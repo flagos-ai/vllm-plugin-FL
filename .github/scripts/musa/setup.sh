@@ -15,12 +15,26 @@ python -m pip install "pytest-xdist>=3.0.0"
 python .github/scripts/install_flaggems_vllm.py
 
 python - <<'PY'
+from importlib.metadata import version as dist_version
+
 import flag_gems
+import flagtree  # noqa: F401 - provides the Triton build
 import torch
 import torch_musa
+import triton
 import vllm
 import vllm_fl
 from vllm.platforms import current_platform
+
+# The MUSA CI image is pinned to the vLLM 0.32 adaptation stack; fail loudly
+# instead of silently testing a different dependency set.
+assert vllm.__version__.startswith("0.32."), vllm.__version__
+assert flag_gems.__version__.startswith("5.4."), flag_gems.__version__
+# ``flagtree.__version__`` mirrors Triton (3.6.0); the distribution carries the
+# 0.7.x FlagTree build identifier.
+assert dist_version("flagtree").startswith("0.7."), dist_version("flagtree")
+assert triton.__version__.startswith("3.6."), triton.__version__
+assert torch.__version__.startswith("2.9."), torch.__version__
 
 assert torch.musa.is_available(), "MUSA accelerator is unavailable"
 assert torch.musa.device_count() > 0, "No MUSA devices detected"

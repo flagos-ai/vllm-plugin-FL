@@ -1,6 +1,6 @@
-# MUSA deployment
+﻿# MUSA deployment
 
-vLLM-Plugin-FL supports vLLM **0.28.0** on Moore Threads MUSA with the V1 model
+vLLM-Plugin-FL supports vLLM **0.32.0** on Moore Threads MUSA with the V1 model
 runner, native MCCL communication and piecewise MUSA graph capture.
 
 ## Runtime requirements
@@ -11,29 +11,36 @@ runtime baseline is:
 | Component | Version |
 |---|---|
 | Python | 3.10 |
-| PyTorch / TorchMUSA | 2.9.0 |
-| MUSA SDK | 4.3.5 |
-| vLLM | 0.28.0 `empty` build |
-| FlagGems | `5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2` |
-| FlagTree | `0.7.0+mthreads3.6.git69148faf.profilefix1` |
+| PyTorch / TorchMUSA | 2.9.0 (`torch.version.musa` = `40306`) / 2.9.0 |
+| MUSA SDK | 4.3.6 |
+| vLLM | 0.32.0 `empty` build |
+| FlagGems | `5.4.0` |
+| FlagTree | `0.7.0+mthreads3.6` (also provides Triton 3.6.0) |
 
-The default [CI configuration](../../.github/configs/musa.yml) pins this image:
+The [CI configuration](../../.github/configs/musa.yml) pins the adapted image:
 
 ```text
-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-musa-ci
 ```
 
-The image provides the vendor runtime, an ordinary empty vLLM wheel and the
-MUSA dependency wheels. Preserve its Torch, TorchMUSA and SDK packages when
-installing the plugin. Generic PyPI Torch, CUDA wheels or an unpatched FlagTree
-build are not substitutes for this MUSA stack.
+The image is published to the `plugin` project. It contains the vendor runtime,
+the vLLM 0.32.0 empty wheel and the test tooling; the plugin itself and
+`flaggems-vllm` are installed from the checkout at job time by
+[`.github/scripts/musa/setup.sh`](../../.github/scripts/musa/setup.sh). The
+0.32.0 adaptation was additionally validated on the FlagOS 2.2 runtime image
+`harbor.baai.ac.cn/flagos-runtime/flagos-runtime-mthreads-musa4.3.6:2.2.0`
+with the plugin installed editable (see below).
+
+The image provides the vendor runtime and an ordinary empty vLLM wheel. Preserve
+its Torch, TorchMUSA and SDK packages when installing the plugin. Generic PyPI
+Torch, CUDA wheels or a standalone Triton are not substitutes for this MUSA stack.
 
 ## Required dependencies and issue handling
 
-**Use the pinned image above for this guide. Its corrected FlagGems and FlagTree
-wheels are required parts of this tested runtime; no additional dependency source
-edits, cherry-picks or issue reproducer commands are needed.** The issue links
-below explain what is already included, rather than extra installation steps.
+**Use the image above that ships the pinned tuple; the corrected FlagGems and
+FlagTree wheels are required parts of this tested runtime.** The issue links
+below were recorded while adapting the 0.28.0 stack and are kept for lineage;
+they were not re-verified individually on 0.32.0.
 
 | Issue | Treatment in the pinned image | Action when following this guide |
 |---|---|---|
@@ -59,17 +66,18 @@ directory:
 
 ```bash
 set -euo pipefail
-IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+# Validated runtime. The CI image adds the same vLLM 0.32.0 empty wheel:
+#   harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-musa-ci
+# Installing the plugin editable from the checkout below works on either image.
+IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-mthreads-musa4.3.6:2.2.0
 MODEL_DIR="$HOME/models/Qwen3-0.6B"
 SOURCE_DIR="$PWD/vllm-plugin-FL"
 PHYSICAL_DEVICE=0  # Replace with the host card allocated to your job.
 
 mthreads-gmi
 docker pull "$IMAGE"
-git clone --depth 1 https://github.com/flagos-ai/vllm-plugin-FL.git "$SOURCE_DIR"
-# While this adaptation is under review, select its public PR head instead of main.
-git -C "$SOURCE_DIR" fetch --depth 1 origin pull/575/head
-git -C "$SOURCE_DIR" checkout --detach FETCH_HEAD
+# This adaptation targets the 0.5.0-dev branch (vLLM 0.32.0).
+git clone --depth 1 --branch 0.5.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git "$SOURCE_DIR"
 mkdir -p "$MODEL_DIR"
 ```
 
@@ -80,7 +88,7 @@ This writes model assets, without changing the runtime image:
 docker run --rm --runtime=runc \
   --env MTHREADS_VISIBLE_DEVICES= --env MUSA_VISIBLE_DEVICES= \
   --mount "type=bind,src=$MODEL_DIR,dst=/model" \
-  --entrypoint /opt/musa/venv/bin/python "$IMAGE" -I -B -c \
+  --entrypoint /flagos/bin/python "$IMAGE" -I -B -c \
   'from huggingface_hub import snapshot_download; snapshot_download(repo_id="Qwen/Qwen3-0.6B", revision="c1899de289a04d12100db370d81485cdf75e47ca", local_dir="/model")'
 ```
 
@@ -114,6 +122,8 @@ variables serve different layers:
 | `VLLM_PLUGINS=fl` | Enable the FL platform/model plugin in vLLM. |
 | `MTHREADS_VISIBLE_DEVICES` | Give the Mthreads container runtime the allocated **host physical** card IDs. Never replace a job's allocation with `all`. |
 | `MUSA_VISIBLE_DEVICES` | Limit the MUSA SDK/TorchMUSA logical device IDs inside the container. The single exposed card in this example is logical `0`, even when its host ID is different. |
+| `VLLM_USE_V2_MODEL_RUNNER=0` | Required: the plugin implements the V1 `ModelRunnerFL`; the upstream V2 runner uses CUDA/UVA APIs MUSA does not provide. The plugin sets this default itself. |
+| `USE_FLAGTUNE` | The plugin sets `USE_FLAGTUNE=0` on MUSA so FlagGems does not fetch the FlagTune cost-model bundle; set `VLLM_FL_MUSA_FLAGTUNE=1` to opt back in. |
 
 The CI runner has a separate fixed four-card allocation: host cards `4,5,6,7`
 become logical cards `0,1,2,3`. These numbers are runner-specific, not a requirement
@@ -124,20 +134,17 @@ plugin enables FlagGems by default. `FLAGCX_PATH` is not required for native MCC
 
 ## Install the current plugin
 
-Run **inside the container**, from `/workspace/vllm-plugin-FL`. Use the image's
-interpreter for both installation and serving. Install an ordinary wheel so fresh
-serving workers use this checkout rather than the image's older plugin:
+Run **inside the container**, from the plugin checkout. Use the image's
+interpreter for both installation and serving. Install the checkout editable so
+fresh serving workers use this source tree:
 
 ```bash
 set -euo pipefail
-PYTHON=/opt/musa/venv/bin/python
+PYTHON=/flagos/bin/python
 unset SETUPTOOLS_SCM_PRETEND_VERSION SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL
-WHEEL_DIR=$(mktemp -d)
-env -u VLLM_VENDOR "$PYTHON" -I -B -m pip wheel \
-  --no-deps --no-build-isolation --wheel-dir "$WHEEL_DIR" .
-"$PYTHON" -I -B -m pip install --no-deps --force-reinstall \
-  "$WHEEL_DIR"/vllm_plugin_fl-*.whl
-"$PYTHON" -I -B .github/scripts/install_flaggems_vllm.py
+env -u VLLM_VENDOR "$PYTHON" -m pip install \
+  --no-deps --no-build-isolation -e .
+"$PYTHON" .github/scripts/install_flaggems_vllm.py
 ```
 
 The last command is **required**: it installs the shared FlagGems-vllm provider
@@ -150,26 +157,26 @@ Do not install generic PyPI Torch/CUDA packages or replace the image's dependenc
 Check the runtime before loading the model:
 
 ```bash
-"$PYTHON" -I -B - <<'PY'
-import sys
-from pathlib import Path
+"$PYTHON" - <<'PY'
 from importlib.metadata import version
 import torch
 import torch_musa
+import triton
 import vllm_fl
 from vllm.platforms import current_platform
 
 expected = {
-    "vllm": "0.28.0+empty",
-    "flag-gems": "5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2",
-    "flagtree": "0.7.0+mthreads3.6.git69148faf.profilefix1",
+    "vllm": "0.32.0",
+    "flag-gems": "5.4.0",
+    "flagtree": "0.7.0+mthreads3.6",
 }
 for package, wanted in expected.items():
-    assert version(package) == wanted, (package, version(package))
+    assert version(package).startswith(wanted), (package, version(package))
+assert torch.__version__.startswith("2.9.0"), torch.__version__
+assert triton.__version__.startswith("3.6."), triton.__version__
 assert torch.musa.is_available(), "Check the host driver and allocated devices"
 assert torch.musa.device_count() == 1, "This example expects one exposed card"
 assert current_platform.device_type == "musa", current_platform
-assert Path(vllm_fl.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
 print("MUSA runtime ready:", vllm_fl.__file__)
 PY
 ```
@@ -182,11 +189,14 @@ test-reporting plugins. Running that script is not required for this deployment.
 In the same **container shell**, run:
 
 ```bash
-"$PYTHON" -I -B -m vllm.entrypoints.openai.api_server \
+"$PYTHON" -m vllm.entrypoints.openai.api_server \
   --model "$MODEL_DIR" --served-model-name musa-smoke \
   --tensor-parallel-size 1 --dtype bfloat16 --max-model-len 2048 \
   --host 0.0.0.0 --port 8000
 ```
+
+For hybrid (GDN/Mamba) models keep `--mamba-cache-mode none` (the vLLM 0.32
+default); `align` is not supported by the plugin runner on MUSA.
 
 Wait for `Application startup complete` in the server log. The first start can
 take longer while kernels compile and graphs capture. In a second **host shell**,
@@ -216,41 +226,61 @@ other-platform paths retain their own operator dispatch.
 
 ## Graph behavior and limitations
 
-MUSA graph handling lives in
-[`dispatch/backends/vendor/musa/graph.py`](../../vllm_fl/dispatch/backends/vendor/musa/graph.py).
-Capture and replay use `torch.musa.MUSAGraph` directly. Captured inputs stay owned
-by the graph; output views are reconstructed from storage and tensor metadata.
-Stable captured buffers replay. Calls with replacement input allocations execute
-the original callable so mutations and output aliases remain visible to the
-caller.
+MUSA graph capture runs in PIECEWISE mode. torch_musa does not support
+`musaStreamCaptureModeThreadLocal`, so FULL cudagraphs are rejected; requesting
+`FULL` falls back to `PIECEWISE`. Capture and replay use `torch.musa.MUSAGraph`
+directly. Captured inputs stay owned by the graph; output views are reconstructed
+from storage and tensor metadata. Stable captured buffers replay. Calls with
+replacement input allocations execute the original callable so mutations and
+output aliases remain visible to the caller.
 
-All configured capture sizes and their order are retained. A process-wide budget
-admits at most 1900 live native graphs, including reservations for pending
-captures. Additional entries execute the original callable until their wrapper
-entries are cleared. The budget is a conservative resource policy; it does not
-measure the SDK's exact capacity or guarantee native capture of every size.
+Two MUSA policies shape `CompilationConfig` before vLLM compiles:
 
-A weak-reference set tracks graph lifetime. Clearing a wrapper releases its
-entries; graphs held by external references continue to count against the budget
-until released. Capture, replay and eager execution failures propagate and poison
-the budget, stopping subsequent graph work. This path requires no extra C++ shim,
-Ninja build or executable rotation. A different TorchMUSA version needs separate
-validation.
+- MCCL collectives (`_c10d_functional::*`) are appended to `splitting_ops`
+  because `ProcessGroupMCCL` submits and polls them on its own stream, which is
+  illegal while a graph is recording.
+- The capture ladder is thinned to at most 10 sizes, ordered and unique, always
+  keeping the largest batch size. The torch_musa graph pool is not shared across
+  captures, so every captured size costs a full activation footprint (~2.4 GiB
+  for a 27B model at TP4 with a 512-token batch); vLLM's default 51-size ladder
+  needs more memory than the card has.
 
-The live-graph budget and eager fallback define resource behavior; they do not
-establish a GPU latency or throughput guarantee. Representative hardware
-bucket-switching latency and broad ABI compatibility remain unmeasured.
+Capture, replay and eager execution failures propagate. A different TorchMUSA
+version needs separate validation. The policies above define resource behavior;
+they do not establish a latency or throughput guarantee.
+
+## Known limitations
+
+- FlagGems FlagTune is disabled by default (`USE_FLAGTUNE=0`): its cost-model
+  bundle is fetched from a CDN that offline hosts cannot reach. FlagGems kernels
+  and local Triton autotuning stay enabled; `VLLM_FL_MUSA_FLAGTUNE=1` opts back
+  into the remote model.
+- FlagCX is not available for MUSA; distributed runs use native MCCL (`mccl`).
+  The FlagGems + FlagTree + FlagCX combined acceptance gate is therefore blocked
+  for this platform and reported as such.
+- FULL cudagraph mode is unsupported; graph runs stay PIECEWISE.
+- MoE `topk_softmax` is routed through the plugin dispatch (FlagGems/reference).
+  The 0.32-only `is_padding` mask and `e_score_correction_bias` arguments are
+  accepted but not applied; MoE bias correction is not exercised on MUSA yet.
 
 ## CI coverage
+
+The `v0.32.0-musa-ci` image referenced by the CI configuration is built with
+`./docker/build.sh --platform musa --target ci` and pushed to the `plugin`
+project. The 0.32.0 adaptation was verified on the FlagOS 2.2 runtime image with
+the plugin installed editable, using
+`tools/adaptation-gate-cases/run_serve_graph.sh` / `run_serve_eager.sh` followed
+by `run_test.sh` for Qwen3.6-27B and Qwen3.6-35B-A3B in both eager and graph
+modes.
 
 MUSA uses the repository's
 [shared platform workflow](../../.github/workflows/_platform_test.yml) for a
 combined unit/functional job, E2E inference and serving, and benchmark smoke. The
 [platform test configuration](../../tests/platforms/musa.yaml) currently lists
-six inference and five serving configurations for PR validation, retaining the
-0.6B smoke cases alongside all four 27B/35B modes. Nightly also includes
-concurrent cases; MUSA E2E cases run serially to avoid overlapping
-MCCL group initialization.
+four inference and four serving cases for PR validation (27B and 35B-A3B in eager
+and graph modes, TP4). Nightly adds the two 0.6B smoke cases, the same four
+27B/35B modes and two concurrent cases; MUSA E2E cases run serially to avoid
+overlapping MCCL group initialization.
 
 Use the repository's `ci.yml` platform selection. Runner labels and device
 environment settings come from the
@@ -261,3 +291,36 @@ actual CI run for its source, platform results and conditional skips.
 
 Installation checks or CPU tests alone do not establish device-kernel,
 multimodal-model, native ABI or performance acceptance.
+
+## Adaptation record
+
+The 0.32.0 adaptation was accepted on 2026-11-05:
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-05 |
+| Platform | MUSA MTT S5000 ×4 (80 GiB per card) |
+| Host / container | `10.121.38.14`, container `flagos22` |
+| Branch | `vllm-plugin-FL` `0.5.0-dev` (vLLM 0.32.0 `empty` build) |
+| Models | Qwen3.6-27B, Qwen3.6-35B-A3B (TP4) |
+| Runtime | `flagos-runtime-mthreads-musa4.3.6:2.2.0`, plugin installed editable |
+| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:62acf6a6590ce0c7be91130ec8f8e5def01ab5572400d74ddb6907fd11ead0fa` |
+| Dependency tuple | torch 2.9.0 (`torch.version.musa` = 40306), FlagGems 5.4.0, FlagTree 0.7.0+mthreads3.6, Triton 3.6.0 |
+| Gate | 4/4 groups `GATE_TEST_RC=0` (27B and 35B-A3B × eager and graph) |
+| Unit tests | raw full suite 2004 passed, 225 skipped, 1 failed (`test_gcu_kv_zeroer`, outside MUSA); `FL_TEST_PLATFORM=musa` (CI path) 1884 passed, 231 skipped, 0 failed |
+| Evidence | Validation host `/data/mt032/final_{27b,35b}_{graph,eager}/` (`*.server.log`, `*.test.log`, gate results) |
+| Status | Accepted for MUSA; FlagCX combined gate not applicable (native MCCL) |
+
+Key changes in this adaptation:
+
+- vLLM 0.32 API drift: the runner passes the Mamba state-copy mapping returned by
+  `get_mamba_state_copy_funcs`, and MoE `topk_softmax` is redirected to the plugin
+  dispatch through the `vllm._custom_ops` leaf module.
+- `DeviceConfig` keeps a device with no index, so every TP rank binds to its own
+  card; the compatibility fallback handles both `auto` and `musa` device strings.
+- Graphs: MCCL collectives are split out of the captured graph, and the capture
+  ladder is thinned to at most 10 sizes because the torch_musa pool is not shared.
+- FlagTune is disabled by default (`USE_FLAGTUNE=0`) so serving does not require
+  the remote cost-model bundle.
+- CI setup asserts the pinned tuple (vLLM 0.32, FlagGems 5.4, FlagTree 0.7,
+  Triton 3.6, torch 2.9).
