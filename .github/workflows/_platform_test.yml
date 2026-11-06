@@ -115,6 +115,9 @@ jobs:
   # Unit tests (pure-logic) run first, then component-level GPU tests.
   functional:
     needs: setup
+    # Debug probe for PR #709: reserve the iluvatar runner for the exact
+    # concurrent replay. This branch is diagnostic and must not be merged.
+    if: inputs.platform != 'iluvatar'
     uses: ./.github/workflows/_functional_test.yml
     secrets: inherit
     with:
@@ -129,7 +132,8 @@ jobs:
   # pr stage: pr subset cases (text + multimodal, one device).
   # nightly/weekly stage: main/full cases, all devices.
   e2e:
-    needs: [setup, functional]
+    # Debug probe for PR #709: do not gate the iluvatar replay on functional.
+    needs: setup
     if: inputs.run_e2e && needs.setup.outputs.e2e_matrix != '[]'
     strategy:
       fail-fast: false
