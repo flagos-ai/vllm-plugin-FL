@@ -50,6 +50,12 @@ env_defaults:
   MACA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
 
+# Opt in to native V2 for model E2E cases.
+e2e_variants:
+  - suffix: v2
+    env:
+      VLLM_USE_V2_MODEL_RUNNER: "1"
+
 c550:
   name: "c550"
   tests:
