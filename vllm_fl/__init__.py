@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 
-
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.
@@ -68,11 +67,6 @@ from vllm_fl.utils import get_op_config as _get_op_config
 
 logger = logging.getLogger(__name__)
 
-# vLLM 0.28 relocated the Flash-Linear-Attention kernels from
-# ``vllm.model_executor.layers.fla`` to
-# ``vllm.third_party.flash_linear_attention``.  Alias the old spelling onto
-# the new one so the plugin and vendor backends keep working verbatim on
-# 0.28 (and stay a no-op on <= 0.24, where the real package exists).
 def _install_xpu_device_guard() -> None:
     """Install the torch.xpu.get_device_name wrapper BEFORE any FLA import.
 
@@ -80,8 +74,9 @@ def _install_xpu_device_guard() -> None:
     ``vllm.model_executor.layers.fla``, which on 0.28 pulls in the FLA ops
     package whose module body calls ``torch.xpu.get_device_name(0)``.  On
     Kunlunxin that raises "Torch not compiled with XPU enabled" and aborts the
-    alias install, so the wrapper must already be in place.  Idempotent and a
-    no-op when ``torch.xpu`` is unavailable.
+    alias install, so the wrapper must already be in place.
+
+    Kunlunxin-only; ``register()`` calls it after the vendor is known.
     """
     try:
         from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (  # noqa: E501
@@ -96,12 +91,18 @@ def _install_xpu_device_guard() -> None:
 def _install_fla_relocation_alias() -> None:
     """Alias the pre-0.28 FLA path onto the 0.28 layout (deferred to register).
 
-    Probing ``vllm.model_executor.layers.fla`` imports the parent
+    vLLM 0.28 relocated the Flash-Linear-Attention kernels from
+    ``vllm.model_executor.layers.fla`` to
+    ``vllm.third_party.flash_linear_attention``.  The alias keeps the old
+    spelling working verbatim, and is a no-op on <= 0.24 where the real
+    package still exists.
+
+    Deferred to ``register()`` because probing the old path imports the parent
     ``vllm.model_executor.layers`` package, which resolves ``current_platform``
     and re-enters the platform-plugin loader while this module is only
-    partially initialised (``vllm_fl.register`` not yet bound), so vLLM drops
-    the platform plugin.  Deferring to ``register()`` keeps the alias in place
-    before any vendor/model code imports it.
+    partially initialised.  Kunlunxin-only: no other vendor spells the old
+    path, and importing those modules for them perturbs vLLM's own import
+    order.
     """
     try:
         from vllm_fl.patches.fla_module_relocation import install as _install
@@ -355,13 +356,18 @@ def _install_metax_compat():
 def register():
     """Register the FL platform.
 
-    vLLM 0.28 calls this entry point from
-    ``resolve_current_platform_cls_qualname()`` inside a bare
+    The body follows the upstream order step by step: vLLM resolves the
+    platform from inside its own import chain, so every extra import here
+    changes the order in which vLLM's modules get bound.  Vendor-specific
+    hooks therefore run only after ``vendor_name`` is known, and only for the
+    vendor that needs them.
+
+    vLLM 0.28 also calls this entry point inside a bare
     ``except Exception: pass``, so an escaping exception is not a traceback: it
     silently pins ``current_platform`` to ``UnspecifiedPlatform`` for the life
-    of the process.  Optional patches are therefore installed best-effort.  The
-    one required step -- the vendor allocator bridge -- still surfaces, because
-    an unusable allocator cannot be papered over at registration time.
+    of the process.  Optional patches are installed best-effort for that
+    reason.  The one required step -- the vendor allocator bridge -- still
+    surfaces, because an unusable allocator cannot be papered over here.
     """
     global _register_in_progress
     if _register_in_progress:
@@ -372,11 +378,6 @@ def register():
     _register_in_progress = True
     required_failure = False
     try:
-        _preload_platform_class()
-        _run_best_effort(
-            _install_xpu_device_guard,
-            _install_fla_relocation_alias,
-        )
         # The MUSA allocator bridge is a hard precondition: when the vendor
         # patch cannot rebind torch.accelerator, the engine fails later with an
         # opaque allocator assert, so that failure must reach the caller instead
@@ -402,25 +403,7 @@ def register():
             logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
             return arm_cpu_platform
 
-        _run_best_effort(
-            _patch_custom_ops,
-            _patch_flash_attn_import,
-            _patch_transformers_compat,
-        )
-
-        # Model-specific platform patches. The patch module only exists on
-        # plugin revisions that ship GLM-5/DSA support; a missing module means
-        # "nothing to patch", not "the platform is broken".
-        try:
-            from vllm_fl.patches.glm_moe_dsa import (
-                apply_platform_patches as glm5_platform,
-            )
-
-            glm5_platform()
-        except ImportError as _glm_exc:
-            logger.debug("[vllm_fl] GLM-5 platform patches unavailable: %s", _glm_exc)
-        except Exception as _glm_exc:  # pragma: no cover - vendor dependent
-            logger.warning("[vllm_fl] GLM-5 platform patches failed: %s", _glm_exc)
+        _run_best_effort(_patch_custom_ops, _patch_flash_attn_import)
 
         # Note: FlagCX connector registration is deferred to register_model()
         # to avoid circular imports during VllmConfig.__post_init__ in spawned
@@ -434,6 +417,20 @@ def register():
         from vllm_fl.utils import DeviceInfo
 
         vendor_name = DeviceInfo().vendor_name
+
+        # Kunlunxin-only compatibility hooks. The XPU guard has to be in place
+        # before anything imports the FLA ops package (its module body calls
+        # torch.xpu.get_device_name), and the 0.28 FLA alias only matters for
+        # the pre-0.28 ``vllm.model_executor.layers.fla`` spelling, which no
+        # other vendor uses. Both import heavy vLLM model modules, so they must
+        # not run for other vendors while vLLM is still initialising.
+        if vendor_name == "kunlunxin":
+            _run_best_effort(
+                _install_xpu_device_guard,
+                _install_fla_relocation_alias,
+                _patch_transformers_compat,
+            )
+
         if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
             # v0.28 defaults some models to the upstream V2 runner. These
             # backends use ModelRunnerFL; choose it before VllmConfig reads
