@@ -1,8 +1,58 @@
 # Ascend 910C Deployment Guide
 
-> This guide reproduces the validated vLLM 0.28.0 stack. For the
-> `0.5.0-dev` / vLLM 0.32.0 empty build and its current validation status, see
-> the [Ascend image recipe](../../docker/ascend/README.md).
+## vLLM 0.32.0 on `0.5.0-dev`
+
+Prepare the pinned 910C image and install the matching FL wheel using the
+[Ascend image recipe](../../docker/ascend/README.md#build). The image and CI
+set `VLLM_USE_V2_MODEL_RUNNER=1`. The [serving examples](../../docker/ascend/README.md#inference-smoke-tests)
+cover eager execution and `FULL_DECODE_ONLY` with native HCCL.
+
+### Optional FlagCX device collectives on vLLM 0.32.0
+
+Use the Ascend core library and Python wrapper from the same
+[FlagCX v0.13.0 revision](https://github.com/flagos-ai/FlagCX/tree/0beba7aa7e76cc0885a9929f1975857bcd310d5e).
+Build with `make USE_ASCEND=1` in a CANN development environment and check
+both files before starting the container.
+
+```bash
+export FLAGCX_DIR=/path/to/FlagCX
+test -f "$FLAGCX_DIR/build/lib/libflagcx.so"
+test -f "$FLAGCX_DIR/plugin/interservice/flagcx_wrapper.py"
+```
+
+Select two idle NPUs for TP2. Set `NPU_IDS` to those physical IDs and add
+these options to the container's device and driver mounts.
+
+```bash
+-v "$FLAGCX_DIR:/opt/FlagCX:ro" \
+-e FLAGCX_PATH=/opt/FlagCX \
+-e ASCEND_VISIBLE_DEVICES="$NPU_IDS" \
+-e ASCEND_RT_VISIBLE_DEVICES="$NPU_IDS" \
+-e VLLM_USE_V2_MODEL_RUNNER=1
+```
+
+`FLAGCX_PATH` selects the FL FlagCX device communicator. PyTorch's NPU
+process groups still use HCCL. The device communicator uses a CPU group
+for initialization and invokes the FlagCX C API for its collectives.
+Check the selected communicator and its loaded library when verifying
+that path.
+
+The standalone smoke on two 910C NPUs used CANN 9.0.0, vLLM `0.32.0+empty`,
+and the accepted FL wheel `0.5.0.dev0+ascend032v2graphg4`. The tested
+`libflagcx.so` SHA256 was
+`47a9ea1afce45ab6002c8ca095229772b76b54fe90188778b5bc80a86a186ab6`.
+
+| Check | Result on both ranks |
+| --- | --- |
+| FlagCX initialization | Loaded the mounted native library and initialized both communicators over a CPU Gloo group. |
+| Eager `all_reduce` | Exact FP32 sum `[3, 5, 7, 9]`. |
+| Eager `all_gather` | Exact FP32 output `[1, 2, 3, 4, 2, 3, 4, 5]`. |
+| FlagCX `all_reduce` in `NPUGraph` | Capture ended with ACL error `107025`. The runtime reported a stream that had not joined the original capture stream. |
+
+The standalone eager run exited 0 on both ranks. For model graph serving, use
+the native HCCL configuration in the [validated serving examples](../../docker/ascend/README.md#inference-smoke-tests).
+
+## Historical vLLM 0.28.0 recipe
 
 This guide starts an OpenAI-compatible vLLM inference service on Huawei
 Ascend 910C. It follows the NVIDIA deployment guide's prebuilt-image workflow,
@@ -32,7 +82,7 @@ The CI image contains the validated runtime, but its packaged plugin wheel
 predates some changes in this guide. Step 5 builds and installs a non-editable
 wheel from the selected plugin revision without changing runtime dependencies.
 For build details, see the
-[Ascend image guide](../../docker/ascend/README.md).
+[historical Ascend image guide](../../docker/ascend/README.v0.28.0.md).
 
 ### FlagGems execution mode
 
@@ -334,8 +384,8 @@ select the plugin's FlagCX device communicator.
 
 ## 8. Build the same stack from the official base image
 
-When the prebuilt Harbor image is unavailable, build the checked-in Ascend
-Dockerfile on an aarch64 machine. It starts from the base image in the table,
+When the prebuilt Harbor image is unavailable, use the vLLM 0.28.0
+checkout pinned in step 2 to build its Ascend Dockerfile on an aarch64 machine. It starts from the base image in the table,
 removes the inherited vLLM 0.20.2 installation, and installs upstream vLLM
 0.28.0 with `VLLM_TARGET_DEVICE=empty` plus the pinned FlagTree and FlagGems
 stack. Give the local build an explicit tag:
@@ -353,7 +403,7 @@ export IMAGE=vllm-plugin-fl:ascend-vllm0.28.0-local
 Run step 4 before serving. The Dockerfile prepares the runtime and CI tools
 but does not install this repository's current plugin wheel. Use the step 5
 wheel build, or publish a separate release image with that fixed wheel. The
-[image guide](../../docker/ascend/README.md) documents build constraints and
+[historical image guide](../../docker/ascend/README.v0.28.0.md) documents build constraints and
 the known OpenCV/NumPy dependency conflict in this pinned stack.
 
 ## Troubleshooting
