@@ -55,6 +55,7 @@ op_backends:
 flagos_blacklist:
   - zeros
   - zero_
+  - scatter_
   # D72 BF16 ViT attention produces NaNs at N256 with FlagGems 5.3.5.
   # Native SDPA redispatches through the inner flash entry: exclude both.
   - _scaled_dot_product_flash_attention

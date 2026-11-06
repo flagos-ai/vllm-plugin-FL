@@ -76,6 +76,10 @@ jobs:
     name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
+    concurrency:
+      group: ${{ inputs.platform == 'nvidia' && inputs.device == 'h20' && 'e2e-gpu-nvidia-h20' || format('e2e-{0}-{1}-{2}-{3}-{4}', github.run_id, github.run_attempt, inputs.platform, inputs.device, inputs.task) }}
+      cancel-in-progress: false
+      queue: max
     container:
       image: ${{ inputs.ci_image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
