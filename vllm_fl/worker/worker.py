@@ -1,5 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_worker.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.32.0/vllm/v1/worker/gpu_worker.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -240,8 +240,9 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
-        # this flag to select the matching block-table and KV-cache kernels.
+        # Provisional default; the real value comes from vllm_config below.
+        # The warmup paths read this flag to select the matching block-table
+        # and KV-cache kernels, so it must be set before they run.
         self.use_v2_model_runner = False
 
         # Hybrid models (mamba/linear attention + full attention) keep the

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_model_runner.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.32.0/vllm/v1/worker/gpu_model_runner.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -244,10 +244,18 @@ try:
     from vllm.v1.worker.cp_utils import (
         get_total_cp_world_size,
     )
-except ImportError:  # vLLM >= 0.28: CP merged into DCP; KV cache shards over DCP
-    from vllm.v1.worker.cp_utils import (
-        get_kv_cache_shard_count as get_total_cp_world_size,
-    )
+except ImportError:
+    try:
+        # Older 0.28-era builds: CP merged into DCP and the count was renamed.
+        from vllm.v1.worker.cp_utils import (
+            get_kv_cache_shard_count as get_total_cp_world_size,
+        )
+    except ImportError:
+        # vLLM 0.32 exports neither name. Nothing in this module calls it, so
+        # keep the import optional rather than failing the whole module: a
+        # hard import here makes ModelRunnerFL unimportable on 0.32, which
+        # takes out every backend that selects it.
+        get_total_cp_world_size = None
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
@@ -8155,11 +8163,11 @@ class ModelRunnerFL(
                     # each block's bytes into its conv/ssm state views. Keeping
                     # one tensor per layer lets the KV connector register it
                     # without special-casing Mamba.
-                    # vLLM 0.28 MambaBase.bind_kv_cache expects exactly this single
-                    # view: it squeezes dims (1,2) then unpacks the layer conv/ssm
-                    # states. The old 0.27 fork returned a list of state tensors ->
-                    # AttributeError: list object has no attribute squeeze at
-                    # mamba/abstract.py:35. Mirror native 0.28.
+                    # MambaBase.bind_kv_cache expects exactly this single view:
+                    # it squeezes dims (1,2) then unpacks the layer conv/ssm
+                    # states (unchanged through 0.32, see mamba/abstract.py).
+                    # An older fork returned a list of state tensors ->
+                    # AttributeError: list object has no attribute squeeze.
                     kv_caches[layer_name] = raw_tensor[
                         : num_blocks * page_size_bytes
                     ].view(num_blocks, 1, 1, page_size_bytes)
