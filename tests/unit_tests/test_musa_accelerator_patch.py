@@ -276,13 +276,23 @@ def parent_registration(monkeypatch, musa_patch, vendor_modules):
     ]
     namespace = {
         "os": os,
+        "logger": Mock(),
         # The extracted hooks still call the unrelated MetaX installer.
         "_install_metax_compat": Mock(),
         "_arm_cpu_platform": lambda: None,
-        "_install_metax_compat": Mock(),
         "_patch_custom_ops": Mock(),
         "_patch_flash_attn_import": Mock(),
         "_get_op_config": Mock(),
+        # vllm_fl register() also references the module-level hardening
+        # helpers; the AST extraction only carries register() over.
+        "_preload_platform_class": lambda: None,
+        "_install_xpu_device_guard": lambda: None,
+        "_install_fla_relocation_alias": lambda: None,
+        "_patch_transformers_compat": lambda: None,
+        "_run_best_effort": lambda *steps: [step() for step in steps],
+        "_force_adopt_platform": lambda: False,
+        "_register_in_progress": False,
+        "_PLATFORM_QUALNAME": "vllm_fl.platform.PlatformFL",
     }
     exec(
         compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"),
@@ -318,14 +328,11 @@ def test_parent_cleanup_preserves_original_startup_error(
     startup_error = RuntimeError("engine startup failed before model construction")
     namespace["_patch_custom_ops"].side_effect = startup_error
 
-    # Registration can fail before model initialization; its allocator bridge
-    # must already be present so cleanup cannot replace the original error.
-    with pytest.raises(RuntimeError) as caught:
-        try:
-            namespace["register"]()
-        finally:
-            torch.accelerator.empty_cache()
-    assert caught.value is startup_error
+    # Registration degrades an optional ops-registry failure instead of
+    # aborting; the allocator bridge must already be installed so that the
+    # caller-side cleanup cannot replace the original error.
+    assert namespace["register"]() == "vllm_fl.platform.PlatformFL"
+    torch.accelerator.empty_cache()
     musa.empty_cache.assert_called_once_with()
     assert torch.accelerator.get_memory_info is musa.mem_get_info
     namespace["_patch_flash_attn_import"].assert_not_called()
