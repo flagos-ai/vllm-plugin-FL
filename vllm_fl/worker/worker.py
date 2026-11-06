@@ -87,6 +87,18 @@ def _patch_accelerator_empty_cache():
     torch.accelerator.empty_cache = torch.npu.empty_cache
 
 
+def _is_kunlunxin_bypass_enabled() -> bool:
+    """Whether the Kunlunxin GDN bypass is active.
+
+    Explicit ``VLLM_KUNLUNXIN_BYPASS_GDN`` wins; otherwise fall back to the
+    platform marker ``VLLM_FL_PLATFORM=kunlunxin``.
+    """
+    value = os.environ.get("VLLM_KUNLUNXIN_BYPASS_GDN")
+    if value is None:
+        return os.environ.get("VLLM_FL_PLATFORM", "").strip().lower() == "kunlunxin"
+    return value.strip().lower() not in ("0", "false", "no")
+
+
 @dataclass
 class MemorySnapshot:
     """Platform-agnostic memory snapshot for FL worker."""
@@ -729,7 +741,17 @@ class WorkerFL(WorkerBase):
         # memory buffers from being cleared by `torch.cuda.empty_cache`.
         # NOTE: On Ascend NPU, skip _dummy_run because the GDN/FLA Triton
         # kernels crash the worker process during the model forward pass.
-        if get_pp_group().is_last_rank and current_platform.device_type != "npu":
+        # NOTE: On Kunlunxin XPU with the GDN bypass enabled, skip the dummy
+        # model/sampler warmup to avoid XPU exponential_()/sampler stalls.
+        skip_dummy_warmup = (
+            current_platform.device_type == "npu"
+            or _is_kunlunxin_bypass_enabled()
+        )
+        if _is_kunlunxin_bypass_enabled():
+            logger.info(
+                "Kunlunxin: skipped dummy model/sampler warmup during initialization"
+            )
+        if get_pp_group().is_last_rank and not skip_dummy_warmup:
             max_num_reqs = min(
                 self.scheduler_config.max_num_seqs,
                 self.scheduler_config.max_num_batched_tokens,
