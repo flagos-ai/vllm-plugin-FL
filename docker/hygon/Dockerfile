@@ -12,62 +12,67 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG HYGON_BASE_IMAGE=harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6
+ARG HYGON_BASE_IMAGE=harbor.baai.ac.cn/plugin/hygon-dtk26.04-tree0.6.0hcu3.6-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt2100-x64:202609041747
 
 # ---------- base stage ----------
 FROM ${HYGON_BASE_IMAGE} AS base
 
-ARG VLLM_VERSION=0.20.2
+ARG VLLM_VERSION=0.24.0
 ARG PYTHON_VERSION=3.10
 ARG UBUNTU_VERSION=22.04
-ARG INDEX_URL
+ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV DTK_HOME=/opt/dtk \
-    ROCM_PATH=/opt/dtk \
+ENV EDEBIAN_FRONTEND=noninteractive \
+    PYTORCH_MIOPEN_SUGGEST_NDHWC=1 \
+    ALLREDUCE_STREAM_WITH_COMPUTE=1 \
+    HIP_KERNEL_EVENT_SYSTENFENCE=1 \
     HIP_PATH=/opt/dtk/hip \
-    HSA_PATH=/opt/dtk/hsa \
-    HIP_CLANG_PATH=/opt/dtk/llvm/bin \
-    DEVICE_LIB_PATH=/opt/dtk/amdgcn/bitcode \
+    CMAKE_PREFIX_PATH=/opt/hyhal:/opt/dtk/.hyhal/rocm_smi/:/opt/hyhal:/opt/dtk-26.04-DCC2602-0317/.hyhal/rocm_smi/: \
+    NCCL_NCHANNELS_PER_PEER=2 \
+    HYHAL_PATH=/opt/hyhal \
+    PYTHONPATH=/usr/local/: \
+    CPLUS_INCLUDE_PATH=/opt/dtk/dcc/gcvm/include:/opt/dtk/include:/opt/hyhal/include:/opt/dtk/llvm/include:/opt/dtk/dushmem/include:/opt/dtk/opencl/include:/opt/dtk/.hyhal/rocm_smi/include:/opt/dtk-26.04-DCC2602-0317/dcc/gcvm/include:/opt/dtk-26.04-DCC2602-0317/include:/opt/hyhal/include:/opt/dtk-26.04-DCC2602-0317/llvm/include:/opt/dtk-26.04-DCC2602-0317/dushmem/include:/opt/dtk-26.04-DCC2602-0317/opencl/include:/opt/dtk-26.04-DCC2602-0317/.hyhal/rocm_smi/include: \
+    LIBRARY_PATH=/opt/hyhal/lib:/opt/dtk/opencl/lib:/opt/dtk/dushmem/lib:/opt/dtk/.hyhal/rocm_smi/lib:/opt/hyhal/lib:/opt/dtk-26.04-DCC2602-0317/opencl/lib:/opt/dtk-26.04-DCC2602-0317/dushmem/lib:/opt/dtk-26.04-DCC2602-0317/.hyhal/rocm_smi/lib: \
+    DTKROOT=/opt/dtk \
+    ROCM_PATH=/opt/dtk \
+    LD_LIBRARY_PATH=/usr/local/lib/:/usr/local/lib64/:/opt/mpi/lib:/opt/hwloc/lib:/opt/dtk/dcc/gcvm/lib:/opt/dtk/hip/lib:/opt/dtk/llvm/lib:/opt/dtk/lib:/opt/dtk/lib64:/opt/hyhal/lib:/opt/hyhal/lib64:/opt/dtk/dushmem/lib:/opt/dtk/opencl/lib:/opt/dtk/.hyhal/rocm_smi/lib:/opt/dtk-26.04-DCC2602-0317/dcc/gcvm/lib:/opt/dtk-26.04-DCC2602-0317/hip/lib:/opt/dtk-26.04-DCC2602-0317/llvm/lib:/opt/dtk-26.04-DCC2602-0317/lib:/opt/dtk-26.04-DCC2602-0317/lib64:/opt/hyhal/lib:/opt/hyhal/lib64:/opt/dtk-26.04-DCC2602-0317/dushmem/lib:/opt/dtk-26.04-DCC2602-0317/opencl/lib:/opt/dtk-26.04-DCC2602-0317/.hyhal/rocm_smi/lib: \
+    HIP_USE_GRAPH_QUEUE_POOL=1 \
+    PATH=/usr/local/bin:/opt/mpi/bin:/opt/hwloc/bin/:/opt/dtk/bin:/opt/dtk/llvm/bin:/opt/dtk/hip/bin:/opt/dtk/hip/bin/hipify:/opt/hyhal/bin:/opt/dtk/opencl/bin:/opt/dtk/.hyhal/rocm_smi/bin:/opt/dtk-26.04-DCC2602-0317/bin:/opt/dtk-26.04-DCC2602-0317/llvm/bin:/opt/dtk-26.04-DCC2602-0317/hip/bin:/opt/dtk-26.04-DCC2602-0317/hip/bin/hipify:/opt/hyhal/bin:/opt/dtk-26.04-DCC2602-0317/opencl/bin:/opt/dtk-26.04-DCC2602-0317/.hyhal/rocm_smi/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    C_INCLUDE_PATH=/opt/dtk/dcc/gcvm/include:/opt/dtk/include:/opt/hyhal/include:/opt/dtk/llvm/include:/opt/dtk/opencl/include:/opt/dtk/.hyhal/rocm_smi/include:/opt/dtk-26.04-DCC2602-0317/dcc/gcvm/include:/opt/dtk-26.04-DCC2602-0317/include:/opt/hyhal/include:/opt/dtk-26.04-DCC2602-0317/llvm/include:/opt/dtk-26.04-DCC2602-0317/opencl/include:/opt/dtk-26.04-DCC2602-0317/.hyhal/rocm_smi/include: \
+    TRITON_HIP_CLANG_PATH=/opt/rocm/aillvm/bin/clang-18 \
     GEMS_VENDOR=hygon \
-    VLLM_PLUGINS=fl
-ENV PATH="/root/.local/bin:/opt/dtk/bin:/opt/dtk/hip/bin:/opt/dtk/llvm/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/hyhal/lib/criu:/opt/hyhal/lib/rocprofiler:/opt/hyhal/lib:/usr/local/hyhal/lib:/opt/dtk/hip/lib:/opt/dtk/lib:/opt/dtk/llvm/lib:/opt/dtk/dcc/lib:/opt/dtk/aillvm/lib:/opt/dtk/hsa/lib:${LD_LIBRARY_PATH}"
-ENV CMAKE_PREFIX_PATH="/opt/dtk:/opt/dtk/hip:/opt/dtk/hsa:/opt/hyhal:/usr/local/hyhal:${CMAKE_PREFIX_PATH}"
-
-# Add the minimal Hygon runtime libraries staged by docker/build.sh.
-COPY .hygon-runtime/ /
+    VLLM_PLUGINS=fl \
+    VLLM_VENDOR=cuda
 
 # Prepare Python build tooling for editable source installs.
-RUN python -m pip install --upgrade \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        pip "setuptools<81" wheel setuptools-scm
+# RUN python -m pip install --upgrade \
+#         ${INDEX_URL:+--index-url ${INDEX_URL}} \
+#         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
+#         pip "setuptools<81" wheel setuptools-scm setuptools-rust
 
 # Replace the base image's vLLM with official vLLM built in empty mode.
-RUN python -m pip uninstall -y vllm || true \
-    && python -m pip cache remove vllm || true \
-    && SITE_PACKAGES="$(python -c 'import site; print(site.getsitepackages()[0])')" \
-    && find "${SITE_PACKAGES}" -maxdepth 1 \
-        \( -name "vllm" -o -name "vllm-*.dist-info" -o -name "vllm-*.egg-info" \) \
-        -exec rm -rf {} + 2>/dev/null || true \
-    && rm -rf /opt/vllm-src/vllm \
-    && mkdir -p /opt/vllm-src \
-    && git clone https://github.com/vllm-project/vllm.git /opt/vllm-src/vllm \
-    && cd /opt/vllm-src/vllm \
-    && git checkout "v${VLLM_VERSION}" \
-    && VLLM_TARGET_DEVICE=empty python -m pip install -v --no-build-isolation -e . --no-deps
+# RUN python -m pip uninstall -y vllm || true \
+#     && python -m pip cache remove vllm || true \
+#     && SITE_PACKAGES="$(python -c 'import site; print(site.getsitepackages()[0])')" \
+#     && find "${SITE_PACKAGES}" -maxdepth 1 \
+#         \( -name "vllm" -o -name "vllm-*.dist-info" -o -name "vllm-*.egg-info" \) \
+#         -exec rm -rf {} + 2>/dev/null || true \
+#     && rm -rf /opt/vllm-src/vllm \
+#     && mkdir -p /opt/vllm-src \
+#     && git clone https://github.com/vllm-project/vllm.git /opt/vllm-src/vllm \
+#     && cd /opt/vllm-src/vllm \
+#     && git checkout "v${VLLM_VERSION}" \
+#     && VLLM_TARGET_DEVICE=empty python -m pip install -v --no-build-isolation -e . --no-deps
 
 WORKDIR /workspace
 
 # ---------- ci stage ----------
 FROM base AS ci
 
-ARG INDEX_URL
+ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
-ARG FLAGGEMS_VERSION=62d70b9e858ec407572153ee8cdf65cc24a637d5
-ARG VLLM_PLUGIN_FL_VERSION=ffa2ee3eb3831f3873dd0966d12fc8e0b4e6e3d4
+ARG FLAGGEMS_VERSION=master
 
 # Install dev/test tools in the image instead of every CI job.
 RUN python -m pip install \
@@ -85,39 +90,38 @@ RUN python -m pip install \
         sqlalchemy \
         setuptools-scm \
         scikit-build-core==0.11 \
+        compressed-tensors==0.17.0 \
         pybind11 \
         ninja \
         cmake
 
-# Install FlagGems from the pinned source commit.
-RUN rm -rf /opt/vllm-src/FlagGems \
-    && mkdir -p /opt/vllm-src \
-    && git clone https://github.com/flagos-ai/FlagGems /opt/vllm-src/FlagGems \
-    && cd /opt/vllm-src/FlagGems \
-    && git checkout "${FLAGGEMS_VERSION}" \
-    && python -m pip install \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        --no-build-isolation -e .
+# Install FlagGems.
+# RUN rm -rf /opt/vllm-src/FlagGems \
+#     && mkdir -p /opt/vllm-src \
+#     && git clone https://github.com/flagos-ai/FlagGems /opt/vllm-src/FlagGems \
+#     && cd /opt/vllm-src/FlagGems \
+#     && git checkout "${FLAGGEMS_VERSION}" \
+#     && python -m pip install \
+#         ${INDEX_URL:+--index-url ${INDEX_URL}} \
+#         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
+#         --no-build-isolation -e .
 
-# Install vllm-plugin-FL from the pinned source commit.
-RUN rm -rf /opt/vllm-src/vllm-plugin-FL \
-    && mkdir -p /opt/vllm-src \
-    && git clone https://github.com/flagos-ai/vllm-plugin-FL /opt/vllm-src/vllm-plugin-FL \
-    && cd /opt/vllm-src/vllm-plugin-FL \
-    && git checkout "${VLLM_PLUGIN_FL_VERSION}" \
-    && CMAKE_ARGS="-DCMAKE_PREFIX_PATH=/opt/dtk;/opt/dtk/hip;/opt/dtk/hsa;/opt/hyhal;/usr/local/hyhal ${CMAKE_ARGS:-}" \
-        VLLM_VENDOR=cuda python -m pip install \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        --no-build-isolation -e .
+
+# Install FlagTree
+# RUN rm -rf /opt/vllm-src/FlagTree \
+#     && mkdir -p /opt/vllm-src \
+#     && python3 -m pip uninstall -y triton \
+#     && RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple" \
+#     && python3.10 -m pip install flagtree===0.6.1+hcu3.6 $RES
+
+ENV TRITON_HIP_CLANG_PATH=/opt/rocm/aillvm/bin/clang-18
 
 WORKDIR /workspace
 
 # ---------- dev stage ----------
 FROM base AS dev
 
-ARG INDEX_URL
+ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
 
 RUN python -m pip install \

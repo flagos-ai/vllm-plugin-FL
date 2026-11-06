@@ -30,8 +30,8 @@ op_backends:
   mla_prefill: [flagos, vendor]
   bf16_indexer_cache_write: [flagos, vendor, reference]
   bf16_indexer_decode: [flagos, reference]
-  top_k_per_row_prefill: [flagos, reference]
-  top_k_per_row_decode: [flagos, reference]
+  bf16_indexer_top_k_per_row_prefill: [flagos, reference]
+  bf16_indexer_top_k_per_row_decode: [flagos, reference]
   # MLA query concatenation and cache writes belong to attention_backend.
   dynamic_per_token_quant_int8: [flagos, vendor, reference]
   moe_align_block_size: [flagos, vendor, reference]

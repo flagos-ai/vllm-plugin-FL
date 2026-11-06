@@ -14,8 +14,13 @@ import logging
 from functools import lru_cache
 from importlib import import_module
 
+from vllm.logger import init_logger
+
+import vllm_fl.envs as fl_envs
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 from vllm_fl.utils import use_flaggems_op
+
+logger = init_logger(__name__)
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -53,16 +58,16 @@ def _lazy_fn(module: str, name: str, is_available):
 
 
 def _register_capability_ops(registry, is_available):
-    """Register reusable row-wise top-k capabilities from FlagGems."""
+    """Register the reduced BF16 indexer ABI separately from vLLM top-k."""
     torch_module = import_module("torch")
     torch_module._dynamo.config.ignore_logger_methods.add(logging.Logger.debug)
     specs = {
-        "top_k_per_row_prefill": (
+        "bf16_indexer_top_k_per_row_prefill": (
             "top_k_per_row",
             "top_k_per_row_prefill",
             ("flag_gems.fused.top_k_per_row_prefill", "top_k_per_row_prefill"),
         ),
-        "top_k_per_row_decode": (
+        "bf16_indexer_top_k_per_row_decode": (
             "top_k_per_row",
             "top_k_per_row_decode",
             ("flag_gems.fused.top_k_per_row_decode", "top_k_per_row_decode"),
@@ -71,7 +76,7 @@ def _register_capability_ops(registry, is_available):
     impls = []
     for op_name, (module_name, symbol, *dependencies) in specs.items():
         target_module = f"vllm_fl.dispatch.backends.flaggems.impl.{module_name}"
-        required_names = (op_name, symbol, *(name for _, name in dependencies))
+        required_names = (symbol, *(name for _, name in dependencies))
         if not all(use_flaggems_op(name) for name in required_names):
             continue
 
@@ -109,6 +114,15 @@ def register_builtins(registry) -> None:
         registry: Registry to register into
     """
     from .flaggems import FlagGemsBackend
+
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        import flaggems_vllm
+
+        logger.info_once(
+            "FlagGems-vllm integration activated: VLLM_FL_USE_FLAGGEMS_VLLM=1, "
+            "package=%s",
+            getattr(flaggems_vllm, "__file__", "<unknown>"),
+        )
 
     backend = FlagGemsBackend()
     is_avail = backend.is_available
@@ -179,6 +193,16 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        OpImpl(
+            op_name="silu_and_mul_with_clamp",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                backend.silu_and_mul_with_clamp,
+                lambda: is_avail() and fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM,
+            ),
+            priority=BackendPriority.DEFAULT,
+        ),
         # Normalization
         OpImpl(
             op_name="rms_norm",
@@ -194,6 +218,14 @@ def register_builtins(registry) -> None:
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
+            op_name="apply_rotary_emb",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.apply_rotary_emb, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -253,6 +285,18 @@ def register_builtins(registry) -> None:
         ),
     ]
 
-    filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
+    # Keep the existing rotary_embedding FlagGems switch for both vLLM RoPE
+    # interfaces; dispatch uses separate names because their signatures differ.
+    filtered = [
+        impl
+        for impl in impls
+        if use_flaggems_op(
+            "rotary_embedding" if impl.op_name == "apply_rotary_emb" else impl.op_name
+        )
+    ]
     registry.register_many(filtered)
     _register_capability_ops(registry, is_avail)
+
+    from .impl.mla_ops import register_mla_operators
+
+    register_mla_operators(registry, allow=use_flaggems_op)

@@ -116,7 +116,7 @@ RUN uv pip install --system --break-system-packages \
         pre-commit \
         ninja \
         cmake
-ARG FLAGGEMS_VERSION=v5.3.5
+ARG FLAGGEMS_VERSION=v5.4.0
 
 # Install FlagGems
 RUN uv pip install --system --break-system-packages scikit-build-core==0.11 pybind11 \

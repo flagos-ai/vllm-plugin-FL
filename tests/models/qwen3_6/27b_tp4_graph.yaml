@@ -50,5 +50,7 @@ serve:
       expected:
         - "Hello VLM"
         - "blue rectangle"
+  chat_template_kwargs:
+    enable_thinking: false
   sampling:
     temperature: 0.0

@@ -72,9 +72,11 @@ def register_builtins(registry) -> None:
         "bf16_indexer_decode",
         "dynamic_per_token_quant_int8",
         "silu_and_mul",
+        "silu_and_mul_with_clamp",
         "gelu_and_mul",
         "rms_norm",
         "rotary_embedding",
+        "apply_rotary_emb",
         "attention_backend",
         "moe_align_block_size",
         "moe_sum",
@@ -99,8 +101,8 @@ def register_builtins(registry) -> None:
         )
 
     capability_ops = {
-        "top_k_per_row_prefill": ("top_k_per_row", "top_k_per_row_prefill"),
-        "top_k_per_row_decode": ("top_k_per_row", "top_k_per_row_decode"),
+        "bf16_indexer_top_k_per_row_prefill": ("top_k_per_row", "top_k_per_row_prefill"),
+        "bf16_indexer_top_k_per_row_decode": ("top_k_per_row", "top_k_per_row_decode"),
     }
     for op_name, (module_name, symbol) in capability_ops.items():
         impls.append(

@@ -10,10 +10,55 @@ Note: Common fixtures (device, has_accelerator, markers) are inherited
 from the root tests/conftest.py. Only functional-specific fixtures belong here.
 """
 
+import os
+
 import pytest
 
+from tests.utils.device_utils import get_backend, get_visible_device_env_var
 
-@pytest.hookimpl(trylast=True)
+# ---------------------------------------------------------------------------
+# xdist: assign one physical device per worker (controller side)
+# ---------------------------------------------------------------------------
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node):
+    """Assign a physical device index to each xdist worker.
+
+    Called on the controller process once per worker before it starts.
+    The worker index (0, 1, 2, ...) maps directly to a device index so that
+    each worker process sees only one accelerator via the platform's
+    VISIBLE_DEVICES env var.
+    """
+    # node.workerinput is a dict forwarded to the worker's pytest_configure.
+    worker_id = node.workerinput.get("workerid", "gw0")
+    try:
+        index = int(worker_id.replace("gw", ""))
+    except ValueError:
+        index = 0
+    node.workerinput["fl_device_index"] = str(index)
+
+
+def pytest_configure(config):
+    """Worker side: apply the device pinning injected by pytest_configure_node."""
+    worker_input = getattr(config, "workerinput", None)
+    if worker_input is None:
+        return
+    index = worker_input.get("fl_device_index")
+    if index is None:
+        return
+    env_var = get_visible_device_env_var()
+    os.environ[env_var] = index
+    worker_id = worker_input.get("workerid", "?")
+    print(f"\n[functional] {worker_id}: {env_var}={index}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Crash-safe teardown (Ascend NPU GC workaround)
+# ---------------------------------------------------------------------------
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_sessionfinish(session, exitstatus):
     """Force clean exit after all plugins finish to avoid NPU GC destructor crash.
 
@@ -21,16 +66,24 @@ def pytest_sessionfinish(session, exitstatus):
     during interpreter shutdown, causing a segfault at a random GC location
     (e.g. _pytest/mark/structures.py) even after all tests have passed.
 
-    trylast=True ensures this hook runs after all other plugins (json-report,
-    coverage, etc.) have flushed their output files. os._exit() then bypasses
-    Python GC entirely, preventing the NPU destructor crash.
+    The outer hook wrapper lets terminal summaries and report plugins finish
+    before bypassing Python GC on Ascend only.
 
     Secondary fix: also drains any residual inductor SubprocPool whose
     _read_thread would segfault when the subprocess pipe breaks on NPU teardown.
     Primary guard for that is TORCHINDUCTOR_COMPILE_THREADS=1 in ascend.yaml.
+
+    xdist note: worker processes also run this hook. os._exit() is safe here
+    because xdist workers communicate results via a socket before sessionfinish,
+    so all data has already been sent to the controller by this point.
     """
+    yield
+
+    if get_backend() != "ascend":
+        return
+
     import contextlib
-    import os
+    import sys
     import threading
 
     # --- drain residual inductor subprocess pool (if any) ---
@@ -62,5 +115,27 @@ def pytest_sessionfinish(session, exitstatus):
             if isinstance(read_thread, threading.Thread) and read_thread.is_alive():
                 read_thread.join(timeout=3.0)
 
-    # --- bypass Python GC to avoid NPU destructor memory corruption ---
-    os._exit(int(exitstatus))
+    # os._exit() is only safe when running serially (no xdist).
+    #
+    # With xdist:
+    #  - Workers must NOT call os._exit(): the connection to the controller
+    #    closes abruptly, which xdist interprets as a crash and spawns a
+    #    replacement worker, triggering a cascade of "node down: Not properly
+    #    terminated" messages until the 64-replacement limit is hit.
+    #  - The controller must NOT call os._exit() either: it still needs to
+    #    aggregate results and write JSON/JUnit reports after all workers finish.
+    #
+    # Without xdist (serial run on Ascend), os._exit() prevents the NPU GC
+    # destructor crash that otherwise segfaults the interpreter on shutdown.
+    try:
+        from xdist import is_xdist_controller, is_xdist_worker
+
+        _is_xdist = is_xdist_worker(session) or is_xdist_controller(session)
+    except ImportError:
+        # xdist not installed — running serially
+        _is_xdist = False
+
+    if not _is_xdist:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(int(exitstatus))

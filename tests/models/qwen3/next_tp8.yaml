@@ -19,8 +19,8 @@ llm:
   tensor_parallel_size: 8
   max_model_len: 8192
   max_num_batched_tokens: 8192
-  max_num_seqs: 512
-  gpu_memory_utilization: 0.8
+  max_num_seqs: 256
+  gpu_memory_utilization: 0.70
   enforce_eager: true
   trust_remote_code: true
 
@@ -34,7 +34,7 @@ generate:
     temperature: 0.0
 
 serve:
-  # Endpoints to validate (completion and/or chat)
   endpoints: [completion]
   completion_prompt: "please introduce yourself"
   max_tokens: 20
+  startup_retries: 180

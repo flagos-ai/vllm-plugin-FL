@@ -11,6 +11,7 @@ This module follows a layered testing strategy:
 Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -36,6 +37,105 @@ def has_vllm_model_runner():
 pytestmark = pytest.mark.skipif(
     not has_vllm_model_runner(), reason="vllm_fl.worker.model_runner not available"
 )
+
+
+def test_musa_piecewise_capture_sizes_respect_live_graph_limit(monkeypatch):
+    from vllm.config import CUDAGraphMode
+
+    from vllm_fl.worker import model_runner as model_runner_module
+    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+    capture_sizes = [1, 2, 4] + list(range(8, 256, 8)) + list(range(256, 513, 16))
+    compilation_config = SimpleNamespace(
+        cudagraph_mode=CUDAGraphMode.PIECEWISE,
+        cudagraph_capture_sizes=capture_sizes,
+        max_cudagraph_capture_size=512,
+    )
+    dispatcher = MagicMock()
+    dispatcher.cudagraph_mode = CUDAGraphMode.PIECEWISE
+    dispatcher.cudagraph_keys = {
+        CUDAGraphMode.PIECEWISE: set(),
+        CUDAGraphMode.FULL: set(),
+    }
+    dispatcher.get_capture_descs.return_value = [
+        (CUDAGraphMode.PIECEWISE, [object()] * len(capture_sizes))
+    ]
+    runner = SimpleNamespace(
+        compilation_config=compilation_config,
+        parallel_config=SimpleNamespace(tensor_parallel_size=2),
+        cudagraph_dispatcher=dispatcher,
+        uniform_decode_query_len=1,
+    )
+
+    monkeypatch.setattr(
+        model_runner_module,
+        "current_platform",
+        SimpleNamespace(device_type="musa"),
+    )
+    monkeypatch.setattr(
+        model_runner_module.GraphWrapper,
+        "_all_instances",
+        [SimpleNamespace(runtime_mode=CUDAGraphMode.PIECEWISE) for _ in range(86)],
+    )
+
+    ModelRunnerFL._limit_musa_piecewise_capture_sizes(runner)
+
+    assert compilation_config.cudagraph_capture_sizes == capture_sizes[:23]
+    assert compilation_config.max_cudagraph_capture_size == 160
+    dispatcher.initialize_cudagraph_keys.assert_called_once_with(
+        CUDAGraphMode.PIECEWISE, 1
+    )
+
+
+@pytest.mark.parametrize("disable_full", [False, True])
+@pytest.mark.parametrize("dp_size", [1, 2])
+def test_full_graph_exclusion_survives_dp_redispatch(
+    monkeypatch, disable_full, dp_size
+):
+    from vllm.config import CUDAGraphMode
+
+    from vllm_fl.worker import model_runner as module
+
+    dispatcher = MagicMock()
+    mode = CUDAGraphMode.NONE if disable_full else CUDAGraphMode.FULL
+    dispatcher.dispatch.return_value = (mode, SimpleNamespace(num_tokens=1))
+    parallel = SimpleNamespace(data_parallel_size=dp_size, data_parallel_rank=0)
+    runner = SimpleNamespace(
+        _is_uniform_decode=module.ModelRunnerFL._is_uniform_decode,
+        uniform_decode_query_len=1,
+        model_config=SimpleNamespace(is_encoder_decoder=False),
+        input_batch=SimpleNamespace(lora_id_to_lora_request={}),
+        _pad_for_sequence_parallelism=lambda tokens: tokens,
+        cudagraph_dispatcher=dispatcher,
+        compilation_config=SimpleNamespace(
+            pass_config=SimpleNamespace(enable_sp=False)
+        ),
+        parallel_config=parallel,
+        vllm_config=SimpleNamespace(
+            parallel_config=parallel,
+            observability_config=SimpleNamespace(cudagraph_metrics=False),
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "coordinate_batch_across_dp",
+        lambda **kwargs: (False, torch.ones(dp_size, dtype=torch.int32), mode.value),
+    )
+    result = module.ModelRunnerFL._determine_batch_execution_and_padding(
+        runner,
+        num_tokens=1,
+        num_reqs=1,
+        num_scheduled_tokens_np=np.array([1]),
+        max_num_scheduled_tokens=1,
+        use_cascade_attn=False,
+        disable_full=disable_full,
+    )
+    assert result[0] == mode
+    assert dispatcher.dispatch.call_count == dp_size
+    for call in dispatcher.dispatch.call_args_list:
+        assert call.kwargs["invalid_modes"] == (
+            {CUDAGraphMode.FULL} if disable_full else None
+        )
 
 
 # =============================================================================

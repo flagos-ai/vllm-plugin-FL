@@ -7,13 +7,12 @@ git config --global --add safe.directory "$(pwd)"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
-: "${DTK_HOME:?DTK_HOME is not set}"
 : "${ROCM_PATH:?ROCM_PATH is not set}"
 : "${HIP_PATH:?HIP_PATH is not set}"
-: "${HSA_PATH:?HSA_PATH is not set}"
-: "${HIP_CLANG_PATH:?HIP_CLANG_PATH is not set}"
-: "${DEVICE_LIB_PATH:?DEVICE_LIB_PATH is not set}"
 : "${LD_LIBRARY_PATH:?LD_LIBRARY_PATH is not set}"
+
+# Optional vars - use if set, otherwise use defaults
+DTK_HOME="${DTK_HOME:-${DTKROOT:-/opt/dtk}}"
 
 unset VLLM_FL_IMAGE_PLUGIN_ROOT
 unset HYGON_USE_IMAGE_PLUGIN
@@ -24,6 +23,9 @@ test -e "${HIP_PATH}/lib/libgalaxyhip.so.5"
 test -e "${DTK_HOME}/llvm/lib/libomp.so"
 
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install "pytest-xdist>=3.0.0"
+
+python .github/scripts/install_flaggems_vllm.py
 
 python - <<'PY'
 import flag_gems

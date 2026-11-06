@@ -42,9 +42,16 @@ op_backends:
     - flagos
     - vendor
     - reference
+  apply_rotary_emb:
+    - flagos
+    - vendor
+    - reference
 
 # FlagOS operator blacklist
 flagos_blacklist:
+  # FlagGems 5.3.4 cannot lower torch.float8_e8m0fnu allocations used by
+  # DeepSeek-V4 FP8 UE8M0 scale parameters. Fall back to native PyTorch.
+  - empty
   - index_put_
   - index_put
   - _index_put_impl_
@@ -52,5 +59,12 @@ flagos_blacklist:
   - copy_
   - to_copy
   - index
+  - cat
+  - unfold
+  # FlagGems linear autotuning can access invalid memory for dynamic shapes.
+  - linear
+  # FlagGems 5.4.0 Hopper mm.out retunes Inductor output-buffer GEMMs
+  # across graph capture shapes, delaying cold server startup.
+  - mm_out
 # OOT (Out-of-Tree) operator blacklist
 # oot_blacklist: []

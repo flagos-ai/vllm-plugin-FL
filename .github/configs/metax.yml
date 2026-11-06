@@ -18,7 +18,7 @@
 platform: metax
 
 # Docker image for this hardware.
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-metax-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-metax-ci
 
 # Runner labels for this hardware.
 # Keep this aligned with the MetaX C550 runner label.
@@ -38,4 +38,3 @@ container_options: >-
   --device /dev/mxcd:/dev/mxcd:rwm
   --env GEMS_VENDOR=metax
   --env VLLM_PLUGINS=fl
-  --env MACA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7

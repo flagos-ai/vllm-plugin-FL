@@ -33,6 +33,7 @@ from vllm.v1.attention.backend import (
     AttentionCGSupport,
     AttentionMetadataBuilder,
 )
+from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
@@ -74,7 +75,7 @@ class AttentionFLBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "TRITON_ATTN"
+        return "CUSTOM"
 
     @classmethod
     def supports_attn_type(cls, attn_type: str) -> bool:
@@ -154,6 +155,13 @@ class AttentionFLBackend(AttentionBackend):
         if has_sink:
             return "not support sink"
         return None
+
+
+register_backend(
+    AttentionBackendEnum.CUSTOM,
+    "vllm_fl.dispatch.backends.vendor.sunrise.impl.attention.AttentionFLBackend",
+)
+
 
 @dataclass
 class AttentionFLMetadata:

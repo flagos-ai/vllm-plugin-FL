@@ -13,11 +13,12 @@ from vllm_fl.dispatch.registry import OpRegistry
 
 class TestFindVendorBackendDir:
     def test_maps_vendor_names(self):
-        available = {"cuda", "ascend", "metax", "iluvatar"}
+        available = {"cuda", "ascend", "metax", "iluvatar", "supa"}
         assert _find_vendor_backend_dir("nvidia", available) == "cuda"
         assert _find_vendor_backend_dir("ascend", available) == "ascend"
         assert _find_vendor_backend_dir("metax", available) == "metax"
         assert _find_vendor_backend_dir("iluvatar", available) == "iluvatar"
+        assert _find_vendor_backend_dir("biren", available) == "supa"
 
     def test_maca_alias_resolves_to_metax(self):
         assert _find_vendor_backend_dir("maca", {"metax"}) == "metax"
@@ -72,6 +73,7 @@ def test_reference_registration_keeps_implemented_fallbacks():
         "gelu_and_mul",
         "rms_norm",
         "rotary_embedding",
+        "apply_rotary_emb",
         "attention_backend",
         "invoke_fused_moe_triton_kernel",
     }

@@ -15,7 +15,7 @@
 # Enflame S60 hardware configuration.
 platform: enflame
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-enflame-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-enflame-ci
 
 # Replace this with the exact label configured on the Enflame S60 runner.
 runner_labels:
@@ -30,7 +30,6 @@ container_options: >-
   --ipc=host
   --privileged
   --env VLLM_PLUGINS=fl
-  --env TOPS_VISIBLE_DEVICES=2,3
   --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=99999
   --env TORCH_GCU_ENABLE_INT64_AND_UINT64=1
   --env ENABLE_I64_CHECK=0

@@ -45,10 +45,10 @@ from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.distributed.kv_transfer import get_kv_transfer_group, has_kv_transfer_group
 from vllm.distributed.kv_transfer.kv_connector.utils import copy_kv_blocks
 from vllm.distributed.parallel_state import (
+    GraphCaptureContext,
     get_dcp_group,
     get_pp_group,
     get_tp_group,
-    GraphCaptureContext,
     is_global_first_rank,
     prepare_communication_buffer_for_model,
 )
@@ -153,6 +153,11 @@ if current_platform.dist_backend == "flagcx" or current_platform.device_type == 
             yield graph_capture_context
 else:
     from vllm.distributed.parallel_state import graph_capture
+
+if current_platform.device_type == "npu":
+    from vllm_fl.compilation.graph_runtime import get_graph_capture
+
+    graph_capture = get_graph_capture(graph_capture)
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
@@ -162,8 +167,9 @@ from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.math_utils import cdiv, round_up
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.nvtx_pytorch_hooks import PytHooks
-from vllm.utils.platform_utils import num_compute_units, is_pin_memory_available, num_compute_units
+from vllm.utils.platform_utils import is_pin_memory_available, num_compute_units
 from vllm.utils.torch_utils import (
+    PIN_MEMORY,
     get_dtype_size,
     is_quantized_kv_cache,
     kv_cache_dtype_str_to_dtype,
@@ -250,8 +256,6 @@ from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunne
 from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
 from vllm.v1.worker.gpu.pool.late_interaction_runner import LateInteractionRunner
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
-from vllm.utils.torch_utils import PIN_MEMORY
-
 from vllm.v1.worker.gpu_ubatch_wrapper import UBatchWrapper
 from vllm.v1.worker.kv_connector_model_runner_mixin import KVConnectorModelRunnerMixin
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
@@ -261,27 +265,47 @@ from vllm.v1.worker.ubatch_utils import (
     maybe_create_ubatch_slices,
     split_attn_metadata,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp
-from vllm.v1.worker.workspace import lock_workspace
-
 from vllm.v1.worker.utils import (
     AttentionGroup,
     KVBlockZeroer,
     add_kv_sharing_layers_to_kv_cache_groups,
-    bind_kv_cache,
+    is_residual_scattered_for_sp,
     prepare_kernel_block_sizes,
     sanity_check_mm_encoder_outputs,
 )
+from vllm.v1.worker.workspace import lock_workspace
 
 # FL-specific imports
+from vllm_fl.compat.kv_cache import bind_kv_cache
 from vllm_fl.compilation.graph import GraphWrapper
+from vllm_fl.dispatch import prewarm_cached_ops
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.dispatch.io_dumper import (
     advance_io_step,
     init_io_dump_from_env,
     register_io_module_hooks,
 )
-GraphWrapper = GraphWrapper
+from vllm_fl.worker.common_attention_metadata import (
+    CommonAttentionMetadataGraphRunner,
+    common_attention_metadata_enabled,
+    compute_common_attention_metadata,
+)
+from vllm_fl.worker.model_state import ModelRunnerState
+
+
+def _decoder_graph_wrappers():
+    """Return every decoder graph wrapper used by the CUDA runner."""
+    return list(GraphWrapper._all_instances) + list(
+        BreakableCUDAGraphWrapper._all_instances
+    )
+
+
+def _clear_decoder_graphs(runtime=None) -> None:
+    if runtime is not None:
+        runtime.clear_decoder_graphs()
+    else:
+        GraphWrapper.clear_all_graphs()
+    BreakableCUDAGraphWrapper.clear_all_graphs()
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
@@ -289,6 +313,10 @@ if TYPE_CHECKING:
     from vllm.v1.worker.encoder_cudagraph import EncoderCudaGraphManager
 
 logger = init_logger(__name__)
+
+# A single MUSA context fails near 2048 simultaneously live native graphs.
+# Leave some headroom for graph resources created outside GraphWrapper.
+_MUSA_MAX_LIVE_GRAPHS = 2000
 
 AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
 # list when ubatching is enabled
@@ -500,6 +528,23 @@ class ModelRunnerFL(
         scheduler_config = self.scheduler_config
         parallel_config = self.parallel_config
         self.device = device
+        self.use_ascend_attention = (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+        )
+        self.use_ascend_hybrid_cache = False
+        if self.use_ascend_attention:
+            from vllm_fl.kv_cache.ascend.hybrid import uses_dense_hybrid_cache
+
+            self.use_ascend_hybrid_cache = uses_dense_hybrid_cache(model_config)
+        self._ascend_attn_state = None
+        self.graph_runtime = None
+        if self.use_ascend_attention:
+            from vllm_fl.compilation.graph_runtime import GraphRuntimeController
+
+            self.graph_runtime = GraphRuntimeController(
+                vllm_config=vllm_config,
+                full_graph_wrapper_type=GraphWrapper,
+            )
         self.pin_memory = is_pin_memory_available()
         self.dtype = self.model_config.dtype
 
@@ -541,6 +586,7 @@ class ModelRunnerFL(
         self.inputs_embeds_size = model_config.get_inputs_embeds_size()
         # Only relevant for models using ALiBi (e.g, MPT)
         self.use_alibi = model_config.uses_alibi
+        self.model_state = ModelRunnerState(self)
 
         self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
         self.is_mm_prefix_lm = self.model_config.is_mm_prefix_lm
@@ -782,6 +828,11 @@ class ModelRunnerFL(
         )
         self.query_start_loc = self._make_buffer(
             self.max_num_reqs + 1, dtype=torch.int32
+        )
+        self.common_attention_metadata_graph = (
+            CommonAttentionMetadataGraphRunner()
+            if common_attention_metadata_enabled()
+            else None
         )
         self.seq_lens = torch.zeros(
             self.max_num_reqs, dtype=torch.int32, device=self.device
@@ -1194,6 +1245,7 @@ class ModelRunnerFL(
         The SamplingMetadata is updated and copied to the GPU if there is a
         new/resumed/paused/finished request in the batch.
         """
+        self.model_state.remove_requests(scheduler_output.finished_req_ids)
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
             self.requests.pop(req_id, None)
@@ -1498,6 +1550,7 @@ class ModelRunnerFL(
         # Add the new or resumed requests to the persistent batch.
         # The smaller empty indices are filled first.
         for request in reqs_to_add:
+            self.model_state.remove_requests((request.req_id,))
             self.input_batch.add_request(request)
             self.input_batch.update_req_spec_token_ids(request, scheduled_spec_tokens)
 
@@ -1974,6 +2027,24 @@ class ModelRunnerFL(
         # E.g., [2, 5, 3] -> [0, 0, 1, 1, 1, 1, 1, 2, 2, 2]
         req_indices = np.repeat(self.arange_np[:num_reqs], num_scheduled_tokens)
 
+        if self.use_ascend_attention:
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                classify_ascend_attention_state,
+            )
+
+            num_valid_tokens = num_scheduled_tokens.copy()
+            for req_idx, req_id in enumerate(self.input_batch.req_ids):
+                num_valid_tokens[req_idx] -= len(
+                    scheduler_output.scheduled_spec_decode_tokens.get(req_id, [])
+                )
+            self._ascend_attn_state = classify_ascend_attention_state(
+                self.input_batch.num_computed_tokens_cpu[:num_reqs],
+                num_scheduled_tokens,
+                num_valid_tokens,
+                self.scheduler_config.enable_chunked_prefill,
+                self.speculative_config.method if self.speculative_config else None,
+            )
+
         # cu_num_tokens: [2, 5, 3] -> [2, 7, 10]
         # self.query_pos.np[:10]: [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
         cu_num_tokens = self._get_cumsum_and_arange(
@@ -2186,11 +2257,12 @@ class ModelRunnerFL(
         )
         self.seq_lens[num_reqs:].fill_(0)
 
-        self.input_batch.block_table.compute_slot_mapping(
-            num_reqs,
-            self.query_start_loc.gpu[: num_reqs + 1],
-            self.positions[:total_num_scheduled_tokens],
-        )
+        if self.common_attention_metadata_graph is None:
+            self.input_batch.block_table.compute_slot_mapping(
+                num_reqs,
+                self.query_start_loc.gpu[: num_reqs + 1],
+                self.positions[:total_num_scheduled_tokens],
+            )
 
         # Copy the tensors to the GPU.
         self._prepare_input_ids(
@@ -2290,6 +2362,8 @@ class ModelRunnerFL(
         num_scheduled_tokens: dict[str, int] | None = None,
         cascade_attn_prefix_lens: list[list[int]] | None = None,
         slot_mappings: dict[int, torch.Tensor] | None = None,
+        block_table_rows_are_current: bool = False,
+        ascend_attn_state: Any | None = None,
     ) -> tuple[PerLayerAttnMetadata, CommonAttentionMetadata | None]:
         """
         :return: tuple[attn_metadata, spec_decode_common_attn_metadata]
@@ -2329,9 +2403,10 @@ class ModelRunnerFL(
                 blk_table = self.input_batch.block_table[kv_cache_gid]
                 blk_table_tensor = blk_table.get_device_tensor(num_reqs_padded)
 
-            # Fill unused block table entries with NULL_BLOCK_ID (null block)
-            # for CUDAGraph padding. Block 0 is reserved for padding.
-            blk_table_tensor[num_reqs:num_reqs_padded].fill_(NULL_BLOCK_ID)
+            if not block_table_rows_are_current:
+                # Fill unused block table entries with NULL_BLOCK_ID (null
+                # block) for graph padding. Block 0 is reserved for padding.
+                blk_table_tensor[num_reqs:num_reqs_padded].fill_(NULL_BLOCK_ID)
             return blk_table_tensor
 
         assert slot_mappings is not None
@@ -2403,6 +2478,10 @@ class ModelRunnerFL(
             seq_lens=self.seq_lens[:num_reqs_padded],
             _seq_lens_cpu=seq_lens_cpu,
             _num_computed_tokens_cpu=num_computed_tokens_cpu,
+            _num_computed_tokens_cache=(
+                self.num_computed_tokens[:num_reqs_padded]
+                if self.common_attention_metadata_graph is not None else None
+            ),
             seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             num_reqs=num_reqs_padded,
             num_actual_tokens=num_tokens_padded,
@@ -2415,6 +2494,16 @@ class ModelRunnerFL(
             positions=self.positions[:num_tokens_padded],
             mm_req_doc_ranges=req_doc_ranges,
         )
+
+        if self.use_ascend_attention:
+            phase = (
+                ascend_attn_state
+                if ascend_attn_state is not None else self._ascend_attn_state
+            )
+            assert phase is not None, (
+                "Ascend metadata requires an explicit attention state"
+            )
+            cm_base.attn_state = phase
 
         if self.dcp_world_size > 1:
             self.dcp_local_seq_lens.cpu[:num_reqs] = get_dcp_local_seq_lens(
@@ -3494,6 +3583,40 @@ class ModelRunnerFL(
             return round_up(num_scheduled_tokens, tp_size)
         return num_scheduled_tokens
 
+    def _pad_query_start_loc_for_fia(
+        self,
+        query_start_loc: CpuGpuBuffer,
+        num_tokens_padded: int,
+        num_reqs: int,
+        batch_desc_num_reqs: int | None = None,
+    ) -> int:
+        """Pad FIA query starts for FULL_DECODE_ONLY decode/capture batches."""
+        num_reqs_padded = (
+            batch_desc_num_reqs
+            if batch_desc_num_reqs is not None
+            else num_reqs
+        )
+
+        if (
+            num_tokens_padded
+            == num_reqs_padded * self.uniform_decode_query_len
+        ):
+            assert num_reqs <= num_reqs_padded
+            last_loc = query_start_loc.np[num_reqs]
+            query_start_loc.np[num_reqs + 1 : num_reqs_padded + 1] = (
+                self.arange_np[1 : num_reqs_padded + 1 - num_reqs]
+                * self.uniform_decode_query_len
+                + last_loc
+            )
+        else:
+            assert num_reqs == num_reqs_padded
+            if query_start_loc.np[num_reqs_padded] < num_tokens_padded:
+                query_start_loc.np[num_reqs_padded + 1] = num_tokens_padded
+                num_reqs_padded += 1
+
+        query_start_loc.copy_to_gpu()
+        return num_reqs_padded
+
     def _prepare_mm_inputs(
         self, num_tokens: int
     ) -> tuple[torch.Tensor | None, torch.Tensor]:
@@ -3509,6 +3632,8 @@ class ModelRunnerFL(
         self,
         scheduler_output: "SchedulerOutput",
         num_input_tokens: int,  # Padded
+        num_reqs: int,
+        num_reqs_padded: int,
         intermediate_tensors: IntermediateTensors | None = None,
     ) -> tuple[
         torch.Tensor | None,
@@ -3612,6 +3737,10 @@ class ModelRunnerFL(
             input_ids = self.input_ids.gpu[:num_input_tokens]
             inputs_embeds = None
             model_kwargs = self._init_model_kwargs()
+
+        model_kwargs.update(
+            self.model_state.prepare_inputs(num_reqs, num_reqs_padded, input_ids)
+        )
 
         if self.uses_mrope:
             positions = self.mrope_positions.gpu[:, :num_input_tokens]
@@ -3897,6 +4026,7 @@ class ModelRunnerFL(
         use_cascade_attn: bool,
         allow_microbatching: bool = True,
         force_eager: bool = False,
+        disable_full: bool = False,
         # For cudagraph capture TODO(lucas): Refactor how we capture cudagraphs (will
         # be improved in model runner v2)
         force_uniform_decode: bool | None = None,
@@ -3933,7 +4063,9 @@ class ModelRunnerFL(
 
         num_tokens_padded = self._pad_for_sequence_parallelism(num_tokens)
 
-        def dispatch_cudagraph(num_tokens, disable_full=False, valid_modes=None):
+        disable_full = disable_full or use_cascade_attn or has_encoder_output
+
+        def dispatch_cudagraph(num_tokens, valid_modes=None):
             return self.cudagraph_dispatcher.dispatch(
                 num_tokens=num_tokens,
                 has_lora=has_lora,
@@ -3943,9 +4075,7 @@ class ModelRunnerFL(
                 invalid_modes={CUDAGraphMode.FULL} if disable_full else None,
             )
 
-        cudagraph_mode, batch_descriptor = dispatch_cudagraph(
-            num_tokens_padded, disable_full=use_cascade_attn or has_encoder_output
-        )
+        cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded)
         num_tokens_padded = batch_descriptor.num_tokens
         if self.compilation_config.pass_config.enable_sp:
             assert (
@@ -4038,12 +4168,46 @@ class ModelRunnerFL(
                 pyt_hooks.register_hooks(self.model, self.model.__class__.__name__)
                 self.layerwise_nvtx_hooks_registered = True
 
+    def _run_common_attention_metadata(
+        self,
+        num_reqs: int,
+        cudagraph_mode: CUDAGraphMode,
+        *,
+        capture: bool = False,
+    ) -> bool:
+        if self.common_attention_metadata_graph is None:
+            return False
+        # PIECEWISE descriptors pad tokens, not requests. A fixed request
+        # extent covers mixed batches whose request counts never occur in the
+        # token-size capture list. query_start_loc/seq_lens have padded tails.
+        if cudagraph_mode == CUDAGraphMode.PIECEWISE:
+            num_reqs = self.max_num_reqs
+        # Follow the globally resolved graph mode. The standalone metadata
+        # graph also benefits piecewise execution; ubatching retains eager
+        # generation because its metadata is sliced per microbatch.
+        use_graph = (
+            cudagraph_mode != CUDAGraphMode.NONE
+            and not self.parallel_config.use_ubatching
+        )
+        return self.common_attention_metadata_graph.run(
+            self.input_batch.block_table,
+            num_reqs,
+            self.query_start_loc.gpu[: num_reqs + 1],
+            self.positions,
+            self.seq_lens[:num_reqs],
+            self.num_computed_tokens[:num_reqs],
+            use_graph=use_graph,
+            capture=capture,
+            compute=compute_common_attention_metadata,
+        )
+
     def _get_slot_mappings(
         self,
         num_tokens_padded: int,
         num_reqs_padded: int,
         num_tokens_unpadded: int,
         ubatch_slices: "UBatchSlices | None" = None,
+        slot_mapping_is_current: bool = False,
     ) -> tuple[
         dict[int, torch.Tensor] | None,
         dict[str, torch.Tensor] | list[dict[str, torch.Tensor]] | None,
@@ -4084,9 +4248,10 @@ class ModelRunnerFL(
                 blk_table = self.input_batch.block_table[kv_cache_gid]
                 slot_mapping = blk_table.slot_mapping.gpu[:num_tokens_padded]
 
-            # Fill unused with -1. Needed for reshape_and_cache in full cuda
-            # graph mode. `blk_table_tensor` -1 to match mamba PAD_SLOT_ID
-            slot_mapping[num_tokens_unpadded:num_tokens_padded].fill_(-1)
+            if not slot_mapping_is_current:
+                # Fill unused with -1. Needed for reshape_and_cache in full
+                # graph mode. `blk_table_tensor` -1 matches mamba PAD_SLOT_ID.
+                slot_mapping[num_tokens_unpadded:num_tokens_padded].fill_(-1)
 
             return slot_mapping
 
@@ -4211,6 +4376,18 @@ class ModelRunnerFL(
                 num_scheduled_tokens_np,
             )
 
+            disable_full = False
+            if self.use_ascend_attention:
+                from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                    AscendAttentionState,
+                )
+
+                # A fresh one-token prompt also looks uniform to the dispatcher,
+                # but the captured attention tasks only support DecodeOnly.
+                disable_full = (
+                    self._ascend_attn_state != AscendAttentionState.DecodeOnly
+                )
+
             cascade_attn_prefix_lens = None
             # Disable cascade attention when using microbatching (DBO)
             if self.cascade_attn_enabled and not self.parallel_config.use_ubatching:
@@ -4233,6 +4410,7 @@ class ModelRunnerFL(
                 num_scheduled_tokens_np=num_scheduled_tokens_np,
                 max_num_scheduled_tokens=max_num_scheduled_tokens,
                 use_cascade_attn=cascade_attn_prefix_lens is not None,
+                disable_full=disable_full,
                 num_encoder_reqs=len(scheduler_output.scheduled_encoder_inputs),
             )
 
@@ -4322,6 +4500,12 @@ class ModelRunnerFL(
             use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
             ubatch_slices_attn = ubatch_slices_padded if pad_attn else ubatch_slices
 
+            if self.use_ascend_attention and cudagraph_mode == CUDAGraphMode.FULL:
+                num_reqs_padded = self._pad_query_start_loc_for_fia(
+                    self.query_start_loc, num_tokens_padded,
+                    num_reqs, batch_desc.num_reqs,
+                )
+            self._run_common_attention_metadata(num_reqs_padded, cudagraph_mode)
             slot_mappings_by_group, slot_mappings = self._get_slot_mappings(
                 num_tokens_padded=num_tokens_padded
                 if pad_attn or has_separate_kv_update
@@ -4331,6 +4515,7 @@ class ModelRunnerFL(
                 ),
                 num_tokens_unpadded=num_tokens_unpadded,
                 ubatch_slices=ubatch_slices_padded,
+                slot_mapping_is_current=self.common_attention_metadata_graph is not None,
             )
 
             attn_metadata, spec_decode_common_attn_metadata = (
@@ -4346,6 +4531,7 @@ class ModelRunnerFL(
                     num_scheduled_tokens=scheduler_output.num_scheduled_tokens,
                     cascade_attn_prefix_lens=cascade_attn_prefix_lens,
                     slot_mappings=slot_mappings_by_group,
+                    block_table_rows_are_current=self.common_attention_metadata_graph is not None,
                 )
             )
 
@@ -4357,7 +4543,11 @@ class ModelRunnerFL(
                 model_kwargs,
                 ec_connector_output,
             ) = self._preprocess(
-                scheduler_output, num_tokens_padded, intermediate_tensors
+                scheduler_output,
+                num_tokens_padded,
+                num_reqs,
+                num_reqs_padded,
+                intermediate_tensors,
             )
 
         # Set cudagraph mode to none if calc_kv_scales is true.
@@ -5250,6 +5440,9 @@ class ModelRunnerFL(
                 self.model = model_loader.load_model(
                     vllm_config=self.vllm_config, model_config=self.model_config
                 )
+                get_state_cls = getattr(self.model, "get_legacy_model_state_cls", None)
+                if get_state_cls is not None:
+                    self.model_state = get_state_cls()(self)
                 if self.lora_config:
                     self.model = self.load_lora_model(
                         self.model, self.vllm_config, self.device
@@ -5334,6 +5527,11 @@ class ModelRunnerFL(
             format_gib(self.model_memory_usage),
             time_after_load - time_before_load,
         )
+
+        # All model modules are loaded now, while compilation and CUDA Graph
+        # capture have not started yet. Resolve CachedOps outside either graph.
+        prewarm_cached_ops()
+
         if not load_dummy_weights:
             prepare_communication_buffer_for_model(self.model)
             # FL: register IO dumper module hooks
@@ -5398,7 +5596,8 @@ class ModelRunnerFL(
             and not self.parallel_config.use_ubatching
         ):
             self.model = GraphWrapper(
-                self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL
+                self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL,
+                graph_runtime=self.graph_runtime,
             )
         elif self.parallel_config.use_ubatching:
             if cudagraph_mode.has_full_cudagraphs():
@@ -5524,7 +5723,7 @@ class ModelRunnerFL(
             logger.warning_once(
                 "Reloading with `is_checkpoint_format=True` requires that "
                 "weights be in kernel format and already sharded",
-                
+
             )
             loaded_weights = set()
             for name, loaded_weight in weights_iterator:
@@ -5538,7 +5737,7 @@ class ModelRunnerFL(
         logger.info_once(
             "Reloading and processing weights took %.2f seconds",
             diff_seconds,
-            
+
         )
         if self.model_config.quantization is None and loaded_weights is not None:
             weights_not_loaded = weights_to_load - loaded_weights
@@ -5912,22 +6111,20 @@ class ModelRunnerFL(
             num_reqs_padded=num_reqs_padded,
             num_tokens_unpadded=num_tokens_unpadded,
             ubatch_slices=ubatch_slices_padded,
+            slot_mapping_is_current=self.common_attention_metadata_graph is not None,
         )
-
-        # Dummy runs have no real slot assignments — fill with -1 so
-        # concat_and_cache kernels skip the KV write.
-        if slot_mappings_by_group is not None:
-            for sm in slot_mappings_by_group.values():
-                sm.fill_(-1)
 
         # _dummy_run shares pinned CPU buffers (seq_lens, query_start_loc,
         # etc.) with execute_model.  It must participate in the same event
         # protocol so that back-to-back dummy/real steps don't overwrite
         # pinned memory while a prior non_blocking H2D DMA is still reading.
         with self.synchronize_input_prep():
-            # If force_attention is True, we always capture attention.
-            # Otherwise, it only happens for cudagraph_runtime_mode=FULL.
-            if force_attention or cudagraph_runtime_mode == CUDAGraphMode.FULL:
+            build_attention = (
+                force_attention or cudagraph_runtime_mode == CUDAGraphMode.FULL
+            )
+            # Metadata has its own graph, including in pure PIECEWISE mode.
+            # Its inputs must be initialized even when attention is not run.
+            if build_attention or self.common_attention_metadata_graph is not None:
                 if profile_seq_lens is not None:
                     seq_lens = profile_seq_lens  # type: ignore[assignment]
                 elif create_mixed_batch:
@@ -5947,18 +6144,48 @@ class ModelRunnerFL(
                 cum_num_tokens = self._get_cumsum_and_arange(
                     num_scheduled_tokens, self.query_pos.np
                 )
+                self.query_start_loc.np[0] = 0
                 self.query_start_loc.np[1 : num_reqs + 1] = cum_num_tokens
-                self.query_start_loc.np[num_reqs + 1 : num_reqs_padded + 1].fill(
+                self.query_start_loc.np[num_reqs + 1 :].fill(
                     cum_num_tokens[-1]
                 )
                 self.query_start_loc.copy_to_gpu()
+
+                if (
+                    self.use_ascend_attention
+                    and cudagraph_runtime_mode == CUDAGraphMode.FULL
+                ):
+                    num_reqs_padded = self._pad_query_start_loc_for_fia(
+                        self.query_start_loc, num_tokens_padded,
+                        num_reqs, batch_desc.num_reqs,
+                    )
 
                 # Sync block table CPU->GPU so cleared rows from
                 # remove_request() are visible to the attention metadata
                 # builder. Without this, stale block IDs from finished
                 # requests can corrupt Mamba state.
                 self.input_batch.block_table.commit_block_table(num_reqs_padded)
+                self._run_common_attention_metadata(
+                    num_reqs_padded,
+                    cudagraph_runtime_mode,
+                    capture=is_graph_capturing,
+                )
 
+            if build_attention:
+                ascend_dummy_attn_state = None
+                if self.use_ascend_attention:
+                    from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                        get_ascend_dummy_attention_state,
+                    )
+
+                    ascend_dummy_attn_state = get_ascend_dummy_attention_state(
+                        create_mixed_batch,
+                        speculative_method=(
+                            self.speculative_config.method
+                            if self.speculative_config else None
+                        ),
+                        use_mla=self.model_config.use_mla,
+                    )
                 pad_attn = cudagraph_runtime_mode == CUDAGraphMode.FULL
                 attn_metadata, _ = self._build_attention_metadata(
                     num_tokens=num_tokens_unpadded,
@@ -5969,7 +6196,17 @@ class ModelRunnerFL(
                     for_cudagraph_capture=is_graph_capturing,
                     slot_mappings=slot_mappings_by_group,
                     use_spec_decode=self.speculative_config is not None,
+                    block_table_rows_are_current=self.common_attention_metadata_graph is not None,
+                    ascend_attn_state=ascend_dummy_attn_state,
                 )
+
+            # Dummy forwards must not update real KV-cache slots. Capture the
+            # metadata producer first, then restore the existing PAD_SLOT_ID
+            # behavior before the model dummy/capture forward. Runtime replay
+            # overwrites these fixed-address buffers with current metadata.
+            if slot_mappings_by_group is not None:
+                for slot_mapping in slot_mappings_by_group.values():
+                    slot_mapping.fill_(-1)
 
         with self.maybe_dummy_run_with_lora(
             self.lora_config,
@@ -5995,6 +6232,12 @@ class ModelRunnerFL(
             else:
                 input_ids = self.input_ids.gpu[:num_tokens_padded]
                 inputs_embeds = None
+
+            model_kwargs.update(
+                self.model_state.prepare_dummy_inputs(
+                    num_reqs, num_reqs_padded, num_scheduled_tokens
+                )
+            )
 
             if self.uses_mrope:
                 positions = self.mrope_positions.gpu[:, :num_tokens_padded]
@@ -6166,6 +6409,16 @@ class ModelRunnerFL(
             bad_words_token_ids={},
             logitsprocs=LogitsProcessors(),
         )
+
+        # FlagGems 5.4's Kunlunxin radix-sort kernel can raise an XPU kernel
+        # exception for the large synthetic top-k workload used only by this
+        # memory profile.  Exercise the real logits and greedy sampler path
+        # here; non-greedy requests still use the normal runtime metadata.
+        from vllm_fl.platform import PlatformFL
+
+        if PlatformFL.vendor_name == "kunlunxin":
+            dummy_metadata = replace(dummy_metadata, all_greedy=True)
+
         try:
             sampler_output = self.sampler(
                 logits=logits, sampling_metadata=dummy_metadata
@@ -6440,11 +6693,14 @@ class ModelRunnerFL(
         from vllm.v1.worker.workspace import reset_workspace_manager
 
         # Calls torch.accelerator.synchronize()
+        if self.graph_runtime is not None:
+            self.graph_runtime.clear_decoder_graphs()
         self._cleanup_profiling_kv_cache()
         if current_platform.is_rocm():
             # Drop captured graphs before distributed teardown. On ROCm, delayed
             # graph destruction can surface HSA faults in the next engine startup.
-            CUDAGraphWrapper.clear_all_graphs()
+            GraphWrapper.clear_all_graphs()
+            BreakableCUDAGraphWrapper.clear_all_graphs()
             self.encoder_cudagraph_manager = None
         self.compilation_config.static_forward_context.clear()
         self.model = None  # type: ignore[assignment]
@@ -6458,6 +6714,8 @@ class ModelRunnerFL(
 
     def _cleanup_profiling_kv_cache(self) -> None:
         _accelerator_synchronize()
+        if self.common_attention_metadata_graph is not None:
+            self.common_attention_metadata_graph.clear()
         if hasattr(self, "kv_caches") and self.kv_caches:
             for i in range(len(self.kv_caches)):
                 self.kv_caches[i] = None  # type: ignore
@@ -6576,12 +6834,35 @@ class ModelRunnerFL(
         profiling_pool = current_platform.graph_pool_handle()
         encoder_profiling_pool = current_platform.graph_pool_handle()
         original_pools: dict[int, Any] = {}
-        for instance in list(GraphWrapper._all_instances):
+        all_wrappers = list(GraphWrapper._all_instances) + list(
+            BreakableCUDAGraphWrapper._all_instances
+        )
+        private_breakable_graphs = any(
+            instance.graph_pool is None
+            for instance in BreakableCUDAGraphWrapper._all_instances
+        )
+        for instance in all_wrappers:
             original_pools[id(instance)] = instance.graph_pool
-            instance.graph_pool = profiling_pool
+            # None requests independent pools, including every breakable segment.
+            # Profiling must preserve the runtime allocation policy.
+            if instance.graph_pool is not None:
+                instance.graph_pool = profiling_pool
+
+        # The common-attention metadata producer captures its own graphs before
+        # the decoder wrapper is entered.  Keep those profiling graphs in the
+        # same temporary pool as the decoder graphs.  If they use the global
+        # runtime pool here, the profiling cleanup drops the last graph owning
+        # that pool; the first real decoder capture then reuses a zero-refcount
+        # CachingHostAllocator pool and aborts in capture_begin().
+        metadata_graph = self.common_attention_metadata_graph
+        original_metadata_pool = None
+        if metadata_graph is not None:
+            original_metadata_pool = metadata_graph.graph_pool
+            metadata_graph.graph_pool = profiling_pool
 
         shared_memory_estimate = {}
         per_graph_estimate = {}
+        private_memory_estimate = 0
         encoder_memory_estimate = 0
         # Cleanup-only guard: CUDA graph capture errors should still propagate
         # because encoder graph capture is opt-in.
@@ -6592,7 +6873,15 @@ class ModelRunnerFL(
                 torch.accelerator.empty_cache()
 
                 for mode, descs in capture_descs:
-                    profile_descs = descs[:2]
+                    if not descs:
+                        continue
+                    # Native Breakable PIECEWISE also owns private pools when
+                    # no compiled runner exists. Measure every descriptor;
+                    # extrapolating a shared-pool sample can under-budget it.
+                    private_pools = private_breakable_graphs
+                    # Private pools cannot overlay allocations across sizes or
+                    # segments. Capture every descriptor and add its full cost.
+                    profile_descs = descs if private_pools else descs[:2]
                     mem_samples: list[int] = []
 
                     for i, desc in enumerate(profile_descs):
@@ -6612,6 +6901,17 @@ class ModelRunnerFL(
                         _accelerator_synchronize()
                         free_after = current_platform.torch_device_fn.mem_get_info()[0]
                         mem_samples.append(mem_before - free_after)
+
+                    if private_pools:
+                        private_memory_estimate += sum(
+                            max(sample, 1 << 20) for sample in mem_samples
+                        )
+                        logger.debug(
+                            "Measured private graph memory: %.2f MiB for %d graphs",
+                            private_memory_estimate / (1 << 20),
+                            len(descs),
+                        )
+                        continue
 
                     first_capture = mem_samples[0]
                     # Use at least 1 MiB per graph for driver overhead
@@ -6643,8 +6943,10 @@ class ModelRunnerFL(
                     )
         finally:
             set_cudagraph_capturing_enabled(False)
-            GraphWrapper.clear_all_graphs()
-            for instance in list(GraphWrapper._all_instances):
+            _clear_decoder_graphs(getattr(self, "graph_runtime", None))
+            if encoder_cudagraph_manager is not None:
+                encoder_cudagraph_manager.clear()
+            for instance in _decoder_graph_wrappers():
                 if id(instance) in original_pools:
                     instance.graph_pool = original_pools[id(instance)]
             for key_set in self.cudagraph_dispatcher.cudagraph_keys.values():
@@ -6652,13 +6954,16 @@ class ModelRunnerFL(
             self.cudagraph_dispatcher.keys_initialized = False
             self.maybe_remove_all_loras(self.lora_config)
             self._cleanup_profiling_kv_cache()
+            if metadata_graph is not None:
+                metadata_graph.graph_pool = original_metadata_pool
             compilation_counter.num_cudagraph_captured = saved_num_cudagraph_captured
 
-        # FULL and PIECEWISE graphs share the global pool at runtime and are
-        # never replayed concurrently, so the pool overlays their memory.
-        # Take the max to avoid double-counting the overlap.
-        decoder_estimate = max(shared_memory_estimate.values(), default=0) + sum(
-            per_graph_estimate.values()
+        # Overlay shared-pool modes, but add private Breakable pools: neither their
+        # sizes nor their breakable segments can share activation storage.
+        decoder_estimate = (
+            private_memory_estimate
+            + max(shared_memory_estimate.values(), default=0)
+            + sum(per_graph_estimate.values())
         )
         # Encoder graphs use a manager-local pool at runtime, separate from the
         # decoder pool, so add their estimate instead of overlaying it.
@@ -6678,6 +6983,8 @@ class ModelRunnerFL(
                 "ensure `cudagraph_mode` was not manually set to `NONE`"
             )
             return 0
+
+        self._limit_musa_piecewise_capture_sizes()
 
         # Initialize encoder CUDA graph manager if enabled.
         self._maybe_init_encoder_cudagraph_manager()
@@ -6735,9 +7042,69 @@ class ModelRunnerFL(
             "Graph capturing finished in %.0f secs, took %.2f GiB",
             elapsed_time,
             cuda_graph_size / (1 << 30),
-            
+
         )
         return cuda_graph_size
+
+    def _limit_musa_piecewise_capture_sizes(self) -> None:
+        if (
+            current_platform.device_type != "musa"
+            or self.parallel_config.tensor_parallel_size <= 1
+            or not self.compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+        ):
+            return
+
+        capture_sizes = self.compilation_config.cudagraph_capture_sizes
+        if not capture_sizes:
+            return
+
+        wrapper_count = sum(
+            wrapper.runtime_mode == CUDAGraphMode.PIECEWISE
+            for wrapper in list(GraphWrapper._all_instances)
+        )
+        if wrapper_count == 0:
+            return
+
+        capture_descs = self.cudagraph_dispatcher.get_capture_descs()
+        descriptor_count = sum(
+            len(descs)
+            for mode, descs in capture_descs
+            if mode == CUDAGraphMode.PIECEWISE
+        )
+        descriptors_per_size = max(
+            1, (descriptor_count + len(capture_sizes) - 1) // len(capture_sizes)
+        )
+        max_capture_sizes = max(
+            1,
+            _MUSA_MAX_LIVE_GRAPHS
+            // (wrapper_count * descriptors_per_size),
+        )
+        if len(capture_sizes) <= max_capture_sizes:
+            return
+
+        original_size_count = len(capture_sizes)
+        limited_sizes = sorted(capture_sizes)[:max_capture_sizes]
+        self.compilation_config.cudagraph_capture_sizes = limited_sizes
+        self.compilation_config.max_cudagraph_capture_size = limited_sizes[-1]
+
+        dispatcher = self.cudagraph_dispatcher
+        resolved_mode = dispatcher.cudagraph_mode
+        for key_set in dispatcher.cudagraph_keys.values():
+            key_set.clear()
+        dispatcher.keys_initialized = False
+        dispatcher.initialize_cudagraph_keys(
+            resolved_mode, self.uniform_decode_query_len
+        )
+        logger.warning(
+            "MUSA: Reduced PIECEWISE graph capture sizes from %d to %d "
+            "(%d wrappers, %d descriptors per size) to stay below the "
+            "%d-live-graph runtime limit.",
+            original_size_count,
+            len(limited_sizes),
+            wrapper_count,
+            descriptors_per_size,
+            _MUSA_MAX_LIVE_GRAPHS,
+        )
 
     def _warmup_and_capture(
         self,
@@ -7122,6 +7489,10 @@ class ModelRunnerFL(
         kv_cache_raw_tensors: dict[str, torch.Tensor] = {}
         packed_backing: torch.Tensor | None = None
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
+            if self.use_ascend_hybrid_cache and kv_cache_tensor.block_stride > 0:
+                raise NotImplementedError(
+                    "Ascend dense hybrid cache does not support packed pools"
+                )
             if kv_cache_tensor.block_stride > 0:
                 # Allocate once; all packed tensors alias the same backing.
                 if packed_backing is None:
@@ -7177,6 +7548,7 @@ class ModelRunnerFL(
         kv_caches: dict[str, torch.Tensor] = {}
         has_attn, has_mamba = False, False
 
+
         # Map layer names to (offset, block_stride) within the packed
         # backing tensor so we can create strided views per layer.
         layer_packing: dict[str, tuple[int, int]] = {}
@@ -7204,16 +7576,21 @@ class ModelRunnerFL(
                     num_blocks = raw_tensor.numel() // kv_cache_spec.page_size_bytes
                 if isinstance(kv_cache_spec, AttentionSpec):
                     has_attn = True
-                    num_blocks_per_kv_block = (
-                        kv_cache_spec.block_size // kernel_block_size
-                    )
-                    kernel_num_blocks = num_blocks * num_blocks_per_kv_block
-
-                    # For MLA with compression, storage_block_size != block_size
-                    if kv_cache_spec.storage_block_size != kv_cache_spec.block_size:
-                        shape_block_size = kv_cache_spec.storage_block_size
+                    from vllm_fl.runtime.kv_layout import get_physical_cache_layout
+                    layout = get_physical_cache_layout(attn_backend, kv_cache_spec)
+                    if layout is not None:
+                        num_blocks_per_kv_block = layout.pages_per_block
+                        shape_block_size = layout.kernel_block_size
                     else:
-                        shape_block_size = kernel_block_size
+                        num_blocks_per_kv_block = (
+                            kv_cache_spec.block_size // kernel_block_size
+                        )
+                        shape_block_size = (
+                            kv_cache_spec.storage_block_size
+                            if kv_cache_spec.storage_block_size != kv_cache_spec.block_size
+                            else kernel_block_size
+                        )
+                    kernel_num_blocks = num_blocks * num_blocks_per_kv_block
 
                     kv_cache_shape = attn_backend.get_kv_cache_shape(
                         kernel_num_blocks,
@@ -7222,15 +7599,51 @@ class ModelRunnerFL(
                         kv_cache_spec.head_size,
                         cache_dtype_str=self.cache_config.cache_dtype,
                     )
+                    if self.use_ascend_hybrid_cache:
+                        from vllm_fl.kv_cache.ascend.hybrid import dense_attention_view
+
+                        kv_caches[layer_name] = dense_attention_view(
+                            raw_tensor, kv_cache_spec, kv_cache_shape
+                        )
+                        continue
                     try:
                         kv_cache_stride_order = attn_backend.get_kv_cache_stride_order()
                         assert len(kv_cache_stride_order) == len(kv_cache_shape)
                     except (AttributeError, NotImplementedError):
                         kv_cache_stride_order = tuple(range(len(kv_cache_shape)))
                     raw_tensor = kv_cache_raw_tensors[layer_name]
+                    # A padded logical cache block can be split into multiple
+                    # backend blocks (for example, GLM5-Next uses a 192-token
+                    # logical DSA indexer block and the indexer kernel consumes
+                    # 64-token blocks).  The upstream v0.24 helper applies the
+                    # complete logical-page stride to every backend block,
+                    # which makes the strided view run past the allocation.
+                    # Divide the physical page evenly across the backend blocks
+                    # so flattened kernel block ids retain a constant stride.
+                    reshape_spec = kv_cache_spec
+                    if (
+                        layout is not None
+                        and packing is None
+                        and kv_cache_spec.page_size_padded is not None
+                        and num_blocks_per_kv_block > 1
+                    ):
+                        assert (
+                            kv_cache_spec.page_size_bytes
+                            % num_blocks_per_kv_block
+                            == 0
+                        )
+                        reshape_spec = replace(
+                            kv_cache_spec,
+                            block_size=layout.metadata_block_size,
+                            page_size_padded=(
+                                kv_cache_spec.page_size_bytes
+                                // num_blocks_per_kv_block
+                            ),
+                        )
+
                     kv_caches[layer_name] = _reshape_attention_kv_cache(
                         raw_tensor,
-                        kv_cache_spec,
+                        reshape_spec,
                         kv_cache_shape,
                         kv_cache_stride_order,
                         kernel_num_blocks,
@@ -7240,6 +7653,13 @@ class ModelRunnerFL(
                 elif isinstance(kv_cache_spec, MambaSpec):
                     has_mamba = True
                     raw_tensor = kv_cache_raw_tensors[layer_name]
+                    if self.use_ascend_hybrid_cache:
+                        from vllm_fl.kv_cache.ascend.hybrid import dense_mamba_views
+
+                        kv_caches[layer_name] = dense_mamba_views(
+                            raw_tensor, kv_cache_spec, num_blocks
+                        )
+                        continue
                     state_tensors = []
                     storage_offset_bytes = 0
                     for shape, dtype in zip(kv_cache_spec.shapes, kv_cache_spec.dtypes):
@@ -7264,7 +7684,7 @@ class ModelRunnerFL(
                 else:
                     raise NotImplementedError
 
-        if has_attn and has_mamba:
+        if has_attn and has_mamba and not self.use_ascend_hybrid_cache:
             self._update_hybrid_attention_mamba_layout(kv_caches, kernel_block_sizes)
 
         return kv_caches
@@ -7390,7 +7810,7 @@ class ModelRunnerFL(
         self,
         kv_cache_config: KVCacheConfig,
         is_profiling: bool = False,
-    ) -> None:        
+    ) -> None:
         """
         Initialize KV cache based on `kv_cache_config`.
         Args:
@@ -7418,6 +7838,8 @@ class ModelRunnerFL(
 
         # create metadata builders
         self.initialize_metadata_builders(kv_cache_config, kernel_block_sizes)
+        if self.graph_runtime is not None:
+            self.graph_runtime.bind_attention_groups(self.attn_groups)
 
         # Reinitialize need to after initialize_attn_backend
         self.may_reinitialize_input_batch(kv_cache_config, kernel_block_sizes)
@@ -7579,6 +8001,12 @@ class ModelRunnerFL(
                     spec = replace(spec, indexes_kv_by_block_stride=indexes)
                 kv_cache_spec[layer_name] = spec
 
+        if self.use_ascend_hybrid_cache:
+            from vllm_fl.kv_cache.ascend.hybrid import pad_attention_specs
+
+            kv_cache_spec = pad_attention_specs(
+                kv_cache_spec, self.cache_config.mamba_page_size_padded
+            )
         return kv_cache_spec
 
     def _to_list(self, sampled_token_ids: torch.Tensor) -> list[list[int]]:

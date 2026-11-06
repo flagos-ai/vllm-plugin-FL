@@ -8,7 +8,7 @@ import dataclasses
 import weakref
 from collections import Counter
 from collections.abc import Callable
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from typing import Any, ClassVar
 from unittest.mock import patch
 
@@ -47,10 +47,12 @@ class Graph:
         graph = torch.npu.NPUGraph
     elif current_platform.device_type == "musa":
         graph = torch.musa.MUSAGraph
+    elif current_platform.device_type == "gcu":
+        graph = torch.gcu.GCUGraph
     elif current_platform.device_type == "ptpu":
         graph = torch.ptpu.PTPUGraph
     elif current_platform.device_type == "txda":
-        graph = None
+        graph = torch.txda.TXDAGraph
     else:
         raise NotImplementedError("not support graph")
 
@@ -68,6 +70,37 @@ class GraphEntry:
     # for graph debugging, track the input addresses
     # during capture, and check if they are the same during replay
     input_addresses: list[int] | None = None
+    input_tensors: list[torch.Tensor] | None = None
+
+
+def _copy_graph_inputs(
+    static_inputs: list[torch.Tensor] | None,
+    runtime_inputs: list[torch.Tensor],
+) -> None:
+    if static_inputs is None or len(static_inputs) != len(runtime_inputs):
+        raise RuntimeError(
+            "Graph input count changed between capture and replay: "
+            f"expected {len(static_inputs or [])}, got {len(runtime_inputs)}"
+        )
+
+    for index, (static, runtime) in enumerate(zip(static_inputs, runtime_inputs)):
+        if static.data_ptr() == runtime.data_ptr():
+            continue
+        if (
+            static.shape != runtime.shape
+            or static.stride() != runtime.stride()
+            or static.dtype != runtime.dtype
+            or static.device != runtime.device
+        ):
+            raise RuntimeError(
+                f"Graph input {index} metadata changed between capture and "
+                f"replay: expected shape={tuple(static.shape)}, "
+                f"stride={static.stride()}, dtype={static.dtype}, "
+                f"device={static.device}; got shape={tuple(runtime.shape)}, "
+                f"stride={runtime.stride()}, dtype={runtime.dtype}, "
+                f"device={runtime.device}"
+            )
+        static.copy_(runtime)
 
 
 @dataclasses.dataclass
@@ -93,11 +126,22 @@ class GraphWrapper:
                  runnable: Callable,
                  vllm_config: VllmConfig,
                  runtime_mode: CUDAGraphMode,
-                 cudagraph_options: GraphOptions | None = None):
+                 cudagraph_options: GraphOptions | None = None,
+                 graph_runtime: Any | None = None):
         self.runnable = runnable
         self.vllm_config = vllm_config
         self.runtime_mode = runtime_mode
         self.compilation_config = vllm_config.compilation_config
+        self.graph_runtime = graph_runtime
+        # Eager MCCL collectives produce new tensor addresses on every call.
+        # Copy only TP PIECEWISE segment inputs into their capture-time buffers;
+        # enabling vLLM's full-model copy wrapper would clone dynamic views and
+        # can change strides before Inductor sees them.
+        self._copy_inputs = self.compilation_config.cudagraph_copy_inputs or (
+            current_platform.device_type in ("musa", "ptpu")
+            and vllm_config.parallel_config.tensor_parallel_size > 1
+            and runtime_mode == CUDAGraphMode.PIECEWISE
+        )
 
         self.first_run_finished = False
         self.is_debugging_mode = envs.VLLM_LOGGING_LEVEL == "DEBUG"
@@ -177,10 +221,19 @@ class GraphWrapper:
             # validate that cudagraph capturing is legal at this point.
             validate_cudagraph_capturing_enabled()
 
-            input_addresses = [
-                x.data_ptr() for x in args if isinstance(x, torch.Tensor)
-            ]
-            entry.input_addresses = input_addresses
+            # FL-specific: TXDA needs one eager warmup iteration before
+            # capture so flaggems/triton kernels are compiled and their
+            # runtime modules are loaded outside the capture stream;
+            # a first launch during capture is rejected by the runtime.
+            if current_platform.device_type == "txda":
+                self.runnable(*args, **kwargs)
+
+            input_tensors = [x for x in args if isinstance(x, torch.Tensor)]
+            entry.input_addresses = [x.data_ptr() for x in input_tensors]
+            if self._copy_inputs:
+                # Keep the capture-time buffers alive so replay can copy
+                # runtime values back to the addresses recorded by the graph.
+                entry.input_tensors = input_tensors
             graph = Graph.graph()
 
             with ExitStack() as stack:
@@ -192,32 +245,57 @@ class GraphWrapper:
                               lambda: None)
                     )
 
-            if self.graph_pool is not None:
-                set_graph_pool_id(self.graph_pool)
-            else:
-                set_graph_pool_id(current_platform.graph_pool_handle())
+                if self.graph_pool is not None:
+                    set_graph_pool_id(self.graph_pool)
+                else:
+                    set_graph_pool_id(current_platform.graph_pool_handle())
 
-            # Sync offloader's copy stream before capture if available.
-            try:
-                from vllm.model_executor.offloader.base import get_offloader
-                get_offloader().sync_prev_onload()
-            except (ImportError, RuntimeError):
-                pass
-
-            # FL-specific: use platform-agnostic graph capture
-            with current_platform.torch_device_fn.graph(
-                graph, pool=self.graph_pool
-            ):
-                # `output` is managed by pytorch's cudagraph pool
-                output = self.runnable(*args, **kwargs)
-                # Join offloader's copy stream after forward if available
+                # Sync offloader's copy stream before capture if available.
                 try:
                     from vllm.model_executor.offloader.base import get_offloader
-                    get_offloader().join_after_forward()
+                    get_offloader().sync_prev_onload()
                 except (ImportError, RuntimeError):
+                    # Offloader hooks are optional across FL runtime builds.
                     pass
-                if self.cudagraph_options.weak_ref_output:
-                    output = weak_ref_tensors(output)
+
+                # FL-specific (txda only): torch_txda's ExchangeDevice ->
+                # txSetDevice resets the current stream to the device
+                # default stream, and flaggems wraps every triton kernel
+                # launch in a device guard — without neutralizing it during
+                # capture, kernels are diverted to the default stream and
+                # the capture is corrupted. The default "global"
+                # capture_error_mode also makes the tsingmicro triton
+                # launcher reject kernel launches (txLaunchKernel
+                # err=0x47000003); "relaxed" captures and replays correctly.
+                # Other platforms take the exact previous capture path.
+                capture_ctx = nullcontext()
+                capture_kwargs: dict[str, Any] = {}
+                if current_platform.device_type == "txda":
+                    from vllm_fl.dispatch.backends.vendor.txda.patch import (
+                        capture_guard_context,
+                    )
+                    capture_ctx = capture_guard_context()
+                    capture_kwargs["capture_error_mode"] = "relaxed"
+
+                # FL-specific: use platform-agnostic graph capture
+                capture_scope = (
+                    self.graph_runtime.capture_scope(forward_context)
+                    if self.graph_runtime is not None else nullcontext()
+                )
+                with capture_scope, capture_ctx, current_platform.torch_device_fn.graph(
+                    graph, pool=self.graph_pool, **capture_kwargs
+                ):
+                    # `output` is managed by pytorch's cudagraph pool
+                    output = self.runnable(*args, **kwargs)
+                    # Join offloader's copy stream after forward if available
+                    try:
+                        from vllm.model_executor.offloader.base import get_offloader
+                        get_offloader().join_after_forward()
+                    except (ImportError, RuntimeError):
+                        # Keep the existing path without optional offloader hooks.
+                        pass
+                    if self.cudagraph_options.weak_ref_output:
+                        output = weak_ref_tensors(output)
 
             entry.output = weak_ref_tensors(output)
             entry.graph = graph
@@ -229,11 +307,12 @@ class GraphWrapper:
             # manage the memory during graph capture
             return output
 
-        if self.is_debugging_mode:
+        runtime_inputs = [x for x in args if isinstance(x, torch.Tensor)]
+        if self._copy_inputs:
+            _copy_graph_inputs(entry.input_tensors, runtime_inputs)
+        elif self.is_debugging_mode:
             # check if the input addresses are the same
-            new_input_addresses = [
-                x.data_ptr() for x in args if isinstance(x, torch.Tensor)
-            ]
+            new_input_addresses = [x.data_ptr() for x in runtime_inputs]
             assert new_input_addresses == entry.input_addresses, (
                 f"Input addresses for cudagraphs are different "
                 f"during replay. Expected {entry.input_addresses}, "
@@ -247,7 +326,9 @@ class GraphWrapper:
         except (ImportError, RuntimeError):
             pass
 
-        if current_platform.device_type == "npu":
-            current_platform.torch_device_fn.synchronize()
-        entry.graph.replay()
+        if self.graph_runtime is not None:
+            with self.graph_runtime.replay_scope(forward_context):
+                entry.graph.replay()
+        else:
+            entry.graph.replay()
         return entry.output

@@ -1,0 +1,26 @@
+# vLLM-FL Dispatch Configuration for biren GPU
+# Auto-loaded when running on biren hardware
+
+prefer: flagos
+strict: false
+
+allow_vendors:
+  - supa
+
+op_backends:
+  attention_backend:
+    - flagos
+    - reference
+  rms_norm:
+    - flagos
+    - reference
+  silu_and_mul:
+    - flagos
+    - reference
+  rotary_embedding:
+    - flagos
+    - reference
+
+# FlagGems marks copy_ unsupported for its Biren backend.
+flagos_blacklist:
+  - copy_

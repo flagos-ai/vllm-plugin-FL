@@ -89,7 +89,7 @@ _indexer_cache_write = CachedOp("bf16_indexer_cache_write")
 _indexer_decode = CachedOp("bf16_indexer_decode")
 
 
-_top_k_per_row_prefill = CachedOp("top_k_per_row_prefill")
+_top_k_per_row_prefill = CachedOp("bf16_indexer_top_k_per_row_prefill")
 
 
 _HYV4_PREFILL_INDEXER_BLOCK_ROWS = 128

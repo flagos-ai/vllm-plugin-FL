@@ -3,41 +3,44 @@
 """
 Tests for flagcx communicator module.
 
-Note: Tests require FLAGCX_PATH environment variable and the flagcx Python bindings.
-Tests are skipped if flagcx is not available.
-
 Integration tests for actual distributed operations should be in functional_tests/.
 """
 
-import os
-
-import pytest
-
-
-def has_flagcx():
-    """Check if flagcx is available (both library and Python bindings)."""
-    flagcx_path = os.getenv("FLAGCX_PATH")
-    if not flagcx_path:
-        return False
-    lib_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
-    if not os.path.exists(lib_path):
-        return False
-    # Also check Python bindings
-    try:
-        from plugin.interservice.flagcx_wrapper import flagcxDataTypeEnum  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+import importlib
+import sys
+import types
 
 
-# Mark all tests in this module as requiring flagcx
-pytestmark = pytest.mark.skipif(
-    not has_flagcx(),
-    reason="FLAGCX_PATH not set, flagcx library not found, or Python bindings unavailable",
-)
+def _install_fake_pre_api_flagcx(monkeypatch):
+    """Replace ``flagcx`` in ``sys.modules`` with a package that has no
+    ``flagcx.api`` submodule, simulating an installed pre-API wheel."""
+    fake = types.ModuleType("flagcx")
+    fake.__path__ = []  # a package whose api.py does not exist
+    fake.__spec__ = types.SimpleNamespace(name="flagcx", submodule_search_locations=[])
+    monkeypatch.setitem(sys.modules, "flagcx", fake)
+    monkeypatch.delitem(sys.modules, "flagcx.api", raising=False)
 
 
-# Note: PyFlagcxCommunicator requires multi-GPU distributed environment for meaningful tests.
-# Unit tests for dtype/op conversions are moved here but require the plugin module.
-# Integration tests should be in functional_tests/.
+def test_pre_api_package_without_flagcx_path_keeps_native_backend(monkeypatch):
+    """Regression: an installed pre-API flagcx package must not enable the
+    FlagCX backend when FLAGCX_PATH is unset."""
+    monkeypatch.delenv("FLAGCX_PATH", raising=False)
+    _install_fake_pre_api_flagcx(monkeypatch)
+
+    from vllm_fl.platform import _flagcx_backend_enabled
+
+    assert _flagcx_backend_enabled() is False
+
+
+def test_pre_api_package_without_flagcx_path_disables_communicator(monkeypatch):
+    """Regression: the communicator module must resolve FLAGCXLibrary=None
+    (and _flagcx_available=False) for a pre-API package with no source tree."""
+    monkeypatch.delenv("FLAGCX_PATH", raising=False)
+    _install_fake_pre_api_flagcx(monkeypatch)
+
+    module_name = "vllm_fl.distributed.device_communicators.flagcx"
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+    fc = importlib.import_module(module_name)
+
+    assert fc._flagcx_available is False
+    assert fc.FLAGCXLibrary is None

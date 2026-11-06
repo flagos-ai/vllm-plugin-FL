@@ -1,11 +1,21 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-from typing import Optional
 import torch
+
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
+from vllm.platforms import current_platform
+
 from vllm_fl.dispatch import CachedOp
 
 _rotary_embedding = CachedOp("rotary_embedding")
+_apply_rotary_emb = CachedOp("apply_rotary_emb")
+
+
+def apply_rotary_emb_dispatch(
+    self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> torch.Tensor:
+    """Route vLLM's single-tensor RoPE through the FL backend policy."""
+    return _apply_rotary_emb(self, x, cos, sin)
 
 
 class RotaryEmbeddingFL(RotaryEmbedding):
@@ -19,17 +29,26 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         dtype: torch.dtype,
     ) -> None:
         super().__init__(
-            head_size, rotary_dim, max_position_embeddings, base,
-            is_neox_style, dtype
+            head_size, rotary_dim, max_position_embeddings, base, is_neox_style, dtype
         )
+        if current_platform.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
+                initialize_rotary_embedding_ascend,
+            )
+
+            initialize_rotary_embedding_ascend()
 
     def forward_oot(
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
-        key: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-        self.cos_sin_cache: torch.Tensor = self.cos_sin_cache.to(positions.device)
+        key: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        cos_sin_cache = self.cos_sin_cache.to(positions.device)
+        # Follow upstream's compile-safe buffer handling, retaining FL's
+        # device-only conversion and the existing cache dtype.
+        if current_platform.device_type != "npu" or not torch.compiler.is_compiling():
+            self.cos_sin_cache = cos_sin_cache
         positions = positions.flatten()
         num_tokens = positions.shape[0]
 
@@ -41,10 +60,10 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         query_rot = query[..., : self.rotary_dim]
         key_rot = key[..., : self.rotary_dim]
         if self.rotary_dim < self.head_size:
-            query_pass = query[..., self.rotary_dim:]
-            key_pass = key[..., self.rotary_dim:]
+            query_pass = query[..., self.rotary_dim :]
+            key_pass = key[..., self.rotary_dim :]
 
-        cos, sin = self.cos_sin_cache.chunk(2, dim=-1)
+        cos, sin = cos_sin_cache.chunk(2, dim=-1)
 
         q_embed, k_embed = _rotary_embedding(
             self,
@@ -65,6 +84,18 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             key = k_embed.reshape(key_shape)
 
         return query, key
+
+    def forward_hip(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        # vLLM selects HIP before OOT on ROCm platforms.
+        if key is None:
+            # The FL Q/K provider requires a key; retain native HIP/AITER here.
+            return super().forward_hip(positions, query, key)
+        return self.forward_oot(positions, query, key)
 
 
 __all__ = ["RotaryEmbeddingFL"]

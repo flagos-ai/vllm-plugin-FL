@@ -6,12 +6,13 @@ set -euo pipefail
 echo "Current time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=== Checking Enflame S60 availability ==="
 
-if ! command -v efsmi >/dev/null 2>&1; then
-  echo "::error::efsmi is not available in the CI container."
-  exit 1
+# The torch_gcu 2.11 vendor bundle does not ship the efsmi CLI; fall back to
+# the python device probe below (same pattern as the MUSA check script).
+if command -v efsmi >/dev/null 2>&1; then
+  efsmi
+else
+  echo "::warning::efsmi not found; checking through torch_gcu."
 fi
-
-efsmi
 
 python - <<'PY'
 import torch
@@ -24,4 +25,8 @@ count = torch.gcu.device_count()
 print(f"Enflame GCU count: {count}")
 if count < 2:
     raise RuntimeError(f"At least 2 GCUs are required, found {count}")
+
+tensor = torch.ones((32, 32), device="gcu:0")
+torch.gcu.synchronize()
+print(f"Tensor smoke: {tensor.device} {tuple(tensor.shape)}")
 PY

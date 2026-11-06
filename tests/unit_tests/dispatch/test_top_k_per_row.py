@@ -25,7 +25,10 @@ def test_shared_topk_capabilities_are_registered(monkeypatch):
     reference_registration.register_builtins(registry)
 
     entries = registry.snapshot().impls_by_op
-    for op_name in ("top_k_per_row_prefill", "top_k_per_row_decode"):
+    for op_name in (
+        "bf16_indexer_top_k_per_row_prefill",
+        "bf16_indexer_top_k_per_row_decode",
+    ):
         assert {impl.impl_id for impl in entries[op_name]} == {
             "default.flagos",
             "reference.torch",
