@@ -34,6 +34,10 @@ def register_builtins(registry: OpRegistry) -> None:
     """
     from .ascend import AscendBackend
 
+    # Register the mutable fake boundary before an initial Dynamo trace.
+    # This function is only loaded for the current vendor.
+    from .impl import compressor as _compressor  # noqa: F401
+
     backend = AscendBackend()
     is_avail = backend.is_available
 
@@ -84,21 +88,37 @@ def register_builtins(registry: OpRegistry) -> None:
         ),
     ]
 
-    for op_name in ("gdn_decode", "gdn_prefill"):
-        impls.append(OpImpl(
-            op_name=op_name,
+    for op_name in (
+        "deepseek_v4_compressor",
+        "deepseek_v4_sparse_attention",
+        "deepseek_v4_index_quant",
+        "deepseek_v4_indexer",
+        "paged_cache_write",
+        "modelslim_w8a8_prepare_experts",
+        "modelslim_w8a8_experts",
+        "gdn_decode",
+        "gdn_prefill",
+        "modelslim_w8a8_prepare_weight",
+        "modelslim_w8a8_dynamic_linear",
+    ):
+        impls.append(
+            OpImpl(
+                op_name=op_name,
+                impl_id="vendor.ascend",
+                kind=BackendImplKind.VENDOR,
+                fn=_bind_is_available(getattr(backend, op_name), is_avail),
+                vendor="ascend",
+                priority=BackendPriority.VENDOR,
+            )
+        )
+    impls.append(
+        OpImpl(
+            op_name="fused_experts",
             impl_id="vendor.ascend",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(getattr(backend, op_name), is_avail),
+            fn=_bind_is_available(backend.fused_experts, is_avail),
             vendor="ascend",
             priority=BackendPriority.VENDOR,
-        ))
-    impls.append(OpImpl(
-        op_name="fused_experts",
-        impl_id="vendor.ascend",
-        kind=BackendImplKind.VENDOR,
-        fn=_bind_is_available(backend.fused_experts, is_avail),
-        vendor="ascend",
-        priority=BackendPriority.VENDOR,
-    ))
+        )
+    )
     registry.register_many(impls)

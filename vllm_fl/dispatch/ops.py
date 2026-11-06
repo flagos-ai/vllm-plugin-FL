@@ -9,7 +9,6 @@ This module defines the abstract base class that all backends must implement.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional, Union
 
 import torch
 
@@ -48,7 +47,7 @@ class VLLMFLBackendBase(ABC):
         pass
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         """
         Get the vendor name for this backend (if applicable).
 
@@ -58,6 +57,200 @@ class VLLMFLBackendBase(ABC):
         return None
 
     # ==================== Quantization Operators ====================
+
+    # Optional logical operators: unsupported backends need not override these.
+    def modelslim_w8a8_prepare_weight(
+        self, weight: torch.Tensor, weight_scale: torch.Tensor, nz_mode: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Prepare logical INT8 [K,N] weights and per-output-channel scales."""
+        raise NotImplementedError
+
+    def modelslim_w8a8_dynamic_linear(
+        self,
+        x: torch.Tensor,
+        weight: torch.Tensor,
+        weight_scale: torch.Tensor,
+        bias: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Dynamic INT8 Linear: floating [T,K] input and prepared [K,N] weight."""
+        raise NotImplementedError
+
+    def modelslim_w8a8_prepare_experts(
+        self,
+        w1: torch.Tensor,
+        w2: torch.Tensor,
+        s1: torch.Tensor,
+        s2: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Prepare INT8 [E,N,K] experts and channel scales [E,N,1]."""
+        raise NotImplementedError
+
+    def modelslim_w8a8_experts(
+        self,
+        x: torch.Tensor,
+        w1: torch.Tensor,
+        w2: torch.Tensor,
+        s1: torch.Tensor,
+        s2: torch.Tensor,
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+        first_expert: int = 0,
+        global_num_experts: int = -1,
+        activation: str = "silu",
+        limit: float | None = None,
+    ) -> torch.Tensor:
+        """Return this local expert range's weighted [T,K] contribution."""
+        raise NotImplementedError
+
+    def topk_softplus_sqrt(
+        self,
+        hidden_states: torch.Tensor,
+        gating_output: torch.Tensor,
+        topk: int,
+        renormalize: bool,
+        e_score_correction_bias: torch.Tensor | None = None,
+        indices_type: torch.dtype | None = None,
+        input_tokens: torch.Tensor | None = None,
+        hash_indices_table: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select experts with optional hash/bias; return unscaled FP32 weights."""
+        raise NotImplementedError
+
+    def deepseek_v4_partial_rope(
+        self,
+        x: torch.Tensor,
+        positions: torch.Tensor,
+        cos_sin_cache: torch.Tensor,
+        inverse: bool = False,
+    ) -> torch.Tensor:
+        """Apply adjacent-pair RoPE to trailing head dimensions."""
+        raise NotImplementedError
+
+    def deepseek_v4_hadamard(
+        self,
+        x: torch.Tensor,
+        matrix: torch.Tensor,
+    ) -> torch.Tensor:
+        """Apply padded Hadamard projection then normalized dtype-round scaling."""
+        raise NotImplementedError
+
+    def deepseek_v4_index_quant(
+        self,
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return same-shape INT8 rows and FP16 scales [*leading,1]."""
+        raise NotImplementedError
+
+    def deepseek_v4_grouped_project(
+        self,
+        x: torch.Tensor,
+        weight: torch.Tensor,
+        groups: int,
+    ) -> torch.Tensor:
+        """Project [T,H,D] using grouped logical weights [groups*out,in]."""
+        raise NotImplementedError
+
+    def deepseek_v4_compressor(
+        self,
+        hidden_states: torch.Tensor,
+        wkv: torch.Tensor,
+        wgate: torch.Tensor,
+        ape: torch.Tensor,
+        state_cache: torch.Tensor,
+        positions: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        state_block_table: torch.Tensor,
+        output_request_ids: torch.Tensor,
+        output_positions: torch.Tensor,
+        rms_weight: torch.Tensor,
+        cos_sin_cache: torch.Tensor,
+        compress_ratio: int = 4,
+        rms_eps: float = 1e-6,
+    ) -> torch.Tensor:
+        """Project and mutate FP32 paged state, then compress output rows."""
+        raise NotImplementedError
+
+    def deepseek_v4_hc_pre(
+        self,
+        x: torch.Tensor,
+        fn: torch.Tensor,
+        scale: torch.Tensor,
+        base: torch.Tensor,
+        rms_eps: float,
+        hc_eps: float,
+        sinkhorn_iters: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """BF16 HC input [T,C,D] -> layer [T,D], FP32 post [T,C]/mix [T,C,C]."""
+        raise NotImplementedError
+
+    def deepseek_v4_hc_post(
+        self,
+        x: torch.Tensor,
+        residual: torch.Tensor,
+        post: torch.Tensor,
+        comb: torch.Tensor,
+    ) -> torch.Tensor:
+        """Combine layer output with HC residual streams, preserving mix order."""
+        raise NotImplementedError
+
+    def deepseek_v4_hc_head(
+        self,
+        x: torch.Tensor,
+        fn: torch.Tensor,
+        scale: torch.Tensor,
+        base: torch.Tensor,
+        rms_eps: float,
+        hc_eps: float,
+    ) -> torch.Tensor:
+        """Collapse HC streams [T,C,D] to [T,D] with FP32 mixing parameters."""
+        raise NotImplementedError
+
+    def paged_cache_write(
+        self,
+        values: torch.Tensor,
+        slots: torch.Tensor,
+        cache: torch.Tensor,
+    ) -> None:
+        """Mutate paged [P,B,D] cache at unique valid slots; negative slots skip."""
+        raise NotImplementedError
+
+    def deepseek_v4_indexer(
+        self,
+        query: torch.Tensor,
+        key_cache: torch.Tensor,
+        weights: torch.Tensor,
+        block_table: torch.Tensor,
+        request_ids: torch.Tensor,
+        positions: torch.Tensor,
+        key_lengths: torch.Tensor,
+        topk: int,
+        compress_ratio: int = 4,
+        query_scale: torch.Tensor | None = None,
+        key_scale_cache: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return causal C4 logical compact IDs [T,topk] INT32, padding with -1."""
+        raise NotImplementedError
+
+    def deepseek_v4_sparse_attention(
+        self,
+        query: torch.Tensor,
+        swa_cache: torch.Tensor,
+        compact_cache: torch.Tensor | None,
+        swa_block_table: torch.Tensor,
+        compact_block_table: torch.Tensor | None,
+        request_ids: torch.Tensor,
+        positions: torch.Tensor,
+        swa_lengths: torch.Tensor,
+        compact_lengths: torch.Tensor | None,
+        compact_indices: torch.Tensor | None,
+        window_size: int,
+        compress_ratio: int = 4,
+        scale: float | None = None,
+        attn_sink: torch.Tensor | None = None,
+        value_dim: int | None = None,
+    ) -> torch.Tensor:
+        """Joint SWA/compact normalization with optional zero-value sink."""
+        raise NotImplementedError
 
     @abstractmethod
     def dynamic_per_token_quant_int8(
@@ -109,10 +302,10 @@ class VLLMFLBackendBase(ABC):
     def rms_norm(
         self,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor],
+        residual: torch.Tensor | None,
         weight: torch.Tensor,
         epsilon: float,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 
