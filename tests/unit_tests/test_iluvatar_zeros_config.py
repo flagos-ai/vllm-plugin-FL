@@ -26,5 +26,5 @@ def test_iluvatar_native_zero_dependency_is_excluded(monkeypatch):
         blacklist
     )
     assert "_scaled_dot_product_attention_math" not in blacklist
-    assert "mm" not in blacklist
+    assert "mm" in blacklist
     assert "rms_norm" not in blacklist

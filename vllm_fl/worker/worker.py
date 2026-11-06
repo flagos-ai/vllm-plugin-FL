@@ -150,6 +150,9 @@ def _apply_worker_vendor_patches() -> None:
     )
 
     patch_autotune_memory()
+    from vllm_fl.dispatch.backends.vendor.iluvatar.v2_buffers import patch_v2_uva
+
+    patch_v2_uva()
     try:
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
             patch_sampler_compile_for_iluvatar,
