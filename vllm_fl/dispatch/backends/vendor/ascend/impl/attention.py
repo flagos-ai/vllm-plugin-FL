@@ -1158,8 +1158,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
             value = value.contiguous()
             key, value = self.reshape_and_cache(key, value, kv_cache, attn_metadata)
 
-        # Handle pooling model branch (encoder attention)
-        if attn_metadata.model_runner_type == "pooling":
+        # Causal pooling must read cached chunks and prefixes through the
+        # decoder path; local K/V contain only the current scheduled chunk.
+        if attn_metadata.model_runner_type == "pooling" and not attn_metadata.causal:
             attn_output = self._forward_encoder_attention(
                 query, key, value, attn_metadata, output)
             output[:num_tokens] = attn_output[:num_tokens]
