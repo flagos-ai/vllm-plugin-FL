@@ -5,11 +5,12 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import ctypes
+import importlib.util
 import os
 import sys
 import threading
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -22,19 +23,67 @@ from vllm.utils.torch_utils import current_stream
 logger = init_logger(__name__)
 _TXDA_ABORT_TIMEOUT_SECONDS = 5.0
 
-_flagcx_path = os.getenv('FLAGCX_PATH')
-if _flagcx_path and os.path.isdir(_flagcx_path):
-    sys.path.append(_flagcx_path)
+def _load_flagcx_wheel_bindings(api_path):
+    """Load the wheel's C API without running its Torch backend initializer."""
+    name = f"{__name__}._wheel_api"
+    spec = importlib.util.spec_from_file_location(name, api_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load FlagCX API from {api_path}")
+    api = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(name)
+    # Dataclasses resolve annotations through their defining module.
+    sys.modules[name] = api
+    try:
+        spec.loader.exec_module(api)
+        try:
+            return (
+                api.FLAGCXLibrary,
+                api.buffer_type,
+                api.flagcxComm_t,
+                api.flagcxDataTypeEnum,
+                api.flagcxUniqueId,
+                api.flagcxRedOpTypeEnum,
+            )
+        except AttributeError as exc:
+            raise ImportError(f"Incomplete FlagCX API at {api_path}") from exc
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+        raise
+
+
+_flagcx_path = os.getenv("FLAGCX_PATH")
+_flagcx_root = Path(_flagcx_path) if _flagcx_path else None
+_flagcx_wheel_library = None
 
 try:
-    from plugin.interservice.flagcx_wrapper import (
-        FLAGCXLibrary,
-        buffer_type,
-        flagcxComm_t,
-        flagcxDataTypeEnum,
-        flagcxUniqueId,
-        flagcxRedOpTypeEnum,
-    )
+    if (
+        _flagcx_root is not None
+        and (_flagcx_root / "api.py").is_file()
+        and (_flagcx_root / "lib" / "libflagcx.so").is_file()
+    ):
+        (
+            FLAGCXLibrary,
+            buffer_type,
+            flagcxComm_t,
+            flagcxDataTypeEnum,
+            flagcxUniqueId,
+            flagcxRedOpTypeEnum,
+        ) = _load_flagcx_wheel_bindings(_flagcx_root / "api.py")
+        _flagcx_wheel_library = str((_flagcx_root / "lib" / "libflagcx.so").absolute())
+    else:
+        if _flagcx_path and os.path.isdir(_flagcx_path):
+            sys.path.append(_flagcx_path)
+        from plugin.interservice.flagcx_wrapper import (
+            FLAGCXLibrary,
+            buffer_type,
+            flagcxComm_t,
+            flagcxDataTypeEnum,
+            flagcxRedOpTypeEnum,
+            flagcxUniqueId,
+        )
     _flagcx_available = True
 except (ImportError, ModuleNotFoundError):
     _flagcx_available = False
@@ -74,9 +123,9 @@ def is_trace_tensor(tensor) -> bool:
 class PyFlagcxCommunicator:
     def __init__(
         self,
-        group: Union[ProcessGroup, StatelessProcessGroup],
-        device: Union[str, torch.device],
-        library_path: Optional[str] = None,
+        group: ProcessGroup | StatelessProcessGroup,
+        device: str | torch.device,
+        library_path: str | None = None,
     ):
         """
         Args:
@@ -90,6 +139,7 @@ class PyFlagcxCommunicator:
         is bind to a unique device.
         """
         self.comm = None
+        self._npu_comm_stream = None
         self._destroy_lock = threading.Lock()
         self._destroy_started = False
         self._destroy_thread = None
@@ -114,13 +164,12 @@ class PyFlagcxCommunicator:
             self.disabled = True
             return
         try:
-            ### TODO(lms): simplify it
             if library_path is None:
-                flagcx_path = os.getenv('FLAGCX_PATH')
-                library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
-                self.flagcx = FLAGCXLibrary(library_path)
-            else:
-                self.flagcx = FLAGCXLibrary(library_path)
+                library_path = _flagcx_wheel_library
+                if library_path is None:
+                    flagcx_path = os.getenv("FLAGCX_PATH")
+                    library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
+            self.flagcx = FLAGCXLibrary(library_path)
         except Exception as exc:
             # disable because of missing NCCL library
             # e.g. in a non-GPU environment
@@ -188,9 +237,15 @@ class PyFlagcxCommunicator:
                 self.comm = self.flagcx.flagcxCommInitRank(
                     self.world_size, self.unique_id, self.rank)
 
+            if self.device.type == "npu" and _flagcx_wheel_library is not None:
+                self._npu_comm_stream = torch.npu.Stream(device=self.device)
+                self._npu_submit_lock = threading.Lock()
+                self._npu_input_ready = torch.npu.Event()
+                self._npu_output_ready = torch.npu.Event()
+
             try:
                 stream = self._current_stream()
-                # A small all_reduce for warmup.
+                # A small all_reduce for warmup, including the NPU event pair.
                 data = torch.zeros(1, device=device)
                 self.all_reduce(data)
                 stream.synchronize()
@@ -306,15 +361,37 @@ class PyFlagcxCommunicator:
 
         if stream is None:
             stream = self._current_stream()
-        flagcx_stream = self._copy_flagcx_stream(stream)
-        self.flagcx.flagcxAllReduce(buffer_type(in_tensor.data_ptr()),
-                                buffer_type(out_tensor.data_ptr()),
-                                in_tensor.numel(),
-                                flagcxDataTypeEnum.from_torch(in_tensor.dtype),
-                                flagcxRedOpTypeEnum.from_torch(op), self.comm,
-                                flagcx_stream)
-        self.flagcx.adaptor_stream_free(flagcx_stream)
+        comm_stream = getattr(self, "_npu_comm_stream", None)
+        if comm_stream is None:
+            self._all_reduce_on_stream(in_tensor, out_tensor, op, stream)
+        else:
+            # HCCL can add a stream dependency during capture. Submit on a
+            # caller-owned communication stream and join it back explicitly.
+            # Keep another caller from re-recording either event while its
+            # wait is being enqueued. The lock covers submission only.
+            with self._npu_submit_lock:
+                self._npu_input_ready.record(stream)
+                comm_stream.wait_event(self._npu_input_ready)
+                with torch.npu.stream(comm_stream):
+                    self._all_reduce_on_stream(in_tensor, out_tensor, op, comm_stream)
+                self._npu_output_ready.record(comm_stream)
+                stream.wait_event(self._npu_output_ready)
         return out_tensor
+
+    def _all_reduce_on_stream(self, in_tensor, out_tensor, op, stream):
+        flagcx_stream = self._copy_flagcx_stream(stream)
+        try:
+            self.flagcx.flagcxAllReduce(
+                buffer_type(in_tensor.data_ptr()),
+                buffer_type(out_tensor.data_ptr()),
+                in_tensor.numel(),
+                flagcxDataTypeEnum.from_torch(in_tensor.dtype),
+                flagcxRedOpTypeEnum.from_torch(op),
+                self.comm,
+                flagcx_stream,
+            )
+        finally:
+            self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def all_gather(self,
                    output_tensor: torch.Tensor,
