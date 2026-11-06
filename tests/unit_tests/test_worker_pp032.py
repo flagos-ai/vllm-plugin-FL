@@ -88,7 +88,12 @@ def test_pp_send_tracks_only_device_work(first_rank):
 
 
 @pytest.mark.parametrize(
-    "vendor,enabled", [("iluvatar", False), ("nvidia", False), ("nvidia", True)]
+    "vendor,enabled",
+    [
+        (vendor, enabled)
+        for vendor in ("iluvatar", "nvidia", "ascend", "musa", "txda")
+        for enabled in (False, True)
+    ],
 )
 def test_kv_init_routed_expert_config_migration(vendor, enabled):
     tree = ast.parse(
@@ -119,11 +124,7 @@ def test_kv_init_routed_expert_config_migration(vendor, enabled):
         "ensure_kv_transfer_initialized": Mock(),
     }
     exec(compile(module, "<worker KV init>", "exec"), namespace)
-    model_config = (
-        SimpleNamespace()
-        if vendor == "iluvatar"
-        else SimpleNamespace(enable_return_routed_experts=enabled)
-    )
+    model_config = SimpleNamespace()
     worker = SimpleNamespace(
         cache_config=SimpleNamespace(),
         model_config=model_config,
@@ -135,4 +136,4 @@ def test_kv_init_routed_expert_config_migration(vendor, enabled):
     namespace["initialize_from_config"](worker, kv)
     worker.model_runner.initialize_kv_cache.assert_called_once_with(kv)
     assert worker.cache_config.num_gpu_blocks == 17
-    assert worker.model_runner.init_routed_experts_capturer.call_count == int(enabled)
+    worker.model_runner.init_routed_experts_capturer.assert_not_called()

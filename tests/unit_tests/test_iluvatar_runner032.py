@@ -10,7 +10,7 @@ ROOT = Path(__file__).parents[2]
 
 
 @pytest.mark.parametrize("vendor", ["iluvatar", "nvidia", "ascend", "kunlunxin"])
-def test_v1_runner_vendor_isolation(monkeypatch, vendor):
+def test_v1_runner_shared_entry(monkeypatch, vendor):
     # Execute the actual construction branch; neither runner is constructed on GPU.
     tree = ast.parse((ROOT / "vllm_fl/worker/worker.py").read_text())
     cls = next(
@@ -27,10 +27,7 @@ def test_v1_runner_vendor_isolation(monkeypatch, vendor):
         if isinstance(n, ast.If) and ast.unparse(n.test) == "self.use_v2_model_runner"
     )
     calls = []
-    for name, symbol in [
-        ("iluvatar_model_runner", "IluvatarModelRunner"),
-        ("model_runner", "ModelRunnerFL"),
-    ]:
+    for name, symbol in [("model_runner", "ModelRunnerFL")]:
         module = ModuleType("vllm_fl.worker." + name)
 
         def constructor(config, device, selected=name):
@@ -45,7 +42,7 @@ def test_v1_runner_vendor_isolation(monkeypatch, vendor):
         compile(module, "<worker v1 runner construction>", "exec"),
         {"self": worker, "current_platform": SimpleNamespace(vendor_name=vendor)},
     )
-    expected = "iluvatar_model_runner" if vendor == "iluvatar" else "model_runner"
+    expected = "model_runner"
     assert worker.model_runner == expected
     assert calls == [(expected, worker.vllm_config, worker.device)]
 
@@ -56,7 +53,7 @@ def test_target_runner_import(monkeypatch):
     from vllm.platforms import current_platform
 
     monkeypatch.setattr(current_platform, "torch_device_fn", torch.cuda)
-    from vllm_fl.worker.iluvatar_model_runner import IluvatarModelRunner
+    from vllm_fl.worker.model_runner import ModelRunnerFL
 
-    assert callable(IluvatarModelRunner.execute_model)
-    assert callable(IluvatarModelRunner.sample_tokens)
+    assert callable(ModelRunnerFL.execute_model)
+    assert callable(ModelRunnerFL.sample_tokens)

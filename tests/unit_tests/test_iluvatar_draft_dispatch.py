@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture
 def propose_draft_token_ids():
-    source = Path(__file__).parents[2] / "vllm_fl/worker/iluvatar_model_runner.py"
+    source = Path(__file__).parents[2] / "vllm_fl/worker/model_runner.py"
     tree = ast.parse(source.read_text())
     method = next(
         node

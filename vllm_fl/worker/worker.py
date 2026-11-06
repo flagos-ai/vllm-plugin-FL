@@ -14,7 +14,6 @@ from datetime import timedelta
 from types import NoneType
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import regex as re
 import torch
 import torch.nn as nn
@@ -61,8 +60,11 @@ try:  # pragma: no cover - vLLM version compat
         prepare_communication_buffer_for_model as _prepare_comm_buffer,
     )
 except ImportError:  # vLLM >= 0.28 dropped the symbol
+
     def _prepare_comm_buffer(*args, **kwargs):
         return None
+
+
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
@@ -532,12 +534,7 @@ class WorkerFL(WorkerBase):
                 self.vllm_config, self.device
             )
         else:
-            if getattr(current_platform, "vendor_name", "") == "iluvatar":
-                from vllm_fl.worker.iluvatar_model_runner import (
-                    IluvatarModelRunner as ModelRunnerFL,
-                )
-            else:
-                from vllm_fl.worker.model_runner import ModelRunnerFL
+            from vllm_fl.worker.model_runner import ModelRunnerFL
 
             self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
 
@@ -853,12 +850,6 @@ class WorkerFL(WorkerBase):
 
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
-
-        # In 0.32 the V1 runner initializes routed-expert capture itself from
-        # aux_output_config; ModelConfig no longer owns this option.
-        if getattr(current_platform, "vendor_name", "") != "iluvatar":
-            if self.model_config.enable_return_routed_experts:
-                self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch

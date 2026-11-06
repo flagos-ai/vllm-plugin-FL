@@ -23,7 +23,8 @@
 
 ## 代码适配范围
 
-- Iluvatar 使用基于上游 0.32 源码迁移的独立 `IluvatarModelRunner`，其他厂商仍使用已有 runner。
+- 所有厂商统一使用基于上游 0.32 的 `vllm_fl/worker/model_runner.py::ModelRunnerFL`；独立 Iluvatar runner 及 worker 中的厂商入口分支已删除。
+- 公共实现保留 Ascend 混合 KV 缓存和图状态、MUSA 图内存与编译预热、TXDA 采样与 RNG 定制。其他平台仅完成 CPU 回归，尚未重新验证真实硬件。
 - EMPTY 环境 IR 默认优先级不再引用未注册的 `vllm_c`。
 - worker 对齐上游 batch-invariant 导入、PP metadata 句柄约定及已移除的旧 routed-expert 配置访问。
 

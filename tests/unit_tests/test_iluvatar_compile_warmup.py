@@ -23,7 +23,7 @@ def test_runner_warms_dispatch_before_compile(
 
     calls = []
     monkeypatch.setattr(dispatch, "warmup_cached_ops", lambda: calls.append("warm"))
-    source = Path(__file__).parents[2] / "vllm_fl/worker/iluvatar_model_runner.py"
+    source = Path(__file__).parents[2] / "vllm_fl/worker/model_runner.py"
     tree = ast.parse(source.read_text())
     load = next(
         n
