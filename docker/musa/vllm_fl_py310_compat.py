@@ -22,6 +22,7 @@ and breaks torch import.
 
 try:
     import typing as _t
+
     import typing_extensions as _te
 
     for _name in (
@@ -60,6 +61,7 @@ try:
         _enum.StrEnum = _StrEnum
 
     if not hasattr(_enum, "global_enum"):
+
         def _global_enum(cls):
             return cls
 
