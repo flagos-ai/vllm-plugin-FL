@@ -31,7 +31,6 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml",
-    "modelscope==1.35.3",
 ]
 
 [project.entry-points."vllm.platform_plugins"]
@@ -44,6 +43,11 @@ fl = "vllm_fl:register_model"
 Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"
 
 [project.optional-dependencies]
+hy4 = [
+    "vllm==0.28.0",
+    "flag_gems @ git+https://github.com/CherryLemon/FlagGems.git@36d8e98ba627d52963f1fd0d56567eabd3b79c53",
+    "flaggems_vllm @ git+https://github.com/CherryLemon/FlagGems-vllm.git@c70a979e50b2d38a368091a1bc42f7da68abcafb",
+]
 test = [
     "pytest",
     "pytest-cov",
@@ -54,6 +58,7 @@ test = [
     "openai",
     "decorator",
     "vllm[audio]==0.28.0",
+    "modelscope>=1.18.1",
 ]
 
 [tool.setuptools_scm]
@@ -105,7 +110,6 @@ python_functions = ["test_*"]
 markers = [
     "gpu: marks tests as requiring single GPU (deselect with '-m \"not gpu\"')",
     "multi_gpu: marks tests as requiring multiple GPUs",
-    "serial: marks tests that must not run under pytest-xdist",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "e2e: marks tests as end-to-end tests",
