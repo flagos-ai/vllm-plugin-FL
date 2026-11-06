@@ -59,6 +59,9 @@ def initialize():
         .resolve()
         .is_relative_to(Path(os.environ["FLAGTREE_ROOT"]).resolve())
     )
+    from vllm_fl.models.minimax_m3_registration import register_minimax_m3_support
+
+    register_minimax_m3_support()
     # Correctness-sensitive registration must be fixed before WorkerFL enables ATen.
     from vllm_fl.dispatch.config import get_effective_config, get_flagos_blacklist
     from vllm_fl.utils import (

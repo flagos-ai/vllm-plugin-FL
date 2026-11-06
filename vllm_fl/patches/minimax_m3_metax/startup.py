@@ -43,7 +43,7 @@ def configure_libraries():
     _LIBRARIES_CONFIGURED = True
 
 
-def register_platform():
+def prepare_platform():
     from .compat import ensure_dtype_alias, install_platform_hooks
     from .platform_compat import _patch_torch_accelerator
     from vllm_fl import _patch_custom_ops, _patch_transformers_compat
@@ -55,20 +55,3 @@ def register_platform():
         _patch_torch_accelerator, _patch_custom_ops, _patch_transformers_compat
     )
     os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
-    return "vllm_fl.patches.minimax_m3_platform.MiniMaxPlatformFL"
-
-
-def register_models():
-    from vllm.model_executor.models.registry import ModelRegistry
-
-    from vllm_fl import register_quant_linear
-
-    install_import_guard()
-    configure_libraries()
-    register_quant_linear()
-    for name in (
-        "MiniMaxM3SparseForCausalLM",
-        "MiniMaxM3SparseForConditionalGeneration",
-        "MiniMaxM3MTP",
-    ):
-        ModelRegistry.register_model(name, "vllm_fl.models.minimax_m3:" + name)

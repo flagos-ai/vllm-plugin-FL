@@ -9,7 +9,6 @@ M3 model. Keep the vLLM implementation of loading, metadata and preprocessing.
 """
 
 import hashlib
-import importlib
 import importlib.util
 import json
 from pathlib import Path
@@ -33,13 +32,6 @@ def validate_upstream():
             )
 
 
-def _bind(module, name, value):
-    if not hasattr(module, name):
-        raise RuntimeError("Missing M3 binding: " + module.__name__ + "." + name)
-    setattr(module, name, value)
-    _BINDINGS.append((module, name, value))
-
-
 def install():
     global _INSTALLED
     if _INSTALLED:
@@ -60,9 +52,15 @@ def install():
 
     from . import model, vision
     from vllm_fl.attention.minimax_m3 import bridge as attention
-    from vllm_fl.ops.minimax_m3 import layers
-    from vllm_fl.ops.minimax_m3 import msa
+    from vllm_fl.ops.minimax_m3 import layers, msa
     from vllm_fl.ops.minimax_m3.vision import M3VisionAttentionFL
+
+    updates = []
+
+    def bind(module, name, value):
+        if not hasattr(module, name):
+            raise RuntimeError("Missing M3 binding: " + module.__name__ + "." + name)
+        updates.append((module, name, value))
 
     for name in (
         "MiniMAXGemmaRMSNorm",
@@ -71,30 +69,30 @@ def install():
         "MiniMaxM3SparseAttention",
     ):
         replacement = getattr(model, name)
-        _bind(native, name, replacement)
+        bind(native, name, replacement)
         if hasattr(mtp, name):
-            _bind(mtp, name, replacement)
+            bind(mtp, name, replacement)
     if profile.framework.flagos_swiglu:
-        _bind(native, "SiluAndMulWithClamp", layers.SiluAndMulWithClampFL)
+        bind(native, "SiluAndMulWithClamp", layers.SiluAndMulWithClampFL)
     for name in ("MiniMaxVLPatchEmbed", "MiniMaxVLVisionModel"):
-        _bind(vision_tower, name, getattr(vision, name))
-    _bind(vision_tower, "MMEncoderAttention", M3VisionAttentionFL)
-    _bind(native, "MiniMaxVLVisionModel", vision.MiniMaxVLVisionModel)
+        bind(vision_tower, name, getattr(vision, name))
+    bind(vision_tower, "MMEncoderAttention", M3VisionAttentionFL)
+    bind(native, "MiniMaxVLVisionModel", vision.MiniMaxVLVisionModel)
     for name in (
         "minimax_m3_index_decode",
         "minimax_m3_index_score",
         "minimax_m3_index_topk",
     ):
-        _bind(indexer, name, getattr(msa, name))
-    _bind(sparse_attention, "minimax_m3_sparse_attn", attention.sparse_attn)
-    _bind(sparse_attention, "minimax_m3_sparse_attn_decode", attention.sparse_decode)
+        bind(indexer, name, getattr(msa, name))
+    bind(sparse_attention, "minimax_m3_sparse_attn", attention.sparse_attn)
+    bind(sparse_attention, "minimax_m3_sparse_attn_decode", attention.sparse_decode)
+    previous = [(module, name, getattr(module, name)) for module, name, _ in updates]
+    try:
+        for module, name, value in updates:
+            setattr(module, name, value)
+    except Exception:
+        for module, name, value in reversed(previous):
+            setattr(module, name, value)
+        raise
+    _BINDINGS[:] = updates
     _INSTALLED = True
-
-
-def model_class(name):
-    install()
-    module = importlib.import_module(
-        "vllm.models.minimax_m3.nvidia."
-        + ("mtp" if name == "MiniMaxM3MTP" else "model")
-    )
-    return getattr(module, name)

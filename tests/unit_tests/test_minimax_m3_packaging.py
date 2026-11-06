@@ -274,12 +274,12 @@ class VisionDispatchTests(unittest.TestCase):
     def test_native_vision_attention_method_is_preserved(self):
         import ast
 
-        source = (ROOT / "vllm_fl/models/minimax_m3/vision.py").read_text()
+        source = (ROOT / "vllm_fl/models/minimax_m3_metax/vision.py").read_text()
         classes = {
             n.name for n in ast.parse(source).body if isinstance(n, ast.ClassDef)
         }
         self.assertNotIn("MiniMaxVLAttention", classes)
-        bindings = (ROOT / "vllm_fl/models/minimax_m3/bindings.py").read_text()
+        bindings = (ROOT / "vllm_fl/models/minimax_m3_metax/bindings.py").read_text()
         self.assertNotIn('"MiniMaxVLAttention"', bindings)
         worker = (ROOT / "vllm_fl/worker/worker.py").read_text()
         self.assertIn("patch_oot_apply_rotary_emb()", worker)
@@ -325,7 +325,8 @@ class DependencyTests(unittest.TestCase):
                 self.module.importlib.util,
                 "find_spec",
                 return_value=SimpleNamespace(origin="/unexpected/__init__.py"),
-            ),self.assertRaisesRegex(RuntimeError, "shadowed")
+            ),
+            self.assertRaisesRegex(RuntimeError, "shadowed"),
         ):
             self.module.verified_dependencies()
 
@@ -334,9 +335,12 @@ class DependencyTests(unittest.TestCase):
             dist = SimpleNamespace(
                 version="test", read_text=lambda _, origin=origin: json.dumps(origin)
             )
-            with patch.object(
-                self.module.importlib.metadata, "distribution", return_value=dist
-            ), self.assertRaisesRegex(RuntimeError, "public commit"):
+            with (
+                patch.object(
+                    self.module.importlib.metadata, "distribution", return_value=dist
+                ),
+                self.assertRaisesRegex(RuntimeError, "public commit"),
+            ):
                 self.module.verified_dependencies()
 
     def test_clean_local_checkout_retains_commit_identity(self):
@@ -351,11 +355,14 @@ class DependencyTests(unittest.TestCase):
             )
 
     def test_dirty_local_checkout_is_rejected(self):
-        with patch.object(
-            self.module.subprocess,
-            "check_output",
-            side_effect=["a" * 40, " M src/op.py"],
-        ), self.assertRaisesRegex(RuntimeError, "not clean"):
+        with (
+            patch.object(
+                self.module.subprocess,
+                "check_output",
+                side_effect=["a" * 40, " M src/op.py"],
+            ),
+            self.assertRaisesRegex(RuntimeError, "not clean"),
+        ):
             self.module._installed_source_commit(
                 {"dir_info": {}, "url": "file:///checkout"}
             )

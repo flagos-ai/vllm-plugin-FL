@@ -361,6 +361,13 @@ class PlatformFL(Platform):
         if cls.vendor_name in ("gcu", "enflame"):
             parallel_config.disable_custom_all_reduce = True
 
+        from vllm_fl.minimax_m3_config import is_enabled
+
+        if is_enabled():
+            from vllm_fl.models.minimax_m3_registration import MiniMaxM3MetaXConfig
+
+            MiniMaxM3MetaXConfig.verify_and_update_config(vllm_config)
+
     @classmethod
     def get_attn_backend_cls(
         cls,

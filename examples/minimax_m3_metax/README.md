@@ -134,7 +134,7 @@ the comparison baseline.
 | Area | Main files / public library PR | What to review |
 |---|---|---|
 | Configuration/startup | `vllm_fl/minimax_m3_config.py`; `patches/minimax_m3_metax/` | Typed policy, blacklists, scoped initialization and cache identity |
-| Model and vLLM interfaces | `models/minimax_m3/`; `ops/minimax_m3/` | Model deltas, honest torch-op mutation schemas, local router/expert classes |
+| Model and vLLM interfaces | `models/minimax_m3_metax/`; `ops/minimax_m3/` | Model deltas, honest torch-op mutation schemas, local router/expert classes |
 | MSA orchestration | `attention/minimax_m3/bridge.py`; `base_*.py`; `*_policy.py` | TP/consumer guards, query/head packing selection, base/long branches and fallbacks |
 | MetaX local calculation | `dispatch/backends/vendor/metax/impl/minimax_m3/` | Accepted index/sparse/GEMV kernels and explicit launch metadata; unchanged vLLM kernels imported directly |
 | Library adapters | `dispatch/backends/flaggems/impl/minimax_m3/` | FG vision/Gemma, FGV numerical modes/alignment/GEMM/reduction/top-k; no copied library kernels |

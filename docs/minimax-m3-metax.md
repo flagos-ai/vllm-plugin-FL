@@ -8,7 +8,9 @@ configuration and launch instructions, together with the retained evaluation and
 serving measurements.
 
 ```text
-models/minimax_m3/                         model deltas from public vLLM
+models/minimax_m3.py                       shared native model exports
+models/minimax_m3_registration.py          shared CUDA/opt-in MetaX registration
+models/minimax_m3_metax/                   MetaX component deltas from public vLLM
 ops/minimax_m3/                            vLLM interfaces, routing and expert orchestration
 attention/minimax_m3/                      TP/shape/consumer selection and fallback
 dispatch/backends/vendor/metax/impl/minimax_m3/  local kernels and explicit launches
@@ -28,11 +30,13 @@ Paths below are relative to `vllm_fl/`.
 
 | File | Responsibility and source |
 |---|---|
-| `models/minimax_m3/__init__.py` | Lazy model exports; uses the scoped bindings. No copied model loader. |
-| `models/minimax_m3/model.py` | Local subclasses for norm, QKV, sparse attention and MoE; reuse public vLLM construction/loading. Framework adaptation. |
-| `models/minimax_m3/vision.py` | Patch projection and chunked vision forward; native attention/RoPE class remains upstream. Framework adaptation. |
-| `models/minimax_m3/bindings.py` | Explicit, idempotent replacement of named symbols inside vLLM M3 modules. This is a runtime hook. |
-| `models/minimax_m3/upstream.json` | Small source-revision guard for the required vLLM model files. |
+| `models/minimax_m3.py` | Reuses the mainline native class exports and fused projection metadata; no hook installation during class lookup. |
+| `models/minimax_m3_registration.py` | Shared registration entry; preserves native CUDA support and explicitly installs the opt-in MetaX bindings/config verifier. |
+| `models/minimax_m3_metax/__init__.py` | Package marker for the existing MetaX components; no model export facade. |
+| `models/minimax_m3_metax/model.py` | Local subclasses for norm, QKV, sparse attention and MoE; reuse public vLLM construction/loading. Framework adaptation. |
+| `models/minimax_m3_metax/vision.py` | Patch projection and chunked vision forward; native attention/RoPE class remains upstream. Framework adaptation. |
+| `models/minimax_m3_metax/bindings.py` | Explicit, idempotent replacement of named symbols inside vLLM M3 modules. This is a runtime hook. |
+| `models/minimax_m3_metax/upstream.json` | Small source-revision guard for the required vLLM model files. |
 | `ops/minimax_m3/msa.py` | Cached dispatch handles for index and sparse interfaces. |
 | `ops/minimax_m3/torch_ops.py` | Torch schemas, mutation/fake contracts and graph boundaries. Calls the framework bridge or FG/FGV adapters; defines no calculation kernel. |
 | `ops/minimax_m3/registration.py` | Opt-in registration for this profile. Five MSA entries are MetaX VENDOR implementations; FG/FGV entries remain distinct. The standard backend is unchanged. |
@@ -107,15 +111,16 @@ Neither the `vllm_metax` framework nor FlagCX is introduced.
 | File | Responsibility |
 |---|---|
 | `minimax_m3_config.py` | Typed immutable policy, correctness-sensitive flags/blacklists and explicit MSA VENDOR policy validation. |
-| `patches/minimax_m3_metax/startup.py` | Ordered library configuration, model/platform registration and legacy-framework import guard. |
+| `patches/minimax_m3_metax/startup.py` | Ordered library configuration, scoped accelerator preparation and legacy-framework import guard; the public FL platform remains in use. |
 | `patches/minimax_m3_metax/bootstrap.py` | Effective provider, numerical policy and graph-capture audit. |
 | `patches/minimax_m3_metax/compat.py`, `compatibility.json` | Version/signature/source-guarded Torch/vLLM/vendor ABI hooks. Unchanged by this cleanup. |
 | `patches/minimax_m3_metax/platform_compat.py` | Retained MetaX accelerator compatibility. |
 | `patches/minimax_m3_metax/launch.py`, `reasoning.py` | Normal vLLM CLI invocation and scoped M3 reasoning parser. |
-| `patches/minimax_m3_platform.py`, `worker/minimax_m3.py` | Restrict the profile to M3, select its worker, retain graph/collective boundaries and after-capture audit. |
+| `platform.py`, `worker/minimax_m3.py` | The common platform applies the M3 config verifier and selects the existing worker; graph/collective boundaries and after-capture audit are retained. |
 | `examples/minimax_m3_metax/config.json`, `serve.py`, `tuning-ar512k.cfg` | Accepted settings, isolated cache/launch and existing MCCL message-size policy. |
 | `tests/unit_tests/test_minimax_m3_packaging.py` | Configuration, blacklists, dependency identity and launcher regressions. |
-| `tests/unit_tests/test_minimax_m3_structure.py` | Scope, exact provider selection, source reuse and import-boundary checks. |
+| `tests/unit_tests/test_minimax_m3_structure.py` | Scope, exact provider selection and import-boundary checks. |
+| `tests/unit_tests/test_minimax_m3_registration.py` | Shared registration, CUDA/MetaX scope, profile validation and failure rollback. |
 
 Package markers in the new directories have no initialization side effects.
 No installed vLLM source is rewritten. Existing model bindings and compatibility

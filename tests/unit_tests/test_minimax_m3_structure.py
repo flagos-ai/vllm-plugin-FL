@@ -109,7 +109,7 @@ class StructureTests(unittest.TestCase):
 
     def test_interfaces_and_orchestration_do_not_define_jit_kernels(self):
         for folder in (
-            "vllm_fl/models/minimax_m3",
+            "vllm_fl/models/minimax_m3_metax",
             "vllm_fl/ops/minimax_m3",
             "vllm_fl/attention/minimax_m3",
         ):
