@@ -9,6 +9,21 @@ git config --global --add safe.directory "$(pwd)"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${MTHREADS_VISIBLE_DEVICES:?MTHREADS_VISIBLE_DEVICES is not set}"
 
+# The base image puts FlagTree (which supplies Triton) on PYTHONPATH from
+# /etc/bash_env.sh, i.e. only for bash. The functional and e2e jobs run their
+# test steps with the default `sh`, which does not read that file, so every
+# FlagGems-backed test failed to collect with "No module named 'triton'".
+# Publish the value to later steps so they see the same stack.
+if [ -n "${GITHUB_ENV:-}" ]; then
+    _pythonpath="${PYTHONPATH:-}"
+    if [ -z "${_pythonpath}" ]; then
+        _pythonpath="$(bash -c 'echo "${PYTHONPATH:-}"')"
+    fi
+    if [ -n "${_pythonpath}" ]; then
+        echo "PYTHONPATH=${_pythonpath}" >>"${GITHUB_ENV}"
+    fi
+fi
+
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip install "pytest-xdist>=3.0.0"
 
