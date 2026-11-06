@@ -193,6 +193,17 @@ def _init_vendor_device():
 
         _patch_xpu_get_device()
 
+    if vendor_name == "amd":
+        # vLLM's bundled triton_kernels import AMD architecture predicates that
+        # FlagTree's target_info does not define. Without them every path that
+        # touches those kernels fails to import, which takes out MoE models
+        # while dense ones still serve. Must precede the model layer imports.
+        from vllm_fl.patches.flagtree_target_info import (
+            apply_flagtree_target_info,
+        )
+
+        apply_flagtree_target_info()
+
 
 def _install_metax_compat():
     """Apply the MetaX vLLM 0.28 compatibility shims before any kernel runs.

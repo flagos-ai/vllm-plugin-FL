@@ -1,5 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_model_runner.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.32.0/vllm/v1/worker/gpu_model_runner.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -240,14 +240,11 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
-try:
-    from vllm.v1.worker.cp_utils import (
-        get_total_cp_world_size,
-    )
-except ImportError:  # vLLM >= 0.28: CP merged into DCP; KV cache shards over DCP
-    from vllm.v1.worker.cp_utils import (
-        get_kv_cache_shard_count as get_total_cp_world_size,
-    )
+# NOTE: ``cp_utils.get_total_cp_world_size`` (0.28-era, later renamed
+# ``get_kv_cache_shard_count``) used to be imported here. vLLM 0.32 exports
+# neither name, and nothing in this module ever called it, so the import is
+# dropped rather than guarded: keeping it made ModelRunnerFL unimportable on
+# 0.32 for every backend that selects it.
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
@@ -5783,11 +5780,12 @@ class ModelRunnerFL(
 
         if (
             current_platform.device_type in ("npu", "musa")
-            and self.compilation_config.mode != CompilationMode.NONE
-        ):
+            or getattr(current_platform, "vendor_name", None) == "amd"
+        ) and self.compilation_config.mode != CompilationMode.NONE:
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
-            # because fullgraph compilation cannot enter that context manager.
+            # because fullgraph compilation cannot enter that context manager
+            # ("Dynamo does not know how to enter a `RLock` context manager").
             from vllm_fl.dispatch import warmup_cached_ops
 
             if current_platform.device_type == "musa":
@@ -8024,11 +8022,11 @@ class ModelRunnerFL(
                     # each block's bytes into its conv/ssm state views. Keeping
                     # one tensor per layer lets the KV connector register it
                     # without special-casing Mamba.
-                    # vLLM 0.28 MambaBase.bind_kv_cache expects exactly this single
-                    # view: it squeezes dims (1,2) then unpacks the layer conv/ssm
-                    # states. The old 0.27 fork returned a list of state tensors ->
-                    # AttributeError: list object has no attribute squeeze at
-                    # mamba/abstract.py:35. Mirror native 0.28.
+                    # MambaBase.bind_kv_cache expects exactly this single view:
+                    # it squeezes dims (1,2) then unpacks the layer conv/ssm
+                    # states (unchanged through 0.32, see mamba/abstract.py).
+                    # An older fork returned a list of state tensors ->
+                    # AttributeError: list object has no attribute squeeze.
                     kv_caches[layer_name] = raw_tensor[
                         : num_blocks * page_size_bytes
                     ].view(num_blocks, 1, 1, page_size_bytes)
@@ -8268,7 +8266,7 @@ class ModelRunnerFL(
     def init_routed_experts_capturer(self):
         logger.info(
             "Initializing routed experts capturer, enable_return_routed_experts: %s",
-            self.model_config.enable_return_routed_experts,
+            getattr(self.model_config, "enable_return_routed_experts", False),
         )
         self.routed_experts_capturer = RoutedExpertsCapturer(
             max_num_batched_tokens=self.scheduler_config.max_num_batched_tokens,

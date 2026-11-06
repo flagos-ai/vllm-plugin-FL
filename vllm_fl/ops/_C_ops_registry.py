@@ -7,6 +7,7 @@
 import logging
 import os
 from contextlib import suppress
+from functools import lru_cache
 
 import torch
 
@@ -27,11 +28,56 @@ _OPTIONAL_NATIVE_ONLY_OPS = frozenset(
 )
 
 
+@lru_cache(maxsize=1)
+def _log_amd_host_view_once() -> None:
+    logger.info(
+        "Using the AMD ROCm zero-copy host mapping for "
+        "_C::get_cuda_view_from_cpu_tensor."
+    )
+
+
 def _unavailable_cuda_view(tensor):
     raise RuntimeError(
         "vLLM empty builds do not provide a mapped CUDA view of CPU memory; "
         "this backend must provide an implementation or avoid mapped CPU buffers"
     )
+
+
+def _accelerator_view_from_cpu_tensor(tensor):
+    """Dispatch ``_C::get_cuda_view_from_cpu_tensor`` to the vendor's mapping.
+
+    vLLM routes UVA input buffers through this operator, which only the native
+    CUDA extension provides. AMD/ROCm honours the same contract with a real
+    zero-copy mapping. The vendor is resolved per call rather than at
+    registration time, because schema registration can run before the platform
+    shim is constructed (and in worker subprocesses that register anew).
+
+    Detection goes through DeviceInfo, which reads the vendor straight from
+    FlagGems and is therefore answerable before vLLM's platform object exists;
+    ``current_platform`` is only a fallback for callers that replace it.
+    """
+    vendor = None
+    try:
+        from vllm_fl.utils import DeviceInfo
+
+        vendor = DeviceInfo().vendor_name
+    except Exception:
+        try:
+            from vllm.platforms import current_platform
+
+            vendor = getattr(current_platform, "vendor_name", None)
+        except Exception:
+            vendor = None
+
+    if vendor == "amd":
+        from vllm_fl.dispatch.backends.vendor.amd.impl.uva import (
+            get_cuda_view_from_cpu_tensor_amd,
+        )
+
+        _log_amd_host_view_once()
+        return get_cuda_view_from_cpu_tensor_amd(tensor)
+
+    return _unavailable_cuda_view(tensor)
 
 
 def _unavailable_weak_ref(tensor):
@@ -49,7 +95,6 @@ _QUERY_OP_IMPLS = [
     ("cutlass_group_gemm_supported", lambda cap: False),
     ("cutlass_scaled_mm_supports_fp4", lambda cap: False),
     ("weak_ref_tensor", _unavailable_weak_ref),
-    ("get_cuda_view_from_cpu_tensor", _unavailable_cuda_view),
 ]
 
 
@@ -180,6 +225,16 @@ def register_op_schemas():
         for name, fn in _QUERY_OP_IMPLS:
             with suppress(RuntimeError):
                 c_lib.impl(name, fn, "CompositeImplicitAutograd")
+
+        # The accelerator view takes a *pinned CPU* tensor, so it dispatches on
+        # the CPU key rather than CompositeImplicitAutograd. Resolved here, not
+        # call time, so it works regardless of registration order.
+        with suppress(RuntimeError):
+            c_lib.impl(
+                "get_cuda_view_from_cpu_tensor",
+                _accelerator_view_from_cpu_tensor,
+                "CPU",
+            )
 
         for name, fn in _CUDA_FALLBACK_IMPLS:
             with suppress(RuntimeError):
