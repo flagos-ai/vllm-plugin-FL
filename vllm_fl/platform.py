@@ -361,7 +361,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -371,6 +379,15 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if (
+            cls.vendor_name == "metax"
+            and vllm_config.use_v2_model_runner
+            and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") != "1"
+        ):
+            raise ValueError(
+                "MetaX V2 is experimental and requires explicit "
+                "VLLM_USE_V2_MODEL_RUNNER=1."
+            )
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(
@@ -627,10 +644,15 @@ class PlatformFL(Platform):
             if model_config is not None:
                 model_config.disable_cascade_attn = True
             if attention_config := vllm_config.attention_config:
-                attention_config.use_cudnn_prefill = False
-                attention_config.use_trtllm_ragged_deepseek_prefill = False
                 attention_config.use_trtllm_attention = False
-                attention_config.disable_flashinfer_prefill = True
+                if attention_config.mla_prefill_backend is None:
+                    from vllm.v1.attention.backends.mla.prefill.registry import (
+                        MLAPrefillBackendEnum,
+                    )
+
+                    attention_config.mla_prefill_backend = (
+                        MLAPrefillBackendEnum.FLASH_ATTN
+                    )
 
             # Graph defaults (PIECEWISE, capture sizes, no mm-encoder graph)
             # are installed in apply_config_platform_defaults so that explicit
@@ -775,6 +797,11 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
+            if (
+                cls.vendor_name == "metax"
+                and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1"
+            ):
+                return "vllm_fl.distributed.metax_communicator.MetaxCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
@@ -785,6 +812,11 @@ class PlatformFL(Platform):
     def get_static_graph_wrapper_cls(cls) -> str:
         if cls.device_type == "musa":
             return "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper"
+        if (
+            getattr(cls, "vendor_name", None) == "metax"
+            and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1"
+        ):
+            return "vllm.compilation.cuda_graph.CUDAGraphWrapper"
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod
@@ -834,19 +866,6 @@ class PlatformFL(Platform):
         """Copy blocks from device to host (CPU)."""
         _src_cache = src_cache[:, src_block_indices]
         dst_cache[:, dst_block_indices] = _src_cache.cpu()
-
-    @classmethod
-    def _align_hybrid_block_size(cls, vllm_config, backend_cls) -> None:
-        if cls.vendor_name == "ascend":
-            from vllm_fl.kv_cache.ascend.hybrid import (
-                align_hybrid_block_size,
-                uses_dense_hybrid_cache,
-            )
-
-            if uses_dense_hybrid_cache(vllm_config.model_config):
-                align_hybrid_block_size(vllm_config)
-                return
-        super()._align_hybrid_block_size(vllm_config, backend_cls)
 
     @classmethod
     def support_hybrid_kv_cache(cls) -> bool:
@@ -921,10 +940,13 @@ class PlatformFL(Platform):
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
         # Retain the registered collective routes for TXDA and native MCCL.
+        # FlagCX's ctypes calls must stay behind vLLM's opaque collective op
+        # when Dynamo traces a MetaX model. Keep the normal MCCL route intact.
         return (
             cls.device_type == "txda"
             or cls.vendor_name in ("nvidia", "thead", "iluvatar")
             or (cls.device_type == "musa" and cls.dist_backend == "mccl")
+            or (cls.vendor_name == "metax" and cls.dist_backend == "flagcx")
         )
 
     @classmethod
@@ -981,6 +1003,24 @@ class PlatformFL(Platform):
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"] if using_inductor else ["vllm_c", "native"]
+        if cls.vendor_name == "metax":
+            from dataclasses import fields
+
+            from vllm.ir import ops as ir_ops  # noqa: F401 - populate IR registry
+            from vllm.ir.op import IrOp
+
+            # An empty wheel's _C schemas do not register IR implementations.
+            # Filter each op separately, including defaults such as sparse GELU.
+            return IrOpPriorityConfig(
+                **{
+                    field.name: [
+                        provider
+                        for provider in default
+                        if provider in IrOp.registry[field.name].impls
+                    ]
+                    for field in fields(IrOpPriorityConfig)
+                }
+            )
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

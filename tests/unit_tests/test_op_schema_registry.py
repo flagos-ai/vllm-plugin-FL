@@ -30,6 +30,10 @@ def _load_registry(monkeypatch, schemas, *, native=False):
     spec = importlib.util.spec_from_file_location("op_schema_registry_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # These synthetic namespaces must not inherit the test host's backend or
+    # native _C registrations (the suite also runs inside vendor CI images).
+    monkeypatch.setattr(module, "_is_metax_backend", lambda: False)
+    monkeypatch.setattr(module, "_C_ops_present", lambda: False)
     return module
 
 

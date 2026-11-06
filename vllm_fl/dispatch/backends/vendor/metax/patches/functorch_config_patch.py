@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .._compat import legacy_torch_runtime
+
 logger = logging.getLogger(__name__)
 
 _AUTOGRAD_CACHE_NORMALIZE_INPUTS = "autograd_cache_normalize_inputs"
@@ -53,6 +55,8 @@ def _mark_config_dirty(config_module: Any, name: str) -> None:
 
 
 def patch_functorch_config() -> None:
+    if not legacy_torch_runtime():
+        return
     try:
         import torch._functorch.config as functorch_config
     except Exception:

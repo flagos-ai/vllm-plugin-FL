@@ -1,5 +1,14 @@
 # Ascend graph execution with vLLM 0.28
 
+This page records the original `0.4.0-dev` / vLLM 0.28 environment and
+hardware results. `0.5.0-dev` uses vLLM 0.32; the build commands and hardware
+results below retain their original version scope. Its Ascend integration
+uses the upstream 0.32 hybrid-page planner, allocator and manager-to-kernel
+mapping. A layer-binding adapter supplies strided K/V and per-page GDN state
+views without changing manager storage or scheduler block ownership. Kernel
+blocks remain 128 tokens. These compatibility changes have CPU contracts;
+the recorded 0.28 NPU results do not establish 0.32 NPU model acceptance.
+
 The Ascend adapter uses vLLM 0.28's v1 model runner and supports
 `FULL_DECODE_ONLY` with native `torch.npu.NPUGraph` capture and replay.
 Prefill, vision encoding and sampling execute outside the decode graph.

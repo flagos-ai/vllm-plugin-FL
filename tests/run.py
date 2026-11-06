@@ -361,6 +361,8 @@ class TestRunner:
         # per-process import overhead (torch, vllm_fl) outweighs the parallelism
         # benefit and can cause memory pressure on large CI machines.
         cpu_workers = min(os.cpu_count() or 1, 16)
+        # Single-GPU tests share inherited device visibility on MetaX.
+        serialize_gpu_tests = self.config.platform == "metax"
 
         extra_args = [
             "--tb=short",
@@ -374,7 +376,8 @@ class TestRunner:
             # ordinal"). Tests with process-global state use the serial marker.
             # Both groups run serially in a second pass below.
             "-m",
-            "not multi_gpu and not serial",
+            ("not gpu and " if serialize_gpu_tests else "")
+            + "not multi_gpu and not serial",
             "--cov=vllm_fl",
             "--cov-report=term-missing",
             f"--cov-report=json:coverage-{self.config.platform}.json",
@@ -395,7 +398,7 @@ class TestRunner:
             "--tb=short",
             "-q",
             "-m",
-            "multi_gpu or serial",
+            ("gpu or " if serialize_gpu_tests else "") + "multi_gpu or serial",
             "--cov=vllm_fl",
             "--cov-append",
             "--cov-report=term-missing",
@@ -410,7 +413,7 @@ class TestRunner:
 
         print(
             f"[run] Unit tests parallel: {cpu_workers} workers (CPU-only, no device pinning); "
-            "multi_gpu and serial-marked tests run serially afterwards"
+            f"{'gpu, ' if serialize_gpu_tests else ''}multi_gpu and serial-marked tests run serially afterwards"
         )
 
         return [

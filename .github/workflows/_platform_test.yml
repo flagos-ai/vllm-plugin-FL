@@ -131,6 +131,10 @@ jobs:
   # job on that device's runner (device_runner_labels override).
   unit:
     needs: setup
+    # MetaX runs unit tests in functional when there are no extra devices.
+    if: >-
+      ${{ inputs.platform != 'metax' ||
+          toJson(fromJson(needs.setup.outputs.config).unit_devices || fromJson('[]')) != '[]' }}
     strategy:
       fail-fast: false
       matrix:

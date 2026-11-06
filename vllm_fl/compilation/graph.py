@@ -129,7 +129,102 @@ def _weak_ref_gcu_tensors(value: Any) -> Any:
     return value
 
 
+def _borrow_metax_tensor_storage(value: torch.Tensor) -> torch.Tensor:
+    """Rebuild graph-owned tensor metadata without owning its allocation.
+
+    PyTorch's cudagraph_trees uses the same storage constructor: the new
+    StorageImpl contains a bare DataPtr with no owning context or deleter.
+    These aliases are valid only while the captured graph owns its pool.
+    """
+    construct_storage = getattr(torch._C, "_construct_storage_from_data_pointer", None)
+    if not callable(construct_storage):
+        raise RuntimeError(
+            "MetaX graph weak references require "
+            "torch._C._construct_storage_from_data_pointer. "
+            "Use the documented torch 2.10 MACA runtime or disable graph mode."
+        )
+
+    storage = value.untyped_storage()
+    metadata = {
+        "nbytes": storage.nbytes(),
+        "data_ptr": storage.data_ptr(),
+        "size": value.shape,
+        "stride": value.stride(),
+        "dtype": value.dtype,
+        "device": value.device,
+        "storage_offset": value.storage_offset(),
+    }
+    borrowed_storage = construct_storage(
+        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+    )
+    construct_tensor = getattr(
+        torch._C, "_construct_CUDA_Tensor_From_Storage_And_Metadata", None
+    )
+    if value.device.type == "cuda" and callable(construct_tensor):
+        result = construct_tensor(metadata, borrowed_storage)
+    else:
+        # Zero elements allocate no device memory. set_ installs only the
+        # borrowed storage and view metadata, including the original offset.
+        result = torch.empty(0, dtype=value.dtype, device=value.device).set_(
+            borrowed_storage,
+            metadata["storage_offset"],
+            metadata["size"],
+            metadata["stride"],
+        )
+    if value.is_conj():
+        torch._C._set_conj(result, True)
+    if value.is_neg():
+        torch._C._set_neg(result, True)
+    result.requires_grad_(value.requires_grad)
+    return result
+
+
+def _weak_ref_metax_tensor(value: torch.Tensor) -> torch.Tensor:
+    if value.device.type != "cuda":
+        return value
+
+    for namespace in ("_C", "vllm_fl"):
+        try:
+            has_native = torch._C._dispatch_has_kernel_for_dispatch_key(
+                f"{namespace}::weak_ref_tensor", "CUDA"
+            )
+        except RuntimeError:
+            has_native = False
+        # The empty wheel has a Composite placeholder that raises. A schema
+        # or Meta registration is insufficient evidence of a native kernel.
+        if has_native:
+            return getattr(torch.ops, namespace).weak_ref_tensor(value)
+    return _borrow_metax_tensor_storage(value)
+
+
+def _weak_ref_metax_tensors(value: Any) -> Any:
+    if isinstance(value, torch.Tensor):
+        return _weak_ref_metax_tensor(value)
+    if isinstance(value, list):
+        return [_weak_ref_metax_tensors(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_weak_ref_metax_tensors(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _weak_ref_metax_tensors(item) for key, item in value.items()}
+
+    from vllm.sequence import IntermediateTensors
+
+    if isinstance(value, IntermediateTensors):
+        return IntermediateTensors(
+            {key: _weak_ref_metax_tensors(item) for key, item in value.tensors.items()}
+        )
+    return value
+
+
 def weak_ref_tensors(value: Any) -> Any:
+    if (
+        current_platform.device_type == "cuda"
+        and getattr(current_platform, "vendor_name", None) == "metax"
+    ):
+        # Keep missing native weak refs away from the generic exception path,
+        # whose identity fallback would retain captured graph allocations.
+        return _weak_ref_metax_tensors(value)
+
     if current_platform.device_type == "npu":
         # The empty vLLM wheel registers torch.ops._C.weak_ref_tensor as an
         # identity. torch_npu's private primitive creates the real weak tensor

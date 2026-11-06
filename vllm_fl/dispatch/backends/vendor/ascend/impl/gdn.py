@@ -19,6 +19,11 @@ class AscendQwenGatedDeltaNetAttention(QwenGatedDeltaNetAttention):
     """Non-speculative reference path, sharing eager and captured math."""
 
     def bind_kv_cache(self, kv_cache) -> None:
+        if isinstance(kv_cache, (tuple, list)):
+            # Preserve prepared per-state kernel views, including their page
+            # strides, storage offsets and manager-owned block mapping.
+            self.kv_cache = tuple(kv_cache)
+            return
         from vllm_fl.kv_cache.ascend.hybrid import (
             dense_mamba_views,
             uses_dense_hybrid_cache,

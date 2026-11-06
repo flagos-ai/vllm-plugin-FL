@@ -461,13 +461,13 @@ class PyFlagcxCommunicator:
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def group_start(self):
-        if self.device.type == "npu":
+        if self.device.type == "npu" or not getattr(self, "_legacy_unique_id_api", True):
             self.flagcx.flagcxGroupStart(self.comm)
         else:
             self.flagcx.flagcxGroupStart()
 
     def group_end(self):
-        if self.device.type == "npu":
+        if self.device.type == "npu" or not getattr(self, "_legacy_unique_id_api", True):
             self.flagcx.flagcxGroupEnd(self.comm)
         else:
             self.flagcx.flagcxGroupEnd()

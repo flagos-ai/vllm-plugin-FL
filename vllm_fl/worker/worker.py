@@ -61,8 +61,11 @@ try:  # pragma: no cover - vLLM version compat
         prepare_communication_buffer_for_model as _prepare_comm_buffer,
     )
 except ImportError:  # vLLM >= 0.28 dropped the symbol
+
     def _prepare_comm_buffer(*args, **kwargs):
         return None
+
+
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
@@ -188,7 +191,6 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
         # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
         # kernels inside spawned workers; when every rank shares the default
         # Triton cache directory, concurrent compilation of the same kernel
@@ -410,6 +412,7 @@ class WorkerFL(WorkerBase):
                 tp_pp_world_size = (
                     self.parallel_config.pipeline_parallel_size
                     * self.parallel_config.tensor_parallel_size
+                    * self.parallel_config.prefill_context_parallel_size
                 )
 
                 # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
@@ -510,6 +513,10 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
+            if getattr(current_platform, "vendor_name", None) == "metax":
+                from vllm_fl.worker.metax_v2 import prepare_metax_v2_runtime
+
+                prepare_metax_v2_runtime(self.vllm_config)
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
@@ -518,6 +525,12 @@ class WorkerFL(WorkerBase):
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
                 self.vllm_config, self.device
             )
+            if getattr(current_platform, "vendor_name", None) == "metax":
+                init_logger("vllm.metax_v2").info_once(
+                    "MetaX V2 model runner: %s.%s",
+                    type(self.model_runner).__module__,
+                    type(self.model_runner).__qualname__,
+                )
         else:
             from vllm_fl.worker.model_runner import ModelRunnerFL
 
@@ -542,6 +555,16 @@ class WorkerFL(WorkerBase):
         ):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
 
+        if (
+            self.use_v2_model_runner
+            and getattr(current_platform, "vendor_name", None) == "metax"
+            and self.vllm_config.compilation_config.mode != CompilationMode.NONE
+        ):
+            # ModelRunnerFL normally resolves CachedOps before Dynamo tracing.
+            # Upstream V2 does not know FL's lazy dispatch registry.
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops()
         if self.vllm_config.weight_transfer_config is not None:
             self.weight_transfer_engine = WeightTransferEngineFactory.create_engine(
                 self.vllm_config.weight_transfer_config,
@@ -549,6 +572,10 @@ class WorkerFL(WorkerBase):
                 self.device,
                 self.model_runner.get_model(),
             )
+
+        # Keep profile, compilation and serving under the same Dynamo global
+        # thread guard, as in vLLM 0.32's worker.
+        set_torch_threads_for_runtime()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
@@ -836,7 +863,10 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        # vLLM 0.32 dropped ModelConfig.enable_return_routed_experts when the
+        # routed-experts plumbing moved to the aux-output connector; treat an
+        # absent field as the feature being off.
+        if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -1026,10 +1056,11 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        activate_jit_monitor(
-            mode=self.observability_config.jit_monitor_mode,
-            verbose=self.observability_config.jit_monitor_verbose,
-        )
+        if self.vllm_config.kernel_config.enable_jit_warmup:
+            activate_jit_monitor(
+                mode=self.observability_config.jit_monitor_mode,
+                verbose=self.observability_config.jit_monitor_verbose,
+            )
 
         # Freeze the worker heap so the GC won't scan static objects
         # (model weights, KV caches, CUDA graphs) during inference.
@@ -1039,10 +1070,6 @@ class WorkerFL(WorkerBase):
         # Warmup / first-compile is done — activate the `VLLM_GPU_SYNC_CHECK`
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
-
-        # Startup is done; steady-state serving gets no benefit from torch
-        # intra-op parallelism.
-        set_torch_threads_for_runtime()
 
         return CompilationTimes(
             language_model=self.compilation_config.compilation_time,
@@ -1246,7 +1273,7 @@ class WorkerFL(WorkerBase):
 
         if (
             parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
+            and getattr(compilation_config.pass_config, "enable_sp", False)
             and forward_pass
         ):
             # currently only supported by V1 GPUModelRunner
@@ -1581,7 +1608,14 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    try:
+        from vllm.model_executor.determinism.batch_invariant import (
+            init_batch_invariance,
+        )
+    except ImportError:  # vLLM <= 0.28 kept it under layers/
+        from vllm.model_executor.layers.batch_invariant import (
+            init_batch_invariance,
+        )
 
     init_batch_invariance()
     override_envs_for_eplb(
