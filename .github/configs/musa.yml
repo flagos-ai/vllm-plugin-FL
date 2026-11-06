@@ -17,7 +17,8 @@
 
 platform: musa
 
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+# FlagOS 2.2 runtime base (flagos-runtime-mthreads-musa4.3.6:2.2.0) + vLLM 0.32.0 empty.
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-musa-ci
 
 runner_labels:
   - mt-cicd-vllm-plugin
@@ -25,7 +26,9 @@ runner_labels:
 container_volumes:
   - /data:/data:ro
 
-# The vLLM 0.28 image uses the native MUSA runtime without privileged mode.
+# The image ships the vendor stack, the vLLM 0.32.0 empty wheel and the test
+# tooling. The plugin itself and flaggems-vllm are installed from the checkout by
+# .github/scripts/musa/setup.sh, which then asserts the pinned dependency tuple.
 # GEMS_VENDOR selects the Mthreads kernels; VLLM_PLUGINS enables the FL plugin.
 # This runner allocates host cards 4..7; the SDK sees their logical IDs 0..3.
 # Keep both masks to preserve that allocation; see docs/usage/musa.md.

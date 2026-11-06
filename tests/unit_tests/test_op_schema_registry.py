@@ -48,6 +48,9 @@ def test_registers_same_name_and_overloads_in_separate_namespaces(monkeypatch):
     existing = torch.library.Library(regular, "FRAGMENT")
     existing.define(schemas[0][1])
     registry = _load_registry(monkeypatch, schemas)
+    # The dedicated skip-path test covers the bail-out; keep this test
+    # independent of _C ops registered earlier in the same process.
+    monkeypatch.setattr(registry, "_C_ops_present", lambda: False)
     try:
         registry.register_op_schemas()
         libraries = registry.register_op_schemas._libs
@@ -82,6 +85,7 @@ def test_optional_native_exclusion_is_limited_to_c_namespace(monkeypatch):
     cache = "schema_test_cache_" + uuid.uuid4().hex
     schema = f"{name}(Tensor input) -> Tensor"
     registry = _load_registry(monkeypatch, [("_C", schema), (cache, schema)])
+    monkeypatch.setattr(registry, "_C_ops_present", lambda: False)
     monkeypatch.setattr(
         registry,
         "_OPTIONAL_NATIVE_ONLY_OPS",

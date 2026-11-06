@@ -15,20 +15,24 @@ def apply_musa_patches():
     global _patches_applied
     if _patches_applied:
         return
-    _patches_applied = True
 
+    # Every patch below is idempotent, so a retry only repeats cheap lookups.
     patch_topk_topp_sampler()
     patch_triton_reshape_and_cache_flash()
     patch_cuda_get_device_properties()
-    _patches_applied = bool(patch_accelerator_missing_attrs())
-    if not _patches_applied:
-        return
     patch_cuda_stream_for_musa()
     patch_inductor_triton_for_musa()
     patch_moe_topk_softmax_for_musa()
     patch_triton_mtgpu_alias_for_musa()
     patch_device_config_for_musa()
     patch_musa_vision_rotary_layout()
+    patch_flag_gems_capture_safe_tuning()
+    patch_flag_gems_disable_flagtune()
+
+    # The allocator shim is optional: a missing torch_musa API must not gate the
+    # device, MoE, or FlagGems patches above. It alone decides whether the
+    # entry point is retried on the next call.
+    _patches_applied = bool(patch_accelerator_missing_attrs())
 
 
 def patch_topk_topp_sampler():
@@ -74,16 +78,26 @@ def patch_cuda_get_device_properties():
         torch.cuda.get_device_capability = _get_device_capability_musa
         logger.info("Patched torch.cuda.get_device_capability for MUSA")
 
-        _orig_get_props = torch.cuda.get_device_properties
-
-        def _cuda_get_device_properties_musa(device, names, init_cuda=False):
+        # vLLM 0.32 defines the helper in ``vllm.utils.platform_utils`` and
+        # binds it into ``vllm.usage.usage_lib`` at import time. Its contract is
+        # a tuple of the requested property names (not the props object), and
+        # the stock implementation forks a ProcessPoolExecutor, which is
+        # illegal inside the daemonized API-server workers.
+        def _cuda_device_property_tuple_musa(device, names, init_cuda=False):
             props = torch_musa.get_device_properties(device)
-            return props
+            return tuple(getattr(props, name, None) for name in names)
 
-        import vllm.utils as _vllm_utils
-        if hasattr(_vllm_utils, "cuda_get_device_properties"):
-            _vllm_utils.cuda_get_device_properties = _cuda_get_device_properties_musa
-            logger.info("Patched cuda_get_device_properties to use torch_musa for MUSA")
+        import vllm.utils.platform_utils as _platform_utils
+
+        _platform_utils.cuda_get_device_properties = _cuda_device_property_tuple_musa
+        import vllm.usage.usage_lib as _usage_lib
+
+        if hasattr(_usage_lib, "cuda_get_device_properties"):
+            # ``usage_lib`` imported the function before this patch ran.
+            _usage_lib.cuda_get_device_properties = _cuda_device_property_tuple_musa
+        logger.info(
+            "Patched platform_utils/usage_lib cuda_get_device_properties for MUSA"
+        )
 
         torch.cuda._musa_device_props_patched = True
     except Exception as e:
@@ -133,9 +147,11 @@ def patch_accelerator_missing_attrs() -> bool:
 
         vendor_names = {
             "empty_cache": "empty_cache",
+            "memory_allocated": "memory_allocated",
             "max_memory_allocated": "max_memory_allocated",
             "memory_stats": "memory_stats",
             "memory_reserved": "memory_reserved",
+            "max_memory_reserved": "max_memory_reserved",
             "reset_peak_memory_stats": "reset_peak_memory_stats",
             "get_memory_info": "mem_get_info",
             "synchronize": "synchronize",
@@ -338,23 +354,24 @@ def patch_moe_topk_softmax_for_musa():
     """Patch MoE top-k softmax for MUSA via the dispatch system.
 
     ``torch.ops._moe_C.topk_softmax`` is a CUDA-only extension not available
-    on MUSA.  vllm 0.24.0 calls it through two entry points:
+    on MUSA. vLLM 0.32 resolves the operator through
+    ``vllm._custom_ops.topk_softmax``; the fused-MoE routers
+    (``fused_topk_router`` and ``fused_topk_bias_router``) call the
+    ``vllm_topk_softmax`` wrapper, which looks the attribute up at call time.
 
-      - ``vllm.model_executor.layers.fused_moe.router.fused_topk_router``
-        ``vllm_topk_softmax()``
-      - ``vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router``
-        ``vllm_topk_softmax()``
+    The leaf ``vllm._custom_ops`` binding is patched first because it is the
+    robust path. The router modules are patched afterwards as a best effort:
+    importing them reaches ``vllm.model_executor.layers.utils`` while it is
+    still initializing, so those imports may fail harmlessly.
 
-    Rather than patching ``vllm._custom_ops`` (which suffers from circular
-    import timing issues at apply_musa_patches() call time), we directly
-    replace the ``vllm_topk_softmax`` function objects in both router modules
-    via ``importlib.import_module``.  These modules are safe to import at
-    this point since they only depend on torch and vllm internals that are
-    already loaded by the time apply_musa_patches() is invoked in the worker.
+    The implementation is resolved through the dispatch system's op_backends
+    configuration (musa.yaml: topk_softmax -> [flagos, reference]) instead of
+    importing the FlagGems backend directly.
 
-    The actual implementation is resolved through the dispatch system's
-    op_backends configuration (musa.yaml: topk_softmax -> [flagos, reference]),
-    rather than directly importing from the flaggems backend.
+    vLLM 0.32 passes ``is_padding`` (a padding-row mask) and
+    ``e_score_correction_bias``; the dispatched kernels implement neither
+    argument, so both are accepted and ignored. Padded rows are discarded by
+    the caller, and MoE bias correction is not exercised on MUSA yet.
 
     TODO: remove once MUSA ships a compiled _moe_C extension.
     """
@@ -373,6 +390,7 @@ def patch_moe_topk_softmax_for_musa():
         gating_output,
         renormalize=False,
         e_score_correction_bias=None,
+        is_padding=None,
     ):
         # Delegate to the dispatch system which resolves the best available
         # implementation based on musa.yaml op_backends configuration.
@@ -389,6 +407,22 @@ def patch_moe_topk_softmax_for_musa():
         )
         return topk_weights, topk_ids
 
+    # ``vllm_topk_softmax`` resolves ``vllm._custom_ops.topk_softmax`` at call
+    # time. Patching that leaf module is the robust path: the router modules
+    # below import ``vllm.model_executor.layers.utils`` and can be reached
+    # while it is still initializing (circular import), which used to leave the
+    # patch unapplied and broke MoE models.
+    custom_ops_patched = False
+    try:
+        import vllm._custom_ops as _vllm_ops
+
+        _vllm_ops.topk_softmax = _topk_softmax_musa
+        custom_ops_patched = True
+    except Exception as exc:
+        logger.warning(
+            "patch_moe_topk_softmax_for_musa: cannot patch "
+            "vllm._custom_ops.topk_softmax: %s", exc)
+
     _router_modules = [
         "vllm.model_executor.layers.fused_moe.router.fused_topk_router",
         "vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router",
@@ -402,14 +436,22 @@ def patch_moe_topk_softmax_for_musa():
                 mod.vllm_topk_softmax = _topk_softmax_musa
                 patched.append(mod_name.split(".")[-1])
         except Exception as exc:
-            logger.warning(
-                "patch_moe_topk_softmax_for_musa: failed to patch %s: %s",
+            # Harmless once ``vllm._custom_ops`` is patched: the router wrapper
+            # forwards to it. Only surface this when nothing was patched.
+            logger.debug(
+                "patch_moe_topk_softmax_for_musa: skipped %s: %s",
                 mod_name, exc)
 
+    if custom_ops_patched:
+        patched.insert(0, "vllm._custom_ops")
     if patched:
         logger.info(
             "Patched vllm_topk_softmax for MUSA (via dispatch) in: %s",
             ", ".join(patched))
+    else:
+        logger.warning(
+            "patch_moe_topk_softmax_for_musa: no call site patched — "
+            "MoE models will fail on MUSA")
 
 
 def patch_triton_mtgpu_alias_for_musa():
@@ -492,19 +534,19 @@ def patch_triton_mtgpu_alias_for_musa():
 
 
 def patch_device_config_for_musa():
-    """Patch vllm DeviceConfig so that device_type='musa' is accepted.
+    """Accept ``torch.device('musa')`` in vllm DeviceConfig on old torch_musa.
 
-    vllm 0.24.0's ``DeviceConfig.__post_init__`` calls
-    ``torch.device(self.device_type)`` which raises
-    ``RuntimeError: Device string must not be empty`` when device_type is
-    ``'musa'`` because plain ``torch.device('musa')`` is invalid without an
-    index — ``torch.device('musa:0')`` works after torch_musa is imported.
+    vLLM 0.32 rebuilds the device from the type in
+    ``DeviceConfig.__post_init__`` (``self.device = torch.device(device_type)``).
+    torch_musa 2.9 accepts the bare ``'musa'`` string; older builds raise
+    ``RuntimeError: Device string must not be empty``.
 
-    We monkey-patch ``__post_init__`` to intercept the ``'musa'`` case and
-    substitute ``torch.device('musa:0')`` before the original logic runs.
+    Only those old builds need a patch, and it must keep the index out of
+    ``DeviceConfig.device``: the model loader rebuilds ``torch.device(load_device)``
+    and enters it as the default device, so a hard-coded ``musa:0`` puts all
+    ranks on card 0 (observed as one 54 GiB card and a stalled ``vllm serve``).
 
-    TODO: remove once vllm DeviceConfig handles non-CUDA device strings
-    natively, or torch_musa registers 'musa' as a valid bare device string.
+    TODO: remove once the minimum torch_musa build accepts ``'musa'``.
     """
     try:
         import torch
@@ -514,13 +556,41 @@ def patch_device_config_for_musa():
         if getattr(_dc_mod.DeviceConfig, "_musa_post_init_patched", False):
             return
 
+        try:
+            torch.device("musa")
+            return  # this build accepts the bare device string
+        except RuntimeError:
+            pass
+
+        def _musa_device_object() -> torch.device:
+            # ``torch.device(type, None)`` builds the unindexed object without
+            # parsing the string form that this build rejects.
+            try:
+                return torch.device("musa", None)
+            except Exception as exc:
+                raise RuntimeError(
+                    "torch_musa is too old for vLLM 0.32: neither "
+                    "torch.device('musa') nor torch.device('musa', None) is "
+                    "supported. Upgrade torch_musa."
+                ) from exc
+
         _orig_post_init = _dc_mod.DeviceConfig.__post_init__
 
         def _patched_post_init(self):
-            # Intercept before torch.device("musa") is called (invalid).
-            if getattr(self, "device", None) == "musa":
-                self.device_type = "musa"
-                self.device = torch.device("musa:0")
+            # ``__post_init__`` resolves "auto" to the platform type and then
+            # rebuilds the device object, so both inputs hit the bad conversion.
+            raw = getattr(self, "device", None)
+            if raw in ("auto", "musa"):
+                if raw == "auto":
+                    from vllm.platforms import current_platform
+
+                    self.device_type = current_platform.device_type
+                else:
+                    self.device_type = "musa"
+                if self.device_type != "musa":
+                    _orig_post_init(self)
+                    return
+                self.device = _musa_device_object()
                 return
             _orig_post_init(self)
 
@@ -528,7 +598,7 @@ def patch_device_config_for_musa():
         _dc_mod.DeviceConfig._musa_post_init_patched = True
         logger.info(
             "Patched DeviceConfig.__post_init__ for MUSA "
-            "(torch.device('musa:0') workaround)")
+            "(torch.device('musa') is rejected by this torch_musa build)")
     except Exception as exc:
         logger.warning(
             "patch_device_config_for_musa failed: %s", exc)
@@ -536,10 +606,17 @@ def patch_device_config_for_musa():
 
 def patch_musa_vision_rotary_layout():
     """Materialize strided rotary half views before MUSA broadcast products."""
-    import torch
-    from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
+    try:
+        import torch
+        from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
 
-    original = ApplyRotaryEmb.forward_native
+        original = ApplyRotaryEmb.forward_native
+    except Exception as exc:
+        # Optional patch: a moved module or renamed attribute must not abort the
+        # remaining patches in ``apply_musa_patches``.
+        logger.warning("patch_musa_vision_rotary_layout failed: %s", exc)
+        return
+
     if getattr(original, "_musa_rotary_layout_patched", False):
         return
 
@@ -576,3 +653,104 @@ def patch_musa_vision_rotary_layout():
 
     forward_native._musa_rotary_layout_patched = True
     ApplyRotaryEmb.forward_native = forward_native
+
+
+def patch_flag_gems_capture_safe_tuning():
+    """Make FlagGems/libentry autotuning safe inside MUSA graph capture.
+
+    ``LibTuner.run`` benchmarks every candidate config with device events and
+    synchronizes.  Running those benchmark launches while ``torch.musa.graph``
+    is recording aborts the capture with
+    "MUSA error: an illegal memory access was encountered"; the tuner surfaces
+    it as ``[libentry] config ... failed to compile`` because it catches the
+    RuntimeError and keeps benchmarking.
+
+    Under capture, reuse the config already cached for these arguments (or the
+    first static config when nothing is cached) and launch it directly, which
+    mirrors what triton's own Autotuner does for the single-config case.
+    """
+    try:
+        import importlib
+
+        import torch
+        import torch_musa  # noqa: F401 — registers the musa device type
+
+        # NOTE: ``from flag_gems.utils import libentry`` yields the decorator
+        # function, because flag_gems/utils/__init__.py re-exports it under the
+        # same name and shadows the submodule.
+        _libentry = importlib.import_module("flag_gems.utils.libentry")
+    except Exception as exc:
+        logger.debug(
+            "flag_gems libentry unavailable, skipping capture-safe tuning: %s",
+            exc)
+        return
+
+    tuner_cls = getattr(_libentry, "LibTuner", None)
+    if tuner_cls is None or getattr(tuner_cls, "_fl_capture_safe", False):
+        return
+
+    _orig_run = tuner_cls.run
+
+    def _run_capture_safe(self, *args, **kwargs):
+        if not torch.musa.is_current_stream_capturing():
+            return _orig_run(self, *args, **kwargs)
+
+        self.seen_tuned_metas = {}
+        self.nargs = dict(zip(self.arg_names, args))
+        config = None
+        try:
+            all_args = {**self.nargs, **kwargs}
+            key_args = {k: v for k, v in all_args.items() if k in self.arg_names}
+            config = self.cache.get(self.get_key(key_args))
+        except Exception:
+            config = None
+        if config is None:
+            configs = list(self.configs)
+            config = configs[0] if configs else None
+        if config is None:
+            self.nargs = None
+            return _orig_run(self, *args, **kwargs)
+
+        self.best_config = config
+        try:
+            if getattr(config, "pre_hook", None) is not None:
+                config.pre_hook({**self.nargs, **kwargs, **config.all_kwargs()})
+            return self.fn.run(*args, **kwargs, **config.all_kwargs())
+        finally:
+            self.nargs = None
+
+    tuner_cls.run = _run_capture_safe
+    tuner_cls._fl_capture_safe = True
+    logger.info(
+        "Patched flag_gems LibTuner.run for MUSA graph capture "
+        "(no autotune while capturing)")
+
+
+def patch_flag_gems_disable_flagtune():
+    """Stop FlagGems FlagTune from downloading its model bundle on MUSA.
+
+    Adapted operators default to ``TuningMode.COST_MODEL``, so the first tuned
+    operator makes ``flag_gems.flagtune.inference.cost_model.run_policy``
+    resolve a model bundle through FlagTree. That resolver sets
+    ``FLAGTUNE_MODEL_DOWNLOAD_LATEST=1`` and fetches the bundle from the
+    FlagTune CDN; this host cannot reach it, so workers block on HTTPS retries
+    during startup before falling back.
+
+    ``USE_FLAGTUNE`` is FlagGems' own switch: ``USE_FLAGTUNE=0`` makes
+    ``resolve_tuning_mode`` return ``TuningMode.DEFAULT`` for every operator,
+    which needs neither a model nor the network.
+
+    Set ``VLLM_FL_MUSA_FLAGTUNE=1`` to keep FlagTune enabled.
+    """
+    import os
+
+    if os.environ.get("VLLM_FL_MUSA_FLAGTUNE", "0") == "1":
+        return
+    if os.environ.get("USE_FLAGTUNE") == "0":
+        return
+
+    os.environ["USE_FLAGTUNE"] = "0"
+    logger.info(
+        "Disabled FlagGems FlagTune for MUSA (USE_FLAGTUNE=0, no model "
+        "download); set VLLM_FL_MUSA_FLAGTUNE=1 to keep it"
+    )

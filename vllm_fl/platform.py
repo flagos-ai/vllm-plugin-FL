@@ -604,6 +604,23 @@ class PlatformFL(Platform):
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
+            cls.device_type == "musa"
+            and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        ):
+            from vllm_fl.dispatch.backends.vendor.musa.graph_config import (
+                limit_cudagraph_capture_sizes,
+            )
+
+            thinned = limit_cudagraph_capture_sizes(compilation_config)
+            if thinned is not None:
+                logger.info(
+                    "MUSA: limiting cudagraph capture to %d batch sizes %s "
+                    "(torch_musa does not share the graph pool across captures)",
+                    len(thinned),
+                    thinned,
+                )
+
+        if (
             parallel_config.all2all_backend == "deepep_high_throughput"
             and parallel_config.data_parallel_size > 1
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
@@ -666,6 +683,20 @@ class PlatformFL(Platform):
                 and "vllm::all_reduce" not in compilation_config.splitting_ops
             ):
                 compilation_config.splitting_ops.append("vllm::all_reduce")
+            # vLLM 0.32 lowers TP collectives to `_c10d_functional` ops, not the
+            # `vllm::all_reduce` wrapper. torch_musa's MCCL cannot submit or poll
+            # those while a graph is recording, so split them out too; they then
+            # run eagerly between the captured regions.
+            from vllm_fl.dispatch.backends.vendor.musa.graph_config import (
+                append_collective_splitting_ops,
+            )
+
+            if append_collective_splitting_ops(compilation_config.splitting_ops):
+                logger.info(
+                    "MUSA: excluding c10d collectives from cudagraphs "
+                    "(MCCL is not capture-safe); splitting_ops=%s",
+                    compilation_config.splitting_ops,
+                )
 
     @classmethod
     def get_attn_backend_cls(
@@ -974,18 +1005,27 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Mirror upstream CUDA's IR-op defaults without hardcoding CUDA APIs.
+
+        vLLM 0.32 registers ``gelu_and_mul_sparse`` only for the ``triton`` and
+        ``native`` providers, so the generic ``["vllm_c", "native"]`` default is
+        rejected there by ``IrOp._filter_priority_impls``.  Keep upstream's
+        per-op override so EMPTY builds (MUSA and other OOT vendors) start.
+        """
+        from dataclasses import fields
+
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"] if using_inductor else ["vllm_c", "native"]
-        return IrOpPriorityConfig.with_default(
-            default,
-            rms_norm=default,
-            fused_add_rms_norm=default,
-        )
+        overrides = {"rms_norm": default, "fused_add_rms_norm": default}
+        # Only override ops the installed vLLM knows about: with_default() forwards
+        # kwargs straight to the dataclass, so an unknown name is a TypeError.
+        if any(f.name == "gelu_and_mul_sparse" for f in fields(IrOpPriorityConfig)):
+            overrides["gelu_and_mul_sparse"] = ["triton", "native"]
+        return IrOpPriorityConfig.with_default(default, **overrides)
 
     @classmethod
     def is_arch_support_pdl(cls) -> bool:
