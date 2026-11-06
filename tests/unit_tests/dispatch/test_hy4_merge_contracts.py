@@ -131,9 +131,14 @@ def test_hy4_registration_is_platform_scoped(isolated_runtime, vendor):
     model_loader = module(
         "vllm.model_executor.model_loader", _LOAD_FORMAT_TO_MODEL_LOADER=loaders
     )
-    model_loader.register_model_loader = lambda name: lambda cls: loaders.setdefault(
-        name, cls
-    )
+
+    def register_loader(name):
+        def register(cls):
+            return loaders.setdefault(name, cls)
+
+        return register
+
+    model_loader.register_model_loader = register_loader
     module(
         "vllm.model_executor.models.registry",
         ModelRegistry=SimpleNamespace(

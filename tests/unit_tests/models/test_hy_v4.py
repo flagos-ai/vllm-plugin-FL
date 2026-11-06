@@ -80,9 +80,7 @@ def test_hy4_prefill_host_metadata_honors_query_slice():
 
     hy_v4._attach_hyv4_prefill_host_metadata(chunk, common_attn_metadata, 2)
 
-    assert hy_v4._get_hyv4_prefill_host_metadata(chunk) == (
-        [0, 3], [0], [3], [0], [0]
-    )
+    assert hy_v4._get_hyv4_prefill_host_metadata(chunk) == ([0, 3], [0], [3], [0], [0])
 
 
 def test_hy4_sparse_index_block_n_is_thead_shape_gated(monkeypatch):
@@ -91,25 +89,30 @@ def test_hy4_sparse_index_block_n_is_thead_shape_gated(monkeypatch):
     )
     monkeypatch.setattr(hy_v4.current_platform, "vendor_name", "thead")
 
-    assert hy_v4._select_hyv4_sparse_index_block_n(
-        token_indices, 2048, 128, False, True
-    ) == 2048
-    assert hy_v4._select_hyv4_sparse_index_block_n(
-        token_indices, 2048, 128, True, True
-    ) == 128
-    assert hy_v4._select_hyv4_sparse_index_block_n(
-        token_indices, 2048, 128, False, False
-    ) == 128
+    assert (
+        hy_v4._select_hyv4_sparse_index_block_n(token_indices, 2048, 128, False, True)
+        == 2048
+    )
+    assert (
+        hy_v4._select_hyv4_sparse_index_block_n(token_indices, 2048, 128, True, True)
+        == 128
+    )
+    assert (
+        hy_v4._select_hyv4_sparse_index_block_n(token_indices, 2048, 128, False, False)
+        == 128
+    )
 
     token_indices.shape = (64, 1024)
-    assert hy_v4._select_hyv4_sparse_index_block_n(
-        token_indices, 1024, 128, False, True
-    ) == 128
+    assert (
+        hy_v4._select_hyv4_sparse_index_block_n(token_indices, 1024, 128, False, True)
+        == 128
+    )
     monkeypatch.setattr(hy_v4.current_platform, "vendor_name", "nvidia")
     token_indices.shape = (64, 2048)
-    assert hy_v4._select_hyv4_sparse_index_block_n(
-        token_indices, 2048, 128, False, True
-    ) == 128
+    assert (
+        hy_v4._select_hyv4_sparse_index_block_n(token_indices, 2048, 128, False, True)
+        == 128
+    )
 
 
 def test_hy4_prefill_topk_uses_shared_capability(monkeypatch):
@@ -180,8 +183,10 @@ def test_hy4_blocked_prefill_topk_matches_row_reference():
             continue
         scores = torch.matmul(keys[start:end], q[row].transpose(0, 1))
         logits = (
-            torch.relu(scores) * weights[row].to(scores.dtype).unsqueeze(0)
-        ).sum(dim=-1).float()
+            (torch.relu(scores) * weights[row].to(scores.dtype).unsqueeze(0))
+            .sum(dim=-1)
+            .float()
+        )
         selected = torch.topk(logits, count, sorted=True).indices.to(torch.int32)
         expected[row, :count].copy_(selected + start - request_start)
 
@@ -234,9 +239,7 @@ def test_hy4_full_range_indices_are_request_relative():
     ends = torch.tensor([2, 7, 9], dtype=torch.int32)
     output = torch.empty((3, 4), dtype=torch.int32)
 
-    hy_v4._fill_hyv4_full_range_indices(
-        starts, ends, request_start=2, output=output
-    )
+    hy_v4._fill_hyv4_full_range_indices(starts, ends, request_start=2, output=output)
 
     assert output.tolist() == [
         [-1, -1, -1, -1],
@@ -286,9 +289,7 @@ class _FakeMoERunner(nn.Module):
 
 def test_hyv4_native_router_mm_is_shape_precision_and_backend_gated(monkeypatch):
     monkeypatch.setattr(hy_v4.current_platform, "vendor_name", "thead")
-    monkeypatch.setattr(
-        torch, "get_float32_matmul_precision", lambda: "highest"
-    )
+    monkeypatch.setattr(torch, "get_float32_matmul_precision", lambda: "highest")
     monkeypatch.setattr(hy_v4, "use_flaggems_op", lambda name: False)
     monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", False)
 
@@ -315,13 +316,9 @@ def test_hyv4_native_router_mm_is_shape_precision_and_backend_gated(monkeypatch)
     monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", True)
     assert not hy_v4._can_use_hyv4_native_router_mm(**args)
     monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", False)
-    monkeypatch.setattr(
-        torch, "get_float32_matmul_precision", lambda: "high"
-    )
+    monkeypatch.setattr(torch, "get_float32_matmul_precision", lambda: "high")
     assert not hy_v4._can_use_hyv4_native_router_mm(**args)
-    monkeypatch.setattr(
-        torch, "get_float32_matmul_precision", lambda: "highest"
-    )
+    monkeypatch.setattr(torch, "get_float32_matmul_precision", lambda: "highest")
     monkeypatch.setattr(hy_v4, "use_flaggems_op", lambda name: True)
     assert not hy_v4._can_use_hyv4_native_router_mm(**args)
     monkeypatch.setattr(hy_v4.current_platform, "vendor_name", "nvidia")
