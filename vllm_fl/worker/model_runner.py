@@ -6639,6 +6639,10 @@ class ModelRunnerFL(
                     mem_samples: list[int] = []
 
                     for i, desc in enumerate(profile_descs):
+                        # Count live graph allocations rather than ordinary
+                        # allocator cache left by a profiling forward pass.
+                        _accelerator_synchronize()
+                        _accelerator_empty_cache()
                         mem_before = current_platform.torch_device_fn.mem_get_info()[0]
                         self._warmup_and_capture(
                             desc,
@@ -6653,6 +6657,7 @@ class ModelRunnerFL(
                             ),
                         )
                         _accelerator_synchronize()
+                        _accelerator_empty_cache()
                         free_after = current_platform.torch_device_fn.mem_get_info()[0]
                         mem_samples.append(mem_before - free_after)
 
@@ -6675,9 +6680,12 @@ class ModelRunnerFL(
                     )
 
                 if encoder_cudagraph_manager is not None:
+                    _accelerator_synchronize()
+                    _accelerator_empty_cache()
                     mem_before = current_platform.torch_device_fn.mem_get_info()[0]
                     encoder_cudagraph_manager.capture(graph_pool=encoder_profiling_pool)
                     _accelerator_synchronize()
+                    _accelerator_empty_cache()
                     free_after = current_platform.torch_device_fn.mem_get_info()[0]
                     encoder_memory_estimate = max(mem_before - free_after, 0)
 
