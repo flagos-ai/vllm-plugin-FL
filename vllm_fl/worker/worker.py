@@ -396,8 +396,26 @@ class WorkerFL(WorkerBase):
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
             parallel_config = self.parallel_config
+            # When vLLM already handed this DP rank its own physical device
+            # list (assigned_physical_gpu_ids, set for platforms that cannot
+            # rely on set_device_index(), e.g. NPU), that list is already
+            # sliced per rank and local_rank indexes into it. Adding the DP
+            # offset on top double-counts: DP rank 1 gets local_rank 2 while
+            # only [2, 3] are assigned, which trips the bounds check below /
+            # raises IndexError from logical_device_id_to_visible_device_id().
+            # A full (un-sliced) list -- CUDA with --device-ids -- is longer
+            # than one TP x PP group and still needs the offset.
+            assigned_ids = parallel_config.assigned_physical_gpu_ids
+            tp_pp_world_size = (
+                parallel_config.pipeline_parallel_size
+                * parallel_config.tensor_parallel_size
+            )
+            rank_slice_assigned = (
+                assigned_ids is not None and len(assigned_ids) <= tp_pp_world_size
+            )
             if (
-                parallel_config.distributed_executor_backend
+                not rank_slice_assigned
+                and parallel_config.distributed_executor_backend
                 not in ("ray", "external_launcher")
                 and parallel_config.data_parallel_backend != "ray"
                 and parallel_config.nnodes_within_dp == 1
@@ -406,11 +424,6 @@ class WorkerFL(WorkerBase):
                 dp_local_rank = self.parallel_config.data_parallel_rank_local
                 if dp_local_rank is None:
                     dp_local_rank = self.parallel_config.data_parallel_index
-
-                tp_pp_world_size = (
-                    self.parallel_config.pipeline_parallel_size
-                    * self.parallel_config.tensor_parallel_size
-                )
 
                 # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
                 self.local_rank += dp_local_rank * tp_pp_world_size
