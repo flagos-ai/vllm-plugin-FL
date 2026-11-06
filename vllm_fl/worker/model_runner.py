@@ -6623,8 +6623,9 @@ class ModelRunnerFL(
             original_pools[id(instance)] = instance.graph_pool
             instance.graph_pool = profiling_pool
 
-        shared_memory_estimate = {}
-        per_graph_estimate = {}
+        decoder_memory_peak = 0
+        unprofiled_graph_memory = 0
+        profiled_driver_floor = 0
         encoder_memory_estimate = 0
         # Cleanup-only guard: CUDA graph capture errors should still propagate
         # because encoder graph capture is opt-in.
@@ -6633,6 +6634,9 @@ class ModelRunnerFL(
             with self._freeze_gc(), graph_capture(device=self.device):
                 _accelerator_synchronize()
                 _accelerator_empty_cache()
+                decoder_memory_baseline = (
+                    current_platform.torch_device_fn.mem_get_info()[0]
+                )
 
                 for mode, descs in capture_descs:
                     profile_descs = descs[:2]
@@ -6660,6 +6664,11 @@ class ModelRunnerFL(
                         _accelerator_empty_cache()
                         free_after = current_platform.torch_device_fn.mem_get_info()[0]
                         mem_samples.append(mem_before - free_after)
+                        decoder_memory_peak = max(
+                            decoder_memory_peak,
+                            decoder_memory_baseline - free_after,
+                            0,
+                        )
 
                     first_capture = mem_samples[0]
                     # Use at least 1 MiB per graph for driver overhead
@@ -6667,15 +6676,22 @@ class ModelRunnerFL(
                         mem_samples[1] if len(mem_samples) > 1 else 0, 1 << 20
                     )
 
-                    shared_memory_estimate[mode] = first_capture
-                    per_graph_estimate[mode] = per_graph * (len(descs) - 1)
+                    unprofiled_graphs = len(descs) - len(profile_descs)
+                    unprofiled_graph_memory += per_graph * unprofiled_graphs
+                    if len(mem_samples) > 1:
+                        # Preserve the existing driver allowance for a sampled
+                        # second graph, adding only its gap above measured growth.
+                        profiled_driver_floor += max(
+                            (1 << 20) - max(mem_samples[1], 0), 0
+                        )
 
                     logger.debug(
-                        "Estimated %s CUDA graph memory: "
-                        "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
+                        "Profiled %s CUDA graph memory: "
+                        "%.2f MiB first-capture; %d unprofiled graphs at "
+                        "%.2f MiB per-graph",
                         mode.name,
                         first_capture / (1 << 20),
-                        len(descs),
+                        unprofiled_graphs,
                         per_graph / (1 << 20),
                     )
 
@@ -6707,11 +6723,10 @@ class ModelRunnerFL(
             self._cleanup_profiling_kv_cache()
             compilation_counter.num_cudagraph_captured = saved_num_cudagraph_captured
 
-        # FULL and PIECEWISE graphs share the global pool at runtime and are
-        # never replayed concurrently, so the pool overlays their memory.
-        # Take the max to avoid double-counting the overlap.
-        decoder_estimate = max(shared_memory_estimate.values(), default=0) + sum(
-            per_graph_estimate.values()
+        # Both modes were sampled in one pool, so each free-memory delta is
+        # incremental. Keep its observed peak and project uncaptured graphs.
+        decoder_estimate = (
+            decoder_memory_peak + unprofiled_graph_memory + profiled_driver_floor
         )
         # Encoder graphs use a manager-local pool at runtime, separate from the
         # decoder pool, so add their estimate instead of overlaying it.

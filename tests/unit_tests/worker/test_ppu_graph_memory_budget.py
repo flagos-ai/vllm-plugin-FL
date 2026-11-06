@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 class Mode(IntEnum):
     NONE = 0
     FULL = 1
+    PIECEWISE = 2
 
 
 def method(file, class_name, name, namespace):
@@ -223,14 +224,13 @@ class TestGraphMeasurements(unittest.TestCase):
     def test_graph_estimate_excludes_ordinary_allocator_cache(self):
         function, runner, wrappers, events, memory, counter = self.profiler()
         self.assertEqual(function(runner), 12 * (1 << 20))
-        self.assertEqual(
-            [
-                event[1]
-                for event in events
-                if isinstance(event, tuple) and event[0] == "read"
-            ],
-            [0, 0, 0, 0],
-        )
+        readings = [
+            event[1]
+            for event in events
+            if isinstance(event, tuple) and event[0] == "read"
+        ]
+        self.assertTrue(readings)
+        self.assertEqual(set(readings), {0})
         self.assertEqual(wrappers[0].graph_pool, "original-pool")
         self.assertIn("cleanup-kv", events)
         self.assertEqual(memory["live"], 0)
@@ -246,6 +246,65 @@ class TestGraphMeasurements(unittest.TestCase):
         self.assertIn(("capture-enabled", False), events)
         self.assertEqual(memory["live"], 0)
         self.assertEqual(counter.num_cudagraph_captured, 7)
+
+    def test_mixed_modes_include_sampled_pool_peak_and_unsampled_graphs(self):
+        function, runner, wrappers, events, memory, counter = self.profiler()
+        runner.cudagraph_dispatcher.get_capture_descs = lambda: [
+            (Mode.FULL, [SimpleNamespace(num_tokens=n) for n in (512, 256, 128)]),
+            (
+                Mode.PIECEWISE,
+                [SimpleNamespace(num_tokens=n) for n in (384, 192, 96)],
+            ),
+        ]
+        runner.cudagraph_dispatcher.cudagraph_keys = {
+            Mode.FULL: {1},
+            Mode.PIECEWISE: {2},
+        }
+        captures = []
+        observed_peak = {"value": 0}
+
+        def capture(desc, **kwargs):
+            self.assertEqual(wrappers[0].graph_pool, "profiling-pool")
+            captures.append(desc.num_tokens)
+            counter.num_cudagraph_captured += 1
+            memory["live"] += {512: 8, 256: 2, 384: 12, 192: 2}[desc.num_tokens] * (
+                1 << 20
+            )
+            memory["cached"] = 90 * (1 << 30)
+            observed_peak["value"] = max(observed_peak["value"], memory["live"])
+
+        runner._warmup_and_capture = capture
+        self.assertEqual(function(runner), 28 * (1 << 20))
+        self.assertEqual(observed_peak["value"], 24 * (1 << 20))
+        self.assertEqual(captures, [512, 256, 384, 192])
+        self.assertEqual(wrappers[0].graph_pool, "original-pool")
+        self.assertTrue(
+            all(
+                not keys for keys in runner.cudagraph_dispatcher.cudagraph_keys.values()
+            )
+        )
+        self.assertIn("cleanup-kv", events)
+        self.assertEqual(counter.num_cudagraph_captured, 7)
+
+    def test_profiled_second_graph_keeps_existing_driver_overhead_floor(self):
+        function, runner, wrappers, events, memory, counter = self.profiler()
+        captures = []
+
+        def capture(desc, **kwargs):
+            captures.append(desc.num_tokens)
+            memory["live"] += (5 if len(captures) == 1 else 0) * (1 << 20)
+            memory["cached"] = 90 * (1 << 30)
+
+        runner._warmup_and_capture = capture
+        self.assertEqual(function(runner), 7 * (1 << 20))
+        self.assertEqual(captures, [512, 256])
+        self.assertIn("cleanup-kv", events)
+
+    def test_pool_peak_excludes_live_memory_present_before_graph_profiling(self):
+        function, runner, wrappers, events, memory, counter = self.profiler()
+        memory["live"] = 100 * (1 << 20)
+        self.assertEqual(function(runner), 12 * (1 << 20))
+        self.assertIn("cleanup-kv", events)
 
     def test_encoder_graph_measurement_excludes_allocator_cache(self):
         function, runner, wrappers, events, memory, counter = self.profiler()
@@ -263,10 +322,13 @@ class TestGraphMeasurements(unittest.TestCase):
         )
         runner._create_encoder_cudagraph_manager = lambda: encoder
         self.assertEqual(function(runner), 5 * (1 << 20))
-        self.assertEqual(
-            [e[1] for e in events if isinstance(e, tuple) and e[0] == "read"],
-            [0, 0],
-        )
+        readings = [
+            event[1]
+            for event in events
+            if isinstance(event, tuple) and event[0] == "read"
+        ]
+        self.assertTrue(readings)
+        self.assertEqual(set(readings), {0})
         self.assertIn("cleanup-kv", events)
         self.assertEqual(wrappers[0].graph_pool, "original-pool")
 
