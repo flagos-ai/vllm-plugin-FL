@@ -100,6 +100,12 @@ def test_gate_missing_flagcx_fails_before_server_launch(tmp_path, missing):
     assert not (tmp_path / "results").exists()
 
 
+def test_ci_leaves_memory_budget_at_vllm_default():
+    source = (ROOT / ".github/scripts/iluvatar/run_gates.sh").read_text()
+    assert "GPU_MEMORY_UTILIZATION" not in source
+    assert "--gpu-memory-utilization" not in source
+
+
 def test_ci_graph_config_default_and_override():
     import json
 

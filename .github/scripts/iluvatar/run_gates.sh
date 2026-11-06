@@ -17,7 +17,6 @@ export VLLM_PLUGINS=fl USE_FLAGGEMS=1 GEMS_VENDOR=iluvatar
 python .github/scripts/iluvatar/verify_stack.py
 export TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-4}
 export MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
-export GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.70}
 # Keep FULL graph replay; Inductor lowering currently fails generation gates.
 if [[ -z ${GRAPH_COMPILATION_CONFIG:-} ]]; then
     export GRAPH_COMPILATION_CONFIG='{"mode":0,"cudagraph_mode":"FULL","custom_ops":["all"],"ir_enable_torch_wrap":false}'

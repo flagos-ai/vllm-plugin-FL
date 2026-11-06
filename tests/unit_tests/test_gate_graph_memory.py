@@ -1,4 +1,4 @@
-"""The graph launcher's memory budget must reach the actual serve command."""
+"""Gate launchers leave the memory budget at the vLLM default."""
 
 import os
 import subprocess
@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.mark.parametrize("launcher", ["graph", "eager"])
 @pytest.mark.parametrize("budget", [None, "0.70", "0.83"])
-def test_memory_budget_forwarded(tmp_path, budget, launcher):
+def test_memory_budget_uses_vllm_default(tmp_path, budget, launcher):
     binary = tmp_path / "vllm"
     binary.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
     binary.chmod(0o755)
@@ -35,7 +35,7 @@ def test_memory_budget_forwarded(tmp_path, budget, launcher):
         check=True,
     )
     args = result.stdout.splitlines()
-    assert args[args.index("--gpu-memory-utilization") + 1] == (budget or "0.92")
+    assert not any(arg.startswith("--gpu-memory-utilization") for arg in args)
     assert ("--enforce-eager" in args) == (launcher == "eager")
 
 
