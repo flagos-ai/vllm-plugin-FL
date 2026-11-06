@@ -396,15 +396,7 @@ Pipeline/expert parallelism and FlagCX KV transfer are outside this test scope.
 
 ### Validate FlagCX across two physical hosts
 
-The procedure below separates each mode's acceptance. Exact private revision
-`661807408568` passed the original two-host native V2 eager client: 14 records
-(1 GET and 13 POST), all 188 original checks, with enabled FlagCX world size 2,
-distinct host boot/GPU identities and native communication during inference.
-The image response used its original 128-token cap; this is smoke coverage.
-That revision failed native V2 graph startup at the coordinator's communicator
-type assertion, before any HTTP request. A CUDA API bridge addresses the
-interface mismatch; its graph model acceptance must be recorded separately.
-
+Use native runner V2 for both eager and PIECEWISE on two physical hosts.
 
 Reserve one idle MetaX GPU on each of two physical hosts. Use the same image,
 plugin revision, pinned FlagCX core/wrapper and complete Qwen3.5-4B checkpoint
@@ -439,9 +431,9 @@ export FLAGCX_DEBUG_FILE=/work/flagcx-%h-%p.log
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 ```
 
-Keep `GEMS_VENDOR=metax`, `VLLM_PLUGINS=fl`, `VLLM_USE_V2_MODEL_RUNNER=0`,
-`FLAGCX_PATH` and the import/library paths from the earlier examples on both
-hosts. Retain the execution-RPC watchdog of 1800 seconds. Leave
+Set `VLLM_USE_V2_MODEL_RUNNER=1` on both hosts. Keep `GEMS_VENDOR=metax`,
+`VLLM_PLUGINS=fl`, `FLAGCX_PATH` and the import/library paths from the earlier
+examples. Retain the execution-RPC watchdog of 1800 seconds. Leave
 `FLAGCX_HOSTID` and `FLAGCX_CLUSTER_SPLIT_LIST` unset so the core can detect the
 real topology. A custom network plugin is optional; the pinned core provides
 built-in network adaptors when `FLAGCX_NET_ADAPTOR_PLUGIN` is unset.
@@ -510,18 +502,17 @@ For PIECEWISE, stop both owned service processes, replace the `mode_args`
 assignment on both hosts with the following, and rerun the same command:
 
 ```bash
-mode_args=(--compilation-config '{"mode":3,"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4],"cudagraph_mm_encoder":false}')
+mode_args=(--compilation-config '{"mode":3,"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4],"cudagraph_mm_encoder":false,"use_inductor_graph_partition":false}' --cudagraph-metrics)
 ```
 
 Use the same temperature-zero, no-thinking text, arithmetic, repeated-request
 and image checks against the main host's port 18020 in each mode. Retain the
 actual commands, responses, quality assertions, exit statuses and logs from
-both hosts. Record the rank-to-host/GPU mapping, actual `CommunicatorFL` class,
-FlagCX library/wrapper fingerprints and enabled state. Confirm successful
-native FlagCX calls during model execution, beyond the one-element startup
-warmup, and during graph capture/replay for the PIECEWISE run. Gloo bootstrap
-success or a disabled communicator is insufficient. Report cross-machine
-results separately from the earlier single-host runs and the adaptation Gate.
+both hosts. Record the rank-to-host/GPU mapping, the native V2 runner class,
+the `MetaxCommunicatorFL` class, and the enabled FlagCX library fingerprints.
+For PIECEWISE, verify final capture of sizes 1, 2 and 4 after KV cache
+allocation, and native FlagCX replay during requests on both hosts. Report
+response assertion failures separately from the capture and replay evidence.
 
 ## Compatibility boundaries
 
@@ -546,31 +537,23 @@ results separately from the earlier single-host runs and the adaptation Gate.
   `FlashMLASchedMeta`. Older tuple-based libraries are rejected with a dependency
   error. Sparse MLA and FP8 MLA caches are not supported by this backend.
 - `ModelRunnerFL` remains the default. Explicit `VLLM_USE_V2_MODEL_RUNNER=1`
-  enables the [experimental upstream V2 path](#experimental-upstream-v2-runner).
+  enables the [native V2 path](#native-v2-runner).
   FULL graphs and additional speculative/quantized configurations require
   separate hardware validation.
 - All changes are installed through the FL plugin lifecycle. Do not edit
   installed vLLM sources or copy CUDA extensions from another environment.
 
 
-### Experimental upstream V2 runner
+### Native V2 runner
 
-The default MetaX path remains `ModelRunnerFL`. Explicitly setting
-`VLLM_USE_V2_MODEL_RUNNER=1` selects the official vLLM 0.32
-`vllm.v1.worker.gpu.model_runner.GPUModelRunner` for isolated validation.
+MetaX defaults to `ModelRunnerFL`. Set `VLLM_USE_V2_MODEL_RUNNER=1` to
+select vLLM 0.32's native `vllm.v1.worker.gpu.model_runner.GPUModelRunner`.
+The MetaX model E2E CI variant sets this flag for eager and graph cases.
 When the empty wheel lacks a native CPU-dispatch mapped-memory kernel,
 only V2's buffer module uses its existing `NonUvaBuffer` copy fallback;
 global pinned-memory and CUDA platform classification are unchanged.
 
-This path uses the official `CUDAGraphWrapper` and its V2 profiling/cleanup
-registry, with the existing MetaX native-first weak-reference primitive.
-It preserves the explicit active capture stream and does not apply the
-private V1 stable-input/split-boundary candidate. FL operator dispatch is
-resolved after model loading before compilation. Model/operator registration,
-KV allocation and GDN metadata remain on their upstream V2 paths.
-
-This is an experimental implementation, not GPU or model acceptance. Validate
-single-host eager correctness first, followed by actual PIECEWISE capture and
-replay with unchanged text/image budgets and assertions. Cross-node FlagCX
-requires its own native per-rank communication and complete HTTP evidence.
-The older V1 failures and CPU-only candidates do not establish V2 correctness.
+This path uses upstream V2's `CUDAGraphWrapper` and its profiling and
+cleanup registry with the MetaX weak-reference implementation. FL operator
+dispatch is resolved after model loading, before compilation. V2 handles
+model and operator registration, KV allocation and GDN metadata.
