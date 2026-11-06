@@ -42,7 +42,6 @@ exec vllm serve "$model_path" \
     --port "$((10#$port))" \
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-2}" \
     --max-model-len "${MAX_MODEL_LEN:-32768}" \
-    --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.92}" \
     --allowed-local-media-path "$script_dir/images" \
     --trust-remote-code \
     "${compilation_args[@]}"
