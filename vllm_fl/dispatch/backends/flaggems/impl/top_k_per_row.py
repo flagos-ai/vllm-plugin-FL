@@ -5,6 +5,15 @@ from __future__ import annotations
 
 import torch
 
+from vllm_fl.dispatch.capabilities import get_flaggems_vllm_operator
+
+
+def _get_operator(name):
+    implementation = get_flaggems_vllm_operator(name)
+    if not callable(implementation):
+        raise RuntimeError(f"Selected FlagGems-vllm operator {name} is unavailable")
+    return implementation
+
 
 def _normalize_decode_lengths(
     seq_lens: torch.Tensor, num_rows: int, next_n: int
@@ -44,8 +53,6 @@ def top_k_per_row_prefill(
     indices: torch.Tensor,
 ) -> None:
     """Select request-relative top-k indices for prefill rows."""
-    from flag_gems.fused import top_k_per_row_prefill as flaggems_topk
-
     _validate_common(logits, indices)
     if row_starts.ndim != 1 or row_ends.ndim != 1:
         raise ValueError("row_starts and row_ends must be 1D")
@@ -55,7 +62,7 @@ def top_k_per_row_prefill(
         raise TypeError("prefill row ranges must be int32")
     if logits.device != row_starts.device or logits.device != row_ends.device:
         raise ValueError("logits, row ranges and indices must share a device")
-    flaggems_topk(
+    _get_operator("top_k_per_row_prefill")(
         logits,
         row_starts.contiguous(),
         row_ends.contiguous(),
@@ -75,8 +82,6 @@ def top_k_per_row_decode(
     next_n: int,
 ) -> None:
     """Select top-k indices within each decode row's valid token range."""
-    from flag_gems.fused import top_k_per_row_decode as flaggems_topk
-
     _validate_common(logits, indices)
     if seq_lens.dtype != torch.int32:
         raise TypeError("seq_lens must be int32")
@@ -85,7 +90,7 @@ def top_k_per_row_decode(
     kernel_seq_lens, kernel_next_n = _normalize_decode_lengths(
         seq_lens, logits.shape[0], next_n
     )
-    flaggems_topk(
+    _get_operator("top_k_per_row_decode")(
         logits,
         kernel_next_n,
         kernel_seq_lens,

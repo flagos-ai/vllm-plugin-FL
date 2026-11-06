@@ -520,12 +520,6 @@ class PlatformFL(Platform):
             if override:
                 return override
 
-        if use_mla and cls.vendor_name == "thead":
-            from vllm.config import get_current_vllm_config
-            from vllm_fl.attention.mla_prefill import configure_mla_prefill
-
-            configure_mla_prefill(get_current_vllm_config())
-
         backend_path = call_op(
             "attention_backend", use_mla=use_mla, use_sparse=use_sparse
         )

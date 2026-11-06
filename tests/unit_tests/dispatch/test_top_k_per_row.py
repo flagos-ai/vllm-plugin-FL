@@ -39,7 +39,7 @@ def test_flaggems_decode_uses_explicit_2d_lengths(monkeypatch):
     module = importlib.import_module(
         "vllm_fl.dispatch.backends.flaggems.impl.top_k_per_row"
     )
-    fused = importlib.import_module("flag_gems.fused")
+    fused = importlib.import_module("flaggems_vllm")
     captured = {}
 
     def fake_topk(logits, next_n, seq_lens, indices, *shape_args):
@@ -63,7 +63,7 @@ def test_flaggems_decode_preserves_final_length_abi(monkeypatch):
     module = importlib.import_module(
         "vllm_fl.dispatch.backends.flaggems.impl.top_k_per_row"
     )
-    fused = importlib.import_module("flag_gems.fused")
+    fused = importlib.import_module("flaggems_vllm")
     captured = {}
 
     def fake_topk(logits, next_n, seq_lens, indices, *shape_args):
@@ -85,7 +85,7 @@ def test_flaggems_prefill_derives_provider_abi(monkeypatch):
     module = importlib.import_module(
         "vllm_fl.dispatch.backends.flaggems.impl.top_k_per_row"
     )
-    fused = importlib.import_module("flag_gems.fused")
+    fused = importlib.import_module("flaggems_vllm")
     captured = {}
 
     def fake_topk(logits, starts, ends, indices, *shape_args):

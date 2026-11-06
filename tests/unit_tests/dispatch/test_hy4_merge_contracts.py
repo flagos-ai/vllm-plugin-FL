@@ -320,3 +320,112 @@ def test_ppu_policy_uses_bf16_contract_names():
             "flagos",
             "reference",
         ]
+
+
+@pytest.mark.parametrize("phase", ["prefill", "decode"])
+@pytest.mark.parametrize("failure", [None, "missing", "execution"])
+def test_bf16_topk_uses_public_operator_without_retry(isolated_runtime, phase, failure):
+    calls = []
+
+    def legacy_operator(*args):
+        pytest.fail("legacy FlagGems provider selected")
+
+    isolated_runtime.module("flag_gems", __path__=[])
+    isolated_runtime.module(
+        "flag_gems.fused", **{f"top_k_per_row_{phase}": legacy_operator}
+    )
+
+    def public_operator(*args):
+        calls.append(args)
+        if failure == "execution":
+            raise RuntimeError("selected kernel failed")
+
+    isolated_runtime.module(
+        "flaggems_vllm",
+        **{f"top_k_per_row_{phase}": None if failure == "missing" else public_operator},
+    )
+    adapter = importlib.import_module(
+        "vllm_fl.dispatch.backends.flaggems.impl.top_k_per_row"
+    )
+    # Non-unit logits stride must reach the public ABI unchanged.
+    logits = torch.empty((2, 16), dtype=torch.float32)[:, ::2]
+    indices = torch.empty((2, 3), dtype=torch.int32)
+    lengths = torch.tensor([[3, 1]], dtype=torch.int32)
+    starts = torch.tensor([1, 2], dtype=torch.int32)
+    ends = torch.tensor([6, 8], dtype=torch.int32)
+
+    def invoke():
+        if phase == "prefill":
+            adapter.top_k_per_row_prefill(logits, starts, ends, indices)
+        else:
+            adapter.top_k_per_row_decode(logits, lengths, indices, next_n=2)
+
+    if failure:
+        reason = "is unavailable" if failure == "missing" else "selected kernel failed"
+        with pytest.raises(RuntimeError, match=reason):
+            invoke()
+    else:
+        invoke()
+    assert len(calls) == (0 if failure == "missing" else 1)
+    if calls:
+        args = calls[0]
+        assert args[0] is logits and args[3] is indices
+        assert args[4:] == (2, 16, 2, 3)
+        if phase == "prefill":
+            assert args[1] is starts and args[2] is ends
+        else:
+            assert args[1] == 1 and args[2].tolist() == [3, 1]
+
+
+@pytest.mark.parametrize("active_plan", [False, True])
+def test_ppu_attention_selection_needs_no_current_config(isolated_runtime, active_plan):
+    module = isolated_runtime.module
+    platform = sys.modules["vllm.platforms"]
+    platform.Platform = type("Platform", (), {})
+    platform.PlatformEnum = SimpleNamespace(OOT=object())
+    module("vllm.platforms.interface", DeviceCapability=object)
+    module("vllm.v1.attention.backends.registry", AttentionBackendEnum=object())
+    utils = sys.modules["vllm_fl.utils"]
+    utils.SPLITTING_OPS = []
+    utils.DeviceInfo = lambda: SimpleNamespace(
+        vendor_name="thead",
+        device_type="cuda",
+        dispatch_key="CUDA",
+        torch_device_fn=None,
+    )
+    utils.get_device_type = lambda vendor: "cuda"
+    utils.get_device_name = lambda vendor: vendor
+    utils.get_device_control_env_var = lambda vendor: "CUDA_VISIBLE_DEVICES"
+
+    def no_config():
+        raise AssertionError("Current vLLM config is not set")
+
+    module("vllm.config", get_current_vllm_config=no_config)
+    module("vllm_fl.attention.mla_prefill", configure_mla_prefill=lambda config: None)
+    plan = (
+        SimpleNamespace(attention_backend=lambda **kw: "MODEL") if active_plan else None
+    )
+    module(
+        "vllm_fl.activation",
+        get_active_plan=lambda: plan,
+    )
+    calls = []
+
+    def dispatch(op, **kwargs):
+        calls.append((op, kwargs))
+        return "GENERIC"
+
+    sys.modules["vllm_fl.dispatch"].call_op = dispatch
+    implementation = importlib.import_module("vllm_fl.platform")
+    implementation.logger = SimpleNamespace(
+        info=lambda *a: None, info_once=lambda *a, **k: None
+    )
+    selector = SimpleNamespace(use_mla=True, use_sparse=False)
+    assert implementation.PlatformFL.get_attn_backend_cls(None, selector) == (
+        "MODEL" if active_plan else "GENERIC"
+    )
+    assert calls == (
+        []
+        if active_plan
+        else [("attention_backend", {"use_mla": True, "use_sparse": False})]
+    )
