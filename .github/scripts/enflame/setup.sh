@@ -8,6 +8,9 @@ set -euo pipefail
 
 git config --global --add safe.directory "$(pwd)"
 
+# FlagOps benchmark report upload uses jq to build JSON payloads.
+apt-get update && apt-get install -y --no-install-recommends jq
+
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   for name in \
     VLLM_PLUGINS \

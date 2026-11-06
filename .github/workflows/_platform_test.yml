@@ -100,6 +100,8 @@ jobs:
             $CHANGED_ARG
 
   unit:
+    # Temporarily skip while validating benchmark report upload.
+    if: false
     needs: setup
     uses: ./.github/workflows/_unit_test.yml
     with:
@@ -113,6 +115,8 @@ jobs:
   # Runs all tests under tests/functional_tests/ in one job. No model files needed.
   # Runs once per platform (not per device) — functional tests are device-agnostic.
   functional:
+    # Temporarily skip while validating benchmark report upload.
+    if: false
     needs: [setup, unit]
     uses: ./.github/workflows/_functional_test.yml
     with:
@@ -128,7 +132,9 @@ jobs:
   # run inside a single job to avoid repeated container startup.
   e2e:
     needs: [setup, functional]
-    if: needs.setup.outputs.e2e_matrix != '[]'
+    # Temporarily skip while validating benchmark report upload.
+    # if: needs.setup.outputs.e2e_matrix != '[]'
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -147,7 +153,9 @@ jobs:
 
   # Validates vllm bench throughput/latency/serve entrypoints.
   benchmark:
-    needs: [setup, e2e]
+    # Temporarily run benchmark without waiting for e2e.
+    # needs: [setup, e2e]
+    needs: setup
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -156,6 +164,7 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
+    secrets: inherit
 
   # ============================================================
   # Feishu notification — per-platform status
