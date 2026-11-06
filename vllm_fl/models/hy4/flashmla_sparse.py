@@ -298,8 +298,6 @@ class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
             # Kernel dispatch was rebound to FlagGems (CUDA-alike device); only
             # the compute-capability gate reflects the missing native kernel.
             reasons = [r for r in reasons if "compute capability" not in r]
-            if not reasons:
-                cls._maybe_retune_triton_sparse_prefill()
         return reasons
 
     @staticmethod
@@ -325,7 +323,7 @@ class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
     _retuned: bool = False
 
     @classmethod
-    def _maybe_retune_triton_sparse_prefill(cls) -> None:
+    def _maybe_retune_triton_sparse_prefill(cls, tx=None) -> None:
         if cls._retuned:
             return
         import os
@@ -337,23 +335,39 @@ class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
             "no",
         ):
             return
+        from vllm.platforms import current_platform
+
+        if not (current_platform.is_cuda_alike() and not current_platform.is_cuda()):
+            return
+        if not cls._flaggems_sparse_active():
+            return
         import triton
 
+        retuned = False
         for module_name in (
             "flaggems_vllm.ops.flashmla_sparse",
             "flag_gems.fused.flashmla_sparse",
         ):
             try:
                 mod = __import__(module_name, fromlist=["_"])
-            except Exception:
+            except ImportError:
                 continue
             fn = getattr(mod, "triton_flash_mla_sparse_fwd", None)
             if fn is None or not hasattr(fn, "configs"):
                 continue
-            fn.configs = [
+            configs = [
                 triton.Config({"BK": bk, "BH": bh}, num_warps=warps, num_stages=stages)
                 for bk, bh, stages, warps in cls._SAFE_TILE_CONFIGS
             ]
+            if tx is not None:
+                # Discard selected upstream configs as well as the config list;
+                # both belong to this process-global installation transaction.
+                tx.set(fn, "configs", configs)
+                tx.set(fn, "cache", {})
+            else:
+                fn.configs = configs
+                fn.cache = {}
+            retuned = True
             logger.warning_once(
                 "HYV4 sparse MLA: rewrote %s.triton_flash_mla_sparse_fwd autotune "
                 "configs to small-shared-memory variants %s (device shared-memory "
@@ -361,4 +375,11 @@ class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
                 module_name,
                 cls._SAFE_TILE_CONFIGS,
             )
-        cls._retuned = True
+        if not retuned:
+            raise RuntimeError(
+                "HYV4 FlagGems sparse MLA has no retunable Triton prefill kernel"
+            )
+        if tx is not None:
+            tx.set(cls, "_retuned", True)
+        else:
+            cls._retuned = True

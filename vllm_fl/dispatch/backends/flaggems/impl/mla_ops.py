@@ -37,9 +37,7 @@ def _flaggems_query_quantizer(implementation):
 
 def get_operator(name):
     if name == "per_token_group_quant_fp8":
-        import flag_gems
-
-        fn = getattr(flag_gems, name, None)
+        fn = get_flaggems_vllm_operator(name)
         return _flaggems_query_quantizer(fn) if callable(fn) else None
     if name == "mla_prefill_backend":
         from vllm_fl.attention.mla_prefill import FlagGemsMLAPrefillBackend
