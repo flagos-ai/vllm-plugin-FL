@@ -785,6 +785,8 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
+            if cls.device_type == "cuda":
+                return "vllm_fl.distributed.cuda_communicator.CudaCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:

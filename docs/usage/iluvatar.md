@@ -43,6 +43,41 @@ The plugin also applies Iluvatar-specific compilation defaults in
 
 These three are applied at startup and do not have to be written by hand.
 
+## vLLM 0.32 V2 runner compatibility
+
+The image and commands in this guide validate vLLM 0.28, not 0.32. A separate
+CoreX 4.5 / PyTorch 2.10 / FlagGems 5.5 development environment was used to check
+vLLM 0.32's default V2 runner with Qwen3.6-27B, TP=4.
+
+On CUDA devices using FlagCX, the plugin selects `CudaCommunicatorFL` to satisfy
+upstream `GroupCoordinator.graph_capture()`'s CUDA communicator contract while
+keeping collective operations on FlagCX. This does not initialize PyNCCL or
+custom CUDA all-reduce. Non-CUDA FlagCX platforms keep `CommunicatorFL`.
+
+In that development environment, `FULL_AND_PIECEWISE` captured successfully but
+failed one long-text request: generation repeatedly emitted token 248320, equal
+to the vocabulary size. Keeping compilation mode 3 and changing only the graph
+mode to `FULL_DECODE_ONLY` produced two identical, normally terminated responses
+with valid token IDs in an isolated long-text test. However, the full 26-request
+gate passed only 24/26: two concurrent text requests returned truncated or empty
+outputs. Changing only compilation mode from 3 to 0 with `FULL_DECODE_ONLY`
+then passed all 26 requests (text, image, and mixed eight-way concurrency), while
+all four workers still captured and replayed full decode graphs. The explicitly
+validated configuration for this environment is:
+
+```bash
+--compilation-config '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32]}'
+```
+
+This disables torch compilation, not CUDA graphs or the V2 runner. It isolates a
+compilation-related compatibility issue; the underlying kernel cause and the
+performance impact have not been established.
+
+These tests retained `VLLM_FL_FLAGOS_BLACKLIST_APPEND=slice,mm,mm_out`. They do
+not validate removing those operator exclusions, other models, or token-level
+precision against NVIDIA. Do not treat successful graph capture alone as an
+inference correctness check or apply this model-specific workaround globally.
+
 ## 1. Check the host
 
 The host needs an installed CoreX driver, the CoreX management tool, and Docker.
