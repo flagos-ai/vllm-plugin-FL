@@ -15,13 +15,14 @@ from vllm.distributed.device_communicators.cuda_communicator import (  # noqa: E
     CudaCommunicator,
 )
 
-from vllm_fl.distributed.communicator import CommunicatorFL  # noqa: E402
-from vllm_fl.distributed.metax_communicator import (  # noqa: E402
-    MetaxCommunicatorFL,
-)
+import vllm_fl.distributed.communicator as communicator_module  # noqa: E402
+import vllm_fl.distributed.metax_communicator as metax_communicator_module  # noqa: E402
 from vllm_fl.distributed.nvidia_communicator import (  # noqa: E402
     NvidiaCommunicatorFL,
 )
+
+CommunicatorFL = communicator_module.CommunicatorFL
+MetaxCommunicatorFL = metax_communicator_module.MetaxCommunicatorFL
 
 
 @pytest.fixture
@@ -195,8 +196,6 @@ def test_cuda_bridge_keeps_flagcx_as_only_device_communicator(
 ):
     from types import SimpleNamespace
 
-    import vllm_fl.distributed.communicator as module
-
     base_init = DeviceCommunicatorBase.__init__
 
     def two_rank_base(self, *args, **kwargs):
@@ -206,7 +205,9 @@ def test_cuda_bridge_keeps_flagcx_as_only_device_communicator(
     native = MagicMock(disabled=False)
     native.all_reduce.return_value = expected = object()
     monkeypatch.setattr(DeviceCommunicatorBase, "__init__", two_rank_base)
-    monkeypatch.setattr(module, "PyFlagcxCommunicator", lambda **kwargs: native)
+    monkeypatch.setattr(
+        communicator_module, "PyFlagcxCommunicator", lambda **kwargs: native
+    )
     monkeypatch.setattr(
         CudaCommunicator,
         "__init__",
@@ -227,8 +228,6 @@ def metax_handoff(monkeypatch):
 
     import torch
 
-    import vllm_fl.distributed.metax_communicator as module
-
     events = []
     calls = []
     stream = SimpleNamespace(synchronize=lambda: events.append("sync"))
@@ -245,7 +244,7 @@ def metax_handoff(monkeypatch):
     capture = MagicMock(return_value=False)
     monkeypatch.setattr(torch.compiler, "is_compiling", lambda: False)
     monkeypatch.setattr(
-        module,
+        metax_communicator_module,
         "current_platform",
         SimpleNamespace(
             torch_device_fn=SimpleNamespace(is_current_stream_capturing=capture)
@@ -275,7 +274,7 @@ def metax_handoff(monkeypatch):
         capture=capture,
         events=events,
         calls=calls,
-        module=module,
+        module=metax_communicator_module,
     )
 
 
@@ -435,8 +434,6 @@ def test_metax_handoff_cpu_fullgraph_does_not_query_cuda(monkeypatch):
 
     import torch
 
-    import vllm_fl.distributed.metax_communicator as module
-
     def no_cuda():
         pytest.fail("CPU fullgraph path queried CUDA")
 
@@ -448,7 +445,7 @@ def test_metax_handoff_cpu_fullgraph_does_not_query_cuda(monkeypatch):
     )
     communicator._flagcx_capture_seen = True
     monkeypatch.setattr(
-        module,
+        metax_communicator_module,
         "current_platform",
         SimpleNamespace(
             torch_device_fn=SimpleNamespace(is_current_stream_capturing=no_cuda)
