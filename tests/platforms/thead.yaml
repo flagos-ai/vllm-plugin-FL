@@ -45,6 +45,17 @@ device_overrides:
 # Example: ["flaggems"] would skip "qwen3_flaggems" cases.
 unsupported_features: []
 
+# Default environment variables for this platform (applied by run.py before tests start)
+env_defaults:
+  VLLM_PLUGINS: "fl"
+  VLLM_TARGET_DEVICE: "empty"
+  VLLM_USE_V2_MODEL_RUNNER: "0"
+  GEMS_VENDOR: "thead"
+  USE_FLAGGEMS: "1"
+  TORCH_DEVICE_BACKEND_AUTOLOAD: "1"
+  FLAGCX_PATH: "/sgl-workspace/FlagCX"
+  LD_LIBRARY_PATH: "/sgl-workspace/FlagCX/build/lib"
+
 zw810e:
   name: "zw810e"
   tests:
