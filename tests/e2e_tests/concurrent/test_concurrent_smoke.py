@@ -7,7 +7,7 @@ Adapted from the sglang-plugin-FL concurrent smoke test: N requests are
 submitted to a single engine in one ``LLM.generate`` call, so the scheduler
 runs them through continuous batching concurrently, then every output is
 validated. The ``concurrent`` block in the model YAML is optional —
-defaults keep the CI smoke small (8 requests, 64 tokens each).
+defaults keep the CI smoke small (8 requests, 256 tokens each).
 
 This test file is driven by environment variables set by ``tests/run.py``:
 
@@ -24,11 +24,6 @@ import time
 
 import pytest
 
-from tests.utils.concurrent_cases import (
-    DEFAULT_TEXT_CASES,
-    matches_expected,
-    normalize_text_cases,
-)
 from tests.utils.device_utils import get_visible_device_env_var
 from tests.utils.model_config import ModelConfig
 from vllm import LLM, SamplingParams
@@ -62,9 +57,46 @@ if not os.path.exists(_CFG.model):
 # Prompt pool and sampling
 # ---------------------------------------------------------------------------
 
-_TEXT_CASES = normalize_text_cases(_CFG.concurrent.text_prompts or DEFAULT_TEXT_CASES)
+_DEFAULT_TEXT_CASES = [
+    {
+        "text": "How many states are there in the United States?",
+        "expected": ["50"],
+    },
+    {"text": "The capital of France is", "expected": ["paris"]},
+    {
+        "text": "What is the largest planet in the solar system?",
+        "expected": ["jupiter"],
+    },
+    {"text": "Who wrote the play Romeo and Juliet?", "expected": ["shakespeare"]},
+    {"text": "What is 17 multiplied by 13?", "expected": ["221"]},
+    {
+        "text": "Name the three primary colors of light.",
+        "expected": ["red", "green", "blue"],
+    },
+    {"text": "What year did World War II end?", "expected": ["1945"]},
+    {
+        "text": "Explain the concept of gravity in one sentence.",
+        "expected": ["mass", "force", "attract"],
+    },
+]
+
+
+def _normalize_text_cases(raw_cases: list) -> list[dict]:
+    cases = []
+    for item in raw_cases:
+        if isinstance(item, str):
+            cases.append({"text": item, "expected": []})
+            continue
+        expected = item.get("expected", [])
+        if isinstance(expected, str):
+            expected = [expected]
+        cases.append({"text": item["text"], "expected": expected})
+    return cases
+
+
+_TEXT_CASES = _normalize_text_cases(_CFG.concurrent.text_prompts or _DEFAULT_TEXT_CASES)
 CONCURRENT_N = int(os.environ.get("FL_CONCURRENT_N", str(_CFG.concurrent.concurrent_n)))
-_SAMPLING = {"max_tokens": 64, "temperature": 0.0}
+_SAMPLING = {"max_tokens": 256, "temperature": 0.0}
 _SAMPLING.update(_CFG.concurrent.text_sampling)
 _SAMPLING["max_tokens"] = int(
     os.environ.get("FL_CONCURRENT_MAX_TOKENS", _SAMPLING["max_tokens"])
@@ -131,7 +163,9 @@ def test_concurrent() -> None:
             print(f"  output[{i}]: {text!r}")
 
             if case["expected"]:
-                assert matches_expected(case, text), (
+                lower = text.lower()
+                matched = any(item.lower() in lower for item in case["expected"])
+                assert matched, (
                     f"Expected one of {case['expected']!r} in output for "
                     f"request[{i}] (finish_reason={completion.finish_reason!r}, "
                     f"generated_tokens={generated_tokens}, "
