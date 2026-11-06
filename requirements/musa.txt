@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# FlagTree provides the triton module. Match the MUSA 4.3.5 / torch 2.9.0
+# stack used with vLLM 0.24; do not install standalone Triton alongside it.
+--extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+flagtree==0.6.1a2+mthreads3.6
+
 decorator
 pyyaml
 scipy
