@@ -1,0 +1,29 @@
+[
+  {
+    "layer": 0,
+    "key": "layers.0.ffn.gate.tid2eid",
+    "shape": [
+      129280,
+      6
+    ],
+    "canonical_int32_sha256": "da364a46796cbc4a6fb2616272f3f92dcd7fc009c87202a8f25eac22ad5da5c1"
+  },
+  {
+    "layer": 1,
+    "key": "layers.1.ffn.gate.tid2eid",
+    "shape": [
+      129280,
+      6
+    ],
+    "canonical_int32_sha256": "c4bc1f1a1bd00f236a68e898ee0054a989b35e1099928463cbf5802a6be9618c"
+  },
+  {
+    "layer": 2,
+    "key": "layers.2.ffn.gate.tid2eid",
+    "shape": [
+      129280,
+      6
+    ],
+    "canonical_int32_sha256": "505c47590094064f2136f3e347ebe7492fc1e9c6623dd93095e9973a64d07494"
+  }
+]

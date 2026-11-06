@@ -20,7 +20,12 @@ from . import cuda_wrapper
 from . import utils_patch
 from . import chunk_delta_h
 from . import topk_topp_sampler
-from . import gdn_linear_attn  # noqa: F401 — register MacaGatedDeltaNetAttention
+
+
+def register_model_patches():
+    # import_kernels can run while vLLM linear.py is still being imported.
+    # Layer registration belongs to the later general-plugin/model hook.
+    from . import gdn_linear_attn  # noqa: F401
 
 # --------------------------------------------------
 # MetaX C550 does not support third-party Triton kernels (Triton upgrade required).

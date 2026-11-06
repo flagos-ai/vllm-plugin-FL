@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Custom Sparse Attention Indexer layers."""
 
+import os
+
 import torch
 
 import vllm.envs as envs
@@ -27,10 +29,8 @@ from vllm.v1.worker.workspace import current_workspace_manager
 
 from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
 from vllm_fl.dispatch import CachedOp
-from vllm_fl.ops.deepseek_v4_int8_indexer import (
-    int8_mqa_logits,
-    int8_paged_mqa_logits,
-)
+
+from vllm_fl import dsv4_config as _dsv4
 
 _indexer_k_quant_and_cache = CachedOp("indexer_k_quant_and_cache")
 _cp_gather_indexer_k_quant_cache = CachedOp("cp_gather_indexer_k_quant_cache")
@@ -47,12 +47,129 @@ RADIX_TOPK_WORKSPACE_SIZE = 1024 * 1024
 MXFP4_BLOCK_SIZE = 32
 
 
+def _dequantize_fp8(values: torch.Tensor, scales: torch.Tensor) -> torch.Tensor:
+    return values.to(torch.bfloat16) * scales.to(torch.bfloat16).unsqueeze(-1)
+
+
+# --- sparse_indexer_topk_fix (runtime patch, see scripts/sparse_indexer_topk_fix) ---
+# Background: the reference impls of top_k_per_row_prefill/decode are no-op
+# `pass`, and on MetaX the decode CachedOp resolves to that no-op while the
+# flagos decode Triton kernel fails to compile. As a result every decode step
+# left topk_indices_buffer at its -1 init and sparse attention selected nothing.
+# This helper restores the semantics:
+#   valid_len <= topk_tokens -> select ALL valid compressed entries (ks..ke-1),
+#                               rest stays -1 (no kernel);
+#   valid_len >  topk_tokens -> real top-k: flagos kernel (prefill, works on
+#                               MetaX) or torch-native masked topk (decode,
+#                               flagos kernel unavailable).
+
+_TOPK_FIX_STATE: dict[str, int] = {}
+
+
+def _log_topk_fix(kind: str, msg: str) -> None:
+    n = _TOPK_FIX_STATE.get(kind, 0) + 1
+    _TOPK_FIX_STATE[kind] = n
+    if n <= 3 or n % 512 == 0:
+        logger.warning(f"[sparse_indexer_topk_fix] {kind}: {msg} (call #{n})")
+
+
+def _fill_select_all(
+    ks: torch.Tensor,
+    valid: torch.Tensor,
+    out: torch.Tensor,
+    topk_tokens: int,
+) -> None:
+    """out[r, j] = ks[r] + j for j < valid[r], else -1."""
+    arange_k = torch.arange(topk_tokens, device=out.device, dtype=torch.long)
+    filled = arange_k.unsqueeze(0) + ks.unsqueeze(1)
+    filled = torch.where(
+        arange_k.unsqueeze(0) < valid.unsqueeze(1),
+        filled,
+        torch.full_like(filled, -1),
+    )
+    out.copy_(filled.to(out.dtype))
+
+
+def _topk_per_row_fixed(
+    logits: torch.Tensor,
+    ks: torch.Tensor,
+    ke: torch.Tensor,
+    out: torch.Tensor,
+    topk_tokens: int,
+    tag: str,
+    kernel=None,
+    kernel_args=(),
+    max_valid_hint: int | None = None,
+) -> None:
+    num_rows = logits.shape[0]
+    ks1 = ks.reshape(-1).to(torch.long)
+    ke1 = ke.reshape(-1).to(torch.long)
+    valid = (ke1 - ks1).clamp(min=0)
+    # Scores index the concatenated pool, but prefill outputs are request-local.
+    # Decode currently has ks=0; preserve its existing coordinate contract.
+    index_base = torch.zeros_like(ks1) if tag == "prefill" else ks1
+    # ksprobe (log-once, observation only): R4 check for topk-blacklist route.
+    # Computes ks min/max only when this call index will actually log
+    # (first 3 calls, then every 512th), so steady-state overhead is zero.
+    _ksn = _TOPK_FIX_STATE.get(f"{tag}-ksprobe", 0)
+    if _ksn < 3 or (_ksn + 1) % 512 == 0:
+        _log_topk_fix(
+            f"{tag}-ksprobe",
+            f"ks_min={int(ks1.min())} ks_max={int(ks1.max())} rows={num_rows}",
+        )
+    else:
+        _TOPK_FIX_STATE[f"{tag}-ksprobe"] = _ksn + 1
+    max_valid = (
+        max_valid_hint if max_valid_hint is not None else int(valid.max().item())
+    )
+
+    if max_valid <= topk_tokens:
+        _fill_select_all(index_base, valid, out, topk_tokens)
+        _log_topk_fix(f"{tag}-all", f"rows={num_rows} max_valid={max_valid}")
+        return
+
+
+    if kernel is not None:
+        # Production kernel (prefill flagos) writes all rows; short rows are
+        # re-filled below to guarantee select-all semantics.
+        kernel(*kernel_args)
+        _log_topk_fix(f"{tag}-kernel", f"rows={num_rows} max_valid={max_valid}")
+        # GPU-only merge for short rows (valid <= topk_tokens): select-all
+        # indices, no host sync (.item()/.any()/nonzero) -> graph-safe.
+        short = valid <= topk_tokens
+        arange_k = torch.arange(topk_tokens, device=out.device, dtype=torch.long)
+        filled = arange_k.unsqueeze(0) + index_base.unsqueeze(1)
+        filled = torch.where(
+            arange_k.unsqueeze(0) < valid.unsqueeze(1),
+            filled,
+            torch.full_like(filled, -1),
+        )
+        merged = torch.where(short.unsqueeze(1), filled.to(out.dtype), out)
+        out.copy_(merged)
+        return
+
+    # Decode path with long rows: flagos decode top-k kernel fails to compile
+    # on MetaX (CompilationError). Use the MetaX-verified Triton tree top-k
+    # (exact top-K + select-all semantics, verified for N=753..8192).
+    # Only the packaged implementation is accepted; no loose-file fallback.
+    from vllm_fl.dispatch.backends.vendor.metax.impl.dsv4.indexer.tree_topk import (
+        decode_topk_tree,
+    )
+    decode_topk_tree(logits, valid, out, topk_tokens)
+    _log_topk_fix(
+        f"{tag}-tree",
+        f"rows={num_rows} max_valid={max_valid} (metax tree top-k)",
+    )
+
+
+# --- end sparse_indexer_topk_fix ---
+
+
 def _gather_workspace_shapes(
     total_seq_lens: int,
     head_dim: int,
     fp8_dtype: torch.dtype,
     use_fp4_cache: bool,
-    use_int8_cache: bool = False,
 ) -> tuple[tuple[tuple[int, int], torch.dtype], tuple[tuple[int, int], torch.dtype]]:
     """Return ((values_shape, values_dtype), (scales_shape, scales_dtype)) for
     the K-gather workspace. FP8 path: (T, head_dim) fp8 + (T, 4) uint8 fp32
@@ -62,11 +179,6 @@ def _gather_workspace_shapes(
         return (
             ((total_seq_lens, head_dim // 2), torch.uint8),
             ((total_seq_lens, head_dim // MXFP4_BLOCK_SIZE), torch.uint8),
-        )
-    if use_int8_cache:
-        return (
-            ((total_seq_lens, head_dim), torch.int8),
-            ((total_seq_lens, 4), torch.uint8),
         )
     return (
         ((total_seq_lens, head_dim), fp8_dtype),
@@ -116,17 +228,15 @@ def sparse_attn_indexer_fl(
     attn_metadata = get_forward_context().attn_metadata
     fp8_dtype = current_platform.fp8_dtype()
     k_cache_prefix = _resolve_layer_name(k_cache_prefix)
-    use_int8_cache = q_quant.dtype == torch.int8
 
     # assert isinstance(attn_metadata, dict)
     if not isinstance(attn_metadata, dict):
+        _log_topk_fix(
+            "dummy", "attn_metadata not dict -> fake return (capture/profile run)"
+        )
         # Reserve workspace for indexer during profiling run
         values_spec, scales_spec = _gather_workspace_shapes(
-            total_seq_lens,
-            head_dim,
-            fp8_dtype,
-            use_fp4_cache,
-            use_int8_cache,
+            total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
         )
         current_workspace_manager().get_simultaneous(
             values_spec,
@@ -165,6 +275,10 @@ def sparse_attn_indexer_fl(
     has_decode = attn_metadata_narrowed.num_decodes > 0
     has_prefill = attn_metadata_narrowed.num_prefills > 0
     num_decode_tokens = attn_metadata_narrowed.num_decode_tokens
+    _log_topk_fix(
+        "entry",
+        f"has_prefill={has_prefill} has_decode={has_decode} num_tokens={hidden_states.shape[0]}",
+    )
 
     # q_scale is required iff the FP4 cache path is enabled; the FP8 path
     # folds the Q scale into `weights` inside fused_indexer_q_rope_quant.
@@ -203,17 +317,13 @@ def sparse_attn_indexer_fl(
         # scales) based on use_fp4_cache.
         workspace_manager = current_workspace_manager()
         values_spec, scales_spec = _gather_workspace_shapes(
-            total_seq_lens,
-            head_dim,
-            fp8_dtype,
-            use_fp4_cache,
-            use_int8_cache,
+            total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
         )
         k_quant_full, k_scale_full = workspace_manager.get_simultaneous(
             values_spec,
             scales_spec,
         )
-        for chunk in prefill_metadata.chunks:
+        for chunk_index, chunk in enumerate(prefill_metadata.chunks):
             k_quant = k_quant_full[: chunk.total_seq_lens]
             k_scale = k_scale_full[: chunk.total_seq_lens]
 
@@ -243,11 +353,56 @@ def sparse_attn_indexer_fl(
                 k_quant_cast = k_quant
                 k_scale_cast = k_scale.view(torch.float32).squeeze(-1)
 
-            if use_int8_cache:
-                logits = int8_mqa_logits(
-                    q_slice_cast,
-                    k_quant_cast,
-                    k_scale_cast,
+            if current_platform.vendor_name == "metax" and not use_fp4_cache:
+                from vllm_fl.attention.deepseek_v4.row_sharding import (
+                    bf16_mqa_logits_prefill as bf16_mqa_logits,
+                )
+
+                from vllm_fl.attention.deepseek_v4.query_sharding import (
+                    try_prefill_query_sharding,
+                )
+
+                q_bf16 = q_slice_cast.to(torch.bfloat16)
+                kv_bf16 = _dequantize_fp8(k_quant_cast, k_scale_cast)
+
+                def topk_into_local(scores, starts, ends, output):
+                    _topk_per_row_fixed(
+                        scores,
+                        starts,
+                        ends,
+                        output,
+                        topk_tokens,
+                        "prefill",
+                        max_valid_hint=chunk.total_seq_lens,
+                        kernel=_top_k_per_row_prefill,
+                        kernel_args=(
+                            scores,
+                            starts,
+                            ends,
+                            output,
+                            scores.shape[0],
+                            scores.stride(0),
+                            scores.stride(1),
+                            topk_tokens,
+                        ),
+                    )
+
+                if try_prefill_query_sharding(
+                    q_bf16,
+                    kv_bf16,
+                    weights[chunk.token_start : chunk.token_end],
+                    chunk.cu_seqlen_ks,
+                    chunk.cu_seqlen_ke,
+                    topk_indices_buffer[
+                        chunk.token_start : chunk.token_end, :topk_tokens
+                    ],
+                    topk_tokens,
+                    topk_into_local,
+                ):
+                    continue
+                logits = bf16_mqa_logits(
+                    q_bf16,
+                    kv_bf16,
                     weights[chunk.token_start : chunk.token_end],
                     chunk.cu_seqlen_ks,
                     chunk.cu_seqlen_ke,
@@ -267,24 +422,31 @@ def sparse_attn_indexer_fl(
                 chunk.token_start : chunk.token_end, :topk_tokens
             ]
 
-            _top_k_per_row_prefill(
+            _topk_per_row_fixed(
                 logits,
                 chunk.cu_seqlen_ks,
                 chunk.cu_seqlen_ke,
                 topk_indices,
-                num_rows,
-                logits.stride(0),
-                logits.stride(1),
                 topk_tokens,
+                "prefill",
+                max_valid_hint=chunk.total_seq_lens,
+                kernel=_top_k_per_row_prefill,
+                kernel_args=(
+                    logits,
+                    chunk.cu_seqlen_ks,
+                    chunk.cu_seqlen_ke,
+                    topk_indices,
+                    num_rows,
+                    logits.stride(0),
+                    logits.stride(1),
+                    topk_tokens,
+                ),
             )
 
     if has_decode:
         decode_metadata = attn_metadata_narrowed.decode
         assert decode_metadata is not None
-        if not use_int8_cache:
-            kv_cache = kv_cache_as_quant_view(
-                kv_cache, head_dim, use_fp4_cache
-            )
+        kv_cache = kv_cache_as_quant_view(kv_cache, head_dim, use_fp4_cache)
         decode_lens = decode_metadata.decode_lens
         if decode_metadata.requires_padding:
             # pad in edge case where we have short chunked prefill length <
@@ -305,9 +467,7 @@ def sparse_attn_indexer_fl(
                 )
             else:
                 padded_q_quant_decode_tokens = _pack_seq_triton(
-                    q_quant[:num_decode_tokens],
-                    decode_lens,
-                    pad_value=0 if use_int8_cache else -float("inf"),
+                    q_quant[:num_decode_tokens], decode_lens
                 )
                 padded_q_scale = None
         else:
@@ -334,15 +494,204 @@ def sparse_attn_indexer_fl(
             else padded_q_quant_decode_tokens
         )
 
-        if use_int8_cache:
-            logits = int8_paged_mqa_logits(
-                padded_q_quant_decode_tokens,
-                kv_cache,
-                weights[:num_padded_tokens],
-                seq_lens,
-                decode_metadata.block_table,
-                max_model_len=max_model_len,
+        graphsafe_decode = _dsv4.current.indexer_graphsafe
+        decode_static_context_len = max_model_len
+        if current_platform.vendor_name == "metax" and not use_fp4_cache:
+            from vllm_fl.dispatch.backends.vendor.metax.impl.dsv4.indexer.deep_gemm import (
+                bf16_mqa_logits,
             )
+
+            context_lens_per_batch = seq_lens.amax(dim=1)
+            cu_seq_lens = torch.zeros(
+                batch_size + 1,
+                dtype=torch.int32,
+                device=seq_lens.device,
+            )
+            torch.cumsum(context_lens_per_batch, dim=0, out=cu_seq_lens[1:])
+
+            workspace_manager = current_workspace_manager()
+            if graphsafe_decode:
+                # CUDA graph capture cannot tolerate the original decode path CPU sync,
+                # dynamic max shape, or tensor shapes derived from runtime lengths.
+                # Use static per-sequence decode slots. For batch_size==1 we preserve
+                # the actual gather length that already passed smoke. For batch_size>1
+                # we gather a fixed context window per sequence, then real seq_lens mask
+                # logits/top-k semantics. This avoids SPLIT_ATTENTION fallback while a
+                # proper fused paged logits kernel is still missing on MetaX.
+                static_context_len = int(decode_static_context_len)
+                if batch_size == 1:
+                    gather_cu_seq_lens = cu_seq_lens
+                    static_total_context_len = static_context_len
+                else:
+                    gather_cu_seq_lens = (
+                        torch.arange(
+                            batch_size + 1,
+                            dtype=torch.int32,
+                            device=seq_lens.device,
+                        )
+                        * static_context_len
+                    )
+                    static_total_context_len = batch_size * static_context_len
+                use_paged_indexer_logits = (
+                    _dsv4.current.indexer_paged_logits
+                    and next_n == 1
+                    and head_dim == 128
+                )
+                logits = torch.empty(
+                    (num_padded_tokens, static_context_len),
+                    dtype=torch.float32,
+                    device=kv_cache.device,
+                )
+                if use_paged_indexer_logits:
+                    # Prototype: direct paged read of indexer KV cache, semantically
+                    # matching cp_gather_indexer_k_quant_cache + batched_mqa_logits.
+                    # Does not bypass logits/topk/indexer; only removes the contiguous
+                    # k_quant/k_scale workspace materialization in decode next_n=1.
+                    try:
+                        from vllm_fl.dispatch.backends.vendor.metax.impl.dsv4.indexer.paged_logits import (
+                            paged_indexer_mqa_logits_match,
+                        )
+                    except ImportError as exc:
+                        raise RuntimeError(
+                            "MetaX paged indexer implementation is unavailable"
+                        ) from exc
+                    q_b = padded_q_quant_cast.to(torch.bfloat16).reshape(
+                        batch_size, -1, padded_q_quant_cast.shape[-1]
+                    )
+                    w_b = weights[:num_padded_tokens].reshape(batch_size, -1)
+                    valid_b = seq_lens.amax(dim=1).to(torch.int32)
+                    paged_indexer_mqa_logits_match(
+                        q_b,
+                        kv_cache,
+                        w_b,
+                        valid_b,
+                        decode_metadata.block_table,
+                        logits,
+                        static_context_len,
+                    )
+                else:
+                    values_spec, scales_spec = _gather_workspace_shapes(
+                        max(total_seq_lens, static_total_context_len),
+                        head_dim,
+                        fp8_dtype,
+                        False,
+                    )
+                    k_quant_full, k_scale_full = workspace_manager.get_simultaneous(
+                        values_spec,
+                        scales_spec,
+                    )
+                    k_quant = k_quant_full[:static_total_context_len]
+                    k_scale = k_scale_full[:static_total_context_len]
+                    _cp_gather_indexer_k_quant_cache(
+                        kv_cache,
+                        k_quant,
+                        k_scale,
+                        decode_metadata.block_table,
+                        gather_cu_seq_lens,
+                    )
+                    # Fused single-launch logits: replaces 64 x (_dequantize_fp8 +
+                    # bf16_mqa_logits) launches. Exact per-bit semantics vs the
+                    # loop version (standalone-verified N=1024..8192).
+                    try:
+                        from vllm_fl.dispatch.backends.vendor.metax.impl.dsv4.indexer.batched_logits import (
+                            batched_mqa_logits,
+                        )
+                    except ImportError as exc:
+                        raise RuntimeError(
+                            "MetaX batched indexer implementation is unavailable"
+                        ) from exc
+                    if next_n == 1:
+                        q_b = padded_q_quant_cast.to(torch.bfloat16).reshape(
+                            batch_size, -1, padded_q_quant_cast.shape[-1]
+                        )
+                        w_b = weights[:num_padded_tokens].reshape(batch_size, -1)
+                        valid_b = seq_lens.amax(dim=1).to(torch.int32)
+                        batched_mqa_logits(
+                            q_b,
+                            k_quant,
+                            k_scale.view(torch.float32).squeeze(-1),
+                            w_b,
+                            valid_b,
+                            logits,
+                            static_context_len,
+                        )
+                    else:
+                        for batch_idx in range(batch_size):
+                            seq_start = batch_idx * static_context_len
+                            seq_end = seq_start + static_context_len
+                            k_bf16 = _dequantize_fp8(
+                                k_quant[seq_start:seq_end],
+                                k_scale[seq_start:seq_end]
+                                .view(torch.float32)
+                                .squeeze(-1),
+                            )
+                            q_bf16 = padded_q_quant_cast[batch_idx].to(torch.bfloat16)
+                            context_lens = seq_lens[batch_idx].reshape(-1)
+                            starts = torch.zeros_like(context_lens)
+                            row_start = batch_idx * next_n
+                            logits[row_start : row_start + next_n, :] = bf16_mqa_logits(
+                                q_bf16,
+                                k_bf16,
+                                weights[row_start : row_start + next_n],
+                                starts,
+                                context_lens,
+                            )
+            else:
+                seq_offsets = cu_seq_lens.tolist()
+                total_context_len = seq_offsets[-1]
+
+                # The gather must hold the WHOLE decode batch's compressed context,
+                # which can exceed the static prefill-oriented sizing
+                # (max_model_len * 40 // compress_ratio). Request the actual need;
+                # the workspace manager grows on demand. Otherwise the slice below
+                # silently truncates trailing sequences and the per-sequence logits
+                # assignment shape-mismatches (worker crash at long context).
+                values_spec, scales_spec = _gather_workspace_shapes(
+                    max(total_seq_lens, total_context_len), head_dim, fp8_dtype, False
+                )
+                k_quant_full, k_scale_full = workspace_manager.get_simultaneous(
+                    values_spec,
+                    scales_spec,
+                )
+                k_quant = k_quant_full[:total_context_len]
+                k_scale = k_scale_full[:total_context_len]
+                _cp_gather_indexer_k_quant_cache(
+                    kv_cache,
+                    k_quant,
+                    k_scale,
+                    decode_metadata.block_table,
+                    cu_seq_lens,
+                )
+
+                max_context_len = max(
+                    seq_offsets[i + 1] - seq_offsets[i] for i in range(batch_size)
+                )
+                logits = torch.full(
+                    (num_padded_tokens, max_context_len),
+                    -float("inf"),
+                    dtype=torch.float32,
+                    device=kv_cache.device,
+                )
+                for batch_idx in range(batch_size):
+                    context_lens = seq_lens[batch_idx].reshape(-1)
+                    seq_start = seq_offsets[batch_idx]
+                    seq_end = seq_offsets[batch_idx + 1]
+                    k_bf16 = _dequantize_fp8(
+                        k_quant[seq_start:seq_end],
+                        k_scale[seq_start:seq_end].view(torch.float32).squeeze(-1),
+                    )
+                    q_bf16 = padded_q_quant_cast[batch_idx].to(torch.bfloat16)
+                    starts = torch.zeros_like(context_lens)
+                    row_start = batch_idx * next_n
+                    logits[row_start : row_start + next_n, : seq_end - seq_start] = (
+                        bf16_mqa_logits(
+                            q_bf16,
+                            k_bf16,
+                            weights[row_start : row_start + next_n],
+                            starts,
+                            context_lens,
+                        )
+                    )
         else:
             logits = fp8_fp4_paged_mqa_logits(
                 (padded_q_quant_cast, padded_q_scale),
@@ -356,16 +705,24 @@ def sparse_attn_indexer_fl(
             )
         num_rows = logits.shape[0]
         topk_indices = topk_indices_buffer[:num_padded_tokens, :topk_tokens]
-        _top_k_per_row_decode(
-                logits,
-                next_n,
-                seq_lens,
-                topk_indices,
-                num_rows,
-                logits.stride(0),
-                logits.stride(1),
-                topk_tokens,
-            )
+        _topk_per_row_fixed(
+            logits,
+            torch.zeros(num_rows, dtype=torch.long, device=logits.device),
+            seq_lens.reshape(-1)[:num_rows],
+            topk_indices,
+            topk_tokens,
+            "decode",
+            kernel=None,
+            max_valid_hint=(
+                decode_static_context_len
+                if graphsafe_decode
+                else (
+                    max(seq_offsets[i + 1] - seq_offsets[i] for i in range(batch_size))
+                    if "seq_offsets" in locals()
+                    else None
+                )
+            ),
+        )
 
         # if current_platform.is_cuda() and topk_tokens in (512, 1024, 2048):
         #     workspace_manager = current_workspace_manager()
@@ -485,7 +842,7 @@ class SparseAttnIndexerFL(SparseAttnIndexer):
         weights: torch.Tensor,
     ):
         return self.forward_oot(hidden_states, q_quant, k, weights)
-    
+
     def forward_oot(
         self,
         hidden_states: torch.Tensor,
