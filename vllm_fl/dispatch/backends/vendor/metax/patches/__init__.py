@@ -1,9 +1,9 @@
-"""MetaX patches applied into vLLM 0.32 at import time.
+"""MetaX patches installed during vLLM import and before model creation.
 
 ``PlatformFL.import_kernels()`` imports this package while vLLM is still
-initialising, so a single failing module used to skip every patch below it.
-Each patch is imported on its own and failures are recorded in
-``PATCH_ERRORS`` instead of aborting the rest of the package.
+initialising. Low-level patches are installed immediately; patches that import
+model layers are deferred to ``ensure_patches()`` to avoid circular imports.
+Failures remain recorded in ``PATCH_ERRORS`` for reporting and retry.
 """
 
 import importlib
@@ -15,8 +15,7 @@ from .._compat import legacy_torch_runtime
 
 logger = logging.getLogger(__name__)
 
-# Order matters: pynccl_wrapper depends on utils_patch, and gdn_linear_attn
-# must be imported before any model layer is instantiated.
+# Order matters: pynccl_wrapper depends on utils_patch.
 _PATCH_MODULES = (
     "accelerator_compat",
     "functorch_config_patch",
@@ -26,8 +25,11 @@ _PATCH_MODULES = (
     "cuda_wrapper",
     "chunk_delta_h",
     "moe_topk_compat",
-    "gdn_linear_attn",
 )
+
+# These patches import model layers and must wait until vLLM has finished
+# importing its core modules, but run before any model layer is instantiated.
+_DEFERRED_PATCH_MODULES = ("gdn_linear_attn",)
 
 # Keep the optional third-party triton_kernels package disabled, matching
 # vLLM-metax 0.32. vLLM's bundled FLA/Triton kernels remain available in the
@@ -46,7 +48,10 @@ iu.has_triton_kernels = lambda: False
 def _import_patches() -> dict[str, Exception]:
     errors: dict[str, Exception] = {}
     for name in _PATCH_MODULES:
-        if name in ("fix_standalone_compile", "functorch_config_patch") and not legacy_torch_runtime():
+        if (
+            name in ("fix_standalone_compile", "functorch_config_patch")
+            and not legacy_torch_runtime()
+        ):
             # These replace private torch 2.8 APIs and the matmul class's
             # __setattr__; importing them on torch 2.10 would undo native fixes.
             continue
@@ -64,22 +69,20 @@ PATCH_ERRORS: dict[str, Exception] = _import_patches()
 
 
 def ensure_patches() -> dict[str, Exception]:
-    """Retry the patch modules that failed to import earlier.
+    """Install deferred patches and retry earlier failures before model creation.
 
-    ``import_kernels()`` runs while vLLM may still be importing itself, so a
-    patch that needs a model-layer module (``gdn_linear_attn`` imports the
-    mamba/attention layers) can hit a circular import. Python drops a module
-    whose import raised, so importing it again once vLLM is fully loaded
-    succeeds. ``PlatformFL.apply_config_platform_defaults()`` calls this before
-    any model layer is built.
+    The platform configuration hook and worker runtime call this after vLLM
+    core imports have completed. Successful imports are cached by Python, so
+    repeated calls do not register the GDN replacement more than once. Failed
+    imports remain in ``PATCH_ERRORS`` and are retried on the next call.
     """
-    for name in list(PATCH_ERRORS):
+    for name in dict.fromkeys((*PATCH_ERRORS, *_DEFERRED_PATCH_MODULES)):
         try:
             importlib.import_module(f"{__name__}.{name}")
         except Exception as exc:
             PATCH_ERRORS[name] = exc
             continue
-        del PATCH_ERRORS[name]
+        PATCH_ERRORS.pop(name, None)
     # _custom_ops invokes import_kernels() before defining its top-k helpers.
     # A successful early import can therefore be overwritten without raising
     # an exception. Restore this patch after the native module finishes loading.
