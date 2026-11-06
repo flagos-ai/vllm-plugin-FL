@@ -116,6 +116,17 @@ def register_builtins(registry) -> None:
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
+        # Use CUDA's native fused sigmoid route when the op is installed.
+        OpImpl(
+            op_name="topk_sigmoid",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                backend.topk_sigmoid, backend.has_native_topk_sigmoid
+            ),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
         # invoke fused moe triton kernel
         OpImpl(
             op_name="invoke_fused_moe_triton_kernel",
