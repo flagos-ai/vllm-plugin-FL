@@ -469,6 +469,9 @@ class AscendAttentionBackend(AttentionBackend):
     Huawei Ascend NPUs.
     """
     accept_output_buffer: bool = True
+    supported_dtypes: ClassVar[list[torch.dtype]] = [
+        torch.float16, torch.bfloat16, torch.float32
+    ]
 
     @staticmethod
     def get_name() -> str:
@@ -1138,6 +1141,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
             )
 
         assert layer._k_scale_float == 1.0 and layer._v_scale_float == 1.0
+
+        if query.dtype == torch.float32:
+            from .fp32_attention import forward_fp32
+
+            return forward_fp32(
+                self, layer, query, key, value, kv_cache, attn_metadata, output
+            )
 
         attn_type = self.attn_type
         if attn_type not in [AttentionType.DECODER, AttentionType.ENCODER_ONLY]:
