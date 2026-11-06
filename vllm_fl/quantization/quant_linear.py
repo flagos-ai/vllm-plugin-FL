@@ -80,3 +80,18 @@ def add_oot_quant_kernel() -> None:
     register_fl_w8a8_linear_kernel(_POSSIBLE_INT8_KERNELS)
     install_packed_w8a8_scheme()
     install_fl_w8a8_moe_selector()
+
+    if (getattr(current_platform, "vendor_name", "") == "hygon"
+            and current_platform.torch_device_fn.get_device_properties(0).gcnArchName.startswith("gfx938")):
+        from vllm.model_executor.kernels.linear.scaled_mm.pytorch import (
+            ChannelWiseTorchFP8ScaledMMLinearKernel,
+        )
+        from vllm.model_executor.layers.quantization.compressed_tensors.triton_scaled_mm import (
+            triton_scaled_mm,
+        )
+
+        def _gfx938_channel_fp8_scaled_mm(self, *, A, B, out_dtype, As, Bs, bias, output_shape):
+            return triton_scaled_mm(A, B, As, Bs, out_dtype, bias).view(*output_shape)
+
+        ChannelWiseTorchFP8ScaledMMLinearKernel.apply_scaled_mm = _gfx938_channel_fp8_scaled_mm
+

@@ -86,10 +86,16 @@ class SelectionPolicy:
         return {k: list(v) for k, v in self.per_op_order}
 
     def get_per_op_order(self, op_name: str) -> Optional[List[str]]:
-        """Get order for a specific operator."""
+        """Get an exact order, then let internal native variants inherit it."""
         for name, order in self.per_op_order:
             if name == op_name:
                 return list(order)
+
+        if op_name.endswith("_native"):
+            base_name = op_name.removesuffix("_native")
+            for name, order in self.per_op_order:
+                if name == base_name:
+                    return list(order)
         return None
 
     def get_default_order(self) -> List[str]:

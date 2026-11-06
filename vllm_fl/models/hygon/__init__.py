@@ -1,0 +1,2 @@
+"""Hygon-specific model implementations."""
+
