@@ -73,7 +73,7 @@ def limit_cudagraph_capture_sizes(compilation_config: Any) -> list[int] | None:
 
     Returns the new ladder when it was changed, otherwise None.
     """
-    sizes = list(compilation_config.cudagraph_capture_sizes or [])
+    sizes = list(getattr(compilation_config, "cudagraph_capture_sizes", None) or [])
     if len(sizes) <= MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES:
         return None
     sizes = thin_cudagraph_capture_sizes(sizes)
