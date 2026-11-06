@@ -417,10 +417,14 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
-        if cls.vendor_name == "metax" and vllm_config.use_v2_model_runner:
+        if (
+            cls.vendor_name == "metax"
+            and vllm_config.use_v2_model_runner
+            and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") != "1"
+        ):
             raise ValueError(
-                "MetaX requires ModelRunnerFL; the upstream V2 runner requires "
-                "native CUDA/UVA support. Set VLLM_USE_V2_MODEL_RUNNER=0."
+                "MetaX V2 is experimental and requires explicit "
+                "VLLM_USE_V2_MODEL_RUNNER=1."
             )
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
@@ -878,6 +882,11 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
+            if (
+                cls.vendor_name == "metax"
+                and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1"
+            ):
+                return "vllm_fl.distributed.metax_communicator.MetaxCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
@@ -888,6 +897,11 @@ class PlatformFL(Platform):
     def get_static_graph_wrapper_cls(cls) -> str:
         if cls.device_type == "musa":
             return "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper"
+        if (
+            getattr(cls, "vendor_name", None) == "metax"
+            and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1"
+        ):
+            return "vllm.compilation.cuda_graph.CUDAGraphWrapper"
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod

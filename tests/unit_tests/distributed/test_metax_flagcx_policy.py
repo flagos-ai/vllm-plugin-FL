@@ -188,3 +188,50 @@ def test_only_metax_flagcx_adds_opaque_collective_boundary(
     )
     assert namespace["use_custom_op_collectives"](platform) is opaque
     assert namespace["use_custom_allreduce"](platform) is native_custom_ar
+
+
+@pytest.mark.parametrize(
+    "vendor,backend,v2,expected",
+    [
+        (
+            "metax",
+            "flagcx",
+            "1",
+            "vllm_fl.distributed.metax_communicator.MetaxCommunicatorFL",
+        ),
+        ("metax", "flagcx", "0", "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("metax", "flagcx", None, "vllm_fl.distributed.communicator.CommunicatorFL"),
+        (
+            "metax",
+            "nccl",
+            "1",
+            "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator",
+        ),
+        ("nvidia", "flagcx", "1", "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("mthreads", "flagcx", "1", "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("ascend", "flagcx", "1", "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("iluvatar", "flagcx", "1", "vllm_fl.distributed.communicator.CommunicatorFL"),
+    ],
+)
+def test_only_explicit_metax_v2_flagcx_selects_cuda_graph_bridge(
+    vendor, backend, v2, expected
+):
+    path = ROOT / "vllm_fl/platform.py"
+    cls = next(
+        node
+        for node in ast.parse(path.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.ClassDef) and node.name == "PlatformFL"
+    )
+    method = next(
+        node
+        for node in cls.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "get_device_communicator_cls"
+    )
+    method.decorator_list = []
+    env = {} if v2 is None else {"VLLM_USE_V2_MODEL_RUNNER": v2}
+    namespace = _compile(
+        [method], path, {"os": SimpleNamespace(environ=env), "logger": Mock()}
+    )
+    platform = SimpleNamespace(vendor_name=vendor, dist_backend=backend)
+    assert namespace[method.name](platform) == expected
