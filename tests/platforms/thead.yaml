@@ -38,7 +38,10 @@ device_overrides:
       gpu_memory_utilization: 0.85
       trust_remote_code: true
     serve:
-      startup_retries: 300
+      # Polls every 10s. The CI runner captures graphs at 18-26s/it (vs 5.9s/it
+      # on the dev box), so 35b_a3b_tp4_graph exhausted 300 polls (~50 min)
+      # while still capturing. 600 gives ~100 min of startup headroom.
+      startup_retries: 600
 
 # Features not supported on this platform.
 # Test cases whose model name contains any of these strings will be skipped.
