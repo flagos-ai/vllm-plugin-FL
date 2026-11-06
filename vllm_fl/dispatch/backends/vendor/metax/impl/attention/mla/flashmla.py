@@ -16,7 +16,7 @@ from ..ops.flashmla import (
 from vllm.config import VllmConfig
 from vllm.config.cache import CacheDType
 from vllm.logger import init_logger
-from vllm.model_executor.layers.batch_invariant import (
+from vllm.model_executor.determinism.batch_invariant import (
     _batch_invariant_MODE as _bi_mode,
 )
 from vllm.platforms.interface import DeviceCapability

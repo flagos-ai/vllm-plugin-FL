@@ -52,6 +52,12 @@ op_backends:
 # Blacklist only ops that are known to have issues
 flagos_blacklist:
   - cat
+  # FlagGems' Triton zeros/zero_ kernels pass the element count as int32, so
+  # the multi-GB KV-cache backing buffer (>2**31 int8 elements) fails with
+  # "Triton Error [HIP]: invalid argument". Keep the native ATen memset
+  # (torch.zeros lowers to empty + zero_).
+  - zeros
+  - zero_
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

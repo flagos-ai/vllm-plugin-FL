@@ -174,6 +174,18 @@ def fixture(
     config.inductor_compile_config = {}
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
+    # vLLM 0.32 fields read by CompilationConfig.__post_init__ (the stub
+    # executes upstream's real defaults).
+    config.cudagraph_mm_encoder = False
+    config.encoder_cudagraph_token_budgets = []
+    config.encoder_cudagraph_max_vision_items_per_batch = 0
+    config.encoder_cudagraph_max_frames_per_batch = None
+    config.decoder_replay_cudagraph_capture_sizes = []
+    config.decoder_replay_trim_threshold = 768
+    config.cudagraph_decoder_replay = True
+    config.ir_enable_torch_wrap = False
+    config.compile_ranges_endpoints = [8192]
+    config.max_cudagraph_capture_size = 0
     config.pass_config = SimpleNamespace(
         **{
             "fuse_attn_quant": False,
@@ -456,8 +468,9 @@ def test_explicit_list_keeps_identity_and_existing_order():
     [
         ({}, GraphMode.NONE),
         ({"fuse_attn_quant": True}, GraphMode.FULL),
-        ({"enable_sp": True}, GraphMode.FULL),
-        ({"fuse_gemm_comms": True}, GraphMode.FULL),
+        # vLLM 0.32 dropped PassConfig.enable_sp and fuse_gemm_comms; only
+        # attn-quant fusion still upgrades the graph mode in
+        # CompilationConfig.set_splitting_ops_for_v1.
     ],
 )
 def test_initializer_graph_mode_changes_are_preserved(passes, expected):
