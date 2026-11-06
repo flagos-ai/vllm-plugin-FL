@@ -58,7 +58,7 @@ def _make_ascend_vllm_config(
 
 
 @pytest.mark.parametrize(
-    "vendor", ["ascend", "mthreads", "enflame", "gcu", "iluvatar", "tsingmicro"]
+    "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro"]
 )
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
@@ -92,7 +92,6 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
         ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
-        ("cuda", "iluvatar", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
     ],
 )
@@ -284,8 +283,9 @@ def test_ascend_eager_mode_accepts_inductor_backend(monkeypatch):
     assert config.compilation_config.pass_config.fuse_attn_quant is True
 
 
-@pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
-def test_iluvatar_keeps_vendor_graph_config(monkeypatch, requested, expected):
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_iluvatar_keeps_vendor_graph_config(monkeypatch, requested, use_v2):
     import os
 
     from vllm_fl.platform import PlatformFL
@@ -297,13 +297,15 @@ def test_iluvatar_keeps_vendor_graph_config(monkeypatch, requested, expected):
     else:
         monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
     config = _make_ascend_vllm_config(backend="inductor")
+    config.use_v2_model_runner = use_v2
 
     PlatformFL.check_and_update_config(config)
 
+    assert config.use_v2_model_runner is use_v2
     assert config.compilation_config.cudagraph_mm_encoder is False
     assert config.compilation_config.use_inductor_graph_partition is True
     assert config.compilation_config.pass_config.fuse_rope_kvcache_cat_mla is False
-    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested
     # 0.32 does not import these CUDA-only passes for the OOT CoreX platform.
     assert config.compilation_config.pass_config.fuse_norm_quant is False
     assert config.compilation_config.pass_config.fuse_act_quant is False
@@ -387,24 +389,31 @@ def test_ascend_forces_breakable_graph_off(monkeypatch, existing):
     assert os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] == "0"
 
 
-def test_register_preserves_upstream_runner_selection(monkeypatch):
+@pytest.mark.parametrize("vendor", ["metax", "iluvatar"])
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+def test_register_preserves_upstream_runner_selection(monkeypatch, vendor, requested):
     from types import SimpleNamespace
 
     import vllm_fl
     import vllm_fl.utils
 
-    monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
     monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
     monkeypatch.setattr(
         vllm_fl.utils,
         "DeviceInfo",
-        lambda: SimpleNamespace(vendor_name="metax"),
+        lambda: SimpleNamespace(vendor_name=vendor),
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
-    assert "VLLM_USE_V2_MODEL_RUNNER" not in __import__("os").environ
+    assert __import__("os").environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested
 
 
 def test_register_preserves_explicit_v1_request(monkeypatch):

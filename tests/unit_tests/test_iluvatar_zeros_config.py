@@ -20,9 +20,8 @@ def test_iluvatar_native_zero_dependency_is_excluded(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
     assert not whitelist
-    assert {"zeros", "zero_", "scatter_"} <= set(blacklist)
-    # Native SDPA invokes the inner flash op, so excluding only the outer
-    # registration does not avoid the BF16 D72/N256 NaN regression.
+    assert {"zeros", "zero_", "linear", "native_layer_norm", "addmm"} <= set(blacklist)
+    assert "scatter_" not in blacklist
     assert {"_scaled_dot_product_flash_attention", "_flash_attention_forward"} <= set(
         blacklist
     )

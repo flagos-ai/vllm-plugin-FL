@@ -246,7 +246,6 @@ def register():
         "mthreads",
         "enflame",
         "gcu",
-        "iluvatar",
         "tsingmicro",
     ):
         # These backends use ModelRunnerFL; choose it before VllmConfig reads

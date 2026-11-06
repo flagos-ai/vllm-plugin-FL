@@ -361,7 +361,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -371,11 +379,6 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
-        if cls.vendor_name == "iluvatar" and vllm_config.use_v2_model_runner:
-            raise ValueError(
-                "Iluvatar requires ModelRunnerFL; the upstream V2 runner needs "
-                "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
-            )
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(
@@ -593,9 +596,6 @@ class PlatformFL(Platform):
                 _pc.fuse_norm_quant = False
                 _pc.fuse_act_quant = False
                 _pc.fuse_attn_quant = False
-            # Also retain the default for callers invoking this hook directly.
-            # Normal startup selects it earlier in register().
-            os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
 
         if cls.device_type == "npu":
             _configure_ascend_compilation(vllm_config)

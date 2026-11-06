@@ -49,14 +49,12 @@ op_backends:
 # FlagOS operator blacklist
 # Iluvatar is CUDA-compatible, so most FlagGems ops should work
 # Blacklist only ops that are known to have issues
-# vLLM 0.32 allocates a single multi-GiB KV backing tensor. FlagGems 5.3.5
-# zero kernels fail at 16 GiB on BI-V150. Native zeros calls zero_ too, so
-# exclude both registrations; keep other FlagGems operators enabled.
 flagos_blacklist:
   - zeros
   - zero_
-  - scatter_
-  # D72 BF16 ViT attention produces NaNs at N256 with FlagGems 5.3.5.
+  - linear
+  - native_layer_norm
+  - addmm
   # Native SDPA redispatches through the inner flash entry: exclude both.
   - _scaled_dot_product_flash_attention
   - _flash_attention_forward
