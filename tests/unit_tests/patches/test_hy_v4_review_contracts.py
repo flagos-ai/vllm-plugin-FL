@@ -94,9 +94,27 @@ def test_shared_indexer_pp_contract():
         index_topk=8, num_hidden_layers=2, indexer_types=["full", "shared"]
     )
     attention.validate_hy4_parallel_config(config, 1)
-    with pytest.raises(ValueError, match="pipeline_parallel_size=1"):
+    # The default 2-stage split (1,1) starts stage 1 on the shared layer, so no
+    # buffer producer exists inside that stage.
+    with pytest.raises(ValueError, match="must start on a full"):
         attention.validate_hy4_parallel_config(config, 2)
     config.indexer_types = ["full", "full"]
+    attention.validate_hy4_parallel_config(config, 2)
+
+
+def test_shared_indexer_pp_contract_accepts_producer_aligned_partition(monkeypatch):
+    # Layer 2 is a full producer, so cutting after layer 2 keeps every stage
+    # able to fill its own top-k buffer.
+    config = SimpleNamespace(
+        index_topk=8,
+        num_hidden_layers=4,
+        indexer_types=["full", "shared", "full", "shared"],
+    )
+    attention.validate_hy4_parallel_config(config, 2)
+    monkeypatch.setenv("VLLM_PP_LAYER_PARTITION", "2,2")
+    attention.validate_hy4_parallel_config(config, 2)
+    # An exported-but-empty value must be treated as unset, not parsed as int("").
+    monkeypatch.setenv("VLLM_PP_LAYER_PARTITION", "")
     attention.validate_hy4_parallel_config(config, 2)
 
 
@@ -122,7 +140,7 @@ def test_schema_is_not_a_kernel_and_composite_is_valid():
     ],
 )
 def test_quantizer_respects_backend_policy(monkeypatch, env, value):
-    import flag_gems
+    import flaggems_vllm
 
     from vllm_fl import utils
 
@@ -130,7 +148,7 @@ def test_quantizer_respects_backend_policy(monkeypatch, env, value):
     monkeypatch.delenv("VLLM_FL_FLAGOS_WHITELIST", raising=False)
     monkeypatch.setenv(env, value)
     monkeypatch.setattr(
-        flag_gems,
+        flaggems_vllm,
         "per_token_group_quant_fp8",
         lambda *a, **k: pytest.fail("forbidden FlagGems call"),
     )
@@ -220,7 +238,7 @@ def test_fallback_failure_rolls_back_real_module_attributes(monkeypatch):
 
     monkeypatch.delattr(indexer, "_hy4_runtime_installed", raising=False)
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True, is_cuda_alike=lambda: True)
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
@@ -236,7 +254,17 @@ def test_fallback_failure_rolls_back_real_module_attributes(monkeypatch):
         importlib.import_module("flaggems_vllm.ops." + n)
         for n in ("top_k_per_row_prefill", "top_k_per_row_decode", "flashmla_sparse")
     ]
+    kernels = [
+        importlib.import_module(name).triton_flash_mla_sparse_fwd
+        for name in (
+            "flaggems_vllm.ops.flashmla_sparse",
+            "flag_gems.fused.flashmla_sparse",
+        )
+        if importlib.util.find_spec(name) is not None
+    ]
     snapshots = [dict(vars(m)) for m in modules]
+    kernel_snapshots = [dict(vars(fn)) for fn in kernels]
+    retuned_snapshot = sparse.HYV4FlashMLASparseBackend._retuned
     original_set = runtime.PatchTransaction.set
     error = RuntimeError("late installation failure")
 
@@ -254,6 +282,135 @@ def test_fallback_failure_rolls_back_real_module_attributes(monkeypatch):
         for module, before in zip(modules, snapshots):
             for name, value in before.items():
                 assert getattr(module, name) is value, (module.__name__, name)
+        for fn, before in zip(kernels, kernel_snapshots):
+            for name, value in before.items():
+                assert getattr(fn, name) is value, (fn, name)
+        assert sparse.HYV4FlashMLASparseBackend._retuned is retuned_snapshot
+
+
+def test_valid_metax_install_retunes_sparse_prefill_transactionally(monkeypatch):
+    import vllm.model_executor.layers.attention.mla_attention as mla
+    import vllm.model_executor.layers.sparse_attn_indexer as indexer
+    import vllm.v1.attention.backends.mla.flashmla_sparse as native
+    from vllm import platforms
+
+    monkeypatch.delattr(indexer, "_hy4_runtime_installed", raising=False)
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda: False, is_cuda_alike=lambda: True),
+    )
+    monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
+    monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
+    monkeypatch.setattr(runtime, "use_flaggems_op", lambda name: True)
+    monkeypatch.setattr(
+        mla,
+        "get_mla_prefill_backend",
+        lambda cfg: SimpleNamespace(is_available=lambda: False),
+    )
+    monkeypatch.delenv("VLLM_FL_METAX_SAFE_MLA_TILES", raising=False)
+    backend = sparse.HYV4FlashMLASparseBackend
+    monkeypatch.setattr(backend, "_retuned", False)
+    fn = importlib.import_module(
+        "flaggems_vllm.ops.flashmla_sparse"
+    ).triton_flash_mla_sparse_fwd
+    original_configs = list(fn.configs)
+    original_cache = fn.cache
+    plan = runtime.validate_hy4_runtime(_prefill_config())
+    with runtime.patch_transaction() as tx:
+        try:
+            assert runtime._install_fallback(tx, plan)
+            configs = [(c.kwargs, c.num_warps, c.num_stages) for c in fn.configs]
+            assert configs == [
+                ({"BK": bk, "BH": bh}, warps, stages)
+                for bk, bh, stages, warps in backend._SAFE_TILE_CONFIGS
+            ]
+            assert native.flash_mla_sparse_fwd is plan.operations[
+                "flash_mla_sparse_fwd"
+            ]
+            assert fn.cache == {}
+            assert backend._retuned
+            selected_configs = list(fn.configs)
+            assert runtime._install_fallback(tx, plan)
+            assert fn.configs == selected_configs
+            # An already-valid configuration must not rely on a validation error
+            # to install the resource-compatible tiles.
+            assert backend.validate_configuration(
+                head_size=576,
+                dtype=torch.bfloat16,
+                kv_cache_dtype="auto",
+                block_size=64,
+                use_mla=True,
+                has_sink=True,
+                use_sparse=True,
+                use_mm_prefix=False,
+                use_per_head_quant_scales=False,
+                device_capability=SimpleNamespace(major=8, minor=0),
+                attn_type="decoder",
+            ) == []
+        finally:
+            tx.rollback()
+    assert fn.configs == original_configs
+    assert fn.cache is original_cache
+    assert not backend._retuned
+    assert not getattr(indexer, "_hy4_runtime_installed", False)
+
+
+@pytest.mark.parametrize("disabled", ["0", "false", "off", "no"])
+def test_metax_sparse_tile_opt_out(monkeypatch, disabled):
+    from vllm import platforms
+
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda: False, is_cuda_alike=lambda: True),
+    )
+    monkeypatch.setenv("VLLM_FL_METAX_SAFE_MLA_TILES", disabled)
+    monkeypatch.setattr(sparse.HYV4FlashMLASparseBackend, "_retuned", False)
+    fn = importlib.import_module(
+        "flaggems_vllm.ops.flashmla_sparse"
+    ).triton_flash_mla_sparse_fwd
+    monkeypatch.setattr(
+        sparse.HYV4FlashMLASparseBackend,
+        "_flaggems_sparse_active",
+        lambda: True,
+    )
+    before = fn.configs
+    sparse.HYV4FlashMLASparseBackend._maybe_retune_triton_sparse_prefill()
+    assert fn.configs is before
+    assert not sparse.HYV4FlashMLASparseBackend._retuned
+
+
+def test_native_install_does_not_retune_sparse_prefill(monkeypatch):
+    import vllm.model_executor.layers.attention.mla_attention as mla
+    import vllm.model_executor.layers.sparse_attn_indexer as indexer
+    from vllm import platforms
+
+    monkeypatch.delattr(indexer, "_hy4_runtime_installed", raising=False)
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda: True, is_cuda_alike=lambda: True),
+    )
+    monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
+    monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
+    monkeypatch.setattr(runtime, "use_flaggems_op", lambda name: True)
+    monkeypatch.setattr(
+        mla,
+        "get_mla_prefill_backend",
+        lambda cfg: SimpleNamespace(is_available=lambda: False),
+    )
+    monkeypatch.setattr(
+        sparse.HYV4FlashMLASparseBackend,
+        "_maybe_retune_triton_sparse_prefill",
+        lambda **kwargs: pytest.fail("native CUDA must keep upstream tiles"),
+    )
+    plan = runtime.validate_hy4_runtime(_prefill_config())
+    with runtime.patch_transaction() as tx:
+        try:
+            assert runtime._install_fallback(tx, plan)
+        finally:
+            tx.rollback()
 
 
 def test_fp8_kv_requires_native_metadata(monkeypatch):
@@ -261,7 +418,7 @@ def test_fp8_kv_requires_native_metadata(monkeypatch):
     from vllm import platforms
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True, is_cuda_alike=lambda: True)
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(
@@ -348,7 +505,6 @@ def test_automatic_prefill_does_not_hide_configuration_errors(error):
     "name", ["per_token_group_quant_fp8", "flash_attn_varlen_func"]
 )
 def test_preflight_requires_callable_implementations(monkeypatch, name):
-    import flag_gems
     import flaggems_vllm
 
     import vllm.model_executor.layers.attention.mla_attention as mla
@@ -365,8 +521,7 @@ def test_preflight_requires_callable_implementations(monkeypatch, name):
         "get_mla_prefill_backend",
         lambda cfg: SimpleNamespace(is_available=lambda *_: False),
     )
-    module = flag_gems if name == "per_token_group_quant_fp8" else flaggems_vllm
-    monkeypatch.setattr(module, name, None)
+    monkeypatch.setattr(flaggems_vllm, name, None)
     with pytest.raises(RuntimeError, match=name):
         runtime.validate_hy4_runtime(_prefill_config())
 
@@ -378,7 +533,7 @@ def test_fallback_success_idempotence_and_prefill_selection(monkeypatch):
 
     monkeypatch.delattr(indexer, "_hy4_runtime_installed", raising=False)
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True, is_cuda_alike=lambda: True)
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)

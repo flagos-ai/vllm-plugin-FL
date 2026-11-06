@@ -116,13 +116,129 @@ def _validate_topk_producers(config, skip_layers: set[int]) -> None:
             producer = i
 
 
+def _stage_starts(partition: str, num_hidden_layers: int, pp_size: int) -> list[int]:
+    """Return the first layer index of every stage for a VLLM_PP_LAYER_PARTITION value."""
+    sizes = [int(size) for size in partition.split(",")]
+    if len(sizes) != pp_size or sum(sizes) != num_hidden_layers:
+        return []
+    starts = [0]
+    for size in sizes[:-1]:
+        starts.append(starts[-1] + size)
+    return starts
+
+
+def _sparse_producers(config, shared: set[int]) -> list[int | None]:
+    """Return the nearest preceding full sparse producer of every backbone layer."""
+    layer_types = getattr(config, "layer_types", None)
+    producers: list[int | None] = []
+    producer = None
+    for layer_idx in range(config.num_hidden_layers):
+        sparse = layer_types is None or layer_types[layer_idx] in _SPARSE_LAYER_TYPES
+        if sparse and layer_idx not in shared:
+            producer = layer_idx
+        producers.append(producer)
+    return producers
+
+
+def _pp_stage_bounds(num_hidden_layers: int, pp_size: int) -> list[tuple[int, int]]:
+    """Return every stage's (start, end), honouring VLLM_PP_LAYER_PARTITION.
+
+    An exported-but-empty ``VLLM_PP_LAYER_PARTITION`` means "unset", but
+    ``get_pp_indices`` only checks for ``None`` and would die on ``int("")``.
+    Hide it for the duration of the call so the error the user sees is the
+    actionable one from :func:`validate_hy4_parallel_config`, not a parsing
+    failure deep inside model init.
+    """
+    import os
+
+    from vllm.distributed.utils import get_pp_indices
+
+    partition = os.environ.get("VLLM_PP_LAYER_PARTITION")
+    if partition is not None and not partition.strip():
+        os.environ.pop("VLLM_PP_LAYER_PARTITION", None)
+        try:
+            return [
+                get_pp_indices(num_hidden_layers, pp_rank, pp_size)
+                for pp_rank in range(pp_size)
+            ]
+        finally:
+            os.environ["VLLM_PP_LAYER_PARTITION"] = partition
+    return [
+        get_pp_indices(num_hidden_layers, pp_rank, pp_size) for pp_rank in range(pp_size)
+    ]
+
+
+def _suggest_pp_partition(
+    num_hidden_layers: int, producers: list[int | None], pp_size: int
+) -> str | None:
+    """Suggest a balanced partition whose every stage starts on a producer layer."""
+    starts = [0]
+    for stage in range(1, pp_size):
+        target = round(stage * num_hidden_layers / pp_size)
+        last_start = num_hidden_layers - (pp_size - stage)
+        candidates = [
+            layer
+            for layer in range(starts[-1] + 1, last_start + 1)
+            if producers[layer] == layer
+        ]
+        if not candidates:
+            return None
+        starts.append(min(candidates, key=lambda layer: (abs(layer - target), layer)))
+    bounds = starts + [num_hidden_layers]
+    return ",".join(str(bounds[i + 1] - bounds[i]) for i in range(pp_size))
+
+
 def validate_hy4_parallel_config(config, pipeline_parallel_size: int) -> None:
+    """Reject PP layouts that cut a shared indexer away from its top-k producer.
+
+    A "shared" indexer layer reuses the top-k indices written by the closest
+    preceding "full" indexer layer through a per-rank buffer, and PP stages do
+    not exchange that buffer. This does not make PP>1 impossible: it only
+    requires every stage to *start* on a full (producer) layer, so that each
+    stage fills its own buffer before any shared layer reads it.
+    ``VLLM_PP_LAYER_PARTITION`` can express such a split.
+    """
     shared = compute_skip_topk_layers(config)
-    if pipeline_parallel_size > 1 and shared:
-        raise ValueError(
-            "HY4 shared top-k indices are not transferred between PP stages; "
-            "use pipeline_parallel_size=1 for shared indexers."
+    if pipeline_parallel_size <= 1 or not shared:
+        return
+
+    num_hidden_layers = config.num_hidden_layers
+    producers = _sparse_producers(config, shared)
+    violations: list[tuple[int, int, int, int | None]] = []
+    for pp_rank, (start, end) in enumerate(
+        _pp_stage_bounds(num_hidden_layers, pipeline_parallel_size)
+    ):
+        for layer_idx in range(start, end):
+            if layer_idx not in shared:
+                continue
+            producer = producers[layer_idx]
+            if producer is None or producer < start:
+                violations.append((pp_rank, layer_idx, start, producer))
+                break
+    if not violations:
+        return
+
+    suggestion = _suggest_pp_partition(
+        num_hidden_layers, producers, pipeline_parallel_size
+    )
+    if suggestion:
+        starts = _stage_starts(suggestion, num_hidden_layers, pipeline_parallel_size)
+        hint = (
+            f"set VLLM_PP_LAYER_PARTITION={suggestion} "
+            f"(stages start on layers {', '.join(str(s) for s in starts)})"
         )
+    else:
+        hint = "no layer partition starts every stage on a full indexer layer"
+    details = "; ".join(
+        f"stage {pp_rank} starts at layer {start} but shared layer {layer_idx} "
+        f"needs producer {producer}"
+        for pp_rank, layer_idx, start, producer in violations
+    )
+    raise ValueError(
+        "HY4 shared top-k indices are not transferred between PP stages: every "
+        "pipeline stage must start on a full (non-shared) indexer layer. "
+        f"{details}. Use pipeline_parallel_size=1, or {hint}."
+    )
 
 
 def is_skip_topk_indexer_weight(weight_name: str, skip_topk_layers: set[int]) -> bool:

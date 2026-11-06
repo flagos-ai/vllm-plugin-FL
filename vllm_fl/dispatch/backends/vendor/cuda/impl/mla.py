@@ -41,7 +41,7 @@ def get_operator(name):
 def is_available(name, implementation):
     from vllm.platforms import current_platform
 
-    if not current_platform.is_cuda() or not callable(implementation):
+    if not (current_platform.is_cuda() or current_platform.is_cuda_alike()) or not callable(implementation):
         return False
     if name in _CACHE_OPS:
         return has_device_kernel("_C_cache_ops::" + name, "cuda")
