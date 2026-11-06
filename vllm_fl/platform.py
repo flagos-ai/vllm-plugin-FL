@@ -215,7 +215,9 @@ class PlatformFL(Platform):
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
     dist_backend: str = (
-        "flagcx" if _flagcx_backend_enabled() else dist_backend_dict.get(device_name, "nccl")
+        "flagcx"
+        if _flagcx_backend_enabled()
+        else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
     # translated into the ordinal visible to this process. Leaving the
@@ -343,6 +345,7 @@ class PlatformFL(Platform):
                 from vllm_fl.dispatch.backends.vendor.txda.patch import (
                     apply_txda_patches,
                 )
+
                 apply_txda_patches()
             except Exception as e:
                 logger.warning(f"Failed to apply txda patches: {e}")
@@ -489,6 +492,13 @@ class PlatformFL(Platform):
         from vllm_fl.models.glm5.runtime import validate_glm5_config
 
         validate_glm5_config(vllm_config)
+
+        from vllm_fl.minimax_m3_config import is_enabled
+
+        if is_enabled():
+            from vllm_fl.models.minimax_m3_registration import MiniMaxM3MetaXConfig
+
+            MiniMaxM3MetaXConfig.verify_and_update_config(vllm_config)
 
     @classmethod
     def get_attn_backend_cls(
@@ -775,10 +785,7 @@ class PlatformFL(Platform):
                 # path — the GroupCoordinator that matters is built after
                 # check_and_update_config has finalized cudagraph_mode.
                 return False
-            return (
-                vllm_config.compilation_config.cudagraph_mode
-                != CUDAGraphMode.NONE
-            )
+            return vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         # HIP communicators also use ctypes. Keep them opaque to Dynamo,
         # matching vLLM's ROCm platform even when is_cuda_alike() is False.
         return cls.vendor_name in ("nvidia", "amd", "hygon", "thead", "iluvatar")

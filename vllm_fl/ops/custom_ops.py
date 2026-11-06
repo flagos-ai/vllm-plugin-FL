@@ -70,7 +70,9 @@ def _patch_unquantized_moe_oracle(*, prefer_flaggems_experts: bool) -> None:
     )
 
 
-def register_oot_ops(whitelist: list[str] | None = None) -> None:
+def register_oot_ops(
+    whitelist: list[str] | None = None, *, install_moe_hooks: bool = True
+) -> None:
     """
     Register OOT (out-of-tree) custom operators.
 
@@ -78,6 +80,9 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         whitelist: If provided, only register operators in this list.
                    If None, check VLLM_FL_OOT_WHITELIST env var.
                    If neither is set, register all operators.
+        install_moe_hooks: Keep the default global factory/oracle integration.
+                           Set False when the caller supplies a scoped expert
+                           factory and its own backend selection.
 
     Operators in VLLM_FL_OOT_BLACKLIST or platform config oot_blacklist
     will be excluded from registration.
@@ -96,7 +101,8 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
     # Check if OOT registration is enabled
     if not is_oot_enabled():
         # Patch the upstream oracle so in-tree FusedMoE works on this platform.
-        _patch_unquantized_moe_oracle(prefer_flaggems_experts=False)
+        if install_moe_hooks:
+            _patch_unquantized_moe_oracle(prefer_flaggems_experts=False)
         return
 
     # Get blacklist (from env var or platform config)
@@ -123,7 +129,7 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
 
     # If fused_moe is excluded (blacklisted or not in the active whitelist),
     # patch the upstream oracle so in-tree FusedMoE works on OOT platforms.
-    if not fused_moe_enabled:
+    if install_moe_hooks and not fused_moe_enabled:
         _patch_unquantized_moe_oracle(prefer_flaggems_experts=False)
 
     for op_name in ops_to_register:
@@ -189,7 +195,7 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
     # subclass, so it cannot be registered via CustomOp/PluggableLayer.register_oot.
     # Instead we replace the factory function in the two places vllm imports it
     # from, so all model code transparently gets FusedMoEFL.
-    if fused_moe_enabled:
+    if install_moe_hooks and fused_moe_enabled:
         # Some model modules import the upstream FusedMoE factory before the
         # WorkerFL constructor runs.  Patching only the package-level factory
         # cannot rewrite those already-bound symbols.  Patch the method's

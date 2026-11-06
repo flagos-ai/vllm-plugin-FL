@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 
-
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.
@@ -149,6 +148,13 @@ def _init_vendor_device():
         )
 
         _patch_xpu_get_device()
+    elif vendor_name in {"metax", "maca"}:
+        from vllm_fl.minimax_m3_config import is_enabled
+
+        if is_enabled():
+            from vllm_fl.patches.minimax_m3_metax.startup import prepare_platform
+
+            prepare_platform()
 
 
 def register():
@@ -205,6 +211,11 @@ def register_router():
     from vllm_fl.utils import is_oot_enabled
 
     if not is_oot_enabled():
+        return
+    from vllm_fl.minimax_m3_config import is_enabled
+
+    if getattr(current_platform, "vendor_name", None) == "metax" and is_enabled():
+        # M3 supplies its own local router; keep the native global router intact.
         return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
 
