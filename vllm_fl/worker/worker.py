@@ -153,6 +153,9 @@ def _apply_worker_vendor_patches() -> None:
     from vllm_fl.dispatch.backends.vendor.iluvatar.v2_buffers import patch_v2_uva
 
     patch_v2_uva()
+    from vllm_fl.dispatch.backends.vendor.iluvatar.mrope import patch_mrope
+
+    patch_mrope()
     try:
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
             patch_sampler_compile_for_iluvatar,

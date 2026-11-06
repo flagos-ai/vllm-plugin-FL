@@ -54,29 +54,37 @@ upstream `GroupCoordinator.graph_capture()`'s CUDA communicator contract while
 keeping collective operations on FlagCX. This does not initialize PyNCCL or
 custom CUDA all-reduce. Non-CUDA FlagCX platforms keep `CommunicatorFL`.
 
-In that development environment, `FULL_AND_PIECEWISE` captured successfully but
-failed one long-text request: generation repeatedly emitted token 248320, equal
-to the vocabulary size. Keeping compilation mode 3 and changing only the graph
-mode to `FULL_DECODE_ONLY` produced two identical, normally terminated responses
-with valid token IDs in an isolated long-text test. However, the full 26-request
-gate passed only 24/26: two concurrent text requests returned truncated or empty
-outputs. Changing only compilation mode from 3 to 0 with `FULL_DECODE_ONLY`
-then passed all 26 requests (text, image, and mixed eight-way concurrency), while
-all four workers still captured and replayed full decode graphs. The explicitly
-validated configuration for this environment is:
+In that development environment, a compiled `FULL_AND_PIECEWISE` graph previously
+produced NaNs after layer 27's multimodal RoPE and repeatedly emitted token
+248320, equal to the vocabulary size. The Q/K normalization outputs, positions,
+and source cosine/sine cache rows were finite. Disabling graph replay recovered
+the request, while an isolated RoPE operation replayed correctly.
+
+The Iluvatar worker now routes two-dimensional `MRotaryEmbedding.forward_native`
+calls through vLLM's existing opaque `mrope` operation. Q/K are cloned before the
+in-place kernel, preserving the native method's input semantics and the
+non-rotated head dimensions. This keeps the RoPE region out of the compiler's
+elementwise fusion without disabling model compilation or graph capture.
+
+With this compatibility fix, the original long-text request terminated normally
+twice with 309 valid generated tokens, and all 26 requests in the original
+text/image/mixed adaptation gate passed in both graph and eager modes. The
+tested graph configuration is:
 
 ```bash
---compilation-config '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32]}'
+--compilation-config '{"cudagraph_capture_sizes":[1,2,4,8,16,32]}'
 ```
 
-This disables torch compilation, not CUDA graphs or the V2 runner. It isolates a
-compilation-related compatibility issue; the underlying kernel cause and the
-performance impact have not been established.
+`VLLM_FL_ILUVATAR_MROPE_IMPL` defaults to `opaque-v1`. Setting it to `native`
+before restarting a service restores the former path for diagnosis. The worker
+registers this choice in vLLM's compilation hash so the default fix cannot load
+an old AOT artifact containing the native decomposition. The precise upstream
+compiler/buffer-lifetime defect and the performance impact remain unestablished.
 
 These tests retained `VLLM_FL_FLAGOS_BLACKLIST_APPEND=slice,mm,mm_out`. They do
 not validate removing those operator exclusions, other models, or token-level
 precision against NVIDIA. Do not treat successful graph capture alone as an
-inference correctness check or apply this model-specific workaround globally.
+inference correctness check.
 
 ## 1. Check the host
 
