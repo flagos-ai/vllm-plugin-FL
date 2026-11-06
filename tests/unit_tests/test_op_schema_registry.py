@@ -30,6 +30,13 @@ def _load_registry(monkeypatch, schemas, *, native=False):
     spec = importlib.util.spec_from_file_location("op_schema_registry_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if not native:
+        # ``torch.ops._C`` is process-global: earlier tests in the same worker
+        # may already have registered ops there (or loaded the native
+        # extension), which makes register_op_schemas() short-circuit and hide
+        # the namespace logic under test. Isolate the presence probes.
+        monkeypatch.setattr(module, "_C_ops_present", lambda: False)
+        monkeypatch.setattr(module, "_is_metax_backend", lambda: False)
     return module
 
 

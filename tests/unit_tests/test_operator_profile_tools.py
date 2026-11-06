@@ -102,6 +102,9 @@ def test_serve_script_cleans_configured_flaggems_oplist(tmp_path):
         {
             "FLAGGEMS_ENABLE_OPLIST_PATH": str(oplist),
             "PATH": f"{fake_bin}:{env['PATH']}",
+            # Non-interactive bash sources BASH_ENV; vendor images use it to
+            # prepend their own bin dir, which would shadow the fake binaries.
+            "BASH_ENV": "",
         }
     )
 
@@ -133,6 +136,9 @@ def test_profile_script_moves_configured_flaggems_oplist(tmp_path):
         {
             "FLAGGEMS_ENABLE_OPLIST_PATH": str(oplist),
             "PATH": f"{fake_bin}:{env['PATH']}",
+            # Non-interactive bash sources BASH_ENV; vendor images use it to
+            # prepend their own bin dir, which would shadow the fake binaries.
+            "BASH_ENV": "",
         }
     )
 
@@ -171,6 +177,8 @@ def test_serve_script_uses_supported_vllm_profiler_config(tmp_path):
         {
             "PATH": f"{fake_bin}:{env['PATH']}",
             "PROFILE_TEST_INVOCATION": str(invocation),
+            # See above: avoid BASH_ENV shadowing the fake `vllm`.
+            "BASH_ENV": "",
         }
     )
     subprocess.run(

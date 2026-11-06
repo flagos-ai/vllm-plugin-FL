@@ -14,7 +14,6 @@ from datetime import timedelta
 from types import NoneType
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import regex as re
 import torch
 import torch.nn as nn
@@ -95,7 +94,7 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -246,7 +245,21 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        self.use_v2_model_runner = vllm_config.use_v2_model_runner
+        # The FL plugin only implements vLLM's v1 model runner. vLLM 0.32
+        # enables the V2 runner (vllm.v1.worker.gpu.model_runner) by default,
+        # which has not been ported to vLLM-FL on Hygon yet.
+        if (
+            getattr(current_platform, "vendor_name", "") == "hygon"
+            and vllm_config.use_v2_model_runner
+        ):
+            logger.warning(
+                "The vLLM 0.32 V2 model runner is not supported by vLLM-FL on "
+                "Hygon; falling back to the FL (v1) model runner."
+            )
+        self.use_v2_model_runner = (
+            vllm_config.use_v2_model_runner
+            and getattr(current_platform, "vendor_name", "") != "hygon"
+        )
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 
@@ -642,12 +655,40 @@ class WorkerFL(WorkerBase):
         ):
             cudagraph_memory_estimate = self.model_runner.profile_cudagraph_memory()
 
-        # Respect the opt-in flag as originally designed.
+        # Hygon DCUs report is_cuda_alike() == False, so the upstream estimator
+        # above never runs and the KV cache takes the whole
+        # gpu_memory_utilization budget. Graph capture then has no room left and
+        # the first capture ends in `HIP out of memory`, which also leaves the
+        # DCU memory unreclaimable. Reserve a headroom instead, bounded by a
+        # share of the device budget so smaller cards are not starved.
+        hygon_graph_headroom = 0
+        compilation_config = getattr(self.vllm_config, "compilation_config", None)
+        if (
+            getattr(current_platform, "vendor_name", "") == "hygon"
+            and getattr(compilation_config, "cudagraph_mode", CUDAGraphMode.NONE)
+            != CUDAGraphMode.NONE
+        ):
+            requested = int(
+                float(os.environ.get("VLLM_FL_HYGON_GRAPH_HEADROOM_GB", "4")) * 1024**3
+            )
+            # At most 30% of one DCU, matching the budget shape used for the
+            # other DCU platform. On a 144 GiB card this leaves the 4 GiB
+            # default untouched; it only trims the request on small cards.
+            device_budget_cap = int(current_platform.get_device_total_memory() * 0.3)
+            hygon_graph_headroom = min(requested, device_budget_cap)
+            logger.info(
+                "Hygon: reserving %.1f GiB of the KV cache budget for graph "
+                "capture (requested %.1f GiB, device budget cap %.1f GiB).",
+                hygon_graph_headroom / 1024**3,
+                requested / 1024**3,
+                device_budget_cap / 1024**3,
+            )
+
         cudagraph_memory_estimate_applied = (
             cudagraph_memory_estimate
             if envs.VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS
             else 0
-        )
+        ) + hygon_graph_headroom
 
         self.total_consumed = profile_result.total_consumed
         self.peak_activation_memory = (
@@ -836,7 +877,9 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        if getattr(self.vllm_config, "aux_output_config", None) is not None and (
+            self.vllm_config.aux_output_config.enable_return_routed_experts
+        ):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -1239,45 +1282,11 @@ class WorkerFL(WorkerBase):
 
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        all_gather_tensors = {}
-        compilation_config = self.vllm_config.compilation_config
-        parallel_config = self.vllm_config.parallel_config
-
-        if (
-            parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
-            and forward_pass
-        ):
-            # currently only supported by V1 GPUModelRunner
-            assert not self.use_v2_model_runner
-            num_scheduled_tokens_np = np.array(
-                list(scheduler_output.num_scheduled_tokens.values()),
-                dtype=np.int32,
-            )
-            # TODO(lucas): This is pretty gross; ideally we should only ever call
-            # `_determine_batch_execution_and_padding` once (will get called again
-            # in `execute_model`) but this requires a larger refactor of PP.
-            _, batch_desc, _, _, _ = (
-                self.model_runner._determine_batch_execution_and_padding(
-                    num_tokens=num_scheduled_tokens,
-                    num_reqs=len(num_scheduled_tokens_np),
-                    num_scheduled_tokens_np=num_scheduled_tokens_np,
-                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
-                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
-                )
-            )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
-                )
-            }
 
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (
                 get_pp_group().irecv_tensor_dict(
                     all_gather_group=get_tp_group(),
-                    all_gather_tensors=all_gather_tensors,
                 )
             )
             assert tensor_dict is not None
@@ -1313,7 +1322,6 @@ class WorkerFL(WorkerBase):
         self._pp_send_work = get_pp_group().isend_tensor_dict(
             output.tensors,
             all_gather_group=get_tp_group(),
-            all_gather_tensors=all_gather_tensors,
         )
 
         return None
@@ -1581,7 +1589,7 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    from vllm.model_executor.determinism.batch_invariant import init_batch_invariance
 
     init_batch_invariance()
     override_envs_for_eplb(

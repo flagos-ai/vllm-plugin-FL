@@ -96,12 +96,14 @@ platforms:
     exempt_from_global:
       - vllm_fl/dispatch/config/ascend.yaml
   hygon:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/hygon.yaml
+      - vllm_fl/dispatch/backends/vendor/hygon/
       - tests/platforms/hygon.yaml
     exempt_from_global:
       - vllm_fl/dispatch/config/hygon.yaml
+      - vllm_fl/dispatch/backends/vendor/hygon/
   metax:
     enabled: false
     trigger_paths:

@@ -423,6 +423,38 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
+        if cls.vendor_name == "hygon":
+            # vLLM 0.32 fills a wide capture table (51 entries, up to 512 tokens)
+            # while the compilation config is built, i.e. before this hook runs,
+            # and capturing every entry costs DCU memory on top of the KV cache.
+            # Cap the table at the largest decode batch this backend needs;
+            # larger batches fall back to eager execution.
+            #
+            # The 64 default is the upper bound of the decode buckets that fit
+            # the reserved graph headroom on a 144 GiB DCU (11 PIECEWISE + 11
+            # FULL captures measured); the budget itself is device-dependent, so
+            # the cap stays overridable for other card sizes.
+            capture_cap = int(
+                os.environ.get("VLLM_FL_HYGON_CUDAGRAPH_CAPTURE_CAP", "64")
+            )
+            compilation_config = getattr(vllm_config, "compilation_config", None)
+            if compilation_config is not None:
+                from vllm.config.compilation import CompilationMode
+
+                sizes = getattr(compilation_config, "cudagraph_capture_sizes", None)
+                mode = getattr(compilation_config, "mode", CompilationMode.NONE)
+                if mode != CompilationMode.NONE and sizes and max(sizes) > capture_cap:
+                    capped = [size for size in sizes if size <= capture_cap] or [
+                        capture_cap
+                    ]
+                    compilation_config.cudagraph_capture_sizes = capped
+                    compilation_config.max_cudagraph_capture_size = capped[-1]
+                    logger.info(
+                        "Hygon: cudagraph capture sizes capped at %s to stay "
+                        "within the DCU memory budget.",
+                        capped,
+                    )
+
         if (
             cls.device_type in {"npu", "musa", "txda"}
             and vllm_config.use_v2_model_runner
@@ -974,17 +1006,37 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs.
+
+        vLLM 0.32 dispatches IR ops (``rms_norm``, ``fused_add_rms_norm``,
+        ``gelu_and_mul_sparse``) through the ``vllm.ir.op`` registry and asserts
+        that every provider in the priority list is registered for that op.
+        ``vllm_c`` is only registered when the vendor wheel ships ``vllm._C``,
+        and even then not for every op, so filter it per op instead of
+        assuming the CUDA layout.
+        """
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
-        return IrOpPriorityConfig.with_default(
-            default,
-            rms_norm=default,
-            fused_add_rms_norm=default,
+        preferred = ["native"] if using_inductor else ["vllm_c", "native"]
+
+        try:
+            from vllm.ir.op import IrOp
+        except Exception:
+            IrOp = None  # type: ignore[assignment]
+
+        def for_op(name: str) -> list[str]:
+            if IrOp is None or name not in IrOp.registry:
+                return ["native"]
+            impls = IrOp.registry[name].impls
+            return [p for p in preferred if p in impls] or ["native"]
+
+        return IrOpPriorityConfig(
+            rms_norm=for_op("rms_norm"),
+            fused_add_rms_norm=for_op("fused_add_rms_norm"),
+            gelu_and_mul_sparse=for_op("gelu_and_mul_sparse"),
         )
 
     @classmethod
