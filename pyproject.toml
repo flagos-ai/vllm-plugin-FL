@@ -188,7 +188,3 @@ ignore-dot = true
 ignore-vcs = true
 ignore-global = true
 ignore-parent = true
-
-[tool.typos.default.extend-words]
-# PyPI package installed as a vLLM dependency; typos suggests "certify".
-certifi = "certifi"
