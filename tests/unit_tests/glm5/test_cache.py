@@ -529,8 +529,15 @@ def _legacy_tail_slots(
 
 
 def _make_batch(per_request_positions, padded_len=None):
-    positions = torch.cat(
-        [torch.tensor(values, dtype=torch.int64) for values in per_request_positions]
+    positions = (
+        torch.cat(
+            [
+                torch.tensor(values, dtype=torch.int64)
+                for values in per_request_positions
+            ]
+        )
+        if per_request_positions
+        else torch.empty(0, dtype=torch.int64)
     )
     num_actual_tokens = positions.numel()
     num_reqs = len(per_request_positions)
@@ -676,6 +683,8 @@ def _make_common_metadata(
 def _make_tail_builder():
     builder = object.__new__(KpoolTailMetadataBuilder)
     builder.kv_cache_spec = SimpleNamespace(block_size=KPOOL)
+    builder._slot_mapping_capacity = 1024
+    builder._slot_mapping_buffer = None
     return builder
 
 
@@ -930,10 +939,11 @@ def test_decode_writer_rejects_multi_token_verify():
         _decode_write_layout(metadata, 2, 4)
 
 
+@pytest.mark.gpu
 def test_invalid_middle_block_is_compacted_out() -> None:
-    request_ids = torch.tensor([0], dtype=torch.int32)
-    block_table = torch.tensor([[10, -1, 12]], dtype=torch.int32)
-    token_indices = torch.tensor([[0, 64, 128, 1]], dtype=torch.int32)
+    request_ids = torch.tensor([0], dtype=torch.int32, device="cuda")
+    block_table = torch.tensor([[10, -1, 12]], dtype=torch.int32, device="cuda")
+    token_indices = torch.tensor([[0, 64, 128, 1]], dtype=torch.int32, device="cuda")
 
     physical, valid_lengths = _convert_request_to_physical_indices(
         request_ids, block_table, token_indices, block_size=64
@@ -943,10 +953,13 @@ def test_invalid_middle_block_is_compacted_out() -> None:
     assert valid_lengths.tolist() == [3]
 
 
+@pytest.mark.gpu
 def test_negative_and_out_of_range_tokens_stay_after_valid_prefix() -> None:
-    request_ids = torch.tensor([0, 1], dtype=torch.int32)
-    block_table = torch.tensor([[2, 3], [5, -1]], dtype=torch.int32)
-    token_indices = torch.tensor([[-1, 65, 0, 128], [64, 1, -1, 0]], dtype=torch.int32)
+    request_ids = torch.tensor([0, 1], dtype=torch.int32, device="cuda")
+    block_table = torch.tensor([[2, 3], [5, -1]], dtype=torch.int32, device="cuda")
+    token_indices = torch.tensor(
+        [[-1, 65, 0, 128], [64, 1, -1, 0]], dtype=torch.int32, device="cuda"
+    )
 
     physical, valid_lengths = _convert_request_to_physical_indices(
         request_ids, block_table, token_indices, block_size=64
@@ -976,3 +989,73 @@ def test_pool_expansion_and_tail_append_keep_request_local_indices() -> None:
         with_tail[:, -3:],
         torch.tensor([[12, 13, -1], [16, 17, -1]], dtype=torch.int32),
     )
+
+
+def test_tail_builder_reuses_address_and_refreshes_every_step() -> None:
+    builder = _make_tail_builder()
+    first = _make_common_metadata([[3]], [1])
+    old = builder.build(0, first)
+    address = old.slot_mapping.data_ptr()
+    second = _make_common_metadata([[7]], [9])
+    new = builder.build(0, second)
+    assert new.slot_mapping.data_ptr() == address
+    assert old.slot_mapping[0].item() == 9 * KPOOL + 3
+    assert torch.equal(new.slot_mapping[1:], second.slot_mapping[1:])
+
+
+@pytest.mark.parametrize("counts", [(1, 8, 1), (8, 1, 8), (0, 8, 0)])
+def test_tail_builder_batch_changes_do_not_replace_storage(counts) -> None:
+    builder = _make_tail_builder()
+    storage = None
+    for count in counts:
+        common = _make_common_metadata([[11]] * count, list(range(10, 10 + count)))
+        result = builder.build(0, common)
+        pointer = result.slot_mapping.untyped_storage().data_ptr()
+        storage = pointer if storage is None else storage
+        assert pointer == storage
+        assert torch.equal(
+            result.slot_mapping,
+            compute_kpool_tail_slot_mapping(
+                common.slot_mapping,
+                common.block_table_tensor,
+                common.query_start_loc,
+                common.positions,
+                common.num_actual_tokens,
+                common.num_reqs,
+                KPOOL,
+            ),
+        )
+
+
+def test_tail_builder_rejects_capacity_change_without_replacing_storage() -> None:
+    builder = _make_tail_builder()
+    common = _make_common_metadata([[3]], [1])
+    old = builder.build(0, common)
+    pointer = old.slot_mapping.data_ptr()
+    builder._slot_mapping_capacity = 4
+    with pytest.raises(ValueError, match="fixed capacity"):
+        builder.build(0, _make_common_metadata([[7]] * 8, list(range(8))))
+    assert builder._slot_mapping_buffer.data_ptr() == pointer
+
+
+def test_tail_builder_rejects_dtype_change_without_replacing_storage() -> None:
+    builder = _make_tail_builder()
+    common = _make_common_metadata([[3]], [1])
+    old = builder.build(0, common)
+    pointer = old.slot_mapping.data_ptr()
+    common.slot_mapping = common.slot_mapping.to(torch.int32)
+    with pytest.raises(ValueError, match="dtype/device"):
+        builder.build(0, common)
+    assert builder._slot_mapping_buffer.data_ptr() == pointer
+
+
+def test_tail_builder_owns_buffer_and_preserves_input_mapping() -> None:
+    builder = _make_tail_builder()
+    common = _make_common_metadata([[3]], [1])
+    original = common.slot_mapping.clone()
+    result = builder.build(0, common)
+    assert builder._slot_mapping_buffer is not None
+    assert result.slot_mapping.untyped_storage().data_ptr() == (
+        builder._slot_mapping_buffer.untyped_storage().data_ptr()
+    )
+    assert torch.equal(common.slot_mapping, original)

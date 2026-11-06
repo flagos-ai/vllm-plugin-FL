@@ -410,3 +410,67 @@ def test_video_sampling_remains_config_selectable() -> None:
     assert legacy_indices[0] == 0
     assert legacy_indices[-1] == 295
     assert all(a < b for a, b in zip(legacy_indices, legacy_indices[1:]))
+
+
+@pytest.mark.parametrize(
+    "device_type,is_cuda,nvidia_reference,portable",
+    [
+        ("cuda", False, False, True),  # OOT CUDA, including PPU
+        ("cuda", True, False, True),  # FlagGems on native CUDA
+        ("cuda", True, True, False),  # Native NVIDIA reference
+        ("cpu", False, False, False),
+    ],
+)
+@pytest.mark.parametrize("fail_parent", [False, True])
+def test_mla_constructor_cuda_device_contract_and_patch_rollback(
+    monkeypatch, device_type, is_cuda, nvidia_reference, portable, fail_parent
+):
+    from vllm.model_executor.layers import sparse_attn_indexer
+    from vllm.model_executor.layers.attention import mla_attention
+
+    import vllm_fl.models.glm5.model as model_module
+    from vllm_fl.dispatch.backends.flaggems.impl.mla import (
+        FlagGemsMLAPrefillBackend,
+    )
+
+    native_prefill = object()
+    original_deep_gemm = lambda: False
+    original_prefill = lambda config: native_prefill
+    monkeypatch.setattr(sparse_attn_indexer, "has_deep_gemm", original_deep_gemm)
+    monkeypatch.setattr(mla_attention, "get_mla_prefill_backend", original_prefill)
+    monkeypatch.setattr(
+        model_module,
+        "current_platform",
+        SimpleNamespace(device_type=device_type, is_cuda=lambda: is_cuda),
+    )
+    monkeypatch.setattr(model_module, "use_nvidia_reference", lambda: nvidia_reference)
+    observed = {}
+
+    def parent_init(self, *args, **kwargs):
+        nn.Module.__init__(self)
+        observed["deep_gemm"] = sparse_attn_indexer.has_deep_gemm()
+        observed["prefill"] = mla_attention.get_mla_prefill_backend(
+            kwargs["vllm_config"]
+        )
+        self.indexer = None
+        self.qk_rope_head_dim = 1
+        if fail_parent:
+            raise RuntimeError("parent construction failed")
+
+    monkeypatch.setattr(model_module.DeepseekV2MLAAttention, "__init__", parent_init)
+    arguments = dict(
+        vllm_config=SimpleNamespace(),
+        config=SimpleNamespace(index_kpool_compress=False),
+        cache_config=None,
+    )
+    if fail_parent:
+        with pytest.raises(RuntimeError, match="parent construction failed"):
+            model_module.Glm5NextMLAAttention(**arguments)
+    else:
+        model_module.Glm5NextMLAAttention(**arguments)
+    assert observed["deep_gemm"] is portable
+    assert observed["prefill"] is (
+        FlagGemsMLAPrefillBackend if portable else native_prefill
+    )
+    assert sparse_attn_indexer.has_deep_gemm is original_deep_gemm
+    assert mla_attention.get_mla_prefill_backend is original_prefill
