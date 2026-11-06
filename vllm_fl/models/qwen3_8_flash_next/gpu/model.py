@@ -86,8 +86,11 @@ from vllm.model_executor.models.utils import (
 try:
     from vllm.model_executor.models.utils import maybe_fuse_shared_experts
 except ImportError:  # vLLM 0.24 predates optional AITER shared-expert fusion
+
     def maybe_fuse_shared_experts(weights, **_kwargs):
         return weights
+
+
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.sequence import IntermediateTensors
@@ -100,14 +103,13 @@ from ..common.hyperconnection import (
     HyperConnectionConfig,
     pack_gated_hc_projection_weights,
 )
+from ..common.multimodal import validate_video_fps, validate_video_pruning
 from ..config import Qwen3_8FlashNextConfig, Qwen3_8FlashNextTextConfig
 from .ple_layer import Qwen3_8FlashNextPLELayer, validate_ple_embedding_weights
 from .qsa import Qwen3_8FlashNextQSAAttention
 from .quantization import with_platform_quantization
 
-_HAS_NATIVE_STACKED_WEIGHTS_MAPPER = hasattr(
-    WeightsMapper(), "orig_to_new_stacked"
-)
+_HAS_NATIVE_STACKED_WEIGHTS_MAPPER = hasattr(WeightsMapper(), "orig_to_new_stacked")
 
 
 def _get_qwen35_hf_to_vllm_mapper() -> WeightsMapper:
@@ -160,10 +162,13 @@ def _get_expert_mappings(
     model: nn.Module,
     num_experts: int,
     num_redundant_experts: int,
-) -> tuple[
-    list[tuple[str, str, int, str]],
-    list[tuple[str, str, int, str]],
-] | None:
+) -> (
+    tuple[
+        list[tuple[str, str, int, str]],
+        list[tuple[str, str, int, str]],
+    ]
+    | None
+):
     """Probe for the fused-MoE mapping API.
 
     vLLM 0.24 exposes ``fused_moe_make_expert_params_mapping`` but does not
@@ -487,21 +492,24 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
                 "prefix": f"{prefix}.linear_attn",
                 "gqa_interleaved_layout": False,
             }
-            if "reduce_results" in inspect.signature(
-                QwenGatedDeltaNetAttention.__init__
-            ).parameters:
+            if (
+                "reduce_results"
+                in inspect.signature(QwenGatedDeltaNetAttention.__init__).parameters
+            ):
                 gdn_kwargs["reduce_results"] = False
             self.linear_attn = QwenGatedDeltaNetAttention(config, **gdn_kwargs)
             # vLLM 0.24 predates the constructor option. HC owns the single TP
             # reduction after each branch, so disable the GDN output linear's
             # internal reduction explicitly to avoid a double all-reduce.
-            if "reduce_results" not in inspect.signature(
-                QwenGatedDeltaNetAttention.__init__
-            ).parameters:
+            if (
+                "reduce_results"
+                not in inspect.signature(QwenGatedDeltaNetAttention.__init__).parameters
+            ):
                 self.linear_attn.out_proj.reduce_results = False
-            self._gdn_requires_output_buffer = "output" in inspect.signature(
-                QwenGatedDeltaNetAttention.forward
-            ).parameters
+            self._gdn_requires_output_buffer = (
+                "output"
+                in inspect.signature(QwenGatedDeltaNetAttention.forward).parameters
+            )
         elif layer_type == "full_attention":
             use_qsa = getattr(config, "indexer_n_heads", None) is not None
             if not use_qsa:
@@ -884,9 +892,7 @@ class Qwen3_8FlashNextModel(nn.Module):
                         if handled:
                             legacy_loaded.update(loaded)
                             continue
-                        yield from _map_stacked_weights(
-                            ((name, loaded_weight),)
-                        )
+                        yield from _map_stacked_weights(((name, loaded_weight),))
 
                 weights = _legacy_weights()
             else:
@@ -1193,7 +1199,25 @@ class Qwen3_8FlashNextMixtureOfExperts(MixtureOfExperts):
 
 class Qwen3_8FlashNextProcessingInfo(Qwen3VLProcessingInfo):
     def get_hf_config(self) -> Qwen3_8FlashNextConfig:
+        validate_video_pruning(self.ctx.get_mm_config())
         return self.ctx.get_hf_config(Qwen3_8FlashNextConfig)
+
+    def _get_video_second_idx(
+        self,
+        metadata,
+        do_sample_frames=None,
+        sampled_fps=None,
+        sampled_num_frames=None,
+    ):
+        validate_video_fps(metadata.get("fps"), name="source video fps")
+        if sampled_fps is not None:
+            validate_video_fps(sampled_fps, name="sampled video fps")
+        return super()._get_video_second_idx(
+            metadata=metadata,
+            do_sample_frames=do_sample_frames,
+            sampled_fps=sampled_fps,
+            sampled_num_frames=sampled_num_frames,
+        )
 
 
 @MULTIMODAL_REGISTRY.register_processor(
@@ -1239,6 +1263,7 @@ class Qwen3_8FlashNextForConditionalGeneration(
             raise ValueError(
                 "Qwen3_8FlashNextForConditionalGeneration requires multimodal_config"
             )
+        validate_video_pruning(multimodal_config)
 
         self.config = config
         self.model_config = vllm_config.model_config
