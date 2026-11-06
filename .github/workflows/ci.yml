@@ -80,7 +80,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      platforms: ${{ steps.detect.outputs.platforms }}
+      # Debug probe for PR #709: route only the target vendor. This branch is
+      # diagnostic and must not be merged.
+      platforms: '["iluvatar"]'
       # Stage selection from PR labels. Default (no tier label) and
       # workflow_dispatch run the full stack; tier labels narrow it:
       # ci-functional = functional only, ci-e2e adds e2e smoke, ci-full
