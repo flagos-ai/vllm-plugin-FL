@@ -4,28 +4,7 @@
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=.github/scripts/nvidia/runner_devices.sh
-source "$HERE/runner_devices.sh"
-configure_cuda_runner_devices
-
 git config --global --add safe.directory "$(pwd)"
-
-# DSW job containers can retain a 64 MiB /dev/shm despite Docker IPC options.
-# Model executors need at least 160 MiB for one shared-memory RPC queue. Match
-# the validated H20 setup by mounting a larger tmpfs inside the CI container.
-if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
-    shm_kb=$(df -k --output=avail /dev/shm | tail -1 | tr -d ' ')
-    if (( ${shm_kb:-0} < 1048576 )); then
-        mount -t tmpfs -o size=32g,mode=1777 tmpfs /dev/shm
-        echo "[cuda setup] mounted /dev/shm at 32g"
-        shm_kb=$(df -k --output=avail /dev/shm | tail -1 | tr -d ' ')
-        if (( ${shm_kb:-0} < 1048576 )); then
-            echo "[cuda setup] /dev/shm still has less than 1 GiB free" >&2
-            exit 1
-        fi
-    fi
-    df -h /dev/shm
-fi
 
 # Refresh uv before use: published images may predate GHSA-hq85-5cpj-mr62.
 # Install only this tool so the pinned vLLM/FlagGems/FlagTree stack is preserved.
@@ -51,8 +30,21 @@ env -u VLLM_VENDOR python -m uv pip install \
 # pip.conf and dies connecting to files.pythonhosted.org on some runners.
 python -m pip install --break-system-packages "pytest-xdist>=3.0.0"
 
+# The dsw-hosted runners cap /dev/shm at ~64MB regardless of --ipc=host /
+# --shm-size (verified: both flags reach docker create yet df still shows
+# 63M). tmpfs charges 4KB per POSIX semaphore file, and the unit pass's 16
+# xdist workers x flag_gems' ~1k libentry locks exceed ~15.7K files. The
+# job container is privileged, so remount a private 32g tmpfs — but ONLY
+# when the inherited shm is too small for the burst; hosts with a real
+# large shm (a100 pool) are left untouched.
+shm_kb=$(df -k --output=avail /dev/shm | tail -1 | tr -d ' ')
+if [ "${shm_kb:-0}" -lt 1048576 ] 2>/dev/null; then
+    mount -t tmpfs -o size=32g,mode=1777 tmpfs /dev/shm
+    echo "remounted /dev/shm at 32g (inherited avail was ${shm_kb}KB)"
+    df -h /dev/shm | tail -1
+fi
+
 python -I -B "$HERE/stack.py"
-report_cuda_runner_devices
 
 python - <<'PY'
 import av

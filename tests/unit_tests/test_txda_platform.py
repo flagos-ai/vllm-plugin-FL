@@ -494,6 +494,6 @@ def test_txda_collectives_use_opaque_ops_without_changing_other_platforms(
         class_name="PlatformFL",
     )
     platform = SimpleNamespace(
-        device_type=device_type, vendor_name=vendor_name, dist_backend="nccl"
+        device_type=device_type, vendor_name=vendor_name, dist_backend=""
     )
     assert use_custom_ops(platform) is expected

@@ -133,23 +133,23 @@ tests/
 
 ```bash
 # Run all tests for a platform/device
-python tests/run.py --platform nvidia --device a100
+python tests/run.py --platform cuda --device a100
 
 # Run only unit tests
-python tests/run.py --platform nvidia --device a100 --scope unit
+python tests/run.py --platform cuda --device a100 --scope unit
 
 # Run only functional tests (ops, compilation, distributed)
-python tests/run.py --platform nvidia --device a100 --scope functional
+python tests/run.py --platform cuda --device a100 --scope functional
 
 # Run only E2E tests (inference + serving)
-python tests/run.py --platform nvidia --device a100 --scope e2e
+python tests/run.py --platform cuda --device a100 --scope e2e
 
 # Run a specific E2E test case
-python tests/run.py --platform nvidia --device a100 \
+python tests/run.py --platform cuda --device a100 \
     --scope e2e --task inference --model qwen3 --case 06b_tp2
 
 # Dry-run — show what would be executed
-python tests/run.py --platform nvidia --device a100 --dry-run
+python tests/run.py --platform cuda --device a100 --dry-run
 
 # Ascend NPU
 python tests/run.py --platform ascend --device 910b --scope unit
