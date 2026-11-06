@@ -34,6 +34,8 @@ def test_apply_ascend_patches_installs_mamba_batch_memcpy(monkeypatch):
         "patch_fla_ops",
         "patch_op_cls",
         "patch_fused_moe",
+        "patch_gdn",
+        "patch_vision_position_interpolation",
     ):
         monkeypatch.setattr(ascend_patch, patch_name, lambda: None)
 
@@ -132,6 +134,8 @@ def test_failed_mamba_install_leaves_apply_retryable(monkeypatch):
         "patch_fla_ops",
         "patch_op_cls",
         "patch_fused_moe",
+        "patch_gdn",
+        "patch_vision_position_interpolation",
     ):
         monkeypatch.setattr(
             ascend_patch,
@@ -150,15 +154,33 @@ def test_failed_mamba_install_leaves_apply_retryable(monkeypatch):
         "patch_fla_ops",
         "patch_op_cls",
         "patch_fused_moe",
+        "patch_gdn",
+        "patch_vision_position_interpolation",
     ]
 
     monkeypatch.setattr(ascend_patch, "patch_mamba_batch_memcpy", lambda: True)
     ascend_patch.apply_ascend_patches()
     assert ascend_patch._patch_state["complete"] is True
-    assert len(calls) == 6
+    assert len(calls) == 8
 
 
-def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype(monkeypatch):
+def _make_mamba_copy_config(layer_names, num_states):
+    from vllm.v1.kv_cache_interface import MambaSpec
+
+    # Exercise vLLM 0.32's real spec -> group IDs and mamba_type -> copy funcs
+    # mappings, including its per-layer state count when sizing the buffers.
+    spec = MambaSpec(
+        block_size=128,
+        shapes=((2, 4),) * num_states,
+        dtypes=(torch.float32,) * num_states,
+    )
+    config = SimpleNamespace(
+        kv_cache_groups=[SimpleNamespace(layer_names=layer_names, kv_cache_spec=spec)]
+    )
+    return config, {spec.mamba_type: (object(),) * num_states}
+
+
+def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype():
     from vllm.v1.worker import mamba_utils
 
     ascend_patch.patch_mamba_batch_memcpy()
@@ -169,14 +191,8 @@ def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype(monkeypatch):
     ascend_patch.patch_mamba_batch_memcpy()
     assert mamba_utils.MambaCopyBuffers.create.__func__ is patched_create
 
-    mamba_spec = object()
-    monkeypatch.setattr(
-        mamba_utils,
-        "get_mamba_groups",
-        lambda _config: ([0], mamba_spec),
-    )
-    kv_cache_config = SimpleNamespace(
-        kv_cache_groups=[SimpleNamespace(layer_names=["layer.0", "layer.1"])]
+    kv_cache_config, copy_funcs = _make_mamba_copy_config(
+        ["layer.0", "layer.1"], num_states=2
     )
     allocations = []
 
@@ -187,7 +203,7 @@ def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype(monkeypatch):
     buffers = mamba_utils.MambaCopyBuffers.create(
         max_num_reqs=3,
         kv_cache_config=kv_cache_config,
-        copy_funcs=(object(), object()),
+        copy_funcs=copy_funcs,
         make_buffer=make_buffer,
     )
 
@@ -202,19 +218,12 @@ def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype(monkeypatch):
 
 
 @pytest.mark.gpu
-def test_mamba_copy_buffers_create_allocates_on_npu(monkeypatch):
+def test_mamba_copy_buffers_create_allocates_on_npu():
     from vllm.v1.utils import CpuGpuBuffer
     from vllm.v1.worker import mamba_utils
 
     ascend_patch.patch_mamba_batch_memcpy()
-    monkeypatch.setattr(
-        mamba_utils,
-        "get_mamba_groups",
-        lambda _config: ([0], object()),
-    )
-    kv_cache_config = SimpleNamespace(
-        kv_cache_groups=[SimpleNamespace(layer_names=["layer.0"])]
-    )
+    kv_cache_config, copy_funcs = _make_mamba_copy_config(["layer.0"], num_states=1)
 
     def make_buffer(*size, dtype):
         return CpuGpuBuffer(
@@ -227,7 +236,7 @@ def test_mamba_copy_buffers_create_allocates_on_npu(monkeypatch):
     buffers = mamba_utils.MambaCopyBuffers.create(
         max_num_reqs=2,
         kv_cache_config=kv_cache_config,
-        copy_funcs=(object(),),
+        copy_funcs=copy_funcs,
         make_buffer=make_buffer,
     )
 
@@ -296,3 +305,26 @@ def test_batch_memcpy_copies_multiple_blocks_and_masked_tail(dtype):
 
     for source, destination in zip(sources, destinations):
         torch.testing.assert_close(destination.cpu(), source.cpu(), rtol=0, atol=0)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32])
+@pytest.mark.parametrize("shift_bytes", [4, 68, 8196])
+def test_batch_memcpy_preserves_left_overlapping_source(dtype, shift_bytes):
+    element_size = torch.empty((), dtype=dtype).element_size()
+    shift = shift_bytes // element_size
+    count = 2 * 8192 // element_size + 13
+    original = (torch.arange(count + shift) % 251).to(dtype)
+    expected = original.clone()
+    expected[:count] = original[shift:].clone()
+    storage = original.npu()
+    src_ptrs = torch.tensor(
+        [storage[shift:].data_ptr()], dtype=torch.int64, device="npu"
+    )
+    dst_ptrs = torch.tensor([storage.data_ptr()], dtype=torch.int64, device="npu")
+    sizes = torch.tensor([count * element_size], dtype=torch.int32, device="npu")
+
+    batch_memcpy_impl.batch_memcpy(src_ptrs, dst_ptrs, sizes)
+    torch.npu.synchronize()
+
+    torch.testing.assert_close(storage.cpu(), expected, rtol=0, atol=0)

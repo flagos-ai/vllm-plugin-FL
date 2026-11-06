@@ -472,9 +472,8 @@ def test_flaggems_ascend_rotary_packed_partial_views_on_npu(inplace, interleaved
 
     assert flag_gems.vendor_name == "ascend"
     assert not use_c_extension
-    assert not flaggems_rotary._supports_inplace_argument(
-        flag_gems.apply_rotary_pos_emb
-    )
+    # The selected FlagGems 5.4 image exposes inplace; earlier Ascend builds
+    # do not. Both signatures must preserve the packed-view contract below.
 
     packed_cpu = torch.randn(4, 3, 2, 16, dtype=torch.float32).to(torch.bfloat16)
     packed = packed_cpu.to("npu")

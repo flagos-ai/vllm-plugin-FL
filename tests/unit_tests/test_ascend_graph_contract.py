@@ -473,10 +473,11 @@ def _configure(monkeypatch, *, breakable=False):
     return namespace[helper.name]
 
 
-def _config(enabled=None, *, eager=False):
+def _config(enabled=None, *, eager=False, use_v2=False):
     options = {} if enabled is None else {"enable_npugraph_ex": enabled}
     return NS(
         additional_config={"ascend_compilation_config": options},
+        use_v2_model_runner=use_v2,
         model_config=NS(enforce_eager=eager),
         parallel_config=NS(use_ubatching=False),
         compilation_config=NS(mode="vllm", cudagraph_mode="decode", pass_config=NS()),
@@ -576,12 +577,15 @@ def test_graph_disabled_allows_breakable_switch(monkeypatch, eager, mode):
 
 
 @pytest.mark.parametrize("enabled", [None, False])
-def test_full_decode_uses_eager_fx(monkeypatch, enabled):
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_full_decode_uses_runner_native_capture(monkeypatch, enabled, use_v2):
     monkeypatch.delenv("ASCEND_LAUNCH_BLOCKING", raising=False)
-    config = _config(enabled)
+    config = _config(enabled, use_v2=use_v2)
     _configure(monkeypatch)(config)
     compilation = config.compilation_config
-    assert compilation.mode == "vllm" and compilation.backend == "eager"
+    assert compilation.mode == ("none" if use_v2 else "vllm")
+    assert compilation.cudagraph_mode == "decode"
+    assert compilation.backend == "eager"
     assert not compilation.use_inductor and compilation.splitting_ops == []
     assert compilation.cudagraph_num_of_warmups == 1
     assert not any(vars(compilation.pass_config).values())

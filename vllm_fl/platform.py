@@ -49,7 +49,10 @@ logger = init_logger(__name__)
 
 
 def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
-    """Configure eager FX execution with ordinary Ascend FULL decode graphs.
+    """Configure ordinary Ascend FULL decode graphs.
+
+    V1 uses the eager FX backend; V2 captures the full model directly without
+    torch.compile, using its own graph manager and stable input buffers.
 
     Ascend compiler options may be omitted or explicitly disabled with False.
     The six recognized rc1 compiler options have no implementation here; reject
@@ -129,7 +132,11 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
             "Ascend graph execution requires compilation backend='eager'; "
             "the Inductor backend is not supported on torch_npu."
         )
-    compilation.mode = CompilationMode.VLLM_COMPILE
+    compilation.mode = (
+        CompilationMode.NONE
+        if getattr(vllm_config, "use_v2_model_runner", False)
+        else CompilationMode.VLLM_COMPILE
+    )
     compilation.backend = "eager"
     compilation.use_inductor = False
     compilation.use_inductor_graph_partition = False
@@ -424,11 +431,10 @@ class PlatformFL(Platform):
             patch_mm_encoder_attention()
 
         if (
-            cls.device_type in {"npu", "musa", "txda"}
+            cls.device_type in {"musa", "txda"}
             and vllm_config.use_v2_model_runner
         ):
             platform_name = {
-                "npu": "Ascend",
                 "musa": "MUSA",
                 "txda": "Tsingmicro TXDA",
             }[cls.device_type]
@@ -980,7 +986,14 @@ class PlatformFL(Platform):
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        default = (
+            ["native"]
+            if using_inductor or cls.device_type == "npu"
+            else ["vllm_c", "native"]
+        )
+        # vLLM 0.32 registers vllm_c IR implementations only on CUDA-like
+        # and XPU platforms. Empty NPU wheels must use the native providers,
+        # including newly added IR ops such as sparse GELU.
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

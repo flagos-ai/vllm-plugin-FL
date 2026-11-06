@@ -46,16 +46,20 @@ tolerance:
     float16:  {rtol: 1e-2, atol: 1e-2}
 
 # Device-level overrides for specific test cases (optional).
-# Matrix follows the 0.4.0-dev line: eager only — decode graphs land with the
-# ascend graph work (see the ascend graph branch), not with this CI sync.
+# The vLLM 0.32 matrix selects Ascend V2 eager and FULL_DECODE_ONLY cases.
+# Graph compilation settings live only in the Ascend graph case files.
+# The legacy FL runner retains separate Ascend decode-graph support.
 device_overrides:
   910c:
     cases:
       - qwen3_6/27b_tp2_eager
       - qwen3_6/35b_a3b_tp2_eager
+      - qwen3_6/27b_tp2_graph_ascend
+      - qwen3_6/35b_a3b_tp2_graph_ascend
     llm:
       max_model_len: 4096
       max_num_batched_tokens: 4096
+      max_num_seqs: 4
       gpu_memory_utilization: 0.8
       trust_remote_code: true
       disable_custom_all_reduce: false
@@ -80,6 +84,7 @@ unsupported_features: []
 # Exercise FlagGems registration with an audited ATen whitelist.
 env_defaults:
   USE_FLAGGEMS: "1"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
   VLLM_FL_FLAGOS_WHITELIST: "zeros"
 
 # ---- Device-specific test configurations ------------------------------------
@@ -93,19 +98,27 @@ env_defaults:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
         serving:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
         serving:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
@@ -120,9 +133,11 @@ env_defaults:
     benchmark:
       pr:
         enabled: true
+        config_path: "tests/benchmarks/configs/smoke_ascend.yaml"
         types:
           - serve
       nightly:
         enabled: true
+        config_path: "tests/benchmarks/configs/smoke_ascend.yaml"
         types:
           - serve

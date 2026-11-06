@@ -1,5 +1,121 @@
 # Ascend 910C Deployment Guide
 
+## vLLM 0.32.0 on `0.5.0-dev`
+
+Prepare the pinned 910C image and install the matching FL wheel using the
+[Ascend image recipe](../../docker/ascend/README.md#build). The image and CI
+set `VLLM_USE_V2_MODEL_RUNNER=1`. The [serving examples](../../docker/ascend/README.md#inference-smoke-tests)
+cover eager execution and `FULL_DECODE_ONLY` with native HCCL.
+
+### Optional FlagCX device collectives on vLLM 0.32.0
+
+Use a FL wheel built from a checkout with FlagCX wheel-layout support. On
+the CANN 9.0.0, CPython 3.11 AArch64 image, use the official
+`0.14.1+cann9.0.0.910c` wheel. Its Python API matches
+[FlagCX v0.14.1 source](https://github.com/flagos-ai/FlagCX/tree/995985bba3e08eba8a0acb6990f72961988c8867).
+
+Download the wheel on the host, verify its checksum, and extract the paired
+C API and native library. This avoids loading the wheel's Torch backend
+initializer.
+
+```bash
+wheel=flagcx-0.14.1+cann9.0.0.910c-cp311-cp311-linux_aarch64.whl
+export FLAGCX_DIR="$PWD/flagcx-0.14.1/flagcx"
+curl --fail --location --output "$wheel" \
+  "https://resource.flagos.net/repository/flagos-pypi-ascend/packages/flagcx/0.14.1+cann9.0.0.910c/$wheel" &&
+printf '%s  %s\n' \
+  e785696c15927a8b7ff695be9886f5d0fb399fe7495ba5ab9cee088bf1d3cd2e "$wheel" \
+  | sha256sum --check &&
+python3 - "$wheel" "$FLAGCX_DIR" <<'PY'
+import sys
+from pathlib import Path
+from zipfile import ZipFile
+
+root = Path(sys.argv[2])
+with ZipFile(sys.argv[1]) as wheel:
+    for name in ("api.py", "lib/libflagcx.so"):
+        dest = root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(wheel.read(f"flagcx/{name}"))
+PY
+```
+
+Select two idle physical 910C NPUs and set `NPU_IDS` to their comma-separated
+IDs. Add these options to the container's device and driver mounts.
+
+```bash
+-v "$FLAGCX_DIR:/opt/FlagCX:ro" \
+-e FLAGCX_PATH=/opt/FlagCX \
+-e ASCEND_VISIBLE_DEVICES="$NPU_IDS" \
+-e ASCEND_RT_VISIBLE_DEVICES="$NPU_IDS" \
+-e VLLM_USE_V2_MODEL_RUNNER=1
+```
+
+`FLAGCX_PATH` selects the FL FlagCX device communicator. PyTorch's NPU
+process groups still use HCCL, and the FlagCX communicator exchanges its
+unique ID over the CPU Gloo group. With the wheel layout on Ascend, the
+communicator submits all-reduce on a dedicated NPU stream. Events join that
+stream to the calling stream for graph capture and replay. Leave
+`FLAGCX_PATH` unset to select native HCCL tensor-parallel collectives.
+
+Inside the container, keep the default HCCL expansion mode. For a Qwen3-0.6B
+TP2 graph smoke, use the same model mount as the
+[serving examples](../../docker/ascend/README.md#inference-smoke-tests).
+
+```bash
+unset HCCL_OP_EXPANSION_MODE
+export VLLM_PLUGINS=fl VLLM_FL_PLATFORM=ascend VLLM_USE_V2_MODEL_RUNNER=1
+export USE_C_EXTENSION=0 USE_FLAGGEMS=0 GLOO_SOCKET_IFNAME=lo
+export VLLM_LOGGING_LEVEL=DEBUG VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
+
+vllm serve /models/Qwen3-0.6B \
+  --served-model-name qwen3-0.6b --host 127.0.0.1 --port 7023 \
+  --tensor-parallel-size 2 --dtype bfloat16 \
+  --max-model-len 2048 --max-num-batched-tokens 2048 \
+  --gpu-memory-utilization 0.3 --max-num-seqs 4 --disable-custom-all-reduce \
+  --compilation-config '{"mode":"NONE","backend":"eager","cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4],"max_cudagraph_capture_size":4}' \
+  --no-enable-chunked-prefill --no-async-scheduling --no-enable-prefix-caching
+```
+
+For the eager comparison, replace the compilation configuration with
+`--enforce-eager`. For the graph run, wait for `/v1/models` to return HTTP
+200, then send the completion request in the serving examples. Check both
+ranks for the live FlagCX communicator, the mapped
+`/opt/FlagCX/lib/libflagcx.so`, and native `NPUGraph` captures. Look for
+`Ascend V2 graph replayed` log entries during the request.
+
+Acceptance on two 910C NPUs with the default HCCL expansion mode used
+the final FL wheel, vLLM `0.32.0+empty`, and the official FlagCX C API
+and library. Eager FP32 all-reduce and all-gather were exact on both ranks.
+Each rank captured two dependent all-reduces in one `NPUGraph` and
+verified exact results for two replays with fresh inputs.
+
+The Qwen3-0.6B BF16 TP2 offline test used `GPUModelRunnerFLV2` and the
+active FlagCX communicator on both ranks. Eager and `FULL_DECODE_ONLY`
+generated identical token IDs and text for greedy batches of 1, 2, and 4
+requests, with 20 output tokens per request. Both ranks captured all
+three sizes and recorded 19 request replays per size after startup.
+
+#### Earlier FlagCX v0.13.0 smoke
+
+The earlier [FlagCX v0.13.0 revision](https://github.com/flagos-ai/FlagCX/tree/0beba7aa7e76cc0885a9929f1975857bcd310d5e)
+was built with `make USE_ASCEND=1`. The standalone smoke on two 910C NPUs
+used CANN 9.0.0, vLLM `0.32.0+empty`,
+and the accepted FL wheel `0.5.0.dev0+ascend032v2graphg4`. The tested
+`libflagcx.so` SHA256 was
+`47a9ea1afce45ab6002c8ca095229772b76b54fe90188778b5bc80a86a186ab6`.
+
+| Check | Result on both ranks |
+| --- | --- |
+| FlagCX initialization | Loaded the mounted native library and initialized both communicators over a CPU Gloo group. |
+| Eager `all_reduce` | Exact FP32 sum `[3, 5, 7, 9]`. |
+| Eager `all_gather` | Exact FP32 output `[1, 2, 3, 4, 2, 3, 4, 5]`. |
+| FlagCX `all_reduce` in `NPUGraph` | Capture ended with ACL error `107025`. The runtime reported a stream that had not joined the original capture stream. |
+
+The standalone eager run exited 0 on both ranks.
+
+## Historical vLLM 0.28.0 recipe
+
 This guide starts an OpenAI-compatible vLLM inference service on Huawei
 Ascend 910C. It follows the NVIDIA deployment guide's prebuilt-image workflow,
 using the Ascend stack validated by this repository. The example uses one 910C
@@ -28,7 +144,7 @@ The CI image contains the validated runtime, but its packaged plugin wheel
 predates some changes in this guide. Step 5 builds and installs a non-editable
 wheel from the selected plugin revision without changing runtime dependencies.
 For build details, see the
-[Ascend image guide](../../docker/ascend/README.md).
+[historical Ascend image guide](../../docker/ascend/README.v0.28.0.md).
 
 ### FlagGems execution mode
 
@@ -330,8 +446,8 @@ select the plugin's FlagCX device communicator.
 
 ## 8. Build the same stack from the official base image
 
-When the prebuilt Harbor image is unavailable, build the checked-in Ascend
-Dockerfile on an aarch64 machine. It starts from the base image in the table,
+When the prebuilt Harbor image is unavailable, use the vLLM 0.28.0
+checkout pinned in step 2 to build its Ascend Dockerfile on an aarch64 machine. It starts from the base image in the table,
 removes the inherited vLLM 0.20.2 installation, and installs upstream vLLM
 0.28.0 with `VLLM_TARGET_DEVICE=empty` plus the pinned FlagTree and FlagGems
 stack. Give the local build an explicit tag:
@@ -349,7 +465,7 @@ export IMAGE=vllm-plugin-fl:ascend-vllm0.28.0-local
 Run step 4 before serving. The Dockerfile prepares the runtime and CI tools
 but does not install this repository's current plugin wheel. Use the step 5
 wheel build, or publish a separate release image with that fixed wheel. The
-[image guide](../../docker/ascend/README.md) documents build constraints and
+[historical image guide](../../docker/ascend/README.v0.28.0.md) documents build constraints and
 the known OpenCV/NumPy dependency conflict in this pinned stack.
 
 ## Troubleshooting
