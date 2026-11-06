@@ -68,7 +68,8 @@ def test_experts_apply_resolves_platform_before_vendor_dispatch(
     import torch
 
     module = _import_fused_moe_utils()
-    monkeypatch.setattr(module.fl_envs, "VLLM_FL_USE_FLAGGEMS_VLLM", use_flaggems_vllm)
+    # Patch the environment so teardown does not shadow the lazy module attribute.
+    monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", "1" if use_flaggems_vllm else "0")
     monkeypatch.setattr(
         module,
         "_get_current_platform",
