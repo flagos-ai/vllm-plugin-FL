@@ -227,6 +227,48 @@ class GroupedTopKRouterFL(GroupedTopKRouter):
         return topk_weights, topk_ids
 
 
+def has_moe_c_topk_sigmoid() -> bool:
+    """vLLM 的 sigmoid 路由走 torch.ops._moe_C.topk_sigmoid。
+
+    该算子在 vLLM 的 CUDA/C++ 扩展里，未编译扩展的构建（例如部分昇腾镜像）没有
+    它，调用处会抛 AttributeError。这里探测一次，缺了就走纯 torch 兜底。
+    """
+    try:
+        torch.ops._moe_C.topk_sigmoid
+    except (AttributeError, RuntimeError):
+        return False
+    return True
+
+
+def fused_topk_bias_sigmoid_torch(
+    gating_output: torch.Tensor,
+    e_score_correction_bias: torch.Tensor | None,
+    topk: int,
+    renormalize: bool,
+    indices_type: torch.dtype | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """sigmoid 打分 + bias 的 top-k 路由，纯 torch 等价实现。
+
+    语义与 vLLM 的 topk_sigmoid kernel 一致：sigmoid 打分 → 加 bias →
+    取 top-k → 可选 renormalize。routed_scaling_factor 由调用方缩放。
+    """
+    scores = torch.sigmoid(gating_output.float())
+    scores_for_choice = scores
+    if e_score_correction_bias is not None:
+        scores_for_choice = scores_for_choice + e_score_correction_bias.float()
+    scores_for_choice = torch.nan_to_num(scores_for_choice, nan=-1e30)
+
+    topk_ids = torch.topk(scores_for_choice, k=topk, dim=-1, sorted=False).indices
+    topk_weights = scores.gather(1, topk_ids)
+    if renormalize:
+        denominator = topk_weights.sum(dim=-1, keepdim=True)
+        topk_weights = topk_weights / torch.where(
+            denominator > 0, denominator, torch.ones_like(denominator)
+        )
+    out_dtype = torch.int32 if indices_type is None else indices_type
+    return topk_weights.float(), topk_ids.to(out_dtype)
+
+
 class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
     """FL router that routes topk_softmax (with bias) through call_op."""
 
@@ -238,17 +280,31 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
         *,
         input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        topk_weights, topk_ids = fused_topk_bias(
-            hidden_states=hidden_states,
-            gating_output=router_logits,
-            e_score_correction_bias=self.e_score_correction_bias.data
+        correction_bias = (
+            self.e_score_correction_bias.data
             if self.e_score_correction_bias is not None
-            else None,
-            topk=self.top_k,
-            renormalize=self.renormalize,
-            scoring_func=self.scoring_func,
-            indices_type=indices_type,
+            else None
         )
+        if self.scoring_func == "sigmoid" and not has_moe_c_topk_sigmoid():
+            # 该构建没有 _moe_C.topk_sigmoid（未编译 vLLM 扩展），
+            # 上游 fused_topk_bias 会直接抛 AttributeError，走纯 torch 兜底。
+            topk_weights, topk_ids = fused_topk_bias_sigmoid_torch(
+                gating_output=router_logits,
+                e_score_correction_bias=correction_bias,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                indices_type=indices_type,
+            )
+        else:
+            topk_weights, topk_ids = fused_topk_bias(
+                hidden_states=hidden_states,
+                gating_output=router_logits,
+                e_score_correction_bias=correction_bias,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                scoring_func=self.scoring_func,
+                indices_type=indices_type,
+            )
 
         if self.routed_scaling_factor != 1.0:
             topk_weights *= self.routed_scaling_factor
