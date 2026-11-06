@@ -117,22 +117,25 @@ def test_flaggems_decode_graph_replay_uses_changed_logits(monkeypatch):
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         run()
+    indices.fill_(-99)
     graph.replay()
     torch.cuda.synchronize()
     first = indices.cpu().clone()
 
-    logits.copy_(
-        torch.tensor(
-            [[9.0, 1.0, 8.0, 2.0, 7.0, -1.0], [1.0, 9.0, 2.0, 8.0, -1.0, -2.0]],
-            device=device,
-        )
-    )
-    graph.replay()
-    torch.cuda.synchronize()
-    second = indices.cpu()
-    assert not torch.equal(first, second)
-    for row, valid_len in enumerate((4, 5)):
-        chosen = second[row].to(torch.long)
-        assert bool(((chosen >= 0) & (chosen < valid_len)).all())
-        scores = logits[row].cpu().index_select(0, chosen)
-        assert bool((scores[:-1] >= scores[1:]).all())
+    for values in (
+        [[9.0, 1.0, 8.0, 2.0, 7.0, -1.0], [1.0, 9.0, 2.0, 8.0, -1.0, -2.0]],
+        [[2.0, 8.0, 1.0, 9.0, 7.0, -1.0], [9.0, 2.0, 8.0, 1.0, -1.0, -2.0]],
+    ):
+        logits.copy_(torch.tensor(values, device=device))
+        indices.fill_(-99)
+        graph.replay()
+        torch.cuda.synchronize()
+        second = indices.cpu()
+        assert not torch.equal(first, second)
+        for row, valid_len in enumerate((4, 5)):
+            chosen = second[row].to(torch.long)
+            assert bool(((chosen >= 0) & (chosen < valid_len)).all())
+            scores = logits[row].cpu().index_select(0, chosen)
+            expected = torch.topk(torch.tensor(values[row][:valid_len]), 3).values
+            torch.testing.assert_close(scores, expected)
+        first = second

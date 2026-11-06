@@ -189,20 +189,24 @@ def test_flaggems_decode_2d_lengths_graph_replay():
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         run()
+    indices.fill_(-99)
     graph.replay()
     torch.cuda.synchronize()
     first = indices.clone()
 
-    logits.copy_(torch.randn_like(logits))
-    seq_lens.copy_(torch.tensor([[8, 12], [6, 10]], device=device, dtype=torch.int32))
-    graph.replay()
-    torch.cuda.synchronize()
-    second = indices.clone()
-    assert not torch.equal(first, second)
+    for lengths in ([[8, 12], [6, 10]], [[5, 15], [8, 7]]):
+        logits.copy_(torch.randn_like(logits))
+        seq_lens.copy_(torch.tensor(lengths, device=device, dtype=torch.int32))
+        indices.fill_(-99)
+        graph.replay()
+        torch.cuda.synchronize()
+        second = indices.clone()
+        assert not torch.equal(first, second)
 
-    for row, valid_len in enumerate(seq_lens.reshape(-1).tolist()):
-        chosen = second[row].to(torch.long)
-        assert bool(((chosen >= 0) & (chosen < valid_len)).all())
-        actual = logits[row].index_select(0, chosen).sort(descending=True).values
-        expected = torch.topk(logits[row, :valid_len], 4).values
-        torch.testing.assert_close(actual, expected)
+        for row, valid_len in enumerate(seq_lens.reshape(-1).tolist()):
+            chosen = second[row].to(torch.long)
+            assert bool(((chosen >= 0) & (chosen < valid_len)).all())
+            actual = logits[row].index_select(0, chosen).sort(descending=True).values
+            expected = torch.topk(logits[row, :valid_len], 4).values
+            torch.testing.assert_close(actual, expected)
+        first = second
