@@ -94,9 +94,27 @@ def test_shared_indexer_pp_contract():
         index_topk=8, num_hidden_layers=2, indexer_types=["full", "shared"]
     )
     attention.validate_hy4_parallel_config(config, 1)
-    with pytest.raises(ValueError, match="pipeline_parallel_size=1"):
+    # The default 2-stage split (1,1) starts stage 1 on the shared layer, so no
+    # buffer producer exists inside that stage.
+    with pytest.raises(ValueError, match="must start on a full"):
         attention.validate_hy4_parallel_config(config, 2)
     config.indexer_types = ["full", "full"]
+    attention.validate_hy4_parallel_config(config, 2)
+
+
+def test_shared_indexer_pp_contract_accepts_producer_aligned_partition(monkeypatch):
+    # Layer 2 is a full producer, so cutting after layer 2 keeps every stage
+    # able to fill its own top-k buffer.
+    config = SimpleNamespace(
+        index_topk=8,
+        num_hidden_layers=4,
+        indexer_types=["full", "shared", "full", "shared"],
+    )
+    attention.validate_hy4_parallel_config(config, 2)
+    monkeypatch.setenv("VLLM_PP_LAYER_PARTITION", "2,2")
+    attention.validate_hy4_parallel_config(config, 2)
+    # An exported-but-empty value must be treated as unset, not parsed as int("").
+    monkeypatch.setenv("VLLM_PP_LAYER_PARTITION", "")
     attention.validate_hy4_parallel_config(config, 2)
 
 
