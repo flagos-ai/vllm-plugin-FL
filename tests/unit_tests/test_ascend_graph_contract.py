@@ -543,6 +543,66 @@ def test_full_decode_uses_eager_fx(monkeypatch, enabled):
     assert not any(vars(compilation.pass_config).values())
 
 
+@pytest.mark.parametrize("requires_full", [False, True])
+def test_pooling_piecewise_keeps_attention_outside_graph(monkeypatch, requires_full):
+    monkeypatch.delenv("ASCEND_LAUNCH_BLOCKING", raising=False)
+    configure = _configure(monkeypatch)
+
+    class PiecewiseMode(str):
+        def has_piecewise_cudagraphs(self):
+            return True
+
+    config = _config()
+    config.model_config.runner_type = "pooling"
+    config.model_config.attn_type = "decoder"
+    config.compilation_config.cudagraph_mode = PiecewiseMode("piecewise")
+    config.parallel_config.all2all_backend = "allgather_reducescatter"
+    config.parallel_config.data_parallel_size = 1
+    calls = []
+
+    def set_splitting_ops(**kwargs):
+        assert not config.compilation_config.pass_config.fuse_attn_quant
+        calls.append(kwargs)
+        config.compilation_config.splitting_ops = [
+            "vllm::unified_attention_with_output"
+        ]
+        if requires_full:
+            config.compilation_config.cudagraph_mode = "full"
+
+    config.compilation_config.set_splitting_ops_for_v1 = set_splitting_ops
+    if requires_full:
+        with pytest.raises(NotImplementedError, match="require full graph capture"):
+            configure(config)
+        return
+    configure(config)
+    assert config.compilation_config.cudagraph_mode == "piecewise"
+    assert config.compilation_config.backend == "eager"
+    assert config.compilation_config.splitting_ops == [
+        "vllm::unified_attention_with_output"
+    ]
+    assert calls == [
+        {
+            "all2all_backend": "allgather_reducescatter",
+            "data_parallel_size": 1,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "runner_type,attn_type", [("generate", "decoder"), ("pooling", "encoder_only")]
+)
+def test_other_attention_piecewise_remains_unsupported(
+    monkeypatch, runner_type, attn_type
+):
+    config = _config()
+    config.model_config.runner_type = runner_type
+    config.model_config.attn_type = attn_type
+    config.compilation_config.cudagraph_mode = "piecewise"
+    with pytest.raises(NotImplementedError, match="pooling models"):
+        _configure(monkeypatch)(config)
+    assert not hasattr(config.compilation_config, "backend")
+
+
 def test_runtime_has_no_accelerator_import_side_effects():
     tree = ast.parse((ROOT / "compilation/graph_runtime.py").read_text())
     imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
