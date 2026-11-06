@@ -7,9 +7,10 @@ from unittest.mock import Mock
 import pytest
 
 
+@pytest.mark.parametrize("whitelist", [None, ["rms_norm"]])
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("install_hooks", [None, False, True])
-def test_explicit_moe_hook_scope(monkeypatch, enabled, install_hooks):
+def test_explicit_moe_hook_scope(monkeypatch, enabled, install_hooks, whitelist):
     import vllm.platforms
 
     import vllm_fl.dispatch.config.utils as config_utils
@@ -21,7 +22,7 @@ def test_explicit_moe_hook_scope(monkeypatch, enabled, install_hooks):
     monkeypatch.setattr(ops, "_patch_fused_moe_factory", factory)
     monkeypatch.setattr(ops, "OOT_OPS", {})
     monkeypatch.setattr(utils, "is_oot_enabled", lambda: enabled)
-    monkeypatch.setattr(utils, "get_oot_whitelist", lambda: None)
+    monkeypatch.setattr(utils, "get_oot_whitelist", lambda: whitelist)
     monkeypatch.setattr(utils, "get_oot_blacklist", lambda: [])
     monkeypatch.setattr(config_utils, "get_platform_name", lambda: "metax")
     monkeypatch.setattr(
@@ -33,4 +34,4 @@ def test_explicit_moe_hook_scope(monkeypatch, enabled, install_hooks):
     ops.register_oot_ops(**kwargs)
     expected = install_hooks is not False
     assert oracle.call_count == int(expected)
-    assert factory.call_count == int(expected and enabled)
+    assert factory.call_count == int(expected and enabled and whitelist is None)

@@ -149,7 +149,11 @@ def registered_activations(monkeypatch):
     ):
         monkeypatch.delitem(op_registry_oot, name, raising=False)
         monkeypatch.setattr(cls, "name", cls.name)
-    monkeypatch.setattr(custom_ops, "_patch_unquantized_moe_oracle", lambda: None)
+    monkeypatch.setattr(
+        custom_ops,
+        "_patch_unquantized_moe_oracle",
+        lambda *, prefer_flaggems_experts: None,
+    )
     monkeypatch.setattr(custom_ops, "_patch_fused_moe_factory", lambda: None)
     custom_ops.register_oot_ops(
         whitelist=["silu_and_mul", "gelu_and_mul", "silu_and_mul_with_clamp"]

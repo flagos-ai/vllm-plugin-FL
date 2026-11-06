@@ -12,7 +12,13 @@ from vllm.v1.attention.backends.mla.indexer import DeepseekV32IndexerMetadata
 
 from vllm_fl.attention import sparse_indexer as portable
 
-pytestmark = pytest.mark.gpu
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        not native.current_platform.is_cuda(),
+        reason="HY4 currently supports NVIDIA only",
+    ),
+]
 
 
 @pytest.mark.parametrize("rows", [1, 7, 32, 33])
@@ -59,23 +65,41 @@ def test_registered_portable_topk_2048_with_refreshed_graph_inputs(
         lambda: SimpleNamespace(attn_metadata={prefix: metadata}),
     )
     output = torch.empty(rows, 2048, device="cuda", dtype=torch.int32)
-    k_cache = SimpleNamespace(
-        prefix=prefix,
-        kv_cache=torch.empty(256, 16, 132, device="cuda", dtype=torch.uint8),
-    )
+    kv_cache = torch.full((256, 16, 132), 0x5A, device="cuda", dtype=torch.uint8)
+    cache_before = kv_cache.clone()
     operations = {
-        "indexer_k_quant_and_cache": flaggems_vllm.indexer_k_quant_and_cache,
         "fp8_fp4_paged_mqa_logits": lambda *args, **kwargs: logits,
         "top_k_per_row_decode": flaggems_vllm.top_k_per_row_decode,
     }
     monkeypatch.setitem(portable._LAYER_OPERATIONS, prefix, operations)
-    layer = portable.PortableSparseAttnIndexer(
-        k_cache, 128, "ue8m0", 2048, 128, 4096, 4096, output, operations=operations
-    )
     hidden = torch.zeros(rows, 128, device="cuda", dtype=torch.bfloat16)
-    q = torch.zeros(rows, 32, 128, device="cuda").to(torch.float8_e4m3fn)
+    # Logits are supplied directly, so these inputs carry only shape metadata.
+    q = torch.zeros(rows, 32, 128, device="cuda", dtype=torch.bfloat16)
     k = torch.randn(rows, 128, device="cuda", dtype=torch.bfloat16)
     weights = torch.ones(rows, 32, device="cuda", dtype=torch.bfloat16)
+
+    def run_indexer():
+        # Exercise the registered TopK path on A100 as well as newer GPUs.
+        # Cache insertion has its own numerical/graph test and requires SM89+.
+        # Omitting its provider also makes accidental cache insertion fail.
+        return torch.ops.vllm.portable_sparse_attn_indexer(
+            hidden,
+            portable._encode_layer_name(prefix),
+            kv_cache,
+            q,
+            None,
+            k,
+            weights,
+            128,
+            None,
+            2048,
+            128,
+            4096,
+            4096,
+            output,
+            True,  # skip_k_cache_insert
+            False,
+        )
 
     def check():
         expected = logits.topk(2048, dim=-1).indices.sort(dim=-1).values
@@ -84,14 +108,15 @@ def test_registered_portable_topk_2048_with_refreshed_graph_inputs(
         )
 
     for _ in range(3):
-        assert layer(hidden, q, k, weights) is output
+        assert run_indexer() is output
     check()
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
-        layer(hidden, q, k, weights)
+        run_indexer()
     for shift in (137, 911):
         logits.copy_(logits.roll(shift, dims=-1))
         output.fill_(-777)
         graph.replay()
         check()
+    torch.testing.assert_close(kv_cache, cache_before, rtol=0, atol=0)
     assert native.current_platform is platform and platform.is_cuda()

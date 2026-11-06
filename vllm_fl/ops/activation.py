@@ -86,6 +86,10 @@ class SiluAndMulFL(SiluAndMul):
             return _silu_and_mul_graph(x)
         return _silu_and_mul(self, x)
 
+    def forward_hip(self, x: torch.Tensor) -> torch.Tensor:
+        # vLLM checks ROCm before OOT when selecting a CustomOp forward.
+        return self.forward_oot(x)
+
 
 class GeluAndMulFL(GeluAndMul):
     def __init__(self, approximate: str = "none"):
@@ -95,6 +99,9 @@ class GeluAndMulFL(GeluAndMul):
         if torch.compiler.is_compiling():
             return _gelu_and_mul_graph(x, self.approximate)
         return _gelu_and_mul(self, x)
+
+    def forward_hip(self, x: torch.Tensor) -> torch.Tensor:
+        return self.forward_oot(x)
 
 
 __all__ = ["SiluAndMulFL", "GeluAndMulFL", "SiluAndMulWithClampFL"]
@@ -115,7 +122,7 @@ class SiluAndMulWithClampFL(SiluAndMulWithClamp):
         return (cls.default_on() or enabled) and not disabled
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
-        # v0.2.0 only implements alpha=1,beta=0. Reject that capability before
+        # The fused API implements alpha=1,beta=0. Reject that capability before
         # entering the fused provider, rather than falling back after execution.
         if self.alpha != 1.0 or self.beta != 0.0:
             return self.forward_native(x)

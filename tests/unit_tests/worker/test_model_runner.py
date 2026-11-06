@@ -42,7 +42,7 @@ pytestmark = pytest.mark.skipif(
 def test_musa_piecewise_capture_sizes_respect_live_graph_limit(monkeypatch):
     from vllm.config import CUDAGraphMode
 
-    import vllm_fl.worker.model_runner as model_runner_module
+    from vllm_fl.worker import model_runner as model_runner_module
     from vllm_fl.worker.model_runner import ModelRunnerFL
 
     capture_sizes = [1, 2, 4] + list(range(8, 256, 8)) + list(range(256, 513, 16))
@@ -85,6 +85,57 @@ def test_musa_piecewise_capture_sizes_respect_live_graph_limit(monkeypatch):
     dispatcher.initialize_cudagraph_keys.assert_called_once_with(
         CUDAGraphMode.PIECEWISE, 1
     )
+
+
+@pytest.mark.parametrize("disable_full", [False, True])
+@pytest.mark.parametrize("dp_size", [1, 2])
+def test_full_graph_exclusion_survives_dp_redispatch(
+    monkeypatch, disable_full, dp_size
+):
+    from vllm.config import CUDAGraphMode
+
+    from vllm_fl.worker import model_runner as module
+
+    dispatcher = MagicMock()
+    mode = CUDAGraphMode.NONE if disable_full else CUDAGraphMode.FULL
+    dispatcher.dispatch.return_value = (mode, SimpleNamespace(num_tokens=1))
+    parallel = SimpleNamespace(data_parallel_size=dp_size, data_parallel_rank=0)
+    runner = SimpleNamespace(
+        _is_uniform_decode=module.ModelRunnerFL._is_uniform_decode,
+        uniform_decode_query_len=1,
+        model_config=SimpleNamespace(is_encoder_decoder=False),
+        input_batch=SimpleNamespace(lora_id_to_lora_request={}),
+        _pad_for_sequence_parallelism=lambda tokens: tokens,
+        cudagraph_dispatcher=dispatcher,
+        compilation_config=SimpleNamespace(
+            pass_config=SimpleNamespace(enable_sp=False)
+        ),
+        parallel_config=parallel,
+        vllm_config=SimpleNamespace(
+            parallel_config=parallel,
+            observability_config=SimpleNamespace(cudagraph_metrics=False),
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "coordinate_batch_across_dp",
+        lambda **kwargs: (False, torch.ones(dp_size, dtype=torch.int32), mode.value),
+    )
+    result = module.ModelRunnerFL._determine_batch_execution_and_padding(
+        runner,
+        num_tokens=1,
+        num_reqs=1,
+        num_scheduled_tokens_np=np.array([1]),
+        max_num_scheduled_tokens=1,
+        use_cascade_attn=False,
+        disable_full=disable_full,
+    )
+    assert result[0] == mode
+    assert dispatcher.dispatch.call_count == dp_size
+    for call in dispatcher.dispatch.call_args_list:
+        assert call.kwargs["invalid_modes"] == (
+            {CUDAGraphMode.FULL} if disable_full else None
+        )
 
 
 # =============================================================================

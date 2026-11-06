@@ -10,7 +10,6 @@ fi
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${FLAGCX_PATH:?FLAGCX_PATH is not set}"
-: "${CUDA_VISIBLE_DEVICES:?CUDA_VISIBLE_DEVICES is not set}"
 
 git config --global --add safe.directory "$(pwd)"
 
@@ -27,7 +26,6 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     GEMS_VENDOR \
     VLLM_PLUGINS \
     FLAGCX_PATH \
-    CUDA_VISIBLE_DEVICES \
     VLLM_ALLOW_LONG_MAX_MODEL_LEN \
     VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS; do
     echo "${name}=${!name-}" >> "${GITHUB_ENV}"
@@ -37,6 +35,7 @@ fi
 # vLLM, FlagGems, FlagCX, and vendor runtime dependencies are provided by the
 # Kunlunxin image. Install only the checked-out plugin source for this run.
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install "pytest-xdist>=3.0.0"
 
 python .github/scripts/install_flaggems_vllm.py
 

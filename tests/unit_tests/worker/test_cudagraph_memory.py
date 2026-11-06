@@ -17,14 +17,17 @@ from vllm.platforms import current_platform
 )
 @pytest.mark.parametrize("private", [False, True])
 @pytest.mark.parametrize("fail_capture", [False, True])
+@pytest.mark.parametrize("with_metadata", [False, True])
 def test_graph_memory_preserves_pool_policy_and_cleans_up(
-    monkeypatch, private, fail_capture
+    monkeypatch, private, fail_capture, with_metadata
 ):
     import vllm_fl.worker.model_runner as module
 
     mib = 1 << 20
     shared_pool = object()
     profiling_pool = object()
+    metadata_pool = object()
+    metadata = SimpleNamespace(graph_pool=metadata_pool) if with_metadata else None
     shared = SimpleNamespace(graph_pool=shared_pool)
     full = SimpleNamespace(graph_pool=None if private else shared_pool)
     graph_wrapper = SimpleNamespace(
@@ -60,6 +63,8 @@ def test_graph_memory_preserves_pool_policy_and_cleans_up(
     calls = []
 
     def capture(desc, *, cudagraph_runtime_mode, profile_seq_lens):
+        if metadata is not None:
+            assert metadata.graph_pool is profiling_pool
         assert shared.graph_pool is profiling_pool
         assert full.graph_pool is (None if private else profiling_pool)
         calls.append((cudagraph_runtime_mode, desc.num_tokens))
@@ -73,7 +78,9 @@ def test_graph_memory_preserves_pool_policy_and_cleans_up(
         free[0] -= cost * mib
 
     runner = SimpleNamespace(
+        common_attention_metadata_graph=metadata,
         vllm_config=SimpleNamespace(),
+        graph_runtime=None,
         _init_minimal_kv_cache_for_profiling=MagicMock(),
         _cleanup_profiling_kv_cache=MagicMock(),
         cudagraph_dispatcher=dispatcher,
@@ -100,6 +107,8 @@ def test_graph_memory_preserves_pool_policy_and_cleans_up(
         ]
         assert piecewise_sizes == ([8, 4, 2, 1] if private else [8, 4])
     assert shared.graph_pool is shared_pool
+    if metadata is not None:
+        assert metadata.graph_pool is metadata_pool
     assert full.graph_pool is (None if private else shared_pool)
     assert counter.num_cudagraph_captured == 7
     assert not dispatcher.keys_initialized
@@ -131,6 +140,7 @@ def test_worker_reserves_graph_budget(
         vendor_name=vendor,
         device_type="cuda" if vendor != "musa" else "musa",
         is_cuda=lambda: vendor == "nvidia",
+        is_rocm=lambda: vendor in ("amd", "hygon"),
         empty_cache=lambda: None,
         torch_device_fn=SimpleNamespace(
             reset_peak_memory_stats=lambda: None,

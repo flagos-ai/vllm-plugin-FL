@@ -70,7 +70,6 @@ env_defaults:
   GEMS_VENDOR: "kunlunxin"
   VLLM_PLUGINS: "fl"
   FLAGCX_PATH: "/workspace/FlagCX"
-  CUDA_VISIBLE_DEVICES: "4,5,6,7"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "1800"
 
@@ -78,18 +77,41 @@ p800:
   name: "p800"
   tests:
     e2e:
-      inference:
-        qwen3_6:
-          - "27b_tp4_eager"
-          - "35b_a3b_tp4_graph"
-      serving:
-        qwen3_6:
-          - "27b_tp4_graph"
-          - "35b_a3b_tp4_eager"
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_graph
     timeouts:
       e2e:
         inference: 180
         serving: 180
+        concurrent: 180
     functional:
       include: "*"
       exclude:
@@ -99,5 +121,11 @@ p800:
       exclude:
         - dispatch/test_flaggems_quantization.py
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve

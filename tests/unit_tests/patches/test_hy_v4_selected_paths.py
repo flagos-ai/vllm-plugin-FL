@@ -11,6 +11,26 @@ from vllm_fl.models.hy4 import model as hy_v4, runtime
 
 
 @pytest.mark.parametrize(
+    "vendor", ["ascend", "metax", "musa", "hygon", "thead", "kunlunxin", "enflame"]
+)
+def test_non_cuda_preflight_rejects_before_operator_resolution(monkeypatch, vendor):
+    from vllm import platforms
+
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(vendor_name=vendor, is_cuda=lambda: False),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_resolve_registered_operator",
+        lambda *a, **k: pytest.fail("unsupported platform reached operator resolution"),
+    )
+    with pytest.raises(ValueError, match="requires an NVIDIA CUDA runtime"):
+        runtime.validate_hy4_runtime(_prefill_config())
+
+
+@pytest.mark.parametrize(
     "options,selected",
     [
         ({}, "flagos"),

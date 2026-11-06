@@ -55,7 +55,7 @@ if not os.path.exists(_CFG.model):
 
 
 @pytest.fixture(scope="module")
-def server():
+def server(tmp_path_factory):
     """Start vLLM server with model config and optional serve overrides."""
     serve = _CFG.serve
 
@@ -69,6 +69,7 @@ def server():
         served_model_name=serve.served_model_name,
         max_retries=serve.startup_retries,
         extra_args=extra_args,
+        log_dir=tmp_path_factory.mktemp("vllm-server"),
     ) as srv:
         yield srv
 

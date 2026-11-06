@@ -25,7 +25,9 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
     def __init__(self, moe: FusedMoEConfig):
         super().__init__(moe)
         self.unquantized_backend, self.experts_cls = select_unquantized_moe_backend_oot(
-            moe_config=self.moe, triton_experts_cls=TritonExpertsFL
+            moe_config=self.moe,
+            prefer_flaggems_experts=True,
+            triton_experts_cls=TritonExpertsFL,
         )
 
     @property

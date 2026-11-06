@@ -37,7 +37,6 @@ device_overrides:
 env_defaults:
   GEMS_VENDOR: "iluvatar"
   VLLM_PLUGINS: "fl"
-  CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
   VLLM_ENGINE_ITERATION_TIMEOUT_S: "72000"
   VLLM_RPC_TIMEOUT: "72000000"
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "7200"
@@ -47,14 +46,33 @@ bi_v150:
   name: "bi_v150"
   tests:
     e2e:
-      inference:
-        qwen3_6: ["27b_tp4_eager"]
-      serving:
-        qwen3_6: ["35b_a3b_tp4_eager"]
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
     timeouts:
       e2e:
         inference: 180
         serving: 180
+        concurrent: 180
     functional:
       include: "*"
       # CUDA Graph capture currently fails at capture_begin.
@@ -64,4 +82,7 @@ bi_v150:
     unit:
       include: "*"
     benchmark:
-      enabled: false
+      pr:
+        enabled: false
+      nightly:
+        enabled: false

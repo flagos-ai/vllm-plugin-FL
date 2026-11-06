@@ -10,25 +10,34 @@ if ! command -v npu-smi >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -z "${ASCEND_RT_VISIBLE_DEVICES:-}" ]]; then
-  echo "::error::ASCEND_RT_VISIBLE_DEVICES is not set."
-  exit 1
-fi
-
 required_devices=(
   "/dev/davinci_manager"
   "/dev/devmm_svm"
   "/dev/hisi_hdc"
 )
 
-IFS=',' read -r -a visible_devices <<< "${ASCEND_RT_VISIBLE_DEVICES}"
-for device_id in "${visible_devices[@]}"; do
-  device_id="${device_id//[[:space:]]/}"
-  if [[ -z "${device_id}" ]]; then
-    continue
+if [[ -n "${ASCEND_RT_VISIBLE_DEVICES:-}" ]]; then
+  # A visibility mask is active (e.g. a locally pinned run): verify the
+  # exact davinci device nodes it names.
+  IFS=',' read -r -a visible_devices <<< "${ASCEND_RT_VISIBLE_DEVICES}"
+  for device_id in "${visible_devices[@]}"; do
+    device_id="${device_id//[[:space:]]/}"
+    if [[ -z "${device_id}" ]]; then
+      continue
+    fi
+    required_devices+=("/dev/davinci${device_id}")
+  done
+else
+  # No mask: verify every davinci node mapped into this container.
+  shopt -s nullglob
+  mapped=(/dev/davinci[0-9]*)
+  shopt -u nullglob
+  if [[ ${#mapped[@]} -eq 0 ]]; then
+    echo "::error::No /dev/davinci* devices mapped into the container."
+    exit 1
   fi
-  required_devices+=("/dev/davinci${device_id}")
-done
+  required_devices+=("${mapped[@]}")
+fi
 
 for device_path in "${required_devices[@]}"; do
   if [[ ! -e "${device_path}" ]]; then

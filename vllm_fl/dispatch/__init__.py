@@ -117,6 +117,8 @@ from .io_dumper import (
 )
 from .io_common import list_model_layers, register_tensor_stat, tensor_stats
 
+logger = get_logger()
+
 
 def call_op(op_name: str, *args, **kwargs):
     """
@@ -234,7 +236,17 @@ class CachedOp:
 
         try:
             return impl.fn(*args, **kwargs)
-        except Exception:
+        except Exception as exc:
+            # The fallback below is silent by design for production traffic,
+            # but an invisible impl failure makes dispatch regressions
+            # indistinguishable from a legitimate policy switch (observed:
+            # a flaky flaggems import rode this path for hours). Log it.
+            logger.warning(
+                "CachedOp %s: impl %s raised %r; falling back to manager call",
+                self._op_name,
+                impl.impl_id,
+                exc,
+            )
             self._impl = None
             self._frozen = False
             if get_policy().strict:

@@ -4,13 +4,14 @@ The MUSA CI image for the vLLM 0.24 line wraps the FlagOS-packaged Moore
 Threads stack:
 
 ```text
-harbor.baai.ac.cn/flagrelease-public/flagrelease_mthreads-gmi_vllm024plugin_base:08281629
+harbor.baai.ac.cn/plugin/musa-ph1.4.3.5-tree0.6.1a2-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt290-x64@sha256:6f7c2209c76166c4033bf7693bf5164ed6aee96c1020307b1bd358993c69ac87
 ```
 
 The base provides MUSA 4.3.5, torch 2.9.0 + torch_musa 2.9.0, vLLM 0.24.0
-(empty-device build), FlagGems 5.3.2.post1.dev22 (`b1f939eb5`), FlagTree
-`b97f8214` with the MUSA graph-capture fixes. `Dockerfile` replaces any plugin
-from the base with the repository's `vllm-plugin-fl` package, adds build
+(empty-device build), and FlagGems 5.3.2.post1.dev22 (`b1f939eb5`). `Dockerfile`
+installs `flagtree==0.6.1a2+mthreads3.6` (Triton 3.6.0) by default after removing
+conflicting compiler distributions, replaces the base's plugin with the
+repository's `vllm-plugin-fl` package, adds build
 tooling and CI test dependencies, and fails the build if the base does not
 carry the expected vendor stack. The resulting dev, CI, and release images
 work without mounting a source checkout. The v0.20.2 image that wrapped Moore
@@ -21,14 +22,15 @@ Threads' own registry image directly is kept as `Dockerfile.v0.20.2`.
 From the repository root:
 
 ```bash
-docker/build.sh --platform musa --target ci
-# -> harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-musa-ci
+IMAGE_TAG="v0.24.0-musa-ci-$(git rev-parse --short HEAD)"
+docker/build.sh --platform musa --target ci --image-tag "$IMAGE_TAG" \
+  --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
 
-docker push harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-musa-ci
+docker push "harbor.baai.ac.cn/plugin/vllm-plugin-fl:$IMAGE_TAG"
 ```
 
-`.github/configs/musa.yml` references `v0.24.0-musa-ci`, and the MUSA platform
-is enabled in `.github/configs/platforms.yml`.
+`.github/configs/musa.yml` pins the published CI image by tag and digest. The
+MUSA platform is enabled in `.github/configs/platforms.yml`.
 
 ## Validate on a MUSA host before enabling CI
 
