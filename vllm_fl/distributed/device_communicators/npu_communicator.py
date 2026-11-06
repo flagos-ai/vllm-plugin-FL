@@ -12,6 +12,7 @@ from vllm.distributed.device_communicators.base_device_communicator import (
 class NPUCommunicator(DeviceCommunicatorBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.moe_runtime = None
         if self.use_all2all:
             if self.all2all_backend != "allgather_reducescatter":
                 raise NotImplementedError(
@@ -22,6 +23,30 @@ class NPUCommunicator(DeviceCommunicatorBase):
             )
 
             self.all2all_manager = AgRsAll2AllManager(self.cpu_group)
+
+    def get_moe_runtime(self, config, *, device):
+        if not self.is_ep_communicator:
+            raise RuntimeError(
+                "MoE runtime must be owned by the active EP communicator"
+            )
+        if self.moe_runtime is None:
+            from .npu_moe_runtime import NpuMoERuntime
+
+            # An OOT coordinator can retain a logical local index while the
+            # worker/model uses an assigned visible ordinal. Topology comes
+            # from the group, but persistent tensors follow the model device.
+            self.moe_runtime = NpuMoERuntime(self, config, device)
+        elif self.moe_runtime.device != torch.device(device):
+            raise RuntimeError("MoE worker device changed; recreate and recapture")
+        return self.moe_runtime
+
+    def destroy(self):
+        if self.moe_runtime is not None:
+            self.moe_runtime.destroy()
+            self.moe_runtime = None
+        if self.all2all_manager is not None:
+            self.all2all_manager.destroy()
+        super().destroy()
 
     def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
         # GroupCoordinator's public reduction must not mutate or alias input.

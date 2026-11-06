@@ -424,7 +424,7 @@ class TritonExpertsFL(TritonExperts):
                 apply_router_weight_on_input,
             )
         if getattr(runtime_platform, "device_type", None) == "npu":
-            if self._lora_context is not None or self.gemm1_clamp_limit is not None:
+            if self._lora_context is not None:
                 raise NotImplementedError(
                     "Ascend grouped MoE requires ordinary unquantized experts"
                 )
@@ -435,6 +435,9 @@ class TritonExpertsFL(TritonExperts):
                     w2,
                     topk_weights,
                     topk_ids,
+                    alpha=self.quant_config.gemm1_alpha,
+                    beta=self.quant_config.gemm1_beta,
+                    limit=self.quant_config.gemm1_clamp_limit,
                     activation=activation.value,
                     apply_router_weight_on_input=apply_router_weight_on_input,
                     global_num_experts=global_num_experts,

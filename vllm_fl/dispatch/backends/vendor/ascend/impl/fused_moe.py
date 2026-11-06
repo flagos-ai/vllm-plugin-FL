@@ -22,6 +22,80 @@ def topk_softmax(topk_weights, topk_ids, token_expert_indices, gating_output, re
     return topk_weights, topk_ids
 
 
+def bf16_grouped_experts(
+    hidden_states,
+    w1,
+    w2,
+    *,
+    group_list,
+    group_list_type,
+    activation="silu",
+    alpha=None,
+    beta=None,
+    limit=None,
+):
+    """rc1 unquantized MLP for already routed rows, with packaged NPU ops."""
+    if (
+        hidden_states.dtype not in (torch.bfloat16, torch.float16)
+        or w1.dtype != hidden_states.dtype
+        or w2.dtype != hidden_states.dtype
+    ):
+        raise ValueError("Grouped experts require matching BF16/FP16 rows and weights")
+    if hidden_states.ndim != 2 or w1.ndim != 3 or w2.ndim != 3:
+        raise ValueError("Expected [rows,K] activations and [E,N,K] weights")
+    if group_list_type not in (0, 1):
+        raise ValueError("Unsupported expert group-list format")
+    if hidden_states.shape[0] == 0:
+        return hidden_states.new_empty((0, w2.shape[1]))
+    gate_up = torch_npu.npu_grouped_matmul(
+        x=[hidden_states],
+        weight=[w1.transpose(1, 2)],
+        split_item=2,
+        group_list_type=group_list_type,
+        group_type=0,
+        group_list=group_list,
+    )[0]
+    if activation == "swigluoai_uninterleave":
+        if limit is None or alpha is None or beta is None:
+            raise ValueError(
+                "Packed SwiGLU-OAI requires explicit alpha, beta and limit"
+            )
+        activated = torch_npu.npu_clipped_swiglu(
+            gate_up,
+            interleaved=False,
+            alpha=alpha,
+            bias=beta,
+            limit=limit,
+        )
+    elif activation == "silu":
+        if alpha not in (None, 1.0) or beta not in (None, 0.0):
+            raise NotImplementedError("Non-default SILU alpha/beta")
+        if limit is not None and limit > 0:
+            gate, up = gate_up.chunk(2, dim=-1)
+            gate_up = torch.cat((gate.clamp(max=limit), up.clamp(-limit, limit)), -1)
+        activated = torch_npu.npu_swiglu(gate_up)
+    elif activation in ("gelu", "gelu_tanh"):
+        gate, up = gate_up.chunk(2, dim=-1)
+        activated = (
+            F.gelu(gate, approximate="tanh" if activation == "gelu_tanh" else "none")
+            * up
+        )
+    elif activation == "silu_no_mul":
+        activated = F.silu(gate_up)
+    elif activation == "gelu_no_mul":
+        activated = F.gelu(gate_up)
+    else:
+        raise NotImplementedError(f"Unsupported Ascend MoE activation: {activation}")
+    return torch_npu.npu_grouped_matmul(
+        x=[activated],
+        weight=[w2.transpose(1, 2)],
+        split_item=2,
+        group_list_type=group_list_type,
+        group_type=0,
+        group_list=group_list,
+    )[0]
+
+
 def _torch_fused_experts_impl(
     hidden_states: torch.Tensor,
     w1: torch.Tensor,
@@ -33,6 +107,7 @@ def _torch_fused_experts_impl(
     apply_router_weight_on_input: bool = False,
     global_num_experts: int = -1,
     expert_map: torch.Tensor|None = None,
+    alpha=None, beta=None, limit=None,
 ) -> torch.Tensor:
     """Unquantized local-expert routing and GMM using packaged torch_npu ops.
 
@@ -61,7 +136,7 @@ def _torch_fused_experts_impl(
         global_num_experts = num_experts
     if apply_router_weight_on_input:
         raise NotImplementedError("Ascend grouped MoE requires output router weights")
-    if activation not in ("silu", "gelu", "gelu_tanh", "silu_no_mul", "gelu_no_mul"):
+    if activation not in ("silu", "swigluoai_uninterleave", "gelu", "gelu_tanh", "silu_no_mul", "gelu_no_mul"):
         raise NotImplementedError(f"Unsupported Ascend MoE activation: {activation}")
     if num_tokens == 0:
         return hidden_states if inplace else torch.empty_like(hidden_states)
@@ -80,27 +155,11 @@ def _torch_fused_experts_impl(
         quant_mode=-1,
     )
     group_list = expert_tokens.to(torch.int64)
-    # vLLM retains [E, N, K] weights. GMM expects [E, K, N]; match
-    # current rc1 moe_mlp.py's need_trans path without rewriting parameters.
-    gate_up = torch_npu.npu_grouped_matmul(
-        x=[routed], weight=[w1.transpose(1, 2)], split_item=2,
-        group_list_type=1, group_type=0, group_list=group_list,
-    )[0]
-    if activation == "silu":
-        activated = torch_npu.npu_swiglu(gate_up)
-    elif activation in ("gelu", "gelu_tanh"):
-        gate, up = gate_up.chunk(2, dim=-1)
-        activated = F.gelu(
-            gate, approximate="tanh" if activation == "gelu_tanh" else "none"
-        ) * up
-    elif activation == "silu_no_mul":
-        activated = F.silu(gate_up)
-    else:
-        activated = F.gelu(gate_up)
-    expert_output = torch_npu.npu_grouped_matmul(
-        x=[activated], weight=[w2.transpose(1, 2)], split_item=2,
-        group_list_type=1, group_type=0, group_list=group_list,
-    )[0]
+    # One vendor provider owns identical activation semantics in both paths.
+    expert_output = bf16_grouped_experts(
+        routed, w1, w2, group_list=group_list, group_list_type=1,
+        activation=activation, alpha=alpha, beta=beta, limit=limit,
+    )
     if expert_map is not None:
         # Only the compact local-route prefix is defined by GMM. Unpermute
         # must not expose stale/NaN tail storage even with a zero probability.
@@ -149,6 +208,7 @@ def fused_experts_impl(
     block_shape: Optional[list[int]] = None,
     w1_bias: Optional[torch.Tensor] = None,
     w2_bias: Optional[torch.Tensor] = None,
+    alpha=None, beta=None, limit=None,
 ) -> torch.Tensor:
     if any((use_fp8_w8a8, use_int8_w8a8, use_int8_w8a16, use_int4_w4a16,
             per_channel_quant)) or any(value is not None for value in (
@@ -181,4 +241,33 @@ def fused_experts_impl(
         apply_router_weight_on_input=apply_router_weight_on_input,
         global_num_experts=global_num_experts,
         expert_map=expert_map,
+        alpha=alpha, beta=beta, limit=limit,
     )
+
+
+def topk_bias(logits, bias, topk, renormalize, scoring_func):
+    """Use native NPU expert selection, preserving unbiased FP32 weights."""
+    import torch_npu
+
+    if scoring_func not in ("softmax", "sigmoid"):
+        raise ValueError(f"Unsupported scoring function: {scoring_func}")
+    logits = logits.float()
+    _, indices, _ = torch_npu.npu_moe_gating_top_k(
+        logits,
+        k=topk,
+        bias=None if bias is None else bias.float(),
+        k_group=1,
+        group_count=1,
+        group_select_mode=1,
+        renorm=0,
+        norm_type=0 if scoring_func == "softmax" else 1,
+        routed_scaling_factor=1.0,
+        eps=1e-20,
+    )
+    # CANN sigmoid selection normalizes its returned values. Gather original
+    # scores so the public renormalize=False contract remains exact as well.
+    scores = logits.softmax(-1) if scoring_func == "softmax" else logits.sigmoid()
+    weights = scores.gather(1, indices.long())
+    if renormalize:
+        weights = weights / weights.sum(-1, keepdim=True)
+    return weights, indices.to(torch.int32)

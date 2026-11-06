@@ -177,3 +177,34 @@ class VLLMFLBackendBase(ABC):
             - "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
         """
         pass
+
+    def bf16_grouped_experts(self, *args, **kwargs):
+        """Compute unquantized, already-dispatched BF16/FP16 expert rows.
+
+        Inputs are [M,K] rows, [E,P,K]/[E,K,N] expert weights (P=2N for
+        gated activations, P=N otherwise),
+        group_list, activation, and optional alpha/beta/limit. group_list_type
+        0 means cumulative counts, 1 means per-expert counts. Return [M,K]
+        without routing weights or communication; input storage is read-only.
+        """
+        raise NotImplementedError
+
+    def minimax_m3_kernels(self):
+        """Return one MiniMax provider class before creating model state.
+
+        The provider declares cache_contract="minimax_m3_block_major_bf16"
+        and implements norm_rope, prepare_sparse, insert_caches and attend.
+        It owns the [pages,2,block,heads,dim] BF16 cache layout and in-place
+        cache/output writes. Resolve it once; call its methods directly so
+        partially mutated state never falls through to a different provider.
+        """
+        raise NotImplementedError
+
+    def topk_bias(self, logits, bias, topk, renormalize, scoring_func):
+        """Return FP32 weights and INT32 IDs shaped [tokens,topk].
+
+        Select using softmax/sigmoid(logits)+bias, gather unbiased scores,
+        and normalize only when requested. The caller applies any routed
+        scaling factor. Inputs are read-only; no expert grouping is applied.
+        """
+        raise NotImplementedError
