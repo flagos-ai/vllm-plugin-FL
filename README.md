@@ -90,6 +90,17 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     on [FlagGems-vllm main](https://github.com/flagos-ai/FlagGems-vllm).
     Follow the shared [FlagGems-vllm installation instructions](docs/flaggems-vllm.md).
 
+    GLM-5.3 Flash requires the `glm5` extra and an unquantized checkpoint:
+
+    ```sh
+    pip install --no-build-isolation '.[glm5]'
+    ```
+
+    Its indexer uses BF16 on devices without native FP8 support; BF16 indexer
+    keys need about 1.94 times the FP8 cache space before page padding.
+    Whole-model accuracy and performance equivalence between these paths has
+    not been established.
+
     On devices without native FP8 support, run standard vLLM FP8 checkpoints
     with `--dtype bfloat16`. Qwen3.8-Flash-Next / Qwen4 converts supported
     per-tensor and block-scaled FP8 weights to BF16 when loading. ModelOpt,
