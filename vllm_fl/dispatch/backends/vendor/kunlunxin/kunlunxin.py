@@ -135,12 +135,10 @@ class KunlunxinBackend(Backend):
         Returns:
             Fully qualified class path string
         """
-        # TODO: Implement MLA (Multi-head Latent Attention) support for Kunlunxin
+        from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
         if use_mla:
-            # TODO: Implement MLA with sparse attention support for Kunlunxin
-            if use_sparse:
-                raise NotImplementedError("MLA with sparse attention is not implemented for Kunlunxin yet.")
-            raise NotImplementedError("MLA attention is not implemented for Kunlunxin yet.")
+            return AttentionBackendEnum.XPU_MLA_SPARSE.get_path()
         return "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention.KunlunxinAttentionBackend"
 
     # ==================== FLA Operator Implementations ====================
