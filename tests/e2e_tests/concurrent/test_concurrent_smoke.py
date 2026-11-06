@@ -24,6 +24,11 @@ import time
 
 import pytest
 
+from tests.utils.concurrent_cases import (
+    DEFAULT_TEXT_CASES,
+    matches_expected,
+    normalize_text_cases,
+)
 from tests.utils.device_utils import get_visible_device_env_var
 from tests.utils.model_config import ModelConfig
 from vllm import LLM, SamplingParams
@@ -57,44 +62,7 @@ if not os.path.exists(_CFG.model):
 # Prompt pool and sampling
 # ---------------------------------------------------------------------------
 
-_DEFAULT_TEXT_CASES = [
-    {
-        "text": "How many states are there in the United States?",
-        "expected": ["50"],
-    },
-    {"text": "The capital of France is", "expected": ["paris"]},
-    {
-        "text": "What is the largest planet in the solar system?",
-        "expected": ["jupiter"],
-    },
-    {"text": "Who wrote the play Romeo and Juliet?", "expected": ["shakespeare"]},
-    {"text": "What is 17 multiplied by 13?", "expected": ["221"]},
-    {
-        "text": "Name the three primary colors of light.",
-        "expected": ["red", "green", "blue"],
-    },
-    {"text": "What year did World War II end?", "expected": ["1945"]},
-    {
-        "text": "Explain the concept of gravity in one sentence.",
-        "expected": ["mass", "force", "attract"],
-    },
-]
-
-
-def _normalize_text_cases(raw_cases: list) -> list[dict]:
-    cases = []
-    for item in raw_cases:
-        if isinstance(item, str):
-            cases.append({"text": item, "expected": []})
-            continue
-        expected = item.get("expected", [])
-        if isinstance(expected, str):
-            expected = [expected]
-        cases.append({"text": item["text"], "expected": expected})
-    return cases
-
-
-_TEXT_CASES = _normalize_text_cases(_CFG.concurrent.text_prompts or _DEFAULT_TEXT_CASES)
+_TEXT_CASES = normalize_text_cases(_CFG.concurrent.text_prompts or DEFAULT_TEXT_CASES)
 CONCURRENT_N = int(os.environ.get("FL_CONCURRENT_N", str(_CFG.concurrent.concurrent_n)))
 _SAMPLING = {"max_tokens": 64, "temperature": 0.0}
 _SAMPLING.update(_CFG.concurrent.text_sampling)
@@ -153,19 +121,21 @@ def test_concurrent() -> None:
 
         total_tokens = 0
         for i, (case, output) in enumerate(zip(items, outputs)):
-            text = output.outputs[0].text
-            total_tokens += len(output.outputs[0].token_ids)
+            completion = output.outputs[0]
+            text = completion.text
+            generated_tokens = len(completion.token_ids)
+            total_tokens += generated_tokens
 
             assert text.strip(), f"Empty output for request[{i}]: {case['text']}"
             print(f"  request[{i}]: {case['text']!r}")
             print(f"  output[{i}]: {text!r}")
 
             if case["expected"]:
-                lower = text.lower()
-                matched = any(item.lower() in lower for item in case["expected"])
-                assert matched, (
+                assert matches_expected(case, text), (
                     f"Expected one of {case['expected']!r} in output for "
-                    f"request[{i}], got: {text!r}"
+                    f"request[{i}] (finish_reason={completion.finish_reason!r}, "
+                    f"generated_tokens={generated_tokens}, "
+                    f"max_tokens={_SAMPLING['max_tokens']}), got: {text!r}"
                 )
 
         _report(CONCURRENT_N, elapsed, total_tokens)
