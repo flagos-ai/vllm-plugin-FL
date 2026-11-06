@@ -35,6 +35,12 @@ The image provides the vendor runtime and an ordinary empty vLLM wheel. Preserve
 its Torch, TorchMUSA and SDK packages when installing the plugin. Generic PyPI
 Torch, CUDA wheels or a standalone Triton are not substitutes for this MUSA stack.
 
+One dependency is pinned on top of vLLM's requirement list: `websockets==16.0`.
+The 17.x releases require Python 3.11 and fail at import on this 3.10 stack
+(`logging.LoggerAdapter[Any]` is not subscriptable), which aborts uvicorn's
+websocket protocol import before the server binds. The CI image installs that pin
+and asserts the version at build time.
+
 ## Required dependencies and issue handling
 
 **Use the image above that ships the pinned tuple; the corrected FlagGems and
@@ -304,7 +310,7 @@ The 0.32.0 adaptation was accepted on 2026-11-05:
 | Branch | `vllm-plugin-FL` `0.5.0-dev` (vLLM 0.32.0 `empty` build) |
 | Models | Qwen3.6-27B, Qwen3.6-35B-A3B (TP4) |
 | Runtime | `flagos-runtime-mthreads-musa4.3.6:2.2.0`, plugin installed editable |
-| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:62acf6a6590ce0c7be91130ec8f8e5def01ab5572400d74ddb6907fd11ead0fa` |
+| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:8451d2437e2e57c25741aca964a8e12c755943e42c83d5af6b4438a04b93dcb4` |
 | Dependency tuple | torch 2.9.0 (`torch.version.musa` = 40306), FlagGems 5.4.0, FlagTree 0.7.0+mthreads3.6, Triton 3.6.0 |
 | Gate | 4/4 groups `GATE_TEST_RC=0` (27B and 35B-A3B × eager and graph) |
 | Unit tests | raw full suite 2004 passed, 225 skipped, 1 failed (`test_gcu_kv_zeroer`, outside MUSA); `FL_TEST_PLATFORM=musa` (CI path) 1884 passed, 231 skipped, 0 failed |

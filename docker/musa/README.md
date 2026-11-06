@@ -12,7 +12,9 @@ FlagTree 0.7.0 (`mthreads3.6`, which supplies Triton 3.6.0) and FlagGems 5.4.0.
 The Dockerfile installs vLLM as an empty build (`VLLM_TARGET_DEVICE=empty`) with
 `--ignore-requires-python --no-deps` so pip cannot replace the vendor stack, then
 back-fills the Python 3.11-only names vLLM 0.32 imports at module load through the
-`.pth` shim in this directory.
+`.pth` shim in this directory. `websockets` is held at 16.0: 17.x requires Python
+3.11 and its typing module raises on import here, which breaks uvicorn's websocket
+protocol before the API server binds.
 
 `dev`, `ci` and `release` retain the common Docker target interface. They do not
 rebuild the vendor runtime or change its dependencies. For example:
