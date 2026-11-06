@@ -165,3 +165,12 @@ def test_unit_passes_keep_worker_and_reporting_contracts(
             f"--json-report-file={report}",
         ):
             assert argument in case.extra_args
+
+
+@pytest.mark.parametrize("platform", ("nvidia", "musa"))
+def test_other_platforms_keep_existing_unit_markers(platform):
+    runner = test_runner.TestRunner(platform=platform, scope="unit", dry_run=True)
+    parallel, serial = runner._discover_unit_tests()
+
+    assert _selection_args(parallel)[:2] == ["-m", "not multi_gpu and not serial"]
+    assert _selection_args(serial)[:2] == ["-m", "multi_gpu or serial"]

@@ -10,26 +10,26 @@ gold-value comparison, environment setup, and structured reporting.
 Usage::
 
     # Run all tests for a platform/device
-    python tests/run.py --platform nvidia --device a100
+    python tests/run.py --platform cuda --device a100
 
     # Run only functional tests (ops, compilation, distributed)
-    python tests/run.py --platform nvidia --device a100 --scope functional
+    python tests/run.py --platform cuda --device a100 --scope functional
 
     # Run only E2E tests (inference, serving — require model files)
-    python tests/run.py --platform nvidia --device a100 --scope e2e
+    python tests/run.py --platform cuda --device a100 --scope e2e
 
     # Run only unit tests
     python tests/run.py --platform ascend --device 910b --scope unit
 
     # Run a specific E2E test case
-    python tests/run.py --platform nvidia --device a100 \\
+    python tests/run.py --platform cuda --device a100 \\
         --scope e2e --task inference --model qwen3 --case 4b_tp2
 
     # Dry-run — show what would be executed
-    python tests/run.py --platform nvidia --device a100 --dry-run
+    python tests/run.py --platform cuda --device a100 --dry-run
 
     # Save current outputs as gold values
-    python tests/run.py --platform nvidia --device a100 --save-gold
+    python tests/run.py --platform cuda --device a100 --save-gold
 """
 
 from __future__ import annotations
@@ -361,21 +361,23 @@ class TestRunner:
         # per-process import overhead (torch, vllm_fl) outweighs the parallelism
         # benefit and can cause memory pressure on large CI machines.
         cpu_workers = min(os.cpu_count() or 1, 16)
+        # Single-GPU tests share inherited device visibility on MetaX.
+        serialize_gpu_tests = self.config.platform == "metax"
 
         extra_args = [
             "--tb=short",
             "-q",
             "-n",
             str(cpu_workers),
-            # GPU tests share the inherited device visibility; multi_gpu
-            # tests also spawn their own worker processes that pin
+            # multi_gpu tests spawn their own worker processes that pin
             # concrete device ordinals (e.g. torch.cuda.set_device(rank));
             # running them concurrently with 16 xdist workers corrupts the
             # vendor device layer (kunlunxin: "CUDA error: invalid device
             # ordinal"). Tests with process-global state use the serial marker.
-            # All three groups run serially in a second pass below.
+            # Both groups run serially in a second pass below.
             "-m",
-            "not gpu and not multi_gpu and not serial",
+            ("not gpu and " if serialize_gpu_tests else "")
+            + "not multi_gpu and not serial",
             "--cov=vllm_fl",
             "--cov-report=term-missing",
             f"--cov-report=json:coverage-{self.config.platform}.json",
@@ -396,7 +398,7 @@ class TestRunner:
             "--tb=short",
             "-q",
             "-m",
-            "gpu or multi_gpu or serial",
+            ("gpu or " if serialize_gpu_tests else "") + "multi_gpu or serial",
             "--cov=vllm_fl",
             "--cov-append",
             "--cov-report=term-missing",
@@ -411,7 +413,7 @@ class TestRunner:
 
         print(
             f"[run] Unit tests parallel: {cpu_workers} workers (CPU-only, no device pinning); "
-            "gpu, multi_gpu and serial-marked tests run serially afterwards"
+            f"{'gpu, ' if serialize_gpu_tests else ''}multi_gpu and serial-marked tests run serially afterwards"
         )
 
         return [

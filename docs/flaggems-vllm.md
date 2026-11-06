@@ -21,7 +21,7 @@ In a container with this checkout mounted at `/workspace/vllm-plugin-FL`:
 
 ```bash
 cd /workspace/vllm-plugin-FL
-bash .github/scripts/nvidia/setup.sh
+bash .github/scripts/cuda/setup.sh
 ```
 
 The installer pins FlagGems-vllm **v0.2.0**, commit
@@ -83,8 +83,8 @@ FlagGems-vllm providers.
 Run the same tests without provider-selection environment variables:
 
 ```bash
-python3 tests/run.py --platform nvidia --scope unit
-python3 tests/run.py --platform nvidia --scope functional
+python3 tests/run.py --platform cuda --scope unit
+python3 tests/run.py --platform cuda --scope functional
 ```
 
 For real models, run the [adaptation gate](../tools/adaptation-gate-cases/README.md)
