@@ -138,8 +138,9 @@ class AscendModelGraphManager(ModelCudaGraphManager):
         original_stream = torch.npu.current_stream(self.device)
         capture_stream.wait_stream(original_stream)
         try:
-            # Upstream graph_capture assumes Cuda/XpuCommunicator. FlagCX NPU
-            # collectives use this native stream directly, as ordinary NPU ops.
+            # Upstream graph_capture assumes a CUDA/XPU communicator. Use
+            # the native NPU capture stream and let the device communicator
+            # handle its own stream dependencies.
             with (
                 torch.npu.stream(capture_stream),
                 set_current_vllm_config(self.vllm_config),
