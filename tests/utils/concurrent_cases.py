@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # ``LLM.generate`` receives raw completion prompts, not chat messages. Keep the
 # expected answer at the start of each completion so reasoning models do not
 # spend the smoke test's small token budget on an answer preamble.
