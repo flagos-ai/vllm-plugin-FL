@@ -18,7 +18,7 @@ root = Path(__file__).resolve().parents[3]
 assert root in Path(vllm_fl.__file__).resolve().parents, vllm_fl.__file__
 assert vllm.__version__.split("+")[0] == "0.32.0", vllm.__version__
 assert metadata.version("flag-gems") == "5.3.5"
-assert metadata.version("flagtree") == "0.6.2a3+iluvatar3.6"
+assert metadata.version("flagtree") == "0.7.0+iluvatar3.6"
 assert torch.__version__.split("+")[0] == "2.10.0", torch.__version__
 assert current_platform.vendor_name == "iluvatar"
 assert torch.cuda.is_available() and torch.cuda.device_count() >= 4

@@ -8,7 +8,7 @@
 - 源码：`/workspace/sources/vllm-0.32.0`，来自精确 tag 归档。
 - 归档 SHA256：`bf592c132f27bbb5f65cff0bbd2ee873eae722b79c8286934fd5b5cf88b43d61`。
 - 插件源路径：`/workspace/vllm-plugin-FL`。执行时显式设置 `PYTHONPATH` 为此路径，避免继承环境中的全局 site-packages 覆盖隔离 vLLM。
-- FlagTree：0.6.2a3+iluvatar3.6；FlagGems：5.3.5。
+- 当前 FlagTree：**0.7.0+iluvatar3.6**；FlagGems：5.3.5。CI setup 显式安装带 SHA256 校验的厂商 wheel，`verify_stack.py` 校验此精确版本及 Triton 导入归属，不沿用镜像内旧版 FlagTree。历史测试中的 0.6.2a3 记录保留，不代表当前环境。
 - FlagGems-vllm 安装源 pin：`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`（安装 helper 的 v0.2.0 源码；包元数据为 0.1.0）。
 - 本地 FlagCX：`/mnt/share/user_homes/iluv/FlagCX`，commit `6143384`，已有 CoreX 动态库；运行验证中。
 

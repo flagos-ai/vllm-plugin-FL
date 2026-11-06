@@ -27,8 +27,7 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
-# Keep vendor torch / FlagGems / FlagTree from the image, but install exact
-# upstream EMPTY vLLM so an older baked-in framework cannot pass silently.
+python -m pip install --no-deps 'https://resource.flagos.net/repository/flagos-pypi-hosted/packages/flagtree/0.7.0+iluvatar3.6/flagtree-0.7.0+iluvatar3.6-cp312-cp312-linux_x86_64.whl#sha256=af6a7c9eddf167441fd872c3e6d673e9da572608dee79dba655b0775db740176'
 bash .github/scripts/iluvatar/install_vllm.sh
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip install "pytest-xdist>=3.0.0"

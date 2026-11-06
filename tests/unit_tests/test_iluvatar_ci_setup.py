@@ -20,6 +20,16 @@ def test_setup_installs_target_before_plugin():
         subprocess.run(["bash", "-n", str(SCRIPTS / name)], check=True)
 
 
+def test_setup_pins_flagtree_070_before_integration():
+    setup = (SCRIPTS / "setup.sh").read_text()
+    verification = (SCRIPTS / "verify_stack.py").read_text()
+    wheel = "flagtree-0.7.0+iluvatar3.6-cp312-cp312-linux_x86_64.whl"
+    digest = "af6a7c9eddf167441fd872c3e6d673e9da572608dee79dba655b0775db740176"
+    assert f"{wheel}#sha256={digest}" in setup
+    assert setup.index(wheel) < setup.index("install_flaggems_vllm.py")
+    assert 'metadata.version("flagtree") == "0.7.0+iluvatar3.6"' in verification
+
+
 def test_install_rejects_corrupt_archive_before_pip(tmp_path):
     archive = tmp_path / "corrupt.tar.gz"
     archive.write_bytes(b"not an upstream archive")
