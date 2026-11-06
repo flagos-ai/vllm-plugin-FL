@@ -47,14 +47,6 @@ bi_v150:
   tests:
     e2e:
       pr:
-        inference:
-          qwen3_6:
-            - 27b_tp4_eager
-            - 35b_a3b_tp4_eager
-        serving:
-          qwen3_6:
-            - 27b_tp4_eager
-            - 35b_a3b_tp4_eager
         # Debug-only replay of nightly job 127597450593. This branch/PR is
         # diagnostic and must not be merged.
         concurrent:
