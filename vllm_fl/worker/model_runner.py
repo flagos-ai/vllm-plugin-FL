@@ -240,22 +240,11 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
-try:
-    from vllm.v1.worker.cp_utils import (
-        get_total_cp_world_size,
-    )
-except ImportError:
-    try:
-        # Older 0.28-era builds: CP merged into DCP and the count was renamed.
-        from vllm.v1.worker.cp_utils import (
-            get_kv_cache_shard_count as get_total_cp_world_size,
-        )
-    except ImportError:
-        # vLLM 0.32 exports neither name. Nothing in this module calls it, so
-        # keep the import optional rather than failing the whole module: a
-        # hard import here makes ModelRunnerFL unimportable on 0.32, which
-        # takes out every backend that selects it.
-        get_total_cp_world_size = None
+# NOTE: ``cp_utils.get_total_cp_world_size`` (0.28-era, later renamed
+# ``get_kv_cache_shard_count``) used to be imported here. vLLM 0.32 exports
+# neither name, and nothing in this module ever called it, so the import is
+# dropped rather than guarded: keeping it made ModelRunnerFL unimportable on
+# 0.32 for every backend that selects it.
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
