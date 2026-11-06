@@ -33,11 +33,15 @@ ARG EXTRA_INDEX_URL
 # Keep the vendor Python environment (/flagos), Torch, FlagGems, FlagTree and SDK
 # paths; the base image already exports LD_LIBRARY_PATH for DTK and HyHAL, and
 # PYTHONPATH=/opt/flagtree, which provides the FlagTree (Triton) distribution.
+# LD_LIBRARY_PATH is mirrored from /etc/profile.d/vendor.sh: GitHub Actions runs
+# container steps with `sh`, which ignores BASH_ENV, so a profile-only export
+# leaves `import torch` without libgalaxyhip.so.5. Keep both in sync.
 ENV DEBIAN_FRONTEND=noninteractive \
     ROCM_PATH=/opt/dtk \
     HIP_PATH=/opt/dtk/hip \
     DTKROOT=/opt/dtk \
     HYHAL_PATH=/opt/hyhal \
+    LD_LIBRARY_PATH="/opt/dtk/dcc/gcvm/lib:/opt/dtk/hip/lib:/opt/dtk/llvm/lib:/opt/dtk/lib:/opt/dtk/lib64:/opt/hyhal/lib:/opt/hyhal/lib64:/opt/dtk/dushmem/lib:/opt/dtk/opencl/lib:/opt/dtk/.hyhal/rocm_smi/lib:/opt/dtk/.hyhal/lib:/opt/dtk/.hyhal/lib64:" \
     GEMS_VENDOR=hygon \
     USE_FLAGGEMS=1 \
     VLLM_PLUGINS=fl \
