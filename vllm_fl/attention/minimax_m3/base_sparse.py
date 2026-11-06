@@ -5,19 +5,12 @@ import torch
 
 from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3 import (
     packed_prefill as kernel,
-)
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3 import (
     subtile_decode as decode_kernel,
 )
 from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3.native_sparse import (
     minimax_m3_sparse_attn as original,
-)
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3.native_sparse import (
     minimax_m3_sparse_attn_decode as original_decode,
 )
-
-COUNTS = {"prefill_packed": 0, "decode_subtile": 0, "fallback": 0}
-PREFILL_SHAPES = {}
 
 
 def sparse_attn(
@@ -53,14 +46,6 @@ def sparse_attn(
         and (q.shape[0] > 0)
     )
     if ok:
-        key = f"{q.shape[0]},{max_query_len}"
-        if key not in PREFILL_SHAPES:
-            print(
-                "M3_SPARSE_TUNING_HIT " + key + " QPACK8 K32 all_query_lengths",
-                flush=True,
-            )
-        PREFILL_SHAPES[key] = PREFILL_SHAPES.get(key, 0) + 1
-        COUNTS["prefill_packed"] += 1
         return kernel.minimax_m3_sparse_attn(
             q,
             kv_cache,
@@ -74,7 +59,6 @@ def sparse_attn(
             sm_scale,
             output,
         )
-    COUNTS["fallback"] += 1
     return original(
         q,
         kv_cache,
@@ -120,7 +104,6 @@ def sparse_decode(
         and (0 < q.shape[0] <= 64)
     )
     if ok:
-        COUNTS["decode_subtile"] += 1
         return decode_kernel.minimax_m3_sparse_attn_decode(
             q,
             kv_cache,
@@ -132,7 +115,6 @@ def sparse_decode(
             output,
             decode_query_len,
         )
-    COUNTS["fallback"] += 1
     return original_decode(
         q,
         kv_cache,

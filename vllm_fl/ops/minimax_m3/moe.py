@@ -19,11 +19,6 @@ _ALLOWED = {
     "block_shape",
     "B_bias",
 }
-_COUNTS = {"small_gemv": 0, "small_dot": 0, "g2": 0, "realign": 0, "fallback": 0}
-
-
-def snapshot():
-    return dict(_COUNTS)
 
 
 class ExpertLaunchContext:
@@ -126,12 +121,10 @@ class ExpertLaunchContext:
             assert small_stage == stage
             cfg = thaw(self.choice["config" + str(stage)])
             if cfg.get("kind") == "naive_gemv":
-                _COUNTS["small_gemv"] += 1
                 return moe_gemv.launch(A, B, C, a[5], a[6:9], stage, cfg)
             changed = list(a)
             changed[11] = cfg
             a = tuple(changed)
-            _COUNTS["small_dot"] += 1
         if self.plain(a, kw):
             if tuple(B.shape) == (128, 384, 6144) and a[10] == 4 and a[9] is False:
                 self.base_g1 = True
@@ -165,8 +158,5 @@ class ExpertLaunchContext:
                             self.expert_map,
                             **self.prepare_kwargs,
                         )
-                        _COUNTS["realign"] += 1
                     a = tuple(changed)
-                    _COUNTS["g2"] += 1
-        _COUNTS["fallback"] += int(small_stage is None)
         return native(*a, **kw)

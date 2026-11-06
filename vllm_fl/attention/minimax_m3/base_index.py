@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 FlagOS Contributors
 
-import json
-
 import torch
 
 from vllm.distributed.parallel_state import get_tensor_model_parallel_world_size
@@ -16,8 +14,6 @@ from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3.native_index import 
 )
 
 _TP_OK = None
-COUNTS = {"optimized": 0, "fallback": 0}
-HITS = {}
 
 
 def index_score(q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_heads):
@@ -51,25 +47,10 @@ def index_score(q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_
         and (max_seq_len > 0)
     )
     if not ok:
-        COUNTS["fallback"] += 1
         return original(
             q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_heads
         )
     cfg = index_policy.choose(q.shape[0], max_query_len, max_seq_len)
-    key = json.dumps(
-        dict(
-            total_q=q.shape[0],
-            max_query=max_query_len,
-            max_seq=max_seq_len,
-            batch=lens.numel(),
-            config=cfg,
-        ),
-        sort_keys=True,
-    )
-    if key not in HITS:
-        print("M3_INDEX_OPT_HIT " + key, flush=True)
-    HITS[key] = HITS.get(key, 0) + 1
-    COUNTS["optimized"] += 1
     return kernels.score(
         q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_heads, **cfg
     )

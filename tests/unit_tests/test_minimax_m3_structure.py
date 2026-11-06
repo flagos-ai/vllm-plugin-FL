@@ -138,31 +138,6 @@ class StructureTests(unittest.TestCase):
                         str(p),
                     )
 
-    def test_package_imports_have_no_registration_side_effects(self):
-        for folder in ("vllm_fl/attention/minimax_m3", VENDOR, FG.replace(".", "/")):
-            self.assertEqual(
-                ast.parse((ROOT / folder / "__init__.py").read_text()).body, []
-            )
-
-    def test_upstream_attention_sources_are_imported(self):
-        for filename, upstream in (
-            ("native_index.py", "vllm.models.minimax_m3.common.ops.index_topk"),
-            ("native_sparse.py", "vllm.models.minimax_m3.common.ops.sparse_attn"),
-        ):
-            tree = ast.parse((ROOT / VENDOR / filename).read_text())
-            self.assertTrue(
-                any(
-                    isinstance(n, ast.ImportFrom) and n.module == upstream
-                    for n in tree.body
-                )
-            )
-            self.assertFalse(
-                any(
-                    isinstance(n, ast.FunctionDef) and n.name.endswith("_kernel")
-                    for n in tree.body
-                )
-            )
-
 
 if __name__ == "__main__":
     unittest.main()

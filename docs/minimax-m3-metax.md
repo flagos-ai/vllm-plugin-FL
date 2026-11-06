@@ -55,7 +55,7 @@ Prefix: `vllm_fl/attention/minimax_m3/`.
 |---|---|
 | `bridge.py` | TP16, dtype/layout and consumer-identity guards; selects long/base/fallback paths and prepares exact decode indexing. Framework code, no JIT kernel. |
 | `attention_policy.py` | Accepted long-context index/prefill/decode parameter selection from typed configuration. |
-| `base_index.py` | Base index shape checks, original fallback and hit accounting. |
+| `base_index.py` | Base index shape checks and original fallback. |
 | `index_policy.py` | Base index parameter selection. |
 | `base_sparse.py` | Base query packing and subtile-decode guards, retaining native fallback. |
 

@@ -3,22 +3,18 @@
 
 """Static TP/shape selection, owned by FL; local kernels receive explicit metadata."""
 
-import os
 import weakref
 
 import torch
 
+from . import attention_policy as policy
+from .base_index import index_score as oldi
+from .base_sparse import sparse_attn as oldp, sparse_decode as oldd
 from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3 import (
     attention_launch as kernels,
 )
-from . import attention_policy as policy
-from .base_index import index_score as oldi
-from .base_sparse import sparse_attn as oldp
-from .base_sparse import sparse_decode as oldd
 from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3.native_index import (
     minimax_m3_index_decode as native_index_decode,
-)
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3.native_index import (
     minimax_m3_index_topk as index_topk,
 )
 from vllm_fl.minimax_m3_config import load
@@ -27,15 +23,6 @@ _TP_OK = None
 _STATE = None
 _OWNER_MAP = {}
 _OWNER_CONTEXT = None
-_STATS = {
-    "index_q1": 0,
-    "index_prefill": 0,
-    "sparse_prefill": 0,
-    "sparse_decode": 0,
-    "fallback": 0,
-    "prefill_consumer_rejected": 0,
-}
-_HITS = {}
 
 
 def _tp16():
@@ -60,28 +47,6 @@ def _int_vector(x):
 
 def _bt(x):
     return x.dtype == torch.int32 and x.ndim == 2 and (x.stride(1) == 1)
-
-
-def _hit(kind, shape):
-    _STATS[kind] += 1
-    key = kind + ":" + str(shape)
-    if key not in _HITS:
-        _HITS[key] = 0
-        import torch.distributed as dist
-
-        rank = dist.get_rank() if dist.is_initialized() else None
-        print(
-            "M3_LONG_ATTENTION_HIT rank="
-            + str(rank)
-            + " pid="
-            + str(os.getpid())
-            + " "
-            + key
-            + " capture="
-            + str(torch.cuda.is_current_stream_capturing()),
-            flush=True,
-        )
-    _HITS[key] += 1
 
 
 def _prefill_consumer_ok(index_cache):
@@ -170,12 +135,9 @@ def index_score(q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_
     )
     cfg = policy.choose_index(q.shape[0], lens.numel(), maxq, maxseq) if ok else None
     if cfg is not None and cfg["mode"] == "dot" and (not _prefill_consumer_ok(kv)):
-        _STATS["prefill_consumer_rejected"] += 1
         cfg = None
     if cfg is None:
-        _STATS["fallback"] += 1
         return oldi(q, kv, bt, cu, lens, prefix, maxq, maxseq, nkv)
-    _hit("index_q1" if maxq == 1 else "index_prefill", (q.shape[0], maxq, maxseq))
     return kernels.index_score(q, kv, bt, cu, lens, prefix, maxq, maxseq, nkv, cfg)
 
 
@@ -233,9 +195,7 @@ def sparse_attn(
     )
     cfg = policy.choose_prefill(q.shape[0], maxq) if ok else None
     if cfg is None:
-        _STATS["fallback"] += 1
         return oldp(q, kv, ids, bt, cu, lens, prefix, maxq, nkv, scale, out)
-    _hit("sparse_prefill", (q.shape[0], maxq))
     kernels.prefill(q, kv, ids, bt, cu, lens, prefix, maxq, nkv, scale, out, cfg)
 
 
@@ -267,9 +227,7 @@ def sparse_decode(
     )
     cfg = policy.choose_decode(q.shape[0]) if ok else None
     if cfg is None:
-        _STATS["fallback"] += 1
         return oldd(q, kv, ids, bt, lens, nkv, scale, out, decode_query_len)
-    _hit("sparse_decode", (q.shape[0], cfg["page_parts"]))
     kernels.decode(q, kv, ids, bt, lens, nkv, scale, out, decode_query_len, cfg)
 
 
@@ -279,8 +237,7 @@ def initialize_consumer_contract():
     from vllm_fl.models.minimax_m3.bindings import install
 
     install()
-    from vllm.models.minimax_m3.common import indexer
-    from vllm.models.minimax_m3.common import sparse_attention as caller
+    from vllm.models.minimax_m3.common import indexer, sparse_attention as caller
 
     from vllm_fl.models.minimax_m3.model import MiniMaxM3SparseAttention
 
@@ -296,15 +253,6 @@ def initialize_consumer_contract():
         raise RuntimeError("Attention consumer changed after initialization")
     assert caller.minimax_m3_sparse_attn is sparse_attn
     _STATE = wanted
-
-
-def snapshot():
-    return dict(
-        counts=dict(_STATS),
-        hits=dict(_HITS),
-        consumer_initialized=_STATE is not None,
-        scope="Python eager/capture calls; graph replays do not increment",
-    )
 
 
 def index_decode(

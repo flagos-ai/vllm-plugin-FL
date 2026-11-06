@@ -15,8 +15,7 @@ from flag_gems.ops.linear_primitives import (
 
 from vllm_fl.dispatch.jit import launch_handle
 
-linear_scheduled = launch_handle(_native_kernel)
-legacy_kernel = linear_scheduled
+_linear_kernel = launch_handle(_native_kernel)
 
 _POLICY = None
 _SMALL = {}
@@ -55,13 +54,6 @@ def is_configured():
     return _POLICY is not None
 
 
-_COUNTS = {"small": 0, "ordered": 0, "legacy": 0, "fallback": 0}
-
-
-def snapshot():
-    return dict(_COUNTS)
-
-
 def launch(native, grid, a, w, bias, out, M, N, K, *strides, **kwargs):
     if _POLICY is None:
         return native[grid](a, w, bias, out, M, N, K, *strides, **kwargs)
@@ -84,7 +76,6 @@ def launch(native, grid, a, w, bias, out, M, N, K, *strides, **kwargs):
         and tuple(strides) == (K, 1, K, 1, N, 1, 0)
     )
     if small is not None and small_ok:
-        _COUNTS["small"] += 1
         cfg = thaw(small["config"])
         if small["kind"] == "gemv":
             return linear_gemv[(triton.cdiv(M, cfg["BM"]), triton.cdiv(N, cfg["BN"]))](
@@ -95,7 +86,7 @@ def launch(native, grid, a, w, bias, out, M, N, K, *strides, **kwargs):
             triton.cdiv(M, cfg["BLOCK_SIZE_M"]),
             triton.cdiv(N, cfg["BLOCK_SIZE_N"]),
         )
-        return linear_scheduled[(gm * gn,) if order else (gm, gn)](
+        return _linear_kernel[(gm * gn,) if order else (gm, gn)](
             a,
             w,
             bias,
@@ -120,10 +111,9 @@ def launch(native, grid, a, w, bias, out, M, N, K, *strides, **kwargs):
         and tuple(strides[:6]) == (K, 1, K, 1, N, 1)
         and not (set(kwargs) - {"BIAS"})
     ):
-        _COUNTS["ordered"] += 1
         cfg = thaw(_POLICY["ordered_config"])
         count = (M // cfg["BLOCK_SIZE_M"]) * (N // cfg["BLOCK_SIZE_N"])
-        return linear_scheduled[(count,)](
+        return _linear_kernel[(count,)](
             a,
             w,
             bias,
@@ -146,12 +136,10 @@ def launch(native, grid, a, w, bias, out, M, N, K, *strides, **kwargs):
         and w.dtype == a.dtype
         and out.dtype == a.dtype
     ):
-        _COUNTS["legacy"] += 1
         cfg = thaw(config)
-        return legacy_kernel[
+        return _linear_kernel[
             (triton.cdiv(M, cfg["BLOCK_SIZE_M"]), triton.cdiv(N, cfg["BLOCK_SIZE_N"]))
         ](a, w, bias, out, M, N, K, *strides, **kwargs, **cfg)
-    _COUNTS["fallback"] += 1
     return native[grid](a, w, bias, out, M, N, K, *strides, **kwargs)
 
 
