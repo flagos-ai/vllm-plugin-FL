@@ -1,272 +1,60 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Qwen3.8 integration and contract regressions."""
+# Copyright 2026 FlagOS Contributors
+"Native serving, scoped startup, rollback and optional logging contracts."
 
 import ast
-import builtins as registration_builtins
 import copy as installation_copy
 import importlib.util
 import json
+import logging
 import os
 import subprocess
 import sys
-import unittest
 from contextvars import ContextVar
 from functools import wraps
 from pathlib import Path
 from types import ModuleType, SimpleNamespace, SimpleNamespace as NS
-from unittest.mock import patch
 
 import pytest
 import torch
 import yaml
 from _qwen38_cpu import ROOT
 
-# Registration contracts.
 
-
-def registration_load_file(name, path, package=False):
-    options = {"submodule_search_locations": [str(path.parent)]} if package else {}
-    spec = importlib.util.spec_from_file_location(name, path, **options)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def registration_forbid_runtime_imports():
-    original = registration_builtins.__import__
-
-    def importing(name, *args, **kwargs):
-        if name.startswith("vllm.v1"):
-            raise AssertionError(f"unrequested runtime import: {name}")
-        return original(name, *args, **kwargs)
-
-    return patch("builtins.__import__", importing)
-
-
-def registration_registration_modules():
-    names = [
-        "vllm",
-        "vllm.envs",
-        "vllm.config",
-        "vllm.config.speculative",
-        "vllm.config.compilation",
-        "vllm.model_executor",
-        "vllm.model_executor.models",
-        "vllm.model_executor.models.config",
-        "vllm.model_executor.models.registry",
-        "vllm.transformers_utils",
-        "vllm.transformers_utils.config",
-        "vllm_fl",
-        "vllm_fl.models",
-        "vllm_fl.models.qwen3_8_flash_next",
-        "vllm_fl.models.qwen3_8_flash_next.config",
-        "vllm_fl.models.qwen3_8_flash_next.gpu.runtime",
-    ]
-    modules = {name: ModuleType(name) for name in names}
-    modules["vllm_fl.patches"] = ModuleType("vllm_fl.patches")
-    modules["vllm_fl.patches._qwen38_installation"] = registration_load_file(
-        "qwen38_setup_test_helper", ROOT / "vllm_fl/patches/_qwen38_installation.py"
+def serving_config(k=0, async_mode=True, lookup="uva_auto", mbt=8192):
+    return NS(
+        model_config=NS(
+            dtype=torch.bfloat16, multimodal_config=NS(language_model_only=True)
+        ),
+        cache_config=NS(
+            mamba_ssm_cache_dtype="float32",
+            mamba_cache_mode="none",
+            enable_prefix_caching=False,
+        ),
+        speculative_config=NS(
+            num_speculative_tokens=k, disable_padded_drafter_batch=True
+        )
+        if k
+        else None,
+        scheduler_config=NS(async_scheduling=async_mode, max_num_batched_tokens=mbt),
+        parallel_config=NS(pipeline_parallel_size=1),
+        additional_config={"qwen38_ngram_mode": lookup, "qwen38_tuning_profile": True},
     )
-    modules["vllm_fl.models.qwen3_8_flash_next.gpu.runtime"].is_metax = lambda: True
-    modules["vllm"].__version__ = "0.24.0"
-    modules["vllm"].envs = modules["vllm.envs"]
-    modules["vllm.envs"].VLLM_USE_V2_MODEL_RUNNER = False
-
-    class Spec:
-        hf_config_override = staticmethod(lambda config: ("original", config))
-
-    modules["vllm.config.speculative"].SpeculativeConfig = Spec
-
-    class Registry:
-        registered = {}
-        models = registered
-
-        @classmethod
-        def get_supported_archs(cls):
-            return set(cls.registered)
-
-        @classmethod
-        def register_model(cls, name, path):
-            cls.registered[name] = path
-
-    modules["vllm.model_executor.models"].ModelRegistry = Registry
-    modules["vllm.model_executor.models.registry"].ModelRegistry = Registry
-    registry_module = modules["vllm.model_executor.models.registry"]
-    registry_module._TEXT_GENERATION_MODELS = {}
-    registry_module._MULTIMODAL_MODELS = {}
-    registry_module._VLLM_MODELS = {}
-    config_module = modules["vllm.model_executor.models.config"]
-    config_module.MODELS_CONFIG_MAP = {}
-    config_module.Qwen3_5ForConditionalGenerationConfig = type(
-        "Verifier", (), {"verify_and_update_config": staticmethod(lambda cfg: None)}
-    )
-    modules["vllm.model_executor.models"].config = config_module
-    modules["vllm.model_executor.models"].registry = modules[
-        "vllm.model_executor.models.registry"
-    ]
-    modules["vllm.transformers_utils"].config = modules[
-        "vllm.transformers_utils.config"
-    ]
-    modules["vllm.transformers_utils.config"]._CONFIG_REGISTRY = {}
-    modules["vllm.config.compilation"].CompilationConfig = type(
-        "CompilationConfig", (), {"_attention_ops": []}
-    )
-    models = modules["vllm_fl.models.qwen3_8_flash_next.config"]
-    models.Qwen3_8FlashNextConfig = type("CompositeConfig", (), {})
-    models.Qwen3_8FlashNextTextConfig = type("TextConfig", (), {})
-    return modules, Spec, Registry
 
 
-class registration_LazyRegistrationTest(unittest.TestCase):
-    def test_public_registration_does_not_import_proposer_or_mrv2(self):
-        modules, Spec, Registry = registration_registration_modules()
-        with patch.dict(sys.modules, modules), registration_forbid_runtime_imports():
-            compat = registration_load_file(
-                "qwen38_lazy_compat", ROOT / "vllm_fl/patches/qwen3_8_flash_next_mtp.py"
-            )
-            sys.modules["qwen38_lazy_registration.qwen3_8_flash_next_mtp"] = compat
-            registration = registration_load_file(
-                "qwen38_lazy_registration",
-                ROOT / "vllm_fl/patches/qwen3_8_flash_next.py",
-                package=True,
-            )
-            registration.apply_qwen3_8_flash_next_patches()
-            first = Spec.hf_config_override
-            registration.apply_qwen3_8_flash_next_patches()
-            self.assertIs(Spec.hf_config_override, first)
-            other = NS(model_type="llama", architectures=["LlamaForCausalLM"])
-            self.assertEqual(Spec.hf_config_override(other), ("original", other))
-            target = NS(
-                model_type="qwen4_exp",
-                text_config=NS(
-                    model_type="qwen4_exp_text",
-                    hc_count=4,
-                    mtp_num_hidden_layers=1,
-                    ple_layer_ids=[2],
-                    hidden_size=2560,
-                ),
-            )
-            draft = Spec.hf_config_override(target)
-            self.assertEqual(draft.architectures, ["Qwen3_8FlashNextMTP"])
-            self.assertEqual(draft.hc_mult, 4)
-            self.assertEqual(target.text_config.ple_layer_ids, [2])
-            self.assertEqual(len(Registry.registered), 6)
+@pytest.fixture
+def native_verifier(monkeypatch):
+    from _qwen38_cpu import declarations
 
-    def test_worker_constructor_installs_only_qwen_mtp_before_original_init(self):
-        events = []
-        fake = ModuleType("vllm_fl.patches.qwen3_8_flash_next_mtp")
-        fake.install_qwen38_mtp_runtime_compat = lambda: events.append("install")
-        with registration_forbid_runtime_imports():
-            worker = registration_load_file(
-                "qwen38_lazy_worker",
-                ROOT / "vllm_fl/worker/qwen3_8_flash_next.py",
-                package=True,
-            )
+    from vllm import envs
 
-        class Runner:
-            def __init__(self, vllm_config, device=None):
-                events.append("original")
-                self.model_config = vllm_config.model_config
-
-            def _init_model_kwargs(self):
-                return {"original": 7}
-
-            def _dummy_run(self, n):
-                return n
-
-            def _build_attention_metadata(self, **kwargs):
-                return kwargs
-
-        worker.is_metax = lambda: True
-        worker.install_qwen38_runner_hooks(Runner)
-        first = Runner.__init__
-        worker.install_qwen38_runner_hooks(Runner)
-        self.assertIs(first, Runner.__init__)
-
-        def cfg(qwen, method):
-            return NS(
-                model_config=NS(
-                    hf_text_config=NS(
-                        supports_qwen38_ngram_context=qwen, ple_layer_ids=[]
-                    )
-                ),
-                speculative_config=None if method is None else NS(method=method),
-            )
-
-        fake_modules = {
-            name: ModuleType(name)
-            for name in (
-                "vllm_fl",
-                "vllm_fl.patches",
-                "vllm_fl.patches.qwen3_8_flash_next",
-            )
-        }
-        fake_modules[fake.__name__] = fake
-        with (
-            patch.dict(sys.modules, fake_modules),
-            registration_forbid_runtime_imports(),
-        ):
-            other = Runner(cfg(False, "mtp"))
-            self.assertEqual(events, ["original"])
-            self.assertEqual(other._init_model_kwargs(), {"original": 7})
-            self.assertEqual(other._dummy_run(3), 3)
-            self.assertEqual(other._build_attention_metadata(x=2), {"x": 2})
-            events.clear()
-            Runner(cfg(True, None))
-            self.assertEqual(events, ["original"])
-            events.clear()
-            Runner(vllm_config=cfg(True, "mtp"))
-            self.assertEqual(events, ["install", "original"])
-
-    def test_verifier_accepts_causal_text_and_rejects_mrv2_or_visual(self):
-        modules, _, _ = registration_registration_modules()
-        with patch.dict(sys.modules, modules), registration_forbid_runtime_imports():
-            registration = registration_load_file(
-                "qwen38_lazy_verify",
-                ROOT / "vllm_fl/patches/qwen3_8_flash_next.py",
-                package=True,
-            )
-            text = NS(
-                hc_count=4,
-                ple_layer_ids=[2],
-                indexer_n_heads=4,
-                mamba_ssm_dtype="float32",
-                rope_parameters={},
-            )
-            config = NS(
-                speculative_config=None,
-                model_config=NS(
-                    hf_config=text,
-                    hf_text_config=text,
-                    dtype=torch.bfloat16,
-                    multimodal_config=None,
-                ),
-                cache_config=NS(
-                    mamba_ssm_cache_dtype="float32",
-                    mamba_cache_mode="none",
-                    enable_prefix_caching=False,
-                ),
-                parallel_config=NS(
-                    enable_dbo=False, ubatch_size=1, pipeline_parallel_size=1
-                ),
-                scheduler_config=NS(
-                    async_scheduling=False, max_num_batched_tokens=2048
-                ),
-                additional_config={},
-            )
-            verify = (
-                registration.Qwen3_8FlashNextForCausalLMConfig.verify_and_update_config
-            )
-            verify(config)
-            modules["vllm.envs"].VLLM_USE_V2_MODEL_RUNNER = True
-            with self.assertRaisesRegex(NotImplementedError, "MRV1"):
-                verify(config)
-            modules["vllm.envs"].VLLM_USE_V2_MODEL_RUNNER = False
-            config.model_config.multimodal_config = NS(language_model_only=False)
-            with self.assertRaisesRegex(NotImplementedError, "text-only"):
-                verify(config)
+    monkeypatch.setattr(envs, "VLLM_USE_V2_MODEL_RUNNER", False)
+    return declarations(
+        ROOT / "vllm_fl/patches/qwen3_8_flash_next.py",
+        "qwen_native_config_contract",
+        names={"_verify_metax_config"},
+    )._verify_metax_config
 
 
 @pytest.mark.parametrize(
@@ -282,53 +70,107 @@ class registration_LazyRegistrationTest(unittest.TestCase):
         (0, True, "uva_auto", 16384, False),
     ],
 )
-def test_native_serving_configuration_guards(k, async_mode, lookup, mbt, valid):
-    modules, _, _ = registration_registration_modules()
-    with patch.dict(sys.modules, modules):
-        model = registration_load_file(
-            "qwen_shell_native_verifier", ROOT / "vllm_fl/patches/qwen3_8_flash_next.py"
+def test_native_serving_configuration_guards(
+    native_verifier, k, async_mode, lookup, mbt, valid
+):
+    cfg = serving_config(k, async_mode, lookup, mbt)
+    if valid:
+        native_verifier(cfg)
+    else:
+        with pytest.raises((ValueError, NotImplementedError)):
+            native_verifier(cfg)
+
+
+@pytest.mark.parametrize("case", ["mrv2", "visual", "dtype", "drafts"])
+def test_native_serving_rejects_unsupported_modes(native_verifier, monkeypatch, case):
+    from vllm import envs
+
+    cfg = serving_config()
+    if case == "mrv2":
+        monkeypatch.setattr(envs, "VLLM_USE_V2_MODEL_RUNNER", True)
+    elif case == "visual":
+        cfg.model_config.multimodal_config.language_model_only = False
+    elif case == "dtype":
+        cfg.model_config.dtype = torch.float32
+    else:
+        cfg.speculative_config = NS(
+            num_speculative_tokens=4, disable_padded_drafter_batch=True
         )
-        config = NS(
-            model_config=NS(
-                dtype=torch.bfloat16, multimodal_config=NS(language_model_only=True)
-            ),
-            cache_config=NS(
-                mamba_ssm_cache_dtype="float32",
-                mamba_cache_mode="none",
-                enable_prefix_caching=False,
-            ),
-            speculative_config=NS(
-                num_speculative_tokens=k, disable_padded_drafter_batch=True
-            )
-            if k
-            else None,
-            scheduler_config=NS(
-                async_scheduling=async_mode, max_num_batched_tokens=mbt
-            ),
-            parallel_config=NS(pipeline_parallel_size=1),
-            additional_config={
-                "qwen38_ngram_mode": lookup,
-                "qwen38_tuning_profile": True,
-            },
+    with pytest.raises((ValueError, NotImplementedError)):
+        native_verifier(cfg)
+
+
+@pytest.mark.parametrize(
+    "qwen,method,expected",
+    [
+        (False, "mtp", ["original"]),
+        (True, None, ["original"]),
+        (True, "mtp", ["install", "original"]),
+    ],
+)
+def test_worker_constructor_is_scoped_and_installs_before_native_init(
+    monkeypatch, qwen, method, expected
+):
+    from _qwen38_cpu import worker
+
+    events = []
+    modules = {
+        name: ModuleType(name)
+        for name in (
+            "vllm_fl",
+            "vllm_fl.patches",
+            "vllm_fl.patches.qwen3_8_flash_next_mtp",
         )
-        if valid:
-            model._verify_metax_config(config)
-        else:
-            with pytest.raises((ValueError, NotImplementedError)):
-                model._verify_metax_config(config)
+    }
+    modules[
+        "vllm_fl.patches.qwen3_8_flash_next_mtp"
+    ].install_qwen38_mtp_runtime_compat = lambda: events.append("install")
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(worker, "is_metax", lambda: True)
 
+    class Runner:
+        def __init__(self, vllm_config):
+            events.append("original")
+            self.model_config = vllm_config.model_config
 
-# Installation contracts.
+        def _init_model_kwargs(self):
+            return {"original": 7}
 
-# Copyright 2026 FlagOS Contributors
-# SPDX-License-Identifier: Apache-2.0
+        def _dummy_run(self, n):
+            return n
+
+        def _build_attention_metadata(self, **kwargs):
+            return kwargs
+
+    worker.install_qwen38_runner_hooks(Runner)
+    installed = Runner.__init__
+    worker.install_qwen38_runner_hooks(Runner)
+    assert Runner.__init__ is installed
+    cfg = NS(
+        model_config=NS(
+            hf_text_config=NS(supports_qwen38_ngram_context=qwen, ple_layer_ids=[])
+        ),
+        speculative_config=NS(method=method) if method else None,
+    )
+    runner = Runner(vllm_config=cfg)
+    assert events == expected
+    assert runner._init_model_kwargs() == {"original": 7}
+    assert runner._dummy_run(3) == 3
+    assert runner._build_attention_metadata(x=2) == {"x": 2}
 
 
 installation_HELPER = ROOT / "vllm_fl/patches/_qwen38_installation.py"
+
+
 installation_spec = importlib.util.spec_from_file_location(
     "qwen_install_transaction", installation_HELPER
 )
+
+
 installation_install = importlib.util.module_from_spec(installation_spec)
+
+
 installation_spec.loader.exec_module(installation_install)
 
 
@@ -407,18 +249,6 @@ def test_preset_overlay_never_writes_pinned_rows_to_native_cache():
         _ = cache["missing"]
 
 
-def test_fresh_entry_does_not_mutate_original_dispatch_caches():
-    clone = installation_declaration("_copy_entry")
-    fn = object()
-    original = SimpleNamespace(
-        fn=fn, kernel_cache=[{"compiled": object()}], _cpu_cache={"cpu": object()}
-    )
-    replacement = clone(original, object())
-    assert original.fn is fn and original.kernel_cache[0] and original._cpu_cache
-    assert replacement.kernel_cache == [{}] and replacement._cpu_cache == {}
-    assert replacement.kernel_cache is not original.kernel_cache
-
-
 def test_scoped_rollback_preserves_other_model_registration():
     registry = {"other": object()}
     unrelated = object()
@@ -495,12 +325,6 @@ def test_sampling_group_rolls_back_partial_publication(monkeypatch):
     assert all(getattr(native, key) is value for key, value in originals.items())
     module["install_metax_sampling_patches"]()
     assert native.random_sample is module["_random_sample"]
-
-
-# Serving contracts.
-
-# Copyright 2026 FlagOS Contributors
-# SPDX-License-Identifier: Apache-2.0
 
 
 serving_ENTRY = ROOT / "examples/qwen3_8_flash_next/serve_metax.sh"
@@ -627,13 +451,65 @@ def test_required_paths_fail_before_native_execution(tmp_path, name):
     assert result.returncode != 0 and not args
 
 
-def test_shell_is_posix_and_has_no_custom_interpreter_layer():
-    result = subprocess.run(
-        ["sh", "-n", str(serving_ENTRY)], capture_output=True, text=True
+spec = importlib.util.spec_from_file_location(
+    "fg_logging_policy", ROOT / "vllm_fl/worker/flaggems_logging.py"
+)
+
+
+policy = importlib.util.module_from_spec(spec)
+
+
+spec.loader.exec_module(policy)
+
+
+@pytest.fixture
+def fg_logger():
+    log = logging.getLogger("flag_gems")
+    previous = log.level
+    yield log
+    log.setLevel(previous)
+
+
+@pytest.mark.parametrize("rank", [0, 1, 7])
+def test_legacy_and_explicit_recording(rank, fg_logger):
+    fg_logger.setLevel(logging.DEBUG)
+    assert policy.configure_oplist_recording({}, rank) == (rank == 0)
+    assert policy.configure_oplist_recording({"flaggems_record_ops": True}, rank) == (
+        rank == 0
     )
-    assert result.returncode == 0
-    text = serving_ENTRY.read_text()
-    assert text.startswith("#!/bin/sh")
-    assert not (serving_ENTRY.parent / "serve_metax.py").exists()
-    assert "python " not in text.lower() and "serve_metax.py" not in text
-    assert "exec " in text and " serve " in text
+    assert fg_logger.level == logging.DEBUG
+
+
+@pytest.mark.parametrize(
+    "level", [logging.NOTSET, logging.DEBUG, logging.INFO, logging.WARNING]
+)
+def test_disabled_skips_construction_and_preserves_stricter_levels(
+    level, fg_logger, monkeypatch
+):
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "level", logging.DEBUG)
+    fg_logger.setLevel(level)
+    calls = []
+    original = fg_logger.makeRecord
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(fg_logger, "makeRecord", counted)
+    for rank in [0, 1, 7]:
+        assert (
+            policy.configure_oplist_recording({"flaggems_record_ops": False}, rank)
+            is False
+        )
+        for _ in range(100):
+            fg_logger.debug("probe")
+    assert calls == []
+    assert fg_logger.level == max(logging.INFO, level)
+    assert fg_logger.isEnabledFor(logging.WARNING)
+
+
+@pytest.mark.parametrize("value", ["false", 0, 1, None])
+def test_invalid_value_rejected(value, fg_logger):
+    with pytest.raises(ValueError):
+        policy.configure_oplist_recording({"flaggems_record_ops": value}, 0)

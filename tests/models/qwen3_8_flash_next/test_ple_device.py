@@ -68,7 +68,7 @@ forward__RESULTS = []
 
 
 @pytest.fixture
-def forward_ple_results_dir(tmp_path):
+def ple_results_dir(tmp_path):
     configured = os.environ.get("QWEN38_TEST_RESULTS_DIR")
     directory = Path(configured).expanduser() if configured else tmp_path
     directory.mkdir(parents=True, exist_ok=True)

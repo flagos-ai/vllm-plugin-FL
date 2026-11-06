@@ -96,24 +96,6 @@ ngram = declarations(
         "tensor_model_parallel_all_reduce": lambda x: x,
     },
 )
-# Use the exact pinned v0.24 dataclass field contract, without importing its GPU modules.
-mamba_path = (
-    Path(importlib.util.find_spec("vllm").origin).parent
-    / "v1/attention/backends/mamba_attn.py"
-)
-mamba = declarations(mamba_path, "qwen_cpu_mamba", names={"BaseMambaAttentionMetadata"})
-ple_metadata = declarations(
-    ROOT / "vllm_fl/models/qwen3_8_flash_next/common/short_conv_attn.py",
-    "qwen_cpu_metadata",
-    {
-        "AttentionBackend": GenericBase,
-        "BaseMambaAttentionMetadata": mamba.BaseMambaAttentionMetadata,
-        "BaseMambaAttentionMetadataBuilder": GenericBase,
-        "AttentionCGSupport": SimpleNamespace(UNIFORM_BATCH=2),
-        "mamba_get_block_table_tensor": lambda table, *args: table,
-        "NULL_BLOCK_ID": 0,
-    },
-)
 ple = declarations(
     ROOT / "vllm_fl/models/qwen3_8_flash_next/gpu/ple_layer.py",
     "qwen_cpu_ple",

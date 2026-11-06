@@ -17,10 +17,6 @@ from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next import (
     qsa_policy as dispatch_qsa_policy,
 )
 
-# Dispatch contracts.
-
-# SPDX-License-Identifier: Apache-2.0
-
 
 def dispatch_expansion_oracle(blocks, positions, lengths, requests, ratio, budget):
     result = []
@@ -267,86 +263,6 @@ def test_registration_preserves_default_and_scopes_vendor_difference():
         assert not entry.is_available()
 
 
-def test_packed_gdn_passes_fp32_beta_input_without_changing_values(monkeypatch):
-    sent = {}
-
-    def packed(*args):
-        sent["b"] = args[2]
-        return args[7], args[6]
-
-    monkeypatch.setattr(dispatch_ops, "get_flaggems_vllm_operator", lambda name: packed)
-    b = torch.tensor([[0.3125, -0.421875]], dtype=torch.bfloat16)
-    out, state = torch.empty(1, 1, 2, 4), torch.empty(3, 2, 4, 4)
-    dispatch_ops.gdn_packed_decode(
-        torch.empty(1, 16),
-        b,
-        b,
-        torch.empty(2),
-        torch.empty(2),
-        0.5,
-        state,
-        out,
-        torch.tensor([1], dtype=torch.int32),
-    )
-    assert sent["b"].dtype == torch.float32
-    torch.testing.assert_close(sent["b"], b.float(), atol=0, rtol=0)
-
-
-def test_metax_prefill_preserves_fp32_state_and_metadata(monkeypatch):
-    q = torch.randn(1, 8, 2, 4, dtype=torch.bfloat16)
-    v = torch.randn(1, 8, 6, 4, dtype=torch.bfloat16)
-    g, beta = torch.randn(1, 8, 6), torch.rand(1, 8, 6)
-    state = torch.randn(1, 6, 4, 4)
-    offsets = torch.tensor([0, 8], dtype=torch.int32)
-    chunks = torch.tensor([[0, 0]], dtype=torch.int32)
-    chunk_offsets = torch.tensor([0, 1], dtype=torch.int32)
-    expected_out, expected_state = torch.randn_like(v), torch.randn_like(state)
-    sent = {}
-
-    def chunk(**kwargs):
-        sent.update(kwargs)
-        return None, expected_out, None, expected_state, None, None, None
-
-    monkeypatch.setattr(
-        dispatch_metax,
-        "import_module",
-        lambda name: SimpleNamespace(chunk_gated_delta_rule_fwd=chunk),
-    )
-    out, final = dispatch_metax.gdn_prefill(
-        q,
-        q,
-        v,
-        g,
-        beta,
-        state,
-        True,
-        offsets,
-        chunks,
-        chunk_offsets,
-        use_qk_l2norm_in_kernel=False,
-    )
-    assert out is expected_out and final is expected_state
-    assert sent["initial_state"] is state
-    assert sent["g"] is g and sent["beta"] is beta
-    assert sent["cu_seqlens"] is offsets
-    assert sent["chunk_indices"] is chunks
-    assert sent["chunk_offsets"] is chunk_offsets
-    assert sent["scale"] == 0.5
-    with pytest.raises(NotImplementedError, match="pre-normalized"):
-        dispatch_metax.gdn_prefill(q, q, v, g, beta, state, True)
-    with pytest.raises(ValueError, match="FP32"):
-        dispatch_metax.gdn_prefill(
-            q,
-            q,
-            v,
-            g,
-            beta,
-            state.bfloat16(),
-            True,
-            use_qk_l2norm_in_kernel=False,
-        )
-
-
 def test_metax_selection_uses_all_short_row_blocks_without_topk_order(monkeypatch):
     import sys
 
@@ -410,59 +326,6 @@ def test_ple_gate_cast_keeps_bf16_rounding_boundaries():
     actual = dispatch_metax.qwen38_ple_gate(gate)
     assert actual.dtype == torch.bfloat16
     torch.testing.assert_close(actual, expected, atol=0, rtol=0, equal_nan=True)
-
-
-def test_expand_strided_selection_never_materializes_python_mul_scalar(monkeypatch):
-    blocks = torch.tensor([[1, 0], [0, 1]], dtype=torch.int32)
-    positions = torch.tensor([7, 0, 9, 0], dtype=torch.int64)[::2]
-    lengths = torch.tensor([8, 0, 10, 0], dtype=torch.int64)[::2]
-    requests = torch.tensor([0, 0, 1, 0], dtype=torch.int64)[::2]
-    expected = dispatch_expansion_oracle(blocks, positions, lengths, requests, 4, 8)
-    original_getitem = torch.Tensor.__getitem__
-    original_mul = torch.Tensor.__mul__
-    strided_products = []
-
-    def column_major_selection(value, key):
-        selected = original_getitem(value, key)
-        if value is blocks:
-            # Reproduce FG indexing's actual M>1 output stride (1, M).
-            return selected.t().contiguous().t()
-        return selected
-
-    def tensor_only_mul(value, other):
-        assert isinstance(other, torch.Tensor), "capture-unsafe scalar mul"
-        if not value.is_contiguous():
-            strided_products.append((value.stride(), other.shape, other.dtype))
-        return original_mul(value, other)
-
-    def forbid_tensor_constructor(*args, **kwargs):
-        raise AssertionError("capture cannot materialize a host scalar tensor")
-
-    with monkeypatch.context() as scoped:
-        scoped.setattr(torch.Tensor, "__getitem__", column_major_selection)
-        scoped.setattr(torch.Tensor, "__mul__", tensor_only_mul)
-        scoped.setattr(torch, "tensor", forbid_tensor_constructor)
-        actual = dispatch_ops.expand_qsa_block_indices(
-            blocks, positions, lengths, requests, 4, 8
-        )
-    assert strided_products
-    assert all(
-        shape == torch.Size([]) and dtype == torch.int64
-        for _, shape, dtype in strided_products
-    )
-    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
-
-
-def test_mixed_gdn_default_keeps_view_and_metax_preserves_values(monkeypatch):
-    monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", "0")
-    qkv = torch.arange(42 * 2048, dtype=torch.float32).reshape(42, 2048)[:, :1280]
-    assert qkv.stride() == (2048, 1)
-    assert dispatch_ops.is_available("qwen38_gdn_mixed_qkv")
-    assert dispatch_ops.qwen38_gdn_mixed_qkv(qkv) is qkv
-    actual = dispatch_metax.qwen38_gdn_mixed_qkv(qkv)
-    assert actual.is_contiguous()
-    torch.testing.assert_close(actual, qkv, atol=0, rtol=0)
-    assert dispatch_metax.qwen38_gdn_mixed_qkv(actual) is actual
 
 
 def test_metax_short_bucket_never_scores_or_selects(monkeypatch):

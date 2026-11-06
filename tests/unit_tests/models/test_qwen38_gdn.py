@@ -12,10 +12,6 @@ import pytest
 import torch
 from _qwen38_cpu import ROOT, declarations
 
-# Layout contracts.
-
-# SPDX-License-Identifier: Apache-2.0
-
 
 @pytest.mark.parametrize(
     "case,spec,prefills,decodes,expected_calls",
@@ -183,49 +179,50 @@ def layout__metadata_common(lengths, k=3, padded_tokens=0):
     )
 
 
+@pytest.mark.parametrize("k", [1, 3])
 @pytest.mark.parametrize("graph", [False, True])
-@pytest.mark.parametrize(
-    "lengths,counts",
-    [
-        ([1, 1, 1, 1, 0], [0, 0, 0, 0, -1]),
-        ([1, 2, 3, 4, 0], [0, 1, 2, 3, -1]),
-    ],
-)
-def test_gdn_k3_accepted_prefixes_survive_zero_draft_and_padding(
-    monkeypatch, graph, lengths, counts
+@pytest.mark.parametrize("mixed", [False, True])
+def test_gdn_accepted_prefixes_survive_zero_draft_and_padding(
+    monkeypatch, k, graph, mixed
 ):
     native, local = layout__metadata_classes(monkeypatch)
-    common = layout__metadata_common(lengths, padded_tokens=2)
-    accepted = torch.tensor([1, 2, 3, 4, 1], dtype=torch.int32)
-    counts = torch.tensor(counts, dtype=torch.int32)
-    saved_counts = counts.clone()
-    metadata = layout__metadata_builder(local, graph=graph).build(
+    n = k + 1
+    lengths = list(range(1, n + 1)) if mixed else [1] * n
+    counts = torch.tensor(list(range(n)) if mixed else [0] * n, dtype=torch.int32)
+    counts = torch.cat((counts, torch.tensor([-1], dtype=torch.int32)))
+    accepted = torch.tensor([*range(1, n + 1), 1], dtype=torch.int32)
+    common = layout__metadata_common([*lengths, 0], k=k, padded_tokens=2)
+    saved_counts, saved_starts = counts.clone(), common.query_start_loc.clone()
+    metadata = layout__metadata_builder(local, k=k, graph=graph).build(
         0, common, accepted, counts
     )
-    # a accepted drafts means a+1 verified tokens, including the mandatory
-    # target token. Native recurrent state and conv both read accepted-1.
-    assert metadata.num_accepted_tokens[:4].tolist() == [1, 2, 3, 4]
-    rows = torch.arange(4)
-    selected = metadata.spec_state_indices_tensor[rows, accepted[:4] - 1]
-    assert selected.tolist() == [1, 6, 11, 16]
+    assert metadata.num_accepted_tokens[:n].tolist() == list(range(1, n + 1))
+    # Independent row/accepted-prefix coordinates in the input block table.
+    selected = metadata.spec_state_indices_tensor[torch.arange(n), accepted[:n] - 1]
+    assert selected.tolist() == [row * (k + 1) + row + 1 for row in range(n)]
     assert (
-        metadata.spec_query_start_loc[:5].tolist()
-        == common.query_start_loc[:5].tolist()
+        metadata.spec_query_start_loc[: n + 1].tolist()
+        == saved_starts[: n + 1].tolist()
     )
     assert metadata.num_spec_decode_tokens == sum(lengths)
-    assert metadata.num_spec_decodes == 4
-    assert metadata.num_decodes == 0 and metadata.num_prefills == 0
+    assert metadata.num_spec_decodes == n
+    assert metadata.num_decodes == metadata.num_prefills == 0
     assert torch.equal(counts, saved_counts)
+    assert torch.equal(common.query_start_loc, saved_starts)
     if graph:
-        assert metadata.spec_state_indices_tensor[-1].tolist() == [0] * 4
+        assert metadata.spec_state_indices_tensor[-1].tolist() == [0] * (k + 1)
         assert metadata.num_accepted_tokens[-1] == 1
         assert not metadata.spec_sequence_masks[-1]
-    if max(lengths) == 1:
-        # Regression control: the unmodified 0.24 builder discards all accepted
-        # offsets and selects column zero when the whole batch has no drafts.
-        control = layout__metadata_builder(native).build(0, common, accepted, counts)
+    if not mixed:
+        # Native 0.24 loses accepted offsets before graph-buffer rebinding.
+        # This is a CPU metadata-mode control, not a GPU Graph execution.
+        control = layout__metadata_builder(native, k=k).build(
+            0, common, accepted, counts
+        )
         assert control.num_accepted_tokens is None
-        assert control.non_spec_state_indices_tensor[:4].tolist() == [1, 5, 9, 13]
+        assert control.non_spec_state_indices_tensor[:n].tolist() == [
+            row * (k + 1) + 1 for row in range(n)
+        ]
 
 
 @pytest.mark.parametrize(
@@ -253,38 +250,6 @@ def test_gdn_classification_preserves_prefill_and_disabled_spec(
     assert (None if received[0] is None else received[0].tolist()) == expected
     if k == 0 or counts is None:
         assert received[0] is counts
-
-
-@pytest.mark.parametrize("graph", [False, True])
-def test_gdn_k1_zero_current_draft_restores_prior_accepted_state(monkeypatch, graph):
-    native, local = layout__metadata_classes(monkeypatch)
-    common = layout__metadata_common([1, 1, 0], k=1)
-    counts = torch.tensor([0, 0, -1], dtype=torch.int32)
-    accepted = torch.tensor([1, 2, 1], dtype=torch.int32)
-    saved_counts = counts.clone()
-    saved_starts = common.query_start_loc.clone()
-    metadata = layout__metadata_builder(local, k=1, graph=graph).build(
-        0, common, accepted, counts
-    )
-    assert metadata.num_accepted_tokens[:2].tolist() == [1, 2]
-    selected = metadata.spec_state_indices_tensor[torch.arange(2), accepted[:2] - 1]
-    assert selected.tolist() == [1, 4]
-    assert metadata.num_spec_decodes == 2
-    assert metadata.num_spec_decode_tokens == 2
-    assert metadata.num_decodes == 0 and metadata.num_prefills == 0
-    assert metadata.spec_query_start_loc[:3].tolist() == [0, 1, 2]
-    assert torch.equal(counts, saved_counts)
-    assert torch.equal(common.query_start_loc, saved_starts)
-    if graph:
-        assert metadata.spec_state_indices_tensor[-1].tolist() == [0, 0]
-        assert metadata.num_accepted_tokens[-1] == 1
-        assert not metadata.spec_sequence_masks[-1]
-    # The native classification defect precedes graph-buffer rebinding.
-    # Keep this negative control eager: the fixed path above separately
-    # exercises both CPU metadata graph modes, not a GPU graph launch.
-    control = layout__metadata_builder(native, k=1).build(0, common, accepted, counts)
-    assert control.num_accepted_tokens is None
-    assert control.non_spec_state_indices_tensor[:2].tolist() == [1, 3]
 
 
 @pytest.mark.parametrize(
@@ -321,11 +286,6 @@ def test_gdn_metadata_reuse_is_explicit_and_keeps_unvalidated_paths(
     )
     builder = local(object(), [], config, SimpleNamespace(type=device))
     assert builder.supports_update_block_table is expected
-
-
-# Metadata contracts.
-
-# SPDX-License-Identifier: Apache-2.0
 
 
 @pytest.fixture(name="gdn_host")

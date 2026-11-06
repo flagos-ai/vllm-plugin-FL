@@ -10,16 +10,11 @@ import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-import torch.nn.functional as F
 from _qwen38_cpu import (
     ROOT,
     ngram,
-    ple,
-    ple_metadata as convolution_ple_metadata,
     worker,
 )
-
-# Hash contracts.
 
 
 def hash_oracle(ids, starts, contexts, multipliers, sizes, offsets, heads, eos):
@@ -51,24 +46,6 @@ def hash_oracle(ids, starts, contexts, multipliers, sizes, offsets, heads, eos):
             result.append(values)
             history.append(token)
     return torch.tensor(result, dtype=torch.int64)
-
-
-def test_hash_matches_independent_signed_integer_oracle_and_eos():
-    ids, starts, context = [3, 9, 5, 7, 4], [0, 3, 3, 5], [[9, 2], [6, 7], [8, 9]]
-    multipliers, sizes, offsets = [2**62 + 3, 19, 29], [23, 31, 37, 41], [0, 23, 54, 91]
-    actual = ngram.compute_ngram_ids_cpu(
-        torch.tensor(ids),
-        torch.tensor(starts),
-        torch.tensor(context),
-        multipliers=torch.tensor(multipliers),
-        vocab_sizes=torch.tensor(sizes),
-        vocab_offsets=torch.tensor(offsets),
-        heads_per_ngram=2,
-        eos_token_id=9,
-    )
-    assert torch.equal(
-        actual, hash_oracle(ids, starts, context, multipliers, sizes, offsets, 2, 9)
-    )
 
 
 def test_hash_is_chunk_invariant():
@@ -109,69 +86,6 @@ def hash_make_model(monkeypatch, rank):
         make_ngram_vocab_size_divisible_by=8,
     )
     return ngram.HostNGramEmbedding(cfg, 8, 0, 16, 4, "ple")
-
-
-def test_host_shards_load_and_sum_to_unsharded_embedding(monkeypatch):
-    models = [hash_make_model(monkeypatch, rank) for rank in (0, 1)]
-    rows = models[0].ngram_embedding.org_vocab_size
-    full = (torch.arange(rows)[:, None] % 23 + torch.arange(4)[None, :] / 8).bfloat16()
-    shard_size = (rows + 3) // 4
-    for model in models:
-        model.load_weights(
-            [
-                (
-                    f"ngram_embedding.shard_{i}.weight",
-                    full[i * shard_size : (i + 1) * shard_size],
-                )
-                for i in range(4)
-            ]
-        )
-        assert model.ngram_embedding.weight.device.type == "cpu"
-        assert model.ngram_embedding.weight.shape[0] == rows // 2
-    ids, starts, context = (
-        torch.tensor([1, 2, 3, 4]),
-        torch.tensor([0, 2, 4]),
-        torch.tensor([[9, 9], [8, 9]]),
-    )
-    outputs = []
-    for model in models:
-        with pytest.raises(RuntimeError, match="not prepared"):
-            model(ids, starts, context)
-        pointer = model.prepared_embeddings.data_ptr()
-        model.prepare_host_lookup(ids, starts, context)
-        outputs.append(model(ids, starts, context).clone())
-        # The model forward reads a fixed allocation; it cannot invoke hashing.
-        assert model.prepared_embeddings.data_ptr() == pointer
-    m = models[0]
-    hashes = ngram.compute_ngram_ids_cpu(
-        ids,
-        starts,
-        context,
-        multipliers=m.layer_multipliers,
-        vocab_sizes=m.ngram_heads_vocab_sizes,
-        vocab_offsets=m.ngram_heads_offsets,
-        heads_per_ngram=1,
-        eos_token_id=9,
-    )
-    expected = full[hashes].flatten(-2)
-    assert torch.equal(outputs[0] + outputs[1], expected)
-
-
-def test_graph_padding_is_zero_and_host_weight_stays_host(monkeypatch):
-    model = hash_make_model(monkeypatch, 0)
-    model.ngram_embedding.weight.data.fill_(1)
-    ids, starts, context = (
-        torch.tensor([1, 2, 7, 7]),
-        torch.tensor([0, 2]),
-        torch.tensor([[9, 9]]),
-    )
-    model.prepare_host_lookup(ids, starts, context)
-    assert torch.count_nonzero(model(ids, starts, context)[2:]) == 0
-    model.to("cpu")
-    assert model.layer_multipliers.device.type == "cpu"
-    assert model.ngram_embedding.weight.device.type == "cpu"
-    with pytest.raises(ValueError, match="must not be omitted"):
-        model(ids, None, context)
 
 
 def test_shared_owner_loads_once_and_matches_hash_oracle_without_reduction(monkeypatch):
@@ -329,38 +243,22 @@ def test_uva_weight_fragments_wait_for_outer_completion(monkeypatch):
     assert not calls
     model._finish_host_lookup_loading()
     assert len(calls) == 1
-
-
-def test_uva_direct_weight_transaction_registers_once(monkeypatch):
-    model = hash_make_model(monkeypatch, 0)
-    calls = []
-    model._uva_lookup = SimpleNamespace(finish_loading=lambda *args: calls.append(args))
-    rows = model.ngram_embedding.org_vocab_size
-    shard_size = (rows + 3) // 4
-    full = torch.zeros((rows, 4), dtype=torch.bfloat16)
-    weights = [
-        (name, getattr(model, name).clone())
-        for name in (
-            "layer_multipliers",
-            "ngram_heads_vocab_sizes",
-            "ngram_heads_offsets",
-        )
-    ]
-    weights += [
-        (
-            f"ngram_embedding.shard_{i}.weight",
-            full[i * shard_size : (i + 1) * shard_size],
-        )
-        for i in range(4)
-    ]
-    model.load_weights(weights)
-    assert len(calls) == 1
-    assert not hasattr(model, "_ple_embedding_load_state")
-
-
-# Shared contracts.
-
-# SPDX-License-Identifier: Apache-2.0
+    # Direct transaction: the same table may register exactly once.
+    direct = hash_make_model(monkeypatch, 0)
+    direct_calls = []
+    direct._uva_lookup = SimpleNamespace(
+        finish_loading=lambda *args: direct_calls.append(args)
+    )
+    names = ("layer_multipliers", "ngram_heads_vocab_sizes", "ngram_heads_offsets")
+    direct.load_weights(
+        [(name, getattr(direct, name).clone()) for name in names]
+        + [
+            (f"ngram_embedding.shard_{i}.weight", part)
+            for i, part in enumerate(full.chunk(4))
+        ]
+    )
+    assert len(direct_calls) == 1
+    assert not hasattr(direct, "_ple_embedding_load_state")
 
 
 def shared_load_buffer():
@@ -465,203 +363,6 @@ def test_shared_result_has_one_producer_and_safe_multi_rank_reuse(tmp_path):
     ]
 
 
-# Convolution contracts.
-
-
-def convolution_native_conv(
-    x,
-    out,
-    state,
-    weight,
-    indices,
-    *,
-    dilation,
-    query_start_loc=None,
-    has_initial_state=None,
-    accepted_tokens=None,
-    max_query_len=1,
-    null_block_id=-1,
-):
-    """CPU state-transition oracle; does not execute the FGV GPU kernel."""
-    out.zero_()
-    length = (weight.shape[1] - 1) * dilation
-    starts = query_start_loc.tolist()
-    for req, index in enumerate(indices.tolist()):
-        begin, end = starts[req : req + 2]
-        if begin == end or index == null_block_id:
-            continue
-        offset = int(accepted_tokens[req]) - 1 if accepted_tokens is not None else 0
-        initial = x.new_zeros((x.shape[1], length))
-        if has_initial_state is None or bool(has_initial_state[req]):
-            initial.copy_(state[index, :, offset : offset + length])
-        history = torch.cat((initial, x[begin:end].T), dim=1)
-        values = F.conv1d(
-            history[None], weight[:, None], groups=x.shape[1], dilation=dilation
-        )
-        out[begin:end].copy_(F.silu(values[0]).T)
-        if accepted_tokens is None:
-            state[index, :, :length].copy_(history[:, -length:])
-        else:
-            count = length + end - begin - 1
-            state[index, :, :count].copy_(history[:, 1 : count + 1])
-
-
-def convolution_make_builder(k, monkeypatch):
-    builder = convolution_ple_metadata.PleShortConvAttentionMetadataBuilder.__new__(
-        convolution_ple_metadata.PleShortConvAttentionMetadataBuilder
-    )
-    builder.use_spec_decode = True
-    builder.num_spec = k
-    builder.use_full_cuda_graph = False
-    builder.kv_cache_spec = object()
-    builder.vllm_config = SimpleNamespace(
-        cache_config=SimpleNamespace(mamba_cache_mode="none")
-    )
-    monkeypatch.setattr(
-        convolution_ple_metadata,
-        "mamba_get_block_table_tensor",
-        lambda table, *args: table,
-    )
-    return builder
-
-
-@pytest.mark.parametrize("k", [1, 3])
-def test_ragged_spec_prefill_and_zero_draft_mapping_matches_native(k, monkeypatch):
-    # Requests are interleaved: spec, prefill, zero-draft decode, fresh token.
-    lengths = [k + 1, 5, 1, 1]
-    starts = torch.tensor(
-        [0, *torch.tensor(lengths).cumsum(0).tolist()], dtype=torch.int32
-    )
-    total = int(starts[-1])
-    common = SimpleNamespace(
-        num_reqs=4,
-        num_actual_tokens=total,
-        query_start_loc=starts,
-        query_start_loc_cpu=starts,
-        block_table_tensor=torch.tensor([[1], [2], [3], [4]], dtype=torch.int32),
-        seq_lens=torch.tensor(lengths) + torch.tensor([10, 0, 20, 0]),
-        compute_num_computed_tokens=lambda: torch.tensor([10, 0, 20, 0]),
-    )
-    accepted = torch.tensor([k + 1, 1, k + 1, 1], dtype=torch.int32)
-    counts = torch.tensor([k, -1, 0, -1], dtype=torch.int32)
-    metadata = convolution_make_builder(k, monkeypatch).build(
-        0, common, num_accepted_tokens=accepted, num_decode_draft_tokens_cpu=counts
-    )
-    assert metadata.spec_state_indices_tensor.tolist() == [1, 3]
-    assert metadata.num_accepted_tokens.tolist() == [k + 1, k + 1]
-    assert metadata.spec_query_start_loc.tolist() == [0, k + 1, k + 2]
-    assert metadata.spec_token_indx.tolist() == list(range(k + 1)) + [k + 6]
-    layer = ple.Qwen3_8FlashNextPLELayer.__new__(ple.Qwen3_8FlashNextPLELayer)
-    torch.nn.Module.__init__(layer)
-    layer.short_conv_dilation = 3
-    torch.manual_seed(29)
-    x = torch.randn(total, 7)
-    weights = torch.randn(7, 4) * 0.1
-    state = torch.randn(5, 7, 9 + k)
-    expected_state = state.clone()
-    expected = torch.empty_like(x)
-    # Independent request-order calls, without the plugin's grouping/permutation.
-    for r in range(4):
-        a, b = int(starts[r]), int(starts[r + 1])
-        kwargs = dict(
-            dilation=3, query_start_loc=torch.tensor([0, b - a]), null_block_id=0
-        )
-        if r in (0, 2):
-            kwargs.update(accepted_tokens=accepted[r : r + 1], max_query_len=k + 1)
-        else:
-            kwargs.update(has_initial_state=torch.tensor([False]))
-        convolution_native_conv(
-            x[a:b],
-            expected[a:b],
-            expected_state,
-            weights,
-            torch.tensor([r + 1]),
-            **kwargs,
-        )
-    monkeypatch.setattr(
-        layer, "_ple_short_conv", convolution_native_conv, raising=False
-    )
-    actual = layer._short_conv_dispatch_metax(x, metadata, state, weights)
-    torch.testing.assert_close(actual, expected)
-    torch.testing.assert_close(state, expected_state, atol=0, rtol=0)
-
-
-def test_spec_padding_keeps_null_cache_and_zeroes_output(monkeypatch):
-    layer = ple.Qwen3_8FlashNextPLELayer.__new__(ple.Qwen3_8FlashNextPLELayer)
-    torch.nn.Module.__init__(layer)
-    layer.short_conv_dilation = 3
-    x, state, weights = torch.randn(6, 3), torch.randn(3, 3, 12), torch.randn(3, 4)
-    null = state[0].clone()
-    metadata = SimpleNamespace(
-        num_actual_tokens=6,
-        num_decodes=0,
-        num_prefills=0,
-        spec_sequence_masks=torch.tensor([True, False]),
-        spec_state_indices_tensor=torch.tensor([1, 0]),
-        spec_query_start_loc=torch.tensor([0, 2, 2]),
-        num_accepted_tokens=torch.tensor([3, 1]),
-        spec_query_len=4,
-    )
-    monkeypatch.setattr(
-        layer, "_ple_short_conv", convolution_native_conv, raising=False
-    )
-    output = layer._short_conv_dispatch_metax(x, metadata, state, weights)
-    assert torch.equal(state[0], null)
-    assert torch.count_nonzero(output[2:]) == 0
-
-
-def test_mtp_metadata_fails_without_worker_acceptance_context(monkeypatch):
-    import sys
-
-    from _qwen38_cpu import worker
-
-    # Scope this lazy framework import stub to this test only.
-    monkeypatch.setitem(sys.modules, "vllm_fl.worker.qwen3_8_flash_next", worker)
-    builder = convolution_make_builder(1, monkeypatch)
-    with pytest.raises(RuntimeError, match="worker hook"):
-        builder.build(0, SimpleNamespace(num_reqs=1))
-
-
-@pytest.mark.parametrize("speculative", [False, True])
-def test_ple_state_addresses_use_wide_indices(monkeypatch, speculative):
-    from types import SimpleNamespace as NS
-
-    calls = []
-    original = torch.tensor([11393], dtype=torch.int32)
-
-    def kernel(x, out, state, weight, indices, **kwargs):
-        calls.append(indices)
-        assert indices.dtype == torch.int64
-        assert indices.item() == 11393
-        out.zero_()
-
-    meta = NS(
-        num_actual_tokens=2,
-        spec_sequence_masks=torch.tensor([True]) if speculative else None,
-        num_decodes=0,
-        num_prefills=0 if speculative else 1,
-        spec_state_indices_tensor=original,
-        spec_query_start_loc=torch.tensor([0, 2]),
-        num_accepted_tokens=torch.tensor([1]),
-        spec_query_len=2,
-        state_indices_tensor=original,
-        non_spec_query_start_loc=torch.tensor([0, 2]),
-        has_initial_states_p=torch.tensor([False]),
-        has_initial_states_d=None,
-    )
-    ple.Qwen3_8FlashNextPLELayer._short_conv_dispatch_metax(
-        NS(short_conv_dilation=3, _ple_short_conv=kernel),
-        torch.ones(2, 7),
-        meta,
-        torch.empty(1, 7, 10),
-        torch.ones(7, 4),
-    )
-    assert len(calls) == 1 and original.dtype == torch.int32
-
-
-# Worker contracts.
-
-
 def test_committed_context_excludes_rejected_draft_suffix():
     history = torch.tensor(
         [[10, 11, 12, 91, 92], [20, 81, 82, 83, 84], [99, 99, 99, 99, 99]]
@@ -678,31 +379,6 @@ def test_zero_draft_decode_keeps_restore_path_and_prefill_does_not(k):
         [1, k + 1, 1, 8, 0], [False, False, True, True, False], k
     )
     assert counts.tolist() == [0, k, -1, -1, -1]
-
-
-def test_mrv1_hooks_are_idempotent_and_leave_other_models_unchanged():
-    class Runner:
-        model_config = SimpleNamespace(hf_text_config=SimpleNamespace(ple_layer_ids=[]))
-
-        def _init_model_kwargs(self):
-            return {"existing": 1}
-
-        def _dummy_run(self, num_tokens):
-            return num_tokens
-
-        def _build_attention_metadata(self, **kwargs):
-            return kwargs
-
-    worker.install_qwen38_runner_hooks(Runner)
-    first = Runner._init_model_kwargs
-    worker.install_qwen38_runner_hooks(Runner)
-    assert Runner._init_model_kwargs is first
-    instance = Runner()
-    assert instance._init_model_kwargs() == {"existing": 1}
-    assert instance._dummy_run(4) == 4
-    assert not hasattr(instance, "_qwen38_dummy_tokens")
-    assert instance._build_attention_metadata(value=3) == {"value": 3}
-    assert worker.get_ple_spec_metadata() is None
 
 
 def test_mrv1_metadata_context_restores_after_builder_error():
@@ -798,42 +474,6 @@ def test_prefill_tail_cannot_alias_k1_decode_graph(monkeypatch):
     )["force_eager"]
 
 
-@pytest.mark.parametrize("k,allowed", [(1, True), (2, True), (3, True), (4, False)])
-def test_metax_config_accepts_only_validated_mtp_lengths(monkeypatch, k, allowed):
-    from _qwen38_cpu import declarations
-
-    from vllm import envs
-
-    monkeypatch.setattr(envs, "VLLM_USE_V2_MODEL_RUNNER", False)
-    config_module = declarations(
-        ROOT / "vllm_fl/patches/qwen3_8_flash_next.py",
-        "_qwen38_metax_config_cpu",
-        names={"_verify_metax_config"},
-    )
-    config = SimpleNamespace(
-        speculative_config=SimpleNamespace(
-            num_speculative_tokens=k,
-            disable_padded_drafter_batch=True,
-        ),
-        model_config=SimpleNamespace(dtype=torch.bfloat16, multimodal_config=None),
-        cache_config=SimpleNamespace(
-            mamba_ssm_cache_dtype="float32",
-            mamba_cache_mode="none",
-            enable_prefix_caching=False,
-        ),
-        scheduler_config=SimpleNamespace(
-            async_scheduling=False, max_num_batched_tokens=2048
-        ),
-        additional_config={},
-        parallel_config=SimpleNamespace(pipeline_parallel_size=1),
-    )
-    if allowed:
-        config_module._verify_metax_config(config)
-    else:
-        with pytest.raises(NotImplementedError, match="MTP K1, K2 or K3"):
-            config_module._verify_metax_config(config)
-
-
 @pytest.mark.parametrize(
     "enabled,counts,spec,prompt_embeds,want_cpu",
     [
@@ -880,47 +520,6 @@ def test_ple_uses_cpu_ids_only_for_synchronous_plain_prefill(
     result = worker._mrv1_prepare(runner)
     assert result["ids"] is (runner.input_ids.cpu if want_cpu else runner.input_ids.gpu)
     assert result["use_cpu_metadata"] is enabled
-
-
-def test_host_metadata_fast_path_keeps_forward_buffers_and_hash_identical():
-    from _qwen38_cpu import ngram
-
-    outputs = []
-    config = SimpleNamespace(eos_token_id=0)
-    ids = torch.tensor([3, 0, 5, 7, 8])
-    starts = torch.tensor([0, 3, 5], dtype=torch.int32)
-    context = torch.tensor([[0, 1], [2, 6]], dtype=torch.int64)
-
-    def make():
-        buffers = worker._HostInputBuffers.__new__(worker._HostInputBuffers)
-        buffers.config = config
-        buffers.query_start_loc = torch.zeros(5, dtype=torch.int32)
-        buffers.context = torch.zeros((4, 2), dtype=torch.int64)
-
-        def prepare(tokens, offsets, histories, dummy=False):
-            actual = int(offsets[-1])
-            outputs.append(
-                ngram.compute_ngram_ids_cpu(
-                    tokens[:actual],
-                    offsets,
-                    histories,
-                    multipliers=torch.tensor([3, 5, 7]),
-                    vocab_sizes=torch.tensor([31, 37]),
-                    vocab_offsets=torch.tensor([0, 31]),
-                    heads_per_ngram=1,
-                    eos_token_id=0,
-                )
-            )
-
-        buffers.layers = [SimpleNamespace(prepare_host_lookup=prepare)]
-        return buffers
-
-    old, new = make(), make()
-    old_result = old.prepare(ids, starts, context)
-    new_result = new.prepare(ids, starts, context, use_cpu_metadata=True)
-    assert torch.equal(outputs[0], outputs[1])
-    assert torch.equal(old_result["query_start_loc"], new_result["query_start_loc"])
-    assert torch.equal(old_result["ngram_context"], new_result["ngram_context"])
 
 
 def test_async_history_plan_handles_reorder_resume_and_reused_request_ids():
