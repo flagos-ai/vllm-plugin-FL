@@ -124,6 +124,11 @@ def rotary_embedding_flaggems(
     # another warp loads it. Compute both outputs before copying either back,
     # preserving packed/partial-RoPE views and the caller's mutation contract.
     nvidia_inplace = inplace and getattr(flag_gems, "vendor_name", None) == "nvidia"
+    # T-Head PPU's in-place split-half kernel has the same read/write race on
+    # contiguous Q/K; packed views take the safe non-contiguous path. Compute
+    # out of place and copy back so both layouts keep the caller's values,
+    # tensors and strides.
+    thead_inplace = inplace and getattr(flag_gems, "vendor_name", None) == "thead"
     result = gems_rope_forward(
         query,
         key,
@@ -131,11 +136,13 @@ def rotary_embedding_flaggems(
         sin,
         position_ids=position_ids,
         rotary_interleaved=rotary_interleaved,
-        inplace=inplace and not nvidia_inplace,
+        inplace=inplace and not (nvidia_inplace or thead_inplace),
     )
-    if nvidia_inplace:
+    if nvidia_inplace or thead_inplace:
         q_embed, k_embed = result
-        query.copy_(q_embed)
-        key.copy_(k_embed)
+        if q_embed is not query:
+            query.copy_(q_embed)
+        if k_embed is not key:
+            key.copy_(k_embed)
         return query, key
     return result

@@ -27,6 +27,91 @@ class ReferenceBackend(Backend):
 
     _available: Optional[bool] = None
 
+    def topk_softmax(
+        self,
+        topk_weights: torch.Tensor,
+        topk_indices: torch.Tensor,
+        token_expert_indices: torch.Tensor,
+        gating_output: torch.Tensor,
+        renormalize: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """PyTorch fallback for the fused MoE top-k router (no CUDA kernel)."""
+        topk = topk_weights.size(-1)
+        scores = torch.softmax(gating_output.float(), dim=-1)
+        weights, indices = torch.topk(scores, topk, dim=-1)
+        if renormalize:
+            weights = weights / weights.sum(dim=-1, keepdim=True)
+        topk_weights.copy_(weights.to(topk_weights.dtype))
+        topk_indices.copy_(indices.to(topk_indices.dtype))
+        token_expert_indices.copy_(
+            torch.arange(
+                gating_output.size(0) * topk,
+                device=gating_output.device,
+                dtype=token_expert_indices.dtype,
+            ).view(gating_output.size(0), topk)
+        )
+        return topk_weights, topk_indices
+
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map: torch.Tensor | None = None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """PyTorch fallback for fused MoE block alignment (capture-safe)."""
+        if expert_map is not None:
+            raise NotImplementedError(
+                "expert_map is not supported by the reference moe_align_block_size"
+            )
+        device = topk_ids.device
+        flat = topk_ids.reshape(-1).to(torch.int64)
+        num_valid = flat.numel()
+        same_expert = flat.unsqueeze(0) == torch.arange(
+            num_experts, device=device
+        ).unsqueeze(1)
+        counts = same_expert.sum(dim=1)
+        padded = (counts + block_size - 1) // block_size * block_size
+        offsets = torch.cumsum(padded, 0) - padded
+        ends = offsets + padded
+        total = padded.sum()
+        if pad_sorted_ids:
+            total = (total + block_size - 1) // block_size * block_size
+        # Static upper bound keeps every buffer size independent of the routing
+        # data, which is required while capturing CUDA graphs.
+        max_total = num_valid + num_experts * (block_size - 1)
+        max_total = (max_total + block_size - 1) // block_size * block_size
+        sorted_ids = torch.full(
+            (max_total,), num_valid, dtype=torch.int32, device=device
+        )
+        slot = torch.arange(num_valid, device=device)
+        ranks = (torch.cumsum(same_expert.to(torch.int32), dim=1) - 1)[flat, slot]
+        dest = offsets[flat] + ranks.to(torch.int64)
+        sorted_ids[dest] = slot.to(torch.int32)
+        num_blocks = max_total // block_size
+        block_start = torch.arange(num_blocks, device=device) * block_size
+        owner = (block_start.unsqueeze(0) >= offsets.unsqueeze(1)) & (
+            block_start.unsqueeze(0) < ends.unsqueeze(1)
+        )
+        expert_of_block = torch.where(
+            owner.any(dim=0),
+            owner.to(torch.int32).argmax(dim=0).to(torch.int32),
+            torch.full((num_blocks,), -1, dtype=torch.int32, device=device),
+        )
+        expert_ids = torch.where(
+            block_start < total,
+            expert_of_block,
+            torch.full((num_blocks,), -1, dtype=torch.int32, device=device),
+        )
+        num_tokens_post_padded = total.reshape(1).to(torch.int32)
+        return sorted_ids, expert_ids, num_tokens_post_padded
+
+    def moe_sum(self, inp: torch.Tensor, out: torch.Tensor) -> None:
+        """PyTorch fallback for the fused MoE reduction over top-k experts."""
+        torch.sum(inp, dim=1, out=out)
+
     @property
     def name(self) -> str:
         return "reference"

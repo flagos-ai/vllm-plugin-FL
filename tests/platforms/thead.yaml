@@ -38,12 +38,26 @@ device_overrides:
       gpu_memory_utilization: 0.85
       trust_remote_code: true
     serve:
-      startup_retries: 300
+      # Polls every 10s. The CI runner captures graphs at 18-26s/it (vs 5.9s/it
+      # on the dev box), so 35b_a3b_tp4_graph exhausted 300 polls (~50 min)
+      # while still capturing. 600 gives ~100 min of startup headroom.
+      startup_retries: 600
 
 # Features not supported on this platform.
 # Test cases whose model name contains any of these strings will be skipped.
 # Example: ["flaggems"] would skip "qwen3_flaggems" cases.
 unsupported_features: []
+
+# Default environment variables for this platform (applied by run.py before tests start)
+env_defaults:
+  VLLM_PLUGINS: "fl"
+  VLLM_TARGET_DEVICE: "empty"
+  VLLM_USE_V2_MODEL_RUNNER: "0"
+  GEMS_VENDOR: "thead"
+  USE_FLAGGEMS: "1"
+  TORCH_DEVICE_BACKEND_AUTOLOAD: "1"
+  FLAGCX_PATH: "/sgl-workspace/FlagCX"
+  LD_LIBRARY_PATH: "/sgl-workspace/FlagCX/build/lib"
 
 zw810e:
   name: "zw810e"
