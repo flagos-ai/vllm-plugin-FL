@@ -56,6 +56,8 @@ flagos_blacklist:
   - native_layer_norm
   - addmm
   - mm
+  - slice
+  - mm_out
   # Native SDPA redispatches through the inner flash entry: exclude both.
   - _scaled_dot_product_flash_attention
   - _flash_attention_forward
