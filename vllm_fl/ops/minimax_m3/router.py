@@ -4,7 +4,10 @@
 """M3-local gate subclass. Original GateLinear and other models remain untouched."""
 
 import torch
-from flaggems_vllm.ops.fp32_router_gemm import fp32_router_gemm
+
+from vllm_fl.dispatch import CachedOp
+
+_router = CachedOp("m3_router_bf16_fp32", retry_on_error=False)
 
 from vllm.model_executor.layers.fused_moe import GateLinear
 
@@ -24,7 +27,7 @@ def router_bf16_load_fp32_dot(hidden, weight):
         "num_warps": 4,
         "num_stages": 4,
     }
-    return fp32_router_gemm(hidden, weight)
+    return _router(hidden, weight)
 
 
 @torch.library.custom_op("vllm_fl::m3_router_bf16_fp32", mutates_args=())

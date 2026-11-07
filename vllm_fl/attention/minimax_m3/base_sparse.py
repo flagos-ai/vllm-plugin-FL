@@ -3,14 +3,9 @@
 
 import torch
 
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3 import (
-    packed_prefill as kernel,
-    subtile_decode as decode_kernel,
-)
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3.native_sparse import (
-    minimax_m3_sparse_attn as original,
-    minimax_m3_sparse_attn_decode as original_decode,
-)
+from . import operators
+from .operators import native_decode as original_decode, native_prefill as original
+from vllm_fl.minimax_m3_config import load, thaw
 
 
 def sparse_attn(
@@ -46,7 +41,7 @@ def sparse_attn(
         and (q.shape[0] > 0)
     )
     if ok:
-        return kernel.minimax_m3_sparse_attn(
+        return operators.prefill(
             q,
             kv_cache,
             topk_idx,
@@ -58,6 +53,7 @@ def sparse_attn(
             num_kv_heads,
             sm_scale,
             output,
+            dict(thaw(load().attention["base_prefill"]), selected_union=False),
         )
     return original(
         q,
@@ -104,7 +100,19 @@ def sparse_decode(
         and (0 < q.shape[0] <= 64)
     )
     if ok:
-        return decode_kernel.minimax_m3_sparse_attn_decode(
+        cfg = thaw(load().attention["base_decode"])
+        target = max(
+            1, min(topk_idx.shape[-1], 256 // max(1, q.shape[0] * num_kv_heads))
+        )
+        chunks = cfg["split"] or (1 << (target.bit_length() - 1))
+        launch = dict(
+            num_topk_chunks=chunks,
+            page_parts=1,
+            ktile=cfg["ktile"],
+            warps=cfg["warps"],
+            stages=cfg["stages"],
+        )
+        return operators.decode(
             q,
             kv_cache,
             topk_idx,
@@ -114,6 +122,7 @@ def sparse_decode(
             sm_scale,
             output,
             decode_query_len,
+            launch,
         )
     return original_decode(
         q,

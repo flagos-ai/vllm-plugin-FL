@@ -6,12 +6,7 @@ import torch
 from vllm.distributed.parallel_state import get_tensor_model_parallel_world_size
 
 from . import index_policy
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3 import (
-    index_score as kernels,
-)
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3.native_index import (
-    minimax_m3_index_score as original,
-)
+from .operators import index_score as score, native_index_score as original
 
 _TP_OK = None
 
@@ -51,6 +46,6 @@ def index_score(q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_
             q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_heads
         )
     cfg = index_policy.choose(q.shape[0], max_query_len, max_seq_len)
-    return kernels.score(
-        q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_heads, **cfg
+    return score(
+        q, kv, bt, cu, lens, prefix, max_query_len, max_seq_len, num_kv_heads, cfg
     )

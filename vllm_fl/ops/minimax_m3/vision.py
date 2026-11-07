@@ -7,9 +7,9 @@ from vllm.model_executor.layers.attention.mm_encoder_attention import (
     MMEncoderAttention as _MMEncoderBase,
 )
 
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.ops.minimax_m3 import torch_ops
 
-vision_attention_op = CachedOp("m3_vision_attention")
+vision_attention_op = torch_ops.vision_attention
 
 
 class M3VisionAttentionFL(_MMEncoderBase):

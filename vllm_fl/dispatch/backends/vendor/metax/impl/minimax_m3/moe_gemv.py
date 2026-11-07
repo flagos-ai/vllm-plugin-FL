@@ -42,21 +42,13 @@ def naive_gemv(
     tl.store(C + row * N + ns, value, ns < N)
 
 
-def launch(a, b, c, rw, assignment, stage, config):
-    assert assignment[0] is None
-    return naive_gemv[(c.shape[0] * 4, triton.cdiv(b.shape[1], config["BN"]))](
-        a,
-        b,
-        c,
-        rw,
-        assignment[1],
-        b.shape[1],
-        b.shape[2],
-        4 if stage == 1 else 1,
-        stage == 2,
-        config["BN"],
-        config["BK"],
-        num_warps=config["num_warps"],
-        num_stages=1,
-        enable_fp_fusion=False,
+def expert_gemv(a, weight, out, routed_weights, expert_ids, top_k, weighted, config):
+    """Consume the M3 expert layout validated by ExpertLaunchContext."""
+    return naive_gemv[
+        (expert_ids.numel(), triton.cdiv(weight.shape[1], config["BN"]))
+    ](
+        a, weight, out, routed_weights, expert_ids,
+        weight.shape[1], weight.shape[2], top_k, weighted,
+        config["BN"], config["BK"], num_warps=config["num_warps"],
+        num_stages=1, enable_fp_fusion=False,
     )

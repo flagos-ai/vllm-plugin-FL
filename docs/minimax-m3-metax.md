@@ -42,14 +42,15 @@ Paths below are relative to `vllm_fl/`.
 | `ops/minimax_m3/registration.py` | Opt-in registration for this profile. Five MSA entries are MetaX VENDOR implementations; FG/FGV entries remain distinct. The standard backend is unchanged. |
 | `ops/minimax_m3/layers.py` | vLLM clamped-activation interface using dispatch. |
 | `ops/minimax_m3/aten.py` | Scoped ATen registrar: selects local Linear policy and the generic FG `masked_fill_`; retains the non-inplace blacklist. |
-| `ops/minimax_m3/linear.py` | Model shape tables, guards and launch selection. Calculation is FG Linear/GEMV, including FG #7320 primitives. |
+| `ops/minimax_m3/linear.py` | Model shape tables and guards; the local FG adapter owns explicit Linear/GEMV launches using pinned FG #7320 primitives. |
+| `dispatch/backends/flaggems/impl/minimax_m3/linear.py` | Thin explicit-launch adapter over the existing FG Linear/GEMV kernels; no library fork or new kernel. |
 | `ops/minimax_m3/router.py` | Local `GateLinear` specialization, graph/fake boundary and exact shape guard; calls FGV FP32 router GEMM (#960). |
 | `ops/minimax_m3/routing.py` | Bias-router interface using the accepted materialized sigmoid/top-k contract. |
 | `ops/minimax_m3/expert_layer.py` | Local vLLM expert/factory subclasses; no replacement of the global factory/oracle. |
 | `ops/minimax_m3/experts.py` | Reuses shared FL expert execution, supplying M3 alignment, activation, GEMM and reduction hooks. |
 | `ops/minimax_m3/moe.py` | Per-call G1/G2 pairing, shape/layout guards, realignment and accepted small-batch policy. Calls FGV or the local routed GEMV. |
 | `ops/minimax_m3/vision.py` | vLLM encoder-attention interface; calculation goes through the FG vision dispatch entry. |
-| `ops/minimax_m3/vision_chunk.py` | Vision patch grouping and output concatenation; retained chunk boundaries. |
+| `models/minimax_m3_metax/vision.py` | Vision patch grouping and output concatenation; retained chunk boundaries. |
 
 ## Attention orchestration
 
@@ -73,12 +74,10 @@ Prefix: `vllm_fl/dispatch/backends/vendor/metax/impl/minimax_m3/`.
 
 | File | Responsibility and source |
 |---|---|
-| `attention_launch.py` | Explicit launch arguments and partial/LSE workspaces for the selected long path. Custom FL launch code. |
+| `attention_launch.py` | Shared base/long launch arguments and per-call partial/LSE workspaces. Custom FL launch code. |
 | `index_score.py` | Vector/dot index scoring and launch wrapper. Custom Triton companion computation for the accepted local index layout. |
 | `long_prefill.py` | Shared packed-query prefill kernel; full or selected-page traversal. Custom M3 specialization retaining the accepted BF16 softmax-to-PV materialization. |
-| `packed_prefill.py` | Base-path launch of that same prefill template; no duplicated kernel. |
 | `long_decode.py` | Shared subtile/page-split decode kernel, adapted from vLLM sparse GQA; merge kernel imported from vLLM. |
-| `subtile_decode.py` | Base decode partial/LSE allocation and launch/merge arguments. |
 | `native_index.py` | Original index/top-k fallback with explicit MetaX launch settings. JIT bodies imported from pinned vLLM. |
 | `native_sparse.py` | Original sparse-attention fallback with explicit launch settings. JIT bodies imported from pinned vLLM. |
 | `moe_gemv.py` | Routed G1/G2 GEMV companion to the M3 expert layout and guards. Custom Triton calculation. |

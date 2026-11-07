@@ -53,7 +53,7 @@ def workspace_bytes(batch, parts):
 def decode(q, kv, ids, bt, lens, nkv, scale, out, decode_query_len, config):
     (total, heads, dim) = q.shape
     parts = config["page_parts"]
-    chunks = 16 * parts
+    chunks = config.get("num_topk_chunks", 16 * parts)
     op = torch.empty((chunks, total, heads, dim), dtype=q.dtype, device=q.device)
     lp = torch.empty((chunks, total, heads), dtype=torch.float32, device=q.device)
     a = sd._gqa_sparse_decode_kernel[total * chunks, nkv](

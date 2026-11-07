@@ -73,3 +73,9 @@ def qknorm_rope_insert(*args, **kwargs):
     return fused_minimax_m3_qknorm_rope_kv_insert(
         *args, **kwargs, numerics="bf16_staged"
     )
+
+
+def router_bf16_load_fp32_dot(hidden, weight):
+    from flaggems_vllm.ops.fp32_router_gemm import fp32_router_gemm
+
+    return fp32_router_gemm(hidden, weight)

@@ -137,9 +137,9 @@ the comparison baseline.
 | Model and vLLM interfaces | `models/minimax_m3_metax/`; `ops/minimax_m3/` | Model deltas, honest torch-op mutation schemas, local router/expert classes |
 | MSA orchestration | `attention/minimax_m3/bridge.py`; `base_*.py`; `*_policy.py` | TP/consumer guards, query/head packing selection, base/long branches and fallbacks |
 | MetaX local calculation | `dispatch/backends/vendor/metax/impl/minimax_m3/` | Accepted index/sparse/GEMV kernels and explicit launch metadata; unchanged vLLM kernels imported directly |
-| Library adapters | `dispatch/backends/flaggems/impl/minimax_m3/` | FG vision/Gemma, FGV numerical modes/alignment/GEMM/reduction/top-k; no copied library kernels |
-| Linear and router | `ops/minimax_m3/linear.py`; `router.py`; FG #7320 / FGV #960 | Model shape rules and direct calls into pinned library primitives |
-| Dispatch | `ops/minimax_m3/registration.py`; `config.json` | Explicit MetaX MSA entries, distinct FG/FGV entries; standard backends unchanged |
+| Library adapters | `dispatch/backends/flaggems/impl/minimax_m3/` | FG Linear/Gemma/vision adapters, FGV numerical modes/alignment/GEMM/reduction/top-k; no copied library kernels |
+| Linear and router | `ops/minimax_m3/linear.py`; `router.py`; FG #7320 / FGV #960 | Model shape rules and the local FG launch adapter; pinned library primitives are unchanged |
+| Dispatch | `ops/minimax_m3/registration.py`; `config.json` | Explicit local MetaX MSA/GEMV and separate FG/FGV entries; execution failures do not retry; shared defaults unchanged |
 | Vendor/communication | Existing MetaX vendor backend; `patches/minimax_m3_metax/compat.py`; `tuning-ar512k.cfg` | Required binary ABI hooks, graph collective boundary and MCCL transport |
 
 For a file-by-file source guide, see [MiniMax M3 code map](../../docs/minimax-m3-metax.md).

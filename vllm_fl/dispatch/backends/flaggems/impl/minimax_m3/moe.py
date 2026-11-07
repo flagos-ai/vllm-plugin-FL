@@ -17,6 +17,10 @@ def moe_align_block_size(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     from flaggems_vllm.ops.moe_align_block_size import moe_align_block_size_no_tle
 
+    if ignore_invalid_experts:
+        raise NotImplementedError(
+            "The selected no-TLE alignment does not accept ignore_invalid_experts"
+        )
     return moe_align_block_size_no_tle(
         topk_ids, block_size, num_experts, expert_map, pad_sorted_ids
     )

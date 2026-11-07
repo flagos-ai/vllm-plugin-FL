@@ -6,8 +6,10 @@
 import torch
 import triton.language as tl
 
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3 import moe_gemv
-from vllm_fl.minimax_m3_config import load, thaw
+from vllm_fl.dispatch import CachedOp
+
+_expert_gemv = CachedOp("m3_expert_gemv", retry_on_error=False)
+from vllm_fl.minimax_m3_config import load
 
 _ALLOWED = {
     "compute_type",
@@ -58,28 +60,32 @@ class ExpertLaunchContext:
         )
 
     def plain(self, a, kw, contiguous=False):
+        if len(a) != 12 or not kw.keys() <= _ALLOWED:
+            return False
+        x, weight, out = a[:3]
+        dtype = torch.bfloat16
+        if not (
+            getattr(x, "dtype", None) == dtype
+            and getattr(weight, "dtype", None) == dtype
+            and getattr(out, "dtype", None) == dtype
+        ):
+            return False
+        if contiguous and not (
+            x.is_contiguous() and weight.is_contiguous() and out.is_contiguous()
+        ):
+            return False
         return (
-            len(a) == 12
-            and not (set(kw) - _ALLOWED)
-            and all(
-                getattr(x, "dtype", None) == torch.bfloat16
-                and (not contiguous or x.is_contiguous())
-                for x in a[:3]
-            )
-            and a[3] is None
+            a[3] is None
             and a[4] is None
             and kw.get("compute_type") == tl.bfloat16
             and kw.get("B_bias") is None
             and kw.get("block_shape") is None
-            and not any(
-                kw.get(k, False)
-                for k in (
-                    "use_fp8_w8a8",
-                    "use_int8_w8a8",
-                    "use_int8_w8a16",
-                    "use_int4_w4a16",
-                    "per_channel_quant",
-                )
+            and not (
+                kw.get("use_fp8_w8a8", False)
+                or kw.get("use_int8_w8a8", False)
+                or kw.get("use_int8_w8a16", False)
+                or kw.get("use_int4_w4a16", False)
+                or kw.get("per_channel_quant", False)
             )
         )
 
@@ -119,9 +125,12 @@ class ExpertLaunchContext:
                 small_stage = 2
         if small_stage is not None:
             assert small_stage == stage
-            cfg = thaw(self.choice["config" + str(stage)])
+            cfg = dict(self.choice["config" + str(stage)])
             if cfg.get("kind") == "naive_gemv":
-                return moe_gemv.launch(A, B, C, a[5], a[6:9], stage, cfg)
+                assert a[6] is None
+                return _expert_gemv(
+                    A, B, C, a[5], a[7], 4 if stage == 1 else 1, stage == 2, cfg
+                )
             changed = list(a)
             changed[11] = cfg
             a = tuple(changed)
@@ -144,7 +153,7 @@ class ExpertLaunchContext:
                 and A.device == B.device == C.device == a[5].device == self.ids.device
             ):
                 cfg = dict(a[11])
-                cfg.update(thaw(load().moe["g2_configs"].get(str(m), {})))
+                cfg.update(load().moe["g2_configs"].get(str(m), {}))
                 if cfg != a[11]:
                     changed = list(a)
                     changed[11] = cfg

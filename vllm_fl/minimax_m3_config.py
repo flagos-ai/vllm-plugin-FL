@@ -137,15 +137,24 @@ def load():
         "oot_blacklist"
     ] != ["masked_fill"]:
         raise ValueError("Preserve the validated ATen/OOT blacklists")
-    for name in (
-        "index_score",
-        "index_topk",
-        "index_decode",
-        "sparse_attn",
-        "sparse_decode",
-    ):
-        if data["dispatch"]["op_backends"].get("m3_" + name) != ["vendor:metax"]:
-            raise ValueError("MiniMax MSA requires the explicit MetaX dispatch policy")
+    required_providers = {
+        "index_score": ["vendor:metax"],
+        "sparse_attn": ["vendor:metax"],
+        "sparse_decode": ["vendor:metax"],
+        "expert_gemv": ["vendor:metax"],
+        "index_topk": ["vendor:metax"],
+        "index_score_native": ["vendor:metax"],
+        "index_decode_native": ["vendor:metax"],
+        "sparse_attn_native": ["vendor:metax"],
+        "sparse_decode_native": ["vendor:metax"],
+    }
+    for name, provider in required_providers.items():
+        if data["dispatch"]["op_backends"].get("m3_" + name) != provider:
+            raise ValueError("Preserve the explicit M3 numerical-provider policy")
+    if "m3_index_decode" in data["dispatch"]["op_backends"]:
+        raise ValueError(
+            "Index decode is a framework composition, not one numerical provider"
+        )
     framework = typed(FrameworkPolicy, data["framework"])
     kernels = typed(KernelPolicy, data["kernels"])
     if framework.tensor_parallel_size != 16:

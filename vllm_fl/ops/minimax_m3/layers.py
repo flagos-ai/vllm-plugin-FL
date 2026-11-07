@@ -3,10 +3,10 @@
 
 import torch
 
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.ops.minimax_m3 import torch_ops
 
-gemma = CachedOp("m3_gemma")
-swiglu = CachedOp("m3_swiglu")
+gemma = torch_ops.gemma
+swiglu = torch_ops.swiglu
 
 
 class SiluAndMulWithClampFL(torch.nn.Module):
@@ -20,6 +20,6 @@ class SiluAndMulWithClampFL(torch.nn.Module):
         return swiglu(x, self.swiglu_limit, self.alpha, self.beta)
 
 
-qknorm_rope_insert = CachedOp("m3_qknorm_rope_insert")
+qknorm_rope_insert = torch_ops.qknorm_rope_insert
 
-patch_embed = CachedOp("m3_patch_embed")
+patch_embed = torch_ops.patch_embed

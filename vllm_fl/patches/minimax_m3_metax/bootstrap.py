@@ -19,6 +19,8 @@ _INITIALIZED = False
 
 
 def _identity(fn):
+    while hasattr(fn, "fn"):
+        fn = fn.fn
     try:
         p = inspect.getsourcefile(fn)
     except TypeError:
@@ -42,6 +44,27 @@ def initialize():
     profile = load()
     from .startup import configure_libraries
 
+    from vllm_fl.dispatch.backends.flaggems.impl.minimax_m3.linear import (
+        linear_with_config,
+    )
+    from vllm_fl.dispatch.backends.flaggems.impl.minimax_m3.numerics import gemma
+    from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3 import (
+        attention_launch, moe_gemv,
+    )
+
+    required_parameters = {
+        linear_with_config: {"config", "kind", "order", "group_m"},
+        gemma: {"x", "weight", "eps", "residual"},
+        attention_launch.index_score: {"config"},
+        attention_launch.prefill: {"config"},
+        attention_launch.decode: {"config", "decode_query_len"},
+        moe_gemv.expert_gemv: {"top_k", "weighted", "config"},
+    }
+    for fn, parameters in required_parameters.items():
+        if not parameters <= set(inspect.signature(fn).parameters):
+            raise RuntimeError(
+                f"Incompatible M3 adapter: {fn.__module__}.{fn.__name__}"
+            )
     configure_libraries()
     import torch
     import triton
@@ -122,49 +145,60 @@ def audit_effective(stage, runner=None):
     import torch
     import triton
 
+    from vllm_fl.attention.minimax_m3 import operators
     from vllm_fl.dispatch import CachedOp, get_default_manager, get_policy
-    from vllm_fl.ops.minimax_m3 import layers, msa, vision
+    from vllm_fl.ops.minimax_m3 import experts, moe, router, routing, torch_ops
     from vllm_fl.utils import get_flag_gems_whitelist_blacklist, get_oot_blacklist
 
     mgr = get_default_manager()
     mgr.ensure_initialized()
     bindings = {}
-    for module in (layers, msa, vision):
-        for name, obj in vars(module).items():
+    for module in (operators, torch_ops, experts, moe, routing, router):
+        for obj in vars(module).values():
             if isinstance(obj, CachedOp):
                 impl = obj.bind() if stage == "import" else obj.inspect_binding()
+                assert not obj.allows_error_fallback
                 bindings[obj.op_name] = {
                     "impl_id": impl.impl_id,
                     "kind": str(impl.kind),
                     "function": _identity(impl.fn),
+                    "fallback_on": "never",
                 }
+    impl = mgr._resolve_impl("attention_backend")
+    bindings["attention_backend"] = {
+        "impl_id": impl.impl_id,
+        "kind": str(impl.kind),
+        "function": _identity(impl.fn),
+    }
+    expected = {
+        "m3_index_score": ("vendor", "vendor.metax.m3.index_score"),
+        "m3_sparse_attn": ("vendor", "vendor.metax.m3.sparse_attn"),
+        "m3_sparse_decode": ("vendor", "vendor.metax.m3.sparse_decode"),
+        "m3_router_bf16_fp32": ("flagos", "m3.flaggems_vllm.router_bf16_fp32"),
+        "m3_expert_gemv": ("vendor", "vendor.metax.m3.expert_gemv"),
+    }
+    for name, (kind, impl_id) in expected.items():
+        assert bindings[name]["kind"] == kind
+        assert bindings[name]["impl_id"] == impl_id
     for name in (
-        "m3_moe_align_block_size",
-        "m3_invoke_fused_moe_triton_kernel",
-        "m3_moe_sum",
-        "m3_grouped_topk",
-        "attention_backend",
+        "index_topk", "index_score_native", "index_decode_native",
+        "sparse_attn_native", "sparse_decode_native",
     ):
-        impl = mgr._resolve_impl(
-            name
-        )  # inspection only; CachedOp owns all mutable binding state
-        bindings[name] = {
-            "impl_id": impl.impl_id,
-            "kind": str(impl.kind),
-            "function": _identity(impl.fn),
-        }
-    # The five MSA interfaces remain the same computations, now explicitly
-    # classified as MetaX specializations instead of default library operators.
-    for name in (
-        "index_score",
-        "index_topk",
-        "index_decode",
-        "sparse_attn",
-        "sparse_decode",
-    ):
-        binding = bindings["m3_" + name]
-        assert binding["kind"] == "vendor"
-        assert binding["impl_id"] == "vendor.metax.m3." + name
+        assert bindings["m3_" + name]["kind"] == "vendor"
+    from flag_gems.ops.gemma_rms_norm import gemma_rms_norm_kernel
+    from flag_gems.ops.linear import linear_kernel
+    from flag_gems.ops.linear_primitives import linear_gemv_untransposed_kernel
+    from flaggems_vllm.ops.fp32_router_gemm import fp32_router_gemm
+
+    library_apis = {
+        name: _identity(fn)
+        for name, fn in (
+            ("gemma_rms_norm_kernel", gemma_rms_norm_kernel),
+            ("linear_kernel", linear_kernel),
+            ("linear_gemv_untransposed_kernel", linear_gemv_untransposed_kernel),
+            ("fp32_router_gemm", fp32_router_gemm),
+        )
+    }
     registrar = getattr(flag_gems, "current_work_registrar", None)
     aten_bindings = {}
     if registrar is not None and hasattr(registrar, "selected_functions"):
@@ -225,6 +259,7 @@ def audit_effective(stage, runner=None):
         oot_blacklist=get_oot_blacklist(),
         bindings=bindings,
         aten_bindings=aten_bindings,
+        library_apis=library_apis,
         policy=str(get_policy()),
         triton_module=triton.__file__,
         native_router_unchanged=True,

@@ -113,6 +113,18 @@ class ProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.config.load()
 
+    def test_local_kernel_cannot_be_mislabeled_as_library(self):
+        self.data["op_backends"]["m3_index_score"] = ["flagos"]
+        self.write()
+        with self.assertRaisesRegex(ValueError, "numerical-provider"):
+            self.config.load()
+
+    def test_composite_index_decode_is_not_one_numerical_provider(self):
+        self.data["op_backends"]["m3_index_decode"] = ["flagos"]
+        self.write()
+        with self.assertRaisesRegex(ValueError, "framework composition"):
+            self.config.load()
+
     def test_project_env_cannot_replace_configuration(self):
         self.data["minimax_m3"]["infrastructure_env"]["M3_MSA_SAFE_TOPK"] = "0"
         self.write()

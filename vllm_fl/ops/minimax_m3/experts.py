@@ -10,9 +10,11 @@ from vllm_fl.minimax_m3_config import load
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.ops.fused_moe.fused_moe_utils import TritonExpertsFL as BaseTritonExpertsFL
 
-_moe_align_block_size = CachedOp("m3_moe_align_block_size")
-_invoke_fused_moe_triton_kernel = CachedOp("m3_invoke_fused_moe_triton_kernel")
-_moe_sum = CachedOp("m3_moe_sum")
+_moe_align_block_size = CachedOp("m3_moe_align_block_size", retry_on_error=False)
+_invoke_fused_moe_triton_kernel = CachedOp(
+    "m3_invoke_fused_moe_triton_kernel", retry_on_error=False
+)
+_moe_sum = CachedOp("m3_moe_sum", retry_on_error=False)
 
 
 class TritonExpertsFL(BaseTritonExpertsFL):

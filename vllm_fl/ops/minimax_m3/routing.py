@@ -9,7 +9,7 @@ import torch
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.router import FusedTopKBiasRouterFL as BaseBiasRouter
 
-_grouped_topk = CachedOp("m3_grouped_topk")
+_grouped_topk = CachedOp("m3_grouped_topk", retry_on_error=False)
 
 
 class FusedTopKBiasRouterFL(BaseBiasRouter):

@@ -7,16 +7,10 @@ import weakref
 
 import torch
 
-from . import attention_policy as policy
+from . import attention_policy as policy, operators as kernels
 from .base_index import index_score as oldi
 from .base_sparse import sparse_attn as oldp, sparse_decode as oldd
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3 import (
-    attention_launch as kernels,
-)
-from vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3.native_index import (
-    minimax_m3_index_decode as native_index_decode,
-    minimax_m3_index_topk as index_topk,
-)
+from .operators import index_topk, native_index_decode
 from vllm_fl.minimax_m3_config import load
 
 _TP_OK = None

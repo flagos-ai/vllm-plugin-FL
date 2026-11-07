@@ -27,85 +27,121 @@ def load_file(name, relative):
 
 class StructureTests(unittest.TestCase):
     def registration(self, enabled):
-        package = types.ModuleType(PREFIX)
-        package.__path__ = []
-        torch_ops = types.ModuleType(PREFIX + ".torch_ops")
-        moe = types.ModuleType(FG + ".moe")
-        names = (
-            "gemma",
-            "swiglu",
-            "qknorm_rope_insert",
-            "patch_embed",
-            "vision_attention",
-            "index_score",
-            "index_topk",
-            "index_decode",
-            "sparse_attn",
-            "sparse_decode",
-        )
-        for name in names:
-            setattr(torch_ops, name, object())
-        for name in (
-            "moe_align_block_size",
-            "invoke_fused_moe_triton_kernel",
-            "moe_sum",
-            "grouped_topk",
-        ):
-            setattr(moe, name, object())
-        package.torch_ops = torch_ops
         library = types.ModuleType(FG)
-        library.moe = moe
+        native_name = "vllm_fl.dispatch.backends.vendor.metax.impl.minimax_m3"
+        native = types.ModuleType(native_name)
+        groups = {
+            "numerics": (
+                "gemma",
+                "swiglu",
+                "qknorm_rope_insert",
+                "router_bf16_load_fp32_dot",
+            ),
+            "vision": ("_patch_embed", "vision_attention"),
+            "moe": (
+                "moe_align_block_size",
+                "invoke_fused_moe_triton_kernel",
+                "moe_sum",
+                "grouped_topk",
+            ),
+        }
+        modules = {FG: library, native_name: native}
+        providers = {}
+        for group, names in groups.items():
+            module = types.ModuleType(FG + "." + group)
+            for name in names:
+                setattr(module, name, object())
+            setattr(library, group, module)
+            modules[module.__name__] = module
+            providers[group] = module
+        for group, names in {
+            "attention_launch": ("index_score", "prefill", "decode"),
+            "moe_gemv": ("expert_gemv",),
+            "native_index": (
+                "minimax_m3_index_score",
+                "minimax_m3_index_topk",
+                "minimax_m3_index_decode",
+            ),
+            "native_sparse": (
+                "minimax_m3_sparse_attn",
+                "minimax_m3_sparse_attn_decode",
+            ),
+        }.items():
+            module = types.ModuleType(native_name + "." + group)
+            for name in names:
+                setattr(module, name, object())
+            setattr(native, group, module)
+            modules[module.__name__] = module
+            providers[group] = module
         t = load_file("_m3_structure_dispatch_types", "vllm_fl/dispatch/types.py")
         dispatch = types.ModuleType("vllm_fl.dispatch")
         for name in ("BackendImplKind", "BackendPriority", "OpImpl"):
             setattr(dispatch, name, getattr(t, name))
-        modules = {
-            PREFIX: package,
-            PREFIX + ".torch_ops": torch_ops,
-            FG: library,
-            FG + ".moe": moe,
-            "vllm_fl.dispatch": dispatch,
-            "vllm_fl.minimax_m3_config": types.SimpleNamespace(
-                is_enabled=lambda: enabled
-            ),
-        }
+        modules.update(
+            {
+                "vllm_fl.dispatch": dispatch,
+                "vllm_fl.minimax_m3_config": types.SimpleNamespace(
+                    is_enabled=lambda: enabled
+                ),
+            }
+        )
         result = []
         with patch.dict(sys.modules, modules):
-            m = load_file(
+            module = load_file(
                 PREFIX + ".registration", "vllm_fl/ops/minimax_m3/registration.py"
             )
-            m.vllm_fl_register(types.SimpleNamespace(register_impl=result.append))
-        return result, t, torch_ops, moe
+            module.vllm_fl_register(types.SimpleNamespace(register_impl=result.append))
+        return result, t, providers
 
     def test_other_models_register_nothing(self):
-        rows, _, _, _ = self.registration(False)
+        rows, _, _ = self.registration(False)
         self.assertEqual(rows, [])
 
-    def test_policy_selects_exact_provider_and_function(self):
-        rows, t, ops, moe = self.registration(True)
-        self.assertEqual(len(rows), 14)
-        self.assertEqual(len({r.op_name for r in rows}), 14)
-        cfg = json.loads((ROOT / "examples/minimax_m3_metax/config.json").read_text())
-        msa = {
+    def test_policy_selects_numerical_provider_and_preserves_native_fallback(self):
+        rows, t, providers = self.registration(True)
+        self.assertEqual(len(rows), 19)
+        self.assertEqual(len({r.op_name for r in rows}), 19)
+        by_name = {r.op_name: r for r in rows}
+        self.assertIs(
+            by_name["m3_index_score"].fn, providers["attention_launch"].index_score
+        )
+        self.assertIs(
+            by_name["m3_sparse_attn"].fn, providers["attention_launch"].prefill
+        )
+        self.assertIs(
+            by_name["m3_sparse_decode"].fn, providers["attention_launch"].decode
+        )
+        self.assertIs(
+            by_name["m3_router_bf16_fp32"].fn,
+            providers["numerics"].router_bf16_load_fp32_dot,
+        )
+        self.assertIs(by_name["m3_expert_gemv"].fn, providers["moe_gemv"].expert_gemv)
+        self.assertIs(
+            by_name["m3_index_topk"].fn, providers["native_index"].minimax_m3_index_topk
+        )
+        self.assertNotIn("m3_index_decode", by_name)
+        native = {
             "index_score",
-            "index_topk",
-            "index_decode",
             "sparse_attn",
             "sparse_decode",
+            "expert_gemv",
+            "index_score_native",
+            "index_topk",
+            "index_decode_native",
+            "sparse_attn_native",
+            "sparse_decode_native",
         }
+        cfg = json.loads((ROOT / "examples/minimax_m3_metax/config.json").read_text())
         for row in rows:
             name = row.op_name.removeprefix("m3_")
-            provider = ops if hasattr(ops, name) else moe
-            self.assertIs(row.fn, getattr(provider, name))
-            if name in msa:
+            if name in native:
                 self.assertEqual(row.kind, t.BackendImplKind.VENDOR)
-                self.assertEqual(row.impl_id, "vendor.metax.m3." + name)
+                self.assertEqual(row.vendor, "metax")
                 self.assertEqual(cfg["op_backends"][row.op_name], ["vendor:metax"])
-                self.assertTrue(t.match_token(row, "vendor:metax"))
-                self.assertFalse(t.match_token(row, "flagos"))
             else:
                 self.assertEqual(row.kind, t.BackendImplKind.DEFAULT)
                 self.assertIsNone(row.vendor)
+                self.assertTrue(t.match_token(row, "flagos"))
 
     def test_interfaces_and_orchestration_do_not_define_jit_kernels(self):
         for folder in (
@@ -118,7 +154,10 @@ class StructureTests(unittest.TestCase):
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         self.assertNotIn(
                             "triton.jit",
-                            [ast.unparse(d) for d in node.decorator_list],
+                            [
+                                ast.unparse(d).split("(", 1)[0]
+                                for d in node.decorator_list
+                            ],
                             str(p),
                         )
 
