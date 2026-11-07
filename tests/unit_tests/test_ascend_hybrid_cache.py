@@ -6,9 +6,16 @@ import pytest
 import torch
 
 pytest.importorskip("vllm.v1.kv_cache_interface")
-from vllm.v1.kv_cache_interface import FullAttentionSpec
+from vllm.v1.kv_cache_interface import (
+    FullAttentionSpec,
+    KVCacheConfig,
+    KVCacheGroupSpec,
+    KVCacheTensor,
+    MambaSpec,
+)
 
 from vllm_fl.kv_cache.ascend.hybrid import (
+    allocate_hybrid_kv_cache,
     dense_attention_view,
     dense_mamba_views,
     pad_attention_specs,
@@ -78,3 +85,136 @@ def test_gdn_binds_raw_pages_as_dense_states():
     assert isinstance(layer.kv_cache, tuple)
     assert [tuple(s.shape) for s in layer.kv_cache] == [(3, 2, 3), (3, 4, 4)]
     assert layer.kv_cache[1].data_ptr() == pages.data_ptr() + 36
+
+
+@pytest.mark.parametrize("num_blocks", [1, 3])
+@pytest.mark.parametrize("offset", [0, 64])
+def test_hybrid_allocator_preserves_group_overlay(num_blocks, offset):
+    attention_spec = FullAttentionSpec(
+        block_size=1,
+        num_kv_heads=8,
+        head_size=4,
+        dtype=torch.float16,
+        page_size_padded=140,
+    )
+    state_spec = MambaSpec(
+        block_size=1,
+        shapes=((2, 3), (4, 4)),
+        dtypes=(torch.float16, torch.float32),
+        page_size_padded=140,
+    )
+    layer_size = num_blocks * 140
+    config = KVCacheConfig(
+        num_blocks=num_blocks,
+        kv_cache_tensors=[
+            KVCacheTensor(
+                offset + 2 * layer_size, ["attn0", "attn1"], layer_size, 140, offset
+            ),
+            KVCacheTensor(
+                offset + 2 * layer_size, ["state0", "state1"], layer_size, 140, offset
+            ),
+        ],
+        kv_cache_groups=[
+            KVCacheGroupSpec(["attn0", "attn1"], attention_spec),
+            KVCacheGroupSpec(["state0", "state1"], state_spec),
+        ],
+    )
+    backend = SimpleNamespace(
+        get_kv_cache_shape=lambda blocks, block_size, heads, dim, dtype: (
+            2,
+            blocks,
+            block_size,
+            heads,
+            dim,
+        )
+    )
+    caches = allocate_hybrid_kv_cache(
+        config,
+        torch.device("cpu"),
+        {"attn0": backend, "attn1": backend},
+        [1, 1],
+        "auto",
+    )
+    for index in range(2):
+        states = caches[f"state{index}"]
+        conv, recurrent = dense_mamba_views(
+            states.view(-1),
+            state_spec.shapes,
+            state_spec.dtypes,
+            num_blocks,
+        )
+        attention = caches[f"attn{index}"]
+        assert recurrent.data_ptr() == attention[0].data_ptr()
+        recurrent.fill_(index + 1)
+        torch.testing.assert_close(
+            attention[0].view(torch.float32),
+            recurrent.view_as(attention[0].view(torch.float32)),
+        )
+        assert torch.count_nonzero(conv) == 0
+        assert torch.count_nonzero(attention[1]) == 0
+    assert caches["state1"].data_ptr() - caches["state0"].data_ptr() == layer_size
+
+
+def test_hybrid_allocator_empty_config():
+    config = KVCacheConfig(num_blocks=0, kv_cache_tensors=[], kv_cache_groups=[])
+    assert allocate_hybrid_kv_cache(config, torch.device("cpu"), {}, [], "auto") == {}
+
+
+@pytest.mark.parametrize("host_resident", [False, True])
+def test_hybrid_allocator_rejects_unsupported_pool(host_resident):
+    spec = FullAttentionSpec(
+        block_size=1,
+        num_kv_heads=8,
+        head_size=4,
+        dtype=torch.float16,
+        page_size_padded=140,
+    )
+    tensor = KVCacheTensor(280, ["attn"], 280, 280, host_resident=host_resident)
+    config = KVCacheConfig(
+        num_blocks=1,
+        kv_cache_tensors=[tensor],
+        kv_cache_groups=[KVCacheGroupSpec(["attn"], spec)],
+    )
+    expected = NotImplementedError if host_resident else ValueError
+    with pytest.raises(expected, match="device-resident|planar"):
+        allocate_hybrid_kv_cache(config, torch.device("cpu"), {}, [1], "auto")
+
+
+@pytest.mark.parametrize("hybrid", [False, True])
+def test_runner_binds_layout_without_remapping_hybrid(monkeypatch, hybrid):
+    from unittest.mock import Mock
+
+    from vllm_fl.kv_cache.ascend import hybrid as hybrid_module
+    from vllm_fl.worker import model_runner
+
+    caches = {"attn": torch.zeros(2)}
+    generic = Mock(return_value=caches)
+    dense = Mock(return_value=caches)
+    mapped = {"attn": torch.zeros(3)}
+    remap = Mock(return_value=mapped)
+    bind = Mock()
+    monkeypatch.setattr(model_runner, "allocate_kv_cache", generic)
+    monkeypatch.setattr(hybrid_module, "allocate_hybrid_kv_cache", dense)
+    monkeypatch.setattr(model_runner, "map_kv_caches_to_kernel_blocks", remap)
+    monkeypatch.setattr(model_runner, "bind_kv_cache", bind)
+    runner = SimpleNamespace(
+        use_ascend_hybrid_cache=hybrid,
+        device=torch.device("cpu"),
+        cache_config=SimpleNamespace(
+            cache_dtype="auto", get_resolved_kv_cache_layout=lambda: "NHD"
+        ),
+        shared_kv_cache_layers={"alias": "attn"},
+        model_config=SimpleNamespace(hf_config=SimpleNamespace(model_type="test")),
+        speculative_config=None,
+        attn_groups=[],
+        kv_caches=[],
+        compilation_config=SimpleNamespace(static_forward_context={}),
+        _kv_cache_spec_attn_group_iterator=lambda: iter([]),
+    )
+    config = SimpleNamespace(kv_cache_groups=[])
+    result = model_runner.ModelRunnerFL.initialize_kv_cache_tensors(runner, config, [1])
+    assert result["alias"] is result["attn"]
+    assert dense.call_count == int(hybrid)
+    assert generic.call_count == int(not hybrid)
+    assert remap.call_count == int(not hybrid)
+    assert bind.call_args.kwargs["layer_kv_caches"] is (caches if hybrid else mapped)

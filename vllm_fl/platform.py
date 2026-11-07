@@ -361,7 +361,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -580,12 +588,27 @@ class PlatformFL(Platform):
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False
             compilation_config.use_inductor_graph_partition = True
+            hf_text_config = getattr(model_config, "hf_text_config", None)
+            if (
+                getattr(hf_text_config, "model_type", None) == "qwen3_5_moe_text"
+                and compilation_config.backend == "inductor"
+                and compilation_config.mode != CompilationMode.NONE
+                and compilation_config.cudagraph_mode.has_full_cudagraphs()
+            ):
+                compilation_config.inductor_compile_config["inplace_buffers"] = False
+                logger.warning_once(
+                    "Disabling Inductor inplace buffers for Iluvatar Qwen3.5 MoE "
+                    "full graphs after output corruption; compilation and "
+                    "graph capture remain enabled."
+                )
             _pc = getattr(compilation_config, "pass_config", None)
             if _pc is not None:
                 _pc.fuse_rope_kvcache_cat_mla = False
-            os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
-            # Iluvatar lacks is_cuda_alike(): the vLLM UVA helper is
-            # unavailable while Model Runner V2 needs UvaBuffer. Use V1.
+                # OOT platforms do not import these CUDA-only fusion passes.
+                # Explicit custom_ops=['all'] otherwise enables them on 0.32.
+                _pc.fuse_norm_quant = False
+                _pc.fuse_act_quant = False
+                _pc.fuse_attn_quant = False
 
         if cls.device_type == "npu":
             _configure_ascend_compilation(vllm_config)
@@ -775,6 +798,8 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
+            if cls.device_type == "cuda":
+                return "vllm_fl.distributed.cuda_communicator.CudaCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
@@ -884,6 +909,11 @@ class PlatformFL(Platform):
             )
 
             patch_triton_chained_or_for_iluvatar()
+            from vllm_fl.dispatch.backends.vendor.iluvatar.moe_router import (
+                patch_moe_router,
+            )
+
+            patch_moe_router()
 
     @classmethod
     def supports_fp8(cls) -> bool:
@@ -980,7 +1010,12 @@ class PlatformFL(Platform):
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        # EMPTY vendor builds do not register upstream CUDA providers.
+        default = (
+            ["native"]
+            if using_inductor or cls.vendor_name == "iluvatar"
+            else ["vllm_c", "native"]
+        )
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

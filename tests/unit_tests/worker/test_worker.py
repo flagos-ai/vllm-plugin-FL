@@ -174,6 +174,7 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "cuda")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "nvidia")
     parallel_config = SimpleNamespace(
         worker_cls=None,
         all2all_backend=None,

@@ -14,6 +14,7 @@ from vllm.distributed.device_communicators.base_device_communicator import (
 )
 from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
 
 from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
 
@@ -51,10 +52,14 @@ class CommunicatorFL(DeviceCommunicatorBase):
                 group=self.cpu_group,
                 device=self.device,
             )
-            if self.device.type == "npu" and self.pyflagcx_comm.disabled:
+            is_iluvatar = getattr(current_platform, "vendor_name", None) == "iluvatar"
+            if (self.device.type == "npu" or is_iluvatar) and self.pyflagcx_comm.disabled:
                 raise RuntimeError(
-                    "FlagCX requested on NPU but failed to initialize"
+                    f"FlagCX requested on {self.device} but failed to initialize"
                 ) from self.pyflagcx_comm.init_error
+            if is_iluvatar:
+                logger.info("Iluvatar FlagCX device communicator active: %s ranks on %s",
+                            self.world_size, self.device)
 
         if self.use_all2all:
             self._init_all2all_manager(tcp_store_group)
@@ -146,6 +151,17 @@ class CommunicatorFL(DeviceCommunicatorBase):
 
     def all_reduce(self, input_):
         assert self.pyflagcx_comm is not None
+        original_dtype = input_.dtype
+        if (
+            getattr(current_platform, 'vendor_name', '') == 'iluvatar'
+            and original_dtype in (torch.bfloat16, torch.float16)
+        ):
+            from vllm_fl.dispatch.backends.vendor.iluvatar.vision_precision import (
+                in_vision_forward,
+            )
+
+            if in_vision_forward():
+                input_ = input_.float()
         out = self.pyflagcx_comm.all_reduce(input_)
         if out is None:
             # fall back to the default all-reduce using PyTorch.
@@ -154,7 +170,7 @@ class CommunicatorFL(DeviceCommunicatorBase):
             # group, where we always have either custom allreduce or pynccl.
             out = input_.clone()
             torch.distributed.all_reduce(out, group=self.device_group)
-        return out
+        return out.to(original_dtype) if out.dtype != original_dtype else out
 
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
         if self.world_size == 1:

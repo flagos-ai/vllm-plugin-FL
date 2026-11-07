@@ -85,7 +85,7 @@ def get_backend() -> str:
         runtime = _gcu_runtime()
         return "enflame" if runtime is not None and runtime.is_available() else "cpu"
     if _BACKEND:
-        return "tsingmicro" if _BACKEND == "txda" else _BACKEND
+        return {"txda": "tsingmicro", "iluvatar": "tianshu"}.get(_BACKEND, _BACKEND)
     if _is_metax_backend():
         return "metax"
     # Check TXDA before CUDA: transfer_to_txda may expose CUDA-style aliases.
@@ -99,10 +99,9 @@ def get_backend() -> str:
         return "enflame"
     if torch.cuda.is_available():
         # Hygon HIP uses Torch CUDA APIs, but remains a distinct test backend.
-        return (
-            "hygon"
-            if os.environ.get("GEMS_VENDOR", "").lower() == "hygon"
-            else "nvidia"
+        vendor = os.environ.get("GEMS_VENDOR", "").lower()
+        return {"hygon": "hygon", "iluvatar": "tianshu", "tianshu": "tianshu"}.get(
+            vendor, "nvidia"
         )
     try:
         import torch_npu  # noqa: F401

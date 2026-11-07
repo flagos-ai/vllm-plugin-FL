@@ -25,8 +25,8 @@ FlagGems stay on the tested versions.
 
 The Iluvatar dispatch policy is loaded automatically from
 [`vllm_fl/dispatch/config/iluvatar.yaml`](../../vllm_fl/dispatch/config/iluvatar.yaml).
-It keeps `prefer: flagos` and an empty `flagos_blacklist`, so FlagGems handles the
-listed operators with `vendor:iluvatar` and then `reference` as fallbacks. Keep
+It keeps `prefer: flagos` with the operator exclusions recorded in that file.
+The listed operator routes use `vendor:iluvatar` and then `reference` as fallbacks. Keep
 that file and the plugin source from the same revision; the policy is part of the
 validated configuration.
 
@@ -42,6 +42,118 @@ The plugin also applies Iluvatar-specific compilation defaults in
   CoreX and must stay off while graph partitioning is active.
 
 These three are applied at startup and do not have to be written by hand.
+
+## vLLM 0.32 V2 runner compatibility
+
+The image and commands in this guide validate vLLM 0.28, not 0.32. A separate
+CoreX 4.5 / PyTorch 2.10 / FlagGems 5.5 development environment was used to check
+vLLM 0.32's default V2 runner with Qwen3.6-27B, TP=4.
+
+On CUDA devices using FlagCX, the plugin selects `CudaCommunicatorFL` to satisfy
+upstream `GroupCoordinator.graph_capture()`'s CUDA communicator contract while
+keeping collective operations on FlagCX. This does not initialize PyNCCL or
+custom CUDA all-reduce. Non-CUDA FlagCX platforms keep `CommunicatorFL`.
+
+In that development environment, a compiled `FULL_AND_PIECEWISE` graph previously
+produced NaNs after layer 27's multimodal RoPE and repeatedly emitted token
+248320, equal to the vocabulary size. The Q/K normalization outputs, positions,
+and source cosine/sine cache rows were finite. Disabling graph replay recovered
+the request, while an isolated RoPE operation replayed correctly.
+
+The Iluvatar worker now routes two-dimensional `MRotaryEmbedding.forward_native`
+calls through vLLM's existing opaque `mrope` operation. Q/K are cloned before the
+in-place kernel, preserving the native method's input semantics and the
+non-rotated head dimensions. This keeps the RoPE region out of the compiler's
+elementwise fusion without disabling model compilation or graph capture.
+
+With this compatibility fix, the original long-text request terminated normally
+twice with 309 valid generated tokens, and all 26 requests in the original
+text/image/mixed adaptation gate passed in both graph and eager modes. The
+tested graph configuration is:
+
+```bash
+--compilation-config '{"cudagraph_capture_sizes":[1,2,4,8,16,32]}'
+```
+
+`VLLM_FL_ILUVATAR_MROPE_IMPL` defaults to `opaque-v1`. Setting it to `native`
+before restarting a service restores the former path for diagnosis. The worker
+registers this choice in vLLM's compilation hash so the default fix cannot load
+an old AOT artifact containing the native decomposition. The precise upstream
+compiler/buffer-lifetime defect and the performance impact remain unestablished.
+
+These tests retained `VLLM_FL_FLAGOS_BLACKLIST_APPEND=slice,mm,mm_out`. They do
+not validate removing those operator exclusions, other models, or token-level
+precision against NVIDIA. Do not treat successful graph capture alone as an
+inference correctness check.
+
+### 35B compiled graph regression and dependency installation
+
+Additional testing on November 7, 2026 used plugin commit
+`7a94aeec80fbb795d5596569eb7d40cfe5460106` with this development stack:
+
+| Component | Version | Source revision |
+|---|---|---|
+| FlagGems | `5.5.0.dev0` | `2bcfe2656dad0b654077fcfe7d66e6a93542afab` |
+| FlagGems-vllm | `0.3.0.dev1` | `b434eafb1715849d1019ddcd480c5fc39461665c` |
+| FlagTree | `0.7.0+iluvatar3.6` | Iluvatar `cp312` wheel |
+| vLLM | `0.32.0+empty` | upstream `v0.32.0` |
+
+The base CI image contains an older stack. Checking out the plugin does not
+update FlagGems, FlagGems-vllm, or FlagTree. At the tested revision, the shared
+`.github/scripts/install_flaggems_vllm.py` still installs helper commit
+`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`, and Iluvatar's `verify_stack.py`
+still requires FlagGems `5.3.5`. Align both the installation and verification
+steps with the chosen stack before claiming to reproduce development results.
+Do not replace the shared helper pin for other vendors without validating them.
+
+Qwen3.6-35B-A3B still showed an intermittent text regression with the compiled
+`FULL_AND_PIECEWISE` configuration above. Under eight concurrent text requests,
+the answer to `19 + 23` sometimes became `4ally`, `4a`, or `4 excerise` instead
+of `42`. Single requests returned `42`. A retry also produced
+`4\n                    \n42`, which the former substring-based gate accepted.
+Numeric text requests now require the complete trimmed answer to match the
+expected number; a retry containing the expected substring is insufficient.
+
+Disabling Inductor's buffer reuse and inplace buffers retained model compilation
+and `FULL_AND_PIECEWISE` graph replay. Two complete gate runs and 50 additional
+diagnostic requests passed, totaling 102 requests. The tested configuration is:
+
+```bash
+export GRAPH_COMPILATION_CONFIG='{"inductor_compile_config":{"allow_buffer_reuse":false,"inplace_buffers":false},"cudagraph_capture_sizes":[1,2,4,8,16,32]}'
+```
+
+Follow-up controlled runs used the same real 35B model with TP=4 and eight
+concurrent requests. Keeping `allow_buffer_reuse=true` and setting only
+`inplace_buffers=false` passed 50/50 strict numeric diagnostic requests and the
+complete text/image/mixed gate. The reverse configuration, with only ordinary
+buffer reuse disabled, also passed 50/50 diagnostic requests. These observations
+suggest an interaction between reuse optimizations, but do not establish which
+compiler transformation first corrupts a tensor.
+
+The platform hook therefore disables only `inplace_buffers` for Iluvatar
+`qwen3_5_moe_text` models using Inductor with full graphs. It leaves
+`allow_buffer_reuse` unchanged and preserves the compilation mode, graph mode,
+capture sizes, and IR torch wrapping setting. Other models, vendors, and eager
+configurations keep their existing settings. This is a narrowly scoped
+compatibility safeguard, not a proven compiler-level root-cause repair. Memory
+and performance costs have not been quantified.
+
+Setting only `ir_enable_torch_wrap=false` is insufficient: a separate complete
+gate run still returned `4inda`. Do not use that setting alone as the fix.
+
+For this tested 35B development stack, a second workaround retained
+decode CUDA Graph replay while disabling Inductor. It passed all 26 original
+gate requests and 50 additional diagnostic requests:
+
+```bash
+export GRAPH_COMPILATION_CONFIG='{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32]}'
+MODEL_PATH=/path/to/Qwen3.6-35B-A3B PORT=8132 \
+  bash tools/adaptation-gate-cases/run_serve_graph.sh
+```
+
+This is a validated workaround for the observed case. It does not establish a
+specific compiler defect or validate the default compiled graph path for 35B.
+Keep the original failure evidence when recording results.
 
 ## 1. Check the host
 

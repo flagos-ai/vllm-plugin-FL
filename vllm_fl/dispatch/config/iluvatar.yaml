@@ -49,7 +49,16 @@ op_backends:
 # FlagOS operator blacklist
 # Iluvatar is CUDA-compatible, so most FlagGems ops should work
 # Blacklist only ops that are known to have issues
-flagos_blacklist: []
+flagos_blacklist:
+  - zeros
+  - zero_
+  - linear
+  - native_layer_norm
+  - addmm
+  - mm
+  # Native SDPA redispatches through the inner flash entry: exclude both.
+  - _scaled_dot_product_flash_attention
+  - _flash_attention_forward
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
