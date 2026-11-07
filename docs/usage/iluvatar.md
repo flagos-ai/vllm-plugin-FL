@@ -49,10 +49,12 @@ The image and commands in this guide validate vLLM 0.28, not 0.32. A separate
 CoreX 4.5 / PyTorch 2.10 / FlagGems 5.5 development environment was used to check
 vLLM 0.32's default V2 runner with Qwen3.6-27B, TP=4.
 
-On CUDA devices using FlagCX, the plugin selects `CudaCommunicatorFL` to satisfy
-upstream `GroupCoordinator.graph_capture()`'s CUDA communicator contract while
-keeping collective operations on FlagCX. This does not initialize PyNCCL or
-custom CUDA all-reduce. Non-CUDA FlagCX platforms keep `CommunicatorFL`.
+On Iluvatar CUDA devices using FlagCX, the plugin selects the vendor-local
+`IluvatarCommunicatorFL` to satisfy upstream `GroupCoordinator.graph_capture()`'s
+CUDA communicator contract while keeping collective operations on FlagCX. This
+does not initialize PyNCCL or custom CUDA all-reduce. The initialization checks
+and vision-specific FP32 reduction are confined to the Iluvatar backend; other
+vendors retain their existing communicators.
 
 In that development environment, a compiled `FULL_AND_PIECEWISE` graph previously
 produced NaNs after layer 27's multimodal RoPE and repeatedly emitted token

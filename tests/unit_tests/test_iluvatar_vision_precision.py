@@ -3,11 +3,14 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from vllm_fl.dispatch.backends.vendor.iluvatar.communicator import (
+    IluvatarCommunicatorFL,
+)
 from vllm_fl.dispatch.backends.vendor.iluvatar.vision_precision import (
     _wrap_vision_forward,
     in_vision_forward,
 )
-from vllm_fl.distributed import communicator as module
+from vllm_fl.distributed.communicator import CommunicatorFL
 
 
 def test_context_nested_exception_and_idempotence():
@@ -34,7 +37,9 @@ def test_context_nested_exception_and_idempotence():
 @pytest.mark.parametrize("vision", [False, True])
 @pytest.mark.parametrize("fallback", [False, True])
 def test_precision_scoped_to_iluvatar_vision(monkeypatch, vendor, vision, fallback):
-    monkeypatch.setattr(module, "current_platform", SimpleNamespace(vendor_name=vendor))
+    communicator_cls = (
+        IluvatarCommunicatorFL if vendor == "iluvatar" else CommunicatorFL
+    )
     seen = []
 
     def reduce(x):
@@ -45,7 +50,7 @@ def test_precision_scoped_to_iluvatar_vision(monkeypatch, vendor, vision, fallba
         x.mul_(2)
 
     monkeypatch.setattr(torch.distributed, "all_reduce", native)
-    comm = object.__new__(module.CommunicatorFL)
+    comm = object.__new__(communicator_cls)
     comm.pyflagcx_comm = SimpleNamespace(all_reduce=reduce)
     comm.device_group = object()
     x = torch.tensor([1.25, -2.5], dtype=torch.bfloat16)

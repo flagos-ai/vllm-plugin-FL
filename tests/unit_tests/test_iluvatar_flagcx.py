@@ -7,6 +7,9 @@ from vllm.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase,
 )
 
+from vllm_fl.dispatch.backends.vendor.iluvatar.communicator import (
+    IluvatarCommunicatorFL,
+)
 from vllm_fl.distributed import communicator as module
 
 
@@ -19,15 +22,13 @@ def test_iluvatar_flagcx_fail_closed(monkeypatch, disabled):
         self.use_all2all = False
 
     monkeypatch.setattr(DeviceCommunicatorBase, "__init__", base_init)
-    monkeypatch.setattr(
-        module, "current_platform", SimpleNamespace(vendor_name="iluvatar")
-    )
+    assert IluvatarCommunicatorFL is not module.CommunicatorFL
     error = OSError("missing test library")
     comm = SimpleNamespace(disabled=disabled, init_error=error)
     monkeypatch.setattr(module, "PyFlagcxCommunicator", lambda **kwargs: comm)
     if disabled:
         with pytest.raises(RuntimeError, match="FlagCX requested") as exc:
-            module.CommunicatorFL(object())
+            IluvatarCommunicatorFL(object())
         assert exc.value.__cause__ is error
     else:
-        assert module.CommunicatorFL(object()).pyflagcx_comm is comm
+        assert IluvatarCommunicatorFL(object()).pyflagcx_comm is comm
