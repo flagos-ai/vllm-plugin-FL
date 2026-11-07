@@ -20,6 +20,7 @@ def vllm_fl_register(registry):
         moe_gemv,
         native_index,
         native_sparse,
+        sampling,
     )
 
     library = {
@@ -47,6 +48,7 @@ def vllm_fl_register(registry):
         "grouped_topk": ("m3.flagos.grouped_topk", moe.grouped_topk),
     }
     native = {
+        "sampling_stable_sort": sampling.stable_sort_keys,
         "index_score": attention_launch.index_score,
         "sparse_attn": attention_launch.prefill,
         "sparse_decode": attention_launch.decode,

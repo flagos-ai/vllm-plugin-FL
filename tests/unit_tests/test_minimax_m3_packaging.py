@@ -125,6 +125,33 @@ class ProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "framework composition"):
             self.config.load()
 
+    def test_async_requires_boolean_and_matching_scheduler(self):
+        self.data["minimax_m3"]["service"]["async_scheduling"] = "true"
+        self.write()
+        with self.assertRaisesRegex(TypeError, "requires bool"):
+            self.config.load()
+        self.data["minimax_m3"]["service"]["async_scheduling"] = True
+        self.data["minimax_m3"]["service"]["scheduler"] = (
+            "vllm.v1.core.sched.scheduler.Scheduler"
+        )
+        self.write()
+        with self.assertRaisesRegex(ValueError, "AsyncScheduler"):
+            self.config.load()
+
+    def test_native_async_and_explicit_sync_selection(self):
+        service = self.data["minimax_m3"]["service"]
+        service["async_scheduling"] = True
+        service["scheduler"] = None
+        self.write()
+        self.assertTrue(self.config.load().service["async_scheduling"])
+        service["async_scheduling"] = False
+        service["scheduler"] = "vllm.v1.core.sched.scheduler.Scheduler"
+        self.write()
+        self.assertFalse(self.config.load().service["async_scheduling"])
+        del service["async_scheduling"]
+        self.write()
+        self.assertFalse(self.config.load().service.get("async_scheduling", False))
+
     def test_project_env_cannot_replace_configuration(self):
         self.data["minimax_m3"]["infrastructure_env"]["M3_MSA_SAFE_TOPK"] = "0"
         self.write()

@@ -71,7 +71,7 @@ def main():
         json.dumps({"indexer_kv_dtype": service["index_kv_dtype"]}),
         "--no-enable-prefix-caching",
         "--disable-custom-all-reduce",
-        "--no-async-scheduling",
+        "--async-scheduling" if service.get("async_scheduling", False) else "--no-async-scheduling",
         "--load-format",
         "safetensors",
         "--safetensors-load-strategy",
@@ -84,11 +84,11 @@ def main():
         str(reasoning),
         "--compilation-config",
         json.dumps(dict(service["compilation_config"])),
-        "--scheduler-cls",
-        service["scheduler"],
         "--watermark",
         str(service["watermark"]),
     ]
+    if service.get("scheduler") is not None:
+        command.extend(["--scheduler-cls", service["scheduler"]])
     if args.node_rank:
         command.append("--headless")
     print("M3_SERVICE_COMMAND " + json.dumps(command), flush=True)

@@ -167,8 +167,14 @@ Vendor binary access reuses the existing FL vendor backend. The remaining ABI
 compatibility lives alongside it, with the M3 entry controlling installation. No installed
 vLLM source is rewritten and no fake module facade is installed by this entry.
 
-## Validation and measurements
+The profile enables native async scheduling and leaves checkpoint sampling
+defaults in effect. The M3 top-p adapter uses native stable int32 sorting with
+the existing FG softmax/CDF and mask path; it preserves full-vocabulary RNG.
+Unsupported layouts and explicit top-k requests retain the original filter.
 
+## Retained validation and measurements
+
+The retained serving figures use the earlier greedy, synchronous benchmark.
 Model evaluation uses ordinary thinking and final answers:
 
 | Task | Accuracy |

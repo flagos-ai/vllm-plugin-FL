@@ -57,6 +57,7 @@ class StructureTests(unittest.TestCase):
         for group, names in {
             "attention_launch": ("index_score", "prefill", "decode"),
             "moe_gemv": ("expert_gemv",),
+            "sampling": ("stable_sort_keys",),
             "native_index": (
                 "minimax_m3_index_score",
                 "minimax_m3_index_topk",
@@ -99,8 +100,8 @@ class StructureTests(unittest.TestCase):
 
     def test_policy_selects_numerical_provider_and_preserves_native_fallback(self):
         rows, t, providers = self.registration(True)
-        self.assertEqual(len(rows), 19)
-        self.assertEqual(len({r.op_name for r in rows}), 19)
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(len({r.op_name for r in rows}), 20)
         by_name = {r.op_name: r for r in rows}
         self.assertIs(
             by_name["m3_index_score"].fn, providers["attention_launch"].index_score
@@ -121,6 +122,7 @@ class StructureTests(unittest.TestCase):
         )
         self.assertNotIn("m3_index_decode", by_name)
         native = {
+            "sampling_stable_sort",
             "index_score",
             "sparse_attn",
             "sparse_decode",

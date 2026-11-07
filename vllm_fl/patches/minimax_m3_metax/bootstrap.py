@@ -136,6 +136,12 @@ def initialize():
     assert not any(
         n == "vllm_metax" or n.startswith("vllm_metax.") for n in sys.modules
     )
+    from vllm_fl.dispatch import get_default_manager
+    from .sampling import install as install_sampling
+
+    # Vendor initialization installs the native fallback first.
+    get_default_manager().ensure_initialized()
+    install_sampling()
     _INITIALIZED = True
     audit_effective("import")
 
@@ -147,13 +153,13 @@ def audit_effective(stage, runner=None):
 
     from vllm_fl.attention.minimax_m3 import operators
     from vllm_fl.dispatch import CachedOp, get_default_manager, get_policy
-    from vllm_fl.ops.minimax_m3 import experts, moe, router, routing, torch_ops
+    from vllm_fl.ops.minimax_m3 import experts, moe, router, routing, sampling, torch_ops
     from vllm_fl.utils import get_flag_gems_whitelist_blacklist, get_oot_blacklist
 
     mgr = get_default_manager()
     mgr.ensure_initialized()
     bindings = {}
-    for module in (operators, torch_ops, experts, moe, routing, router):
+    for module in (operators, torch_ops, experts, moe, routing, router, sampling):
         for obj in vars(module).values():
             if isinstance(obj, CachedOp):
                 impl = obj.bind() if stage == "import" else obj.inspect_binding()
@@ -171,6 +177,7 @@ def audit_effective(stage, runner=None):
         "function": _identity(impl.fn),
     }
     expected = {
+        "m3_sampling_stable_sort": ("vendor", "vendor.metax.m3.sampling_stable_sort"),
         "m3_index_score": ("vendor", "vendor.metax.m3.index_score"),
         "m3_sparse_attn": ("vendor", "vendor.metax.m3.sparse_attn"),
         "m3_sparse_decode": ("vendor", "vendor.metax.m3.sparse_decode"),
@@ -213,6 +220,10 @@ def audit_effective(stage, runner=None):
 
         generic = importlib.import_module("flag_gems.ops.masked_fill").masked_fill_
         assert isinstance(registrar, MiniMaxRegistrar)
+        assert "sort.values_stable" not in registrar.selected_functions
+        import vllm.v1.sample.ops.topk_topp_sampler as sampling_ops
+
+        assert sampling_ops.apply_top_k_top_p is sampling.apply_top_k_top_p
         assert registrar.selected_functions["linear"] is linear
         assert all(
             registrar.selected_functions[key] is generic
@@ -287,6 +298,22 @@ def audit_effective(stage, runner=None):
     )
     if runner is not None:
         record["runner"] = type(runner).__module__ + "." + type(runner).__name__
+        scheduler = runner.scheduler_config.get_scheduler_cls()
+        record["scheduling"] = {
+            "async_scheduling": runner.use_async_scheduling,
+            "scheduler": scheduler.__module__ + "." + scheduler.__name__,
+        }
+        assert runner.use_async_scheduling == load().service.get("async_scheduling", False)
+        if runner.use_async_scheduling:
+            assert scheduler.__name__ == "AsyncScheduler"
+        import vllm.v1.sample.ops.topk_topp_sampler as sampling_ops
+
+        record["sampling_apis"] = {
+            name: _identity(getattr(sampling_ops, name))
+            for name in (
+                "apply_top_k_top_p", "random_sample", "sample_with_exponential_noise"
+            )
+        }
     root = Path(os.environ["VLLM_CACHE_ROOT"]).parent / "audit"
     root.mkdir(parents=True, exist_ok=True)
     (

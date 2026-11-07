@@ -142,6 +142,7 @@ def load():
         "sparse_attn": ["vendor:metax"],
         "sparse_decode": ["vendor:metax"],
         "expert_gemv": ["vendor:metax"],
+        "sampling_stable_sort": ["vendor:metax"],
         "index_topk": ["vendor:metax"],
         "index_score_native": ["vendor:metax"],
         "index_decode_native": ["vendor:metax"],
@@ -155,6 +156,13 @@ def load():
         raise ValueError(
             "Index decode is a framework composition, not one numerical provider"
         )
+    async_enabled = data["service"].get("async_scheduling", False)
+    if type(async_enabled) is not bool:
+        raise TypeError("service.async_scheduling requires bool")
+    if async_enabled and data["service"].get("scheduler") not in (
+        None, "vllm.v1.core.sched.async_scheduler.AsyncScheduler",
+    ):
+        raise ValueError("Async scheduling requires native selection or AsyncScheduler")
     framework = typed(FrameworkPolicy, data["framework"])
     kernels = typed(KernelPolicy, data["kernels"])
     if framework.tensor_parallel_size != 16:
