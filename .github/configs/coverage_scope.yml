@@ -1,0 +1,69 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Coverage ownership is intentionally separate from CI trigger routing in
+# platforms.yml.  A trigger path says which jobs to run; this file says which
+# backend implementation belongs in a platform's coverage denominator.
+
+version: 1
+package_root: vllm_fl
+vendor_root: vllm_fl/dispatch/backends/vendor
+
+platforms:
+  nvidia:
+    backend: cuda
+  ascend:
+    backend: ascend
+  # Hygon is a first-class CI platform.  The runtime vendor resolver currently
+  # registers vendor/cuda because there is no vendor/hygon directory, but
+  # CudaBackend.is_available() only accepts device_name=nvidia.  Therefore the
+  # applicable source for Hygon is shared code until a Hygon backend exists.
+  hygon:
+    backend: cuda
+    mode: shared_only
+    runtime_alias: cuda
+    notes: >-
+      dispatch/config/hygon.yaml names vendor:hygon, while the registered
+      implementation currently resolves to vendor.cuda and is unavailable on
+      the Hygon device name.
+  metax:
+    backend: metax
+  musa:
+    backend: musa
+  mthreads:
+    backend: musa
+    runtime_alias: musa
+  enflame:
+    backend: gcu
+  gcu:
+    backend: gcu
+    runtime_alias: enflame
+  kunlunxin:
+    backend: kunlunxin
+  thead:
+    backend: thead
+  iluvatar:
+    backend: iluvatar
+  biren:
+    backend: supa
+  amd:
+    backend: cuda
+    mode: shared_only
+  maca:
+    backend: metax
+    runtime_alias: metax
+  sunrise:
+    backend: sunrise
+  tsingmicro:
+    backend: txda

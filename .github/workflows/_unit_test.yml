@@ -86,6 +86,17 @@ jobs:
             --platform ${{ inputs.platform }} \
             --scope unit
 
+      - name: Compute platform-effective coverage
+        if: ${{ !cancelled() && hashFiles(format('coverage-{0}.json', inputs.platform)) != '' }}
+        run: |
+          python3 .github/scripts/coverage_scope.py \
+            --platform ${{ inputs.platform }} \
+            --scope unit \
+            --input coverage-${{ inputs.platform }}.json \
+            --full-output coverage-${{ inputs.platform }}-full.json \
+            --effective-output coverage-${{ inputs.platform }}.json \
+            --metadata-output coverage-${{ inputs.platform }}-scope.json
+
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -93,6 +104,8 @@ jobs:
           name: coverage-${{ inputs.platform }}
           path: |
             coverage-${{ inputs.platform }}.json
+            coverage-${{ inputs.platform }}-full.json
+            coverage-${{ inputs.platform }}-scope.json
             report-${{ inputs.platform }}.json
 
       - name: Upload coverage report to FlagCICD
