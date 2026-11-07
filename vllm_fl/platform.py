@@ -588,6 +588,19 @@ class PlatformFL(Platform):
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False
             compilation_config.use_inductor_graph_partition = True
+            hf_text_config = getattr(model_config, "hf_text_config", None)
+            if (
+                getattr(hf_text_config, "model_type", None) == "qwen3_5_moe_text"
+                and compilation_config.backend == "inductor"
+                and compilation_config.mode != CompilationMode.NONE
+                and compilation_config.cudagraph_mode.has_full_cudagraphs()
+            ):
+                compilation_config.inductor_compile_config["inplace_buffers"] = False
+                logger.warning_once(
+                    "Disabling Inductor inplace buffers for Iluvatar Qwen3.5 MoE "
+                    "full graphs after output corruption; compilation and "
+                    "graph capture remain enabled."
+                )
             _pc = getattr(compilation_config, "pass_config", None)
             if _pc is not None:
                 _pc.fuse_rope_kvcache_cat_mla = False
