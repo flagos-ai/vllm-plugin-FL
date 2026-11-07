@@ -974,13 +974,33 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Match CUDA's IR-op defaults, but only offer `vllm_c` when the native
+        extension is importable.
+
+        vLLM 0.32's ``IrOp.set_default`` asserts every provider in the priority
+        is a registered impl. The ``vllm_c`` provider is registered only when
+        ``vllm._C`` loads; every FL build without that extension (i.e. every
+        non-CUDA backend) registers just ``native``, so inheriting CUDA's
+        ``["vllm_c", "native"]`` default aborts engine startup. Dropping
+        ``vllm_c`` when it is absent leaves ``native`` (always registered) and
+        lets FL's own OOT CustomOps carry the real compute.
+        """
+        from contextlib import suppress
+
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
+        have_vllm_c = False
+        with suppress(ImportError, OSError):
+            importlib.import_module("vllm._C")
+            have_vllm_c = True
+
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        if using_inductor or not have_vllm_c:
+            default = ["native"]
+        else:
+            default = ["vllm_c", "native"]
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,
