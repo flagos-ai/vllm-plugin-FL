@@ -253,6 +253,16 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+def _get_device_module(platform):
+    configured_module = getattr(platform, "torch_device_fn", None)
+    if configured_module is not None:
+        return configured_module
+    return torch.get_device_module(platform.device_type)
+
+
+device_module = _get_device_module(current_platform)
+
+
 def _accelerator_synchronize() -> None:
     """Synchronize through the active accelerator implementation."""
     if current_platform.device_type == "musa":
@@ -270,14 +280,12 @@ def _device_graph_capture(
 ):
     """Enter graph capture using the active accelerator's stream API."""
     if graph_capture_context is None:
-        graph_capture_context = GraphCaptureContext(
-            current_platform.torch_device_fn.Stream(device=device)
-        )
+        graph_capture_context = GraphCaptureContext(device_module.Stream(device=device))
     stream = graph_capture_context.stream
-    curr_stream = current_platform.torch_device_fn.current_stream()
+    curr_stream = device_module.current_stream()
     if curr_stream != stream:
         stream.wait_stream(curr_stream)
-    with current_platform.torch_device_fn.stream(stream), nullcontext():
+    with device_module.stream(stream), nullcontext():
         yield graph_capture_context
 
 
@@ -321,7 +329,7 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
         sampled_token_ids: torch.Tensor,
         logprobs_tensors: LogprobsTensors | None,
         invalid_req_indices: list[int],
-        async_output_copy_stream: current_platform.torch_device_fn.Stream,
+        async_output_copy_stream: device_module.Stream,
         vocab_size: int,
         check_ep_fault: bool = False,
         num_nans: torch.Tensor | None = None,
@@ -331,9 +339,7 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
 
         # Event on the copy stream so we can synchronize the non-blocking copy.
         # Blocking (sleep) event to avoid busy-polling the CUDA driver lock.
-        self.async_copy_ready_event = current_platform.torch_device_fn.Event(
-            blocking=True
-        )
+        self.async_copy_ready_event = device_module.Event(blocking=True)
 
         # Keep a reference to the device tensor to avoid it being
         # deallocated until we finish copying it to the host.
@@ -344,8 +350,8 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
         self._has_fault: torch.Tensor | None = None
 
         # Initiate the copy on a separate stream, but do not synchronize it.
-        default_stream = current_platform.torch_device_fn.current_stream()
-        with current_platform.torch_device_fn.stream(async_output_copy_stream):
+        default_stream = device_module.current_stream()
+        with device_module.stream(async_output_copy_stream):
             async_output_copy_stream.wait_stream(default_stream)
             self.sampled_token_ids_cpu = self._sampled_token_ids.to(
                 "cpu", non_blocking=True
@@ -465,23 +471,21 @@ class AsyncGPUPoolingModelRunnerOutput(AsyncModelRunnerOutput):
         model_runner_output: ModelRunnerOutput,
         raw_pooler_output: PoolerOutput,
         finished_mask: list[bool],
-        async_output_copy_stream: current_platform.torch_device_fn.Stream,
+        async_output_copy_stream: device_module.Stream,
     ):
         self._model_runner_output = model_runner_output
 
         # Event on the copy stream so we can synchronize the non-blocking copy.
         # Blocking (sleep) event to avoid busy-polling the CUDA driver lock.
-        self.async_copy_ready_event = current_platform.torch_device_fn.Event(
-            blocking=True
-        )
+        self.async_copy_ready_event = device_module.Event(blocking=True)
 
         # Keep a reference to the device tensors to avoid them being
         # deallocated until we finish copying it to the host.
         self._raw_pooler_output = raw_pooler_output
 
         # Initiate the copy on a separate stream, but do not synchronize it.
-        default_stream = current_platform.torch_device_fn.current_stream()
-        with current_platform.torch_device_fn.stream(async_output_copy_stream):
+        default_stream = device_module.current_stream()
+        with device_module.stream(async_output_copy_stream):
             async_output_copy_stream.wait_stream(default_stream)
             self._model_runner_output.pooler_output = _copy_pooler_output_to_cpu(
                 raw_pooler_output=self._raw_pooler_output,
@@ -811,19 +815,15 @@ class ModelRunnerFL(
 
         # Separate cuda stream for overlapping transfer of sampled token ids from
         # GPU to CPU when async scheduling is enabled.
-        self.async_output_copy_stream: (
-            current_platform.torch_device_fn.Stream | None
-        ) = None
+        self.async_output_copy_stream: device_module.Stream | None = None
         # cuda event to synchronize use of reused CPU tensors between steps
         # when async scheduling is enabled.
         self.prepare_inputs_event: torch.Event | None = None
         if self.use_async_scheduling:
-            self.async_output_copy_stream = current_platform.torch_device_fn.Stream()
+            self.async_output_copy_stream = device_module.Stream()
             # Blocking (sleep) event to avoid busy-polling the CUDA driver lock;
             # under TP contention that spin can balloon and make the rank a straggler.
-            self.prepare_inputs_event = current_platform.torch_device_fn.Event(
-                blocking=True
-            )
+            self.prepare_inputs_event = device_module.Event(blocking=True)
 
         # self.cudagraph_batch_sizes sorts in ascending order.
         if (
@@ -965,12 +965,8 @@ class ModelRunnerFL(
         # N-gram GPU path: async D2H buffer/event for per-request valid draft counts.
         self._num_valid_draft_tokens: torch.Tensor | None = None
         self._num_valid_draft_tokens_cpu: torch.Tensor | None = None
-        self._num_valid_draft_tokens_event: (
-            current_platform.torch_device_fn.Event | None
-        ) = None
-        self._num_valid_draft_tokens_copy_stream: (
-            current_platform.torch_device_fn.Stream | None
-        ) = None
+        self._num_valid_draft_tokens_event: device_module.Event | None = None
+        self._num_valid_draft_tokens_copy_stream: device_module.Stream | None = None
         if (
             self.speculative_config is not None
             and self.speculative_config.use_ngram_gpu()
@@ -978,12 +974,8 @@ class ModelRunnerFL(
             self._num_valid_draft_tokens_cpu = torch.empty(
                 self.max_num_reqs, dtype=torch.int32, pin_memory=PIN_MEMORY
             )
-            self._num_valid_draft_tokens_event = (
-                current_platform.torch_device_fn.Event()
-            )
-            self._num_valid_draft_tokens_copy_stream = (
-                current_platform.torch_device_fn.Stream()
-            )
+            self._num_valid_draft_tokens_event = device_module.Event()
+            self._num_valid_draft_tokens_copy_stream = device_module.Stream()
 
         self._draft_token_req_ids: list[str] | None = None
         self.transfer_event = torch.Event()
@@ -997,22 +989,18 @@ class ModelRunnerFL(
         # Pre-allocated tensor for copying valid sampled token counts to CPU,
         # with dedicated stream for overlapping and event for coordination.
         self.valid_sampled_token_count_event: torch.Event | None = None
-        self.valid_sampled_token_count_copy_stream: (
-            current_platform.torch_device_fn.Stream | None
-        ) = None
+        self.valid_sampled_token_count_copy_stream: device_module.Stream | None = None
         # We also copy the drafted tokens to the CPU asynchronously,
         # in case we need them for structured outputs.
         self.draft_token_ids_event: torch.Event | None = None
-        self.draft_token_ids_copy_stream: (
-            current_platform.torch_device_fn.Stream | None
-        ) = None
+        self.draft_token_ids_copy_stream: device_module.Stream | None = None
         self.valid_sampled_token_count_cpu: torch.Tensor | None = None
         self.draft_token_ids_cpu: torch.Tensor | None = None
         self.num_accepted_tokens_event: torch.Event | None = None
         if self.num_spec_tokens:
             self.draft_token_ids_event = torch.Event()
             self.num_accepted_tokens_event = torch.Event()
-            self.draft_token_ids_copy_stream = current_platform.torch_device_fn.Stream()
+            self.draft_token_ids_copy_stream = device_module.Stream()
             self.draft_token_ids_cpu = torch.empty(
                 (self.max_num_reqs, self.num_spec_tokens),
                 dtype=torch.int64,
@@ -1021,9 +1009,7 @@ class ModelRunnerFL(
             )
             if self.use_async_scheduling:
                 self.valid_sampled_token_count_event = torch.Event()
-                self.valid_sampled_token_count_copy_stream = (
-                    current_platform.torch_device_fn.Stream()
-                )
+                self.valid_sampled_token_count_copy_stream = device_module.Stream()
                 self.valid_sampled_token_count_cpu = torch.empty(
                     self.max_num_reqs,
                     dtype=torch.int32,
@@ -1235,10 +1221,10 @@ class ModelRunnerFL(
 
     def _get_or_create_async_output_copy_stream(
         self,
-    ) -> current_platform.torch_device_fn.Stream:
+    ) -> device_module.Stream:
         stream = self.async_output_copy_stream
         if stream is None:
-            stream = current_platform.torch_device_fn.Stream()
+            stream = device_module.Stream()
             self.async_output_copy_stream = stream
         return stream
 
@@ -4848,10 +4834,10 @@ class ModelRunnerFL(
         assert self.draft_token_ids_event is not None
         assert self.draft_token_ids_copy_stream is not None
         assert self.draft_token_ids_cpu is not None
-        default_stream = current_platform.torch_device_fn.current_stream()
+        default_stream = device_module.current_stream()
         num_reqs = draft_token_ids.shape[0]
         num_spec_tokens = draft_token_ids.shape[1]
-        with current_platform.torch_device_fn.stream(self.draft_token_ids_copy_stream):
+        with device_module.stream(self.draft_token_ids_copy_stream):
             if not zeros_only:
                 # Trigger async copy of draft token ids to cpu.
                 self.draft_token_ids_copy_stream.wait_stream(default_stream)
@@ -4884,12 +4870,10 @@ class ModelRunnerFL(
         if self.valid_sampled_token_count_event is None:
             return
 
-        default_stream = current_platform.torch_device_fn.current_stream()
+        default_stream = device_module.current_stream()
         # Initialize a new stream to overlap the copy operation with
         # prepare_input of draft model.
-        with current_platform.torch_device_fn.stream(
-            self.valid_sampled_token_count_copy_stream
-        ):
+        with device_module.stream(self.valid_sampled_token_count_copy_stream):
             self.valid_sampled_token_count_copy_stream.wait_stream(default_stream)  # type: ignore
             counts = valid_sampled_tokens_count
             counts_cpu = self.valid_sampled_token_count_cpu
@@ -6621,9 +6605,7 @@ class ModelRunnerFL(
         # the same pool and stream for profiling and the real decoder capture.
         context = getattr(self, "_musa_graph_capture_context", None)
         if context is None:
-            context = GraphCaptureContext(
-                current_platform.torch_device_fn.Stream(device=self.device)
-            )
+            context = GraphCaptureContext(device_module.Stream(device=self.device))
             self._musa_graph_capture_context = context
         return context
 

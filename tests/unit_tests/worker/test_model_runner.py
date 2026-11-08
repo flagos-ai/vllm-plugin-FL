@@ -54,7 +54,7 @@ def test_device_graph_capture_uses_accelerator_stream(monkeypatch, reuse_context
         current_stream=MagicMock(return_value=current_stream),
         stream=MagicMock(return_value=nullcontext()),
     )
-    monkeypatch.setattr(model_runner.current_platform, "torch_device_fn", device_api)
+    monkeypatch.setattr(model_runner, "device_module", device_api)
     supplied_context = SimpleNamespace(stream=capture_stream) if reuse_context else None
 
     with model_runner._device_graph_capture(

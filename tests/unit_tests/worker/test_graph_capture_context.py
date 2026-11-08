@@ -12,7 +12,6 @@ import ast
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -99,7 +98,7 @@ def helper_and_backend():
         "contextmanager": contextmanager,
         "nullcontext": nullcontext,
         "GraphCaptureContext": backend.context_factory,
-        "current_platform": SimpleNamespace(torch_device_fn=backend),
+        "device_module": backend,
     }
     function_module = ast.Module(body=functions, type_ignores=[])
     exec(

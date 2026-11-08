@@ -47,13 +47,64 @@ def test_v1_runner_shared_entry(monkeypatch, vendor):
     assert calls == [(expected, worker.vllm_config, worker.device)]
 
 
-def test_target_runner_import(monkeypatch):
-    import torch
-
-    from vllm.platforms import current_platform
-
-    monkeypatch.setattr(current_platform, "torch_device_fn", torch.cuda)
+def test_target_runner_import():
     from vllm_fl.worker.model_runner import ModelRunnerFL
 
     assert callable(ModelRunnerFL.execute_model)
     assert callable(ModelRunnerFL.sample_tokens)
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_runner_device_module_selection(configured):
+    import torch
+
+    tree = ast.parse((ROOT / "vllm_fl/worker/model_runner.py").read_text())
+    helper = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_get_device_module"
+    )
+    namespace = {"torch": torch}
+    exec(
+        compile(ast.Module(body=[helper], type_ignores=[]), "device-module", "exec"),
+        namespace,
+    )
+    override = object()
+    platform = SimpleNamespace(device_type="cuda")
+    if configured:
+        platform.torch_device_fn = override
+    assert namespace["_get_device_module"](platform) is (
+        override if configured else torch.cuda
+    )
+
+
+def test_native_cuda_runner_import_in_fresh_process():
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "\n".join(
+                [
+                    "import torch",
+                    "import vllm.platforms",
+                    "from vllm.platforms.interface import Platform",
+                    "platform = Platform()",
+                    "platform.device_type = 'cuda'",
+                    "assert platform.torch_device_fn is None",
+                    "vllm.platforms.current_platform = platform",
+                    "from vllm_fl.worker import model_runner",
+                    "assert model_runner.device_module is torch.cuda",
+                    "assert callable(model_runner.ModelRunnerFL.execute_model)",
+                    "assert model_runner.AsyncGPUModelRunnerOutput.__init__.__annotations__['async_output_copy_stream'] is torch.cuda.Stream",
+                ]
+            ),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
