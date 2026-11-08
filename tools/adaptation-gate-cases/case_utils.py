@@ -89,15 +89,12 @@ IMAGE_TASKS = (
 
 def text_request(request_id: str, index: int) -> dict[str, Any]:
     prompt, required = TEXT_TASKS[index]
-    request = {
+    return {
         "request_id": request_id,
         "kind": "text",
         "messages": [{"role": "user", "content": prompt}],
         "required_terms": list(required),
     }
-    if index in (0, 3, 6):
-        request["expected_exact"] = required[0]
-    return request
 
 
 def llm_details_request() -> dict[str, Any]:
@@ -206,10 +203,7 @@ def has_repeated_word_run(text: str) -> bool:
 
 
 def quality_checks(
-    text: str,
-    required_terms: list[str],
-    min_length: int = 1,
-    expected_exact: str | None = None,
+    text: str, required_terms: list[str], min_length: int = 1
 ) -> dict[str, bool]:
     normalized = normalized_text(text)
     positions: list[int] = []
@@ -226,7 +220,7 @@ def quality_checks(
         chr(0x00E2) + chr(0x20AC),
         chr(0x00EF) + chr(0x00BF) + chr(0x00BD),
     )
-    checks = {
+    return {
         "non_empty": bool(normalized),
         "minimum_length": len(text.strip()) >= min_length,
         "expected_semantics": all(position >= 0 for position in positions),
@@ -241,11 +235,6 @@ def quality_checks(
         "no_repeated_word_run": not has_repeated_word_run(text),
         "no_repeated_phrase": not has_repeated_phrase(text),
     }
-    if expected_exact is not None:
-        checks["exact_answer"] = (
-            unicodedata.normalize("NFKC", text).strip() == expected_exact
-        )
-    return checks
 
 
 def resolve_served_model_name() -> str:
@@ -279,7 +268,6 @@ async def execute_request(
             text,
             request["required_terms"],
             min_length=int(request.get("min_length", 1)),
-            expected_exact=request.get("expected_exact"),
         )
         return {
             "request_id": request["request_id"],

@@ -31,11 +31,6 @@ if [[ -z ${VLLM_PLUGINS+x} ]]; then
 fi
 printf '%s\n' "$$" >"${SERVER_PID_FILE:-$script_dir/.server.pid}"
 
-compilation_args=()
-if [[ -n ${GRAPH_COMPILATION_CONFIG:-} ]]; then
-    compilation_args+=(--compilation-config "$GRAPH_COMPILATION_CONFIG")
-fi
-
 exec vllm serve "$model_path" \
     --served-model-name "$served_model_name" \
     --host 127.0.0.1 \
@@ -43,5 +38,4 @@ exec vllm serve "$model_path" \
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-2}" \
     --max-model-len "${MAX_MODEL_LEN:-32768}" \
     --allowed-local-media-path "$script_dir/images" \
-    --trust-remote-code \
-    "${compilation_args[@]}"
+    --trust-remote-code
