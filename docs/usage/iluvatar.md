@@ -157,6 +157,30 @@ This is a validated workaround for the observed case. It does not establish a
 specific compiler defect or validate the default compiled graph path for 35B.
 Keep the original failure evidence when recording results.
 
+### Graph service shutdown
+
+For Iluvatar, the plugin snapshots EngineCore descendants before vLLM's process
+manager terminates the core. It then waits for those workers to exit before
+returning from manager shutdown, even if the core has already exited. This keeps
+worker cleanup supervised when terminal Ctrl+C races Core teardown. It does not
+change vLLM's request-drain timeout or disable graph replay.
+
+Worker cleanup allows 30 seconds for normal exit, then sends SIGTERM with a
+4-second wait and SIGKILL with a further 5-second wait if needed. A surviving
+worker raises an error rather than silently reporting completed cleanup. This
+covers descendants captured before manager shutdown, not recovery from an
+EngineCore crash that already orphaned workers before the snapshot.
+
+A real Qwen3.6-35B-A3B regression on vLLM 0.32, TP=4, max length 4096 used
+`FULL_AND_PIECEWISE` graphs, a successful HTTP request returning `42`, and
+foreground-terminal Ctrl+C with the default shutdown timeout. Manager cleanup
+returned about 16 seconds after Ctrl+C. At the first one-second poll observing API
+process exit, no service processes remained and all devices were back at their
+68 MiB baseline. Earlier unpatched runs orphaned workers after API exit, although
+they also recovered naturally by 30 seconds; this was not an indefinite GPU leak.
+ZMQ context and shared-memory resource-tracker warnings remained at shutdown and
+are not claimed to be fixed by worker supervision.
+
 ## 1. Check the host
 
 The host needs an installed CoreX driver, the CoreX management tool, and Docker.

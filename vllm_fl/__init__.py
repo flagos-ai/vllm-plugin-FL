@@ -345,6 +345,13 @@ def register_model():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
+    if vendor_name == "iluvatar":
+        from vllm_fl.dispatch.backends.vendor.iluvatar.shutdown import (
+            install_worker_cleanup,
+        )
+
+        install_worker_cleanup()
+
     if vendor_name != "nvidia":
         # NVIDIA's native vLLM 0.32 already preserves packed GDN beta precision.
         _register_gdn_packed_decode_patch()
