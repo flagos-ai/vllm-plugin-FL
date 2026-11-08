@@ -5302,7 +5302,11 @@ class ModelRunnerFL(
         advance_io_step()
 
         if not self.use_async_scheduling:
-            if self.routed_experts_initialized:
+            if self.routed_experts_initialized and hasattr(
+                output, "routed_experts"
+            ):
+                # vLLM >= 0.32 dropped ``ModelRunnerOutput.routed_experts``;
+                # only populate it when the dataclass still declares the field.
                 # Sync path: D2H was issued in ``_bookkeeping_sync`` and
                 # synchronized by ``_to_list``'s event.synchronize(), so
                 # the pinned buffers are ready to be wrapped as numpy.
@@ -8520,19 +8524,6 @@ class ModelRunnerFL(
             else:
                 kv_transfer_group.register_kv_caches(kv_caches)
             kv_transfer_group.set_host_xfer_buffer_ops(copy_kv_blocks)
-
-    def get_routed_experts(
-        self,
-        num_tokens: int,
-    ) -> RoutedExpertsTensors | None:
-        if not self.routed_experts_initialized:
-            return None
-
-        device_buffer = self.routed_experts_capturer.get_device_buffer()
-        return RoutedExpertsTensors(
-            routing_data=device_buffer[:num_tokens].clone(),
-            slot_mapping=self.routed_experts_slot_mapping_device[:num_tokens].clone(),
-        )
 
     def init_routed_experts_capturer(self):
         logger.info(
