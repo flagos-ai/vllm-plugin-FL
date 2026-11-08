@@ -385,12 +385,15 @@ class DeepseekV4Attention(nn.Module):
                     params_dtype=params_dtype,
                 ),
             )
-        # The grouped operation consumes logical loader weights. Quantized
-        # grouped layouts require a separate provider rather than a dense call.
         if self.wo_a.weight.dtype != params_dtype:
-            raise NotImplementedError(
-                "Grouped output projection requires floating weights"
+            configure_grouped = getattr(
+                self.wo_a.quant_method, "configure_grouped", None
             )
+            if configure_grouped is None:
+                raise NotImplementedError(
+                    "Grouped output projection requires a grouped quantization method"
+                )
+            configure_grouped(self.n_local_groups)
         self.q_norm = RMSNorm(
             config.q_lora_rank, config.rms_norm_eps, dtype=params_dtype
         )
@@ -489,7 +492,10 @@ class DeepseekV4Attention(nn.Module):
             attn_sink=self.attn_sink,
         )
         output = _rope(output, positions, self.cos_sin_cache, inverse=True)
-        output = _grouped_project(output, self.wo_a.weight, self.n_local_groups)
+        if self.wo_a.weight.dtype == torch.int8:
+            output = self.wo_a.quant_method.apply_grouped(self.wo_a, output)
+        else:
+            output = _grouped_project(output, self.wo_a.weight, self.n_local_groups)
         output = self.wo_b(output)
         return torch.where(active[:, None], output, 0)
 

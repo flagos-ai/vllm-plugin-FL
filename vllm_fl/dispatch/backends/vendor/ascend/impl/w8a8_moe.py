@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""ModelSlim dynamic INT8 experts using packaged torch_npu operators.
+"""W8A8 dynamic INT8 experts using packaged torch_npu operators.
 
 Routing/count metadata follows rc1 ops/fused_moe/token_dispatcher.py and
 quantized GMM follows rc1 ops/fused_moe/moe_mlp.py's unfused W8A8 path.
@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch_npu
 
 
-def modelslim_w8a8_prepare_experts(w1, w2, s1, s2):
+def w8a8_prepare_experts(w1, w2, s1, s2, output_dtype=None):
     for weight, scale in ((w1, s1), (w2, s2)):
         if weight.ndim != 3 or weight.dtype != torch.int8:
             raise ValueError("Expert weights must be int8 [experts, output, input]")
@@ -26,11 +26,18 @@ def modelslim_w8a8_prepare_experts(w1, w2, s1, s2):
         or w1.shape[2] != w2.shape[1]
     ):
         raise ValueError("Incompatible gated expert weight shapes")
+    if output_dtype not in (None, torch.bfloat16, torch.float16):
+        raise ValueError("Expert output dtype must be BF16/FP16")
+    # CANN GMM couples the scale dtype to its output dtype. Preserve FP32
+    # checkpoint scales until loading is complete, then convert once here.
+    scale_dtype = torch.bfloat16 if output_dtype == torch.bfloat16 else torch.float32
+    if output_dtype is None:
+        scale_dtype = torch.float32 if s1.dtype == torch.float16 else s1.dtype
     return (
         w1.transpose(1, 2).contiguous().transpose(1, 2),
         w2.transpose(1, 2).contiguous().transpose(1, 2),
-        s1.to(torch.float32 if s1.dtype == torch.float16 else s1.dtype).contiguous(),
-        s2.to(torch.float32 if s2.dtype == torch.float16 else s2.dtype).contiguous(),
+        s1.to(scale_dtype).contiguous(),
+        s2.to(scale_dtype).contiguous(),
     )
 
 
@@ -45,7 +52,7 @@ def _activate(gate_up, activation, limit):
     return gate * torch.sigmoid(gate) * up.clamp(-limit, limit)
 
 
-def modelslim_w8a8_experts(
+def w8a8_experts(
     x,
     w1,
     w2,
@@ -60,7 +67,7 @@ def modelslim_w8a8_experts(
 ):
     """Compute this contiguous local expert range; no communication/groups."""
     if activation not in ("silu", "swiglustep"):
-        raise NotImplementedError(f"Unsupported ModelSlim activation: {activation}")
+        raise NotImplementedError(f"Unsupported W8A8 activation: {activation}")
     if activation == "swiglustep" and limit is None:
         limit = 7.0
     if limit is not None and (not math.isfinite(limit) or limit <= 0):

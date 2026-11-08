@@ -214,17 +214,42 @@ def make_attention(runtime):
         rope = torch.stack([angle.cos(), angle.sin()], -1)
         old_quant = runtime.quant_config
         if mixed:
-            from vllm_fl.quantization.w8a8.modelslim import AscendModelSlimConfig
-
-            runtime.quant_config = AscendModelSlimConfig(
-                {
-                    prefix + "." + name + ".weight": "W8A8_DYNAMIC"
-                    if name in ("wq_a", "wq_b", "wkv", "indexer.wq_b")
-                    else "FLOAT"
-                    for name in ("wq_a", "wq_b", "wkv", "wo_a", "wo_b", "indexer.wq_b")
-                },
-                weight_nz_mode=0,
+            from vllm_fl.quantization.w8a8.compressed_tensors import (
+                AscendCompressedTensorsConfig,
             )
+
+            runtime.quant_config = AscendCompressedTensorsConfig.from_config(
+                {
+                    "quant_method": "compressed-tensors",
+                    "format": "int-quantized",
+                    "quantization_status": "compressed",
+                    "config_groups": {
+                        "w8a8": {
+                            "targets": [
+                                prefix + "." + name
+                                for name in ("wq_a", "wq_b", "wkv", "indexer.wq_b")
+                            ],
+                            "weights": {
+                                "num_bits": 8,
+                                "type": "int",
+                                "strategy": "channel",
+                                "symmetric": True,
+                                "dynamic": False,
+                            },
+                            "input_activations": {
+                                "num_bits": 8,
+                                "type": "int",
+                                "strategy": "token",
+                                "symmetric": True,
+                                "dynamic": True,
+                            },
+                            "format": "int-quantized",
+                        }
+                    },
+                    "ignore": [],
+                }
+            )
+            runtime.quant_config.weight_nz_mode = 0
         try:
             module = DeepseekV4Attention(runtime, cfg, leaves, rope, prefix=prefix).to(
                 "npu"
@@ -239,8 +264,6 @@ def make_attention(runtime):
                     .round()
                     .to(torch.int8)
                 )
-            elif name.endswith("weight_offset"):
-                value = torch.zeros_like(param)
             elif name.endswith("weight_scale"):
                 value = torch.full_like(param, 0.015625)
             elif "norm.weight" in name:
@@ -544,7 +567,7 @@ def test_checkpoint_names_and_standard_loaders(make_attention, ratio):
 
 
 @pytest.mark.parametrize("ratio", [0, 4])
-def test_mixed_modelslim_qkv_actual_module(make_attention, ratio):
+def test_mixed_compressed_tensors_qkv_actual_module(make_attention, ratio):
     env = make_attention(ratio, mixed=True)
     request = _request(env)
     assert env.manager.allocate_slots(request, 4) is not None

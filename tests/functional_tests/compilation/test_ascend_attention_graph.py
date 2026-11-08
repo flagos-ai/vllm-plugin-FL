@@ -30,11 +30,17 @@ def test_attention_graph_updates_mixed_backends(order, linear_quantized):
     )
 
     torch.npu.set_device(0)
-    from vllm_fl.quantization.w8a8.modelslim import AscendModelSlimConfig
+    from vllm_fl.quantization.w8a8.compressed_tensors import (
+        AscendCompressedTensorsConfig,
+    )
 
     config = SimpleNamespace(
         speculative_config=None,
-        quant_config=AscendModelSlimConfig() if linear_quantized else None,
+        quant_config=AscendCompressedTensorsConfig(
+            target_scheme_map={}, ignore=[], quant_format="int-quantized"
+        )
+        if linear_quantized
+        else None,
         model_config=SimpleNamespace(hf_text_config=SimpleNamespace(sliding_window=64)),
     )
     mask = torch.triu(torch.ones(2048, 2048, dtype=torch.bool), 1).npu()
@@ -160,11 +166,16 @@ def test_attention_graph_quantization_gate(method, kv_dtype, cache_dtype, reject
         AscendAttentionBackendImpl,
         AscendAttentionState,
     )
-    from vllm_fl.quantization.w8a8.modelslim import AscendModelSlimConfig
+    from vllm_fl.quantization.w8a8.compressed_tensors import (
+        AscendCompressedTensorsConfig,
+    )
 
     impl = object.__new__(AscendAttentionBackendImpl)
     impl.vllm_config = SimpleNamespace(
-        speculative_config=None, quant_config=AscendModelSlimConfig()
+        speculative_config=None,
+        quant_config=AscendCompressedTensorsConfig(
+            target_scheme_map={}, ignore=[], quant_format="int-quantized"
+        ),
     )
     impl.sinks = None
     impl.kv_cache_dtype = kv_dtype

@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from vllm_fl.quantization.w8a8.reference import dynamic_per_token_quant_int8
 
 
-def modelslim_w8a8_prepare_experts(w1, w2, s1, s2):
+def w8a8_prepare_experts(w1, w2, s1, s2, output_dtype=None):
     for weight, scale in ((w1, s1), (w2, s2)):
         if weight.ndim != 3 or weight.dtype != torch.int8:
             raise ValueError("Expert weights must be int8 [experts, output, input]")
@@ -39,7 +39,7 @@ def _linear(x, weight, scale):
     return (product * token_scale * scale.float().reshape(1, -1)).to(x.dtype)
 
 
-def modelslim_w8a8_experts(
+def w8a8_experts(
     x,
     w1,
     w2,
@@ -53,7 +53,7 @@ def modelslim_w8a8_experts(
     limit=None,
 ):
     if activation not in ("silu", "swiglustep"):
-        raise NotImplementedError(f"Unsupported ModelSlim activation: {activation}")
+        raise NotImplementedError(f"Unsupported W8A8 activation: {activation}")
     if activation == "swiglustep" and limit is None:
         limit = 7.0
     if limit is not None and (not math.isfinite(limit) or limit <= 0):

@@ -25,10 +25,10 @@ def strict_dispatch():
     with with_strict_mode():
         manager = get_default_manager()
         for name in (
-            "modelslim_w8a8_prepare_weight",
-            "modelslim_w8a8_dynamic_linear",
-            "modelslim_w8a8_prepare_experts",
-            "modelslim_w8a8_experts",
+            "w8a8_prepare_weight",
+            "w8a8_dynamic_linear",
+            "w8a8_prepare_experts",
+            "w8a8_experts",
             "deepseek_v4_index_quant",
         ):
             assert manager.get_selected_impl_id(name) == "vendor.ascend"
@@ -87,31 +87,45 @@ def _hf_config():
     )
 
 
-def _description():
-    result = {"embed.weight": "FLOAT", "head.weight": "FLOAT", "norm.weight": "FLOAT"}
+def _quantization_config():
+    targets = []
     for layer, ratio in enumerate((0, 4, 128)):
         prefix = f"layers.{layer}.attn."
-        for name in ("wq_a", "wq_b", "wkv", "wo_a", "wo_b"):
-            result[prefix + name + ".weight"] = (
-                "W8A8_DYNAMIC" if name in ("wq_a", "wq_b", "wkv") else "FLOAT"
-            )
-        if ratio:
-            for name in ("wkv", "wgate"):
-                result[prefix + "compressor." + name + ".weight"] = "FLOAT"
+        targets += [prefix + name for name in ("wq_a", "wq_b", "wkv")]
         if ratio == 4:
-            result[prefix + "indexer.wq_b.weight"] = "W8A8_DYNAMIC"
-            result[prefix + "indexer.weights_proj.weight"] = "FLOAT"
-            for name in ("wkv", "wgate"):
-                result[prefix + "indexer.compressor." + name + ".weight"] = "FLOAT"
+            targets.append(prefix + "indexer.wq_b")
         prefix = f"layers.{layer}.ffn."
-        result[prefix + "gate.weight"] = "FLOAT"
         for projection in ("w1", "w2", "w3"):
-            result[prefix + f"shared_experts.{projection}.weight"] = "W8A8_DYNAMIC"
-            for expert in range(4):
-                result[prefix + f"experts.{expert}.{projection}.weight"] = (
-                    "W8A8_DYNAMIC"
-                )
-    return result
+            targets.append(prefix + f"shared_experts.{projection}")
+            targets += [
+                prefix + f"experts.{expert}.{projection}" for expert in range(4)
+            ]
+    return {
+        "quant_method": "compressed-tensors",
+        "format": "int-quantized",
+        "quantization_status": "compressed",
+        "config_groups": {
+            "w8a8": {
+                "targets": targets,
+                "weights": {
+                    "num_bits": 8,
+                    "type": "int",
+                    "strategy": "channel",
+                    "symmetric": True,
+                    "dynamic": False,
+                },
+                "input_activations": {
+                    "num_bits": 8,
+                    "type": "int",
+                    "strategy": "token",
+                    "symmetric": True,
+                    "dynamic": True,
+                },
+                "format": "int-quantized",
+            }
+        },
+        "ignore": [r"re:.*\.ffn\.gate$", r"re:.*\.attn\.compressor\.(?:wkv|wgate)$"],
+    }
 
 
 def _runtime_config(pipeline_parallel_size=1):
@@ -125,7 +139,9 @@ def _runtime_config(pipeline_parallel_size=1):
         VllmConfig,
     )
 
-    from vllm_fl.quantization.w8a8.modelslim import AscendModelSlimConfig
+    from vllm_fl.quantization.w8a8.compressed_tensors import (
+        AscendCompressedTensorsConfig,
+    )
 
     config = VllmConfig(
         device_config=DeviceConfig(device="npu"),
@@ -152,7 +168,10 @@ def _runtime_config(pipeline_parallel_size=1):
         is_moe=True,
         enforce_eager=False,
     )
-    config.quant_config = AscendModelSlimConfig(_description(), weight_nz_mode=0)
+    config.quant_config = AscendCompressedTensorsConfig.from_config(
+        _quantization_config()
+    )
+    config.quant_config.weight_nz_mode = 0
     return config
 
 
@@ -271,8 +290,6 @@ def _value(name, param, index):
         )
     if param.dtype == torch.int8:
         return values.to(torch.int8)
-    if name.endswith("weight_offset"):
-        return torch.zeros_like(param)
     if name.endswith("weight_scale"):
         return torch.full_like(param, 0.015625)
     if "norm.weight" in name:
@@ -671,11 +688,9 @@ def test_hash_or_bias_router_and_shared_scaling_once(model_env, layer_index):
                 2, -1
             )
             gate = gate.clamp(max=10.0)
-            activated = (
-                gate.float()
-                * torch.sigmoid(gate.float())
-                * up.clamp(-10.0, 10.0).float()
-            ).to(x.dtype)
+            # Match the eager BF16 clamp contract: intermediate operations
+            # round in BF16, rather than assuming a single fused FP32 result.
+            activated = gate * torch.sigmoid(gate) * up.clamp(-10.0, 10.0)
             down = _quant_linear(activated, w2[expert], s2[expert])
             routed[row] += down[0].float() * weights[row, route] * 1.5
     sp = f"model.layers.{layer_index}.mlp.shared_experts."
@@ -684,11 +699,8 @@ def test_hash_or_bias_router_and_shared_scaling_once(model_env, layer_index):
         env.expected[sp + "gate_up_proj.weight"],
         env.expected[sp + "gate_up_proj.weight_scale"],
     ).chunk(2, -1)
-    shared = (
-        shared_gate.clamp(max=10.0).float()
-        * torch.sigmoid(shared_gate.clamp(max=10.0).float())
-        * shared_up.clamp(-10.0, 10.0).float()
-    ).to(x.dtype)
+    shared_gate = shared_gate.clamp(max=10.0)
+    shared = shared_gate * torch.sigmoid(shared_gate) * shared_up.clamp(-10.0, 10.0)
     shared = _quant_linear(
         shared,
         env.expected[sp + "down_proj.weight"],
@@ -697,7 +709,7 @@ def test_hash_or_bias_router_and_shared_scaling_once(model_env, layer_index):
     from vllm_fl.dispatch import CachedOp
 
     experts = mlp.experts.routed_experts
-    actual_routed = CachedOp("modelslim_w8a8_experts")(
+    actual_routed = CachedOp("w8a8_experts")(
         x,
         experts.w13_weight,
         experts.w2_weight,

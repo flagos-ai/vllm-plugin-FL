@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""ModelSlim MoE routing, numerical kernels and upstream modular integration."""
+"""W8A8 MoE routing, numerical kernels and upstream modular integration."""
 
 import pytest
 import torch
@@ -26,10 +26,10 @@ def _case(dtype, ids, first_expert=0, global_num_experts=2):
     torch.manual_seed(83)
     w1 = torch.randint(-24, 24, (2, 128, 128), dtype=torch.int8, device="npu")
     w2 = torch.randint(-24, 24, (2, 128, 64), dtype=torch.int8, device="npu")
-    s1 = torch.full((2, 128, 1), 0.015625, dtype=dtype, device="npu")
-    s2 = torch.full((2, 128, 1), 0.015625, dtype=dtype, device="npu")
-    weights = native.modelslim_w8a8_prepare_experts(w1, w2, s1, s2)
-    oracle_weights = reference.modelslim_w8a8_prepare_experts(w1, w2, s1, s2)
+    s1 = torch.full((2, 128, 1), 0.015625, dtype=torch.float32, device="npu")
+    s2 = torch.full((2, 128, 1), 0.015625, dtype=torch.float32, device="npu")
+    weights = native.w8a8_prepare_experts(w1, w2, s1, s2, output_dtype=dtype)
+    oracle_weights = reference.w8a8_prepare_experts(w1, w2, s1, s2)
     for canonical, original in zip(weights[:2], (w1, w2)):
         assert canonical.shape == original.shape
         torch.testing.assert_close(canonical, original)
@@ -39,7 +39,7 @@ def _case(dtype, ids, first_expert=0, global_num_experts=2):
     assert (
         weights[2].dtype
         == weights[3].dtype
-        == (torch.float32 if dtype == torch.float16 else torch.bfloat16)
+        == (torch.bfloat16 if dtype == torch.bfloat16 else torch.float32)
     )
     assert weights[2].shape == s1.shape
     assert weights[3].shape == s2.shape
@@ -82,8 +82,8 @@ def test_native_dynamic_qdq_reference(dtype, routing):
     native, ref, x, w, rw, probs, ids, kwargs = _case(dtype, ids, first, total)
     if x.shape[0] > 1:
         x[0].zero_()
-    actual = native.modelslim_w8a8_experts(x, *w, probs, ids, **kwargs)
-    expected = ref.modelslim_w8a8_experts(x, *rw, probs, ids, **kwargs)
+    actual = native.w8a8_experts(x, *w, probs, ids, **kwargs)
+    expected = ref.w8a8_experts(x, *rw, probs, ids, **kwargs)
     assert actual.dtype == dtype
     assert torch.isfinite(actual).all()
     torch.testing.assert_close(actual, expected, rtol=0.03, atol=0.06)
@@ -94,8 +94,8 @@ def test_native_dynamic_qdq_reference(dtype, routing):
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 def test_zero_tokens(dtype):
     native, ref, x, w, rw, probs, ids, kwargs = _case(dtype, [], 2, 4)
-    actual = native.modelslim_w8a8_experts(x, *w, probs, ids, **kwargs)
-    expected = ref.modelslim_w8a8_experts(x, *rw, probs, ids, **kwargs)
+    actual = native.w8a8_experts(x, *w, probs, ids, **kwargs)
+    expected = ref.w8a8_experts(x, *rw, probs, ids, **kwargs)
     assert actual.shape == (0, 128)
     assert actual.dtype == dtype
     torch.testing.assert_close(actual, expected)
@@ -108,11 +108,11 @@ def test_clamp_contract(activation):
     )
     x.mul_(3)
     kwargs.update(activation=activation, limit=0.5)
-    actual = native.modelslim_w8a8_experts(x, *w, probs, ids, **kwargs)
-    expected = ref.modelslim_w8a8_experts(x, *rw, probs, ids, **kwargs)
+    actual = native.w8a8_experts(x, *w, probs, ids, **kwargs)
+    expected = ref.w8a8_experts(x, *rw, probs, ids, **kwargs)
     torch.testing.assert_close(actual, expected, rtol=0.03, atol=0.04)
     other = "swiglustep" if activation == "silu" else "silu"
-    other_output = ref.modelslim_w8a8_experts(
+    other_output = ref.w8a8_experts(
         x, *rw, probs, ids, **{**kwargs, "activation": other}
     )
     assert not torch.equal(expected, other_output)
@@ -126,16 +126,16 @@ def test_changed_input_graph_replay(dtype):
         dtype, [[0, 2], [3, 1], [2, 3]], 2, 4
     )
     for _ in range(3):
-        native.modelslim_w8a8_experts(x, *w, probs, ids, **kwargs)
+        native.w8a8_experts(x, *w, probs, ids, **kwargs)
     torch.npu.synchronize()
     graph = torch.npu.NPUGraph()
     with torch.npu.graph(graph):
-        output = native.modelslim_w8a8_experts(x, *w, probs, ids, **kwargs)
+        output = native.w8a8_experts(x, *w, probs, ids, **kwargs)
     torch.npu.synchronize()
     previous = output.clone()
     for _ in range(2):
         x.copy_(torch.randn_like(x))
-        expected = native.modelslim_w8a8_experts(x, *w, probs, ids, **kwargs)
+        expected = native.w8a8_experts(x, *w, probs, ids, **kwargs)
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output, expected)
@@ -148,9 +148,7 @@ def test_unsupported_activation_rejected():
     native, ref, x, w, rw, probs, ids, kwargs = _case(torch.bfloat16, [[0]])
     for provider, weights in ((native, w), (ref, rw)):
         with pytest.raises(NotImplementedError, match="activation"):
-            provider.modelslim_w8a8_experts(
-                x, *weights, probs, ids, activation="gelu", **kwargs
-            )
+            provider.w8a8_experts(x, *weights, probs, ids, activation="gelu", **kwargs)
 
 
 @pytest.fixture
@@ -184,9 +182,9 @@ def test_loader_modular_eager_and_graph(dtype, workspace):
 
     from vllm_fl.dispatch import get_default_manager, with_strict_mode
     from vllm_fl.dispatch.backends.reference.impl.w8a8_moe import (
-        modelslim_w8a8_experts,
+        w8a8_experts,
     )
-    from vllm_fl.quantization.w8a8.modelslim import AscendModelSlimMoEMethod
+    from vllm_fl.quantization.w8a8.compressed_tensors import AscendW8A8DynamicMoEMethod
 
     config = FusedMoEConfig(
         num_experts=2,
@@ -201,7 +199,7 @@ def test_loader_modular_eager_and_graph(dtype, workspace):
         routing_method=RoutingMethodType.Default,
         moe_parallel_config=FusedMoEParallelConfig.make_no_parallel(),
     )
-    method = AscendModelSlimMoEMethod(config)
+    method = AscendW8A8DynamicMoEMethod(config)
     layer = torch.nn.Module()
     layer._expert_routing_tables = lambda: None
     layer.activation = config.activation
@@ -215,7 +213,10 @@ def test_loader_modular_eager_and_graph(dtype, workspace):
     method.create_weights(layer, 2, 128, 64, dtype, weight_loader=loader)
     assert layer.w13_weight.shape == (2, 128, 128)
     assert layer.w2_weight.shape == (2, 128, 64)
+    assert not hasattr(layer, "w13_weight_offset")
+    assert not hasattr(layer, "w2_weight_offset")
     assert layer.w13_weight_scale.shape == (2, 128, 1)
+    assert layer.w13_weight_scale.dtype == layer.w2_weight_scale.dtype == torch.float32
     assert layer.w13_weight_scale.quant_method == "channel"
     assert all(param.weight_loader is loader for param in layer.parameters())
     layer = layer.to("npu")
@@ -228,6 +229,11 @@ def test_loader_modular_eager_and_graph(dtype, workspace):
             )
         layer.w13_weight_scale.fill_(0.015625)
         layer.w2_weight_scale.fill_(0.015625)
+        source_scale = torch.tensor(0.015631, dtype=torch.float32, device="npu")
+        loader_scale = layer.w13_weight_scale[0, 0, 0]
+        loader_scale.copy_(source_scale)
+        assert source_scale != source_scale.bfloat16().float()
+        torch.testing.assert_close(loader_scale, source_scale, rtol=0, atol=0)
     w1, w2 = layer.w13_weight.detach().clone(), layer.w2_weight.detach().clone()
     s1 = layer.w13_weight_scale.detach().clone().float()
     s2 = layer.w2_weight_scale.detach().clone().float()
@@ -240,12 +246,21 @@ def test_loader_modular_eager_and_graph(dtype, workspace):
 
     with with_strict_mode():
         manager = get_default_manager()
-        for op in ("modelslim_w8a8_prepare_experts", "modelslim_w8a8_experts"):
+        for op in ("w8a8_prepare_experts", "w8a8_experts"):
             assert manager.get_selected_impl_id(op) == "vendor.ascend"
         method.process_weights_after_loading(layer)
+        prepared_dtype = torch.bfloat16 if dtype == torch.bfloat16 else torch.float32
+        assert (
+            layer.w13_weight_scale.dtype
+            == layer.w2_weight_scale.dtype
+            == prepared_dtype
+        )
+        torch.testing.assert_close(
+            layer.w13_weight_scale, s1.to(prepared_dtype), rtol=0, atol=0
+        )
         assert method.supports_internal_mk
         assert method.moe_kernel.fused_experts.expects_unquantized_inputs
-        expected = modelslim_w8a8_experts(x, w1, w2, s1, s2, probabilities, ids)
+        expected = w8a8_experts(x, w1, w2, s1, s2, probabilities, ids)
         torch.testing.assert_close(apply(), expected, rtol=0.03, atol=0.06)
         for _ in range(3):
             apply()
