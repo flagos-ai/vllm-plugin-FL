@@ -94,12 +94,12 @@ def register_builtins(registry: OpRegistry) -> None:
         "deepseek_v4_index_quant",
         "deepseek_v4_indexer",
         "paged_cache_write",
-        "modelslim_w8a8_prepare_experts",
-        "modelslim_w8a8_experts",
+        "w8a8_prepare_experts",
+        "w8a8_experts",
         "gdn_decode",
         "gdn_prefill",
-        "modelslim_w8a8_prepare_weight",
-        "modelslim_w8a8_dynamic_linear",
+        "w8a8_prepare_weight",
+        "w8a8_dynamic_linear",
     ):
         impls.append(
             OpImpl(

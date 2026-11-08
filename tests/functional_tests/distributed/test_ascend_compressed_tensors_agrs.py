@@ -117,8 +117,8 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
     )
 
     from vllm_fl.dispatch import get_default_manager, with_strict_mode
-    from vllm_fl.dispatch.backends.reference.impl.w8a8_moe import modelslim_w8a8_experts
-    from vllm_fl.quantization.w8a8.modelslim import AscendModelSlimMoEMethod
+    from vllm_fl.dispatch.backends.reference.impl.w8a8_moe import w8a8_experts
+    from vllm_fl.quantization.w8a8.compressed_tensors import AscendW8A8DynamicMoEMethod
 
     vllm_config, ep, dp, tp = groups
     parallel = FusedMoEParallelConfig(
@@ -148,7 +148,7 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
         routing_method=RoutingMethodType.Default,
         moe_parallel_config=parallel,
     )
-    method = AscendModelSlimMoEMethod(config)
+    method = AscendW8A8DynamicMoEMethod(config)
     layer = torch.nn.Module()
     layer._expert_routing_tables = lambda: None
     layer.activation = config.activation
@@ -164,6 +164,7 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
 
     method.create_weights(layer, 2, 128, 64, dtype, weight_loader=loader)
     assert all(p.weight_loader is loader for p in layer.parameters())
+    assert layer.w13_weight_scale.dtype == layer.w2_weight_scale.dtype == torch.float32
     layer = layer.to("npu")
     # Identical full weights on both ranks, independent of NPU RNG state.
     w1 = (torch.arange(4 * 128 * 128, device="npu").reshape(4, 128, 128) % 47 - 23).to(
@@ -172,7 +173,7 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
     w2 = (
         (torch.arange(4 * 128 * 64, device="npu").reshape(4, 128, 64) + 11) % 47 - 23
     ).to(torch.int8)
-    s1 = torch.full((4, 128, 1), 0.015625, device="npu", dtype=dtype)
+    s1 = torch.full((4, 128, 1), 0.015625, device="npu", dtype=torch.float32)
     s2 = torch.full_like(s1, 0.015625)
     with torch.no_grad():
         layer.w13_weight.copy_(w1[first : first + 2])
@@ -202,7 +203,7 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
         return result
 
     def oracle():
-        return modelslim_w8a8_experts(
+        return w8a8_experts(
             x,
             w1,
             w2,
@@ -215,9 +216,15 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
 
     with with_strict_mode():
         manager = get_default_manager()
-        for op in ("modelslim_w8a8_prepare_experts", "modelslim_w8a8_experts"):
+        for op in ("w8a8_prepare_experts", "w8a8_experts"):
             assert manager.get_selected_impl_id(op) == "vendor.ascend"
         method.process_weights_after_loading(layer)
+        prepared_dtype = torch.bfloat16 if dtype == torch.bfloat16 else torch.float32
+        assert (
+            layer.w13_weight_scale.dtype
+            == layer.w2_weight_scale.dtype
+            == prepared_dtype
+        )
         assert method.supports_internal_mk
         assert method.moe_kernel.fused_experts.expects_unquantized_inputs
         for _ in range(3):

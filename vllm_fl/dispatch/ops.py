@@ -59,13 +59,13 @@ class VLLMFLBackendBase(ABC):
     # ==================== Quantization Operators ====================
 
     # Optional logical operators: unsupported backends need not override these.
-    def modelslim_w8a8_prepare_weight(
+    def w8a8_prepare_weight(
         self, weight: torch.Tensor, weight_scale: torch.Tensor, nz_mode: int
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Prepare logical INT8 [K,N] weights and per-output-channel scales."""
         raise NotImplementedError
 
-    def modelslim_w8a8_dynamic_linear(
+    def w8a8_dynamic_linear(
         self,
         x: torch.Tensor,
         weight: torch.Tensor,
@@ -75,17 +75,18 @@ class VLLMFLBackendBase(ABC):
         """Dynamic INT8 Linear: floating [T,K] input and prepared [K,N] weight."""
         raise NotImplementedError
 
-    def modelslim_w8a8_prepare_experts(
+    def w8a8_prepare_experts(
         self,
         w1: torch.Tensor,
         w2: torch.Tensor,
         s1: torch.Tensor,
         s2: torch.Tensor,
+        output_dtype: torch.dtype | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Prepare INT8 [E,N,K] experts and channel scales [E,N,1]."""
         raise NotImplementedError
 
-    def modelslim_w8a8_experts(
+    def w8a8_experts(
         self,
         x: torch.Tensor,
         w1: torch.Tensor,

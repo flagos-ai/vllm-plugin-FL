@@ -81,25 +81,25 @@ class ReferenceBackend(Backend):
 
         return topk_softplus_sqrt(*args, **kwargs)
 
-    def modelslim_w8a8_prepare_experts(self, *args, **kwargs):
-        from .impl.w8a8_moe import modelslim_w8a8_prepare_experts
+    def w8a8_prepare_experts(self, *args, **kwargs):
+        from .impl.w8a8_moe import w8a8_prepare_experts
 
-        return modelslim_w8a8_prepare_experts(*args, **kwargs)
+        return w8a8_prepare_experts(*args, **kwargs)
 
-    def modelslim_w8a8_experts(self, *args, **kwargs):
-        from .impl.w8a8_moe import modelslim_w8a8_experts
+    def w8a8_experts(self, *args, **kwargs):
+        from .impl.w8a8_moe import w8a8_experts
 
-        return modelslim_w8a8_experts(*args, **kwargs)
+        return w8a8_experts(*args, **kwargs)
 
-    def modelslim_w8a8_prepare_weight(self, *args, **kwargs):
-        from .impl.quantization import modelslim_w8a8_prepare_weight
+    def w8a8_prepare_weight(self, *args, **kwargs):
+        from .impl.quantization import w8a8_prepare_weight
 
-        return modelslim_w8a8_prepare_weight(*args, **kwargs)
+        return w8a8_prepare_weight(*args, **kwargs)
 
-    def modelslim_w8a8_dynamic_linear(self, *args, **kwargs):
-        from .impl.quantization import modelslim_w8a8_dynamic_linear
+    def w8a8_dynamic_linear(self, *args, **kwargs):
+        from .impl.quantization import w8a8_dynamic_linear
 
-        return modelslim_w8a8_dynamic_linear(*args, **kwargs)
+        return w8a8_dynamic_linear(*args, **kwargs)
 
     def dynamic_per_token_quant_int8(
         self,

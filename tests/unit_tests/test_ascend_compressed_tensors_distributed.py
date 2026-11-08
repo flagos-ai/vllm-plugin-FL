@@ -17,7 +17,7 @@ import pytest
 @pytest.mark.parametrize(
     "target",
     [
-        "functional_tests/distributed/test_ascend_modelslim_agrs.py",
+        "functional_tests/distributed/test_ascend_compressed_tensors_agrs.py",
         (
             "functional_tests/models/test_deepseek_v4_causal_lm.py"
             "::test_pp_hc_head_checkpoint_loading"
@@ -25,7 +25,7 @@ import pytest
     ],
     ids=["agrs", "pp"],
 )
-def test_modelslim_distributed_contracts(tmp_path, target):
+def test_compressed_tensors_distributed_contracts(tmp_path, target):
     torch_npu = pytest.importorskip("torch_npu")
     import torch
 
@@ -52,7 +52,7 @@ def test_modelslim_distributed_contracts(tmp_path, target):
         "-s",
         str(tests / target),
     ]
-    log = tmp_path / "modelslim-distributed.log"
+    log = tmp_path / "compressed_tensors-distributed.log"
     timed_out = False
     with log.open("w") as output:
         process = subprocess.Popen(

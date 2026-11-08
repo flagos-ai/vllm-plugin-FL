@@ -7,11 +7,11 @@ from __future__ import annotations
 import torch
 
 
-def modelslim_w8a8_prepare_weight(weight, weight_scale, nz_mode):
+def w8a8_prepare_weight(weight, weight_scale, nz_mode):
     return weight.contiguous(), weight_scale
 
 
-def modelslim_w8a8_dynamic_linear(x, weight, weight_scale, bias=None):
+def w8a8_dynamic_linear(x, weight, weight_scale, bias=None):
     """Symmetric per-row int8 quantization, float32 accumulation/dequantization.
 
     Weight is already transposed [K,N]. This portable numerical oracle uses
