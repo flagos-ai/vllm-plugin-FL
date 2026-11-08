@@ -42,7 +42,11 @@ device_overrides:
       # vLLM's 1024-sequence default, which exhausts 27B private graph pools.
       max_num_seqs: 256
       block_size: 128
-      gpu_memory_utilization: 0.8
+      # 0.8 leaves only ~2 GiB headroom and the GDN prefill activation spike
+      # (6.72 GiB single alloc, qwen_gdn_attention_core) OOMs with 8 concurrent
+      # multimodal requests on 35B-A3B. 0.7 keeps ~25 GiB/rank free for the
+      # spike while still holding 251x concurrency at 16k context.
+      gpu_memory_utilization: 0.7
       disable_custom_all_reduce: false
     serve:
       served_model_name: "qwen3"
