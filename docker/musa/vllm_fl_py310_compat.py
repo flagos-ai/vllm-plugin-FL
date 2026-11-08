@@ -8,8 +8,11 @@ its dependencies import at module load time:
 * ``typing.Never`` / ``Self`` / ``assert_never`` / ``NotRequired`` /
   ``Required`` / ``LiteralString`` -- from typing_extensions.
 * ``datetime.UTC`` -- alias of ``timezone.utc``.
-* ``enum.StrEnum`` (mistral_common) and ``enum.global_enum``
-  (python-multipart >= 0.0.21) -- minimal local implementations.
+* ``enum.StrEnum`` -- mistral_common protocols import it at module load.
+
+Every back-fill is additive (``hasattr`` guarded) and best-effort, so this file
+is a no-op on Python 3.11+ and can be dropped once torch_musa ships cp311
+wheels.
 
 The module is imported from a ``.pth`` file so it runs before any vLLM import.
 
@@ -59,12 +62,5 @@ try:
 
     if not hasattr(_enum, "StrEnum"):
         _enum.StrEnum = _StrEnum
-
-    if not hasattr(_enum, "global_enum"):
-
-        def _global_enum(cls):
-            return cls
-
-        _enum.global_enum = _global_enum
 except Exception:
     pass

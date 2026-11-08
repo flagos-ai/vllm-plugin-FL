@@ -350,7 +350,7 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
     PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
     VLLM_VERSION="${MUSA_VLLM_VERSION}"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
-        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
     fi
     BUILD_ARGS+=(
         --build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}"
