@@ -11,7 +11,12 @@ import threading
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import (
+    AbstractContextManager,
+    contextmanager,
+    nullcontext,
+    suppress,
+)
 from copy import copy, deepcopy
 from dataclasses import replace
 from functools import reduce
@@ -1368,12 +1373,9 @@ class ModelRunnerFL(
             mamba_types = {spec.mamba_type for spec in mamba_groups}
             if hasattr(self.model, "get_mamba_state_copy_funcs"):
                 cached = self.model.get_mamba_state_copy_funcs(mamba_types)
-                try:
-                    mamba_utils.validate_mamba_state_copy_funcs(
-                        mamba_groups, cached
-                    )
-                except AttributeError:
-                    pass
+                # The validator is absent in older vLLM releases.
+                with suppress(AttributeError):
+                    mamba_utils.validate_mamba_state_copy_funcs(mamba_groups, cached)
             else:
                 legacy = self.model.get_mamba_state_copy_func()
                 cached = {mamba_type: legacy for mamba_type in mamba_types}
