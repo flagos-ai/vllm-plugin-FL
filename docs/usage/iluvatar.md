@@ -110,8 +110,8 @@ Do not replace the shared helper pin for other vendors without validating them.
 
 Qwen3.6-35B-A3B still showed an intermittent text regression with the compiled
 `FULL_AND_PIECEWISE` configuration above. Under eight concurrent text requests,
-the answer to `19 + 23` sometimes became `4ally`, `4a`, or `4 excerise` instead
-of `42`. Single requests returned `42`. A retry also produced
+the answer to `19 + 23` sometimes became `4ally`, `4a`, or `4` followed by a
+misspelled word instead of `42`. Single requests returned `42`. A retry also produced
 `4\n                    \n42`, which the former substring-based gate accepted.
 Numeric text requests now require the complete trimmed answer to match the
 expected number; a retry containing the expected substring is insufficient.
