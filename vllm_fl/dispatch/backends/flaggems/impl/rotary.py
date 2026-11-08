@@ -140,9 +140,7 @@ def rotary_embedding_flaggems(
     )
     if nvidia_inplace or thead_inplace:
         q_embed, k_embed = result
-        if q_embed is not query:
-            query.copy_(q_embed)
-        if k_embed is not key:
-            key.copy_(k_embed)
+        query.copy_(q_embed)
+        key.copy_(k_embed)
         return query, key
     return result

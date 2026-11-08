@@ -224,6 +224,8 @@ class WorkerFL(WorkerBase):
         )
         # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
         # this flag to select the matching block-table and KV-cache kernels.
+        # vLLM >= 0.32 defaults VllmConfig.use_v2_model_runner to True, so the
+        # flag is pinned here instead of being mirrored from the config.
         self.use_v2_model_runner = False
 
         _initialize_fl_runtime(self.rank)
@@ -254,14 +256,6 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        # NOTE(thead-port): ModelRunnerFL only implements vLLM's *v1* runner.
-        # vLLM >= 0.32 defaults vllm_config.use_v2_model_runner to True and the
-        # v2 runner needs mapped UVA/CUDA-view buffers, which a
-        # VLLM_TARGET_DEVICE=empty build cannot provide.
-        # VllmConfig.use_v2_model_runner is a read-only property; the v2
-        # runner is not implemented in vllm-plugin-FL, so disable it through
-        # VLLM_USE_V2_MODEL_RUNNER=0 (see CI env) and pin the worker flag here.
-        self.use_v2_model_runner = False
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 

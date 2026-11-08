@@ -48,6 +48,14 @@ from vllm_fl.utils import (
 logger = init_logger(__name__)
 
 
+def _vllm_c_available() -> bool:
+    """True when this build ships upstream's CUDA IR kernels (``vllm._C``)."""
+    try:
+        return importlib.util.find_spec("vllm._C") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     """Configure eager FX execution with ordinary Ascend FULL decode graphs.
 
@@ -981,13 +989,12 @@ class PlatformFL(Platform):
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"]
-        if cls.vendor_name == "nvidia" and not using_inductor:
-            # Upstream CUDA IR kernels (vllm_c) only exist in a CUDA build.
-            # Vendor / VLLM_TARGET_DEVICE=empty builds ship no vllm._C, and
-            # some ops (e.g. gelu_and_mul_sparse) have no vllm_c provider at all,
-            # so keeping it in the priority list makes KernelConfig.set_default
-            # fail with "All providers in priority must be registered
-            # implementations".
+        if not using_inductor and _vllm_c_available():
+            # ``vllm_c`` is only a valid provider when the build actually ships
+            # upstream's CUDA IR kernels. VLLM_TARGET_DEVICE=empty builds have no
+            # vllm._C, and keeping it in the priority list makes
+            # KernelConfig.set_default fail with "All providers in priority must
+            # be registered implementations".
             default = ["vllm_c", "native"]
         return IrOpPriorityConfig.with_default(
             default,
