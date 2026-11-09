@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Mla contracts and regression coverage."""
 
+import importlib
+import itertools
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -13,9 +15,13 @@ from vllm.v1.attention.backends.mla.indexer import (
     DeepSeekV32IndexerDecodeMetadata,
     DeepseekV32IndexerMetadata,
 )
+from vllm.v1.kv_cache_interface import MLAAttentionSpec, UniformTypeKVCacheSpecs
 
+from vllm_fl.attention import sparse_mla_metadata
+from vllm_fl.attention.sparse_mla_metadata import convert_sparse_indices
+from vllm_fl.dispatch import capabilities
 from vllm_fl.dispatch.backends.flaggems.impl import mla as mla_sparse
-from vllm_fl.dispatch.manager import OpManager
+from vllm_fl.dispatch.manager import OpManager, reset_default_manager
 from vllm_fl.dispatch.policy import SelectionPolicy, policy_context
 from vllm_fl.models.glm5 import indexer_backend, runtime as glm5_patch
 from vllm_fl.models.glm5.sparse_indexer import (
@@ -23,6 +29,15 @@ from vllm_fl.models.glm5.sparse_indexer import (
 )
 
 _install_mla_boundary_compat_ops = glm5_patch._install_mla_boundary_compat_ops
+
+
+@pytest.fixture(autouse=True)
+def clean_sparse_dispatch_state():
+    # Load providers before capability mocks can escape through lazy imports.
+    importlib.import_module("vllm_fl.dispatch.backends.flaggems.impl.mla_ops")
+    reset_default_manager()
+    yield
+    reset_default_manager()
 
 
 @pytest.fixture(autouse=False)
@@ -628,7 +643,7 @@ def test_sparse_mla_is_an_eager_boundary():
 
 
 def test_missing_library_fails_before_execution(monkeypatch):
-    monkeypatch.setattr(mla_sparse, "_flag_op", lambda *a: None)
+    monkeypatch.setattr(capabilities, "get_flaggems_vllm_operator", lambda *a: None)
     with pytest.raises(RuntimeError, match="requires FlagGems-vllm"):
         _make_impl()
 
@@ -641,12 +656,12 @@ def test_failure_after_cache_write_propagates_without_second_impl(monkeypatch):
         kv_cache.view(-1, kv_cache.shape[-1])[slots] = 1.0
         raise RuntimeError("kernel failed after writing")
 
-    def fake_flag_op(module, name):
-        if module == "concat_and_cache_mla":
+    def fake_flag_op(name):
+        if name == "concat_and_cache_mla":
             return writer
         return lambda *a, **k: None
 
-    monkeypatch.setattr(mla_sparse, "_flag_op", fake_flag_op)
+    monkeypatch.setattr(capabilities, "get_flaggems_vllm_operator", fake_flag_op)
     impl = _make_impl()
 
     kv_cache = torch.zeros(4, 2, 1, 12, dtype=torch.bfloat16)
@@ -806,3 +821,428 @@ def test_real_decode_uses_pool_capacity_and_preserves_token_selection(
         actual = result[row][result[row] >= 0].tolist()
         assert sorted(actual) == expected_indices[row]
     assert torch.equal(backing, before)
+
+
+def test_sparse_physical_conversion_delegates_without_tensor_materialization(
+    monkeypatch,
+):
+    args = (object(), object(), object(), 64)
+    expected = (object(), object())
+    calls = []
+
+    def convert(*received):
+        calls.append(received)
+        return expected
+
+    monkeypatch.setattr(sparse_mla_metadata, "convert_sparse_indices", convert)
+    assert mla_sparse._convert_request_to_physical_indices(*args) is expected
+    assert calls == [args]
+
+
+def test_sparse_lookup_uses_public_capabilities_not_indexer(monkeypatch):
+    expected = object()
+    calls = []
+
+    def lookup(name):
+        calls.append(name)
+        return lambda: expected
+
+    monkeypatch.setattr(capabilities, "get_flaggems_vllm_operator", lookup)
+    monkeypatch.setattr(
+        indexer_backend,
+        "_load_flaggems_op",
+        lambda *args: pytest.fail("MLA must not import the indexer adapter"),
+    )
+    binding = mla_sparse._resolve_sparse_mla_kernel("concat_and_cache_mla")
+    assert binding.preflight()[0].fn() is expected
+    assert calls == ["concat_and_cache_mla"]
+
+
+def test_sparse_graph_query_resolves_only_attention(monkeypatch):
+    calls = []
+    binding = SimpleNamespace(
+        graph_capabilities={"test": True},
+        preflight=lambda: [SimpleNamespace(impl_id="test")],
+    )
+
+    def resolve(name, *, required=True):
+        calls.append((name, required))
+        return binding
+
+    monkeypatch.setattr(mla_sparse, "_resolve_sparse_mla_kernel", resolve)
+    assert mla_sparse.sparse_mla_cudagraph_support(512)[0] is (
+        AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE
+    )
+    assert calls == [("flash_mla_sparse_fwd", False)]
+    assert mla_sparse.sparse_mla_cudagraph_support(576)[0] is AttentionCGSupport.NEVER
+    assert len(calls) == 1
+
+
+def test_sparse_runtime_resolves_both_required_bindings(monkeypatch):
+    calls = []
+
+    def resolve(name, *, required=True):
+        calls.append((name, required))
+        return name
+
+    monkeypatch.setattr(mla_sparse, "_resolve_sparse_mla_kernel", resolve)
+    assert mla_sparse._resolve_sparse_mla_kernels() == (
+        "concat_and_cache_mla",
+        "flash_mla_sparse_fwd",
+    )
+    assert calls == [("concat_and_cache_mla", True), ("flash_mla_sparse_fwd", True)]
+
+
+@pytest.mark.parametrize("head_size", [512, 576])
+@pytest.mark.parametrize("capable", [False, True])
+def test_sparse_mla_decode_graph_requires_operator_capability(
+    monkeypatch, head_size, capable
+):
+    op = SimpleNamespace(supports_single_token_decode_graph=capable)
+    monkeypatch.setattr(capabilities, "get_flaggems_vllm_operator", lambda *args: op)
+    expected = (
+        AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE
+        if head_size == 512 and capable
+        else AttentionCGSupport.NEVER
+    )
+    spec = SimpleNamespace(head_size=head_size)
+    for cls in (
+        mla_sparse.FlagGemsSparseMLABackend,
+        mla_sparse.FlagGemsSparseMLAMetadataBuilder,
+    ):
+        assert cls.get_cudagraph_support(None, spec) is expected
+
+
+def test_sparse_mla_missing_graph_capability_preserves_eager(monkeypatch):
+    monkeypatch.setattr(capabilities, "get_flaggems_vllm_operator", lambda *args: None)
+    assert mla_sparse.sparse_mla_cudagraph_support(512)[0] is AttentionCGSupport.NEVER
+
+
+@pytest.mark.parametrize("capable", [False, True])
+@pytest.mark.parametrize(
+    "case,supported",
+    [
+        ("main", True),
+        ("with_indexer", True),
+        ("two_main", True),
+        ("unsupported_head", False),
+        ("mixed_heads", False),
+        ("index_only", False),
+        ("empty", False),
+        ("non_mla", False),
+    ],
+)
+def test_sparse_mla_grouped_graph_support_checks_own_specs(
+    monkeypatch, capable, case, supported
+):
+    def spec(head=512, ratio=1, dtype=torch.bfloat16):
+        return MLAAttentionSpec(
+            block_size=512,
+            num_kv_heads=1,
+            head_size=head,
+            dtype=dtype,
+            compress_ratio=ratio,
+            indexes_kv_by_block_stride=True,
+        )
+
+    main, index = spec(), spec(132, 4, torch.uint8)
+    entries = {
+        "main": {"a": main},
+        "with_indexer": {"a": main, "i": index},
+        "two_main": {"a": main, "b": spec()},
+        "unsupported_head": {"a": spec(576), "i": index},
+        "mixed_heads": {"a": main, "b": spec(576), "i": index},
+        "index_only": {"i": index},
+        "empty": {},
+        "non_mla": {"a": SimpleNamespace(head_size=512)},
+    }[case]
+    group = UniformTypeKVCacheSpecs(block_size=512, kv_cache_specs=entries)
+    monkeypatch.setattr(
+        capabilities,
+        "get_flaggems_vllm_operator",
+        lambda *args: SimpleNamespace(supports_single_token_decode_graph=capable),
+    )
+    expected = (
+        AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE
+        if capable and supported
+        else AttentionCGSupport.NEVER
+    )
+    for cls in (
+        mla_sparse.FlagGemsSparseMLABackend,
+        mla_sparse.FlagGemsSparseMLAMetadataBuilder,
+    ):
+        assert cls.get_cudagraph_support(None, group) is expected
+        assert cls._cudagraph_support is AttentionCGSupport.NEVER
+
+
+@pytest.mark.parametrize("kind", ["flagos", "vendor"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_sparse_mla_small_heads_use_selected_provider_without_padding(
+    monkeypatch, kind, fail
+):
+    import flaggems_vllm
+
+    from vllm_fl.dispatch import manager as dispatch_manager
+    from vllm_fl.dispatch.types import BackendImplKind, OpImpl
+
+    calls = []
+    error = torch.OutOfMemoryError("selected provider failure")
+
+    def kernel(label):
+        def call(q, *args, **kwargs):
+            calls.append((label, tuple(q.shape)))
+            if fail:
+                raise error
+            return q.clone(), None, None
+
+        call.supported_query_heads = (4, 64, 128)
+        call.supports_single_token_decode_graph = True
+        return call
+
+    public, native = kernel("flagos"), kernel("vendor")
+    platform = OpManager(register_builtins=False)
+    platform.registry.register_impl(
+        OpImpl(
+            "flash_mla_sparse_fwd",
+            "vendor.test",
+            BackendImplKind.VENDOR,
+            native,
+            vendor="test",
+        )
+    )
+    monkeypatch.setattr(dispatch_manager, "get_default_manager", lambda: platform)
+    monkeypatch.setattr(
+        capabilities,
+        "get_flaggems_vllm_operator",
+        lambda name: public if name == "flash_mla_sparse_fwd" else lambda *a, **k: None,
+    )
+    monkeypatch.setattr(flaggems_vllm, "contiguous_copy", lambda x: x.contiguous())
+    # This CPU test isolates provider routing and error propagation, not the
+    # device-only conversion kernel (covered by real-device cache/op tests).
+    monkeypatch.setattr(
+        sparse_mla_metadata,
+        "convert_sparse_indices",
+        lambda *args: (
+            torch.tensor([[0], [64]], dtype=torch.int32),
+            torch.ones(2, dtype=torch.int32),
+        ),
+    )
+
+    def no_head_expansion(q, heads):
+        assert q.shape[1] == heads == 4
+        return q.contiguous()
+
+    monkeypatch.setattr(flaggems_vllm, "pad_attention_heads", no_head_expansion)
+    policy = SelectionPolicy.from_dict(per_op_order={"flash_mla_sparse_fwd": [kind]})
+    with policy_context(policy):
+        impl = _make_impl()
+        impl.topk_indices_buffer = torch.zeros((2, 1), dtype=torch.int32)
+        meta = mla_sparse.FlagGemsSparseMLAMetadata(
+            num_reqs=2,
+            max_query_len=1,
+            max_seq_len=1,
+            num_actual_tokens=2,
+            query_start_loc=torch.tensor([0, 1, 2], dtype=torch.int32),
+            slot_mapping=torch.tensor([0, 64]),
+            block_table=torch.tensor([[0], [1]], dtype=torch.int32),
+            req_id_per_token=torch.tensor([0, 1], dtype=torch.int32),
+        )
+        q = torch.randn(2, 4, 8).bfloat16()
+        cache = torch.zeros(2, 64, 8, dtype=torch.bfloat16)
+        if fail:
+            with pytest.raises(torch.OutOfMemoryError) as caught:
+                impl.forward_mqa(q, cache, meta, None)
+            assert caught.value is error
+        else:
+            output, lse = impl.forward_mqa(q, cache, meta, None)
+            torch.testing.assert_close(output, q)
+            assert lse is None
+        assert calls == [(kind, (2, 4, 8))]
+        assert impl._sparse_attn.manager.get_failed_impls("flash_mla_sparse_fwd") == {}
+
+
+def test_sparse_mla_graph_contract_follows_selected_vendor(monkeypatch):
+    from vllm_fl.dispatch import manager as dispatch_manager
+    from vllm_fl.dispatch.types import BackendImplKind, OpImpl
+
+    public = lambda *a, **k: None
+    public.supports_single_token_decode_graph = False
+    native = lambda *a, **k: None
+    native.supports_single_token_decode_graph = True
+    platform = OpManager(register_builtins=False)
+    platform.registry.register_impl(
+        OpImpl(
+            "flash_mla_sparse_fwd",
+            "vendor.test",
+            BackendImplKind.VENDOR,
+            native,
+            vendor="test",
+        )
+    )
+    monkeypatch.setattr(dispatch_manager, "get_default_manager", lambda: platform)
+    monkeypatch.setattr(capabilities, "get_flaggems_vllm_operator", lambda *a: public)
+    for name, expected in [
+        ("vendor", AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE),
+        ("flagos", AttentionCGSupport.NEVER),
+    ]:
+        with policy_context(
+            SelectionPolicy.from_dict(per_op_order={"flash_mla_sparse_fwd": [name]})
+        ):
+            assert mla_sparse.sparse_mla_cudagraph_support(512)[0] is expected
+
+
+def _sparse_mapping_reference(requests, table, indices, block_size):
+    """Independent row oracle: filter, map, preserve order and duplicates."""
+    requests, table, indices = requests.cpu(), table.cpu(), indices.cpu()
+    out = torch.full(indices.shape, -1, dtype=torch.int32)
+    lengths = torch.zeros(indices.shape[0], dtype=torch.int32)
+    for row in range(indices.shape[0]):
+        req = int(requests[row])
+        values = []
+        for token in indices[row].tolist():
+            if token < 0 or token // block_size >= table.shape[1]:
+                continue
+            block = int(table[req, token // block_size])
+            if block >= 0:
+                values.append(block * block_size + token % block_size)
+        if values:
+            out[row, : len(values)] = torch.tensor(values, dtype=torch.int64).to(
+                torch.int32
+            )
+        lengths[row] = len(values)
+    return out, lengths
+
+
+def _sparse_mapping_inputs(
+    rows, width, dtype=torch.int32, strided=False, block_size=64
+):
+    g = torch.Generator().manual_seed(42)
+    table = torch.randint(0, 128, (4, 67), generator=g, dtype=dtype)
+    table[:, 1::3] = -1
+    table[0, 0] = 1 << 27  # Address math must widen before multiplication.
+    requests = (torch.arange(rows, dtype=dtype) % 4) - 4
+    indices = torch.randint(
+        -5, 70 * block_size, (rows, width), generator=g, dtype=dtype
+    )
+    if width:
+        indices[:, 0] = 0
+    if width > 3:
+        indices[:, 1:4] = torch.tensor([block_size, 0, 2 * block_size], dtype=dtype)
+    values = [requests.cuda(), table.cuda(), indices.cuda()]
+    if strided:
+        result = []
+        for value in values:
+            shape = list(value.shape)
+            shape[-1] *= 2
+            backing = torch.empty(shape, dtype=value.dtype, device=value.device)
+            view = backing[..., ::2]
+            view.copy_(value)
+            result.append(view)
+        values = result
+    return values
+
+
+@pytest.mark.parametrize("rows", [0, 1, 8])
+@pytest.mark.parametrize("width", [0, 1, 3, 17, 1023, 1024, 1025, 2048, 8195])
+@pytest.mark.parametrize("dtype", [torch.int32, torch.int64])
+@pytest.mark.parametrize("strided", [False, True])
+@pytest.mark.gpu
+def test_sparse_mapping(rows, width, dtype, strided):
+    args = _sparse_mapping_inputs(rows, width, dtype, strided)
+    before = [a.clone() for a in args]
+    actual = convert_sparse_indices(*args, 64)
+    expected = _sparse_mapping_reference(*args, 64)
+    # Report reduction/count errors separately from compacted-store errors.
+    torch.testing.assert_close(actual[1].cpu(), expected[1], rtol=0, atol=0)
+    for a, e in zip(actual, expected):
+        torch.testing.assert_close(a.cpu(), e, rtol=0, atol=0)
+        assert a.dtype == torch.int32 and a.is_contiguous()
+    for a, b in zip(args, before):
+        torch.testing.assert_close(a, b, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize(
+    "dtypes", list(itertools.product([torch.int32, torch.int64], repeat=3))
+)
+@pytest.mark.parametrize("block_size", [1, 3, 64, 128])
+@pytest.mark.gpu
+def test_mixed_dtypes_and_page_sizes(dtypes, block_size):
+    args = _sparse_mapping_inputs(8, 2051, block_size=block_size)
+    args = [a.to(d) for a, d in zip(args, dtypes)]
+    for a, e in zip(
+        convert_sparse_indices(*args, block_size),
+        _sparse_mapping_reference(*args, block_size),
+    ):
+        torch.testing.assert_close(a.cpu(), e, rtol=0, atol=0)
+
+
+@pytest.mark.gpu
+def test_no_pages_and_all_invalid():
+    req = torch.zeros(8, dtype=torch.int32, device="cuda")
+    indices = torch.zeros((8, 1025), dtype=torch.int32, device="cuda")
+    for table in [
+        torch.empty((1, 0), dtype=torch.int32, device="cuda"),
+        torch.full((1, 8), -1, dtype=torch.int32, device="cuda"),
+    ]:
+        out, lengths = convert_sparse_indices(req, table, indices, 64)
+        assert (out == -1).all().item() and (lengths == 0).all().item()
+
+
+@pytest.mark.parametrize("request_id", [0, -1])
+@pytest.mark.parametrize("dtype", [torch.int32, torch.int64])
+@pytest.mark.gpu
+def test_compaction_masks_literal_with_offset_inputs(request_id, dtype):
+    # Sentinel guards expose tail-lane reads and writes beyond logical views.
+    req = torch.tensor([737, request_id, 737], dtype=dtype, device="cuda")[1:2]
+    pages = torch.tensor([737, 10, -1, 12, 737], dtype=dtype, device="cuda")[1:4][
+        None, :
+    ]
+    tokens = torch.tensor(
+        [737, -1, 0, 64, 128, 1, 192, 737], dtype=dtype, device="cuda"
+    )[1:7][None, :]
+    before = [x.clone() for x in (req, pages, tokens)]
+    out, lengths = convert_sparse_indices(req, pages, tokens, 64)
+    assert lengths.cpu().tolist() == [3]
+    assert out.cpu().tolist() == [[640, 768, 641, -1, -1, -1]]
+    assert out.is_contiguous() and out.untyped_storage().nbytes() == out.numel() * 4
+    for value, original in zip((req, pages, tokens), before):
+        torch.testing.assert_close(value, original, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("width", [17, 2048, 8195])
+@pytest.mark.gpu
+def test_dynamic_graph_two_replays(width):
+    args = _sparse_mapping_inputs(8, width)
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        for _ in range(3):
+            convert_sparse_indices(*args, 64)
+    torch.cuda.current_stream().wait_stream(stream)
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        actual = convert_sparse_indices(*args, 64)
+    for value in [-1, 128]:
+        args[2][:, 0] = value
+        args[1][:, 0] = 3 if value == -1 else -1
+        for tensor in actual:
+            tensor.fill_(-737)
+        graph.replay()
+        for a, e in zip(actual, _sparse_mapping_reference(*args, 64)):
+            torch.testing.assert_close(a.cpu(), e, rtol=0, atol=0)
+
+
+@pytest.mark.gpu
+def test_unsupported_contracts():
+    req, table, indices = _sparse_mapping_inputs(1, 3)
+    with pytest.raises(ValueError):
+        convert_sparse_indices(req, table, indices, 0)
+    with pytest.raises(ValueError):
+        convert_sparse_indices(req[:, None], table, indices, 64)
+    with pytest.raises(ValueError):
+        convert_sparse_indices(req[:0], table, indices, 64)
+    with pytest.raises(NotImplementedError):
+        convert_sparse_indices(req, table, indices.float(), 64)
+    with pytest.raises(ValueError):
+        convert_sparse_indices(req.cpu(), table, indices, 64)
