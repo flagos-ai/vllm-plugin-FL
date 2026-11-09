@@ -1,6 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Sink-capable FlashMLA sparse backend for HY V4 (NVIDIA).
+"""Sink-capable FlashMLA sparse backend for HY V4.
+
+Targets NVIDIA natively.  On CUDA-alike platforms without the native
+FlashMLA kernels (e.g. MetaX), the model runtime plan rebinds this
+module's ``flash_mla_sparse_fwd`` to the resolved FlagGems
+implementation before any layer is built (see
+``runtime.install_hy4_flaggems_fallback``), and
+``HYV4FlashMLASparseBackend.validate_configuration`` below admits the
+device instead of rejecting it.
 
 HY V4 adds a per-head learnable attention sink on top of sparse MLA. The
 vendored FlashMLA kernels already accept an ``attn_sink`` argument, but vLLM's
@@ -269,3 +277,109 @@ class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
     @classmethod
     def supports_sink(cls) -> bool:
         return True
+
+    @classmethod
+    def supports_compute_capability(cls, capability) -> bool:
+        # The parent restricts FLASHMLA_SPARSE to Hopper/Blackwell.  On
+        # CUDA-alike platforms (e.g. MetaX) the runtime plan rebinds
+        # ``flash_mla_sparse_fwd`` to the resolved FlagGems implementation
+        # before any layer is built, so the native-kernel precondition this
+        # gate encodes does not apply.  Native CUDA keeps the parent gate.
+        from vllm.platforms import current_platform
+
+        if current_platform.is_cuda_alike() and not current_platform.is_cuda():
+            return True
+        return super().supports_compute_capability(capability)
+
+    @classmethod
+    def validate_configuration(cls, *args, **kwargs):
+        reasons = super().validate_configuration(*args, **kwargs)
+        if reasons and cls._flaggems_sparse_active():
+            # Kernel dispatch was rebound to FlagGems (CUDA-alike device); only
+            # the compute-capability gate reflects the missing native kernel.
+            reasons = [r for r in reasons if "compute capability" not in r]
+        return reasons
+
+    @staticmethod
+    def _flaggems_sparse_active() -> bool:
+        """True when the sparse kernel globals were rebound to FlagGems."""
+        import vllm.v1.attention.backends.mla.flashmla_sparse as native_sparse
+
+        fn = getattr(native_sparse, "flash_mla_sparse_fwd", None)
+        mod = getattr(fn, "__module__", "") or ""
+        return "flaggems" in mod or "flag_gems" in mod
+
+    # (BK, BH, num_stages, num_warps).  The upstream autotune configs
+    # (BK=64, BH=64) need 188 KB of shared memory; MetaX C550 reports a 64 KB
+    # limit, so the first prefill would die with OutOfResources.  Measured on
+    # C550 (SQ=128, HQ=64, DQK=576, SKV=4096, TOPK=2048): (16, 32, 2, 4) is
+    # the fastest config that fits (54 KB, 8.98 ms).
+    _SAFE_TILE_CONFIGS = (
+        (16, 32, 2, 4),
+        (16, 32, 1, 4),
+        (16, 16, 2, 4),
+        (16, 16, 1, 4),
+    )
+    _retuned: bool = False
+
+    @classmethod
+    def _maybe_retune_triton_sparse_prefill(cls, tx=None) -> None:
+        if cls._retuned:
+            return
+        import os
+
+        if os.environ.get("VLLM_FL_METAX_SAFE_MLA_TILES", "1").lower() in (
+            "0",
+            "false",
+            "off",
+            "no",
+        ):
+            return
+        from vllm.platforms import current_platform
+
+        if not (current_platform.is_cuda_alike() and not current_platform.is_cuda()):
+            return
+        if not cls._flaggems_sparse_active():
+            return
+        import triton
+
+        retuned = False
+        for module_name in (
+            "flaggems_vllm.ops.flashmla_sparse",
+            "flag_gems.fused.flashmla_sparse",
+        ):
+            try:
+                mod = __import__(module_name, fromlist=["_"])
+            except ImportError:
+                continue
+            fn = getattr(mod, "triton_flash_mla_sparse_fwd", None)
+            if fn is None or not hasattr(fn, "configs"):
+                continue
+            configs = [
+                triton.Config({"BK": bk, "BH": bh}, num_warps=warps, num_stages=stages)
+                for bk, bh, stages, warps in cls._SAFE_TILE_CONFIGS
+            ]
+            if tx is not None:
+                # Discard selected upstream configs as well as the config list;
+                # both belong to this process-global installation transaction.
+                tx.set(fn, "configs", configs)
+                tx.set(fn, "cache", {})
+            else:
+                fn.configs = configs
+                fn.cache = {}
+            retuned = True
+            logger.warning_once(
+                "HYV4 sparse MLA: rewrote %s.triton_flash_mla_sparse_fwd autotune "
+                "configs to small-shared-memory variants %s (device shared-memory "
+                "limit is below what the upstream BK=64/BH=64 configs require)",
+                module_name,
+                cls._SAFE_TILE_CONFIGS,
+            )
+        if not retuned:
+            raise RuntimeError(
+                "HYV4 FlagGems sparse MLA has no retunable Triton prefill kernel"
+            )
+        if tx is not None:
+            tx.set(cls, "_retuned", True)
+        else:
+            cls._retuned = True
