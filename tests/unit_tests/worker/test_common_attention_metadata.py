@@ -52,7 +52,7 @@ def test_graph_capture_replays_before_return_and_clear_drops_cache(monkeypatch):
         else:
             output.fill_(42)
 
-    table = object()
+    table = SimpleNamespace(block_tables=[])
     args = (table, 1, output, output, output, output)
     assert runner.run(*args, use_graph=True, capture=True, compute=compute)
     assert output.item() == 42
