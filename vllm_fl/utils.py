@@ -5,6 +5,18 @@ import os
 
 _OP_CONFIG: dict[str, str] | None = None
 
+
+def _env_vendor_name() -> str:
+    """Vendor explicitly requested through ``GEMS_VENDOR`` (FlagGems override).
+
+    Deployments set it exactly where the runtime probe cannot identify the
+    accelerator (for example the Kunlunxin CI container). Honouring it keeps
+    the plugin bound to the right vendor backend instead of collapsing to
+    UnspecifiedPlatform.
+    """
+    return os.environ.get("GEMS_VENDOR", "").strip().lower()
+
+
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
 #
