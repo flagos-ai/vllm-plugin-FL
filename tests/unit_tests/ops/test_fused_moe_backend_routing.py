@@ -1,3 +1,5 @@
+# Copyright (c) 2026 BAAI. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 """Routing tests for the FlagOS unquantized MoE provider."""
 
 import sys
@@ -9,10 +11,8 @@ import pytest
 
 
 def _import_fused_moe_utils():
-    try:
-        from vllm_fl.ops.fused_moe import fused_moe_utils
-    except (ImportError, ModuleNotFoundError) as exc:
-        return pytest.skip(f"vLLM MoE dependencies unavailable: {exc}")
+    from vllm_fl.ops.fused_moe import fused_moe_utils
+
     return fused_moe_utils
 
 
@@ -44,29 +44,46 @@ class _SupportedNativeExperts:
         return True, None
 
 
-@pytest.mark.parametrize("vendor", ["nvidia", "kunlunxin"])
-@pytest.mark.parametrize("use_fused_package", [False, True])
+@pytest.mark.parametrize(
+    "vendor,use_flaggems_vllm,execute_error",
+    [
+        ("nvidia", False, False),
+        ("nvidia", False, True),
+        ("nvidia", True, False),
+        ("nvidia", True, True),
+        ("kunlunxin", False, False),
+        ("kunlunxin", False, True),
+        ("kunlunxin", True, False),
+        ("kunlunxin", True, True),
+        ("thead", False, False),
+        ("thead", True, False),
+        ("thead", True, True),
+    ],
+)
 def test_experts_apply_resolves_platform_before_vendor_dispatch(
-    monkeypatch, vendor, use_fused_package
+    monkeypatch, vendor, use_flaggems_vllm, execute_error
 ):
     """Exercise the execution entry, including a vendor added after import."""
     import flag_gems
     import torch
 
     module = _import_fused_moe_utils()
+    # Patch the environment so teardown does not shadow the lazy module attribute.
+    monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", "1" if use_flaggems_vllm else "0")
     monkeypatch.setattr(
         module,
         "_get_current_platform",
         lambda: SimpleNamespace(vendor_name=vendor, is_cuda=lambda: vendor == "nvidia"),
     )
     result = torch.full((2, 4), 7.0)
-    nvidia = Mock(return_value=result)
-    kunlunxin = Mock(return_value=result)
-    monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", "1" if use_fused_package else "0")
-    monkeypatch.setattr(flag_gems, "fused_experts_impl", nvidia)
-    fused_package = types.ModuleType("flaggems_vllm")
-    fused_package.fused_experts_impl = nvidia
-    monkeypatch.setitem(sys.modules, "flaggems_vllm", fused_package)
+    error = RuntimeError("fused experts failed") if execute_error else None
+    flaggems = Mock(return_value=result, side_effect=error)
+    flaggems_vllm = Mock(return_value=result, side_effect=error)
+    kunlunxin = Mock(return_value=result, side_effect=error)
+    monkeypatch.setattr(flag_gems, "fused_experts_impl", flaggems)
+    fused_backend = types.ModuleType("flaggems_vllm")
+    fused_backend.fused_experts_impl = flaggems_vllm
+    monkeypatch.setitem(sys.modules, "flaggems_vllm", fused_backend)
     name = "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_moe.fused_moe"
     backend = types.ModuleType(name)
     backend.fused_experts_impl = kunlunxin
@@ -89,29 +106,74 @@ def test_experts_apply_resolves_platform_before_vendor_dispatch(
         w2_bias=None,
     )
     output = torch.zeros_like(result)
-    module.TritonExpertsFL.apply(
-        experts,
-        output,
-        result,
-        result,
-        result,
-        result,
-        result,
-        module.MoEActivation.SILU,
-        2,
-        None,
-        None,
-        None,
-        result,
-        result,
-        None,
-        False,
+    if vendor == "thead" and not use_flaggems_vllm:
+        # Without the dedicated library, retain the step-by-step pipeline.
+        # Stop at its first shape check; no kernel execution is needed here.
+        monkeypatch.setattr(experts.quant_config, "use_int4_w4a16", True)
+        fallback_w1 = torch.full((2, 4, 4), 7.0)
+        with pytest.raises(AssertionError, match="Hidden size mismatch"):
+            module.TritonExpertsFL.apply(
+                experts,
+                output,
+                result,
+                fallback_w1,
+                result,
+                result,
+                result,
+                module.MoEActivation.SILU,
+                2,
+                None,
+                None,
+                None,
+                result,
+                result,
+                None,
+                False,
+            )
+        flaggems.assert_not_called()
+        flaggems_vllm.assert_not_called()
+        kunlunxin.assert_not_called()
+        return
+
+    def apply_experts():
+        module.TritonExpertsFL.apply(
+            experts,
+            output,
+            result,
+            result,
+            result,
+            result,
+            result,
+            module.MoEActivation.SILU,
+            2,
+            None,
+            None,
+            None,
+            result,
+            result,
+            None,
+            False,
+        )
+
+    if execute_error:
+        with pytest.raises(RuntimeError, match="fused experts failed"):
+            apply_experts()
+        torch.testing.assert_close(output, torch.zeros_like(result))
+    else:
+        apply_experts()
+        torch.testing.assert_close(output, result)
+    selected = (
+        kunlunxin
+        if vendor == "kunlunxin"
+        else flaggems_vllm
+        if use_flaggems_vllm
+        else flaggems
     )
-    torch.testing.assert_close(output, result)
-    selected, other = (nvidia, kunlunxin) if vendor == "nvidia" else (kunlunxin, nvidia)
     selected.assert_called_once()
     assert selected.call_args.kwargs["activation"] == "silu"
-    other.assert_not_called()
+    for other in (flaggems, flaggems_vllm, kunlunxin):
+        if other is not selected:
+            other.assert_not_called()
 
 
 @pytest.mark.parametrize("backend", ["auto", "triton"])

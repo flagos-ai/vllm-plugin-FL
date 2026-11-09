@@ -11,6 +11,10 @@ This module follows a layered testing strategy:
 Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
+import ast
+import importlib.util
+from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -33,12 +37,13 @@ def has_vllm_model_runner():
         return False
 
 
-# Skip all tests if vllm model runner is not available
-pytestmark = pytest.mark.skipif(
+# Full-runner tests retain their dependency guard; RNG ownership tests run independently.
+requires_model_runner = pytest.mark.skipif(
     not has_vllm_model_runner(), reason="vllm_fl.worker.model_runner not available"
 )
 
 
+@requires_model_runner
 def test_musa_piecewise_capture_sizes_respect_live_graph_limit(monkeypatch):
     from vllm.config import CUDAGraphMode
 
@@ -87,6 +92,7 @@ def test_musa_piecewise_capture_sizes_respect_live_graph_limit(monkeypatch):
     )
 
 
+@requires_model_runner
 @pytest.mark.parametrize("disable_full", [False, True])
 @pytest.mark.parametrize("dp_size", [1, 2])
 def test_full_graph_exclusion_survives_dp_redispatch(
@@ -143,6 +149,7 @@ def test_full_graph_exclusion_survives_dp_redispatch(
 # =============================================================================
 
 
+@requires_model_runner
 class TestExecuteModelState:
     """Test ExecuteModelState NamedTuple behavior and contract."""
 
@@ -217,6 +224,7 @@ class TestExecuteModelState:
 # =============================================================================
 
 
+@requires_model_runner
 class TestGetCumsumAndArange:
     """Test _get_cumsum_and_arange method - critical for batch processing."""
 
@@ -296,6 +304,7 @@ class TestGetCumsumAndArange:
 # =============================================================================
 
 
+@requires_model_runner
 class TestPadForSequenceParallelism:
     """Test sequence parallelism padding logic."""
 
@@ -358,6 +367,7 @@ class TestPadForSequenceParallelism:
 # =============================================================================
 
 
+@requires_model_runner
 class TestGetPositions:
     """Test position retrieval for different position encoding schemes."""
 
@@ -418,3 +428,178 @@ class TestGetPositions:
         expected = mock_model_runner.xdrope_positions.gpu[:, :10]
         assert result.shape == (2, 10)
         torch.testing.assert_close(result, expected)
+
+
+class _OffsetGenerator:
+    def __init__(self, offset=0):
+        self.offset = offset
+        self.restored = []
+
+    def get_offset(self):
+        return self.offset
+
+    def set_offset(self, offset):
+        self.restored.append(offset)
+        self.offset = offset
+
+    def draw(self, increment):
+        before = self.offset
+        self.offset += increment
+        return before
+
+
+class TestSamplingRngOwnership:
+    """Request-local RNG ownership, including the production sampling block."""
+
+    @pytest.fixture(scope="class")
+    def preserve(self):
+        path = Path(__file__).resolve().parents[3] / "vllm_fl/worker/sampling_rng.py"
+        spec = importlib.util.spec_from_file_location("sampling_rng_under_test", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.preserve_discarded_generator_offsets
+
+    @pytest.mark.parametrize("increment", [0, 4, 256, 31040, 124160])
+    def test_discarded_request_restores_exact_entry_offset(self, preserve, increment):
+        generator = _OffsetGenerator(72)
+        with preserve({0: generator}, [0]):
+            assert generator.draw(increment) == 72
+        assert generator.offset == 72
+        assert generator.restored == [72]
+        assert generator.draw(increment) == 72
+
+    def test_mixed_valid_discarded_and_unseeded_rows(self, preserve):
+        (discarded, valid) = (_OffsetGenerator(8), _OffsetGenerator(20))
+        with preserve({0: discarded, 1: valid}, [0, 2]):
+            discarded.draw(31040)
+            valid.draw(124160)
+        assert discarded.offset == 8
+        assert valid.offset == 124180
+        assert valid.restored == []
+
+    def test_no_discard_leaves_valid_generator_untouched(self, preserve):
+        generator = _OffsetGenerator(12)
+        with preserve({0: generator}, []):
+            generator.draw(31040)
+        assert generator.offset == 31052
+        assert generator.restored == []
+
+    def test_global_rng_rows_need_no_offset_api(self, preserve):
+        with preserve({}, [0, 1]):
+            pass
+
+    def test_sampler_error_restores_discarded_offset_without_retry(self, preserve):
+        generator = _OffsetGenerator(28)
+        calls = []
+        with (
+            pytest.raises(RuntimeError, match="sampler failed"),
+            preserve({0: generator}, [0]),
+        ):
+            calls.append(1)
+            generator.draw(31040)
+            raise RuntimeError("sampler failed")
+        assert calls == [1]
+        assert generator.offset == 28
+
+    def test_original_generator_is_restored_if_mapping_changes(self, preserve):
+        (original, replacement) = (_OffsetGenerator(16), _OffsetGenerator(40))
+        generators = {0: original}
+        with preserve(generators, [0]):
+            original.draw(31040)
+            generators[0] = replacement
+        assert original.offset == 16
+        assert replacement.offset == 40
+        assert replacement.restored == []
+
+    def test_repeated_calls_do_not_reuse_another_requests_state(self, preserve):
+        for offset in [0, 100, 200]:
+            generator = _OffsetGenerator(offset)
+            with preserve({0: generator}, [0]):
+                generator.draw(31040)
+            assert generator.offset == offset
+
+    def test_snapshot_failure_prevents_sampling(self, preserve):
+        class Broken(_OffsetGenerator):
+            def get_offset(self):
+                raise RuntimeError("offset unavailable")
+
+        sampled = False
+        with (
+            pytest.raises(RuntimeError, match="offset unavailable"),
+            preserve({0: Broken()}, [0]),
+        ):
+            sampled = True
+        assert not sampled
+
+    @pytest.mark.parametrize("fail", [False, True])
+    def test_real_runner_sampling_block_restores_only_discarded_row(
+        self, preserve, fail
+    ):
+        source = (
+            Path(__file__).resolve().parents[3] / "vllm_fl/worker/model_runner.py"
+        ).read_text()
+        tree = ast.parse(source)
+        sample = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "sample_tokens"
+        )
+        blocks = [
+            node
+            for node in ast.walk(sample)
+            if isinstance(node, ast.With)
+            and "preserve_discarded_generator_offsets" in ast.unparse(node)
+        ]
+        assert len(blocks) == 1
+        (discarded, valid) = (_OffsetGenerator(24), _OffsetGenerator(44))
+        calls = []
+
+        def sampler(*args):
+            calls.append(args)
+            discarded.draw(31040)
+            valid.draw(31040)
+            if fail:
+                raise RuntimeError("sampler failed")
+            return "sampled"
+
+        owner = SimpleNamespace(
+            input_batch=SimpleNamespace(
+                num_reqs=2, generators={0: discarded, 1: valid}
+            ),
+            discard_request_mask=SimpleNamespace(np=np.array([True, False])),
+            _sample=sampler,
+        )
+        env = dict(
+            self=owner,
+            logits=object(),
+            spec_decode_metadata=None,
+            record_function_or_nullcontext=lambda *args: nullcontext(),
+            preserve_discarded_generator_offsets=preserve,
+            np=np,
+        )
+        code = compile(
+            ast.fix_missing_locations(ast.Module(body=blocks, type_ignores=[])),
+            "real-runner-sampling-block",
+            "exec",
+        )
+        if fail:
+            with pytest.raises(RuntimeError, match="sampler failed"):
+                exec(code, env)
+        else:
+            exec(code, env)
+            assert env["sampler_output"] == "sampled"
+        assert len(calls) == 1
+        assert discarded.offset == 24
+        assert valid.offset == 31084
+        bookkeeping = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_bookkeeping_sync"
+        )
+        assert not any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and (node.func.attr == "set_offset")
+            for node in ast.walk(bookkeeping)
+        ), "Bookkeeping must not rewind a restored generator a second time"
