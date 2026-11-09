@@ -327,6 +327,20 @@ class WorkerFL(WorkerBase):
         torch.accelerator.synchronize()
         free_bytes_before_sleep = torch.accelerator.get_memory_info()[0]
 
+        # FL: vendor scale aliases need not be registered buffers. Preserve
+        # calibrated values across both sleep levels alongside upstream buffers.
+        from vllm.v1.kv_cache_interface import is_quantized_kv_cache
+
+        if is_quantized_kv_cache(self.cache_config.cache_dtype):
+            self._sleep_saved_kv_scales = []
+            seen = set()
+            for layer in self.compilation_config.static_forward_context.values():
+                for attr in ("_k_scale", "k_scale", "_v_scale", "v_scale"):
+                    scale = getattr(layer, attr, None)
+                    if isinstance(scale, torch.Tensor) and id(scale) not in seen:
+                        seen.add(id(scale))
+                        self._sleep_saved_kv_scales.append((scale, scale.cpu().clone()))
+
         # Save the buffers before level 2 sleep
         if level == 2:
             model = self.model_runner.model
@@ -378,8 +392,25 @@ class WorkerFL(WorkerBase):
                         buffer.data.copy_(self._sleep_saved_draft_buffers[name].data)
             self._sleep_saved_draft_buffers = {}
 
+        if wake_weights:
+            for scale, saved in getattr(self, "_sleep_saved_kv_scales", ()):
+                scale.data.copy_(saved)
+            self._sleep_saved_kv_scales = []
+
         if tags is None or "kv_cache" in tags:
-            self.model_runner.post_kv_cache_wake_up()
+            from vllm.v1.kv_cache_interface import is_quantized_kv_cache
+
+            if is_quantized_kv_cache(self.cache_config.cache_dtype):
+                # FL: newly allocated FP8 KV memory must be initialized. Model
+                # scales are buffers restored above, not reset to 1.0 here.
+                for entry in self.model_runner.kv_caches:
+                    if entry is None:
+                        continue
+                    tensors = entry if isinstance(entry, (list, tuple)) else (entry,)
+                    for tensor in tensors:
+                        tensor.zero_()
+
+        torch.accelerator.synchronize()
 
     def checkpoint_prepare(self) -> None:
         checkpoint_prepare_distributed_state()
@@ -610,7 +641,22 @@ class WorkerFL(WorkerBase):
             )
 
     def update_config(self, overrides: dict[str, Any]) -> None:
-        self.model_runner.update_config(overrides)
+        """Apply overrides to the worker, runner and shared VllmConfig."""
+        from vllm.config import update_config
+
+        allowed_config_names = {"load_config", "model_config"}
+        for config_name, config_overrides in overrides.items():
+            if config_name not in allowed_config_names:
+                allowed = ", ".join(sorted(allowed_config_names))
+                raise ValueError(
+                    f"Config override '{config_name}' is not supported. "
+                    f"Supported configs: {allowed}"
+                )
+            config = getattr(self.vllm_config, config_name)
+            new_config = update_config(config, config_overrides)
+            setattr(self.vllm_config, config_name, new_config)
+            setattr(self.model_runner, config_name, new_config)
+            setattr(self, config_name, new_config)
 
     def reload_weights(self, *args, **kwargs) -> None:
         with set_current_vllm_config(self.vllm_config):

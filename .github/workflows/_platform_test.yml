@@ -81,6 +81,7 @@ jobs:
     outputs:
       config: ${{ steps.load.outputs.config }}
       e2e_matrix: ${{ steps.matrix.outputs.e2e }}
+      revision: ${{ steps.revision.outputs.sha }}
     steps:
       - name: Checkout (attempt 1)
         id: checkout1
@@ -103,6 +104,10 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
+      - id: revision
+        name: Freeze tested revision
+        run: |
+          printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - id: load
         run: python .github/scripts/load_config.py --platform ${{ inputs.platform }}
       - id: matrix
@@ -119,7 +124,7 @@ jobs:
     secrets: inherit
     with:
       platform: ${{ inputs.platform }}
-      branch: ${{ inputs.branch }}
+      branch: ${{ needs.setup.outputs.revision }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
@@ -138,6 +143,7 @@ jobs:
     uses: ./.github/workflows/_unit_test.yml
     secrets: inherit
     with:
+      branch: ${{ needs.setup.outputs.revision }}
       platform: ${{ inputs.platform }}
       device: ${{ matrix.device }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
@@ -159,7 +165,7 @@ jobs:
     secrets: inherit
     with:
       platform: ${{ inputs.platform }}
-      branch: ${{ inputs.branch }}
+      branch: ${{ needs.setup.outputs.revision }}
       task: ${{ matrix.test.task }}
       device: ${{ matrix.test.device }}
       cases: ${{ matrix.test.cases }}
@@ -179,7 +185,7 @@ jobs:
     secrets: inherit
     with:
       platform: ${{ inputs.platform }}
-      branch: ${{ inputs.branch }}
+      branch: ${{ needs.setup.outputs.revision }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
@@ -196,6 +202,7 @@ jobs:
     uses: ./.github/workflows/_iluvatar_gate.yml
     with:
       config: ${{ needs.setup.outputs.config }}
+      branch: ${{ needs.setup.outputs.revision }}
 
   # ============================================================
   # Feishu notification — per-platform status

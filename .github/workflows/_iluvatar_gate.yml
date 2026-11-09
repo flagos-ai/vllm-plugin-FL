@@ -5,6 +5,9 @@ on:
       config:
         required: true
         type: string
+      branch:
+        required: true
+        type: string
 jobs:
   gates:
     runs-on: ${{ fromJson(inputs.config).runner_labels }}
@@ -19,6 +22,12 @@ jobs:
       FLAGCX_PATH: ${{ vars.ILUVATAR_FLAGCX_PATH }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+      - name: Record tested revision
+        run: |
+          mkdir -p ci-results/iluvatar-gates
+          git rev-parse HEAD | tee ci-results/iluvatar-gates/commit.txt
       - name: Provision and validate FlagCX
         run: bash .github/scripts/iluvatar/install_flagcx.sh
       - name: Install exact EMPTY framework and plugin
