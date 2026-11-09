@@ -64,7 +64,7 @@ def test_rejects_wrong_source_after_install(installer):
         patch.object(installer, "package_version", return_value="1.0"),
         patch.object(installer, "source_is_installed", return_value=False),
         patch.object(installer, "pip_install"),
-        pytest.raises(RuntimeError, match="must come from upstream commit"),
+        pytest.raises(RuntimeError, match="must come from pinned commit"),
     ):
         installer.main()
 

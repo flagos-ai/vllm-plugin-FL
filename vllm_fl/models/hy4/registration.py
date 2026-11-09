@@ -25,17 +25,39 @@ def register_hy_v4_support() -> bool:
         model_arch_config_convertor,
     )
 
-    from .config import HYV4Config
-    from .config_convertor import HYV4ModelArchConfigConvertor
-    from .loader import HYV4SafetensorsLoader
+    from vllm.platforms import current_platform
 
-    transformers_config._CONFIG_REGISTRY.setdefault("hy_v4", HYV4Config)
+    is_ppu = getattr(current_platform, "vendor_name", None) == "thead"
+    model_path = "vllm_fl.models.hy4.model:HYV4ForCausalLM"
+    if is_ppu:
+        from vllm_fl.configs.hy_v4 import HYV4Config
+        from vllm_fl.model_loader.hy_v4_loader import HYV4SafetensorsLoader
+
+        class HYV4ModelArchConfigConvertor(
+            model_arch_config_convertor.ModelArchConfigConvertorBase
+        ):
+            def get_head_size(self) -> int:
+                return int(self.hf_text_config.kv_lora_rank) + int(
+                    self.hf_text_config.qk_rope_head_dim
+                )
+
+            def is_deepseek_mla(self) -> bool:
+                return True
+
+        model_path = "vllm_fl.models.hy_v4:HYV4ForCausalLM"
+        transformers_config._CONFIG_REGISTRY["hy_v4"] = HYV4Config
+    else:
+        from .config import HYV4Config
+        from .config_convertor import HYV4ModelArchConfigConvertor
+        from .loader import HYV4SafetensorsLoader
+
+        transformers_config._CONFIG_REGISTRY.setdefault("hy_v4", HYV4Config)
     model_arch_config_convertor.MODEL_ARCH_CONFIG_CONVERTORS["hy_v4"] = (
         HYV4ModelArchConfigConvertor
     )
     model_registry.ModelRegistry.register_model(
         _ARCHITECTURE,
-        "vllm_fl.models.hy4.model:HYV4ForCausalLM",
+        model_path,
     )
 
     registered_loaders = model_loader._LOAD_FORMAT_TO_MODEL_LOADER
@@ -45,7 +67,8 @@ def register_hy_v4_support() -> bool:
     # Register the public class path before an explicit CUSTOM prefill selection.
     from vllm_fl.attention.mla_prefill import register_flaggems_mla_prefill
 
-    register_flaggems_mla_prefill()
+    if not is_ppu:
+        register_flaggems_mla_prefill()
 
     logger.info("Registered HY4 runtime components")
     return True

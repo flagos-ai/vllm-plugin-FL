@@ -43,6 +43,11 @@ class FlagGemsBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def mla_prefill(self, **kwargs):
+        from .impl.mla_prefill import mla_prefill_flaggems
+
+        return mla_prefill_flaggems(**kwargs)
+
     def dynamic_per_token_quant_int8(
         self,
         x: torch.Tensor,
@@ -58,6 +63,21 @@ class FlagGemsBackend(Backend):
         from .impl.quantization import dynamic_per_token_quant_int8_flaggems_triton
 
         return dynamic_per_token_quant_int8_flaggems_triton(x)
+
+    def bf16_indexer_cache_write(
+        self,
+        keys: torch.Tensor,
+        cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+    ) -> None:
+        from .impl.bf16_indexer import bf16_indexer_cache_write_flaggems
+
+        bf16_indexer_cache_write_flaggems(keys, cache, slot_mapping)
+
+    def bf16_indexer_decode(self, *args, **kwargs) -> None:
+        from .impl.bf16_indexer import bf16_indexer_decode_flaggems
+
+        bf16_indexer_decode_flaggems(*args, **kwargs)
 
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
@@ -181,6 +201,12 @@ class FlagGemsBackend(Backend):
         # Portable MLA is currently validated through a model activation
         # plan. A model's provider must never redirect generic dispatch.
         if use_mla:
+            from vllm.platforms import current_platform
+
+            if getattr(current_platform, "vendor_name", None) == "thead":
+                if use_sparse:
+                    return "vllm_fl.dispatch.backends.flaggems.impl.mla_sparse.MLASparseFLBackend"
+                return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
             raise NotImplementedError("FlagGems MLA requires a model runtime plan")
 
         # TritonAttentionBackend requires CUDA, check if available

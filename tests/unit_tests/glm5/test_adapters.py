@@ -1299,7 +1299,12 @@ vendor = CudaBackend()
 for sparse in (False, True):
     get_default_manager().clear_failed_impls("attention_backend")
     selector = SimpleNamespace(use_mla=True, use_sparse=sparse)
-    if current_platform.is_cuda():
+    if getattr(current_platform, "vendor_name", None) == "thead":
+        # PPU has its own generic MLA backend before any model plan is active.
+        expected = ("vllm_fl.dispatch.backends.flaggems.impl.mla_sparse.MLASparseFLBackend"
+                    if sparse else "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend")
+        assert PlatformFL.get_attn_backend_cls(None, selector) == expected
+    elif current_platform.is_cuda():
         expected = vendor.attention_backend(use_mla=True, use_sparse=sparse)
         assert PlatformFL.get_attn_backend_cls(None, selector) == expected
     else:
