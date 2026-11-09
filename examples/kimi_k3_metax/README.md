@@ -20,8 +20,8 @@ Read [the file-by-file guide](../../docs/kimi-k3-metax.md) for implementation or
 | Version / runtime hooks | `vllm_fl/patches/kimi_k3/` |
 | Model-scoped backend policy | `dispatch.yaml`, through the existing FL configuration mechanism |
 
-The refactor preserves computation, shape guards, launch settings, fallbacks and
-dependency revisions. Generic backend defaults are retained; K3 differences
+The structural cleanup preserves computation, shape guards, launch settings and
+fallbacks. The sampling defaults and pinned native synchronization fix are described below. Generic backend defaults are retained; K3 differences
 are explicit capabilities. Native model loading, processors and the forward
 skeleton remain inherited. Existing KDA numerical compatibility, including
 local FP64 accumulation, is retained without a new performance claim.
@@ -33,7 +33,7 @@ source patch, source snapshot or patch installer is required at installation.
 
 | Package | Pinned source | Review |
 | --- | --- | --- |
-| vLLM | [c88c603e](https://github.com/cshujie131-bot/vllm/commit/c88c603e1f3d3bde7ad18bd7299cb3d502f7b7a7) | Default-preserving component/runner interfaces; explicit non-CUDA CUSTOM MLA validation; twelve Python files, no scheduler algorithm change |
+| vLLM | [1240e674](https://github.com/cshujie131-bot/vllm/commit/1240e6740799454e2d384bde4b117bfd3fab85b3) | Default-preserving component/runner interfaces; explicit non-CUDA CUSTOM MLA validation; no scheduler algorithm change; native top-p scratch synchronization fix |
 | FlagGems | [6efd6dab](https://github.com/cshujie131-bot/FlagGems/commit/6efd6dab4a4a8a78167262d0841ff0d728a2d1d3) | [Argmax #7300](https://github.com/flagos-ai/FlagGems/pull/7300); [addmm compatibility Draft #7302](https://github.com/flagos-ai/FlagGems/pull/7302) |
 | FlagGems-vllm | [1d4b69b3](https://github.com/cshujie131-bot/FlagGems-vllm/commit/1d4b69b355a8a42deb0edd485ef9d9a94b2477b8) | [TopK #950](https://github.com/flagos-ai/FlagGems-vllm/pull/950), [SiTU #951](https://github.com/flagos-ai/FlagGems-vllm/pull/951), [alignment #952](https://github.com/flagos-ai/FlagGems-vllm/pull/952), [MLA interface #953](https://github.com/flagos-ai/FlagGems-vllm/pull/953) |
 
@@ -54,7 +54,7 @@ unqualified and non-normal-scale fallbacks remain available where previously use
 | Component | Required version |
 | --- | --- |
 | Python | 3.12.13 |
-| vLLM | 0.28.0, empty backend plus the pinned generic interfaces |
+| vLLM package label | 0.28.0+empty; the pinned commit defines the actual K3 source/API level |
 | FL target | `0.4.0-dev` |
 | MACA SDK/runtime/MCCL | 3.8.1.3 |
 | MetaX Torch | 2.10.0+metax3.8.1.0 |
@@ -76,7 +76,7 @@ a source change. FlagGems uses build isolation to honor its `setuptools<77` requ
 vLLM uses the matching vendor build environment with setuptools 80.10.2, which
 supports its PEP 639 metadata. Do not downgrade the shared build environment.
 The build-only version override identifies the empty vLLM package; Git
-provenance independently checks the exact source commit.
+provenance independently checks the exact source commit. The empty-wheel version label is compatibility metadata, not an upstream release identifier.
 
 ```sh
 python -I -m pip install --force-reinstall --no-deps \
@@ -137,3 +137,11 @@ its successful snapshot; the long-context rows include the later memory fixes:
 | 4096 | 1192.596 | 238.519 |
 | 16384 | 1196.806 | 70.400 |
 | 65536 | 1553.939 | 23.907 |
+
+## Sampling defaults
+
+The example defaults to `temperature: 1.0` and `top_p: 0.95` for single-step tasks; explicit request parameters still take precedence. Request seeds are not forced by the serving configuration.
+
+K3 uses native stable integer-key sorting for FP32, contiguous, top-p-only batches of 1–7 rows at vocabulary size 163840. The existing scoped VENDOR entry preserves the remaining filter operations and RNG. Other shapes keep the native vLLM path; the pinned vLLM fork adds the scratch synchronization required by that large-batch filter on MetaX. This correctness fix is a fork commit, not an upstream-merge claim.
+
+For reproducible sampling throughput measurements, use distinct per-request seeds (for example `1234 + request_index`). Reusing one seed for an entire equal-length batch correlates generated sequences and changes data-dependent MoE work. The dataset seed remains separate from the request seed.

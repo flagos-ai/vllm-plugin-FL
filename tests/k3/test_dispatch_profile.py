@@ -63,5 +63,5 @@ def test_example_has_no_source_patch_or_install_hook():
     lock = json.loads((example / "dependency-lock.json").read_text())
     assert (
         lock["dependencies"]["vllm"]["commit"]
-        == "c88c603e1f3d3bde7ad18bd7299cb3d502f7b7a7"
+        == "1240e6740799454e2d384bde4b117bfd3fab85b3"
     )

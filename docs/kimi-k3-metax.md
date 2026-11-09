@@ -1,6 +1,6 @@
 # Kimi K3 MetaX: code reading guide
 
-This guide describes the structural refactor of [PR #607](https://github.com/flagos-ai/vllm-plugin-FL/pull/607).
+This guide describes the implementation and sampling paths of [PR #607](https://github.com/flagos-ai/vllm-plugin-FL/pull/607).
 The target remains the accepted single-instance TP8 × PP4 path with MBT4096.
 The later PD/MBT8192 experiment is separate and is not included.
 
@@ -21,7 +21,7 @@ vllm_fl/patches/kimi_k3/         explicit startup, schema and runtime compatibil
 The call direction is **model/interface → framework orchestration → selected implementation → local kernel or pinned library**.
 Model-coupled TP8 packing, state and buffer contracts remain in FL.
 `VENDOR` describes backend selection, not a closed-source classification.
-This refactor introduces no operator PR or dependency upgrade.
+The structural cleanup keeps the existing operator implementations. The sampling update uses the scoped paths and native correctness fix described below.
 
 The existing `VLLM_FL_CONFIG` selects `examples/kimi_k3_metax/dispatch.yaml`.
 Generic MetaX capabilities and default policy remain available.
@@ -155,6 +155,30 @@ Paths are repository-relative. Empty package `__init__.py` files establish names
 | `vllm_fl/ops/_C_ops_{registry,schemas}.py` | Generic defaults restored; strict K3 declarations are under its startup hooks. |
 | `setup.py` / `csrc/metax/uva.cpp` | New package location for the same source-built host extension; C++ implementation unchanged. |
 
+## Sampling
+
+| File | Responsibility | Source / nature |
+|---|---|---|
+| `vllm_fl/ops/kimi_k3/sampling.py` | Eligibility and the existing top-p filter sequence; other shapes retain native dispatch. | Custom FL boundary; unchanged registered filter operations |
+| `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/sampling.py` | Stable signed-integer-key sorting with explicit output-buffer contracts. | Native Torch/MetaX runtime through a scoped VENDOR capability |
+| `vllm_fl/patches/kimi_k3/sampling.py` | One K3-only, idempotent binding for native/V2 imports; reject mismatched signatures or partial bindings. | Explicit version/startup hook |
+
+The small-batch path is limited to contiguous FP32 logits, vocabulary 163840,
+top-p without top-k, and 1–7 rows. It keeps the filter's arithmetic order and
+sample RNG unchanged. A global FG sort exclusion cannot express this
+model/batch/ordering boundary, so the native operation is selected locally.
+
+The pinned vLLM [scratch synchronization fix](https://github.com/cshujie131-bot/vllm/commit/1240e6740799454e2d384bde4b117bfd3fab85b3)
+orders probability-buffer accesses inside one Triton program. This is a
+correctness fix in the existing native operator, not a model scheduler change
+or an operator-library speedup. It is published in the dependency fork;
+upstream integration is not claimed.
+
+The serving example defaults to temperature 1 and top-p 0.95. Explicit request
+values still win, and the serving configuration does not force a shared seed.
+Benchmark dataset seeds and per-request sampling seeds have different roles;
+a single shared request seed can correlate generated sequences and alter MoE work.
+
 ## Preserved behavior
 
 Short/small-batch paths, non-normal expert scales, dense/interleaved MLA pages and KDA numerical compatibility remain behind the same guards.
@@ -163,7 +187,7 @@ Five native KDA kernels remain reused through local precision/launch handles.
 There is no global compiler, autotuner or library-export replacement.
 
 SDK differences are subclasses of the existing wrappers, not complete duplicated SDK modules.
-The fixed dependency lock is unchanged.
+Other dependency revisions remain unchanged; only the native vLLM sampling fix advances its locked source commit.
 Use [the installation and launch example](../examples/kimi_k3_metax/README.md); examples contain no source patches, snapshots or patch installer.
 
 ## Validation scope
@@ -171,4 +195,4 @@ Use [the installation and launch example](../examples/kimi_k3_metax/README.md); 
 “Validated” refers to this project's measured configurations, not official K3 certification of a vLLM release.
 The package label `0.28.0+empty` is a build identifier; exact public source revisions are in the dependency lock.
 [VALIDATION.md](../examples/kimi_k3_metax/VALIDATION.md) separates this refactor's checks from retained historical quality and performance results.
-Full GPQA/ERQA and formal throughput benchmarks are not rerun for this structural change.
+The structural cleanup retained historical GPQA/ERQA and throughput results. Sampling changes are validated separately; historical quality scores are not new sampler-quality measurements.

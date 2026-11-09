@@ -4,6 +4,8 @@ prefer: flagos
 strict: true
 allow_vendors: [metax]
 op_backends:
+  # Small K3 top-p only: native sort.stable_out; global FG sort remains enabled.
+  kimi_k3_sampling_stable_sort: [vendor:metax]
   dynamic_per_token_quant_int8: [flagos]
   silu_and_mul: [flagos]
   gelu_and_mul: [flagos]

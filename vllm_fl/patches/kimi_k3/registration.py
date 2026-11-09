@@ -69,4 +69,6 @@ def register():
         "vllm_fl.models.kimi_k3:K3LinearForCausalLM",
     )
     _LIBRARY = (library, cache_library)
+    from vllm_fl.patches.kimi_k3.sampling import install as install_sampling
+    install_sampling()
     _REGISTERED = True

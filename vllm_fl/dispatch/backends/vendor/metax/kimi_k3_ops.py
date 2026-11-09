@@ -11,7 +11,10 @@ def register_builtins(registry):
     from .impl.kimi_k3.vision import apply_rope
     from vllm_fl.attention.kimi_k3.decode import flash_mla_with_kvcache
 
+    from .impl.kimi_k3.sampling import stable_sort_keys
+
     implementations = {
+        "kimi_k3_sampling_stable_sort": stable_sort_keys,
         "attention_backend": attention_backend,
         "kimi_k3_prepare_experts": tp8_experts.prepare,
         "kimi_k3_tp8_experts": tp8_experts.run,

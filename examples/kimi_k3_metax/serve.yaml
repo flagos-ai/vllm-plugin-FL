@@ -27,3 +27,7 @@ compilation-config:
   cudagraph_capture_sizes: [1, 2, 4, 8, 12, 16, 24, 32, 64]
   max_cudagraph_capture_size: 64
 cpu-distributed-timeout-seconds: 7200
+# Model-card single-step sampling defaults; explicit request values still win.
+override-generation-config:
+  temperature: 1.0
+  top_p: 0.95
