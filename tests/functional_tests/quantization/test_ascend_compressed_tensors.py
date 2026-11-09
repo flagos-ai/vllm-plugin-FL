@@ -16,14 +16,40 @@ pytestmark = [
 ]
 
 
-def _config(targets=None, ignore=None):
+@pytest.fixture(scope="module", autouse=True)
+def single_rank_runtime():
+    from tests.utils.device_utils import ascend_single_rank_runtime
+    from vllm.config import (
+        CompilationConfig,
+        CompilationMode,
+        CUDAGraphMode,
+        DeviceConfig,
+        VllmConfig,
+    )
+
+    def config_factory():
+        return VllmConfig(
+            device_config=DeviceConfig(device="npu"),
+            compilation_config=CompilationConfig(
+                mode=CompilationMode.NONE, cudagraph_mode=CUDAGraphMode.NONE
+            ),
+        )
+
+    # Upstream weight/scale parameter constructors record the real TP group.
+    with ascend_single_rank_runtime(config_factory) as config:
+        yield config
+
+
+def _config(targets=None, ignore=None, model_class=None):
     from vllm.model_executor.model_loader.utils import configure_quant_config
 
+    from vllm_fl import register_quant_linear
     from vllm_fl.models.deepseek_v4 import DeepseekV4ForCausalLM
     from vllm_fl.quantization.w8a8.compressed_tensors import (
         AscendCompressedTensorsConfig,
     )
 
+    register_quant_linear()
     result = AscendCompressedTensorsConfig.from_config(
         {
             "quant_method": "compressed-tensors",
@@ -60,7 +86,7 @@ def _config(targets=None, ignore=None):
         }
     )
     result.weight_nz_mode = 0
-    configure_quant_config(result, DeepseekV4ForCausalLM)
+    configure_quant_config(result, model_class or DeepseekV4ForCausalLM)
     return result
 
 
@@ -79,15 +105,14 @@ def _linear_layer():
 
 def test_method_resolution(config):
     from vllm.model_executor.layers.linear import UnquantizedLinearMethod
-
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendW8A8DynamicLinearMethod,
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsLinearMethod,
     )
 
     layer = _linear_layer()
     assert isinstance(
         config.get_quant_method(layer, "model.layers.0.self_attn.wq_a"),
-        AscendW8A8DynamicLinearMethod,
+        CompressedTensorsLinearMethod,
     )
     assert isinstance(
         config.get_quant_method(layer, "lm_head"), UnquantizedLinearMethod
@@ -97,9 +122,8 @@ def test_method_resolution(config):
 
 def test_raw_regex_ignore_survives_model_mapper():
     from vllm.model_executor.layers.linear import UnquantizedLinearMethod
-
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendW8A8DynamicLinearMethod,
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsLinearMethod,
     )
 
     config = _config([r"re:.*\.attn\..*"], [r"re:.*layers\.0\.attn\.compressor\.wkv$"])
@@ -110,7 +134,7 @@ def test_raw_regex_ignore_survives_model_mapper():
     )
     assert isinstance(
         config.get_quant_method(layer, "model.layers.0.self_attn.wq_a"),
-        AscendW8A8DynamicLinearMethod,
+        CompressedTensorsLinearMethod,
     )
 
 
@@ -166,22 +190,30 @@ def test_registration_idempotent(monkeypatch):
 
 
 @pytest.fixture
-def native(monkeypatch):
-    from vllm_fl.dispatch.backends.vendor.ascend.impl import quantization as ops
-    from vllm_fl.quantization.w8a8 import compressed_tensors as linear
+def native():
+    def factory():
+        config = _config()
+        return config.get_quant_method(_linear_layer(), "model.layers.0.self_attn.wq_a")
 
-    monkeypatch.setattr(linear, "_prepare_weight", ops.w8a8_prepare_weight)
-    monkeypatch.setattr(linear, "_linear", ops.w8a8_dynamic_linear)
-    return linear.AscendW8A8DynamicLinearMethod
+    return factory
 
 
-def make_layer(method, dtype):
-    layer = torch.nn.Module()
+def make_layer(method, dtype, layer=None, prefix="model.layers.0.self_attn.wq_a"):
+    from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+
+    from vllm_fl.quantization.w8a8.linear import AscendInt8ScaledMMLinearKernel
+
+    layer = _linear_layer() if layer is None else layer
+    selected = method.quantization_config.get_quant_method(layer, prefix)
+    assert type(selected) is type(method)
 
     def loader(*args):
-        pass
+        return default_weight_loader(*args)
 
     method.create_weights(layer, 128, [32, 32], 128, 64, dtype, weight_loader=loader)
+    assert isinstance(layer.scheme.kernel, AscendInt8ScaledMMLinearKernel)
+    assert layer.weight.tp_rank == layer.weight_scale.tp_rank == 0
+    assert layer.weight.tp_size == layer.weight_scale.tp_size == 1
     assert layer.weight.input_dim == 1
     assert layer.weight.output_dim == 0
     assert layer.weight_scale.output_dim == 0
@@ -194,7 +226,9 @@ def make_layer(method, dtype):
         layer.weight.copy_(
             torch.randint(-64, 64, (64, 128), device="npu", dtype=torch.int8)
         )
-        layer.weight_scale.fill_(0.015625)
+        scales = torch.linspace(0.010001, 0.020003, 64, device="npu").reshape(-1, 1)
+        layer.weight_scale.weight_loader(layer.weight_scale, scales)
+        torch.testing.assert_close(layer.weight_scale, scales, rtol=0, atol=0)
     checkpoint_weight = layer.weight.detach().clone()
     method.process_weights_after_loading(layer)
     assert layer.weight.shape == (128, 64)
@@ -266,17 +300,14 @@ def test_asymmetric_scheme_rejected():
         config.get_quant_method(_linear_layer(), "model.layers.0.self_attn.wq_a")
 
 
-def test_default_dispatch_native():
+def test_default_dispatch_native(native):
     from vllm_fl.dispatch import get_default_manager, with_strict_mode
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendW8A8DynamicLinearMethod,
-    )
 
     manager = get_default_manager()
     for op in ("w8a8_prepare_weight", "w8a8_dynamic_linear"):
         assert manager.get_selected_impl_id(op) == "vendor.ascend"
     with with_strict_mode():
-        method = AscendW8A8DynamicLinearMethod()
+        method = native()
         layer, _ = make_layer(method, torch.bfloat16)
         output = method.apply(
             layer, torch.ones(2, 128, device="npu", dtype=torch.bfloat16)
@@ -285,18 +316,15 @@ def test_default_dispatch_native():
     assert torch.isfinite(output).all()
 
 
-def test_scoped_reference_dispatch():
+def test_scoped_reference_dispatch(native):
     from vllm_fl.dispatch import get_default_manager, with_preference
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendW8A8DynamicLinearMethod,
-    )
 
     manager = get_default_manager()
     before = manager.get_selected_impl_id("w8a8_dynamic_linear")
     with with_preference("reference"):
         for op in ("w8a8_prepare_weight", "w8a8_dynamic_linear"):
             assert manager.get_selected_impl_id(op) == "reference.torch"
-        method = AscendW8A8DynamicLinearMethod(weight_nz_mode=0)
+        method = native()
         layer, _ = make_layer(method, torch.float16)
         output = method.apply(
             layer, torch.ones(2, 128, device="npu", dtype=torch.float16)
@@ -307,15 +335,28 @@ def test_scoped_reference_dispatch():
 
 
 @pytest.mark.parametrize("groups", [1, 2])
-def test_grouped_wo_a_dynamic_projection(native, groups):
+def test_grouped_wo_a_dynamic_projection(groups):
     from vllm_fl.dispatch.backends.reference.impl.quantization import (
         w8a8_dynamic_linear,
     )
+    from vllm_fl.quantization.w8a8.compressed_tensors import (
+        AscendGroupedW8A8LinearMethod,
+    )
 
-    method = native(weight_nz_mode=0)
+    config = _config()
+    layer = _linear_layer()
+    config.get_quant_method(layer, "model.layers.0.self_attn.wq_a")
+    method = AscendGroupedW8A8LinearMethod(config)
     method.configure_grouped(groups)
-    layer = torch.nn.Module()
-    method.create_weights(layer, 128, [64 * groups], 128, 64 * groups, torch.bfloat16)
+    method.create_weights(
+        layer,
+        128,
+        [64 * groups],
+        128,
+        64 * groups,
+        torch.bfloat16,
+        weight_loader=lambda *args: None,
+    )
     layer = layer.to("npu")
     with torch.no_grad():
         layer.weight.copy_(
@@ -344,3 +385,159 @@ def test_grouped_wo_a_dynamic_projection(native, groups):
     )
     actual = method.apply_grouped(layer, x)
     torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.04)
+
+
+def _lm_head_layer():
+    from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
+
+    layer = object.__new__(ParallelLMHead)
+    torch.nn.Module.__init__(layer)
+    return layer
+
+
+@pytest.mark.parametrize("target", ["head", "lm_head", "model.head", r"re:^head$"])
+def test_real_lm_head_upstream_allocation(target):
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsLinearMethod,
+    )
+    from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
+        CompressedTensorsW8A8Int8,
+    )
+
+    config = _config([target])
+    head = _lm_head_layer()
+    method = config.get_quant_method(head, "lm_head")
+    assert type(method) is CompressedTensorsLinearMethod
+    assert isinstance(head.scheme, CompressedTensorsW8A8Int8)
+    head, _ = make_layer(method, torch.bfloat16, layer=head, prefix="lm_head")
+    output = method.apply(head, torch.randn(2, 128, device="npu", dtype=torch.bfloat16))
+    assert output.shape == (2, 64)
+    assert torch.isfinite(output).all()
+
+
+@pytest.mark.parametrize("use_flaggems", ["0", "1"])
+def test_upstream_kernel_stays_native_for_flaggems_policy(monkeypatch, use_flaggems):
+    from vllm_fl.quantization.w8a8.linear import AscendInt8ScaledMMLinearKernel
+
+    monkeypatch.setenv("USE_FLAGGEMS", use_flaggems)
+    config = _config()
+    layer = _linear_layer()
+    method = config.get_quant_method(layer, "model.layers.0.self_attn.wq_a")
+    layer, _ = make_layer(method, torch.bfloat16, layer=layer)
+    assert type(layer.scheme.kernel) is AscendInt8ScaledMMLinearKernel
+    assert layer._fl_ascend_weight_nz_mode == 0
+
+
+@pytest.mark.parametrize("regex", [False, True])
+def test_generic_model_mapper_target_and_ignore_aliases(regex):
+    from vllm.model_executor.layers.linear import UnquantizedLinearMethod
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsLinearMethod,
+    )
+    from vllm.model_executor.models.utils import WeightsMapper
+
+    # The quantization resolver consumes any model-owned literal mapper.
+    class GenericModel:
+        packed_modules_mapping = {}
+        hf_to_vllm_mapper = WeightsMapper(
+            orig_to_new_prefix={"encoder.": "network."},
+            orig_to_new_substr={".ffn.": ".mlp."},
+        )
+
+    raw = "encoder.block.ffn.projection"
+    canonical = "network.block.mlp.projection"
+    target = r"re:^encoder\.block\.ffn\.projection$" if regex else raw
+    config = _config([target], model_class=GenericModel)
+    assert isinstance(
+        config.get_quant_method(_linear_layer(), canonical),
+        CompressedTensorsLinearMethod,
+    )
+    ignored = _config([target], [target], model_class=GenericModel)
+    assert isinstance(
+        ignored.get_quant_method(_linear_layer(), canonical), UnquantizedLinearMethod
+    )
+    canonical_ignore = _config([target], [canonical], model_class=GenericModel)
+    assert isinstance(
+        canonical_ignore.get_quant_method(_linear_layer(), canonical),
+        UnquantizedLinearMethod,
+    )
+
+
+@pytest.mark.parametrize("ignore", ["head", "lm_head", r"re:^model\.head$"])
+def test_real_lm_head_ignore_aliases(ignore):
+    config = _config(["head"], [ignore])
+    head = _lm_head_layer()
+    assert config.get_quant_method(head, "lm_head") is None
+    assert not hasattr(head, "scheme")
+
+
+def test_float32_linear_allocation_rejected():
+    config = _config()
+    layer = _linear_layer()
+    method = config.get_quant_method(layer, "model.layers.0.self_attn.wq_a")
+    with pytest.raises(NotImplementedError, match="BF16/FP16"):
+        method.create_weights(
+            layer,
+            128,
+            [64],
+            128,
+            64,
+            torch.float32,
+            weight_loader=lambda *args: None,
+        )
+    assert not dict(layer.named_parameters())
+
+
+def test_cached_ignore_matches_upstream_and_tracks_mutation():
+    from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
+        should_ignore_layer,
+    )
+
+    config = _config()
+    config.packed_modules_mapping = {"gate_up_proj": ["gate_proj", "up_proj"]}
+    filler = [rf"re:^unused_{index}\.projection$" for index in range(520)]
+    root = "model.layers.0.gate_up_proj"
+    gate = "model.layers.0.gate_proj"
+    up = "model.layers.0.up_proj"
+
+    def outcome(predicate):
+        try:
+            return predicate(), None
+        except ValueError as error:
+            return None, str(error)
+
+    cases = (
+        ("literal", ["literal"]),
+        ("MODEL.projection", [r"re:(?i)^model\.projection$"]),
+        (root, [gate, up]),
+        (root, [gate]),
+        (root, [root]),
+        (root, [root, gate]),
+        (root, [r"re:^model\.layers\.0\.gate_up_proj$", gate]),
+        (root, [r"re:^model\.layers\.0\.gate_up_proj$"]),
+        (root, [r"re:^model\.layers\.0\.(?:gate_proj|up_proj)$"]),
+        (root, [r"re:^model\.layers\.0\.gate_proj$"]),
+        ("unmatched", []),
+        (None, []),
+    )
+    for name, rules in cases:
+        config.ignore = filler + rules
+        expected = outcome(
+            lambda name=name: should_ignore_layer(
+                name, config.ignore, config.packed_modules_mapping
+            )
+        )
+        assert outcome(lambda name=name: config._should_ignore_cached(name)) == expected
+        cache = config._ignore_cache
+        assert outcome(lambda name=name: config._should_ignore_cached(name)) == expected
+        assert config._ignore_cache is cache
+
+    config.ignore = filler.copy()
+    assert not config._should_ignore_cached("new_literal")
+    previous = config._ignore_cache
+    config.ignore.append("new_literal")
+    assert config._should_ignore_cached("new_literal")
+    assert config._ignore_cache is not previous
+    config.ignore = filler + [r"re:(?i)^new_regex$"]
+    assert config._should_ignore_cached("NEW_REGEX")
+    assert not config._should_ignore_cached("new_literal")

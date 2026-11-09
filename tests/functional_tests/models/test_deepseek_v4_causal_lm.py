@@ -139,10 +139,12 @@ def _runtime_config(pipeline_parallel_size=1):
         VllmConfig,
     )
 
+    from vllm_fl import register_quant_linear
     from vllm_fl.quantization.w8a8.compressed_tensors import (
         AscendCompressedTensorsConfig,
     )
 
+    register_quant_linear()
     config = VllmConfig(
         device_config=DeviceConfig(device="npu"),
         compilation_config=CompilationConfig(
@@ -187,7 +189,8 @@ def runtime():
     int(os.environ.get("WORLD_SIZE", "1")) != 2,
     reason="Requires isolated torchrun with two Ascend processes for PP2",
 )
-def test_pp_hc_head_checkpoint_loading():
+@pytest.mark.parametrize("aliases", ["raw", "canonical", "model-prefixed"])
+def test_pp_hc_head_checkpoint_loading(aliases):
     """Native root HC-head parameters load on both real pipeline ranks."""
     from vllm.config import set_current_vllm_config
     from vllm.distributed import (
@@ -255,7 +258,14 @@ def test_pp_hc_head_checkpoint_loading():
                 )
                 if f"model.{raw_name}" in params:
                     params[f"model.{raw_name}"].fill_(float("nan"))
-                checkpoint.append((raw_name, value))
+                checkpoint_name = (
+                    DeepseekV4ForCausalLM.hf_to_vllm_mapper._map_name(raw_name)
+                    if aliases == "canonical"
+                    else "model." + raw_name
+                    if aliases == "model-prefixed"
+                    else raw_name
+                )
+                checkpoint.append((checkpoint_name, value))
                 expected[f"model.{raw_name}"] = value
             loaded = model.load_weights(iter(checkpoint))
             assert loaded == set(expected)
@@ -477,6 +487,78 @@ def model_env(runtime):
             for name in set(context) - original_names:
                 context.pop(name, None)
             runtime.compilation_config.static_all_moe_layers[:] = original_moe_layers
+
+
+@pytest.mark.parametrize("aliases", ["raw", "canonical", "model-prefixed"])
+def test_checkpoint_mapper_quantized_head_and_scale_aliases(runtime, aliases):
+    """Actual NPU allocations use the same names for quant matching and loading."""
+    from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
+    from vllm.model_executor.model_loader.utils import initialize_model
+
+    from vllm_fl.models.deepseek_v4 import DeepseekV4ForCausalLM
+    from vllm_fl.quantization.w8a8.compressed_tensors import (
+        AscendCompressedTensorsConfig,
+    )
+
+    mapper = DeepseekV4ForCausalLM.hf_to_vllm_mapper
+
+    def alias(name):
+        if aliases == "canonical":
+            return mapper._map_name(name)
+        if aliases == "model-prefixed":
+            return "model." + name.removeprefix("model.")
+        return name
+
+    quantization = _quantization_config()
+    targets = quantization["config_groups"]["w8a8"]["targets"]
+    targets.append("head")
+    # Mapping full tensor keys also exercises terminal projection names.
+    quantization["config_groups"]["w8a8"]["targets"] = [
+        alias(name + ".weight").removesuffix(".weight") for name in targets
+    ]
+    quant_config = AscendCompressedTensorsConfig.from_config(quantization)
+    quant_config.weight_nz_mode = 0
+    previous_quant = runtime.quant_config
+    previous_dtype = torch.get_default_dtype()
+    context = runtime.compilation_config.static_forward_context
+    original_names = set(context)
+    original_moe_layers = list(runtime.compilation_config.static_all_moe_layers)
+    model = None
+    try:
+        runtime.quant_config = quant_config
+        torch.set_default_dtype(torch.bfloat16)
+        model = initialize_model(runtime, model_class=DeepseekV4ForCausalLM).to("npu")
+        assert isinstance(model.lm_head, ParallelLMHead)
+        assert model.lm_head.weight.dtype == torch.int8
+        assert model.lm_head.weight_scale.dtype == torch.float32
+        checkpoint, expected = _native_checkpoint(model)
+        checkpoint = [
+            (
+                alias(name.removesuffix(".weight_scale") + ".scale")
+                if name.endswith(".weight_scale")
+                else alias(name),
+                value,
+            )
+            for name, value in checkpoint
+        ]
+        for name, _ in checkpoint:
+            assert model._checkpoint_name(name) == mapper._map_name(name)
+        loaded = model.load_weights(iter(checkpoint))
+        assert loaded == set(expected)
+        for name, param in model.named_parameters():
+            torch.testing.assert_close(param, expected[name], rtol=0, atol=0)
+            if name.endswith("weight_scale"):
+                assert param.dtype == torch.float32
+        # Both raw and canonical root spellings retain the exact same head.
+        assert mapper._map_name("head.weight") == "lm_head.weight"
+        assert mapper._map_name("model.head.scale") == "lm_head.weight_scale"
+    finally:
+        del model
+        runtime.quant_config = previous_quant
+        torch.set_default_dtype(previous_dtype)
+        for name in set(context) - original_names:
+            context.pop(name, None)
+        runtime.compilation_config.static_all_moe_layers[:] = original_moe_layers
 
 
 def _request(env, name):
