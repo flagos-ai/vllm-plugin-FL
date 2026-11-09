@@ -67,6 +67,23 @@ def is_kunlunxin_ops_available() -> bool:
     return _KUNLUNXIN_OPS_AVAILABLE
 
 
+def _is_full_graph_runtime() -> bool:
+    try:
+        from vllm.config import CUDAGraphMode
+        from vllm.forward_context import (
+            get_forward_context,
+            is_forward_context_available,
+        )
+
+        return (
+            is_forward_context_available()
+            and get_forward_context().cudagraph_runtime_mode
+            == CUDAGraphMode.FULL
+        )
+    except Exception:
+        return False
+
+
 @dataclass
 class KunlunxinMetadata:
     """Metadata for Kunlunxin attention."""
@@ -348,6 +365,20 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
         self.is_spec_decode = vllm_config.speculative_config is not None
         if self.is_spec_decode:
             self.reorder_batch_threshold = 1 + vllm_config.speculative_config.num_speculative_tokens
+        # Persistent buffers for `kv_prefix_start_loc(_host)`. FULL/PIECEWISE
+        # cudagraph replay only re-executes the ops captured inside the graph;
+        # the host-side cumsum below is plain Python and is NOT captured, so a
+        # per-build allocation would freeze the value (and the pointer baked
+        # into the graph) at capture time. Upstream contract for
+        # `build_for_cudagraph_capture` requires metadata tensors to be
+        # persistent and refreshed in place, so keep them on the builder.
+        self._kv_prefix_capacity = 0
+        self._kv_prefix_start_loc_host: Optional[torch.Tensor] = None
+        self._kv_prefix_start_loc: Optional[torch.Tensor] = None
+        # Upper bound on the required length (`num_reqs + 1`), used to size the
+        # buffers once so that they are never reallocated after a graph has
+        # baked their addresses.
+        self._kv_prefix_max_len = vllm_config.scheduler_config.max_num_seqs + 1
 
     def reorder_batch(self, input_batch: "InputBatch",
                       scheduler_output: "SchedulerOutput") -> bool:
@@ -403,9 +434,21 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
         query_start_loc_host = common_attn_metadata.query_start_loc_cpu
         query_start_loc = common_attn_metadata.query_start_loc
 
-        seq_lens_loc_host = torch.zeros(num_reqs + 1, dtype=torch.int32)
+        # Derive `kv_prefix_start_loc(_host)` in place on persistent buffers.
+        need = num_reqs + 1
+        if need > self._kv_prefix_capacity:
+            cap = max(need, 2 * self._kv_prefix_capacity, self._kv_prefix_max_len)
+            self._kv_prefix_start_loc_host = torch.zeros(cap,
+                                                         dtype=torch.int32)
+            self._kv_prefix_start_loc = torch.zeros(cap,
+                                                    dtype=torch.int32,
+                                                    device=self.device)
+            self._kv_prefix_capacity = cap
+        seq_lens_loc_host = self._kv_prefix_start_loc_host[:need]
+        seq_lens_loc_host[0] = 0
         seq_lens_loc_host[1:] = torch.cumsum(seq_lens_cpu, dim=0)
-        seq_lens_loc = seq_lens_loc_host.to(self.device, non_blocking=True)
+        seq_lens_loc = self._kv_prefix_start_loc[:need]
+        seq_lens_loc.copy_(seq_lens_loc_host, non_blocking=True)
         seq_lens_host = seq_lens_cpu
 
         num_decodes, num_prefills, num_decode_tokens, num_prefill_tokens = \
