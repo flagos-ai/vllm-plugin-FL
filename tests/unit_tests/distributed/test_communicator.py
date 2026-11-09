@@ -157,3 +157,25 @@ def test_nvidia_bridge_satisfies_cuda_graph_contract(mocked_base_init):
     assert NvidiaCommunicatorFL.all_reduce is CommunicatorFL.all_reduce
     assert NvidiaCommunicatorFL.all_gather is CommunicatorFL.all_gather
     assert NvidiaCommunicatorFL.broadcast is CommunicatorFL.broadcast
+
+
+def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    import torch
+
+    from vllm.distributed.parallel_state import GroupCoordinator
+
+    communicator = NvidiaCommunicatorFL(cpu_group=object())
+    coordinator = SimpleNamespace(device_communicator=communicator)
+    stream = object()
+    capture_context = SimpleNamespace(stream=stream)
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda: stream)
+    monkeypatch.setattr(torch.cuda, "stream", lambda _: nullcontext())
+
+    # Exercise upstream's attribute reads instead of copying its expected
+    # field list. vLLM 0.32 also consults fi_pcie_ipc_ar_comm during capture.
+    with GroupCoordinator.graph_capture(coordinator, capture_context) as context:
+        assert context is capture_context
+    assert communicator.pyflagcx_comm is None

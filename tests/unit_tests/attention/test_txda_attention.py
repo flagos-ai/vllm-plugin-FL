@@ -2,6 +2,7 @@
 
 """CPU numerics for the TXDA SDPA adapter; accelerator imports are stubbed."""
 
+import ast
 import importlib.util
 import math
 import sys
@@ -13,6 +14,8 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "vllm_fl/dispatch/backends/vendor/txda/impl/attention.py"
+SHARED_SOURCE = ROOT / "vllm_fl/dispatch/backends/flaggems/impl/attention.py"
+CACHE_LAYOUTS = ["NHD", "HND", "LBHNC", "LBNHC"]
 
 
 def _load(monkeypatch, name, path):
@@ -46,6 +49,18 @@ def attention(monkeypatch):
             return SimpleNamespace(prefix=prefix, metadata=metadata, fast=fast_build)
 
     shared.AttentionFLMetadataBuilder = MetadataBuilder
+    # Exercise the real packed-cache view helper without accelerator imports.
+    tree = ast.parse(SHARED_SOURCE.read_text(encoding="utf-8"))
+    split = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_split_kv_cache"
+    )
+    shared.torch = torch
+    exec(
+        compile(ast.Module(body=[split], type_ignores=[]), str(SHARED_SOURCE), "exec"),
+        shared.__dict__,
+    )
     monkeypatch.setitem(sys.modules, shared.__name__, shared)
     return _load(monkeypatch, "txda_attention_under_test", SOURCE)
 
@@ -62,6 +77,24 @@ def _impl(module, *, kv_heads=2, window=-1, attn_type="decoder"):
     impl.alibi_slopes = None
     impl.logits_soft_cap = 0
     return impl
+
+
+def _cache_layout(cache, layout):
+    if layout == "HND":
+        return cache.transpose(2, 3).contiguous().transpose(2, 3)
+    if layout in {"LBHNC", "LBNHC"}:
+        packed = torch.cat(cache.unbind(0), dim=-1).transpose(1, 2)
+        return packed.contiguous() if layout == "LBHNC" else packed
+    return cache
+
+
+def _set_cache_slot(cache, block, offset, key, value):
+    if cache.ndim == 4:
+        cache[block, :, offset, : key.shape[-1]] = key
+        cache[block, :, offset, key.shape[-1] :] = value
+    else:
+        cache[0, block, offset] = key
+        cache[1, block, offset] = value
 
 
 def _oracle(q, k, v, scale, *, causal=True, window=-1, window_right=None):
@@ -103,14 +136,13 @@ def test_sdpa_matches_explicit_attention(
 
 @pytest.mark.parametrize("causal", [True, False])
 @pytest.mark.parametrize("window", [-1, 2])
-@pytest.mark.parametrize("layout", ["NHD", "HND"])
+@pytest.mark.parametrize("layout", CACHE_LAYOUTS)
 def test_paged_mixed_batch_ignores_invalid_padding(attention, causal, window, layout):
     impl = _impl(attention, window=window)
     gen = torch.Generator().manual_seed(21)
     block_size = 4
-    cache = torch.randn(2, 8, block_size, 2, 8, generator=gen)
-    if layout == "HND":
-        cache = cache.transpose(2, 3).contiguous().transpose(2, 3)
+    reference_cache = torch.randn(2, 8, block_size, 2, 8, generator=gen)
+    cache = _cache_layout(reference_cache, layout)
     query = torch.randn(7, 4, 8, generator=gen)
     # Last two queries and two trailing block entries per request are padding.
     output = torch.full_like(query, 991)
@@ -131,26 +163,25 @@ def test_paged_mixed_batch_ignores_invalid_padding(attention, causal, window, la
     assert result is output
     for request, seq_len in enumerate(lengths):
         pages = block_table[request, : math.ceil(seq_len / block_size)]
-        k = cache[0, pages].flatten(0, 1)[:seq_len]
-        v = cache[1, pages].flatten(0, 1)[:seq_len]
+        k = reference_cache[0, pages].flatten(0, 1)[:seq_len]
+        v = reference_cache[1, pages].flatten(0, 1)[:seq_len]
         lo, hi = starts[request : request + 2]
         expected = _oracle(query[lo:hi], k, v, impl.scale, causal=causal, window=window)
         torch.testing.assert_close(result[lo:hi], expected, rtol=1e-5, atol=1e-6)
     assert torch.all(output[5:] == 991)
 
 
-def test_cache_update_skips_negative_slots_and_padded_kv(attention):
+@pytest.mark.parametrize("layout", CACHE_LAYOUTS)
+def test_cache_update_skips_negative_slots_and_padded_kv(attention, layout):
     impl = _impl(attention)
-    cache = torch.full((2, 3, 4, 2, 8), -7.0)
+    cache = _cache_layout(torch.full((2, 3, 4, 2, 8), -7.0), layout)
     key = torch.arange(5 * 2 * 8).reshape(5, 2, 8).float()
     value = key + 1000
     slots = torch.tensor([0, -1, 6])
     impl.do_kv_cache_update(None, key, value, cache, slots)
     expected = torch.full_like(cache, -7)
-    expected[0, 0, 0] = key[0]
-    expected[1, 0, 0] = value[0]
-    expected[0, 1, 2] = key[2]
-    expected[1, 1, 2] = value[2]
+    _set_cache_slot(expected, 0, 0, key[0], value[0])
+    _set_cache_slot(expected, 1, 2, key[2], value[2])
     torch.testing.assert_close(cache, expected, rtol=0, atol=0)
 
 
@@ -223,7 +254,7 @@ def test_noncausal_respects_asymmetric_window(attention):
     torch.testing.assert_close(output, expected, rtol=1e-5, atol=1e-6)
 
 
-@pytest.mark.parametrize("layout", ["NHD", "HND"])
+@pytest.mark.parametrize("layout", CACHE_LAYOUTS)
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_cache_update_padded_hybrid_storage_and_discontinuous_slots(
     attention, layout, dtype
@@ -233,11 +264,22 @@ def test_cache_update_padded_hybrid_storage_and_discontinuous_slots(
     page_values = block_size * heads * width
     page_stride = 2 * page_values + 17
     backing = torch.full((7 + blocks * page_stride + 23,), -7.0, dtype=dtype)
-    shape = (2, blocks, block_size, heads, width)
-    inner = (
-        (heads * width, width, 1) if layout == "NHD" else (width, block_size * width, 1)
-    )
-    strides = (page_values, page_stride, *inner)
+    if layout in {"LBHNC", "LBNHC"}:
+        shape = (blocks, heads, block_size, 2 * width)
+        inner = (
+            (block_size * 2 * width, 2 * width, 1)
+            if layout == "LBHNC"
+            else (2 * width, heads * 2 * width, 1)
+        )
+        strides = (page_stride, *inner)
+    else:
+        shape = (2, blocks, block_size, heads, width)
+        inner = (
+            (heads * width, width, 1)
+            if layout == "NHD"
+            else (width, block_size * width, 1)
+        )
+        strides = (page_values, page_stride, *inner)
     cache = backing.as_strided(shape, strides, storage_offset=7)
     expected_backing = backing.clone()
     expected = expected_backing.as_strided(shape, strides, storage_offset=7)
@@ -250,17 +292,19 @@ def test_cache_update_padded_hybrid_storage_and_discontinuous_slots(
     for index, slot in enumerate(slots.tolist()):
         if slot >= 0:
             block, offset = divmod(slot, block_size)
-            expected[0, block, offset] = key[index]
-            expected[1, block, offset] = value[index]
+            _set_cache_slot(expected, block, offset, key[index], value[index])
     impl.do_kv_cache_update(None, key, value, cache, slots)
     # Check untouched page padding/storage prefix and suffix, not just the view.
     torch.testing.assert_close(backing, expected_backing, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("slots", [[], [-1, -3]])
-def test_cache_update_without_valid_slots_does_not_touch_storage(attention, slots):
+@pytest.mark.parametrize("layout", CACHE_LAYOUTS)
+def test_cache_update_without_valid_slots_does_not_touch_storage(
+    attention, slots, layout
+):
     impl = _impl(attention)
-    cache = torch.full((2, 3, 4, 2, 8), -7.0)
+    cache = _cache_layout(torch.full((2, 3, 4, 2, 8), -7.0), layout)
     before = cache.clone()
     key = torch.randn(len(slots) + 2, 2, 8)
     impl.do_kv_cache_update(

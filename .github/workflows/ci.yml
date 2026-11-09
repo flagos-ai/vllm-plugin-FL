@@ -35,7 +35,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, 0.4.0-dev]
+    branches: [main, 0.5.0-dev]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths-ignore:
       - "**.md"
@@ -117,6 +117,8 @@ jobs:
             .github/scripts
       - name: Install PyYAML
         run: pip install pyyaml
+      - name: Check NVIDIA native CUDA stack validation
+        run: python -I -B .github/scripts/nvidia/test_stack.py
       - name: Get changed files
         id: changed
         run: |

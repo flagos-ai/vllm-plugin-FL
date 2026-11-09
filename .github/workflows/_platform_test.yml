@@ -125,6 +125,26 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
 
+  # Unit coverage on additional devices (e.g. Hopper for the native CUDA
+  # runtime). The default-runner unit pass already runs inside the
+  # functional job; each entry in the config's unit_devices adds one unit
+  # job on that device's runner (device_runner_labels override).
+  unit:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJson(needs.setup.outputs.config).unit_devices || fromJson('[]') }}
+    uses: ./.github/workflows/_unit_test.yml
+    secrets: inherit
+    with:
+      platform: ${{ inputs.platform }}
+      device: ${{ matrix.device }}
+      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
+      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
+      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+
   # End-to-end model tests.
   # pr stage: pr subset cases (text + multimodal, one device).
   # nightly/weekly stage: main/full cases, all devices.

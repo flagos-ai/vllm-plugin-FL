@@ -17,34 +17,31 @@ to prevent torch.xpu.get_device_name crash. See vllm_fl/__init__.py.
 import inspect
 import logging
 import os
+from types import SimpleNamespace
 
 import torch
 
 logger = logging.getLogger(__name__)
-_patches_applied = False
-_patches_initializing = False
-_legacy_patches_applied = False
+_patch_state = SimpleNamespace(applied=False, initializing=False, legacy_applied=False)
 
 
 def apply_kunlunxin_patches():
     """Apply all Kunlunxin-specific patches. Idempotent."""
-    global _patches_applied, _patches_initializing
-    if _patches_applied or _patches_initializing:
+    if _patch_state.applied or _patch_state.initializing:
         return
-    _patches_initializing = True
+    _patch_state.initializing = True
     try:
         _apply_kunlunxin_patches()
-        _patches_applied = True
+        _patch_state.applied = True
     finally:
         # Keep circular-import protection separate from successful installation.
-        _patches_initializing = False
+        _patch_state.initializing = False
 
 
 def _apply_kunlunxin_patches():
-    global _legacy_patches_applied
-    if not _legacy_patches_applied:
+    if not _patch_state.legacy_applied:
         _apply_legacy_kunlunxin_patches()
-        _legacy_patches_applied = True
+        _patch_state.legacy_applied = True
     # Legacy source-replacement patches need not be reapplied when graph
     # preflight fails. A retry starts from the same saved wrapper owners.
     patch_graph_adaptations()

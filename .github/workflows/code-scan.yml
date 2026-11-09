@@ -26,7 +26,7 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
   pull_request:
-    branches: [main, devops]
+    branches: [main, devops, 0.5.0-dev]
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - "**.md"

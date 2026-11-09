@@ -23,6 +23,7 @@ extend-ignore-re = [
 
 [default.extend-words]
 # ML / deep-learning terminology
+arange = "arange"
 rsqrt = "rsqrt"
 dout = "dout"
 bfloat = "bfloat"

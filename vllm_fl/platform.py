@@ -42,7 +42,6 @@ from vllm_fl.utils import (
     DeviceInfo,
     _env_vendor_name,
     get_device_control_env_var,
-    get_device_name,
     get_device_type,
 )
 
@@ -145,17 +144,6 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
-def _safe_device_name(vendor: str) -> str:
-    """Device-family alias for ``vendor``, or ``""`` when unresolvable."""
-    if not vendor:
-        return ""
-    try:
-        return get_device_name(vendor)
-    except ValueError:
-        logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
-        return ""
-
-
 def _safe_device_type(device_info, vendor: str) -> str:
     """Resolve device_type so an empty runtime probe can never abort import."""
     detected = device_info.device_type
@@ -192,7 +180,6 @@ class PlatformFL(Platform):
     # Resolve device_type once and reuse the result below. An empty probe must
     # never overwrite the static VENDOR_DEVICE_MAP entry resolved here.
     device_type = _safe_device_type(device_info, vendor_name)
-    device_name = _safe_device_name(vendor_name)
     # cuda_alike (nvidia/metax): device_name = vendor_name (not used in torch.device)
     # non-cuda_alike (iluvatar/ascend): device_name = device_type (used in torch.device)
     device_name = (
@@ -438,8 +425,10 @@ class PlatformFL(Platform):
                 elif speculative_config.method == "dflash":
                     if vllm_config._dflash_needs_multi_kv_group():
                         v2_only_features.append("mixed-KV DFlash")
-                    if vllm_config._is_dflash2_draft():
-                        v2_only_features.append("DFlash2")
+                    if vllm_config._is_dflash_candidate_draft():
+                        v2_only_features.append(
+                            "DFlash candidate head (DFlash2/LiLiCorr)"
+                        )
             model_config = getattr(vllm_config, "model_config", None)
             if model_config is not None and getattr(
                 model_config, "is_diffusion", False

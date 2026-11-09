@@ -34,12 +34,13 @@ in ``sys.modules`` with correct values.
 from __future__ import annotations
 
 import sys
+from functools import cache
 
 _FLA_UTILS_MOD = "vllm.model_executor.layers.fla.ops.utils"
 _patched = False
-_wrapper_installed = False
 
 
+@cache
 def _install_xpu_get_device_wrapper() -> bool:
     """Wrap torch.xpu.get_device_name so it can never raise.  Idempotent.
 
@@ -49,10 +50,6 @@ def _install_xpu_get_device_wrapper() -> bool:
     nor any vLLM model module, so it is safe to call from vllm_fl.register()
     before the old-to-new module alias exists.
     """
-    global _wrapper_installed
-    if _wrapper_installed:
-        return True
-
     import torch
 
     if hasattr(torch, "xpu") and hasattr(torch.xpu, "get_device_name"):
@@ -66,7 +63,6 @@ def _install_xpu_get_device_wrapper() -> bool:
 
         torch.xpu.get_device_name = _safe_get_device_name
 
-    _wrapper_installed = True
     return True
 
 

@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
-from types import MethodType, NoneType
+from types import NoneType
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -61,8 +61,11 @@ try:  # pragma: no cover - vLLM version compat
         prepare_communication_buffer_for_model as _prepare_comm_buffer,
     )
 except ImportError:  # vLLM >= 0.28 dropped the symbol
+
     def _prepare_comm_buffer(*args, **kwargs):
         return None
+
+
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
@@ -90,7 +93,6 @@ from vllm.v1.outputs import (
 )
 from vllm.v1.utils import compute_iteration_details, report_usage_stats
 from vllm.v1.worker.gpu.warmup import warmup_kernels
-from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
 from vllm.v1.worker.sentinel.gpu_worker_sentinel import WorkerSentinel
 from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
@@ -100,10 +102,8 @@ from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
-import vllm_fl.envs as fl_envs
-from vllm_fl.attention.utils import patch_mm_encoder_attention
 from vllm_fl.dispatch.io_common import managed_inference_mode
-from vllm_fl.utils import get_flag_gems_whitelist_blacklist
+from vllm_fl.worker.runtime import _initialize_fl_runtime
 
 logger = init_logger(__name__)
 
@@ -149,143 +149,12 @@ def _is_hybrid_kv_model(vllm_config: VllmConfig) -> bool:
         if getattr(model_config, "is_hybrid", False):
             return True
     except Exception:
+        # Some model configs cannot resolve is_hybrid before initialization.
+        # Fall back to inspecting the Hugging Face layer types below.
         pass
     hf_config = getattr(model_config, "hf_text_config", None)
     layer_types = getattr(hf_config, "layer_types", None) or ()
     return any(layer_type != "full_attention" for layer_type in layer_types)
-
-
-def _initialize_fl_runtime(rank: int) -> None:
-    """Install FL dispatch hooks before model/operator construction."""
-    from vllm_fl.ops.custom_ops import register_oot_ops
-
-    # CustomOp caches its selected forward method in __init__, so the
-    # multimodal attention patch must run before model construction.
-    patch_mm_encoder_attention()
-    register_oot_ops()
-
-    if not fl_envs.USE_FLAGGEMS:
-        return
-
-    import flag_gems
-
-    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
-    should_record = rank == 0
-    common = {
-        "record": should_record,
-        "once": True,
-        "path": fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
-    }
-    if whitelist:
-        logger.info("[FlagGems] Enable only the following ops: %s", whitelist)
-        flag_gems.only_enable(include=whitelist, **common)
-    elif blacklist:
-        logger.info("[FlagGems] Disable the following ops: %s", blacklist)
-        flag_gems.enable(unused=blacklist, **common)
-    else:
-        logger.info("[FlagGems] Enable all ops")
-        flag_gems.enable(**common)
-
-
-_NATIVE_RUNNER_IO_METHODS = ("execute_model", "sample_tokens", "pool")
-
-
-def _install_native_runner_io_methods(model_runner: Any) -> None:
-    """Replace native runner inference-mode wrappers on one runner instance.
-
-    vLLM's NVIDIA V1 and V2 runners decorate their execution entry points
-    with ``torch.inference_mode``. IO dumping needs ``torch.no_grad`` while its
-    TorchDispatchMode is active. Unwrapping only that outer decorator keeps the
-    native runner implementation and any inner vLLM decorators unchanged.
-    """
-    for method_name in _NATIVE_RUNNER_IO_METHODS:
-        bound_method = getattr(model_runner, method_name, None)
-        if bound_method is None or getattr(bound_method, "_vllm_fl_managed_io", False):
-            continue
-
-        method = getattr(bound_method, "__func__", bound_method)
-        native_impl = getattr(method, "__wrapped__", None)
-        if native_impl is None:
-            raise RuntimeError(
-                f"Native model runner method {method_name!r} no longer exposes "
-                "the vLLM inference-mode wrapper"
-            )
-
-        managed_impl = managed_inference_mode()(native_impl)
-        managed_impl._vllm_fl_managed_io = True
-        setattr(model_runner, method_name, MethodType(managed_impl, model_runner))
-
-
-def _call_native_worker_with_managed_inference(
-    method: Callable, worker: "NvidiaWorkerFL", *args, **kwargs
-) -> Any:
-    """Call a native worker method without its fixed inference-mode wrapper."""
-    native_impl = getattr(method, "__wrapped__", None)
-    if native_impl is None:
-        raise RuntimeError(
-            f"Native worker method {method.__name__!r} no longer exposes "
-            "the vLLM inference-mode wrapper"
-        )
-    return managed_inference_mode()(native_impl)(worker, *args, **kwargs)
-
-
-class NvidiaWorkerFL(NativeGPUWorker):
-    """Thin FL wrapper around vLLM's target-version NVIDIA worker.
-
-    NVIDIA uses the upstream v0.28 GPU worker and V2 model runner unchanged;
-    the plugin only installs its dispatch hooks before model construction.
-    Keeping this as a delegating wrapper prevents the copied multi-vendor
-    worker below from drifting from CUDA behavior in future vLLM releases.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._fl_io_dump_initialized = False
-        _initialize_fl_runtime(self.rank)
-
-    def _ensure_io_dump_initialized(self) -> None:
-        """Enable IO dumping on the first execution after model loading."""
-        if self._fl_io_dump_initialized:
-            return
-
-        from vllm_fl.dispatch.io_dumper import (
-            init_io_dump_from_env,
-            is_dump_enabled,
-            register_io_module_hooks,
-        )
-
-        init_io_dump_from_env(getattr(self.model_config, "enforce_eager", False))
-        if is_dump_enabled():
-            _install_native_runner_io_methods(self.model_runner)
-            register_io_module_hooks(self.model_runner.get_model())
-            logger.info("Enabled FL IO dumping for the native NVIDIA model runner")
-        self._fl_io_dump_initialized = True
-
-    def sample_tokens(
-        self, grammar_output: "GrammarOutput | None"
-    ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
-        self._ensure_io_dump_initialized()
-        output = _call_native_worker_with_managed_inference(
-            NativeGPUWorker.sample_tokens, self, grammar_output
-        )
-        if output is not None:
-            from vllm_fl.dispatch.io_dumper import advance_io_step
-
-            advance_io_step()
-        return output
-
-    def execute_model(
-        self, scheduler_output: "SchedulerOutput"
-    ) -> ModelRunnerOutput | AsyncModelRunnerOutput | None:
-        self._ensure_io_dump_initialized()
-        output = _call_native_worker_with_managed_inference(
-            NativeGPUWorker.execute_model, self, scheduler_output
-        )
-        if output is not None:
-            from vllm_fl.dispatch.io_dumper import advance_io_step
-
-            advance_io_step()
-        return output
 
 
 def _apply_worker_vendor_patches() -> None:
@@ -383,7 +252,9 @@ class WorkerFL(WorkerBase):
         # degenerates to token id 0 ("!" in the Qwen tokenizer) right after one
         # correct token.  The fused paged write path already exists behind
         # USE_RESHAPE_AND_CACHE_FLASH; default it on for such models.
-        if _is_hybrid_kv_model(vllm_config):
+        if getattr(
+            current_platform, "vendor_name", ""
+        ) == "kunlunxin" and _is_hybrid_kv_model(vllm_config):
             os.environ.setdefault("USE_RESHAPE_AND_CACHE_FLASH", "1")
 
         _initialize_fl_runtime(self.rank)
@@ -564,22 +435,13 @@ class WorkerFL(WorkerBase):
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
             parallel_config = self.parallel_config
-            # When vLLM already handed this DP rank its own physical device
-            # list (assigned_physical_gpu_ids, set for platforms that cannot
-            # rely on set_device_index(), e.g. NPU), that list is already
-            # sliced per rank and local_rank indexes into it. Adding the DP
-            # offset on top double-counts: DP rank 1 gets local_rank 2 while
-            # only [2, 3] are assigned, which trips the bounds check below /
-            # raises IndexError from logical_device_id_to_visible_device_id().
-            # A full (un-sliced) list -- CUDA with --device-ids -- is longer
-            # than one TP x PP group and still needs the offset.
+            # vLLM slices physical IDs for non-CUDA-like platforms per DP rank.
+            # A local rank already indexes into this slice. A full device list
+            # (e.g. CUDA --device-ids) still requires the DP offset.
             assigned_ids = parallel_config.assigned_physical_gpu_ids
-            tp_pp_world_size = (
-                parallel_config.pipeline_parallel_size
-                * parallel_config.tensor_parallel_size
-            )
+            local_world_size = parallel_config.local_world_size
             rank_slice_assigned = (
-                assigned_ids is not None and len(assigned_ids) <= tp_pp_world_size
+                assigned_ids is not None and len(assigned_ids) == local_world_size
             )
             if (
                 not rank_slice_assigned
@@ -593,19 +455,17 @@ class WorkerFL(WorkerBase):
                 if dp_local_rank is None:
                     dp_local_rank = self.parallel_config.data_parallel_index
 
-                # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
-                self.local_rank += dp_local_rank * tp_pp_world_size
+                self.local_rank += dp_local_rank * local_world_size
 
             # Publish the logical-to-physical mapping for topology queries
             # such as NIC affinity and P2P checks.
-            assigned_physical_gpu_ids = parallel_config.assigned_physical_gpu_ids
-            if assigned_physical_gpu_ids is not None:
+            if assigned_ids is not None:
                 from vllm.platforms.interface import set_assigned_physical_gpu_ids
 
-                set_assigned_physical_gpu_ids(assigned_physical_gpu_ids)
-                assert self.local_rank < len(assigned_physical_gpu_ids), (
+                set_assigned_physical_gpu_ids(assigned_ids)
+                assert self.local_rank < len(assigned_ids), (
                     f"local_rank {self.local_rank} is out of bounds for "
-                    f"assigned_physical_gpu_ids {assigned_physical_gpu_ids}"
+                    f"assigned_physical_gpu_ids {assigned_ids}"
                 )
                 # NOTE(patch pr45026): local_world_size is derived from
                 # parallel_config.nnodes, which is only set for the "mp"
@@ -619,12 +479,10 @@ class WorkerFL(WorkerBase):
                     "ray",
                     "external_launcher",
                 ):
-                    assert self.parallel_config.local_world_size <= len(
-                        assigned_physical_gpu_ids
-                    ), (
-                        f"local_world_size ({self.parallel_config.local_world_size})"
+                    assert local_world_size <= len(assigned_ids), (
+                        f"local_world_size ({local_world_size})"
                         " exceeds assigned_physical_gpu_ids count "
-                        f"({len(assigned_physical_gpu_ids)})"
+                        f"({len(assigned_ids)})"
                     )
             else:
                 assert self.local_rank < torch.accelerator.device_count(), (
