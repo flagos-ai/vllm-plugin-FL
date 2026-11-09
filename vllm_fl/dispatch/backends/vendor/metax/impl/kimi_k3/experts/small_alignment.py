@@ -6,7 +6,6 @@ from flaggems_vllm.ops.moe_align_block_size import (
 
 import torch
 import triton
-import triton.language as tl
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.grouped_moe import _alignment as baseline_alignment
 
 
