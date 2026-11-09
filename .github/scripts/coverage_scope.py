@@ -33,7 +33,7 @@ def _load_config(path: Path) -> dict[str, Any]:
     return config
 
 
-def _platform_scope(config: dict[str, Any], platform: str) -> tuple[str | None, dict[str, Any]]:
+def _platform_scope(config: dict[str, Any], platform: str) -> tuple[str | None, str]:
     platforms = config.get("platforms")
     if not isinstance(platforms, dict) or platform not in platforms:
         known = ", ".join(sorted(platforms or {}))
@@ -43,14 +43,14 @@ def _platform_scope(config: dict[str, Any], platform: str) -> tuple[str | None, 
     entry = platforms[platform]
     if not isinstance(entry, dict):
         raise SystemExit(f"Coverage platform {platform!r} has no mapping")
-    backend = entry.get("backend")
     mode = entry.get("mode", "backend_plus_shared")
-    if backend is None and mode != "shared_only":
+    if mode == "shared_only":
+        return None, mode
+    if not entry.get("backend"):
         raise SystemExit(
             f"Coverage platform {platform!r} has no backend mapping or shared_only mode"
         )
-    selected_backend = None if mode == "shared_only" else str(backend)
-    return selected_backend, entry
+    return str(entry["backend"]), mode
 
 
 def _vendor_name(path: str, vendor_root: str) -> str | None:
@@ -68,44 +68,23 @@ def _vendor_name(path: str, vendor_root: str) -> str | None:
 
 
 def _sum_totals(files: dict[str, Any]) -> dict[str, Any]:
-    totals: dict[str, int] = {}
-    for file_data in files.values():
-        summary = file_data.get("summary", {})
-        if not isinstance(summary, dict):
-            continue
+    # Statement coverage only: pyproject.toml does not enable branch coverage,
+    # and main() rejects branch reports instead of mis-summing them.
+    totals = {
+        key: sum(int(f["summary"].get(key, 0)) for f in files.values())
         for key in (
             "covered_lines",
             "num_statements",
             "missing_lines",
             "excluded_lines",
-            "covered_branches",
-            "num_branches",
-            "missing_branches",
-            "covered_functions",
-            "num_functions",
-            "missing_functions",
-        ):
-            if key in summary:
-                totals[key] = totals.get(key, 0) + int(summary[key])
-
-    statements = totals.get("num_statements", 0)
-    covered_lines = totals.get("covered_lines", 0)
-    percent = 100.0 * covered_lines / statements if statements else 100.0
-    totals["percent_covered"] = percent
-    totals["percent_covered_display"] = f"{percent:.0f}"
-
-    branches = totals.get("num_branches", 0)
-    if branches:
-        branch_percent = 100.0 * totals.get("covered_branches", 0) / branches
-        totals["percent_covered_branches"] = branch_percent
-        totals["percent_covered_branches_display"] = f"{branch_percent:.0f}"
-
-    functions = totals.get("num_functions", 0)
-    if functions:
-        function_percent = 100.0 * totals.get("covered_functions", 0) / functions
-        totals["percent_covered_functions"] = function_percent
-        totals["percent_covered_functions_display"] = f"{function_percent:.0f}"
-
+        )
+    }
+    statements = totals["num_statements"]
+    percent = 100.0 * totals["covered_lines"] / statements if statements else 100.0
+    # Mirror both coverage.py total keys so consumers see the native schema.
+    for key in ("percent_covered", "percent_statements_covered"):
+        totals[key] = percent
+        totals[f"{key}_display"] = f"{percent:.0f}"
     return totals
 
 
@@ -133,12 +112,18 @@ def main() -> None:
     args = _parse_args()
     config = _load_config(args.config)
     vendor_root = str(config.get("vendor_root", "vllm_fl/dispatch/backends/vendor"))
-    backend, platform_scope = _platform_scope(config, args.platform.lower())
+    backend, mode = _platform_scope(config, args.platform.lower())
 
     with args.input.open(encoding="utf-8") as stream:
         full_report = json.load(stream)
-    if not isinstance(full_report, dict) or not isinstance(full_report.get("files"), dict):
+    if not isinstance(full_report, dict) or not isinstance(
+        full_report.get("files"), dict
+    ):
         raise SystemExit(f"Not a coverage.py JSON report: {args.input}")
+    if full_report.get("meta", {}).get("branch_coverage"):
+        raise SystemExit(
+            "Branch coverage reports are not supported by coverage_scope.py"
+        )
 
     full_files = full_report["files"]
     selected_files: dict[str, Any] = {}
@@ -165,11 +150,8 @@ def main() -> None:
     metadata = {
         "schema_version": "flagos.coverage.scope/v1",
         "platform": args.platform.lower(),
-        "runtime_backend": platform_scope.get("backend"),
-        "resolved_backend": backend,
-        "runtime_alias": platform_scope.get("runtime_alias"),
-        "scope_mode": platform_scope.get("mode", "backend_plus_shared"),
-        "notes": platform_scope.get("notes"),
+        "backend": backend,
+        "scope_mode": mode,
         "scope": args.scope,
         "source_sha": args.source_sha,
         "input_report": str(args.input),

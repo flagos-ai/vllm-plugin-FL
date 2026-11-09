@@ -154,3 +154,6 @@ jobs:
           backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
           api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
           report_path: 'coverage-${{ inputs.platform }}.json'
+          file_type: coverage
+          # Default github.job is shared by every platform.
+          job_name: coverage-${{ inputs.platform }}

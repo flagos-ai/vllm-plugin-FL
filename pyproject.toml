@@ -124,6 +124,10 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["vllm_fl"]
+# Measure Python subprocesses such as vLLM engine-core workers (coverage >= 7.10).
+patch = ["subprocess"]
+# Save data when vLLM terminates engine processes with SIGTERM.
+sigterm = true
 omit = [
     "tests/*",
     "examples/*",

@@ -14,10 +14,9 @@
 
 # Coverage ownership is intentionally separate from CI trigger routing in
 # platforms.yml.  A trigger path says which jobs to run; this file says which
-# backend implementation belongs in a platform's coverage denominator.
+# backend directory under vendor_root belongs in a platform's coverage
+# denominator.  Every platform in platforms.yml must be listed here.
 
-version: 1
-package_root: vllm_fl
 vendor_root: vllm_fl/dispatch/backends/vendor
 
 platforms:
@@ -25,45 +24,20 @@ platforms:
     backend: cuda
   ascend:
     backend: ascend
-  # Hygon is a first-class CI platform.  The runtime vendor resolver currently
-  # registers vendor/cuda because there is no vendor/hygon directory, but
-  # CudaBackend.is_available() only accepts device_name=nvidia.  Therefore the
-  # applicable source for Hygon is shared code until a Hygon backend exists.
+  # Hygon resolves to vendor/cuda (there is no vendor/hygon), but
+  # CudaBackend.is_available() only accepts device_name=nvidia, so no vendor
+  # backend can execute on Hygon.  Count shared code only until one exists.
   hygon:
-    backend: cuda
     mode: shared_only
-    runtime_alias: cuda
-    notes: >-
-      dispatch/config/hygon.yaml names vendor:hygon, while the registered
-      implementation currently resolves to vendor.cuda and is unavailable on
-      the Hygon device name.
   metax:
     backend: metax
   musa:
     backend: musa
-  mthreads:
-    backend: musa
-    runtime_alias: musa
   enflame:
     backend: gcu
-  gcu:
-    backend: gcu
-    runtime_alias: enflame
   kunlunxin:
     backend: kunlunxin
   thead:
     backend: thead
   iluvatar:
     backend: iluvatar
-  biren:
-    backend: supa
-  amd:
-    backend: cuda
-    mode: shared_only
-  maca:
-    backend: metax
-    runtime_alias: metax
-  sunrise:
-    backend: sunrise
-  tsingmicro:
-    backend: txda
