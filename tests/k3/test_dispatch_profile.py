@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+from vllm_fl.kimi_k3_config import is_kimi_k3_profile
+from vllm_fl.patches.metax_open import uses_open_metax_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -14,8 +15,10 @@ ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture(autouse=True)
 def clear_profile_cache():
     is_kimi_k3_profile.cache_clear()
+    uses_open_metax_runtime.cache_clear()
     yield
     is_kimi_k3_profile.cache_clear()
+    uses_open_metax_runtime.cache_clear()
 
 
 def test_no_profile_preserves_default_backend(monkeypatch):
@@ -60,8 +63,47 @@ def test_example_has_no_source_patch_or_install_hook():
     example = ROOT / "examples/kimi_k3_metax"
     assert not list(example.rglob("*.patch"))
     assert not (example / "prepare.py").exists()
-    lock = json.loads((example / "dependency-lock.json").read_text())
+    lock = json.loads((ROOT / "vllm_fl/configs/kimi_k3_dependencies.json").read_text())
     assert (
         lock["dependencies"]["vllm"]["commit"]
         == "1240e6740799454e2d384bde4b117bfd3fab85b3"
     )
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        None,
+        "vllm._C",
+        "vllm._C_stable_libtorch",
+        "vllm._moe_C_stable_libtorch",
+        "vllm._qutlass_C",
+        "mcoplib",
+    ],
+)
+def test_runtime_route_is_derived_without_loading_providers(monkeypatch, provider):
+    import sys
+
+    from vllm_fl.patches import metax_open
+
+    names = (
+        "vllm._C",
+        "vllm._C_stable_libtorch",
+        "vllm._moe_C_stable_libtorch",
+        "vllm._qutlass_C",
+        "mcoplib",
+    )
+    before = {name: sys.modules.get(name) for name in names}
+    monkeypatch.setattr(
+        metax_open, "find_spec", lambda name: object() if name == provider else None
+    )
+    assert uses_open_metax_runtime() is (provider is None)
+    assert before == {name: sys.modules.get(name) for name in names}
+
+
+def test_existing_flagcx_transport_keeps_the_legacy_sdk_route(monkeypatch):
+    from vllm_fl.patches import metax_open
+
+    monkeypatch.setenv("FLAGCX_PATH", "/existing/transport")
+    monkeypatch.setattr(metax_open, "find_spec", lambda _: None)
+    assert not uses_open_metax_runtime()

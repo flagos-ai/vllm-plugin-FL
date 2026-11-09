@@ -48,7 +48,7 @@ Paths are repository-relative. Empty package `__init__.py` files establish names
 
 | File | Responsibility | Source / nature |
 |---|---|---|
-| `vllm_fl/kimi_k3_config.py` | Immutable K3 model/topology policy. | Custom FL configuration, interface or lifecycle |
+| `vllm_fl/kimi_k3_config.py` |Immutable K3 model/topology policy. Initialize private per-process compilation caches before library imports. Select the explicit profile through the existing FL YAML setting.| Custom FL configuration, interface or lifecycle |
 | `vllm_fl/models/kimi_k3.py` | Native model component factories and the changed methods only. | vLLM inheritance + custom FL differences |
 | `vllm_fl/models/kimi_k3_context.py` | Resolve the construction-time model policy. | Custom FL configuration, interface or lifecycle |
 | `vllm_fl/models/kimi_k3_vision.py` | Vision component classes, bounded MLP rows and real-view layout handling. | vLLM inheritance + custom FL differences |
@@ -74,9 +74,7 @@ Paths are repository-relative. Empty package `__init__.py` files establish names
 | File | Responsibility | Source / nature |
 |---|---|---|
 | `vllm_fl/distributed/kimi_k3_pp.py` | Host-packed sampled-token feedback and native queue/invalidation order. | vLLM PPHandler + custom FL packets; PyTorch/Gloo feedback |
-| `vllm_fl/worker/kimi_k3.py` | Runner-owned workspace and release of consumed PP input references. | vLLM inheritance + custom FL differences |
-| `vllm_fl/worker/kimi_k3_graph.py` | Preserve native Graph replay and its accepted MCCL stream boundary. | vLLM inheritance + custom FL differences |
-| `vllm_fl/worker/kimi_k3_workspace.py` | Reserve the accepted workspace inside KV memory budgeting. | Custom FL configuration, interface or lifecycle |
+| `vllm_fl/worker/kimi_k3.py` |Runner-owned workspace and release of consumed PP input references. Preserve native Graph replay and its accepted MCCL stream boundary. Reserve the accepted workspace inside KV memory budgeting.| vLLM inheritance + custom FL differences |
 | `vllm_fl/worker/pipeline_input.py` | Preserve receive ownership and release-after-copy. | FL PP lifetime adapter |
 
 ### FG / FGV adapters
@@ -105,7 +103,7 @@ Paths are repository-relative. Empty package `__init__.py` files establish names
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/experts/decode_experts.py` | Small-batch packed expert G1/G2 paths and output reduction. | Custom TP8 packed-expert compute; FGV primitives where called |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/experts/expert_gemm.py` | Expert GEMM with the accepted decode, accumulation and rounding. | Custom TP8 packed-expert compute; FGV primitives where called |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/experts/grouped_moe.py` | Qualified expert fallback, alignment and weighted reduction. | Custom TP8 packed-expert compute; FGV primitives where called |
-| `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/experts/marlin_mxfp4.py` | Packed-word layout and qualified tail-GEMV support. | Custom TP8 packed-expert compute; FGV primitives where called |
+| `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/experts/marlin_mxfp4.py` | Packed-word layout and shared packed-expert decoding; unused tail-GEMV trials are removed. | Custom TP8 packed-expert compute; FGV primitives where called |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/experts/mxfp4_kernels.py` | Accepted MXFP4 decode primitives and fallback compute. | Custom TP8 packed-expert compute; FGV primitives where called |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/experts/small_alignment.py` | Compact-buffer policy around the pinned FGV alignment kernel. | FGV primitive + FL shape/buffer policy |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/experts/tp8_expert_g1.py` | Fused packed G1/SiTU small-batch specialization. | Custom TP8 packed-expert compute; FGV primitives where called |
@@ -114,7 +112,7 @@ Paths are repository-relative. Empty package `__init__.py` files establish names
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/kda/chunk_delta_h.py` | Native FLA state-update kernel with local launch settings. | Reused vLLM K3/FLA kernels + retained numeric/launch compatibility |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/kda/chunk_intra.py` | Native inter/solve/sub-chunk and token-parallel selection. | Reused vLLM K3/FLA kernels + retained numeric/launch compatibility |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/kda/interface.py` | KDA normalization/materialization and state contract. | Custom cache/layout/numeric compatibility or interface contract |
-| `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/kda/launch.py` | Local kernel handles without replacing upstream exports or global tuning. | Reused vLLM K3/FLA kernels + retained numeric/launch compatibility |
+| `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/kda/launch.sh` | Local kernel handles without replacing upstream exports or global tuning. | Reused vLLM K3/FLA kernels + retained numeric/launch compatibility |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/kda/normalization.py` | Preserve the evaluated KDA normalization precision. | Custom cache/layout/numeric compatibility or interface contract |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/kda/preprocess.py` | KDA input preparation with the existing layout guards. | Custom cache/layout/numeric compatibility or interface contract |
 | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/linear/latent.py` | TP-local D projection, grouped row execution and original launch settings. | FG primitives / registration + FL TP-specific policy |
@@ -129,15 +127,10 @@ Paths are repository-relative. Empty package `__init__.py` files establish names
 
 | File | Responsibility | Source / nature |
 |---|---|---|
-| `vllm_fl/patches/kimi_k3/cache.py` | Initialize private per-process compilation caches before library imports. | Custom FL configuration, interface or lifecycle |
-| `vllm_fl/patches/kimi_k3/cuda_runtime.py` | Reuse the existing SDK wrapper; retain the verified library lookup. | MetaX wrapper inheritance + closed MACA runtime |
-| `vllm_fl/patches/kimi_k3/mccl_runtime.py` | Reuse collectives; retain abort, symbol caches and unsupported-window checks. | MetaX wrapper inheritance + closed MCCL runtime |
-| `vllm_fl/patches/kimi_k3/op_registry.py` | Strict schema-only declarations and capability checks for the pinned empty build. | Compatibility; no fake model-kernel implementation |
-| `vllm_fl/patches/kimi_k3/op_schemas.py` | Pinned declarations generated from the accepted vLLM source. | vLLM schema metadata; no compute |
-| `vllm_fl/patches/kimi_k3/profile.py` | Select the explicit profile through the existing FL YAML setting. | Startup admission; no optimization environment toggle |
+| `vllm_fl/dispatch/backends/vendor/metax/patches/abi.py` |Reuse the existing SDK wrapper; retain the verified library lookup. Reuse collectives; retain abort, symbol caches and unsupported-window checks. Locate the same MCCL library.| MetaX wrapper inheritance + closed MACA runtime |
+| `vllm_fl/patches/metax_open.py` | Pinned empty-build declarations and strict conflict/provider checks, loaded before device kernels. | MetaX version compatibility; no model compute |
 | `vllm_fl/patches/kimi_k3/registration.py` | One model, quantization, attention and torch-op startup registration. | Custom FL configuration, interface or lifecycle |
-| `vllm_fl/patches/kimi_k3/runtime.py` | Install the accepted MACA/MCCL bindings once. | FL hook; closed hardware runtimes underneath |
-| `vllm_fl/patches/kimi_k3/runtime_library.py` | Locate the same MCCL library. | Thin closed-runtime binding |
+| `vllm_fl/dispatch/backends/vendor/metax/runtime.py` | Install the accepted MACA/MCCL bindings once. | FL hook; closed hardware runtimes underneath |
 
 ## Existing integration files
 
@@ -145,7 +138,7 @@ Paths are repository-relative. Empty package `__init__.py` files establish names
 |---|---|
 | `vllm_fl/__init__.py` | K3-only cache/schema startup; other profiles keep the original route. |
 | `vllm_fl/model_registration.py` | One version-checked K3 general-plugin entry. |
-| `vllm_fl/platform.py` | Select K3 runtime hooks and the accepted MCCL constraint only for its profile. |
+| `vllm_fl/platform.py` | Select the MetaX runtime through the vendor entry; model constraints stay in K3 configuration. |
 | `vllm_fl/worker/worker.py` | Select the same K3 registrar and runner at their canonical locations. |
 | `vllm_fl/dispatch/builtin_ops.py` | Ordinary backend initialization; K3 registration errors remain explicit. |
 | `vllm_fl/dispatch/backends/flaggems/register_ops.py` | Scoped library overrides with blacklist filtering. |
@@ -194,5 +187,5 @@ Use [the installation and launch example](../examples/kimi_k3_metax/README.md); 
 
 “Validated” refers to this project's measured configurations, not official K3 certification of a vLLM release.
 The package label `0.28.0+empty` is a build identifier; exact public source revisions are in the dependency lock.
-[VALIDATION.md](../examples/kimi_k3_metax/VALIDATION.md) separates this refactor's checks from retained historical quality and performance results.
+[VALIDATION.md](../examples/kimi_k3_metax/VALIDATION.md) gives reproducible integration checks and their limits. Detailed run evidence is maintained with the PR and project reports; historical quality and performance results retain their original scope.
 The structural cleanup retained historical GPQA/ERQA and throughput results. Sampling changes are validated separately; historical quality scores are not new sampler-quality measurements.

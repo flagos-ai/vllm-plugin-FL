@@ -5,8 +5,11 @@ import logging
 import os
 import sys
 
-from .patches.kimi_k3.cache import initialize_process_cache
-from .patches.kimi_k3.profile import is_kimi_k3_profile
+from .kimi_k3_config import (
+    initialize_process_cache,
+    is_kimi_k3_profile,
+    verify_dependencies,
+)
 
 if is_kimi_k3_profile():
     initialize_process_cache()
@@ -111,7 +114,12 @@ def _patch_custom_ops():
     import torch
     from vllm_fl.utils import DeviceInfo
 
-    if DeviceInfo().vendor_name == "metax" and is_kimi_k3_profile():
+    open_runtime = False
+    if DeviceInfo().vendor_name == "metax":
+        from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+        open_runtime = uses_open_metax_runtime()
+    if open_runtime:
         if os.environ.get("FLAGCX_PATH"):
             raise RuntimeError("K3 MetaX uses MCCL and does not enable FlagCX")
         import vllm_fl._C
@@ -125,9 +133,9 @@ def _patch_custom_ops():
         if not torch._C._dispatch_has_kernel_for_dispatch_key(op_name, "CUDA"):
             raise RuntimeError("FL weak_ref_tensor has no CUDA dispatch implementation")
         logger.info("FL open weak_ref_tensor provider: %s", vllm_fl._C.__file__)
-        from vllm_fl.patches.kimi_k3.op_registry import register_op_schemas
+        from vllm_fl.patches.metax_open import register_op_schemas
         register_op_schemas()
-        return
+        return True
 
     for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
         try:
@@ -189,6 +197,16 @@ def _init_vendor_device():
 
 def register():
     """Register the FL platform."""
+    if is_kimi_k3_profile():
+        verify_dependencies()
+        if os.environ.get("FLAGCX_PATH"):
+            raise RuntimeError("K3 uses MCCL; unset FLAGCX_PATH")
+        from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+        if not uses_open_metax_runtime():
+            raise RuntimeError(
+                "K3 requires the validated empty build without native/vendor providers"
+            )
     _init_vendor_device()
 
     # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
@@ -198,11 +216,9 @@ def register():
         logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
         return arm_cpu_platform
 
-    _patch_custom_ops()
+    open_runtime = _patch_custom_ops()
 
-    from vllm_fl.utils import DeviceInfo
-
-    if DeviceInfo().vendor_name != "metax" or not is_kimi_k3_profile():
+    if not open_runtime:
         _patch_flash_attn_import()
 
     # Note: FlagCX connector registration is deferred to register_model()
@@ -214,6 +230,8 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
+
+    from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
     if vendor_name == "ascend":
@@ -311,14 +329,18 @@ def register_model():
         install_arm_cpu_packed_w4a8()
         return
 
-    if getattr(current_platform, "vendor_name", None) != "metax":
+    k3_metax = (
+        getattr(current_platform, "vendor_name", None) == "metax"
+        and is_kimi_k3_profile()
+    )
+    if not k3_metax:
         _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
     register_quant_linear()
     register_router()
 
-    if getattr(current_platform, "vendor_name", None) != "metax":
+    if not k3_metax:
         _register_gdn_packed_decode_patch()
 
     from vllm_fl.utils import DeviceInfo

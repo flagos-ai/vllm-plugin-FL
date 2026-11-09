@@ -134,7 +134,7 @@ def register_builtins(registry: OpRegistry) -> None:
     Args:
         registry: Registry to register into
     """
-    from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+    from vllm_fl.kimi_k3_config import is_kimi_k3_profile
 
     if is_kimi_k3_profile():
         # Exact profile admission: no silent fallback on failed registrations.
@@ -178,5 +178,3 @@ def register_builtins(registry: OpRegistry) -> None:
             logger.debug(f"Registered {plugin_count} external plugins")
     except Exception as e:
         logger.debug(f"Plugin discovery failed: {e}")
-
-

@@ -1,34 +1,53 @@
-"""Example CLI contracts: inspect commands without importing accelerator libraries."""
+"""Native shell launch contracts; no model or accelerator work."""
 
 import argparse
-import importlib.util
-import json
+import os
+import shlex
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-LAUNCHER = ROOT / "examples" / "kimi_k3_metax" / "launch.py"
-spec = importlib.util.spec_from_file_location("k3_example_launch", LAUNCHER)
-launch = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(launch)
+LAUNCHER = ROOT / "examples/kimi_k3_metax/launch.sh"
 
 
-def arguments(rank):
-    return SimpleNamespace(
-        node_rank=rank,
-        cache=f"/tmp/k3-test/node-{rank}",
-        net_interface="rdma0",
-        ib_hca="hca0:1",
-        gid_index=3,
-        model="/models/Kimi-K3",
-        master_addr="master",
-        master_port=29864,
-        host="127.0.0.1",
-        port=8000,
+def dry_run(rank, cache="/tmp/k3-test/node", model="/models/Kimi-K3"):
+    command = [
+        str(LAUNCHER),
+        "--model",
+        model,
+        "--node-rank",
+        str(rank),
+        "--master-addr",
+        "master",
+        "--cache",
+        str(cache),
+        "--net-interface",
+        "rdma0",
+        "--ib-hca",
+        "hca0:1",
+        "--dry-run",
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        env={k: v for k, v in os.environ.items() if k != "FLAGCX_PATH"},
     )
+    if result.returncode:
+        raise ValueError(result.stderr)
+    environment = {}
+    native = None
+    for line in result.stdout.splitlines():
+        words = shlex.split(line)
+        if words[0] == "export":
+            key, value = words[1].split("=", 1)
+            environment[key] = value
+        elif words[0] == "exec":
+            native = words[1:]
+    return native, environment
 
 
 class LauncherTests(unittest.TestCase):
@@ -61,90 +80,69 @@ class LauncherTests(unittest.TestCase):
         self.assertIs(args.enable_prefix_caching, False)
         self.assertEqual(args.mamba_cache_mode, "none")
 
-    def test_child_uses_isolated_installed_packages(self):
-        command, _ = launch.build_launch(arguments(0))
-        self.assertEqual(command[1], "-I")
-
-    def test_dependency_provenance_rejects_wrong_revision_and_import_shadow(self):
-        lock = json.loads(LAUNCHER.with_name("dependency-lock.json").read_text())
-        items = {x["distribution"]: x for x in lock["dependencies"].values()}
-
-        class Installed:
-            def __init__(self, item, wrong=False):
-                self.item, self.wrong = item, wrong
-
-            def read_text(self, name):
-                return json.dumps(
-                    {
-                        "vcs_info": {
-                            "vcs": "git",
-                            "commit_id": "0" * 40
-                            if self.wrong
-                            else self.item["commit"],
-                        }
-                    }
-                )
-
-            def locate_file(self, path):
-                return Path("/installed") / path
-
-        for wrong, shadow in ((False, False), (True, False), (False, True)):
-            with (
-                self.subTest(wrong=wrong, shadow=shadow),
-                patch.object(
-                    launch,
-                    "distribution",
-                    side_effect=lambda name, wrong=wrong: Installed(items[name], wrong),
-                ),
-                patch.object(
-                    launch,
-                    "find_spec",
-                    side_effect=lambda name, shadow=shadow: SimpleNamespace(
-                        origin=str(
-                            Path("/shadow" if shadow else "/installed")
-                            / name
-                            / "__init__.py"
-                        )
-                    ),
-                ),
-            ):
-                if wrong or shadow:
-                    with self.assertRaises(RuntimeError):
-                        launch.verify_dependencies()
-                else:
-                    launch.verify_dependencies()
+    def test_child_uses_isolated_native_cli(self):
+        command, _ = dry_run(0)
+        self.assertEqual(Path(command[0]).resolve(), Path(sys.executable).resolve())
+        self.assertEqual(
+            command[1:5], ["-I", "-m", "vllm.entrypoints.cli.main", "serve"]
+        )
 
     def test_primary_node_has_one_api_server(self):
-        command, _ = launch.build_launch(arguments(0))
+        command, _ = dry_run(0)
         self.assertNotIn("--headless", command)
         self.assertEqual(command[command.index("--api-server-count") + 1], "1")
 
     def test_all_peer_nodes_are_headless_with_no_api_server(self):
         for rank in (1, 2, 3):
-            with self.subTest(rank=rank):
-                command, _ = launch.build_launch(arguments(rank))
-                self.assertIn("--headless", command)
-                self.assertEqual(command[command.index("--api-server-count") + 1], "0")
+            command, _ = dry_run(rank)
+            self.assertIn("--headless", command)
+            self.assertEqual(command[command.index("--api-server-count") + 1], "0")
 
     def test_invalid_rank_is_rejected(self):
         for rank in (-1, 4):
-            with self.subTest(rank=rank), self.assertRaises(ValueError):
-                launch.build_launch(arguments(rank))
+            with self.assertRaises(ValueError):
+                dry_run(rank)
 
     def test_runtime_transport_and_private_cache_are_explicit(self):
-        _, environment = launch.build_launch(arguments(2))
-        self.assertTrue(environment["K3_CACHE_ROOT"].endswith("/node-2"))
+        _, environment = dry_run(2)
         for prefix in ("MCCL", "NCCL"):
             self.assertEqual(environment[prefix + "_MIN_NCHANNELS"], "16")
             self.assertEqual(environment[prefix + "_BUFFSIZE"], "1048576")
+            self.assertEqual(environment[prefix + "_IB_HCA"], "=hca0:1")
         self.assertEqual(environment["VLLM_PP_LAYER_PARTITION"], "24,24,24,21")
-
-    def test_no_per_operator_k3_environment_switch(self):
-        _, environment = launch.build_launch(arguments(0))
         self.assertEqual(
             {k for k in environment if k.startswith("K3_")}, {"K3_CACHE_ROOT"}
         )
 
+    def test_dry_run_preserves_spaces_without_creating_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "private cache"
+            command, environment = dry_run(0, cache, "/models/Kimi K3")
+            self.assertIn("/models/Kimi K3", command)
+            self.assertEqual(environment["K3_CACHE_ROOT"], str(cache))
+            self.assertFalse(cache.exists())
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_flagcx_is_rejected_before_native_cli(self):
+        result = subprocess.run(
+            [
+                str(LAUNCHER),
+                "--model",
+                "unused",
+                "--node-rank",
+                "0",
+                "--master-addr",
+                "master",
+                "--cache",
+                "/tmp/unused",
+                "--net-interface",
+                "rdma0",
+                "--ib-hca",
+                "hca0:1",
+                "--dry-run",
+            ],
+            env=dict(os.environ, FLAGCX_PATH="/unused"),
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("MCCL", result.stderr)

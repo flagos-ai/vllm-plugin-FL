@@ -53,3 +53,16 @@ def test_hook_is_scoped_idempotent_and_rejects_partial_binding(monkeypatch):
         hook.install()
     assert native.apply_top_k_top_p is sampling.apply_top_k_top_p
     assert runner.apply_top_k_top_p is sampling.baseline_filter
+
+
+def test_prepare_validates_without_mutating_bindings(monkeypatch):
+    import vllm.v1.sample.ops.topk_topp_sampler as native
+    import vllm.v1.worker.gpu.sample.sampler as runner
+
+    monkeypatch.setattr(hook, "is_kimi_k3_profile", lambda: True)
+    for module in (native, runner):
+        monkeypatch.setattr(module, "apply_top_k_top_p", sampling.baseline_filter)
+    assert hook.prepare() == (native, runner)
+    assert (
+        native.apply_top_k_top_p is runner.apply_top_k_top_p is sampling.baseline_filter
+    )

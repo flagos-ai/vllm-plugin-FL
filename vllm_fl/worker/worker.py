@@ -2,7 +2,7 @@ from functools import partial
 """A GPU worker class adapted for the FL out-of-tree platform."""
 
 from vllm_fl.models.kimi_k3_context import execution_config
-from vllm_fl.worker.runtime_identity import worker_profile_identity
+from vllm_fl.worker.runtime_diagnostics import worker_profile_identity
 from vllm.utils.import_utils import resolve_obj_by_qualname
 # Copyright (c) 2025 BAAI. All rights reserved.
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_worker.py
@@ -148,16 +148,14 @@ def _initialize_fl_runtime(rank: int, config=None) -> None:
     import flag_gems
 
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
-    # Op DEBUG logging constructs a LogRecord before its once filter runs.
-    # Keep every TP worker free of that hot-path cost. Operator registration,
-    # backend selection, startup logs and profile evidence remain enabled.
-    should_record = False
+    policy = execution_config(config) if config is not None else None
+    # K3 avoids per-op logging overhead; ordinary workers retain rank-zero records.
+    should_record = rank == 0 and not (policy is not None and policy.enabled)
     common = {
         "record": should_record,
         "once": True,
         "path": fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
     }
-    policy = execution_config(config) if config is not None else None
     if policy is not None and policy.enabled:
         common["registrar"] = partial(
             resolve_obj_by_qualname("vllm_fl.dispatch.backends.flaggems.kimi_k3_registrar.K3OpRegistrar"),

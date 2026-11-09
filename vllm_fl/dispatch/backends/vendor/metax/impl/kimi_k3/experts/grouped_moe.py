@@ -17,7 +17,6 @@ from flaggems_vllm.ops.moe_align_block_size import (
 )
 
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.mxfp4_kernels import _signed_bf16
-from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.decode_bits import decode_bits
 
 
 @triton.jit(do_not_specialize=["ROUTES"])
@@ -37,7 +36,6 @@ def _grouped_mm(
     BM: tl.constexpr,
     BN: tl.constexpr,
     BK: tl.constexpr,
-    BIT_DECODE: tl.constexpr = False,
 ):
     """Every program owns an expert/token block and an output-column block."""
     row_block = tl.program_id(0)
@@ -73,10 +71,7 @@ def _grouped_mm(
             other=127,
         ).to(tl.int32)
         code = (packed >> ((k[:, None] & 1) * 4)) & 15
-        if BIT_DECODE:
-            b = decode_bits(code, exponent)
-        else:
-            b = _signed_bf16(code, exponent)
+        b = _signed_bf16(code, exponent)
         acc = tl.dot(a, b, acc)
     tl.store(
         Y + routes[:, None] * N + columns[None, :],
@@ -201,7 +196,6 @@ def grouped_experts(
         block_m,
         block_n1,
         block_k1,
-        BIT_DECODE=False,
         num_warps=4,
         num_stages=1,
     )
@@ -232,7 +226,6 @@ def grouped_experts(
         block_m,
         block_n2,
         block_k2,
-        BIT_DECODE=False,
         num_warps=4,
         num_stages=1,
     )

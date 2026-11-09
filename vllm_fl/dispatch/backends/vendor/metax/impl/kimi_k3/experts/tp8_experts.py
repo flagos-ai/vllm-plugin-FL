@@ -6,11 +6,10 @@ and the existing top16 reduction remain unchanged.
 
 import torch
 import triton
-from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.marlin_mxfp4 import pack_matrix, _marlin_tail_gemv
+from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.marlin_mxfp4 import pack_matrix
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.expert_gemm import _paired_arithmetic_mm, meta
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.decode_experts import (
     _paired_scheduled_mm,
-    _route_gemv_g2,
 )
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.grouped_moe import _alignment, _situ, _weighted_sum
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.small_alignment import align_small
@@ -54,7 +53,7 @@ def prepare(w13, s13, w2, s2):
     }
 
 
-def run(x, packed, weights, ids, prepared, record=None, *, tiles=None, workspace=None):
+def run(x, packed, weights, ids, prepared, record=None, *, workspace=None):
     m = x.shape[0]
     if (
         x.shape != (m, 3584)
@@ -75,22 +74,19 @@ def run(x, packed, weights, ids, prepared, record=None, *, tiles=None, workspace
     # Preserve baseline tiles for tails and untuned shapes.
     # Qualified middle batches select scheduled G2 below.
     bm = 16 if m < 256 else 32 if m < 2048 else 64
-    bn1, bk1, w1, bn2, w2, tail = (
+    bn1, bk1, w1, bn2, w2 = (
         64 if m == 1 else 128,
         128,
         4,
         64 if m <= 8 else 128,
         4,
-        False,
     )
-    if tiles is not None:
-        bm, bn1, bk1, w1, bn2, w2, tail = tiles
     r = m * 16
     si, ei, total = align_small(ids, bm, 896) if m <= 64 else _alignment(ids, bm, 896)
     cap = min(triton.cdiv(si.numel(), bm), min(896, r) + (r - min(896, r)) // bm)
     # Bound the prefill routing scratch; each output column retains the same
     # FP32 dot, BF16 rounding and top16 reduction as the full-width path.
-    bounded = tiles is None and MIN_PREFILL_TOKENS <= m <= MAX_PREFILL_TOKENS
+    bounded = MIN_PREFILL_TOKENS <= m <= MAX_PREFILL_TOKENS
     down_width = ROUTE_COLUMNS if bounded else 3584
     if bounded and not torch.cuda.is_current_stream_capturing():
         if workspace is None:
@@ -106,7 +102,7 @@ def run(x, packed, weights, ids, prepared, record=None, *, tiles=None, workspace
     down = scratch[: r * down_width].view(r, down_width)
     out = torch.empty_like(x)
     a, sa, b, sb = packed
-    fused_g1 = tiles is None and m in (2, 8, 12, 16, 24, 32)
+    fused_g1 = m in (2, 8, 12, 16, 24, 32)
     if fused_g1:
         first = _tp8_g1_situ[(cap * 12,)](
             x,
@@ -119,23 +115,6 @@ def run(x, packed, weights, ids, prepared, record=None, *, tiles=None, workspace
             r,
             prepared["normal_flags"][0],
             num_warps=2,
-            num_stages=1,
-            enable_fp_fusion=False,
-        )
-    elif tail:
-        first = _marlin_tail_gemv[(r, 192)](
-            x,
-            a,
-            sa,
-            gu,
-            ids,
-            r,
-            768,
-            3584,
-            128,
-            4,
-            512,
-            num_warps=4,
             num_stages=1,
             enable_fp_fusion=False,
         )
@@ -216,30 +195,12 @@ def run(x, packed, weights, ids, prepared, record=None, *, tiles=None, workspace
                 G2=meta(second),
                 G2_slices=slice_meta,
                 G1_fused_situ=fused_g1,
-                tiles=(bm, bn1, bk1, w1, bn2, w2, tail),
+                tiles=(bm, bn1, bk1, w1, bn2, w2, False),
                 bounded_route_columns=down_width,
                 scratch_bytes=scratch.numel() * 2,
             )
         return out
-    if tail:
-        programs = min(r * 56, prepared["sms"] * 16)
-        second = _route_gemv_g2[(programs,)](
-            act,
-            b,
-            sb,
-            down,
-            ids,
-            r,
-            3584,
-            64,
-            programs,
-            prepared["normal_flags"][1],
-            K=384,
-            num_warps=1,
-            num_stages=1,
-            enable_fp_fusion=False,
-        )
-    elif tiles is None and m in (12, 16, 24, 32):
+    if m in (12, 16, 24, 32):
         programs = min(cap * 56, prepared["sms"] * 48)
         second = _paired_scheduled_mm[(programs,)](
             act,
@@ -295,6 +256,6 @@ def run(x, packed, weights, ids, prepared, record=None, *, tiles=None, workspace
             G1=meta(first),
             G2=meta(second),
             G1_fused_situ=fused_g1,
-            tiles=(bm, bn1, bk1, w1, bn2, w2, tail),
+            tiles=(bm, bn1, bk1, w1, bn2, w2, False),
         )
     return out

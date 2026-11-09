@@ -17,7 +17,8 @@ Read [the file-by-file guide](../../docs/kimi-k3-metax.md) for implementation or
 | Qualified local compute | `vllm_fl/dispatch/backends/vendor/metax/impl/kimi_k3/` |
 | FG/FGV adapters | `vllm_fl/dispatch/backends/flaggems/impl/kimi_k3*.py` |
 | Workspace, PP and Graph lifecycle | `vllm_fl/worker/kimi_k3*.py`, `vllm_fl/distributed/kimi_k3_pp.py` |
-| Version / runtime hooks | `vllm_fl/patches/kimi_k3/` |
+| Model policy / source admission | `vllm_fl/kimi_k3_config.py` |
+| SDK / early ABI compatibility | `vllm_fl/dispatch/backends/vendor/metax/runtime.py`, `vllm_fl/patches/metax_open.py` |
 | Model-scoped backend policy | `dispatch.yaml`, through the existing FL configuration mechanism |
 
 The structural cleanup preserves computation, shape guards, launch settings and
@@ -28,7 +29,7 @@ local FP64 accumulation, is retained without a new performance claim.
 
 ## Public source dependencies
 
-The requirements files and `dependency-lock.json` pin complete source commits. No
+The requirements files and the [dependency manifest](../../vllm_fl/configs/kimi_k3_dependencies.json) pin complete source commits. No
 source patch, source snapshot or patch installer is required at installation.
 
 | Package | Pinned source | Review |
@@ -97,14 +98,14 @@ Every node needs a verified read-only path to the original K3 weights, tokenizer
 processor and chat template. Run once per node, changing rank 0 through 3:
 
 ```sh
-python -I examples/kimi_k3_metax/launch.py \
+bash examples/kimi_k3_metax/launch.sh \
   --model /models/Kimi-K3 --node-rank 0 \
   --master-addr MASTER_IP --master-port 29864 --host 0.0.0.0 --port 8000 \
   --cache /cache/k3/run-001/node-0 --net-interface RDMA_INTERFACE \
   --ib-hca HCA0:1,HCA1:1,HCA2:1,HCA3:1 --gid-index 3
 ```
 
-The launcher checks installed dependency commits and rejects import shadowing
+K3 plugin admission checks installed dependency commits and rejects import shadowing
 before model allocation. `--dry-run` prints the command without loading a model.
 The policy remains `K3ExecutionConfig` plus `serve.yaml`; `dispatch.yaml` selects
 this profile through the existing `VLLM_FL_CONFIG` setting. No new operator
@@ -145,3 +146,6 @@ The example defaults to `temperature: 1.0` and `top_p: 0.95` for single-step tas
 K3 uses native stable integer-key sorting for FP32, contiguous, top-p-only batches of 1–7 rows at vocabulary size 163840. The existing scoped VENDOR entry preserves the remaining filter operations and RNG. Other shapes keep the native vLLM path; the pinned vLLM fork adds the scratch synchronization required by that large-batch filter on MetaX. This correctness fix is a fork commit, not an upstream-merge claim.
 
 For reproducible sampling throughput measurements, use distinct per-request seeds (for example `1234 + request_index`). Reusing one seed for an entire equal-length batch correlates generated sequences and changes data-dependent MoE work. The dataset seed remains separate from the request seed.
+
+
+SDK startup uses the existing installed-provider capabilities. The verified empty build needs the open MACA/MCCL ABI adapter; native/vendor providers retain the existing route. No additional runtime selection option is required.

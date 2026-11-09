@@ -165,7 +165,7 @@ def register_builtins(registry) -> None:
     filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
     registry.register_many(filtered)
 
-    from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+    from vllm_fl.kimi_k3_config import is_kimi_k3_profile
 
     if is_kimi_k3_profile():
         from .impl.kimi_k3 import grouped_topk, rms_norm_flaggems

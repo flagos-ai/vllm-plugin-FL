@@ -236,33 +236,32 @@ def plan(m, n, k):
     return None
 
 
-def try_run(x, w, bias, out, fixed_kernel):
+def try_run(x, w, bias, fixed_kernel):
+    """Return an output, or None before launching any unsupported input."""
     if bias is not None or x.ndim != 2 or w.ndim != 2:
-        return False
+        return None
     m, k = x.shape
     n = w.shape[0]
     selected = plan(m, n, k)
     if selected is None:
-        return False
+        return None
     if (
         x.dtype != torch.bfloat16
         or w.dtype != x.dtype
-        or out.dtype != x.dtype
         or not x.is_cuda
         or x.device != w.device
-        or out.device != x.device
         or not w.is_contiguous()
-        or not out.is_contiguous()
         or not (x.is_contiguous() or ((n, k) == (3072, 512) and x.stride() == (576, 1)))
     ):
-        return False
+        return None
     if (
         (n, k) == (3072, 512)
         and _kv_expansion_tile(m) is not None
         and x.is_contiguous()
         and m not in (4096, 65024)
     ):
-        return False
+        return None
+    out = torch.empty((m, n), dtype=x.dtype, device=x.device)
     kind, meta = selected
     if kind == "mm":
         run(x, w, out)
@@ -290,4 +289,4 @@ def try_run(x, w, bias, out, fixed_kernel):
             num_warps=warps,
             num_stages=stages,
         )
-    return True
+    return out

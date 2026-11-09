@@ -104,46 +104,6 @@ def _concat_k(bs, BN: tl.constexpr, BK: tl.constexpr):
     return tl.reshape(tl.trans(q, 4, 3, 2, 0, 1), (BK, BN))
 
 
-@triton.jit
-def _marlin_tail_gemv(
-    X,
-    W,
-    S,
-    Y,
-    IDS,
-    R: tl.constexpr,
-    N: tl.constexpr,
-    K: tl.constexpr,
-    TK: tl.constexpr,
-    BN: tl.constexpr,
-    BK: tl.constexpr,
-):
-    route = tl.program_id(0)
-    cols = tl.program_id(1) * BN + tl.arange(0, BN)
-    kk = tl.arange(0, BK)
-    expert = tl.load(IDS + route).to(tl.int64)
-    kp = TK // 8
-    acc = tl.zeros((BN,), tl.float32)
-    for block in range(tl.cdiv(K, BK)):
-        k = block * BK + kk
-        valid = k < K
-        pk = k // TK * kp + k % kp
-        j = k % TK // kp
-        shift = (j // 2 + j % 2 * 4) * 4
-        x = tl.load(X + route // 16 * K + k, valid, 0).to(tl.float32)
-        word = tl.load(
-            W + (expert * (K // 8) + pk[None, :]) * N + cols[:, None],
-            (cols[:, None] < N) & valid[None, :],
-            0,
-        ).to(tl.uint32)
-        scale = tl.load(
-            S + (expert * (K // 32) + k[None, :] // 32) * N + cols[:, None],
-            (cols[:, None] < N) & valid[None, :],
-            127,
-        ).to(tl.int32)
-        weight = decode_bits(word >> shift[None, :] & 15, scale).to(tl.float32)
-        acc += tl.sum(weight * x[None, :], 1)
-    tl.store(Y + route * N + cols, acc.to(tl.bfloat16), cols < N)
 
 
 @triton.jit

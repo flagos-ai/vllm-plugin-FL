@@ -1,7 +1,7 @@
 """General-plugin entry point, loaded after vLLM platform initialization."""
 
 from importlib.metadata import version
-from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+from vllm_fl.kimi_k3_config import is_kimi_k3_profile
 from vllm.platforms import current_platform
 from vllm.utils.import_utils import resolve_obj_by_qualname
 from vllm_fl import register_model as register_common_model_extensions

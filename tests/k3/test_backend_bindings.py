@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import vllm_fl.kimi_k3_config as profile
 from vllm_fl.dispatch.backends.flaggems.impl.kimi_k3_routing import grouped_topk
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.attention import (
     mla_tp8,
@@ -19,7 +20,6 @@ from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.linear import linear
 from vllm_fl.dispatch.manager import OpManager
 from vllm_fl.dispatch.policy import policy_context, policy_from_config
 from vllm_fl.dispatch.types import BackendImplKind
-from vllm_fl.patches.kimi_k3 import profile
 
 ROOT = Path(__file__).resolve().parents[2]
 

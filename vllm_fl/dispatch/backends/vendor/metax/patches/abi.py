@@ -1,22 +1,42 @@
-"""K3 MCCL additions around the existing MetaX ABI wrapper.
+"""Open MACA/MCCL ABI additions reusing the existing MetaX SDK wrappers."""
 
-Inherited collectives keep the same ctypes signatures and implementation bodies.
-Separate caches preserve K3's validated all-symbols-present initialization.
-"""
 import ctypes
+import os
 from typing import Any
+
+import vllm.envs as envs
 from vllm.distributed.device_communicators.pynccl_wrapper import (
-    Function, buffer_type, ncclComm_t, ncclResult_t, ncclWindow_t,
+    Function,
+    buffer_type,
+    ncclComm_t,
+    ncclResult_t,
+    ncclWindow_t,
 )
-from vllm_fl.dispatch.backends.vendor.metax.patches.pynccl_wrapper import (
-    MCCLLibrary as NativeMCCLLibrary,
-)
-from .runtime_library import find_mccl_library
+
+from .cuda_wrapper import CudaRTLibrary as NativeCudaRTLibrary, find_loaded_library
+from .pynccl_wrapper import MCCLLibrary as NativeMCCLLibrary
+
+
+def find_mccl_library() -> str:
+    return os.environ.get("VLLM_NCCL_SO_PATH") or "libmccl.so"
+
+
+class CudaRTLibrary(NativeCudaRTLibrary):
+    def __init__(self, so_file: str | None = None):
+        if so_file is None:
+            so_file = envs.VLLM_CUDART_SO_PATH or find_loaded_library("libmcruntime")
+            if so_file is None:
+                raise RuntimeError(
+                    "MACA libmcruntime is not loaded; set VLLM_CUDART_SO_PATH "
+                    "to the verified MACA runtime library"
+                )
+        super().__init__(so_file)
 
 
 class MCCLLibrary(NativeMCCLLibrary):
     _group_index = next(
-        i for i, fn in enumerate(NativeMCCLLibrary.exported_functions)
+        i
+        for i, fn in enumerate(NativeMCCLLibrary.exported_functions)
         if fn.name == "mcclGroupStart"
     )
     exported_functions = [
@@ -42,16 +62,13 @@ class MCCLLibrary(NativeMCCLLibrary):
             MCCLLibrary.path_to_dict_mapping[so_file] = funcs
         self._funcs = MCCLLibrary.path_to_dict_mapping[so_file]
 
-
     def ncclCommAbort(self, comm: ncclComm_t) -> None:
         self.NCCL_CHECK(self._funcs["mcclCommAbort"](comm))
-
 
     def ncclCommWindowRegister(
         self, comm: ncclComm_t, buff: buffer_type, size: int, win_flags: int
     ) -> ncclWindow_t:
         raise NotImplementedError("MCCL symmetric-memory windows are not supported")
-
 
     def ncclCommWindowDeregister(self, comm: ncclComm_t, window: ncclWindow_t) -> None:
         raise NotImplementedError("MCCL symmetric-memory windows are not supported")

@@ -10,9 +10,9 @@ __all__ = [
     "MacaBackend",
 ]
 
-from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+from vllm_fl.patches.metax_open import uses_open_metax_runtime
 
-# The open K3 profile installs only its explicit MACA/MCCL ABI hooks.
-# Other models retain the upstream MetaX startup patches.
-if not is_kimi_k3_profile():
+# The open ABI route installs its explicit MACA/MCCL hooks.
+# Unconfigured runtimes retain the original MetaX startup patches.
+if not uses_open_metax_runtime():
     from . import patches  # noqa: F401

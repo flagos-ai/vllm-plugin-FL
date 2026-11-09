@@ -1,7 +1,7 @@
-"""Legacy MetaX startup patches; K3 installs its own hooks."""
-from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+"""Legacy MetaX startup patches; the open ABI route installs its own hooks."""
+from vllm_fl.patches.metax_open import uses_open_metax_runtime
 
-if not is_kimi_k3_profile():
+if not uses_open_metax_runtime():
     from . import accelerator_compat
     from . import functorch_config_patch
     from . import fix_standalone_compile
