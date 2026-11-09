@@ -51,6 +51,7 @@ def register_builtins(registry) -> None:
         "moe_align_block_size",
         "moe_sum",
         "topk_softmax",
+        "topk_sigmoid",
         "invoke_fused_moe_triton_kernel",
         "grouped_topk",
     )
