@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import inspect
 import math
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 import torch
-
 from flag_gems import concat_and_cache_mla, flash_mla
+
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention.mla_attention import (
     MLACommonBackend,
@@ -19,6 +19,10 @@ from vllm.model_executor.layers.attention.mla_attention import (
 from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.v1.attention.backend import AttentionLayer, AttentionType
 from vllm.v1.attention.backends.utils import reshape_query_for_spec_decode
+
+from vllm_fl.dispatch.backends.mla_cache import (
+    torch_gather_and_maybe_dequant_cache as torch_gather_and_maybe_dequant_cache,
+)
 
 logger = init_logger(__name__)
 
@@ -89,55 +93,6 @@ def _query_and_scale_for_flash_mla(
     return q4, kwargs
 
 
-def torch_gather_and_maybe_dequant_cache(
-    src_cache: torch.Tensor,
-    dst: torch.Tensor,
-    block_table: torch.Tensor,
-    cu_seq_lens: torch.Tensor,
-    token_to_seq: torch.Tensor,
-    num_tokens: int,
-    kv_cache_dtype: str,
-    scale: torch.Tensor,
-    seq_starts: torch.Tensor | None = None,
-) -> None:
-    """BF16/FP16 PyTorch fallback for ``_C_cache_ops.gather_and_maybe_dequant_cache``.
-
-    Matches vLLM ``cache_kernels.cu::gather_and_maybe_dequant_cache`` for the
-    non-FP8 path used by MLA chunked-prefill / prefix-cache context gather.
-    """
-    if kv_cache_dtype.startswith("fp8"):
-        raise NotImplementedError(
-            "Sunrise MLA: FP8 gather_and_maybe_dequant_cache not supported"
-        )
-
-    if num_tokens <= 0:
-        return
-
-    # [num_blocks, block_size, D] or [num_blocks, block_size, 1, D]
-    if src_cache.ndim == 4:
-        src = src_cache.squeeze(2)
-    else:
-        src = src_cache
-    assert src.ndim == 3, f"unexpected MLA cache shape {tuple(src_cache.shape)}"
-    block_size = src.size(1)
-    hidden = src.size(-1)
-    flat = src.reshape(-1, hidden)
-
-    token_ids = torch.arange(num_tokens, device=src.device, dtype=torch.long)
-    batch_ids = token_to_seq[:num_tokens].to(dtype=torch.long)
-    batch_start = cu_seq_lens[batch_ids].to(dtype=torch.long)
-    batch_offset = token_ids - batch_start
-    if seq_starts is not None:
-        batch_offset = batch_offset + seq_starts[batch_ids].to(dtype=torch.long)
-
-    block_table_ids = torch.div(batch_offset, block_size, rounding_mode="floor")
-    slot_ids = torch.remainder(batch_offset, block_size)
-    # block_table: [batch, max_blocks]; stride may exceed size(1)
-    block_ids = block_table[batch_ids, block_table_ids].to(dtype=torch.long)
-    flat_idx = block_ids * block_size + slot_ids
-    dst[:num_tokens].copy_(flat[flat_idx])
-
-
 class SunriseMLABackend(MLACommonBackend):
     """Sunrise-owned MLA backend entry for vendor dispatch."""
 
@@ -146,7 +101,7 @@ class SunriseMLABackend(MLACommonBackend):
         return "SUNRISE_MLA"
 
     @staticmethod
-    def get_impl_cls() -> type["SunriseMLAImpl"]:
+    def get_impl_cls() -> type[SunriseMLAImpl]:
         return SunriseMLAImpl
 
 
@@ -160,12 +115,12 @@ class SunriseMLAImpl(MLACommonImpl[MLACommonMetadata]):
         head_size: int,
         scale: float,
         num_kv_heads: int,
-        alibi_slopes: Optional[list[float]],
-        sliding_window: Optional[int],
+        alibi_slopes: list[float] | None,
+        sliding_window: int | None,
         kv_cache_dtype: str,
-        logits_soft_cap: Optional[float],
+        logits_soft_cap: float | None,
         attn_type: str,
-        kv_sharing_target_layer_name: Optional[str],
+        kv_sharing_target_layer_name: str | None,
         # MLA Specific Arguments
         **mla_args,
     ) -> None:
@@ -198,9 +153,7 @@ class SunriseMLAImpl(MLACommonImpl[MLACommonMetadata]):
             )
 
         if is_quantized_kv_cache(self.kv_cache_dtype):
-            raise NotImplementedError(
-                "Sunrise MLA with FP8 KV cache not yet supported"
-            )
+            raise NotImplementedError("Sunrise MLA with FP8 KV cache not yet supported")
 
     def do_kv_cache_update(
         self,
@@ -225,11 +178,11 @@ class SunriseMLAImpl(MLACommonImpl[MLACommonMetadata]):
 
     def forward_mqa(
         self,
-        q: Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
+        q: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
         kv_c_and_k_pe_cache: torch.Tensor,
         attn_metadata: MLACommonMetadata,
         layer: AttentionLayer,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Decode-path MQA over ``kv_c ‖ k_pe`` cache via Sunrise ``flash_mla``.
 
         Expected layouts (GLM-4.7-Flash):
@@ -289,10 +242,6 @@ class SunriseMLAImpl(MLACommonImpl[MLACommonMetadata]):
             True,
             **flash_mla_kwargs,
         )
-        if s_q == 1:
-            o = o.squeeze(1)
-        else:
-            # Spec/multi-token decode: flatten query dim into batch like FA MLA.
-            o = o.reshape(b * s_q, h, head_dim_v)
+        o = o.squeeze(1) if s_q == 1 else o.reshape(b * s_q, h, head_dim_v)
 
         return o, None

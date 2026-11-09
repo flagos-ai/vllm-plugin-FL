@@ -10,8 +10,6 @@ on CC 8.0 devices.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -26,14 +24,14 @@ class TheadBackend(Backend):
     rotary_embedding).
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
         return "thead"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "thead"
 
     def is_available(self) -> bool:
@@ -57,6 +55,7 @@ class TheadBackend(Backend):
                 else:
                     # Fallback: check PPU_SDK env var
                     import os
+
                     TheadBackend._available = "PPU_SDK" in os.environ
             except Exception:
                 TheadBackend._available = False
@@ -67,12 +66,14 @@ class TheadBackend(Backend):
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """SiLU activation followed by element-wise multiplication."""
         from vllm.model_executor.layers.activations import silu_and_mul
+
         return silu_and_mul(x)
 
-    def rms_norm(self, obj, x: torch.Tensor, residual: Optional[torch.Tensor] = None):
+    def rms_norm(self, obj, x: torch.Tensor, residual: torch.Tensor | None = None):
         """RMS normalization."""
         if residual is not None:
             from vllm.model_executor.layers.layernorm import rms_norm
+
             return rms_norm(x, obj.weight, residual)
         return torch.nn.functional.rms_norm(x, (x.shape[-1],), weight=obj.weight)
 
@@ -89,20 +90,24 @@ class TheadBackend(Backend):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply rotary position embedding."""
         from vllm.model_executor.layers.rotary_embedding import apply_rotary_emb
+
         return apply_rotary_emb(
-            query, key, cos, sin,
+            query,
+            key,
+            cos,
+            sin,
             position_ids=position_ids,
             rotary_interleaved=rotary_interleaved,
             inplace=inplace,
         )
 
-    def attention_backend(
-        self, use_mla: bool = False, use_sparse: bool = False
-    ) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for PPU.
 
-        Returns the TheadFlashAttentionBackend which uses the FA3 wheel.
+        Dense MLA uses Triton decode and the PPU FA3 prefill ABI; ordinary
+        attention uses the PPU FA3 wheel. These implementations have different
+        constructor and KV-cache contracts and cannot substitute for each other.
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
@@ -111,10 +116,18 @@ class TheadBackend(Backend):
         Returns:
             Fully qualified class path string
         """
-        if use_mla or use_sparse:
-            # Fall back to standard FLASH_ATTN for MLA/sparse
-            from vllm.v1.attention.backends.registry import AttentionBackendEnum
-            return AttentionBackendEnum.FLASH_ATTN.get_path()
+        if use_sparse and not use_mla:
+            raise ValueError("use_sparse=True requires use_mla=True.")
+        if use_sparse:
+            raise NotImplementedError(
+                "PPU sparse MLA requires a supported model runtime plan"
+            )
+        if use_mla:
+            # FLASH_ATTN is not an MLA implementation: it rejects q_lora_rank
+            # and uses a different KV layout. FlashAttention MLA additionally
+            # requires SM90, whereas PPU advertises CC8.0. Triton MLA supports
+            # the MLA arguments and the PPU's device capability.
+            return "vllm_fl.dispatch.backends.vendor.thead.impl.mla.TheadMLABackend"
 
         return (
             "vllm_fl.dispatch.backends.vendor.thead.impl.attention."
