@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "/audit/repo/tests/run.py", line 56, in <module>
-    from tests.utils.device_utils import get_device_count, get_visible_device_env_var
-  File "/audit/repo/tests/utils/device_utils.py", line 16, in <module>
-    import pytest
-ModuleNotFoundError: No module named 'pytest'
-torch 2.13.0+cu130 requires triton, which is not installed.
-vllm-plugin-fl 0.0.0+g4b3a76a19 requires modelscope, which is not installed.

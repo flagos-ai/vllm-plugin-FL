@@ -1,9 +1,0 @@
-/flagos/lib/python3.12/site-packages/torch/library.py:505: UserWarning: Warning only once for all operators,  other operators may also be overridden.
-  Overriding a previously registered kernel for the same operator and the same dispatch key
-  operator: aten::__ilshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-    registered at /__w/pytorch/pytorch/build/aten/src/ATen/RegisterSchema.cpp:6
-  dispatch key: CUDA
-  previous kernel: registered at /__w/pytorch/pytorch/build/aten/src/ATen/RegisterCPU_3.cpp:6621
-       new kernel: registered at /flagos/lib/python3.12/site-packages/flag_gems/__init__.py:1414 (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/core/dispatch/OperatorEntry.cpp:208.)
-  self.m.impl(
-FlagGems GPU add PASS

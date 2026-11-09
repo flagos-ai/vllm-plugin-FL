@@ -1,3 +1,0 @@
-CV_NUMPY_TEST_PASS 5.0.0 1.26.4 (6, 8)
-BASE_CHANGED {'setuptools': {'before': '84.2.1', 'after': '80.10.2'}}
-MISSING_PROJECT ['pytest', 'pytest-xdist', 'pytest-cov', 'pytest-json-report', 'pytest-timeout', 'flaggems-vllm', 'modelscope', 'decorator', 'wheel', 'scikit-build-core']
