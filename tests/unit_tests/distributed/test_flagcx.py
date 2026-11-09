@@ -8,7 +8,6 @@ import os
 import sys
 from contextlib import nullcontext
 from pathlib import Path
-from threading import Lock
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
@@ -151,14 +150,35 @@ def test_invalid_wheel_api_is_unavailable_and_cleans_module(
 def test_npu_all_reduce_joins_streams_under_submit_lock(load_flagcx, monkeypatch):
     monkeypatch.delenv("FLAGCX_PATH", raising=False)
     module = load_flagcx()
+    path = _SOURCE.parents[2] / "dispatch/backends/vendor/ascend/patches/flagcx.py"
+    spec = importlib.util.spec_from_file_location("_test_ascend_flagcx", path)
+    ascend = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ascend)
+
     comm = module.PyFlagcxCommunicator.__new__(module.PyFlagcxCommunicator)
     comm.disabled = False
     comm.device = "npu:0"
-    comm._npu_submit_lock = Lock()
     ops = Mock()
+    caller = SimpleNamespace(wait_event=ops.wait_output)
+    side = SimpleNamespace(wait_event=ops.wait_input)
+    input_ready = SimpleNamespace(record=ops.record_input)
+    output_ready = SimpleNamespace(record=ops.record_output)
+    stream_context = Mock(return_value=nullcontext())
+    monkeypatch.setattr(
+        module.torch,
+        "npu",
+        SimpleNamespace(
+            Stream=Mock(return_value=side),
+            Event=Mock(side_effect=[input_ready, output_ready]),
+            stream=stream_context,
+        ),
+        raising=False,
+    )
+    comm._all_reduce_stream = ascend.FlagCXAllReduceStream(comm.device)
+    comm._all_reduce_on_stream = ops.reduce
 
     def check_lock(*args):
-        assert comm._npu_submit_lock.locked()
+        assert comm._all_reduce_stream._submit_lock.locked()
 
     for operation in (
         ops.record_input,
@@ -169,26 +189,15 @@ def test_npu_all_reduce_joins_streams_under_submit_lock(load_flagcx, monkeypatch
     ):
         operation.side_effect = check_lock
 
-    caller = SimpleNamespace(wait_event=ops.wait_output)
-    side = SimpleNamespace(wait_event=ops.wait_input)
-    comm._npu_comm_stream = side
-    comm._npu_input_ready = SimpleNamespace(record=ops.record_input)
-    comm._npu_output_ready = SimpleNamespace(record=ops.record_output)
-    comm._all_reduce_on_stream = ops.reduce
-    stream_context = Mock(return_value=nullcontext())
-    monkeypatch.setattr(
-        module.torch, "npu", SimpleNamespace(stream=stream_context), raising=False
-    )
     input_tensor = SimpleNamespace(device=comm.device)
     output_tensor = object()
-
     assert comm.all_reduce(input_tensor, output_tensor, stream=caller) is output_tensor
     assert ops.mock_calls == [
         call.record_input(caller),
-        call.wait_input(comm._npu_input_ready),
+        call.wait_input(input_ready),
         call.reduce(input_tensor, output_tensor, module.ReduceOp.SUM, side),
         call.record_output(side),
-        call.wait_output(comm._npu_output_ready),
+        call.wait_output(output_ready),
     ]
     stream_context.assert_called_once_with(side)
-    assert not comm._npu_submit_lock.locked()
+    assert not comm._all_reduce_stream._submit_lock.locked()

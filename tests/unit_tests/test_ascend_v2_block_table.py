@@ -44,7 +44,7 @@ class AscendV2BlockTablesTests(unittest.TestCase):
         self.addCleanup(modules_patch.stop)
         source = (
             Path(__file__).resolve().parents[2]
-            / "vllm_fl/worker/ascend_v2_block_table.py"
+            / "vllm_fl/dispatch/backends/vendor/ascend/worker/ascend_v2_block_table.py"
         )
         spec = importlib.util.spec_from_file_location(
             "ascend_v2_block_table_under_test", source

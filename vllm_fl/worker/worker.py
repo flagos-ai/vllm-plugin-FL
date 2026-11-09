@@ -549,12 +549,12 @@ class WorkerFL(WorkerBase):
         # Construct the model runner
         if self.use_v2_model_runner:
             if current_platform.device_type == "npu":
-                from vllm_fl.patches.ascend_v2_device import (
-                    install_ascend_v2_device_shims,
+                from vllm_fl.dispatch.backends.vendor.ascend.patches import (
+                    ascend_v2_device,
                 )
 
-                install_ascend_v2_device_shims()
-                from vllm_fl.worker.model_runner_v2 import (
+                ascend_v2_device.install_ascend_v2_device_shims()
+                from vllm_fl.dispatch.backends.vendor.ascend.worker.model_runner_v2 import (
                     GPUModelRunnerFLV2 as GPUModelRunnerV2,
                 )
             else:

@@ -16,7 +16,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 def _adapter():
     spec = importlib.util.spec_from_file_location(
         "ascend_v2_temperature_under_test",
-        _ROOT / "vllm_fl/patches/ascend_v2_sampling.py",
+        _ROOT / "vllm_fl/dispatch/backends/vendor/ascend/patches/ascend_v2_sampling.py",
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

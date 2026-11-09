@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2] / "vllm_fl"
 
 @pytest.fixture
 def shim(monkeypatch):
-    path = ROOT / "patches/ascend_v2_device.py"
+    path = ROOT / "dispatch/backends/vendor/ascend/patches/ascend_v2_device.py"
     spec = importlib.util.spec_from_file_location("_test_ascend_v2_device", path)
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)

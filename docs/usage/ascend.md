@@ -53,9 +53,10 @@ IDs. Add these options to the container's device and driver mounts.
 
 `FLAGCX_PATH` selects the FL FlagCX device communicator. PyTorch's NPU
 process groups still use HCCL, and the FlagCX communicator exchanges its
-unique ID over the CPU Gloo group. With the wheel layout on Ascend, the
-communicator submits all-reduce on a dedicated NPU stream. Events join that
-stream to the calling stream for graph capture and replay. Leave
+unique ID over the CPU Gloo group. With the wheel layout, the
+[Ascend FlagCX stream patch](../../vllm_fl/dispatch/backends/vendor/ascend/patches/flagcx.py)
+submits all-reduce on a dedicated NPU stream. Events join that stream to
+the calling stream for graph capture and replay. Leave
 `FLAGCX_PATH` unset to select native HCCL tensor-parallel collectives.
 
 Inside the container, keep the default HCCL expansion mode. For a Qwen3-0.6B

@@ -10,6 +10,40 @@ import torch.nn.functional as F
 import torch_npu
 
 
+def fused_topk(
+    gating_output: torch.Tensor,
+    topk: int,
+    renormalize: bool,
+    indices_type: torch.dtype | None,
+    scoring_func: str,
+    padding_mask: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Route NPU rows without the CUDA-only vLLM top-k operators."""
+    logits = gating_output.float()
+    if scoring_func == "softmax":
+        scores = logits.softmax(dim=-1)
+    elif scoring_func == "sigmoid":
+        scores = logits.sigmoid()
+    else:
+        raise ValueError(f"Unsupported scoring function: {scoring_func}")
+    weights, ids = scores.topk(topk, dim=-1)
+    if renormalize:
+        denominator = weights.sum(dim=-1, keepdim=True)
+        weights = weights / torch.where(
+            denominator > 0, denominator, torch.ones_like(denominator)
+        )
+    ids = ids.to(torch.int32 if indices_type is None else indices_type)
+    if padding_mask is not None:
+        padded = padding_mask[: logits.shape[0]].unsqueeze(-1)
+        ids = torch.where(padded, -1, ids)
+        weights = torch.where(padded, 0.0, weights)
+    # Match vLLM's source-row scratch indexing: k_idx * num_rows + row_idx.
+    rows = torch.arange(logits.shape[0], device=logits.device, dtype=torch.int32)
+    slots = torch.arange(topk, device=logits.device, dtype=torch.int32)
+    token_expert_indices = rows[:, None] + slots[None, :] * logits.shape[0]
+    return weights, ids, token_expert_indices
+
+
 def topk_softmax(
     topk_weights, topk_ids, token_expert_indices, gating_output, renormalize
 ):

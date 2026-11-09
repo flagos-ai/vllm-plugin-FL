@@ -44,7 +44,10 @@ class _Unsigned32WithArithmeticShift:
 
 
 def _production_integer_helpers():
-    path = Path(__file__).resolve().parents[2] / "vllm_fl/patches/ascend_v2_gumbel.py"
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "vllm_fl/dispatch/backends/vendor/ascend/patches/ascend_v2_gumbel.py"
+    )
     tree = ast.parse(path.read_text(encoding="utf-8"))
     names = {"_murmur3_rotl32", "_murmur3_mix", "_murmur3_fmix32"}
     nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
@@ -122,7 +125,9 @@ def test_seeded_gumbel_matches_independent_cpu_with_slot_permutations():
         pytest.skip("An Ascend NPU is unavailable")
     from vllm.v1.worker.gpu.sample import gumbel
 
-    from vllm_fl.patches.ascend_v2_sampling import install_ascend_v2_sampling_shims
+    from vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_sampling import (
+        install_ascend_v2_sampling_shims,
+    )
 
     assert install_ascend_v2_sampling_shims()
     device = torch.device("npu", torch.npu.current_device())

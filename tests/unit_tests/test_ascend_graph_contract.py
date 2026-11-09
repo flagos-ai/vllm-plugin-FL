@@ -3,7 +3,6 @@
 
 import ast
 import importlib.util
-import os
 import sys
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -448,8 +447,7 @@ def test_graph_cleanup_clears_wrapper_before_task_registry(monkeypatch):
 
 
 def _configure(monkeypatch, *, breakable=False):
-    # Extract the standalone helper, avoiding PlatformFL's device discovery and
-    # unrelated operator registration at import time on another vendor's CI.
+    # Load the helper without triggering the vendor package's initialization.
     graph_modes = NS(NONE="none", FULL_DECODE_ONLY="decode", PIECEWISE="piecewise")
     compile_modes = NS(NONE="none", VLLM_COMPILE="vllm")
     _module(
@@ -459,18 +457,13 @@ def _configure(monkeypatch, *, breakable=False):
         CompilationMode=compile_modes,
     )
     _module(monkeypatch, "vllm.envs", VLLM_USE_BREAKABLE_CUDAGRAPH=breakable)
-    source = ast.parse((ROOT / "platform.py").read_text())
-    helper = next(
-        n
-        for n in source.body
-        if isinstance(n, ast.FunctionDef) and n.name == "_configure_ascend_compilation"
+    spec = importlib.util.spec_from_file_location(
+        "_fl_ascend_compilation_contract",
+        ROOT / "dispatch/backends/vendor/ascend/patches/compilation.py",
     )
-    namespace = {"os": os}
-    exec(
-        compile(ast.Module(body=[helper], type_ignores=[]), "platform-helper", "exec"),
-        namespace,
-    )
-    return namespace[helper.name]
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._configure_ascend_compilation
 
 
 def _config(enabled=None, *, eager=False, use_v2=False):

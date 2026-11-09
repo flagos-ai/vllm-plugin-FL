@@ -2,31 +2,47 @@
 """Numerical routing contracts executed without importing accelerator runtimes."""
 
 import ast
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import torch
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ASCEND_MOE_MODULE = "vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe"
 
-@pytest.fixture
-def router_functions():
-    source = Path(__file__).resolve().parents[2] / "vllm_fl/ops/fused_moe/router.py"
+
+def _load_fused_topk(source):
     tree = ast.parse(source.read_text(encoding="utf-8"))
-    names = {"_ascend_fused_topk", "fused_topk"}
-    functions = [
+    function = next(
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name in names
-    ]
-    assert {node.name for node in functions} == names
+        if isinstance(node, ast.FunctionDef) and node.name == "fused_topk"
+    )
     namespace = {"torch": torch}
     exec(
-        compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"),
+        compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"),
         namespace,
     )
     return namespace
 
 
+@pytest.fixture
+def router_functions():
+    return _load_fused_topk(_REPO_ROOT / "vllm_fl/ops/fused_moe/router.py")
+
+
+@pytest.fixture
+def ascend_fused_topk(monkeypatch):
+    source = _REPO_ROOT / (_ASCEND_MOE_MODULE.replace(".", "/") + ".py")
+    module = ModuleType(_ASCEND_MOE_MODULE)
+    module.fused_topk = _load_fused_topk(source)["fused_topk"]
+    monkeypatch.setitem(sys.modules, _ASCEND_MOE_MODULE, module)
+    return module.fused_topk
+
+
+@pytest.mark.usefixtures("ascend_fused_topk")
 @pytest.mark.parametrize("scoring", ["softmax", "sigmoid"])
 @pytest.mark.parametrize("renormalize", [False, True])
 @pytest.mark.parametrize("input_dtype", [torch.float32, torch.bfloat16])
@@ -97,8 +113,8 @@ def test_other_platform_keeps_upstream_padded_dispatch(router_functions):
     assert calls[0]["scoring_func"] == "softmax"
 
 
-def test_sigmoid_underflow_does_not_produce_nan(router_functions):
-    weights, _, _ = router_functions["_ascend_fused_topk"](
+def test_sigmoid_underflow_does_not_produce_nan(ascend_fused_topk):
+    weights, _, _ = ascend_fused_topk(
         torch.full((2, 4), -1000.0),
         2,
         True,

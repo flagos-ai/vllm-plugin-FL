@@ -171,7 +171,8 @@ class AscendV2GraphTests(unittest.TestCase):
             return metadata, {}
 
         source = (
-            Path(__file__).resolve().parents[2] / "vllm_fl/worker/ascend_v2_graph.py"
+            Path(__file__).resolve().parents[2]
+            / "vllm_fl/dispatch/backends/vendor/ascend/worker/ascend_v2_graph.py"
         )
         tree = ast.parse(source.read_text(encoding="utf-8"))
         nodes = [
@@ -419,7 +420,8 @@ class AscendV2GraphTests(unittest.TestCase):
 
     def test_runner_construction_does_not_require_model_state_before_load(self):
         source = (
-            Path(__file__).resolve().parents[2] / "vllm_fl/worker/model_runner_v2.py"
+            Path(__file__).resolve().parents[2]
+            / "vllm_fl/dispatch/backends/vendor/ascend/worker/model_runner_v2.py"
         )
         tree = ast.parse(source.read_text(encoding="utf-8"))
         runner = next(

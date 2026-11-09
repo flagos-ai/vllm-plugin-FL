@@ -28,7 +28,7 @@ class AscendV2SamplingTests(unittest.TestCase):
     def setUp(self):
         path = (
             Path(__file__).resolve().parents[2]
-            / "vllm_fl/patches/ascend_v2_sampling.py"
+            / "vllm_fl/dispatch/backends/vendor/ascend/patches/ascend_v2_sampling.py"
         )
         spec = importlib.util.spec_from_file_location(
             "ascend_v2_sampling_under_test", path
@@ -41,14 +41,16 @@ class AscendV2SamplingTests(unittest.TestCase):
         self.penalties._penalties_kernel = self.kernel
         self.penalties.apply_penalties = self.upstream_launcher
         self.ascend_kernel = types.ModuleType(
-            "vllm_fl.patches.ascend_v2_penalties_kernel"
+            "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_penalties_kernel"
         )
         self.ascend_kernel._penalties_kernel = self.kernel
         self.temperature = types.ModuleType("vllm.v1.worker.gpu.sample.gumbel")
         self.temperature.apply_temperature = self.upstream_launcher
         self.states = types.ModuleType("vllm.v1.worker.gpu.sample.states")
         self.states.apply_temperature = self.upstream_launcher
-        self.gumbel = types.ModuleType("vllm_fl.patches.ascend_v2_gumbel")
+        self.gumbel = types.ModuleType(
+            "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_gumbel"
+        )
         for name in (
             "_murmur3_rotl32",
             "_murmur3_mix",
@@ -63,11 +65,11 @@ class AscendV2SamplingTests(unittest.TestCase):
         self.platform.current_platform = SimpleNamespace(device_type="npu")
         modules = {
             "vllm.platforms": self.platform,
-            "vllm_fl.patches.ascend_v2_gumbel": self.gumbel,
+            "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_gumbel": self.gumbel,
             "vllm.v1.worker.gpu.sample.gumbel": self.temperature,
             "vllm.v1.worker.gpu.sample.states": self.states,
             "vllm.v1.worker.gpu.sample.penalties": self.penalties,
-            "vllm_fl.patches.ascend_v2_penalties_kernel": self.ascend_kernel,
+            "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_penalties_kernel": self.ascend_kernel,
         }
         module_patch = patch.dict(sys.modules, modules)
         module_patch.start()
@@ -287,7 +289,7 @@ class AscendV2PenaltiesNumericalTests(unittest.TestCase):
         device = torch.device("npu", torch.npu.current_device())
         source = (
             Path(__file__).resolve().parents[2]
-            / "vllm_fl/patches/ascend_v2_sampling.py"
+            / "vllm_fl/dispatch/backends/vendor/ascend/patches/ascend_v2_sampling.py"
         )
         spec = importlib.util.spec_from_file_location(
             "ascend_v2_sampling_numerical", source

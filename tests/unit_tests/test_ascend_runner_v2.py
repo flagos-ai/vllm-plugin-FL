@@ -46,7 +46,7 @@ def adapter():
         namespace,
     )
     _load_definitions(
-        "vllm_fl/worker/model_runner_v2.py",
+        "vllm_fl/dispatch/backends/vendor/ascend/worker/model_runner_v2.py",
         {"_AscendBlockZeroer", "GPUModelRunnerFLV2"},
         namespace,
     )
@@ -136,7 +136,9 @@ def test_v2_runner_uses_real_upstream_v2_mro():
     pytest.importorskip("vllm")
     from vllm.v1.worker.gpu.model_runner import GPUModelRunner as UpstreamV2
 
-    from vllm_fl.worker.model_runner_v2 import GPUModelRunnerFLV2
+    from vllm_fl.dispatch.backends.vendor.ascend.worker.model_runner_v2 import (
+        GPUModelRunnerFLV2,
+    )
 
     assert GPUModelRunnerFLV2.__mro__[1] is UpstreamV2
     modules = {base.__module__ for base in GPUModelRunnerFLV2.__mro__}

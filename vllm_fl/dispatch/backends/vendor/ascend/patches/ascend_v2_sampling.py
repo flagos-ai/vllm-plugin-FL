@@ -12,11 +12,17 @@ import importlib
 import torch
 
 _PENALTIES_MODULE = "vllm.v1.worker.gpu.sample.penalties"
-_ASCEND_KERNEL_MODULE = "vllm_fl.patches.ascend_v2_penalties_kernel"
+_ASCEND_KERNEL_MODULE = (
+    "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_penalties_kernel"
+)
 _TEMPERATURE_MODULE = "vllm.v1.worker.gpu.sample.gumbel"
 _SAMPLING_STATES_MODULE = "vllm.v1.worker.gpu.sample.states"
-_ASCEND_TEMPERATURE_KERNEL_MODULE = "vllm_fl.patches.ascend_v2_temperature_kernel"
-_ASCEND_GUMBEL_MODULE = "vllm_fl.patches.ascend_v2_gumbel"
+_ASCEND_TEMPERATURE_KERNEL_MODULE = (
+    "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_temperature_kernel"
+)
+_ASCEND_GUMBEL_MODULE = (
+    "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_gumbel"
+)
 ASCEND_PENALTIES_BLOCK_SIZE = 1024
 ASCEND_TEMPERATURE_BLOCK_SIZE = 1024
 

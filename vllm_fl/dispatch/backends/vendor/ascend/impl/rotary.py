@@ -10,6 +10,20 @@ from __future__ import annotations
 import torch
 
 
+def restore_flaggems_rotary_inplace(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    result: tuple[torch.Tensor, torch.Tensor],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Preserve tensor identity when Ascend FlagGems returns in-place aliases."""
+    q_embed, k_embed = result
+    if q_embed is not query:
+        query.copy_(q_embed)
+    if k_embed is not key:
+        key.copy_(k_embed)
+    return query, key
+
+
 def initialize_rotary_embedding_ascend() -> None:
     """Resolve torch-npu's lazy ATB registration before model tracing."""
     from torch_npu.op_plugin.atb._atb_ops import _register_atb_extensions

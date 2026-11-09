@@ -11,6 +11,7 @@ import torch
 
 _REPO_ROOT = Path(__file__).parents[3]
 _REFERENCE_MODULE = "vllm_fl.dispatch.backends.reference.impl.rotary"
+_ASCEND_ROTARY_MODULE = "vllm_fl.dispatch.backends.vendor.ascend.impl.rotary"
 
 
 def _load_source_module(name, relative_path):
@@ -26,6 +27,8 @@ def _load_source_module(name, relative_path):
             if name == "vllm.platforms" and level == 0:
                 assert tuple(fromlist) == ("current_platform",)
                 return SimpleNamespace(current_platform=platform)
+            if name == _ASCEND_ROTARY_MODULE and level == 0:
+                return ascend_rotary
             if name == "musa_ops" and level == 1:
                 raise AssertionError("Ascend source contract must not import MUSA ops")
             if name == "torch_musa":
@@ -559,6 +562,8 @@ def test_flaggems_ascend_common_wrapper_preserves_requested_inplace(
 
     def common_rotary(*args, **kwargs):
         calls.append(kwargs)
+        if kwargs["inplace"]:
+            return args[0].view_as(args[0]), args[1].view_as(args[1])
         return args[0], args[1]
 
     _install_fake_flaggems(

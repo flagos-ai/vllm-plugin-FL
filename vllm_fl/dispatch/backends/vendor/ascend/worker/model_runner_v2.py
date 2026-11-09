@@ -15,12 +15,12 @@ from copy import deepcopy
 import numpy as np
 import torch
 
-from vllm_fl.patches.ascend_v2_device import install_ascend_v2_device_shims
+from ..patches.ascend_v2_device import install_ascend_v2_device_shims
 
 # Direct imports of this adapter must get the same shims as WorkerFL imports.
 install_ascend_v2_device_shims()
 
-from vllm_fl.patches.ascend_v2_sampling import install_ascend_v2_sampling_shims
+from ..patches.ascend_v2_sampling import install_ascend_v2_sampling_shims
 
 install_ascend_v2_sampling_shims()
 
@@ -56,16 +56,16 @@ from vllm.v1.worker.gpu.spec_decode.speculator import DraftModelSpeculator
 from vllm.v1.worker.gpu.ubatch_utils import maybe_build_ubatch_runner
 from vllm.v1.worker.utils import bind_kv_cache_to_layers
 
+from .ascend_v2_block_table import AscendBlockTables
+from .ascend_v2_graph import (
+    AscendModelGraphManager,
+    install_graph_metadata_bridge,
+)
 from vllm_fl.kv_cache.ascend.hybrid import (
     allocate_ascend_kv_cache,
     copy_block_planes,
     uses_dense_hybrid_cache,
     zero_block_planes,
-)
-from vllm_fl.worker.ascend_v2_block_table import AscendBlockTables
-from vllm_fl.worker.ascend_v2_graph import (
-    AscendModelGraphManager,
-    install_graph_metadata_bridge,
 )
 
 # vLLM configures INFO handlers for the vllm namespace, not vllm_fl.

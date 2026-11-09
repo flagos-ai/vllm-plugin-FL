@@ -139,7 +139,7 @@ class PyFlagcxCommunicator:
         is bind to a unique device.
         """
         self.comm = None
-        self._npu_comm_stream = None
+        self._all_reduce_stream = None
         self._destroy_lock = threading.Lock()
         self._destroy_started = False
         self._destroy_thread = None
@@ -238,14 +238,15 @@ class PyFlagcxCommunicator:
                     self.world_size, self.unique_id, self.rank)
 
             if self.device.type == "npu" and _flagcx_wheel_library is not None:
-                self._npu_comm_stream = torch.npu.Stream(device=self.device)
-                self._npu_submit_lock = threading.Lock()
-                self._npu_input_ready = torch.npu.Event()
-                self._npu_output_ready = torch.npu.Event()
+                from vllm_fl.dispatch.backends.vendor.ascend.patches.flagcx import (
+                    FlagCXAllReduceStream,
+                )
+
+                self._all_reduce_stream = FlagCXAllReduceStream(self.device)
 
             try:
                 stream = self._current_stream()
-                # A small all_reduce for warmup, including the NPU event pair.
+                # A small all_reduce warms up the selected submission path.
                 data = torch.zeros(1, device=device)
                 self.all_reduce(data)
                 stream.synchronize()
@@ -361,21 +362,13 @@ class PyFlagcxCommunicator:
 
         if stream is None:
             stream = self._current_stream()
-        comm_stream = getattr(self, "_npu_comm_stream", None)
+        comm_stream = getattr(self, "_all_reduce_stream", None)
         if comm_stream is None:
             self._all_reduce_on_stream(in_tensor, out_tensor, op, stream)
         else:
-            # HCCL can add a stream dependency during capture. Submit on a
-            # caller-owned communication stream and join it back explicitly.
-            # Keep another caller from re-recording either event while its
-            # wait is being enqueued. The lock covers submission only.
-            with self._npu_submit_lock:
-                self._npu_input_ready.record(stream)
-                comm_stream.wait_event(self._npu_input_ready)
-                with torch.npu.stream(comm_stream):
-                    self._all_reduce_on_stream(in_tensor, out_tensor, op, comm_stream)
-                self._npu_output_ready.record(comm_stream)
-                stream.wait_event(self._npu_output_ready)
+            comm_stream.submit(
+                self._all_reduce_on_stream, in_tensor, out_tensor, op, stream
+            )
         return out_tensor
 
     def _all_reduce_on_stream(self, in_tensor, out_tensor, op, stream):
