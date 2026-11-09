@@ -127,8 +127,10 @@ platforms:
     exempt_from_global:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/
+  # Image published; needs a self-hosted runner with labels in configs/kunlunxin.yml.
+  # Kunlunxin is added on top of the existing vendor suites, not in place of them.
   kunlunxin:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
