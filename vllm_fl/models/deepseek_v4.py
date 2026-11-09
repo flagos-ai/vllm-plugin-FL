@@ -263,11 +263,11 @@ class DeepseekV4Attention(nn.Module):
             or parallel.prefill_context_parallel_size != 1
         ):
             raise NotImplementedError(
-                "Reference V4 attention requires non-speculative CP1"
+                "DeepSeek V4 attention requires non-speculative CP1"
             )
         if ratio not in (0, 4, 128) or params_dtype != torch.bfloat16:
             raise NotImplementedError(
-                "Reference V4 attention requires BF16 and C0/C4/C128"
+                "DeepSeek V4 attention requires BF16 and C0/C4/C128"
             )
         if min(config.num_attention_heads, config.o_groups, config.sliding_window) < 1:
             raise ValueError("Attention heads, groups and window must be positive")
@@ -432,7 +432,7 @@ class DeepseekV4Attention(nn.Module):
     def forward(self, positions, hidden_states, llama_4_scaling=None, *, metadata=None):
         if llama_4_scaling is not None:
             raise NotImplementedError(
-                "Llama4 scaling is not part of the V4 reference path"
+                "DeepSeek V4 attention does not support Llama4 scaling"
             )
         if metadata is None:
             metadata = get_forward_context().attn_metadata
@@ -698,7 +698,7 @@ class DeepseekV4Model(nn.Module):
         super().__init__()
         config = self.config = vllm_config.model_config.hf_config
         if vllm_config.model_config.dtype != torch.bfloat16:
-            raise NotImplementedError("DeepSeek V4 reference model requires BF16")
+            raise NotImplementedError("DeepSeek V4 model requires BF16")
         self.hc_mult = config.hc_mult
         self.norm_eps = config.rms_norm_eps
         self.hc_eps = config.hc_eps
