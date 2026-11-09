@@ -1,0 +1,66 @@
+{
+  "vllm_module_version": "0.32.0",
+  "vllm_distribution_version": "0.32.0+flagos",
+  "vllm_origin": "/flagos/lib/python3.12/site-packages/vllm/__init__.py",
+  "vllm_distribution_origin": "/flagos/lib/python3.12/site-packages/vllm/__init__.py",
+  "vllm_native_extensions": {
+    "vllm._C_stable_libtorch": "/flagos/lib/python3.12/site-packages/vllm/_C_stable_libtorch.abi3.so",
+    "vllm._moe_C_stable_libtorch": "/flagos/lib/python3.12/site-packages/vllm/_moe_C_stable_libtorch.abi3.so",
+    "vllm._flashmla_C": "/flagos/lib/python3.12/site-packages/vllm/_flashmla_C.abi3.so",
+    "vllm._flashmla_extension_C": "/flagos/lib/python3.12/site-packages/vllm/_flashmla_extension_C.abi3.so",
+    "vllm.vllm_flash_attn._vllm_fa2_C": "/flagos/lib/python3.12/site-packages/vllm/vllm_flash_attn/_vllm_fa2_C.abi3.so",
+    "vllm.vllm_flash_attn._vllm_fa3_C": "/flagos/lib/python3.12/site-packages/vllm/vllm_flash_attn/_vllm_fa3_C.abi3.so",
+    "vllm.cumem_allocator": "/flagos/lib/python3.12/site-packages/vllm/cumem_allocator.abi3.so",
+    "vllm._deepselect_C": "/flagos/lib/python3.12/site-packages/vllm/_deepselect_C.abi3.so",
+    "vllm._flashkda_C": "/flagos/lib/python3.12/site-packages/vllm/_flashkda_C.abi3.so",
+    "vllm._qutlass_C": "/flagos/lib/python3.12/site-packages/vllm/_qutlass_C.abi3.so",
+    "vllm.fs_io_C": "/flagos/lib/python3.12/site-packages/vllm/fs_io_C.abi3.so",
+    "vllm.spinloop": "/flagos/lib/python3.12/site-packages/vllm/spinloop.abi3.so",
+    "vllm.third_party.deep_gemm._C_extension": "/flagos/lib/python3.12/site-packages/vllm/third_party/deep_gemm/_C_extension.abi3.so"
+  },
+  "flaggems-vllm": {
+    "release": "v0.2.0",
+    "commit": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19",
+    "repository": "https://github.com/flagos-ai/FlagGems-vllm.git",
+    "version": "0.1.0",
+    "direct_url": {
+      "url": "https://github.com/flagos-ai/FlagGems-vllm.git",
+      "vcs_info": {
+        "commit_id": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19",
+        "requested_revision": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19",
+        "vcs": "git"
+      }
+    }
+  },
+  "runtime": {
+    "torch": "2.13.0+cu130",
+    "torchvision": "0.28.0+cu130",
+    "torchaudio": "2.11.0+cu130",
+    "flag-gems": "5.4.0",
+    "flagtree": "0.7.0",
+    "flagcx": "0.14.1+cuda13.3",
+    "numpy": "1.26.4",
+    "nvidia-nccl-cu13": "2.29.7"
+  },
+  "xgboost": "3.3.0",
+  "humming-kernels": "0.1.17+flagos",
+  "torchcodec": "0.17.0",
+  "nvidia-cuda-nvcc": "13.0.88",
+  "nvidia-cuda-crt": "13.0.88",
+  "nvidia-nvvm": "13.0.88",
+  "cuda": "13.0",
+  "triton": "3.6.0",
+  "transformers": "5.19.0",
+  "torchcodec_origin": "/flagos/lib/python3.12/site-packages/torchcodec/__init__.py",
+  "nccl_loaded_version": [
+    2,
+    29,
+    7
+  ],
+  "platform": "NvidiaPlatformFL",
+  "llm_class": "vllm.entrypoints.llm.LLM",
+  "flaggems_origin": "/flagos/lib/python3.12/site-packages/flag_gems/__init__.py",
+  "flaggems_vllm_origin": "/flagos/lib/python3.12/site-packages/flaggems_vllm/__init__.py",
+  "worker_class": "vllm_fl.worker.nvidia_worker.NvidiaWorkerFL",
+  "device_count": 1
+}

@@ -1,0 +1,8 @@
+Using Python 3.12.13 environment at: /flagos
+  × No solution found when resolving dependencies:
+  ╰─▶ Because opencv-python-headless>=4.13.0.90 depends on numpy>=2
+      and vllm==0.32.0 depends on numpy==1.26.4, we can conclude that
+      opencv-python-headless>=4.13.0.90 and vllm==0.32.0 are incompatible.
+      And because vllm==0.32.0 depends on opencv-python-headless>=4.13.0 and
+      you require vllm[audio]==0.32.0, we can conclude that your requirements
+      are unsatisfiable.

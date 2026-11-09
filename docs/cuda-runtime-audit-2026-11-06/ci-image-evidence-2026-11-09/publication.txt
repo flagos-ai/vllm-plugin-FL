@@ -1,0 +1,5 @@
+Image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-cuda-ci
+Publication verified: 2026-11-10 Asia/Shanghai
+Observed docker push result: PUSH_EXIT=0
+Independent remote manifest query: REGISTRY_MANIFEST_EXIT=0
+Image reference intentionally uses the requested tag without a digest.

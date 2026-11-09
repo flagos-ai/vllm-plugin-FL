@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="808.128" timestamp="2026-11-09T15:37:34.057356+00:00" hostname="2337ef05cbfd"><testcase classname="tests.e2e_tests.inference.test_inference_smoke" name="test_inference[default]" time="799.469" /></testsuite></testsuites>

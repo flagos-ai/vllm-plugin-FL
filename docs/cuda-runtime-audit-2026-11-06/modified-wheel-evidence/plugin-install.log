@@ -1,0 +1,27 @@
+Obtaining file:///audit/repo
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+  /flagos/lib/python3.12/site-packages/setuptools_scm/git.py:202: BuildBackendWarning: "/audit/repo" is shallow and may cause errors
+    warnings.warn(f'"{wd.path}" is shallow and may cause errors')
+Building wheels for collected packages: vllm-plugin-fl
+  Building editable for vllm-plugin-fl (pyproject.toml): started
+  Building editable for vllm-plugin-fl (pyproject.toml): finished with status 'done'
+  /flagos/lib/python3.12/site-packages/setuptools_scm/git.py:202: BuildBackendWarning: "/audit/repo" is shallow and may cause errors
+    warnings.warn(f'"{wd.path}" is shallow and may cause errors')
+  /flagos/lib/python3.12/site-packages/setuptools/command/editable_wheel.py:352: BuildBackendWarning: Editable installation.
+  !!
+
+          ********************************************************************************
+          Please be careful with folders in your working directory with the same
+          name as your package as they may take precedence during imports.
+          ********************************************************************************
+
+  !!
+    with strategy, WheelFile(wheel_path, "w") as wheel_obj:
+  Created wheel for vllm-plugin-fl: filename=vllm_plugin_fl-0.0.0+g4b3a76a19-0.editable-py3-none-any.whl size=11681 sha256=4ed53cbb5b1b1e7d2a91ff7a9c5cdddfa0f5303d442f030a269e76f5dc6c2d4f
+  Stored in directory: /tmp/pip-ephem-wheel-cache-eg4vncsj/wheels/ba/34/bc/d70ec10103255fd127e7d5bb118be7a7cc4b9f00d262cec835
+Successfully built vllm-plugin-fl
+Installing collected packages: vllm-plugin-fl
+Successfully installed vllm-plugin-fl-0.0.0+g4b3a76a19

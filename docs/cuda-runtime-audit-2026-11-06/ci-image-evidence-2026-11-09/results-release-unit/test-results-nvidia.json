@@ -1,0 +1,30 @@
+{
+  "platform": "nvidia",
+  "device": "h20",
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "duration": 92.77
+  },
+  "results": [
+    {
+      "name": "unit (nvidia)",
+      "status": "passed",
+      "duration": 61.64,
+      "task": "unit",
+      "model": "",
+      "case": "",
+      "message": ""
+    },
+    {
+      "name": "unit-serial (nvidia)",
+      "status": "passed",
+      "duration": 31.13,
+      "task": "unit",
+      "model": "",
+      "case": "",
+      "message": ""
+    }
+  ]
+}

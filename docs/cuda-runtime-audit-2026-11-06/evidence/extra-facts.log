@@ -1,0 +1,17 @@
+flagcx==0.14.1+cuda13.3
+ninja==1.13.0
+numpy==1.26.4
+pybind11==3.0.3
+PyYAML==6.0.1
+setuptools-scm==9.2.2
+torch==2.13.0+cu130
+torchaudio==2.11.0+cu130
+torchvision==0.28.0+cu130
+/opt/triton/triton-3.7.1.dist-info
+1.5G	/data/models/Qwen/Qwen3-0.6B
+7.6G	/data/models/Qwen/Qwen3-4B
+152G	/data/models/Qwen/Qwen3-Next-80B-A3B-Instruct
+67G	/data/models/Qwen/Qwen3.5-35B-A3B
+752G	/data/models/Qwen/Qwen3.5-397B-A17B
+52G	/data/models/Qwen/Qwen3.6-27B
+67G	/data/models/Qwen/Qwen3.6-35B-A3B

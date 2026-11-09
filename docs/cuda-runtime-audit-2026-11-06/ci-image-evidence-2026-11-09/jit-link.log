@@ -1,0 +1,3 @@
+2026-11-09 15:34:43,232 - INFO - core.py:564 - flashinfer.jit: Building JIT module trtllm_mnnvl_comm; this can take several minutes on first use.
+namespace(trtllm_mnnvl_allreduce_fusion=<function get_trtllm_mnnvl_comm_module.<locals>.trtllm_mnnvl_allreduce_fusion at 0x7f4802c12520>)
+JIT_LINK_EXIT=0

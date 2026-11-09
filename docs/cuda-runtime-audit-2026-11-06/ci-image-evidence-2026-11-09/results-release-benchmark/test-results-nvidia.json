@@ -1,0 +1,39 @@
+{
+  "platform": "nvidia",
+  "device": "h20",
+  "summary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "duration": 237.88
+  },
+  "results": [
+    {
+      "name": "benchmark/throughput/throughput_smoke_dummy",
+      "status": "passed",
+      "duration": 71.97,
+      "task": "benchmark",
+      "model": "throughput",
+      "case": "throughput_smoke_dummy",
+      "message": ""
+    },
+    {
+      "name": "benchmark/latency/latency_smoke_dummy",
+      "status": "passed",
+      "duration": 36.57,
+      "task": "benchmark",
+      "model": "latency",
+      "case": "latency_smoke_dummy",
+      "message": ""
+    },
+    {
+      "name": "benchmark/serve/serve_smoke_dummy",
+      "status": "passed",
+      "duration": 129.32,
+      "task": "benchmark",
+      "model": "serve",
+      "case": "serve_smoke_dummy",
+      "message": ""
+    }
+  ]
+}

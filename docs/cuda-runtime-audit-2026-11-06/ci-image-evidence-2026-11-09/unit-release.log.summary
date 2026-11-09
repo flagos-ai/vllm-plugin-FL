@@ -1,0 +1,7 @@
+====================== 1874 passed, 125 skipped in 58.92s ======================
+collected 1981 items / 1979 deselected / 20 skipped / 2 selected
+=============== 2 passed, 20 skipped, 1979 deselected in 26.31s ================
+Total: 2  Passed: 2  Failed: 0
+Duration: 92.8s
+Overall: PASSED
+RELEASE_UNIT_EXIT=0
