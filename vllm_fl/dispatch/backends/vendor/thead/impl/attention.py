@@ -228,12 +228,6 @@ from vllm.v1.attention.backends.flash_attn import (
     FlashAttentionImpl,
     FlashAttentionMetadataBuilder,
 )
-from vllm.v1.attention.backends.fa_utils import (
-    flash_attn_supports_fp8,
-    flash_attn_supports_sinks,
-    get_flash_attn_version,
-    is_flash_attn_varlen_func_available,
-)
 
 
 class TheadFlashAttentionImpl(FlashAttentionImpl):
