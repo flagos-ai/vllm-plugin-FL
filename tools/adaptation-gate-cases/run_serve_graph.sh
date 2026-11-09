@@ -29,6 +29,13 @@ served_model_name=${SERVED_MODEL_NAME:-$model_path}
 if [[ -z ${VLLM_PLUGINS+x} ]]; then
     export VLLM_PLUGINS=fl
 fi
+graph_args=()
+if [[ -n ${MAX_NUM_SEQS:-} ]]; then
+    graph_args+=(--max-num-seqs "$MAX_NUM_SEQS")
+fi
+if [[ -n ${GRAPH_COMPILATION_CONFIG:-} ]]; then
+    graph_args+=(--compilation-config "$GRAPH_COMPILATION_CONFIG")
+fi
 printf '%s\n' "$$" >"${SERVER_PID_FILE:-$script_dir/.server.pid}"
 
 exec vllm serve "$model_path" \
@@ -38,4 +45,5 @@ exec vllm serve "$model_path" \
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-2}" \
     --max-model-len "${MAX_MODEL_LEN:-32768}" \
     --allowed-local-media-path "$script_dir/images" \
-    --trust-remote-code
+    --trust-remote-code \
+    "${graph_args[@]}"

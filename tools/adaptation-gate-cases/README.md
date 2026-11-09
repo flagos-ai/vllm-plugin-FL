@@ -89,6 +89,19 @@ Useful environment overrides are `TENSOR_PARALLEL_SIZE`, `MAX_MODEL_LEN`, and
 `SERVER_PID_FILE`. `run_test.sh` also supports `BASE_URL`, `SERVICE_TIMEOUT`,
 `REQUEST_TIMEOUT`, `SERVER_PID_FILE`, and `RESULTS_DIR`.
 
+`run_serve_graph.sh` also accepts `GRAPH_COMPILATION_CONFIG`, passed as one JSON
+argument to vLLM's `--compilation-config`. Leave it unset to use vLLM's defaults.
+`MAX_NUM_SEQS` optionally sets vLLM's scheduler concurrency limit. For models
+with Mamba layers, it must not exceed the available Mamba cache blocks when
+using FULL decode graphs. The S60 Qwen3.6-35B-A3B TP2 run profiled 219 blocks;
+use 128 sequences and enable the SiluAndMul custom operation:
+
+```bash
+MODEL_PATH=/models/Qwen3.6-35B-A3B PORT=8001 MAX_NUM_SEQS=128 \
+    GRAPH_COMPILATION_CONFIG='{"custom_ops":["none","+SiluAndMul"]}' \
+    ./run_serve_graph.sh
+```
+
 You may use a custom command instead of `run_serve.sh`. It must expose an
 OpenAI-compatible endpoint, serve the model as `qwen`, and allow local images
 from this directory. For example:
