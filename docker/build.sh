@@ -239,7 +239,7 @@ fi
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
-    DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.ci"
+    DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.v0.32.0"
 fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
@@ -255,16 +255,23 @@ fi
 BUILD_ARGS=()
 
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
-    # The CI recipe preserves the official 0.32 CUDA stack. Other CUDA targets
+    # The CI recipe preserves the FlagOS Runtime 2.3.0 CUDA stack. Other targets
     # retain their existing toolkit-based Dockerfile and version defaults.
     VLLM_VERSION="0.32.0"
     BUILD_CONTEXT="${SCRIPT_DIR}/.."
+    PLUGIN_SOURCE_SHA="$(git -C "${BUILD_CONTEXT}" rev-parse HEAD)"
+    PLUGIN_SOURCE_VERSION="${PLUGIN_SOURCE_VERSION:-0.5.0.dev0+g${PLUGIN_SOURCE_SHA:0:12}}"
+    if ! git -C "${BUILD_CONTEXT}" diff --quiet || ! git -C "${BUILD_CONTEXT}" diff --cached --quiet; then
+        PLUGIN_SOURCE_VERSION="${PLUGIN_SOURCE_VERSION}.dirty"
+    fi
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
-        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
     BUILD_ARGS+=(
         --build-arg "INDEX_URL=${INDEX_URL}"
         --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
+        --build-arg "PLUGIN_SOURCE_SHA=${PLUGIN_SOURCE_SHA}"
+        --build-arg "PLUGIN_SOURCE_VERSION=${PLUGIN_SOURCE_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${VLLM_VERSION}-cuda-ci"
@@ -399,7 +406,7 @@ msg "Building image: ${FULL_IMAGE}"
 msg "  Platform:       ${PLATFORM}"
 msg "  Target:         ${TARGET}"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
-    msg "  Stack:          official vLLM 0.32.0 CUDA 12.9 / native extensions / FlagTree 317a0249 / FlagGems 6fe7709e7717"
+    msg "  Stack:          FlagOS Runtime CUDA 13.3:2.3.0 / vLLM 0.32.0+flagos native / Torch cu130"
 elif [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then

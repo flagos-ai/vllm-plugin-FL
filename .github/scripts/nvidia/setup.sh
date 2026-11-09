@@ -14,9 +14,10 @@ python -m pip install --break-system-packages --no-deps "$UV_REQUIREMENT"
 # The shared installer pins its Git source and preserves the runtime packages.
 python "$HERE/../install_flaggems_vllm.py"
 
-python -I -B "$HERE/stack.py" --runtime-only
+# Preserve the Runtime's PYTHONPATH=/opt/flagtree compiler selection.
+python -B "$HERE/stack.py" --runtime-only
 
-# Reuse the official CUDA wheel and install only the plugin checkout.
+# Reuse the non-empty FlagOS CUDA wheel and install only the plugin checkout.
 env -u VLLM_VENDOR python -m uv pip install \
     --python "$(python -c 'import sys; print(sys.executable)')" \
     --break-system-packages \
@@ -24,11 +25,14 @@ env -u VLLM_VENDOR python -m uv pip install \
     --no-deps \
     -e .
 
-# The 0.32 base image predates the harness's xdist unit pass (-n N); the
-# other pytest plugins (cov/json-report/timeout) are already present.
-# pip, not uv: the image's pip index is a reachable mirror while uv ignores
-# pip.conf and dies connecting to files.pythonhosted.org on some runners.
-python -m pip install --break-system-packages "pytest-xdist>=3.0.0"
+# The image supplies the complete test tooling. Fail if a different image
+# lacks it instead of mutating the core environment during each CI job.
+python - <<'PY'
+from importlib.metadata import version
+
+for package in ("pytest", "pytest-xdist", "pytest-cov", "pytest-json-report", "pytest-timeout"):
+    print(f"CI tool: {package}=={version(package)}")
+PY
 
 # The dsw-hosted runners cap /dev/shm at ~64MB regardless of --ipc=host /
 # --shm-size (verified: both flags reach docker create yet df still shows
@@ -44,7 +48,7 @@ if [ "${shm_kb:-0}" -lt 1048576 ] 2>/dev/null; then
     df -h /dev/shm | tail -1
 fi
 
-python -I -B "$HERE/stack.py"
+python -B "$HERE/stack.py"
 
 python - <<'PY'
 import av

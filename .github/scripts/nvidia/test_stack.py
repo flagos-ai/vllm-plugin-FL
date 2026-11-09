@@ -1,8 +1,7 @@
 # Copyright 2026 FlagOS Contributors
-"""CPU regressions for preserving the official native vLLM CUDA installation."""
+"""CPU regressions for the native FlagOS vLLM CUDA installation."""
 
 import base64
-import copy
 import hashlib
 import importlib.machinery
 import importlib.metadata
@@ -25,7 +24,7 @@ class NativeProviderTests(unittest.TestCase):
     def validate(self, **overrides):
         args = {
             "module_version": "0.32.0",
-            "distribution_version": "0.32.0+cu129",
+            "distribution_version": "0.32.0+flagos",
             "module_origin": self.origin,
             "distribution_origin": self.origin,
             "native_libraries": tuple(stack.NATIVE_VLLM_LIBRARIES.values()),
@@ -33,12 +32,12 @@ class NativeProviderTests(unittest.TestCase):
         args.update(overrides)
         return stack.validate_vllm_provider(**args)
 
-    def test_official_cuda_release_pair_is_accepted(self):
+    def test_flagos_native_release_pair_is_accepted(self):
         result = self.validate()
-        self.assertEqual(result["vllm_distribution_version"], "0.32.0+cu129")
+        self.assertEqual(result["vllm_distribution_version"], "0.32.0+flagos")
 
     def test_empty_or_other_cuda_distribution_is_rejected(self):
-        for version in ("0.32.0+empty", "0.32.0", "0.32.0+cu130"):
+        for version in ("0.32.0+empty", "0.32.0", "0.32.0+cu129"):
             with self.subTest(version=version), self.assertRaises(RuntimeError):
                 self.validate(distribution_version=version)
 
@@ -69,6 +68,20 @@ class NativeProviderTests(unittest.TestCase):
                         if path != omitted
                     ]
                 )
+
+    def test_flagos_additional_native_payloads_cannot_be_missing(self):
+        extra = (
+            "_deepselect_C.abi3.so",
+            "_flashkda_C.abi3.so",
+            "_qutlass_C.abi3.so",
+            "fs_io_C.abi3.so",
+            "spinloop.abi3.so",
+            "third_party/deep_gemm/_C_extension.abi3.so",
+        )
+        payload = set(stack.NATIVE_VLLM_LIBRARIES.values()) | set(extra)
+        for omitted in extra:
+            with self.subTest(omitted=omitted), self.assertRaises(RuntimeError):
+                self.validate(native_libraries=payload - {omitted})
 
     def test_resolved_same_origin_is_accepted(self):
         self.validate(distribution_origin=self.origin.parent / "../vllm/__init__.py")
@@ -172,39 +185,32 @@ class NativeImportTests(unittest.TestCase):
             stack.validate_native_import(self.name, self.module, self.origin)
 
 
-class SourceProvenanceTests(unittest.TestCase):
-    def setUp(self):
-        self.provenance = {
-            name: {**source, "wheel_sha256": "a" * 64}
-            for name, source in stack.FL_SOURCES.items()
-        }
-        self.installed = {
-            name: {"version": source["version"], "wheel_sha256": "a" * 64}
-            for name, source in stack.FL_SOURCES.items()
-        }
+class RuntimeVersionTests(unittest.TestCase):
+    def test_cuda12_nccl_file_overlap_is_rejected(self):
+        stack.validate_nccl_version((2, 29, 7))
+        with self.assertRaisesRegex(RuntimeError, "NCCL"):
+            stack.validate_nccl_version((2, 27, 5))
 
-    def test_pinned_source_and_installed_wheel_are_accepted(self):
-        stack.validate_fl_provenance(self.provenance, self.installed)
+    def test_base_runtime_versions_are_accepted(self):
+        versions = dict(stack.RUNTIME_VERSIONS)
+        self.assertEqual(stack.validate_runtime_versions(versions), versions)
 
-    def test_same_version_from_different_source_is_rejected(self):
-        self.provenance["flagtree"]["commit"] = "b" * 40
-        with self.assertRaisesRegex(RuntimeError, "source provenance"):
-            stack.validate_fl_provenance(self.provenance, self.installed)
+    def test_replaced_or_missing_base_package_is_rejected(self):
+        for name in stack.RUNTIME_VERSIONS:
+            versions = dict(stack.RUNTIME_VERSIONS)
+            versions[name] = "0.0.0"
+            with self.subTest(package=name), self.assertRaisesRegex(RuntimeError, name):
+                stack.validate_runtime_versions(versions)
 
-    def test_replaced_or_editable_installation_is_rejected(self):
-        for replacement in ({"wheel_sha256": "b" * 64}, {"editable": True}):
-            installed = copy.deepcopy(self.installed)
-            installed["flag-gems"].update(replacement)
-            with (
-                self.subTest(replacement=replacement),
-                self.assertRaisesRegex(RuntimeError, "not the wheel"),
-            ):
-                stack.validate_fl_provenance(self.provenance, installed)
-
-    def test_release_wheel_cannot_impersonate_fixed_development_commit(self):
-        self.installed["flagtree"]["version"] = "0.7.0"
-        with self.assertRaisesRegex(RuntimeError, "not the wheel"):
-            stack.validate_fl_provenance(self.provenance, self.installed)
+    def test_flagtree_compiler_origin_and_version_are_checked(self):
+        origin = Path("/opt/flagtree/triton/__init__.py")
+        stack.validate_compiler("3.6.0", origin, origin)
+        with self.assertRaises(RuntimeError):
+            stack.validate_compiler("3.7.1", origin, origin)
+        with self.assertRaises(RuntimeError):
+            stack.validate_compiler(
+                "3.6.0", Path("/opt/triton/triton/__init__.py"), origin
+            )
 
 
 class FlagGemsVllmProvenanceTests(unittest.TestCase):
