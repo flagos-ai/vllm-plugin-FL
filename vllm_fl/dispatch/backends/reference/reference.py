@@ -180,14 +180,27 @@ class ReferenceBackend(Backend):
         return AttentionBackendEnum.FLASH_ATTN.get_path()
 
     def grouped_topk(
-        self, scores, n_group, topk_group, topk, renormalize,
-        routed_scaling_factor, bias, scoring_func=0,
+        self,
+        scores,
+        n_group,
+        topk_group,
+        topk,
+        renormalize,
+        routed_scaling_factor,
+        bias,
+        scoring_func=0,
     ):
         from .impl.grouped_topk import grouped_topk_torch
 
         return grouped_topk_torch(
-            scores, n_group, topk_group, topk, renormalize,
-            routed_scaling_factor, bias, scoring_func,
+            scores,
+            n_group,
+            topk_group,
+            topk,
+            renormalize,
+            routed_scaling_factor,
+            bias,
+            scoring_func,
         )
 
     def invoke_fused_moe_triton_kernel(

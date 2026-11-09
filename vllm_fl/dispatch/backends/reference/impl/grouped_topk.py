@@ -6,7 +6,13 @@ import torch
 
 
 def grouped_topk_torch(
-    scores, n_group, topk_group, topk, renormalize, routed_scaling_factor, bias,
+    scores,
+    n_group,
+    topk_group,
+    topk,
+    renormalize,
+    routed_scaling_factor,
+    bias,
     scoring_func=0,
 ):
     if scores.ndim != 2 or bias.numel() != scores.shape[-1]:
@@ -15,7 +21,10 @@ def grouped_topk_torch(
     if n_group <= 0 or num_experts % n_group:
         raise ValueError("num_experts must be divisible by a positive n_group")
     experts_per_group = num_experts // n_group
-    if not 1 <= topk_group <= n_group or not 1 <= topk <= topk_group * experts_per_group:
+    if (
+        not 1 <= topk_group <= n_group
+        or not 1 <= topk <= topk_group * experts_per_group
+    ):
         raise ValueError("topk exceeds the selected expert groups")
     if scoring_func not in (0, 1):
         raise ValueError("scoring_func must be 0 (none) or 1 (sigmoid)")
@@ -29,7 +38,9 @@ def grouped_topk_torch(
     groups = group_scores.argsort(dim=-1, descending=True, stable=True)[:, :topk_group]
     group_mask = torch.zeros_like(group_scores, dtype=torch.bool)
     group_mask.scatter_(1, groups, True)
-    expert_mask = group_mask.unsqueeze(-1).expand(-1, -1, experts_per_group).reshape_as(selection)
+    expert_mask = (
+        group_mask.unsqueeze(-1).expand(-1, -1, experts_per_group).reshape_as(selection)
+    )
     selected = selection.masked_fill(~expert_mask, -float("inf"))
     ids = selected.argsort(dim=-1, descending=True, stable=True)[:, :topk]
     weights = processed.gather(1, ids).float()
