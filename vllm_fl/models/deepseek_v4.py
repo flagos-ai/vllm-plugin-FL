@@ -390,6 +390,25 @@ class DeepseekV4Attention(nn.Module):
                 self.wo_a.quant_method, "configure_grouped", None
             )
             if configure_grouped is None:
+                from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+                    CompressedTensorsLinearMethod,
+                )
+                from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
+                    CompressedTensorsW8A8Int8,
+                )
+
+                if isinstance(
+                    self.wo_a.quant_method, CompressedTensorsLinearMethod
+                ) and isinstance(self.wo_a.scheme, CompressedTensorsW8A8Int8):
+                    from vllm_fl.quantization.w8a8.compressed_tensors import (
+                        AscendGroupedW8A8LinearMethod,
+                    )
+
+                    self.wo_a.quant_method = AscendGroupedW8A8LinearMethod(
+                        self.wo_a.quant_method.quantization_config
+                    )
+                    configure_grouped = self.wo_a.quant_method.configure_grouped
+            if configure_grouped is None:
                 raise NotImplementedError(
                     "Grouped output projection requires a grouped quantization method"
                 )
@@ -812,10 +831,18 @@ class DeepseekV4ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts):
 
     packed_modules_mapping = {"gate_up_proj": ["gate_proj", "up_proj"]}
     hf_to_vllm_mapper = WeightsMapper(
+        # One checkpoint contract for quantization metadata and tensor loading.
+        # Canonical names remain unchanged, including model-prefixed raw aliases.
         orig_to_new_prefix={
             "layers.": "model.layers.",
             "embed.": "model.embed_tokens.",
+            "embed_tokens.": "model.embed_tokens.",
             "head.": "lm_head.",
+            "norm.": "model.norm.",
+            "hc_head_": "model.hc_head_",
+            "model.embed.": "model.embed_tokens.",
+            "model.head.": "lm_head.",
+            "model.lm_head.": "lm_head.",
         },
         orig_to_new_substr={
             ".attn.": ".self_attn.",
@@ -825,7 +852,9 @@ class DeepseekV4ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts):
             ".ffn.": ".mlp.",
             ".ffn_norm.": ".post_attention_layernorm.",
             ".attn_norm.": ".input_layernorm.",
+            ".gate.bias": ".gate.e_score_correction_bias",
         },
+        orig_to_new_suffix={".scale": ".weight_scale"},
     )
 
     def __init__(self, *, vllm_config, prefix=""):
@@ -879,35 +908,10 @@ class DeepseekV4ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts):
     def compute_logits(self, hidden_states):
         return self.logits_processor(self.lm_head, hidden_states)
 
-    @staticmethod
-    def _checkpoint_name(name):
-        if name.startswith("model."):
-            name = name[len("model.") :]
-        for source, target in (
-            ("layers.", "model.layers."),
-            ("embed.", "model.embed_tokens."),
-            ("embed_tokens.", "model.embed_tokens."),
-            ("head.", "lm_head."),
-            ("norm.", "model.norm."),
-            ("hc_head_", "model.hc_head_"),
-        ):
-            if name.startswith(source):
-                name = target + name[len(source) :]
-                break
-        for source, target in (
-            (".attn.", ".self_attn."),
-            (".ffn.", ".mlp."),
-            (".attn_norm.", ".input_layernorm."),
-            (".ffn_norm.", ".post_attention_layernorm."),
-            (".w1.", ".gate_proj."),
-            (".w2.", ".down_proj."),
-            (".w3.", ".up_proj."),
-            (".gate.bias", ".gate.e_score_correction_bias"),
-        ):
-            name = name.replace(source, target)
-        if name.endswith(".scale"):
-            name = name[: -len(".scale")] + ".weight_scale"
-        return name
+    @classmethod
+    def _checkpoint_name(cls, name):
+        # Quantization metadata and tensor loading share the exact same mapper.
+        return cls.hf_to_vllm_mapper._map_name(name)
 
     def load_weights(self, weights):
         params = dict(self.named_parameters())

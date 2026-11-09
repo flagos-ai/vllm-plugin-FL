@@ -822,11 +822,20 @@ class AscendAttentionBackendImpl(AttentionImpl):
             should_load_quant_weights,
         )
 
-        # Linear quantization does not imply quantized attention or KV cache.
-        # Use the layer method selected by init_attention_quantization instead
-        # of the model-wide configuration, and retain the floating-cache gate.
+        quant_method = getattr(layer, "quant_method", None)
+        quantized_attention = should_load_quant_weights(quant_method)
+        # Upstream installs this KV method even for Linear-only checkpoints.
+        if quantized_attention:
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (  # noqa: E501
+                CompressedTensorsKVCacheMethod,
+            )
+
+            if isinstance(quant_method, CompressedTensorsKVCacheMethod):
+                quantized_attention = (
+                    quant_method.quant_config.kv_cache_scheme is not None
+                )
         if (
-            should_load_quant_weights(getattr(layer, "quant_method", None))
+            quantized_attention
             or self.kv_cache_dtype not in ("auto", "float16", "bfloat16")
             or any(
                 cache is not None and cache.dtype not in (torch.float16, torch.bfloat16)

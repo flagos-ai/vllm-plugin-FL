@@ -107,7 +107,18 @@ def groups():
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 @pytest.mark.parametrize("counts", [(1, 3), (0, 2)])
-def test_dynamic_experts_real_agrs(groups, dtype, counts):
+@pytest.mark.parametrize("use_flaggems", ["0", "1"])
+def test_dynamic_experts_real_agrs(groups, dtype, counts, monkeypatch, use_flaggems):
+    monkeypatch.setenv("USE_FLAGGEMS", use_flaggems)
+    from vllm.model_executor.layers.fused_moe.prepare_finalize import naive_dp_ep
+
+    def unexpected_quantization(*args, **kwargs):
+        pytest.fail("AgRs must preserve floating input for native NPU experts")
+
+    monkeypatch.setattr(
+        naive_dp_ep, "moe_kernel_quantize_input", unexpected_quantization
+    )
+
     from vllm.forward_context import get_forward_context, set_forward_context
     from vllm.model_executor.layers.fused_moe.activation import MoEActivation
     from vllm.model_executor.layers.fused_moe.config import (
@@ -118,7 +129,8 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
 
     from vllm_fl.dispatch import get_default_manager, with_strict_mode
     from vllm_fl.dispatch.backends.reference.impl.w8a8_moe import w8a8_experts
-    from vllm_fl.quantization.w8a8.compressed_tensors import AscendW8A8DynamicMoEMethod
+    from vllm_fl.quantization.w8a8.moe import AscendW8A8DynamicMoEMethod
+    from vllm_fl.quantization.w8a8.moe_experts import AscendW8A8DynamicExperts
 
     vllm_config, ep, dp, tp = groups
     parallel = FusedMoEParallelConfig(
@@ -148,7 +160,16 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
         routing_method=RoutingMethodType.Default,
         moe_parallel_config=parallel,
     )
-    method = AscendW8A8DynamicMoEMethod(config)
+    from compressed_tensors.quantization import QuantizationArgs
+
+    method = AscendW8A8DynamicMoEMethod(
+        QuantizationArgs(num_bits=8, type="int", strategy="channel", symmetric=True),
+        QuantizationArgs(
+            num_bits=8, type="int", strategy="token", symmetric=True, dynamic=True
+        ),
+        config,
+    )
+    assert method.experts_cls is AscendW8A8DynamicExperts
     layer = torch.nn.Module()
     layer._expert_routing_tables = lambda: None
     layer.activation = config.activation
@@ -225,6 +246,11 @@ def test_dynamic_experts_real_agrs(groups, dtype, counts):
             == layer.w2_weight_scale.dtype
             == prepared_dtype
         )
+        assert method.moe_quant_config.use_int8_w8a8
+        assert method.moe_quant_config.per_act_token_quant
+        assert method.moe_quant_config.a1_scale is None
+        assert method.moe_quant_config.a2_scale is None
+        assert type(method.moe_kernel.fused_experts) is AscendW8A8DynamicExperts
         assert method.supports_internal_mk
         assert method.moe_kernel.fused_experts.expects_unquantized_inputs
         for _ in range(3):

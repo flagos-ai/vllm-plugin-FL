@@ -14,7 +14,14 @@
 
 from importlib import import_module
 
+import torch
+
 from vllm.logger import init_logger
+from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 import (  # noqa: E501
+    CompressedTensorsW8A8Int8MoEMethod,
+)
+
+from vllm_fl.dispatch import CachedOp
 
 _ADAPTER_MARKER = "_vllm_fl_w8a8_int8_moe_adapter"
 _CONFIG_BUILDER_MARKER = "_vllm_fl_dynamic_w8a8_config"
@@ -106,6 +113,29 @@ def install_fl_w8a8_moe_selector() -> bool:
             None,
             kInt8StaticChannelSym,
         ) and activation_key in (None, kInt8DynamicTokenSym)
+
+        # Ascend owns the dynamic quantization inside its native experts on
+        # either FlagGems setting. Other OOT vendors retain the common policy.
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+        ):
+            from vllm_fl.quantization.w8a8.moe_experts import (
+                AscendW8A8DynamicExperts,
+            )
+
+            _validate_ascend_w8a8_moe(config)
+            supported, reason = AscendW8A8DynamicExperts.is_supported_config(
+                AscendW8A8DynamicExperts,
+                config,
+                weight_key or kInt8StaticChannelSym,
+                activation_key or kInt8DynamicTokenSym,
+                AscendW8A8DynamicExperts.activation_format(),
+            )
+            if not supported:
+                raise NotImplementedError(f"Unsupported Ascend W8A8 MoE: {reason}")
+            logger.info_once("Using native Ascend dynamic W8A8 MoE experts.")
+            return oracle_module.Int8MoeBackend.TRITON, AscendW8A8DynamicExperts
 
         use_fl = (
             canonical_w8a8
@@ -202,7 +232,121 @@ def install_fl_w8a8_moe_selector() -> bool:
     return True
 
 
+def _validate_ascend_w8a8_moe(moe):
+    """Validate the native execution and communication contract."""
+    parallel = moe.moe_parallel_config
+    if moe.moe_backend not in ("auto", "triton"):
+        raise NotImplementedError("Unsupported explicit W8A8 MoE backend")
+    if parallel.is_sequence_parallel and not (
+        parallel.use_ep
+        and parallel.dp_size > 1
+        and parallel.all2all_backend == "allgather_reducescatter"
+    ):
+        raise NotImplementedError("W8A8 MoE token splitting requires DP EP AgRs")
+    if (
+        moe.is_lora_enabled
+        or moe.has_bias
+        or parallel.enable_eplb
+        or parallel.pcp_size != 1
+        or parallel.use_batched_activation_format
+    ):
+        raise NotImplementedError(
+            "W8A8 experts do not support LoRA/bias/EPLB/PCP/batched routing"
+        )
+    if parallel.dp_size > 1 and (
+        not parallel.use_ep or parallel.all2all_backend != "allgather_reducescatter"
+    ):
+        raise NotImplementedError("W8A8 distributed experts require AgRs EP")
+    if moe.activation.value not in ("silu", "swiglustep"):
+        raise NotImplementedError("Unsupported W8A8 expert activation")
+    if moe.swiglu_alpha not in (None, 1.0) or moe.swiglu_beta not in (
+        None,
+        0.0,
+    ):
+        raise NotImplementedError("Unsupported W8A8 SwiGLU alpha/beta")
+    if parallel.use_ep:
+        from vllm.config import get_current_vllm_config
+        from vllm.platforms import current_platform
+
+        config = get_current_vllm_config()
+        if (
+            current_platform.dist_backend != "hccl"
+            or config.parallel_config.expert_placement_strategy != "linear"
+            or config.compilation_config.pass_config.enable_sp
+            or moe.num_experts % parallel.ep_size
+        ):
+            raise NotImplementedError(
+                "W8A8 EP requires HCCL and equal linear experts without compiler SP"
+            )
+    if not moe.is_act_and_mul:
+        raise NotImplementedError("W8A8 experts require gated act-and-mul weights")
+
+
+_prepare = CachedOp("w8a8_prepare_experts")
+
+
+class AscendW8A8DynamicMoEMethod(CompressedTensorsW8A8Int8MoEMethod):
+    """Reuse upstream loading and modular lifecycle with native Ascend math."""
+
+    def __init__(self, weight_quant, input_quant, moe, layer_name=None):
+        # Also support direct component construction outside platform startup.
+        # One idempotent installer owns both selector and dynamic-config seams.
+        install_fl_w8a8_moe_selector()
+        _validate_ascend_w8a8_moe(moe)
+        super().__init__(weight_quant, input_quant, moe, layer_name)
+
+    def create_weights(
+        self,
+        layer,
+        num_experts,
+        hidden_size,
+        intermediate_size_per_partition,
+        params_dtype,
+        **extra_weight_attrs,
+    ):
+        if params_dtype not in (torch.bfloat16, torch.float16):
+            raise NotImplementedError("Dynamic W8A8 experts require BF16/FP16")
+        # The upstream allocator replaces params_dtype with INT8. Preparation
+        # still needs the original activation dtype to select GMM scale dtype.
+        self._activation_dtype = params_dtype
+        super().create_weights(
+            layer,
+            num_experts,
+            hidden_size,
+            intermediate_size_per_partition,
+            params_dtype,
+            **extra_weight_attrs,
+        )
+
+    def process_weights_after_loading(self, layer):
+        for prefix in ("w13", "w2"):
+            weight = getattr(layer, f"{prefix}_weight")
+            scale = getattr(layer, f"{prefix}_weight_scale")
+            if weight.dtype != torch.int8 or weight.ndim != 3:
+                raise ValueError("Expected W8A8 INT8 [experts, output, input] weights")
+            if scale.shape != (*weight.shape[:2], 1):
+                raise ValueError("Expected W8A8 per-channel expert scales")
+        prepared = _prepare(
+            layer.w13_weight.data,
+            layer.w2_weight.data,
+            layer.w13_weight_scale.data,
+            layer.w2_weight_scale.data,
+            output_dtype=self._activation_dtype,
+        )
+        for name, tensor in zip(
+            ("w13_weight", "w2_weight", "w13_weight_scale", "w2_weight_scale"), prepared
+        ):
+            getattr(layer, name).data = tensor
+        super().process_weights_after_loading(layer)
+
+    def get_fused_moe_quant_config(self, layer):
+        config = super().get_fused_moe_quant_config(layer)
+        config.gemm1_clamp_limit = self.moe.swiglu_limit
+        return config
+
+
 __all__ = [
+    "AscendW8A8DynamicMoEMethod",
     "FLAGGEMS_W8A8_MOE_OP",
     "install_fl_w8a8_moe_selector",
 ]

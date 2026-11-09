@@ -170,8 +170,20 @@ def workspace():
 
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
-def test_loader_modular_eager_and_graph(dtype, workspace):
+@pytest.mark.parametrize("use_flaggems", ["0", "1"])
+@pytest.mark.parametrize("activation", ["silu", "swiglustep"])
+def test_loader_modular_eager_and_graph(
+    dtype, workspace, monkeypatch, use_flaggems, activation
+):
     import torch_npu  # noqa: F401
+
+    monkeypatch.setenv("USE_FLAGGEMS", use_flaggems)
+    from vllm.model_executor.layers.fused_moe.prepare_finalize import no_dp_ep
+
+    def unexpected_quantization(*args, **kwargs):
+        pytest.fail("prepare must preserve floating input for native NPU experts")
+
+    monkeypatch.setattr(no_dp_ep, "moe_kernel_quantize_input", unexpected_quantization)
 
     from vllm.model_executor.layers.fused_moe.activation import MoEActivation
     from vllm.model_executor.layers.fused_moe.config import (
@@ -184,7 +196,8 @@ def test_loader_modular_eager_and_graph(dtype, workspace):
     from vllm_fl.dispatch.backends.reference.impl.w8a8_moe import (
         w8a8_experts,
     )
-    from vllm_fl.quantization.w8a8.compressed_tensors import AscendW8A8DynamicMoEMethod
+    from vllm_fl.quantization.w8a8.moe import AscendW8A8DynamicMoEMethod
+    from vllm_fl.quantization.w8a8.moe_experts import AscendW8A8DynamicExperts
 
     config = FusedMoEConfig(
         num_experts=2,
@@ -193,13 +206,71 @@ def test_loader_modular_eager_and_graph(dtype, workspace):
         intermediate_size=64,
         num_local_experts=2,
         num_logical_experts=2,
-        activation=MoEActivation.SILU,
+        activation=MoEActivation(activation),
+        swiglu_limit=0.5,
         device="npu",
         in_dtype=dtype,
         routing_method=RoutingMethodType.Default,
         moe_parallel_config=FusedMoEParallelConfig.make_no_parallel(),
     )
-    method = AscendW8A8DynamicMoEMethod(config)
+    from compressed_tensors.quantization import QuantizationArgs
+
+    method = AscendW8A8DynamicMoEMethod(
+        QuantizationArgs(num_bits=8, type="int", strategy="channel", symmetric=True),
+        QuantizationArgs(
+            num_bits=8, type="int", strategy="token", symmetric=True, dynamic=True
+        ),
+        config,
+    )
+    assert method.experts_cls is AscendW8A8DynamicExperts
+    from dataclasses import replace
+    from importlib import import_module
+
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 import (  # noqa: E501
+        CompressedTensorsW8A8Int8MoEMethod,
+    )
+    from vllm.model_executor.layers.quantization.utils.quant_utils import (
+        kInt8DynamicTokenSym,
+        kInt8StaticChannelSym,
+    )
+
+    from vllm_fl.quantization.w8a8.moe import install_fl_w8a8_moe_selector
+
+    oracle = import_module("vllm.model_executor.layers.fused_moe.oracle.int8")
+    scheme = import_module(CompressedTensorsW8A8Int8MoEMethod.__module__)
+    selector = oracle.select_int8_moe_backend
+    assert install_fl_w8a8_moe_selector()
+    assert oracle.select_int8_moe_backend is scheme.select_int8_moe_backend is selector
+    experts_cls = AscendW8A8DynamicExperts
+    assert experts_cls._supports_current_device()
+    assert not experts_cls._supports_no_act_and_mul()
+    assert not experts_cls._supports_batch_invariance()
+    assert not experts_cls.supports_lora()
+    assert not experts_cls._supports_quant_scheme(None, None)
+    for unsupported in (
+        replace(config, has_bias=True),
+        replace(config, is_lora_enabled=True),
+        replace(config, swiglu_alpha=2.0),
+        replace(config, swiglu_beta=1.0),
+        replace(config, activation=MoEActivation.GELU),
+    ):
+        supported, reason = experts_cls.is_supported_config(
+            experts_cls,
+            unsupported,
+            kInt8StaticChannelSym,
+            kInt8DynamicTokenSym,
+            experts_cls.activation_format(),
+        )
+        assert not supported and reason
+        with pytest.raises(NotImplementedError):
+            selector(unsupported)
+
+    assert type(method).apply is CompressedTensorsW8A8Int8MoEMethod.apply
+    assert type(method).maybe_make_prepare_finalize is (
+        CompressedTensorsW8A8Int8MoEMethod.maybe_make_prepare_finalize
+    )
+    with pytest.raises(ValueError, match="modular kernel initialization"):
+        method.maybe_make_prepare_finalize()
     layer = torch.nn.Module()
     layer._expert_routing_tables = lambda: None
     layer.activation = config.activation
@@ -258,9 +329,17 @@ def test_loader_modular_eager_and_graph(dtype, workspace):
         torch.testing.assert_close(
             layer.w13_weight_scale, s1.to(prepared_dtype), rtol=0, atol=0
         )
+        assert method.moe_quant_config.use_int8_w8a8
+        assert method.moe_quant_config.per_act_token_quant
+        assert method.moe_quant_config.a1_scale is None
+        assert method.moe_quant_config.a2_scale is None
+        assert type(method.moe_kernel.fused_experts) is AscendW8A8DynamicExperts
         assert method.supports_internal_mk
         assert method.moe_kernel.fused_experts.expects_unquantized_inputs
-        expected = w8a8_experts(x, w1, w2, s1, s2, probabilities, ids)
+        assert method.moe_quant_config.gemm1_clamp_limit == 0.5
+        expected = w8a8_experts(
+            x, w1, w2, s1, s2, probabilities, ids, activation=activation, limit=0.5
+        )
         torch.testing.assert_close(apply(), expected, rtol=0.03, atol=0.06)
         for _ in range(3):
             apply()

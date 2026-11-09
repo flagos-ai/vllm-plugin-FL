@@ -2,28 +2,24 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Ascend dynamic W8A8 execution for compressed-tensors checkpoints."""
 
+from copy import copy
 from functools import cache
 
+import regex as re
 import torch
 
-from vllm.model_executor.layers.fused_moe import FusedMoeWeightScaleSupported
-from vllm.model_executor.layers.fused_moe.config import int8_w8a8_moe_quant_config
-from vllm.model_executor.layers.fused_moe.experts.triton_moe import TritonExperts
-from vllm.model_executor.layers.fused_moe.fused_moe_method_base import (
-    FusedMoEMethodBase,
-)
-from vllm.model_executor.layers.fused_moe.oracle.int8 import make_int8_moe_kernel
-from vllm.model_executor.layers.linear import (
-    LinearBase,
-    LinearMethodBase,
-    UnquantizedLinearMethod,
-)
+from vllm.model_executor.layers.linear import LinearBase
 from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
     CompressedTensorsConfig,
+    CompressedTensorsLinearMethod,
 )
-from vllm.model_executor.utils import set_weight_attrs
+from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
+    CompressedTensorsW8A8Int8,
+)
+from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 
 from vllm_fl.dispatch import CachedOp
+from vllm_fl.quantization.w8a8.moe import AscendW8A8DynamicMoEMethod
 
 
 class AscendCompressedTensorsConfig(CompressedTensorsConfig):
@@ -38,6 +34,7 @@ class AscendCompressedTensorsConfig(CompressedTensorsConfig):
         self._weight_mapper = None
         self._applied_mapper = None
         self.weight_nz_mode = 1
+        self._ignore_cache = None
         self._add_fused_moe_to_target_scheme_map()
 
     def apply_vllm_mapper(self, mapper):
@@ -53,36 +50,133 @@ class AscendCompressedTensorsConfig(CompressedTensorsConfig):
         else:
             self._weight_mapper = mapper
 
-    def _checkpoint_name(self, name):
+    def _checkpoint_names(self, name):
+        """Resolve literal aliases without translating exporter regexes."""
         mapper = self._weight_mapper
         if mapper is None:
-            return name
-        # Invert the literal model-owned translation in reverse application order.
-        key = name + ".weight"
-        for suffix, new in reversed(tuple(mapper.orig_to_new_suffix.items())):
-            if new and key.endswith(new):
-                key = key[: -len(new)] + suffix
-        for prefix, new in reversed(tuple(mapper.orig_to_new_prefix.items())):
-            if new and key.startswith(new):
-                key = prefix + key[len(new) :]
-        for source, new in reversed(tuple(mapper.orig_to_new_substr.items())):
-            if new and new in key:
-                key = key.replace(new, source, 1)
-        return key.removesuffix(".weight")
+            return [name]
+        canonical = name + ".weight"
+        candidates = {canonical}
+        # Several checkpoint roots can map to one runtime root. Keep every
+        # valid inverse, then verify it through the model's forward mapper.
+        for mappings, kind in (
+            (mapper.orig_to_new_suffix, "suffix"),
+            (mapper.orig_to_new_prefix, "prefix"),
+            (mapper.orig_to_new_substr, "substr"),
+        ):
+            if kind == "substr":
+                for source, target in reversed(tuple(mappings.items())):
+                    if target:
+                        candidates.update(
+                            key.replace(target, source, 1)
+                            for key in tuple(candidates)
+                            if target in key
+                        )
+            else:
+                originals = tuple(candidates)
+                for source, target in mappings.items():
+                    if not target:
+                        continue
+                    for key in originals:
+                        if kind == "prefix" and key.startswith(target):
+                            candidates.add(source + key[len(target) :])
+                        elif kind == "suffix" and key.endswith(target):
+                            candidates.add(key[: -len(target)] + source)
+        return [name] + sorted(
+            key.removesuffix(".weight")
+            for key in candidates - {canonical}
+            if mapper._map_name(key) == canonical
+        )
 
-    def _scheme(self, layer, prefix):
+    def _should_ignore_cached(self, name):
+        """Retain compiled rules while preserving upstream fused consistency."""
         from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
             should_ignore_layer,
         )
 
-        source = self._checkpoint_name(prefix)
-        if should_ignore_layer(source, self.ignore) or should_ignore_layer(
-            prefix, self.ignore
-        ):
+        if name is None:
+            return False
+        signature = tuple(self.ignore)
+        cached = self._ignore_cache
+        if cached is None or cached[0] != signature:
+            literals = frozenset(
+                rule for rule in signature if not rule.startswith("re:")
+            )
+            patterns = tuple(
+                re.compile(rule[3:]) for rule in signature if rule.startswith("re:")
+            )
+            cached = (signature, literals, patterns)
+            self._ignore_cache = cached
+        _, literals, patterns = cached
+        proj_name = name.split(".")[-1]
+        if proj_name in self.packed_modules_mapping and name not in literals:
+            names = [
+                name.replace(proj_name, shard)
+                for shard in self.packed_modules_mapping[proj_name]
+            ]
+        else:
+            names = [name]
+        # Pass only resolved exact names back through the upstream predicate.
+        # A regex matching a packed root must not bypass its shard checks.
+        matched = tuple(
+            candidate
+            for candidate in names
+            if candidate in literals
+            or any(pattern.match(candidate) for pattern in patterns)
+        )
+        return should_ignore_layer(name, matched, self.packed_modules_mapping)
+
+    def _scheme(self, layer, prefix):
+        names = self._checkpoint_names(prefix)
+        if any(self._should_ignore_cached(name) for name in names):
             return None
-        scheme = super().get_scheme_dict(layer, source)
-        if scheme is None and source != prefix:
-            scheme = super().get_scheme_dict(layer, prefix)
+        # Ignore rules have already been resolved across every alias. Keep
+        # upstream target/class/fused matching without repeating the regex scan.
+        # A fresh shallow view observes current mapper/packed metadata.
+        view = copy(self)
+        view.ignore = ()
+        schemes = [
+            CompressedTensorsConfig.get_scheme_dict(view, layer, name) for name in names
+        ]
+        matched = [scheme for scheme in schemes if scheme is not None]
+        if matched and any(scheme != matched[0] for scheme in matched[1:]):
+            raise ValueError(f"Conflicting quantization aliases for {prefix}")
+        return matched[0] if matched else None
+
+    def _validated_scheme(self, layer, prefix, names):
+        schemes = [self._scheme(layer, name) for name in names]
+        if all(scheme is None for scheme in schemes):
+            return None
+        if any(scheme is None for scheme in schemes):
+            raise ValueError(f"Mixed W8A8 schemes in packed layer {prefix}")
+        if not all(self._dynamic_w8a8(scheme) for scheme in schemes):
+            raise NotImplementedError(
+                f"Unsupported Ascend compressed-tensors scheme at {prefix}"
+            )
+        if any(scheme != schemes[0] for scheme in schemes[1:]):
+            raise ValueError(f"Mixed W8A8 schemes in packed layer {prefix}")
+        if self.kv_cache_scheme or self.transform_config:
+            raise NotImplementedError(
+                "Ascend W8A8 does not implement KV quantization or transforms"
+            )
+        return schemes[0]
+
+    def get_scheme_dict(self, layer, layer_name=None):
+        if layer_name is None:
+            return super().get_scheme_dict(layer, layer_name)
+        if isinstance(layer, (LinearBase, ParallelLMHead)):
+            name = layer_name.rsplit(".", 1)[-1]
+            base = layer_name[: -len(name)]
+            names = [base + n for n in self.packed_modules_mapping.get(name, [name])]
+            return self._validated_scheme(layer, layer_name, names)
+        return self._scheme(layer, layer_name)
+
+    def get_scheme(self, layer, layer_name=None):
+        scheme = super().get_scheme(layer, layer_name)
+        if type(scheme) is CompressedTensorsW8A8Int8:
+            return AscendW8A8Int8(
+                scheme.strategy, scheme.is_static_input_scheme, scheme.input_symmetric
+            )
         return scheme
 
     @staticmethod
@@ -109,36 +203,27 @@ class AscendCompressedTensorsConfig(CompressedTensorsConfig):
         from vllm.model_executor.layers.fused_moe.routed_experts import RoutedExperts
         from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 
-        is_moe = isinstance(layer, (RoutedExperts, MoERunner))
-        if not isinstance(layer, LinearBase) and not is_moe:
-            return super().get_quant_method(layer, prefix)
-        if is_moe:
+        if isinstance(layer, (RoutedExperts, MoERunner)):
             names = [
                 f"{prefix}.{i}.{proj}"
                 for i in range(layer.moe_config.num_experts)
                 for proj in ("gate_proj", "up_proj", "down_proj")
             ]
-        else:
-            name = prefix.rsplit(".", 1)[-1]
-            base = prefix[: -len(name)]
-            names = [base + n for n in self.packed_modules_mapping.get(name, [name])]
-        schemes = [self._scheme(layer, n) for n in names]
-        enabled = [self._dynamic_w8a8(s) for s in schemes]
-        if any(enabled):
-            if not all(enabled):
-                raise ValueError(f"Mixed W8A8 schemes in packed layer {prefix}")
-            if self.kv_cache_scheme or self.transform_config:
-                raise NotImplementedError(
-                    "Ascend W8A8 does not implement KV quantization or transforms"
-                )
-            if is_moe:
-                return AscendW8A8DynamicMoEMethod(layer.moe_config)
-            return AscendW8A8DynamicLinearMethod(self.weight_nz_mode)
-        if all(s is None for s in schemes):
-            return None if is_moe else UnquantizedLinearMethod()
-        raise NotImplementedError(
-            f"Unsupported Ascend compressed-tensors scheme at {prefix}"
-        )
+            scheme = self._validated_scheme(layer, prefix, names)
+            if scheme is None:
+                return None
+            return AscendW8A8DynamicMoEMethod(
+                scheme["weights"],
+                scheme["input_activations"],
+                layer.moe_config,
+                layer_name=prefix,
+            )
+        if isinstance(layer, (LinearBase, ParallelLMHead)):
+            # Validate before upstream's LMHead compatibility fallback, which
+            # intentionally catches ValueError for unsupported embedding schemes.
+            self.get_scheme_dict(layer, prefix)
+            layer._fl_ascend_weight_nz_mode = self.weight_nz_mode
+        return super().get_quant_method(layer, prefix)
 
 
 @cache
@@ -149,51 +234,38 @@ def register_ascend_compressed_tensors():
     register_quantization_config("compressed-tensors")(AscendCompressedTensorsConfig)
 
 
+class AscendW8A8Int8(CompressedTensorsW8A8Int8):
+    """Keep the NPU activation contract around upstream weight allocation."""
+
+    def create_weights(
+        self,
+        layer,
+        output_partition_sizes,
+        input_size_per_partition,
+        params_dtype,
+        weight_loader,
+        **kwargs,
+    ):
+        if params_dtype not in (torch.bfloat16, torch.float16):
+            raise NotImplementedError("Dynamic W8A8 Linear requires BF16/FP16")
+        return super().create_weights(
+            layer,
+            output_partition_sizes,
+            input_size_per_partition,
+            params_dtype,
+            weight_loader,
+            **kwargs,
+        )
+
+
 _prepare_weight = CachedOp("w8a8_prepare_weight")
 
 
 _linear = CachedOp("w8a8_dynamic_linear")
 
 
-class AscendW8A8DynamicLinearMethod(LinearMethodBase):
-    """Load [N,K] int8 weights and channel scales; execute prepared [K,N].
-
-    The quantization config supplies weight_nz_mode, defaulting to 1.
-    Modes 1 and 2 both NZ-cast int8; mode 0 retains ND. This component
-    supports A2/A3 without FlashComm2 quantized communication or DSA-CP splitting.
-    """
-
-    def __init__(self, weight_nz_mode: int = 1):
-        if weight_nz_mode not in (0, 1, 2):
-            raise ValueError("weight_nz_mode must be 0, 1 or 2")
-        self.weight_nz_mode = weight_nz_mode
-
-    def create_weights(
-        self,
-        layer,
-        input_size_per_partition,
-        output_partition_sizes,
-        input_size,
-        output_size,
-        params_dtype,
-        **extra_weight_attrs,
-    ):
-        if params_dtype not in (torch.bfloat16, torch.float16):
-            raise NotImplementedError("Dynamic W8A8 Linear requires BF16/FP16")
-        n = sum(output_partition_sizes)
-        weight = torch.nn.Parameter(
-            torch.empty(n, input_size_per_partition, dtype=torch.int8),
-            requires_grad=False,
-        )
-        set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
-        set_weight_attrs(weight, extra_weight_attrs)
-        layer.register_parameter("weight", weight)
-        scale = torch.nn.Parameter(
-            torch.empty(n, 1, dtype=torch.float32), requires_grad=False
-        )
-        set_weight_attrs(scale, {"output_dim": 0})
-        set_weight_attrs(scale, extra_weight_attrs)
-        layer.register_parameter("weight_scale", scale)
+class AscendGroupedW8A8LinearMethod(CompressedTensorsLinearMethod):
+    """Group projection adapter; ordinary Linear allocation stays upstream."""
 
     def process_weights_after_loading(self, layer):
         if layer.weight.dtype != torch.int8 or layer.weight.ndim != 2:
@@ -204,39 +276,36 @@ class AscendW8A8DynamicLinearMethod(LinearMethodBase):
             raise NotImplementedError(
                 "Large-output DSA-CP Linear splitting is not enabled"
             )
-        if getattr(self, "output_groups", None) is not None:
-            groups = self.output_groups
-            if groups < 1 or layer.weight.shape[0] % groups:
-                raise ValueError("Grouped W8A8 outputs must divide the weight rows")
-            self.group_input_size = layer.weight.shape[1]
-            for group, (weight, scale) in enumerate(
-                zip(
-                    layer.weight.data.chunk(groups, dim=0),
-                    layer.weight_scale.data.chunk(groups, dim=0),
-                )
-            ):
-                weight, scale = _prepare_weight(
-                    weight.transpose(0, 1).contiguous(),
-                    scale.flatten(),
-                    self.weight_nz_mode,
-                )
-                layer.register_buffer(
-                    f"_grouped_w8a8_weight_{group}", weight, persistent=False
-                )
-                layer.register_buffer(
-                    f"_grouped_w8a8_scale_{group}", scale, persistent=False
-                )
-            # Keep parameter ownership while releasing the unused logical bank.
-            # Other groups remain module-owned buffers, moved with the layer.
-            layer.weight.data = layer._grouped_w8a8_weight_0
-            return
-        weight, weight_scale = _prepare_weight(
-            layer.weight.data.transpose(0, 1).contiguous(),
-            layer.weight_scale.data.flatten(),
-            self.weight_nz_mode,
-        )
-        layer.weight.data = weight
-        layer.weight_scale.data = weight_scale
+        if getattr(self, "output_groups", None) is None:
+            raise ValueError(
+                "Grouped W8A8 requires configure_grouped before preparation"
+            )
+        if self.quantization_config.weight_nz_mode not in (0, 1, 2):
+            raise ValueError("weight_nz_mode must be 0, 1 or 2")
+        groups = self.output_groups
+        if groups < 1 or layer.weight.shape[0] % groups:
+            raise ValueError("Grouped W8A8 outputs must divide the weight rows")
+        self.group_input_size = layer.weight.shape[1]
+        for group, (weight, scale) in enumerate(
+            zip(
+                layer.weight.data.chunk(groups, dim=0),
+                layer.weight_scale.data.chunk(groups, dim=0),
+            )
+        ):
+            weight, scale = _prepare_weight(
+                weight.transpose(0, 1).contiguous(),
+                scale.flatten(),
+                self.quantization_config.weight_nz_mode,
+            )
+            layer.register_buffer(
+                f"_grouped_w8a8_weight_{group}", weight, persistent=False
+            )
+            layer.register_buffer(
+                f"_grouped_w8a8_scale_{group}", scale, persistent=False
+            )
+        # Keep parameter ownership while releasing the unused logical bank.
+        # Other groups remain module-owned buffers, moved with the layer.
+        layer.weight.data = layer._grouped_w8a8_weight_0
 
     def configure_grouped(self, groups):
         """Set the independent output groups before post-load preparation."""
@@ -257,247 +326,3 @@ class AscendW8A8DynamicLinearMethod(LinearMethodBase):
             for group in range(groups)
         ]
         return torch.cat(outputs, dim=-1)
-
-    def apply(self, layer, x, bias=None):
-        if x.dtype not in (torch.bfloat16, torch.float16):
-            raise NotImplementedError("Dynamic W8A8 Linear requires BF16/FP16 input")
-        if x.ndim < 2 or x.shape[-1] != layer.weight.shape[0]:
-            raise ValueError("Expected [..., K] activations matching prepared [K,N]")
-        if bias is not None and bias.shape != (layer.weight.shape[1],):
-            raise ValueError("Expected bias [N]")
-        shape = (*x.shape[:-1], layer.weight.shape[1])
-        return _linear(
-            x.reshape(-1, x.shape[-1]).contiguous(),
-            layer.weight,
-            layer.weight_scale,
-            bias,
-        ).reshape(shape)
-
-
-_prepare = CachedOp("w8a8_prepare_experts")
-
-
-class AscendW8A8DynamicMoEMethod(FusedMoEMethodBase):
-    def __init__(self, moe_config):
-        super().__init__(moe_config)
-        parallel = moe_config.moe_parallel_config
-        if moe_config.moe_backend not in ("auto", "triton"):
-            raise NotImplementedError("Unsupported explicit W8A8 MoE backend")
-        if parallel.is_sequence_parallel and not (
-            parallel.use_ep
-            and parallel.dp_size > 1
-            and parallel.all2all_backend == "allgather_reducescatter"
-        ):
-            raise NotImplementedError("W8A8 MoE token splitting requires DP EP AgRs")
-        if (
-            moe_config.is_lora_enabled
-            or moe_config.has_bias
-            or parallel.enable_eplb
-            or parallel.pcp_size != 1
-            or parallel.use_batched_activation_format
-        ):
-            raise NotImplementedError(
-                "W8A8 experts do not support LoRA/bias/EPLB/PCP/batched routing"
-            )
-        if parallel.dp_size > 1 and (
-            not parallel.use_ep or parallel.all2all_backend != "allgather_reducescatter"
-        ):
-            raise NotImplementedError("W8A8 distributed experts require AgRs EP")
-        if moe_config.activation.value not in ("silu", "swiglustep"):
-            raise NotImplementedError("Unsupported W8A8 expert activation")
-        if moe_config.swiglu_alpha not in (None, 1.0) or moe_config.swiglu_beta not in (
-            None,
-            0.0,
-        ):
-            raise NotImplementedError("Unsupported W8A8 SwiGLU alpha/beta")
-        if parallel.use_ep:
-            from vllm.config import get_current_vllm_config
-            from vllm.platforms import current_platform
-
-            config = get_current_vllm_config()
-            if (
-                current_platform.dist_backend != "hccl"
-                or config.parallel_config.expert_placement_strategy != "linear"
-                or config.compilation_config.pass_config.enable_sp
-                or moe_config.num_experts % parallel.ep_size
-            ):
-                raise NotImplementedError(
-                    "W8A8 EP requires HCCL and equal linear experts without compiler SP"
-                )
-
-    def create_weights(
-        self,
-        layer,
-        num_experts,
-        hidden_size,
-        intermediate_size_per_partition,
-        params_dtype,
-        **extra_weight_attrs,
-    ):
-        if params_dtype not in (torch.bfloat16, torch.float16):
-            raise NotImplementedError("Dynamic W8A8 experts require BF16/FP16")
-        self._activation_dtype = params_dtype
-        shapes = {
-            "w13": (num_experts, 2 * intermediate_size_per_partition, hidden_size),
-            "w2": (num_experts, hidden_size, intermediate_size_per_partition),
-        }
-        for prefix, shape in shapes.items():
-            param = torch.nn.Parameter(
-                torch.empty(shape, dtype=torch.int8), requires_grad=False
-            )
-            set_weight_attrs(param, extra_weight_attrs)
-            layer.register_parameter(f"{prefix}_weight", param)
-            attrs = {
-                **extra_weight_attrs,
-                "quant_method": FusedMoeWeightScaleSupported.CHANNEL.value,
-            }
-            scale = torch.nn.Parameter(
-                torch.empty((*shape[:2], 1), dtype=torch.float32), requires_grad=False
-            )
-            set_weight_attrs(scale, attrs)
-            layer.register_parameter(f"{prefix}_weight_scale", scale)
-        layer.w13_input_scale = None
-        layer.w2_input_scale = None
-
-    def process_weights_after_loading(self, layer):
-        for prefix in ("w13", "w2"):
-            weight = getattr(layer, f"{prefix}_weight")
-            scale = getattr(layer, f"{prefix}_weight_scale")
-            if weight.dtype != torch.int8 or weight.ndim != 3:
-                raise ValueError("Expected W8A8 INT8 [experts, output, input] weights")
-            if scale.shape != (*weight.shape[:2], 1):
-                raise ValueError("Expected W8A8 per-channel expert scales")
-        prepared = _prepare(
-            layer.w13_weight.data,
-            layer.w2_weight.data,
-            layer.w13_weight_scale.data,
-            layer.w2_weight_scale.data,
-            output_dtype=self._activation_dtype,
-        )
-        for name, tensor in zip(
-            ("w13_weight", "w2_weight", "w13_weight_scale", "w2_weight_scale"), prepared
-        ):
-            getattr(layer, name).data = tensor
-        self.moe_quant_config = self.get_fused_moe_quant_config(layer)
-        self.moe_kernel = make_int8_moe_kernel(
-            self.moe_quant_config,
-            self.moe,
-            AscendW8A8DynamicExperts,
-            routing_tables=layer._expert_routing_tables(),
-        )
-
-    def maybe_make_prepare_finalize(self, routing_tables=None):
-        raise ValueError("W8A8 experts initialize the modular kernel after loading")
-
-    def get_fused_moe_quant_config(self, layer):
-        config = int8_w8a8_moe_quant_config(
-            w1_scale=layer.w13_weight_scale,
-            w2_scale=layer.w2_weight_scale,
-            a1_scale=None,
-            a2_scale=None,
-            per_act_token_quant=True,
-        )
-        config.gemm1_clamp_limit = self.moe.swiglu_limit
-        return config
-
-    def apply(
-        self, layer, x, topk_weights, topk_ids, shared_experts, shared_experts_input
-    ):
-        if self.moe_kernel is None:
-            raise RuntimeError("W8A8 expert weights are not prepared")
-        return self.moe_kernel.apply(
-            x,
-            layer.w13_weight,
-            layer.w2_weight,
-            topk_weights=topk_weights,
-            topk_ids=topk_ids,
-            activation=layer.activation,
-            global_num_experts=layer.global_num_experts,
-            expert_map=layer.expert_map,
-            apply_router_weight_on_input=layer.apply_router_weight_on_input,
-            shared_experts=shared_experts,
-            shared_experts_input=shared_experts_input,
-        )
-
-
-_experts = CachedOp("w8a8_experts")
-
-
-class AscendW8A8DynamicExperts(TritonExperts):
-    @property
-    def expects_unquantized_inputs(self) -> bool:
-        # Prepare/AgRs must not quantize inputs through a CUDA-only kernel.
-        return True
-
-    def workspace_shapes(
-        self,
-        M,
-        N,
-        K,
-        topk,
-        global_num_experts,
-        local_num_experts,
-        expert_tokens_meta,
-        activation,
-    ):
-        return (0,), (0,), (M, K)
-
-    def apply(
-        self,
-        output,
-        hidden_states,
-        w1,
-        w2,
-        topk_weights,
-        topk_ids,
-        activation,
-        global_num_experts,
-        expert_map,
-        a1q_scale,
-        a2_scale,
-        workspace13,
-        workspace2,
-        expert_tokens_meta,
-        apply_router_weight_on_input,
-    ):
-        if a1q_scale is not None or a2_scale is not None:
-            raise ValueError("Dynamic W8A8 experts require floating prepare inputs")
-        if (
-            apply_router_weight_on_input
-            or self._lora_context is not None
-            or self.w1_bias is not None
-            or self.w2_bias is not None
-        ):
-            raise NotImplementedError(
-                "W8A8 experts require output routing and no LoRA/bias"
-            )
-        if hidden_states.dtype not in (torch.bfloat16, torch.float16):
-            raise TypeError("Dynamic W8A8 experts require BF16/FP16 input")
-        first_expert = 0
-        if expert_map is not None:
-            from vllm.distributed import get_ep_group
-
-            group = get_ep_group()
-            if (
-                expert_map.numel() != w1.shape[0] * group.world_size
-                or global_num_experts != expert_map.numel()
-            ):
-                raise NotImplementedError("W8A8 EP requires evenly partitioned experts")
-            first_expert = group.rank_in_group * w1.shape[0]
-        elif global_num_experts not in (-1, w1.shape[0]):
-            raise NotImplementedError("Sharded W8A8 experts require an expert map")
-        output.copy_(
-            _experts(
-                hidden_states,
-                w1,
-                w2,
-                self.w1_scale,
-                self.w2_scale,
-                topk_weights,
-                topk_ids,
-                first_expert=first_expert,
-                global_num_experts=global_num_experts,
-                activation=activation.value,
-                limit=self.gemm1_clamp_limit,
-            )
-        )
