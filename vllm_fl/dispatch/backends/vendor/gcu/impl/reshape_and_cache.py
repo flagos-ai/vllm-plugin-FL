@@ -53,7 +53,11 @@ def reshape_and_cache_flash(
     # Clamp negative slots to 0 (NULL_BLOCK_ID). Block 0 is reserved
     # for padding in vLLM, so writing padding K/V there is harmless.
     # This avoids boolean indexing (dynamic shape) and CPU-GPU sync.
-    slots = torch.clamp(slot_mapping, min=0)
+    # GCU native ATen cannot do int64 arithmetic (topsatenClamp /
+    # topsatenDiv report "binary op pattern not support") and slot_mapping
+    # arrives as int64. Flat slots are bounded by the KV-cache size
+    # (<< 2**31), so int32 is lossless here. Keeps the path cudagraph-safe.
+    slots = torch.clamp(slot_mapping.to(torch.int32), min=0)
 
     # Decompose flat slot → (block_idx, offset_within_block)
     block_idx = slots // block_size

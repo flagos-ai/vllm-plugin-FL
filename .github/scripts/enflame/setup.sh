@@ -4,14 +4,12 @@
 set -euo pipefail
 
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
-: "${TOPS_VISIBLE_DEVICES:?TOPS_VISIBLE_DEVICES is not set}"
 
 git config --global --add safe.directory "$(pwd)"
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   for name in \
     VLLM_PLUGINS \
-    TOPS_VISIBLE_DEVICES \
     VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS \
     TORCH_GCU_ENABLE_INT64_AND_UINT64 \
     ENABLE_I64_CHECK \
@@ -22,6 +20,9 @@ fi
 
 # The vendor runtime, vLLM, and FlagGems come from the pinned base image.
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install --extra-index-url https://pypi.org/simple "pytest-xdist>=3.0.0"
+
+python .github/scripts/install_flaggems_vllm.py
 
 python - <<'PY'
 import flag_gems

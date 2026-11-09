@@ -10,6 +10,8 @@ import triton.language as tl
 from flag_gems.runtime import torch_device_fn
 from flag_gems.utils import libentry
 
+import vllm_fl.envs as fl_envs
+
 
 @triton.jit
 def _round_half_to_even(x):
@@ -55,12 +57,15 @@ def _dynamic_per_token_quant_int8_kernel(
 def dynamic_per_token_quant_int8_flaggems_vllm(
     x: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run FlagGems-vLLM dynamic symmetric per-token INT8 quantization.
+    """Run optional fused or in-tree symmetric per-token INT8 quantization.
 
     ``scaled_int8_quant`` selects its dynamic path when ``scale`` is ``None``.
     Import and runtime failures propagate to dispatch, which then tries the
     local FlagGems/Triton implementation before the PyTorch reference.
     """
+    if not fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        return dynamic_per_token_quant_int8_flaggems_triton(x)
+
     from flaggems_vllm.ops.scaled_int8_quant import scaled_int8_quant
 
     output, scale, _ = scaled_int8_quant(

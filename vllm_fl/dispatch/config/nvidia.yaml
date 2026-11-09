@@ -42,6 +42,10 @@ op_backends:
     - flagos
     - vendor
     - reference
+  apply_rotary_emb:
+    - flagos
+    - vendor
+    - reference
 
 # FlagOS operator blacklist
 flagos_blacklist:
@@ -59,5 +63,8 @@ flagos_blacklist:
   - unfold
   # FlagGems linear autotuning can access invalid memory for dynamic shapes.
   - linear
+  # FlagGems 5.4.0 Hopper mm.out retunes Inductor output-buffer GEMMs
+  # across graph capture shapes, delaying cold server startup.
+  - mm_out
 # OOT (Out-of-Tree) operator blacklist
 # oot_blacklist: []

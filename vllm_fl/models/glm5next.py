@@ -1348,7 +1348,7 @@ class SiluAndMulWithClamp(nn.Module):
     def __init__(self, swiglu_limit, alpha=1.0, beta=0.0, **kwargs):
         super().__init__()
         self.limit, self.alpha, self.beta = swiglu_limit, alpha, beta
-        self.op = CachedOp("silu_and_mul_with_clamp")
+        self.op = CachedOp("bounded_swiglu")
 
     def forward(self, x):
         return self.op(x, self.limit, self.alpha, self.beta)

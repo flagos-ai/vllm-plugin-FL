@@ -6,8 +6,6 @@ set -euo pipefail
 echo "Current time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=== Checking Kunlunxin P800 availability ==="
 
-: "${CUDA_VISIBLE_DEVICES:?CUDA_VISIBLE_DEVICES is not set}"
-
 if command -v xpu-smi >/dev/null 2>&1; then
   xpu-smi || true
 else

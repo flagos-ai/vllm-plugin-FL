@@ -25,9 +25,14 @@ on:
   workflow_call:
     inputs:
       platform:
-        description: "Platform name (e.g., cuda, ascend)"
+        description: "Platform name (e.g., nvidia, ascend)"
         required: true
         type: string
+      branch:
+        description: "Branch/ref under test (empty = caller ref)"
+        required: false
+        type: string
+        default: ""
       task:
         description: "Test task category (e.g., inference, serving)"
         required: true
@@ -80,15 +85,21 @@ jobs:
       - name: Checkout (attempt 1)
         id: checkout1
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 2)
         id: checkout2
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
@@ -122,3 +133,4 @@ jobs:
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
+            test-results-${{ inputs.platform }}-logs/**/vllm_*.log

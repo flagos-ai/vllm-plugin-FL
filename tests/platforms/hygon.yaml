@@ -54,10 +54,36 @@ bw1000:
   name: "bw1000"
   tests:
     e2e:
-      inference:
-        qwen3_6: ["35b_a3b_tp4_graph", "27b_tp2_eager"]
-      serving:
-        qwen3_6: ["27b_tp4_graph", "35b_a3b_tp2_eager"]
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp4_graph
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp4_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp4_graph
     functional:
       include: "*"
       exclude: []
@@ -65,5 +91,11 @@ bw1000:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve

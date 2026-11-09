@@ -17,7 +17,7 @@
 # replaces any packaged plugin with the checked-out vllm-plugin-FL source.
 # The v0.20.2 image that wrapped Moore Threads' own registry image directly
 # is kept as Dockerfile.v0.20.2.
-ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/flagrelease-public/flagrelease_mthreads-gmi_vllm024plugin_base:08281629
+ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/plugin/musa-ph1.4.3.5-tree0.6.1a2-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt290-x64@sha256:6f7c2209c76166c4033bf7693bf5164ed6aee96c1020307b1bd358993c69ac87
 
 # ---------- base stage ----------
 FROM ${MUSA_BASE_IMAGE} AS base
@@ -26,6 +26,8 @@ ARG MUSA_BASE_IMAGE
 ARG VLLM_VERSION=0.24.0
 ARG TORCH_VERSION=2.9.0
 ARG FLAGGEMS_VERSION=5.3.2.post1.dev22+gb1f939eb5
+ARG FLAGTREE_VERSION=0.6.1a2+mthreads3.6
+ARG FLAGTREE_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-hosted/simple
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG IMAGE_VERSION=unknown
@@ -44,7 +46,8 @@ LABEL org.opencontainers.image.title="vllm-plugin-fl" \
       io.flagos.image.stage="${IMAGE_STAGE}" \
       io.flagos.vllm.version="${VLLM_VERSION}" \
       io.flagos.torch.version="${TORCH_VERSION}" \
-      io.flagos.flaggems.version="${FLAGGEMS_VERSION}"
+      io.flagos.flaggems.version="${FLAGGEMS_VERSION}" \
+      io.flagos.flagtree.version="${FLAGTREE_VERSION}"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     VLLM_PLUGINS=fl
@@ -83,6 +86,17 @@ assert torch.startswith("2.9"), (
 print(f"vLLM {vllm} / torch {torch} / torch_musa {torch_musa} / "
       f"FlagGems {flag_gems} — base stack OK")
 PY
+
+# Install the compiler paired with this MUSA / torch stack by default. Both
+# distributions own the triton namespace, so remove both before installing it.
+RUN python -m pip uninstall -y triton flagtree \
+    && python -m pip install --no-cache-dir --no-deps \
+        --index-url "${FLAGTREE_INDEX_URL}" "flagtree==${FLAGTREE_VERSION}"
+
+# Metadata-only validation does not initialize the MUSA driver during builds.
+COPY docker/musa/check_compiler.py /tmp/check_musa_compiler.py
+RUN python /tmp/check_musa_compiler.py --metadata-only \
+    && rm /tmp/check_musa_compiler.py
 
 # Keep the vendor runtime from the base image and add only the tools required
 # to build the checked-out plugin in CI.

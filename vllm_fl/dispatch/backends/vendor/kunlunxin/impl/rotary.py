@@ -50,7 +50,10 @@ def rotary_embedding_kunlunxin(
 
     # Reconstruct cos_sin_cache: [max_seq_len, rotary_dim]
     # First half is cos, second half is sin
-    cos_sin_cache = torch.cat([cos, sin], dim=-1)
+    # The vendor kernel consumes a row-major cache without stride arguments.
+    # Inner-dimension FlagGems cat may return a valid non-contiguous tensor.
+    # Normalize the layout at this ABI boundary before passing its data pointer.
+    cos_sin_cache = torch.cat([cos, sin], dim=-1).contiguous()
 
     # Save original shapes
     query_shape = query.shape

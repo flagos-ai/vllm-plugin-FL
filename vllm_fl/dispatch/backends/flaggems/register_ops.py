@@ -14,8 +14,13 @@ import logging
 from functools import lru_cache
 from importlib import import_module
 
+from vllm.logger import init_logger
+
+import vllm_fl.envs as fl_envs
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 from vllm_fl.utils import use_flaggems_op
+
+logger = init_logger(__name__)
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -69,7 +74,7 @@ def _register_capability_ops(registry, is_available):
             ("flag_gems.fused.mhc", "mhc_pre"),
             ("flag_gems.fused.mhc", "mhc_post"),
         ),
-        "silu_and_mul_with_clamp": (
+        "bounded_swiglu": (
             "activation",
             "silu_and_mul_with_clamp",
             (
@@ -222,6 +227,15 @@ def register_builtins(registry) -> None:
     """
     from .flaggems import FlagGemsBackend
 
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        import flaggems_vllm
+
+        logger.info_once(
+            "FlagGems-vllm integration activated: VLLM_FL_USE_FLAGGEMS_VLLM=1, "
+            "package=%s",
+            getattr(flaggems_vllm, "__file__", "<unknown>"),
+        )
+
     backend = FlagGemsBackend()
     is_avail = backend.is_available
 
@@ -229,6 +243,8 @@ def register_builtins(registry) -> None:
     def flaggems_vllm_fused_moe_is_available():
         if not is_avail():
             return False
+        if not fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+            return True
         try:
             module = import_module("flaggems_vllm")
             return callable(
@@ -303,6 +319,16 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        OpImpl(
+            op_name="silu_and_mul_with_clamp",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                backend.silu_and_mul_with_clamp,
+                lambda: is_avail() and fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM,
+            ),
+            priority=BackendPriority.DEFAULT,
+        ),
         # Normalization
         OpImpl(
             op_name="rms_norm",
@@ -318,6 +344,14 @@ def register_builtins(registry) -> None:
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
+            op_name="apply_rotary_emb",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.apply_rotary_emb, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -380,6 +414,23 @@ def register_builtins(registry) -> None:
         ),
     ]
 
-    filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
+    # Keep the existing rotary_embedding FlagGems switch for both vLLM RoPE
+    # interfaces; dispatch uses separate names because their signatures differ.
+    filtered = [
+        impl
+        for impl in impls
+        if use_flaggems_op(
+            "rotary_embedding" if impl.op_name == "apply_rotary_emb" else impl.op_name
+        )
+    ]
     registry.register_many(filtered)
+
+    from .impl.mla_ops import register_mla_operators
+
+    register_mla_operators(
+        registry,
+        allow=lambda name: use_flaggems_op(name)
+        and name not in {"top_k_per_row_prefill", "top_k_per_row_decode"},
+    )
+
     _register_capability_ops(registry, is_avail)

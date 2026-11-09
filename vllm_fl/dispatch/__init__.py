@@ -79,6 +79,8 @@ Configuration File (YAML):
 import os
 import weakref
 
+import torch
+
 from .types import OpImpl, BackendImplKind, BackendPriority, match_token
 from .registry import OpRegistry, OpRegistrySnapshot
 from .policy import (
@@ -115,6 +117,8 @@ from .io_dumper import (
     is_dump_enabled,
 )
 from .io_common import list_model_layers, register_tensor_stat, tensor_stats
+
+logger = get_logger()
 
 
 def call_op(op_name: str, *args, **kwargs):
@@ -170,6 +174,7 @@ class CachedOp:
     __slots__ = (
         "_op_name",
         "_impl",
+        "_frozen",
         "_use_manager_call",
         "_manager_id",
         "_manager_epoch",
@@ -180,6 +185,7 @@ class CachedOp:
     def __init__(self, op_name: str) -> None:
         self._op_name = op_name
         self._impl = None
+        self._frozen = False
         self._use_manager_call = False
         self._manager_id = -1
         self._manager_epoch = -1
@@ -197,12 +203,18 @@ class CachedOp:
             prepare()
         mgr._record_first_use(self._op_name, impl)
         self._impl = impl
+        self._frozen = _OP_FAST_PATH_ENABLED and not is_dump_enabled()
         self._use_manager_call = False
         self._manager_id = id(mgr)
         self._manager_epoch = mgr.policy_epoch
         self._policy_epoch = get_policy_epoch()
 
     def __call__(self, *args, **kwargs):
+        # Model construction prewarms and freezes CachedOps before Dynamo
+        # capture. During tracing, expose only the selected kernel call.
+        if self._frozen and torch.compiler.is_compiling():
+            return self._impl.fn(*args, **kwargs)
+
         mgr = get_default_manager()
 
         if not _OP_FAST_PATH_ENABLED:
@@ -220,6 +232,7 @@ class CachedOp:
             or self._policy_epoch != policy_epoch
         ):
             self._impl = None
+            self._frozen = False
             self._use_manager_call = False
 
         if self._use_manager_call:
@@ -242,14 +255,50 @@ class CachedOp:
 
         try:
             return impl.fn(*args, **kwargs)
-        except Exception:
+        except Exception as exc:
+            # The fallback below is silent by design for production traffic,
+            # but an invisible impl failure makes dispatch regressions
+            # indistinguishable from a legitimate policy switch (observed:
+            # a flaky flaggems import rode this path for hours). Log it.
+            logger.warning(
+                "CachedOp %s: impl %s raised %r; falling back to manager call",
+                self._op_name,
+                impl.impl_id,
+                exc,
+            )
             self._impl = None
+            self._frozen = False
             if get_policy().strict:
                 raise
             mgr._mark_failed_impl(self._op_name, impl.impl_id)
             self._use_manager_call = True
             return mgr.call(self._op_name, *args, **kwargs)
 
+
+def prewarm_cached_ops() -> int:
+    """Resolve loaded CachedOps before torch.compile graph capture."""
+    mgr = get_default_manager()
+    manager_id = id(mgr)
+    policy_epoch = get_policy_epoch()
+    resolved = 0
+    for cached in tuple(_CACHED_OPS):
+        try:
+            impl = mgr._resolve_impl(cached._op_name)
+            prepare = getattr(impl.fn, "_prepare", None)
+            if prepare is not None:
+                prepare()
+            mgr._record_first_use(cached._op_name, impl)
+            cached._impl = impl
+            cached._frozen = _OP_FAST_PATH_ENABLED and not is_dump_enabled()
+            cached._use_manager_call = False
+            cached._manager_id = manager_id
+            cached._manager_epoch = mgr.policy_epoch
+            cached._policy_epoch = policy_epoch
+            resolved += 1
+        except Exception:
+            # Some optional ops are unavailable on the active platform.
+            continue
+    return resolved
 
 def prepare_cached_ops() -> None:
     """Prepare all live CachedOp call sites before torch.compile tracing."""
@@ -308,5 +357,7 @@ __all__ = [
     "call_op",
     "resolve_op",
     "CachedOp",
+    "prewarm_cached_ops",
+
     "prepare_cached_ops",
 ]

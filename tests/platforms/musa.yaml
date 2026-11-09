@@ -35,24 +35,55 @@ env_defaults:
   MTHREADS_VISIBLE_DEVICES: "all"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
 
+# MCCL 2.11.4 cannot host two concurrently initializing TP groups on one
+# node: co-scheduled cases die with MUSA/MCCL "unhandled musa error"
+# while every case passes when run alone. Run e2e cases serially.
+e2e_serial: true
+
 s5000:
   name: "s5000"
   tests:
     e2e:
-      inference:
-        qwen3: ["06b_tp1_eager", "06b_tp1_graph"]
-        qwen3_6:
-          - "27b_tp4_eager"
-          - "35b_a3b_tp4_graph"
-      serving:
-        qwen3: ["06b_tp1_graph"]
-        qwen3_6:
-          - "27b_tp4_graph"
-          - "35b_a3b_tp4_eager"
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+      nightly:
+        inference:
+          qwen3:
+            - 06b_tp1_eager
+            - 06b_tp1_graph
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3:
+            - 06b_tp1_graph
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_graph
     timeouts:
       e2e:
         inference: 180
         serving: 180
+        concurrent: 180
     functional:
       include: "*"
       exclude: []
@@ -60,5 +91,11 @@ s5000:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve

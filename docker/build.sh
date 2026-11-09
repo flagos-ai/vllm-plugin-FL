@@ -27,6 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 UV_VERSION="${UV_VERSION:-0.7.12}"
 CUDA_VERSION="${CUDA_VERSION:-12.8.1}"
+CUDA_FLAGGEMS_VERSION="${CUDA_FLAGGEMS_VERSION:-v5.4.0}"
 UBUNTU_VERSION="${UBUNTU_VERSION:-22.04}"
 VLLM_VERSION="${VLLM_VERSION:-0.19.0}"
 CANN_VERSION="${CANN_VERSION:-8.5.1}"
@@ -36,12 +37,13 @@ METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
 METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
 METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
-MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/flagrelease-public/flagrelease_mthreads-gmi_vllm024plugin_base:08281629}"
+MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/musa-ph1.4.3.5-tree0.6.1a2-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt290-x64@sha256:6f7c2209c76166c4033bf7693bf5164ed6aee96c1020307b1bd358993c69ac87}"
 MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
 MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.24.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.3.2.post1.dev22+gb1f939eb5}"
+MUSA_FLAGTREE_VERSION="${MUSA_FLAGTREE_VERSION:-0.6.1a2+mthreads3.6}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.20.2}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3e6528cf04f5f964a7b0fa6628de6f0410dbfd02}"
@@ -54,14 +56,14 @@ ILUVATAR_DRIVER_VERSION="${ILUVATAR_DRIVER_VERSION:-4.5.0}"
 ILUVATAR_PYTHON_VERSION="${ILUVATAR_PYTHON_VERSION:-3.12}"
 ILUVATAR_TORCH_VERSION="${ILUVATAR_TORCH_VERSION:-2.10.0}"
 ILUVATAR_VLLM_VERSION="${ILUVATAR_VLLM_VERSION:-0.24.0}"
-KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/plugin/xvllm-ubuntu2204-py310-torch29-0200:v20.0.10.0}"
+KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/plugin/kunlunxin001-gems5.4.0-treenone-triton3.0.0-cx0.13.0-plugin0.3.0-vllm0.24.0-cp310-pt29-x64-v5.0.21.43:20260917}"
 KUNLUNXIN_DRIVER_VERSION="${KUNLUNXIN_DRIVER_VERSION:-5.0.21.43}"
 KUNLUNXIN_PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION:-3.10}"
 KUNLUNXIN_TORCH_VERSION="${KUNLUNXIN_TORCH_VERSION:-2.9.0}"
-KUNLUNXIN_VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION:-0.20.2}"
-KUNLUNXIN_FLAGGEMS_REF="${KUNLUNXIN_FLAGGEMS_REF:-v5.0.0}"
+KUNLUNXIN_VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION:-0.24.0}"
+KUNLUNXIN_FLAGGEMS_REF="${KUNLUNXIN_FLAGGEMS_REF:-v5.4.0}"
 KUNLUNXIN_FLAGCX_REF="${KUNLUNXIN_FLAGCX_REF:-v0.13.0}"
-KUNLUNXIN_PLUGIN_FL_REF="${KUNLUNXIN_PLUGIN_FL_REF:-38e7dbc20197e2db742c4e4c9687d36ea4df9900}"
+KUNLUNXIN_PLUGIN_FL_REF="${KUNLUNXIN_PLUGIN_FL_REF:-fd5c727fcdb607bc4354cd11384761bb5d5ecfba}"
 HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6}"
 HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.20.2}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
@@ -205,6 +207,7 @@ VERSIONS (override via environment variables):
     MUSA_PYTHON_VERSION  Python version in base image (default: ${MUSA_PYTHON_VERSION})
     MUSA_TORCH_VERSION   PyTorch version in base image (default: ${MUSA_TORCH_VERSION})
     MUSA_FLAGGEMS_VERSION FlagGems version in base image (default: ${MUSA_FLAGGEMS_VERSION})
+    MUSA_FLAGTREE_VERSION FlagTree version installed in the image (default: ${MUSA_FLAGTREE_VERSION})
   Enflame:
     ENFLAME_BASE_IMAGE     Base image (default: ${ENFLAME_BASE_IMAGE})
     ENFLAME_DRIVER_VERSION Driver version used in generated image tag (default: ${ENFLAME_DRIVER_VERSION})
@@ -232,7 +235,8 @@ VERSIONS (override via environment variables):
     HYGON_PYTHON_VERSION Python version in Hygon base image tag (default: ${HYGON_PYTHON_VERSION})
     HYGON_RUNTIME_LIB_DIR Hygon runtime library source dir (default: ${HYGON_RUNTIME_LIB_DIR})
     HYGON_RUNTIME_ROOTS  Colon-separated roots for Hygon runtime overlay files (default: ${HYGON_RUNTIME_ROOTS})
-    FLAGGEMS_VERSION     FlagGems git ref (default: ${FLAGGEMS_VERSION})
+    CUDA_FLAGGEMS_VERSION FlagGems git ref for CUDA (default: ${CUDA_FLAGGEMS_VERSION})
+    FLAGGEMS_VERSION     FlagGems git ref for Hygon (default: ${FLAGGEMS_VERSION})
     VLLM_PLUGIN_FL_VERSION vllm-plugin-FL git ref (default: ${VLLM_PLUGIN_FL_VERSION})
 
 EXAMPLES:
@@ -335,6 +339,7 @@ if [[ "${PLATFORM}" == "cuda" ]]; then
     BUILD_ARGS+=(
         --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
         --build-arg "CUDA_VERSION=${CUDA_VERSION}"
+        --build-arg "FLAGGEMS_VERSION=${CUDA_FLAGGEMS_VERSION}"
         --build-arg "PYTHON_VERSION=${PYTHON_VERSION}"
         --build-arg "VLLM_VERSION=${VLLM_VERSION}"
         --build-arg "UV_VERSION=${UV_VERSION}"
@@ -393,6 +398,7 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
         --build-arg "VLLM_VERSION=${MUSA_VLLM_VERSION}"
         --build-arg "TORCH_VERSION=${MUSA_TORCH_VERSION}"
         --build-arg "FLAGGEMS_VERSION=${MUSA_FLAGGEMS_VERSION}"
+        --build-arg "FLAGTREE_VERSION=${MUSA_FLAGTREE_VERSION}"
         --build-arg "VLLM_PLUGIN_FL_PACKAGE_VERSION=${VLLM_PLUGIN_FL_PACKAGE_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
@@ -458,6 +464,7 @@ msg "  Platform:       ${PLATFORM}"
 msg "  Target:         ${TARGET}"
 if [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
+    msg "  FlagGems:       ${CUDA_FLAGGEMS_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  Base image:     ${ASCEND_BASE_IMAGE}"
     msg "  FlagGems:       ${ASCEND_FLAGGEMS_VERSION}"
@@ -477,6 +484,7 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
     msg "  MUSA base:      ${MUSA_BASE_IMAGE}"
     msg "  MUSA PyTorch:   ${MUSA_TORCH_VERSION}"
     msg "  FlagGems:       ${MUSA_FLAGGEMS_VERSION}"
+    msg "  FlagTree:       ${MUSA_FLAGTREE_VERSION}"
     msg "  Plugin:         ${VLLM_PLUGIN_FL_PACKAGE_VERSION}"
 elif [[ "${PLATFORM}" == "enflame" ]]; then
     msg "  Driver:         ${ENFLAME_DRIVER_VERSION}"

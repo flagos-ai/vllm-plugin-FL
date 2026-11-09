@@ -26,12 +26,16 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 |-------|--------|-----------|
 | Qwen3.5-397B-A17B | Supported | [example](./examples/qwen3_5_offline_inference.py) |
 | Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
+| Qwen3.8-Flash-Next / Qwen4Exp | Supported | [implementation](./vllm_fl/models/qwen3_8_flash_next/) |
 | Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
 | GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
+| GLM-5.3 Flash | Supported | [implementation](./vllm_fl/models/glm5/model.py) |
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
+| MiniMax-M3.1-Flash | Supported | [example](./examples/minimax_m31_offline_inference.py) / [deployment guide](./docs/minimax-m31.md) |
+| HY4-Preview | Merging (NVIDIA) | [installation](#hy4-on-nvidia) |
 
 ### Supported Chips
 
@@ -82,6 +86,17 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
+    Qwen3.8-Flash-Next / Qwen4 uses the HC, PLE and QSA operators available
+    on [FlagGems-vllm main](https://github.com/flagos-ai/FlagGems-vllm).
+    Follow the shared [FlagGems-vllm installation instructions](docs/flaggems-vllm.md).
+
+    On devices without native FP8 support, run standard vLLM FP8 checkpoints
+    with `--dtype bfloat16`. Qwen3.8-Flash-Next / Qwen4 converts supported
+    per-tensor and block-scaled FP8 weights to BF16 when loading. ModelOpt,
+    MXFP8, and compressed-tensors FP8 formats are not covered by this fallback.
+    BF16 weights need about twice the device memory of FP8 weights; an FP8 KV
+    cache request is likewise served as BF16 and may need twice the memory.
+
     For CUDA-like devices, including CUDA and HIP/ROCm environments that use
     PyTorch's CUDA dispatch key, build the plugin native extension by setting
     `VLLM_VENDOR=cuda` during installation:
@@ -126,6 +141,12 @@ model registrations are loaded only for their corresponding architectures.
 Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
+
+On Iluvatar with vLLM 0.24, the FlagOS GPU runner binds all attention caches
+within each decoder layer, including separate main and index caches. Binding
+preserves layer order, cache order within a layer, tensor identity and shared
+aliases. This cache initialization fix does not enable graph capture or establish
+model or operator support; validate those separately in the target environment.
 
 ### Optional T-Head native kernels
 
@@ -200,10 +221,72 @@ If there are multiple plugins in the current environment, you can specify use vl
     export TRITON_ALL_BLOCKS_PARALLEL=1
     ```
 
-3. Enable eager execution
+3. Select eager or full-decode graph execution
 
-    Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
+    For eager execution, add `enforce_eager=True` to the `LLM` constructor or
+    pass `--enforce-eager` on the command line. For `FULL_DECODE_ONLY`, use:
 
+    ```sh
+    export VLLM_PLUGINS=fl
+    export USE_FLAGGEMS=0
+
+    vllm serve Qwen/Qwen3-0.6B \
+        --dtype bfloat16 --tensor-parallel-size 1 \
+        --max-model-len 2048 --max-num-batched-tokens 1024 --max-num-seqs 4 \
+        --gpu-memory-utilization 0.3 \
+        --no-enable-prefix-caching --no-async-scheduling \
+        --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4]}'
+    ```
+
+    This path uses the eager FX backend with NPU graph capture/replay. The
+    standard Python-only FL installation above is sufficient. Use a compatible
+    FlagGems/FlagTree installation when setting `USE_FLAGGEMS=1`.
+
+
+### HY4 on NVIDIA
+
+HY4 is paired with this branch's vLLM 0.24.0 environment and the shared
+[FlagGems-vllm integration](./docs/flaggems-vllm.md). Its MLA query concatenation
+and graph-safe paged MQA logits APIs are now merged into upstream FlagGems-vllm.
+The shared CI dependency now includes both APIs. Install the same pinned upstream
+source using the integration instructions above; no separate HY4 upgrade is needed.
+
+HY4 uses the public `flaggems_vllm` sparse indexer, cache and attention APIs;
+query quantization uses general FlagGems. No model-specific dependency extra or
+fork revision is required. The shared fused-operator rollout switch and its
+default behavior are described in the integration documentation.
+Runtime selection checks callable APIs, device kernels and the shared dispatch
+policy before allocating model weights. A selected operator's execution error
+propagates without retrying another implementation.
+
+Use `hy4_safetensors` to load the preview checkpoint with expert slicing. The
+portable path requires BF16 KV (`auto` with a BF16 model, or `bfloat16`); FP8 KV
+requires the complete native sparse/cache/prefill path. Shared indexers require
+pipeline parallel size 1. The [manual checkpoint smoke configuration](./tests/models/hy4/fp8_tp16.yaml)
+requires 16 NVIDIA GPUs; the single-GPU dummy smoke checks model integration.
+HY4-Preview currently targets NVIDIA H100, vLLM 0.24.0, the MXFP8 preview
+checkpoint, BF16 activations and BF16 portable KV. Other chips, multimodal serving and portable FP8 KV
+are not validated. Sparse indexer providers use explicit entry points while
+preserving the real CUDA platform identity.
+The portable sparse indexer checks the selected paged MQA logits provider's
+graph capability before loading weights. Upstream FlagGems-vllm exposes
+`fp8_fp4_paged_mqa_logits_graph` for static-grid CUDA Graph capture, reading
+lengths and page mappings on the GPU on every replay. The shared dispatch
+selects that public entry point when available; older operator builds without
+the capability require `--enforce-eager`.
+
+With the graph-safe operator build, use `FULL_DECODE_ONLY` with compilation
+mode `NONE`, for example:
+
+```bash
+--compilation-config '{"mode":"NONE","cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4],"max_cudagraph_capture_size":4}'
+```
+
+The shared CachedOp prewarming from
+[vllm-plugin-FL #552](https://github.com/flagos-ai/vllm-plugin-FL/pull/552) is
+used after model loading. Whole-model Dynamo compilation remains limited
+by the current FlagGems `libentry` implementation; CUDA Graph mode `NONE`
+and eager execution remain available.
 
 ### Run a Task
 

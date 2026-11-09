@@ -391,6 +391,7 @@ def test_dummy_capture_initializes_metadata_without_model_warmups(device, mode_n
         pytest.skip("Accelerator graph capture is unavailable")
     mode = getattr(CUDAGraphMode, mode_name)
     runner = object.__new__(ModelRunnerFL)
+    runner.use_ascend_attention = False
     runner.vllm_config = SimpleNamespace(
         model_config=SimpleNamespace(multimodal_config=None),
         parallel_config=SimpleNamespace(num_ubatches=1),

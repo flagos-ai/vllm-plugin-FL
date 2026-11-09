@@ -57,6 +57,7 @@ op_backends:
 
   # Bounded activation and hyperconnection capabilities.
   silu_and_mul_with_clamp: [flagos, reference]
+  bounded_swiglu: [flagos, reference]
   mhc_pre_with_norm: [flagos, reference]
   mhc_post: [flagos, reference]
   mhc_fused_post_pre_with_norm: [flagos, reference]

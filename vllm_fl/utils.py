@@ -2,7 +2,6 @@
 
 import json
 import os
-from typing import Optional, Tuple
 
 import flag_gems
 
@@ -14,7 +13,7 @@ except (ImportError, FileNotFoundError):
     from flag_gems.runtime.backend.device_finder import DeviceDetector
 from flag_gems.runtime import backend
 
-_OP_CONFIG: Optional[dict[str, str]] = None
+_OP_CONFIG: dict[str, str] | None = None
 
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
@@ -47,6 +46,10 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
     # Registered backend: vendor/hygon
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
+    # Registered backend: vendor/amd (ROCm/HIP exposed through torch.cuda)
+    # FlagGems intentionally reports ``vendor_name=amd`` and
+    # ``device_name=cuda`` for ROCm devices.
+    "amd": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
     # Registered backend: vendor/thead (tsingmicro)
@@ -67,6 +70,19 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
 SPLITTING_OPS: dict[str, tuple[str, ...]] = {
     # MCCL collectives cannot run while a MUSA stream is being captured.
     "musa": (
+        "vllm::all_reduce",
+        "vllm::all_gather",
+        "vllm::reduce_scatter",
+        "vllm::patched_fused_scaled_matmul_reduce_scatter",
+        "_c10d_functional::all_reduce",
+        "_c10d_functional::all_gather_into_tensor",
+        "_c10d_functional::reduce_scatter_tensor",
+        "_c10d_functional::wait_tensor",
+    ),
+    # PCCL collectives (FlagCX/tang) likewise cannot run while a PTPU stream
+    # is being captured, so the TP communication ops must be split out of the
+    # piecewise cudagraph (same set as MUSA above).
+    "ptpu": (
         "vllm::all_reduce",
         "vllm::all_gather",
         "vllm::reduce_scatter",
@@ -145,16 +161,18 @@ def use_flaggems(default: bool = True) -> bool:
     return value.lower() in ("true", "1")
 
 
-def get_flag_gems_whitelist_blacklist() -> Tuple[
-    Optional[list[str]], Optional[list[str]]
-]:
+def get_flag_gems_whitelist_blacklist(
+    *,
+    vllm_config=None,
+    vendor_name: str | None = None,
+) -> tuple[list[str] | None, list[str] | None]:
     """
     Get FlagGems operator whitelist and blacklist.
 
     Priority (highest to lowest):
     1. VLLM_FL_FLAGOS_WHITELIST env var: Only these ops use FlagGems
     2. VLLM_FL_FLAGOS_BLACKLIST env var: These ops don't use FlagGems
-    3. Platform config flagos_blacklist: Default blacklist from config file
+    3. Platform and model defaults: Default operator blacklist
     4. VLLM_FL_FLAGOS_BLACKLIST_APPEND: Ops appended to the selected blacklist
 
     Note: VLLM_FL_FLAGOS_WHITELIST and VLLM_FL_FLAGOS_BLACKLIST cannot be set
@@ -202,6 +220,21 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
         except Exception:
             pass
 
+    if vllm_config is not None and not blacklist_str:
+        from vllm.model_executor.models.config import MODELS_CONFIG_MAP
+
+        model_config = vllm_config.model_config
+        for architecture in model_config.architectures:
+            config_cls = MODELS_CONFIG_MAP.get(architecture)
+            get_defaults = getattr(config_cls, "get_flag_gems_blacklist", None)
+            if get_defaults is not None:
+                blacklist = list(
+                    dict.fromkeys(
+                        (blacklist or []) + get_defaults(vendor_name=vendor_name)
+                    )
+                )
+                break
+
     # Add deployment exclusions without replacing platform safety defaults.
     # Preserve insertion order so startup logs and dispatch policy stay stable.
     if blacklist_append_str:
@@ -236,8 +269,14 @@ def use_flaggems_op(op_name: str, default: bool = True) -> bool:
     # Get whitelist/blacklist with proper priority
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
 
-    # If whitelist is set, only allow ops in whitelist
+    # If whitelist is set, only allow ops in whitelist.  Validate it against the
+    # active model plan so the registry filter and the runtime enable step use
+    # the same source of truth (a plan-required op excluded from an explicit
+    # whitelist is a startup error, not a silently missing implementation).
     if whitelist is not None:
+        from vllm_fl.activation import validate_flaggems_whitelist
+
+        validate_flaggems_whitelist(whitelist)
         return op_name in whitelist
 
     # If blacklist is set (from env or config), deny ops in blacklist
@@ -271,7 +310,7 @@ def _load_op_config_from_env() -> None:
     _OP_CONFIG = normalized
 
 
-def get_op_config() -> Optional[dict[str, str]]:
+def get_op_config() -> dict[str, str] | None:
     return _OP_CONFIG
 
 
@@ -283,10 +322,12 @@ class DeviceInfo:
         self.device = DeviceDetector()
         self.supported_device = [
             "nvidia",
+            "amd",
             "ascend",
             "metax",
             "mthreads",
             "sunrise",
+            "hygon",
             "thead",
             "gcu",
             "enflame",
@@ -339,6 +380,7 @@ def get_flaggems_all_ops() -> list[str]:
 # OOT operator names as registered in custom_ops.py (op_name lowercase)
 OOT_OP_NAMES = [
     "silu_and_mul",
+    "silu_and_mul_with_clamp",
     "gelu_and_mul",
     "rms_norm",
     "rotary_embedding",
@@ -347,7 +389,7 @@ OOT_OP_NAMES = [
 ]
 
 
-def get_oot_whitelist() -> Optional[list[str]]:
+def get_oot_whitelist() -> list[str] | None:
     """
     Get OOT operator whitelist from VLLM_FL_OOT_WHITELIST environment variable.
 
@@ -363,7 +405,7 @@ def get_oot_whitelist() -> Optional[list[str]]:
     return [op.strip() for op in whitelist_str.split(",") if op.strip()]
 
 
-def get_oot_blacklist() -> Optional[list[str]]:
+def get_oot_blacklist() -> list[str] | None:
     """
     Get OOT operator blacklist from environment variable or platform config.
 
@@ -398,6 +440,40 @@ def get_oot_blacklist() -> Optional[list[str]]:
         pass
 
     return None
+
+
+def has_native_triton_moe() -> bool:
+    """Whether the runtime exposes vLLM's native Triton MoE path.
+
+    Probes the vLLM native CUDA ABI and DeepGEMM.  This is a capability check
+    independent of any model or provider, used to choose between the native
+    Triton experts and the FlagGems per-step fallback when a MoE clamp must be
+    preserved.
+    """
+    import importlib
+
+    try:
+        from vllm.platforms import current_platform
+    except Exception:  # pragma: no cover - vLLM must be importable
+        return False
+    if not current_platform.is_cuda():
+        return False
+
+    for name in ("vllm._C", "vllm._C_stable_libtorch"):
+        try:
+            importlib.import_module(name)
+        except (ImportError, OSError, RuntimeError):
+            continue
+        break
+    else:
+        return False
+
+    try:
+        from vllm.utils.deep_gemm import has_deep_gemm
+
+        return bool(has_deep_gemm())
+    except (ImportError, AttributeError, OSError, RuntimeError):
+        return False
 
 
 def is_oot_enabled() -> bool:

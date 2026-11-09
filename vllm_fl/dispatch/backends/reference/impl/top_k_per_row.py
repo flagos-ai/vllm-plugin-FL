@@ -6,6 +6,21 @@ from __future__ import annotations
 import torch
 
 
+def _raw_topk_views(logits, indices, shape_args):
+    if not shape_args:
+        return logits, indices
+    if len(shape_args) != 4:
+        raise ValueError("Raw top-k expects numRows, stride0, stride1 and topK")
+    rows, stride0, stride1, top_k = shape_args
+    if (
+        not 0 <= rows <= logits.shape[0]
+        or not 0 <= top_k <= indices.shape[1]
+        or (stride0, stride1) != logits.stride()
+    ):
+        raise ValueError("Raw top-k dimensions do not match the tensor views")
+    return logits[:rows], indices[:rows, :top_k]
+
+
 def _validate_common(logits: torch.Tensor, indices: torch.Tensor) -> None:
     if logits.ndim != 2 or logits.dtype != torch.float32:
         raise ValueError("Row-wise top-k expects FP32 logits [rows, width]")
@@ -63,8 +78,12 @@ def top_k_per_row_prefill(
     row_starts: torch.Tensor,
     row_ends: torch.Tensor,
     indices: torch.Tensor,
+    *shape_args: int,
 ) -> None:
     """Select request-relative top-k indices for prefill rows."""
+    logits, indices = _raw_topk_views(logits, indices, shape_args)
+    row_starts = row_starts[:logits.shape[0]]
+    row_ends = row_ends[:logits.shape[0]]
     _validate_common(logits, indices)
     if row_starts.ndim != 1 or row_ends.ndim != 1:
         raise ValueError("row_starts and row_ends must be 1D")
@@ -87,10 +106,15 @@ def top_k_per_row_decode(
     logits: torch.Tensor,
     seq_lens: torch.Tensor,
     indices: torch.Tensor,
-    *,
-    next_n: int,
+    *raw_args,
+    next_n: int | None = None,
 ) -> None:
     """Select top-k indices within each decode row's valid token range."""
+    if next_n is None:
+        if not raw_args:
+            raise TypeError("Raw top-k decode requires an output indices tensor")
+        next_n, seq_lens, indices = seq_lens, indices, raw_args[0]
+        logits, indices = _raw_topk_views(logits, indices, raw_args[1:])
     _validate_common(logits, indices)
     if seq_lens.dtype != torch.int32:
         raise TypeError("seq_lens must be int32")

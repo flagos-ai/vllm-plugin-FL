@@ -42,8 +42,16 @@ def top_k_per_row_prefill(
     row_starts: torch.Tensor,
     row_ends: torch.Tensor,
     indices: torch.Tensor,
+    *shape_args: int,
 ) -> None:
     """Select request-relative top-k indices for prefill rows."""
+    if shape_args:
+        from .mla_ops import get_operator
+
+        operator = get_operator("top_k_per_row_prefill")
+        if not callable(operator):
+            raise RuntimeError("Raw top-k prefill provider is unavailable")
+        return operator(logits, row_starts, row_ends, indices, *shape_args)
     from flag_gems.fused import top_k_per_row_prefill as flaggems_topk
 
     _validate_common(logits, indices)
@@ -71,10 +79,17 @@ def top_k_per_row_decode(
     logits: torch.Tensor,
     seq_lens: torch.Tensor,
     indices: torch.Tensor,
-    *,
-    next_n: int,
+    *raw_args,
+    next_n: int | None = None,
 ) -> None:
     """Select top-k indices within each decode row's valid token range."""
+    if next_n is None:
+        from .mla_ops import get_operator
+
+        operator = get_operator("top_k_per_row_decode")
+        if not callable(operator):
+            raise RuntimeError("Raw top-k decode provider is unavailable")
+        return operator(logits, seq_lens, indices, *raw_args)
     from flag_gems.fused import top_k_per_row_decode as flaggems_topk
 
     _validate_common(logits, indices)
