@@ -158,8 +158,8 @@ _linear = CachedOp("w8a8_dynamic_linear")
 class AscendW8A8DynamicLinearMethod(LinearMethodBase):
     """Load [N,K] int8 weights and channel scales; execute prepared [K,N].
 
-    The caller supplies the resolved weight_nz_mode when config integration is
-    added. Modes 1 and 2 both NZ-cast int8; mode 0 retains ND. This component
+    The quantization config supplies weight_nz_mode, defaulting to 1.
+    Modes 1 and 2 both NZ-cast int8; mode 0 retains ND. This component
     supports A2/A3 without FlashComm2 quantized communication or DSA-CP splitting.
     """
 

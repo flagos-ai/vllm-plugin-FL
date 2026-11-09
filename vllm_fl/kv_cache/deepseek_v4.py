@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Scheduler-owned cache leaves for the DeepSeek V4 reference path."""
+"""Scheduler-owned cache leaves for dispatch-backed DeepSeek V4 execution."""
 
 import torch
 from torch import nn
@@ -19,7 +19,7 @@ _write = CachedOp("paged_cache_write")
 
 
 def create_deepseek_v4_cache_layers(config, cache_config, prefix):
-    """Build scheduler leaves for plain reference storage, not packed OPP pages.
+    """Build scheduler leaves using plain tensor storage.
 
     Small state/SWA pages share the main C4 page size. Their logical windows
     are unchanged; compression applies only to the full compact-cache specs.

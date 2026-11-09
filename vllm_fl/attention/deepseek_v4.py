@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Private scheduler-to-reference cache plans; original-token coordinates."""
+"""Private scheduler cache plans in original-token coordinates."""
 
 from dataclasses import dataclass
 
@@ -108,7 +108,7 @@ class DeepseekV4MetadataBuilder(AttentionMetadataBuilder[DeepseekV4CacheMetadata
             or parallel.prefill_context_parallel_size != 1
         ):
             raise NotImplementedError(
-                "V4 reference cache plans require non-speculative CP1"
+                "DeepSeek V4 cache plans require non-speculative CP1"
             )
         self.ratio = kv_cache_spec.compress_ratio
         self.logical_block = kv_cache_spec.block_size
