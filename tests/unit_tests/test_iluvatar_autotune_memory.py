@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vllm_fl.dispatch.backends.vendor.iluvatar.autotune_memory import (
+from vllm_fl.worker.worker import (
     _release_benchmark_tensors,
 )
 

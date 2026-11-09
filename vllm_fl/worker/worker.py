@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
+from functools import wraps
 from types import NoneType
 from typing import TYPE_CHECKING, Any
 
@@ -133,6 +134,49 @@ if TYPE_CHECKING:
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 
+def _release_benchmark_tensors(run):
+    if getattr(run, '_iluvatar_release_benchmark_tensors', False):
+        return run
+
+    @wraps(run)
+    def wrapped(self, *args, **kwargs):
+        try:
+            return run(self, *args, **kwargs)
+        finally:
+            # These are diagnostic replay arguments, not kernel/config caches.
+            # Generated per-shape tuners otherwise retain whole activations.
+            self._last_benchmark_args = ()
+            self._last_benchmark_meta = {}
+            self.nargs = None
+
+    wrapped._iluvatar_release_benchmark_tensors = True
+    return wrapped
+
+
+def patch_autotune_memory() -> None:
+    from flag_gems.utils.libentry import LibTuner
+
+    LibTuner.run = _release_benchmark_tensors(LibTuner.run)
+
+
+def _is_uva_available() -> bool:
+    return False
+
+
+def patch_v2_uva() -> None:
+    from vllm.platforms import current_platform
+
+    if getattr(current_platform, "vendor_name", "") != "iluvatar":
+        return
+
+    from vllm.v1.worker.gpu import buffer_utils
+
+    if buffer_utils.is_uva_available is _is_uva_available:
+        return
+    buffer_utils.is_uva_available = _is_uva_available
+    logger.info("Iluvatar V2 buffers use explicit host-to-device copies instead of UVA")
+
+
 def _apply_worker_vendor_patches() -> None:
     """Apply patches that must execute inside every worker process."""
     if getattr(current_platform, "vendor_name", "") != "iluvatar":
@@ -145,13 +189,7 @@ def _apply_worker_vendor_patches() -> None:
     )
 
     patch_vision_precision()
-    from vllm_fl.dispatch.backends.vendor.iluvatar.autotune_memory import (
-        patch_autotune_memory,
-    )
-
     patch_autotune_memory()
-    from vllm_fl.dispatch.backends.vendor.iluvatar.v2_buffers import patch_v2_uva
-
     patch_v2_uva()
     from vllm_fl.dispatch.backends.vendor.iluvatar.mrope import patch_mrope
 

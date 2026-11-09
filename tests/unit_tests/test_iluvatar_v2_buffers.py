@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from vllm_fl.dispatch.backends.vendor.iluvatar.v2_buffers import (
+from vllm_fl.worker.worker import (
     _is_uva_available,
     patch_v2_uva,
 )
