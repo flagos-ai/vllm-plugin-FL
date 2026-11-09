@@ -296,6 +296,7 @@ from vllm_fl.vllm_compat import (
     map_kv_caches_to_kernel_blocks_032,
     reshape_attention_kv_cache,
     resolve_cudagraph_mode_and_sizes,
+    return_routed_experts_enabled,
     supports_xdrope,
 )
 
@@ -8366,7 +8367,7 @@ class ModelRunnerFL(
             return
         logger.info(
             "Initializing routed experts capturer, enable_return_routed_experts: %s",
-            getattr(self.model_config, "enable_return_routed_experts", False),
+            return_routed_experts_enabled(self.vllm_config),
         )
         self.routed_experts_capturer = RoutedExpertsCapturer(
             max_num_batched_tokens=self.scheduler_config.max_num_batched_tokens,

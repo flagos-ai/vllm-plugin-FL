@@ -103,6 +103,7 @@ from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.vllm_compat import (
     init_batch_invariance,
     is_residual_scattered_for_sp,
+    return_routed_experts_enabled,
 )
 from vllm_fl.worker.runtime import _initialize_fl_runtime
 
@@ -840,7 +841,7 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if getattr(self.model_config, "enable_return_routed_experts", False):
+        if return_routed_experts_enabled(self.vllm_config):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping

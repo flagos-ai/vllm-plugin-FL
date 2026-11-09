@@ -349,3 +349,20 @@ def common_attention_metadata_cpu_kwargs(
 
 
 __all__ += ["common_attention_metadata_cpu_kwargs"]
+
+
+def return_routed_experts_enabled(vllm_config: Any) -> bool:
+    """Whether routed-expert capture is requested.
+
+    vLLM 0.32 moved the flag from ``ModelConfig`` to
+    ``VllmConfig.aux_output_config``. Read the new location first and fall back
+    to the legacy field, so a request is never silently downgraded to "off".
+    """
+    aux_output_config = getattr(vllm_config, "aux_output_config", None)
+    if aux_output_config is not None:
+        return bool(getattr(aux_output_config, "enable_return_routed_experts", False))
+    model_config = getattr(vllm_config, "model_config", None)
+    return bool(getattr(model_config, "enable_return_routed_experts", False))
+
+
+__all__ += ["return_routed_experts_enabled"]
