@@ -291,12 +291,17 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" && "${TARGET}" == "ci" && "${ASCEND_VLLM_VERSION}" == "0.32.0" ]]; then
     VLLM_VERSION="0.32.0"
-    BUILD_CONTEXT="${SCRIPT_DIR}/.."
-    PLUGIN_SOURCE_SHA="$(git -C "${BUILD_CONTEXT}" rev-parse HEAD)"
-    PLUGIN_SOURCE_VERSION="${PLUGIN_SOURCE_VERSION:-0.5.0.dev0+g${PLUGIN_SOURCE_SHA:0:12}}"
-    if ! git -C "${BUILD_CONTEXT}" diff --quiet || ! git -C "${BUILD_CONTEXT}" diff --cached --quiet; then
-        PLUGIN_SOURCE_VERSION="${PLUGIN_SOURCE_VERSION}.dirty"
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    # The vLLM 0.32 adapter is pinned as a separate source commit; build from
+    # that commit's tree (Dockerfile and COPY inputs), never working-tree files.
+    PLUGIN_SOURCE_SHA="$(tr -d '[:space:]' < "${SCRIPT_DIR}/ascend/plugin-source.ref")"
+    [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || err "docker/ascend/plugin-source.ref must hold a full Git revision."
+    if ! git -C "${BUILD_CONTEXT}" cat-file -e "${PLUGIN_SOURCE_SHA}^{commit}" 2>/dev/null; then
+        git -C "${BUILD_CONTEXT}" fetch --no-tags https://github.com/BrianPei/vllm-plugin-FL.git "${PLUGIN_SOURCE_SHA}" \
+            || err "Cannot fetch plugin source ${PLUGIN_SOURCE_SHA}."
     fi
+    ARCHIVE_SOURCE=1
+    PLUGIN_SOURCE_VERSION="${PLUGIN_SOURCE_VERSION:-0.5.0.dev0+g${PLUGIN_SOURCE_SHA:0:12}}"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
@@ -491,6 +496,12 @@ docker_build() {
 
 if [[ "${PLATFORM}" == "hygon" ]]; then
     git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | docker_build -
+elif [[ "${ARCHIVE_SOURCE:-0}" == "1" ]]; then
+    source_context="$(mktemp -d)"
+    trap 'rm -rf -- "${source_context}"' EXIT
+    git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | tar -x -C "${source_context}"
+    DOCKERFILE="${source_context}/docker/ascend/Dockerfile"
+    docker_build "${source_context}"
 else
     docker_build "${BUILD_CONTEXT}"
 fi

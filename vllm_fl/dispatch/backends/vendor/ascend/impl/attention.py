@@ -235,13 +235,6 @@ class AscendMetadata:
     model_runner_type: str = ""
 
 
-def _get_model_runner_type(model_config: Any) -> str:
-    runner_type = getattr(model_config, "runner_type", None)
-    if runner_type is not None:
-        return runner_type
-    return "pooling" if getattr(model_config, "is_pooling_model", False) else "generate"
-
-
 class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
     """Builder for Ascend attention metadata."""
 
@@ -302,7 +295,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         mask_builder = self._get_mask_builder()
 
         # Pooling model uses general attention mask
-        if _get_model_runner_type(self.model_config) == "pooling":
+        if self.model_config.runner_type == "pooling":
             return mask_builder.get_attn_mask(2048, torch.bool)
 
         # MLA attention
@@ -337,7 +330,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         # async/spec paths may leave the public compatibility field unset.
         if getattr(common_attn_metadata, "_seq_lens_cpu", None) is not None:
             seq_lens = common_attn_metadata._seq_lens_cpu[:num_reqs]
-        elif getattr(common_attn_metadata, "seq_lens_cpu", None) is not None:
+        elif common_attn_metadata.seq_lens_cpu is not None:
             seq_lens = common_attn_metadata.seq_lens_cpu[:num_reqs]
         else:
             seq_lens = common_attn_metadata.seq_lens[:num_reqs].to("cpu")
@@ -395,7 +388,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
             num_prefills=num_prefills,
             num_decodes=num_decodes,
             causal=getattr(common_attn_metadata, "causal", True),
-            model_runner_type=_get_model_runner_type(self.model_config),
+            model_runner_type=self.model_config.runner_type,
         )
 
     def _split_decodes_and_prefills(self, common_attn_metadata):
@@ -527,9 +520,7 @@ class AscendAttentionBackend(AttentionBackend):
             value_caches[dst_indices] = value_caches[src_indices]
 
     @staticmethod
-    def get_supported_kernel_block_sizes(
-        kv_cache_spec: Any = None,
-    ) -> list[int]:
+    def get_supported_kernel_block_sizes() -> list[int]:
         return [128]
 
 

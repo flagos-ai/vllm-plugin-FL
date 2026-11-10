@@ -10,11 +10,11 @@ The default recipe `docker/ascend/Dockerfile` installs
 bash docker/build.sh --platform ascend --target ci
 # On Podman-only hosts (without creating a docker alias):
 CONTAINER_ENGINE=podman bash docker/build.sh --platform ascend --target ci
-# Equivalent direct build command:
-podman build --build-arg PLUGIN_SOURCE_SHA="$(git rev-parse HEAD)" \
-  --target ci -f docker/ascend/Dockerfile \
-  -t harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-ascend-ci .
 ```
+
+The script builds from the plugin commit pinned in `docker/ascend/plugin-source.ref`
+(the vLLM 0.32 Ascend adapter), using that commit's Dockerfile and sources rather
+than the working tree.
 
 | Component | Version / source |
 | --- | --- |

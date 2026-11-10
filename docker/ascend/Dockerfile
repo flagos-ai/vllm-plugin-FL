@@ -10,10 +10,11 @@ ARG INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
 ARG EXTRA_INDEX_URL
 ENV UV_PYTHON=/flagos/bin/python \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    UV_HTTP_TIMEOUT=120
+    UV_HTTP_TIMEOUT=600
 
 COPY docker/ascend/constraints.txt docker/ascend/requirements-ci.txt /opt/fl-ci/
-RUN uv pip install --python /flagos/bin/python \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /flagos/bin/python \
         --index "${FLAGOS_INDEX_URL}" \
         ${EXTRA_INDEX_URL:+--index "${EXTRA_INDEX_URL}"} \
         --default-index "${INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}" \
