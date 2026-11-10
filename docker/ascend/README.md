@@ -1,18 +1,18 @@
-# Ascend Runtime-based vLLM 0.32 CI image (`Dockerfile.v0.32.0`)
+# Ascend Runtime-based vLLM 0.32 CI image (`Dockerfile`)
 
 Build from the repository root using the FlagOS Runtime 2.3.0 (CANN 9.2.1) base
 image `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.2.1:2.3.0@sha256:92600f84feee2a2a738bbc77abdb02c8c7af925a6da379b23dde6ded6cba50db`.
-The versioned recipe `docker/ascend/Dockerfile.v0.32.0` installs
-`vllm==0.32.0+flagos` while preserving the existing 910C `v0.28.0+empty` recipe
-in `docker/ascend/Dockerfile`.
+The default recipe `docker/ascend/Dockerfile` installs
+`vllm==0.32.0+flagos` on FlagOS Runtime 2.3.0 for `0.5.0-dev`, while the historical
+910C `v0.28.0+empty` recipe is preserved in `docker/ascend/Dockerfile.v0.28.0`.
 
 ```bash
-ASCEND_VLLM_VERSION=0.32.0 bash docker/build.sh --platform ascend --target ci
+bash docker/build.sh --platform ascend --target ci
 # On Podman-only hosts (without creating a docker alias):
-CONTAINER_ENGINE=podman ASCEND_VLLM_VERSION=0.32.0 bash docker/build.sh --platform ascend --target ci
+CONTAINER_ENGINE=podman bash docker/build.sh --platform ascend --target ci
 # Equivalent direct build command:
 podman build --build-arg PLUGIN_SOURCE_SHA="$(git rev-parse HEAD)" \
-  --target ci -f docker/ascend/Dockerfile.v0.32.0 \
+  --target ci -f docker/ascend/Dockerfile \
   -t harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-ascend-ci .
 ```
 
@@ -112,7 +112,7 @@ configuration rather than a general driver compatibility guarantee.
 
 ---
 
-# Ascend 910C: vLLM 0.28.0 empty (`Dockerfile`)
+# Ascend 910C: vLLM 0.28.0 empty (`Dockerfile.v0.28.0`)
 
 The image keeps the CANN 9.0.0 and torch_npu 2.10 runtime from the earlier
 910C environment:

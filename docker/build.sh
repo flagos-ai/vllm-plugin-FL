@@ -42,7 +42,7 @@ MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
-ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.28.0}"
+ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.32.0}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3b406c36212744b98b9720bf6d0a5387c09fe96b}"
 ASCEND_FLAGTREE_VERSION="${ASCEND_FLAGTREE_VERSION:-0.6.2a1+ascend3.5}"
@@ -241,8 +241,12 @@ BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
     DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.ci"
-elif [[ "${PLATFORM}" == "ascend" && "${TARGET}" == "ci" && "${ASCEND_VLLM_VERSION}" == "0.32.0" ]]; then
-    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.32.0"
+elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.28.0" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.28.0"
+elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.18.0" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.18.0"
+elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.13.0" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.13.0"
 fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
