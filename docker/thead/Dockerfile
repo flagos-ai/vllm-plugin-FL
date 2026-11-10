@@ -33,7 +33,6 @@ FROM ${THEAD_BASE_IMAGE} AS base
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
 ARG VLLM_VERSION=0.32.0
-ARG VLLM_SOURCE_REF=v0.32.0
 ARG VLLM_WHEEL_SHA256=""
 ARG FLAGTREE_VERSION=0.7.0+ppu3.6
 ARG FLAGGEMS_VERSION=5.5.0.dev0+g317b76320
@@ -92,39 +91,22 @@ RUN --mount=type=bind,from=thead_wheels,target=/run/wheels,ro \
     fi
 
 # vLLM is installed as an ordinary "+empty" wheel: no vllm._C, no
-# _C_stable_libtorch. A hashed wheel from the named context is used when
-# present, otherwise it is built from the pinned upstream tag in empty mode.
+# _C_stable_libtorch. The wheel must come from THEAD_WHEELS_DIR so the image is
+# reproducible and offline; there is deliberately no source fallback.
 RUN --mount=type=bind,from=thead_wheels,target=/run/wheels,ro \
     shopt -s nullglob \
     && wheels=(/run/wheels/vllm-"${VLLM_VERSION}"+empty-*.whl) \
-    && if (( ${#wheels[@]} )); then \
-        test "${#wheels[@]}" = 1 \
-        && if [[ -n "${VLLM_WHEEL_SHA256}" ]]; then \
-            printf '%s  %s\n' "${VLLM_WHEEL_SHA256}" "${wheels[0]}" | sha256sum -c -; \
-        fi \
-        && "$VENV/bin/python" -I -B -m pip install --no-deps --no-index \
-            --no-compile "${wheels[0]}"; \
-    else \
-        test -z "${VLLM_WHEEL_SHA256}" \
-        && "$VENV/bin/python" -I -B -m pip install --no-deps --no-compile \
-            ${INDEX_URL:+--index-url "${INDEX_URL}"} \
-            ${EXTRA_INDEX_URL:+--extra-index-url "${EXTRA_INDEX_URL}"} \
-            setuptools-rust \
-        && git clone --depth 1 --branch "${VLLM_SOURCE_REF}" \
-            https://github.com/vllm-project/vllm.git /opt/thead/vllm-src \
-        && env -u VLLM_VENDOR -u VLLM_VERSION_OVERRIDE \
-            -u SETUPTOOLS_SCM_PRETEND_VERSION \
-            -u SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM \
-            -u VLLM_PRECOMPILED_WHEEL_LOCATION \
-            VLLM_TARGET_DEVICE=empty VLLM_USE_PRECOMPILED=0 \
-            VLLM_USE_PRECOMPILED_RUST=0 VLLM_DOCKER_BUILD_CONTEXT=0 \
-            VLLM_REQUIRE_RUST_FRONTEND=0 CARGO_NET_OFFLINE=true \
-            "$VENV/bin/python" -I -B -m pip wheel --no-deps \
-                --no-build-isolation --no-cache-dir \
-                --wheel-dir /opt/thead/wheels /opt/thead/vllm-src \
-        && "$VENV/bin/python" -I -B -m pip install --no-deps --no-index \
-            --no-compile /opt/thead/wheels/vllm-"${VLLM_VERSION}"+empty-*.whl; \
-    fi
+    && if (( ${#wheels[@]} == 0 )); then \
+        echo "error: no vllm-${VLLM_VERSION}+empty wheel in THEAD_WHEELS_DIR;" \
+            "see docker/thead/README.md" >&2; \
+        exit 1; \
+    fi \
+    && test "${#wheels[@]}" = 1 \
+    && if [[ -n "${VLLM_WHEEL_SHA256}" ]]; then \
+        printf '%s  %s\n' "${VLLM_WHEEL_SHA256}" "${wheels[0]}" | sha256sum -c -; \
+    fi \
+    && "$VENV/bin/python" -I -B -m pip install --no-deps --no-index \
+        --no-compile "${wheels[0]}"
 
 # The CI stack assertions in .github/scripts/thead/stack.py depend on these
 # exact versions and origins, so fail the build here rather than in CI.
@@ -160,10 +142,4 @@ WORKDIR /workspace
 FROM base AS ci
 RUN "$VENV/bin/python" -I -B -m pip install --no-compile \
         "pytest-xdist>=3.0.0" "pytest-cov>=7.0.0" "pytest-json-report>=1.5.0"
-WORKDIR /workspace
-
-FROM ci AS dev
-WORKDIR /workspace
-
-FROM base AS release
 WORKDIR /workspace

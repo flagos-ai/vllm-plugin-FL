@@ -56,7 +56,11 @@ device_overrides:
 # Example: ["flaggems"] would skip "qwen3_flaggems" cases.
 unsupported_features: []
 
-# Default environment variables for this platform (applied by run.py before tests start)
+# Default environment variables for this platform (applied by run.py before tests
+# start). These are a fallback for running outside the CI image; the image sets
+# the same keys via ENV and apply_env_defaults uses setdefault, so they are
+# no-ops there. LD_LIBRARY_PATH is deliberately absent: it must be appended to,
+# and setdefault would replace the image's system library path.
 env_defaults:
   VLLM_PLUGINS: "fl"
   VLLM_TARGET_DEVICE: "empty"
@@ -65,7 +69,6 @@ env_defaults:
   USE_FLAGGEMS: "1"
   TORCH_DEVICE_BACKEND_AUTOLOAD: "1"
   FLAGCX_PATH: "/sgl-workspace/FlagCX"
-  LD_LIBRARY_PATH: "/sgl-workspace/FlagCX/build/lib"
 
 zw810e:
   name: "zw810e"

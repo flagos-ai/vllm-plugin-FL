@@ -167,7 +167,7 @@ VERSIONS (override via environment variables):
     THEAD_VLLM_VERSION   vLLM empty-mode version (default: ${THEAD_VLLM_VERSION})
     THEAD_FLAGTREE_VERSION PPU FlagTree/Triton wheel version (default: ${THEAD_FLAGTREE_VERSION})
     THEAD_FLAGGEMS_VERSION FlagGems version (default: ${THEAD_FLAGGEMS_VERSION})
-    THEAD_WHEELS_DIR     Optional directory with vllm/flagtree/flag_gems wheels
+    THEAD_WHEELS_DIR     Required for thead: directory with the vllm/flagtree/flag_gems wheels
 
 EXAMPLES:
     # Build CUDA dev image
@@ -362,10 +362,13 @@ elif [[ "${PLATFORM}" == "thead" ]]; then
     )
     [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
     [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
-    if [[ -n "${THEAD_WHEELS_DIR}" ]]; then
-        [[ -d "${THEAD_WHEELS_DIR}" ]] || err "THEAD_WHEELS_DIR directory does not exist."
-        BUILD_ARGS+=(--build-context "thead_wheels=${THEAD_WHEELS_DIR}")
+    if [[ -z "${THEAD_WHEELS_DIR}" ]]; then
+        err "THEAD_WHEELS_DIR is required: the thead image installs a prebuilt vllm-${THEAD_VLLM_VERSION}+empty wheel (see docker/thead/README.md)."
     fi
+    [[ -d "${THEAD_WHEELS_DIR}" ]] || err "THEAD_WHEELS_DIR directory does not exist."
+    thead_vllm_wheels=("${THEAD_WHEELS_DIR}"/vllm-"${THEAD_VLLM_VERSION}"+empty-*.whl)
+    [[ -e "${thead_vllm_wheels[0]}" ]] || err "no vllm-${THEAD_VLLM_VERSION}+empty wheel in ${THEAD_WHEELS_DIR}."
+    BUILD_ARGS+=(--build-context "thead_wheels=${THEAD_WHEELS_DIR}")
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${THEAD_VLLM_VERSION}-thead-${TARGET}"
     fi
