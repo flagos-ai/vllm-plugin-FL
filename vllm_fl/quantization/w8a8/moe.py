@@ -124,7 +124,7 @@ def install_fl_w8a8_moe_selector() -> bool:
                 AscendW8A8DynamicExperts,
             )
 
-            _validate_ascend_w8a8_moe(config)
+            AscendW8A8DynamicExperts.validate_config(config)
             supported, reason = AscendW8A8DynamicExperts.is_supported_config(
                 AscendW8A8DynamicExperts,
                 config,
@@ -232,56 +232,6 @@ def install_fl_w8a8_moe_selector() -> bool:
     return True
 
 
-def _validate_ascend_w8a8_moe(moe):
-    """Validate the native execution and communication contract."""
-    parallel = moe.moe_parallel_config
-    if moe.moe_backend not in ("auto", "triton"):
-        raise NotImplementedError("Unsupported explicit W8A8 MoE backend")
-    if parallel.is_sequence_parallel and not (
-        parallel.use_ep
-        and parallel.dp_size > 1
-        and parallel.all2all_backend == "allgather_reducescatter"
-    ):
-        raise NotImplementedError("W8A8 MoE token splitting requires DP EP AgRs")
-    if (
-        moe.is_lora_enabled
-        or moe.has_bias
-        or parallel.enable_eplb
-        or parallel.pcp_size != 1
-        or parallel.use_batched_activation_format
-    ):
-        raise NotImplementedError(
-            "W8A8 experts do not support LoRA/bias/EPLB/PCP/batched routing"
-        )
-    if parallel.dp_size > 1 and (
-        not parallel.use_ep or parallel.all2all_backend != "allgather_reducescatter"
-    ):
-        raise NotImplementedError("W8A8 distributed experts require AgRs EP")
-    if moe.activation.value not in ("silu", "swiglustep"):
-        raise NotImplementedError("Unsupported W8A8 expert activation")
-    if moe.swiglu_alpha not in (None, 1.0) or moe.swiglu_beta not in (
-        None,
-        0.0,
-    ):
-        raise NotImplementedError("Unsupported W8A8 SwiGLU alpha/beta")
-    if parallel.use_ep:
-        from vllm.config import get_current_vllm_config
-        from vllm.platforms import current_platform
-
-        config = get_current_vllm_config()
-        if (
-            current_platform.dist_backend != "hccl"
-            or config.parallel_config.expert_placement_strategy != "linear"
-            or config.compilation_config.pass_config.enable_sp
-            or moe.num_experts % parallel.ep_size
-        ):
-            raise NotImplementedError(
-                "W8A8 EP requires HCCL and equal linear experts without compiler SP"
-            )
-    if not moe.is_act_and_mul:
-        raise NotImplementedError("W8A8 experts require gated act-and-mul weights")
-
-
 _prepare = CachedOp("w8a8_prepare_experts")
 
 
@@ -292,7 +242,11 @@ class AscendW8A8DynamicMoEMethod(CompressedTensorsW8A8Int8MoEMethod):
         # Also support direct component construction outside platform startup.
         # One idempotent installer owns both selector and dynamic-config seams.
         install_fl_w8a8_moe_selector()
-        _validate_ascend_w8a8_moe(moe)
+        from vllm_fl.quantization.w8a8.moe_experts import (
+            AscendW8A8DynamicExperts,
+        )
+
+        AscendW8A8DynamicExperts.validate_config(moe)
         super().__init__(weight_quant, input_quant, moe, layer_name)
 
     def create_weights(
