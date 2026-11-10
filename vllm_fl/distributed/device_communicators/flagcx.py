@@ -49,7 +49,6 @@ flagcxComm_t = getattr(_flagcx_module, "flagcxComm_t", None)
 flagcxDataTypeEnum = getattr(_flagcx_module, "flagcxDataTypeEnum", None)
 flagcxUniqueId = getattr(_flagcx_module, "flagcxUniqueId", None)
 flagcxRedOpTypeEnum = getattr(_flagcx_module, "flagcxRedOpTypeEnum", None)
-_flagcx_available = FLAGCXLibrary is not None
 
 
 _FAKE_TENSOR_CLS = ()

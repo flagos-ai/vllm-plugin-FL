@@ -325,7 +325,29 @@ if current_platform.dist_backend == "flagcx" or current_platform.device_type in 
     graph_capture = _device_graph_capture
 
 else:
-    from vllm.distributed.parallel_state import graph_capture
+    from vllm.distributed.parallel_state import (
+        get_dp_group,
+        graph_capture as _vllm_graph_capture,
+    )
+
+    @contextmanager
+    def graph_capture(
+        device: torch.device,
+        graph_capture_context: GraphCaptureContext | None = None,
+    ):
+        # vLLM 0.32 creates its own stream in the top-level helper. Reuse an
+        # explicit stream through the same group capture hooks.
+        if graph_capture_context is None:
+            with _vllm_graph_capture(device=device) as context:
+                yield context
+            return
+
+        with (
+            get_tp_group().graph_capture(graph_capture_context),
+            get_pp_group().graph_capture(graph_capture_context),
+            get_dp_group().graph_capture(graph_capture_context),
+        ):
+            yield graph_capture_context
 
 
 def _get_parameter_for_reload(model: nn.Module, name: str) -> nn.Parameter:
@@ -7242,13 +7264,7 @@ class ModelRunnerFL(
             set_cudagraph_capturing_enabled(True)
             with (
                 self._freeze_gc(),
-                (
-                    graph_capture(device=self.device)
-                    if cap_ctx is None
-                    else _device_graph_capture(
-                        device=self.device, graph_capture_context=cap_ctx
-                    )
-                ),
+                graph_capture(device=self.device, graph_capture_context=cap_ctx),
             ):
                 torch.accelerator.synchronize()
                 torch.accelerator.empty_cache()
@@ -7495,13 +7511,7 @@ class ModelRunnerFL(
 
         with (
             self._freeze_gc(),
-            (
-                graph_capture(device=self.device)
-                if cap_ctx is None
-                else _device_graph_capture(
-                    device=self.device, graph_capture_context=cap_ctx
-                )
-            ),
+            graph_capture(device=self.device, graph_capture_context=cap_ctx),
         ):
             torch.accelerator.synchronize()
             torch.accelerator.empty_cache()
