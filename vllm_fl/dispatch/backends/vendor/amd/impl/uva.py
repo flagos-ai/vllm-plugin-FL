@@ -83,6 +83,11 @@ def _mapped_device_pointer(host_ptr: int) -> int:
 # allocator reuses addresses, so this is bounded by the distinct pinned
 # allocations actually mapped, and retaining them is the intended lifetime: the
 # view *is* that memory.
+#
+# INTENDED CALLERS: UVAOffloader (model-weight offload path) only. The dict
+# has no eviction path, which is safe for weight tensors whose lifetime spans
+# the entire serving session. Do not call get_cuda_view_from_cpu_tensor_amd
+# for short-lived tensors; introduce an explicit unmap interface first.
 _mapped_sources: dict[int, torch.UntypedStorage] = {}
 
 

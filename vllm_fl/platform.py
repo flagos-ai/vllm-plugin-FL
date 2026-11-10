@@ -815,8 +815,14 @@ class PlatformFL(Platform):
             # AMD defers ViT backend selection to vLLM's ROCm platform, so it
             # must accept everything that platform can return (notably the
             # Triton flash-attention backend used on RDNA).
-            from vllm.platforms.rocm import RocmPlatform
-
+            try:
+                from vllm.platforms.rocm import RocmPlatform
+            except ImportError:
+                logger.warning(
+                    "[vllm_fl] RocmPlatform unavailable; defaulting AMD ViT "
+                    "supported backends to TORCH_SDPA."
+                )
+                return [AttentionBackendEnum.TORCH_SDPA]
             return RocmPlatform.get_supported_vit_attn_backends()
         return [
             AttentionBackendEnum.TORCH_SDPA,
@@ -881,8 +887,14 @@ class PlatformFL(Platform):
             # the architectures -- Composable Kernel on CDNA, Triton flash
             # attention on gfx11xx/gfx12xx -- so defer to it and inherit any
             # upstream fix.
-            from vllm.platforms.rocm import RocmPlatform
-
+            try:
+                from vllm.platforms.rocm import RocmPlatform
+            except ImportError:
+                logger.warning(
+                    "[vllm_fl] RocmPlatform unavailable; defaulting AMD ViT "
+                    "attn backend to TORCH_SDPA."
+                )
+                return AttentionBackendEnum.TORCH_SDPA
             return RocmPlatform.get_vit_attn_backend(head_size, dtype, backend)
 
         # Try FlashAttention first
@@ -929,6 +941,19 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
+        if cls.vendor_name == "amd":
+            # Graph mode is not supported in this release; `--enforce-eager` is
+            # required. The capability itself is real (graph capture works on
+            # gfx1100 and warmup passes), so we return True rather than force
+            # vLLM to skip capture entirely -- but warn so users who omit the
+            # flag get a clear message rather than a cryptic FlagGems fake-tensor
+            # error. Upstream blocker: flagos-ai/FlagGems#8460.
+            logger.warning_once(
+                "[vllm_fl] AMD backend is eager-only in this release. "
+                "Pass --enforce-eager to suppress this warning. "
+                "Graph-mode blockers are tracked at "
+                "https://github.com/flagos-ai/FlagGems/issues/8460"
+            )
         return cls.vendor_name in [
             "nvidia",
             "ascend",

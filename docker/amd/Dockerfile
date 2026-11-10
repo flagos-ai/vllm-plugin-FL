@@ -34,8 +34,8 @@ SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 ARG PYTHON_VERSION=3.12
 ARG VLLM_VERSION=0.32.0
 ARG FLAGTREE_VERSION=0.7.0+amd3.6
-ARG FLAGGEMS_COMMIT=main
-ARG FLAGCX_COMMIT=main
+ARG FLAGGEMS_COMMIT=a8fdfa0
+ARG FLAGCX_COMMIT=591cfbf
 ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
 
@@ -102,11 +102,9 @@ v = version("vllm"); print("vllm:", v); assert v.endswith("+empty"), v'
 # triton_extra_name="hip" for the _amd backend is not in the 5.4.0 release.
 RUN git clone https://github.com/flagos-ai/FlagGems.git /opt/FlagGems \
     && git -C /opt/FlagGems checkout "${FLAGGEMS_COMMIT}" \
-    && SP="$(python3 -c 'import site; print(site.getsitepackages()[0])')" \
-    && cp -r /opt/FlagGems/src/flag_gems "${SP}/flag_gems" \
-    && python3 -m pip install --no-cache-dir \
+    && python3 -m pip install --no-cache-dir --no-build-isolation \
         ${INDEX_URL:+--index-url "${INDEX_URL}"} \
-        sqlalchemy \
+        /opt/FlagGems \
     && rm -rf /opt/FlagGems
 
 COPY .github/scripts/install_flaggems_vllm.py /opt/amd/install_flaggems_vllm.py

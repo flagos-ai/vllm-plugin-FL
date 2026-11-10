@@ -41,8 +41,8 @@ AMD_FLAGOS_RUNTIME_IMAGE="${AMD_FLAGOS_RUNTIME_IMAGE:-harbor.baai.ac.cn/flagos-r
 AMD_VLLM_VERSION="${AMD_VLLM_VERSION:-0.32.0}"
 AMD_PYTHON_VERSION="${AMD_PYTHON_VERSION:-3.12}"
 AMD_FLAGTREE_VERSION="${AMD_FLAGTREE_VERSION:-0.7.0+amd3.6}"
-AMD_FLAGGEMS_COMMIT="${AMD_FLAGGEMS_COMMIT:-main}"
-AMD_FLAGCX_COMMIT="${AMD_FLAGCX_COMMIT:-main}"
+AMD_FLAGGEMS_COMMIT="${AMD_FLAGGEMS_COMMIT:-a8fdfa0}"
+AMD_FLAGCX_COMMIT="${AMD_FLAGCX_COMMIT:-591cfbf}"
 MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06}"
 MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
 MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
@@ -133,12 +133,15 @@ VERSIONS (override via environment variables):
     METAX_PYTHON_VERSION Python version used in generated image tag (default: ${METAX_PYTHON_VERSION})
     METAX_PYTHON_TAG     Python tag fragment used in generated image tag (default: ${METAX_PYTHON_TAG})
     METAX_VLLM_VERSION   vLLM version installed in empty mode (default: ${METAX_VLLM_VERSION})
-  MUSA:
+  AMD:
     AMD_BASE_IMAGE       AMD ROCm base image, Torch must target gfx1100 (default: ${AMD_BASE_IMAGE})
     AMD_FLAGOS_RUNTIME_IMAGE
                          Image supplying FlagTree ${AMD_FLAGTREE_VERSION}; it is not on PyPI
                          (default: ${AMD_FLAGOS_RUNTIME_IMAGE})
     AMD_VLLM_VERSION     vLLM empty-mode version (default: ${AMD_VLLM_VERSION})
+    AMD_FLAGGEMS_COMMIT  FlagGems commit (needs triton_extra_name="hip"; default: ${AMD_FLAGGEMS_COMMIT})
+    AMD_FLAGCX_COMMIT    FlagCX commit (default: ${AMD_FLAGCX_COMMIT})
+  MUSA:
     MUSA_BASE_IMAGE      Moore Threads base image (default: ${MUSA_BASE_IMAGE})
     MUSA_VERSION         MUSA version used in image tag (default: ${MUSA_VERSION})
     MUSA_VLLM_VERSION    vLLM empty-mode version (default: ${MUSA_VLLM_VERSION})

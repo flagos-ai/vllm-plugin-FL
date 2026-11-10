@@ -42,6 +42,7 @@ from vllm.config import (
 from vllm.config.cache import CacheConfig
 from vllm.config.ec_manager_config import EncoderCacheManagerMetadata
 from vllm.config.model import PROCESSED_LOGPROBS_MODES
+
 try:  # FL: vLLM >= 0.28 slot mapping mode enum
     from vllm.v1.worker.block_table import SlotMappingMode
 except ImportError:  # pragma: no cover - older vLLM
@@ -59,17 +60,12 @@ from vllm.distributed.parallel_state import (
     get_tp_group,
     is_global_first_rank,
 )
-try:
-    from vllm.distributed.weight_transfer.sparse_nccl_engine import (
-        SparseWeightPatch,
-    )
-except ImportError:  # older vLLM
-    from vllm.distributed.weight_transfer.base import SparseWeightPatch
 from vllm.forward_context import (
     BatchDescriptor,
     set_forward_context,
 )
 from vllm.logger import init_logger
+
 # FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
 try:  # pragma: no cover - vLLM version compat
     from vllm.distributed.parallel_state import (
@@ -240,6 +236,7 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
+
 # NOTE: ``cp_utils.get_total_cp_world_size`` (0.28-era, later renamed
 # ``get_kv_cache_shard_count``) used to be imported here. vLLM 0.32 exports
 # neither name, and nothing in this module ever called it, so the import is
@@ -248,6 +245,7 @@ from vllm.v1.worker.cp_utils import (
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
+
 try:
     from vllm.v1.worker.gpu.pool.late_interaction_runner import (
         LateInteractionRunner,
@@ -5810,6 +5808,11 @@ class ModelRunnerFL(
             # ("Dynamo does not know how to enter a `RLock` context manager").
             # Aliased on purpose: a plain import here would shadow the
             # module-level symbol used by the earlier warmup in this function.
+            #
+            # NOTE: the AMD arm above is currently dead code. AMD runs
+            # eager-only (CompilationMode.NONE), so the != NONE guard never
+            # passes. The arm is kept as a placeholder for when FlagGems#8460
+            # is resolved and graph mode becomes available on gfx1100.
             from vllm_fl.dispatch import warmup_cached_ops as _warmup_cached_ops
 
             if current_platform.device_type == "musa":

@@ -69,9 +69,10 @@ def _enable_except(flag_gems, blacklist: list[str], common: dict) -> None:
     try:
         all_ops = [entry[0] for entry in flag_gems._FULL_CONFIG]
     except Exception as e:  # pragma: no cover - depends on FlagGems internals
-        logger.warning(
-            "[FlagGems] Could not read the operator list (%s); falling back to "
-            "enable(unused=...), which may not exclude every operator.",
+        logger.error(
+            "[FlagGems] _FULL_CONFIG unavailable (%s); falling back to "
+            "enable(unused=...) which may not exclude pow/float_power — "
+            "AMD Triton will reject __nv_powf symbols if hit.",
             e,
         )
         flag_gems.enable(unused=blacklist, **common)
