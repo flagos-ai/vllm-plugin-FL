@@ -207,7 +207,7 @@ patch_triton_language_for_iluvatar()
 patch_triton_perf_model_for_iluvatar()
 
 
-def patch_sampler_compile_for_iluvatar() -> None:
+def patch_sampler_compile_for_iluvatar(*, strict: bool = False) -> None:
     # Disable torch.compile on vllm sampler ops for Iluvatar.
     # flagtree triton only supports Iluvatar backend, not cuda target.
     # TODO: Remove once flagtree triton supports cuda inductor target.
@@ -220,6 +220,8 @@ def patch_sampler_compile_for_iluvatar() -> None:
             _tts._iluvatar_compile_patched = True
             logger.info('patch_sampler_compile_for_iluvatar: unwrapped topk_topp_sampler.compiled_random_sample')
     except Exception as e:
+        if strict:
+            raise RuntimeError('Iluvatar topk/topp sampler patch failed') from e
         logger.warning('patch_sampler_compile_for_iluvatar (topk_topp): %s', e)
     try:
         import importlib
@@ -230,12 +232,14 @@ def patch_sampler_compile_for_iluvatar() -> None:
             _lp._iluvatar_compile_patched = True
             logger.info('patch_sampler_compile_for_iluvatar: unwrapped logprobs.batched_count_greater_than')
     except Exception as e:
+        if strict:
+            raise RuntimeError('Iluvatar logprobs sampler patch failed') from e
         logger.warning('patch_sampler_compile_for_iluvatar (logprobs): %s', e)
 
 patch_sampler_compile_for_iluvatar()
 
 
-def patch_torch_inductor_for_iluvatar() -> None:
+def patch_torch_inductor_for_iluvatar(*, strict: bool = False) -> None:
     """Patch torch._inductor GPUTarget to use the correct triton backend name.
 
     torch._inductor always passes device_type='cuda' to GPUTarget, but
@@ -255,6 +259,8 @@ def patch_torch_inductor_for_iluvatar() -> None:
         import triton.backends as _tb
         _registered = list(getattr(_tb, 'backends', {}).keys())
         # If 'cuda' is already registered as a backend name, no patch needed
+        if strict and not _registered:
+            raise RuntimeError('No Triton backend registered for Iluvatar')
         if 'cuda' in _registered or not _registered:
             logger.debug('patch_torch_inductor_for_iluvatar: triton has cuda backend or no backends, skipping')
             return
@@ -282,7 +288,9 @@ def patch_torch_inductor_for_iluvatar() -> None:
         except Exception:
             pass
         if not _target:
-            _target = 'corex'  # safe default for all known flagtree versions
+            if strict:
+                raise RuntimeError('No supported Iluvatar Triton target found')
+            _target = 'corex'  # import-time compatibility fallback
 
         # If the discovered target is already 'cuda', no remapping needed —
         # inductor naturally passes 'cuda' to GPUTarget.
@@ -293,7 +301,9 @@ def patch_torch_inductor_for_iluvatar() -> None:
                 _registered,
             )
             return
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise RuntimeError('Cannot inspect Iluvatar Triton backends') from exc
         logger.debug('patch_torch_inductor_for_iluvatar: cannot inspect triton backends, skipping')
         return
 
@@ -325,6 +335,8 @@ def patch_torch_inductor_for_iluvatar() -> None:
             _remap_target,
         )
     except Exception as e:
+        if strict:
+            raise RuntimeError("Iluvatar Inductor target patch failed") from e
         logger.warning(
             "Failed to patch torch._inductor for iluvatar triton backend: %s", e
         )

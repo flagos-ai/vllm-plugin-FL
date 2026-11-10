@@ -217,16 +217,14 @@ def _apply_worker_vendor_patches() -> None:
     from vllm_fl.dispatch.backends.vendor.iluvatar.mrope import patch_mrope
 
     patch_mrope()
-    try:
-        from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
-            patch_sampler_compile_for_iluvatar,
-            patch_torch_inductor_for_iluvatar,
-        )
+    from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+        patch_sampler_compile_for_iluvatar,
+        patch_torch_inductor_for_iluvatar,
+    )
 
-        patch_torch_inductor_for_iluvatar()
-        patch_sampler_compile_for_iluvatar()
-    except Exception as exc:
-        logger.warning("Iluvatar worker patch failed: %s", exc)
+    # Required worker patches must fail startup, not silently degrade execution.
+    patch_torch_inductor_for_iluvatar(strict=True)
+    patch_sampler_compile_for_iluvatar(strict=True)
 
 
 class AsyncIntermediateTensors(IntermediateTensors):

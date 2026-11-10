@@ -51,3 +51,39 @@ def test_installer_keeps_vendor_dependencies():
     assert "pip install --no-build-isolation --no-deps" in helper
     assert "sha256sum -c -" in helper
     assert "refs/tags/v0.32.0.tar.gz" in helper
+
+
+def test_graph_primitive_preflight():
+    import ast
+    from types import SimpleNamespace
+
+    import pytest
+
+    source = SCRIPTS / "verify_stack.py"
+    tree = ast.parse(source.read_text())
+    check = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.For)
+        and isinstance(n.target, ast.Name)
+        and n.target.id == "primitive"
+    )
+    code = compile(
+        ast.fix_missing_locations(ast.Module(body=[check], type_ignores=[])),
+        str(source),
+        "exec",
+    )
+    names = (
+        "_construct_storage_from_data_pointer",
+        "_construct_CUDA_Tensor_From_Storage_And_Metadata",
+    )
+    primitives = dict.fromkeys(names, lambda: None)
+    exec(code, {"torch": SimpleNamespace(_C=SimpleNamespace(**primitives))})
+    for name in names:
+        for value in (None, 1):
+            broken = dict(primitives, **{name: value})
+            with pytest.raises(RuntimeError, match=name):
+                exec(code, {"torch": SimpleNamespace(_C=SimpleNamespace(**broken))})
+        missing = {key: value for key, value in primitives.items() if key != name}
+        with pytest.raises(RuntimeError, match=name):
+            exec(code, {"torch": SimpleNamespace(_C=SimpleNamespace(**missing))})

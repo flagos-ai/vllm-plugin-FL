@@ -20,6 +20,15 @@ assert vllm.__version__.split("+")[0] == "0.32.0", vllm.__version__
 assert metadata.version("flag-gems") == "5.3.5"
 assert metadata.version("flagtree") == "0.7.0+iluvatar3.6"
 assert torch.__version__.split("+")[0] == "2.10.0", torch.__version__
+# Graph output aliases require these primitives in the vendor PyTorch build.
+for primitive in (
+    "_construct_storage_from_data_pointer",
+    "_construct_CUDA_Tensor_From_Storage_And_Metadata",
+):
+    if not callable(getattr(torch._C, primitive, None)):
+        raise RuntimeError(
+            f"Iluvatar graph weak references require torch._C.{primitive}"
+        )
 assert current_platform.vendor_name == "iluvatar"
 assert torch.cuda.is_available() and torch.cuda.device_count() >= 4
 assert os.environ["USE_FLAGGEMS"] == "1"

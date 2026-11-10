@@ -15,7 +15,8 @@ def _snapshot_descendants(processes):
         try:
             for child in psutil.Process(process.pid).children(recursive=True):
                 descendants[child.pid] = child
-        except psutil.NoSuchProcess:
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            logger.debug("Cannot snapshot descendants of PID %s: %s", process.pid, exc)
             continue
     return list(descendants.values())
 

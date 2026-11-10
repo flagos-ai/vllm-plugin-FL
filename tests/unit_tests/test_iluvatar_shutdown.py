@@ -151,3 +151,38 @@ def test_cleanup_reports_unkillable_worker(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="42"):
         shutdown._cleanup_workers([worker])
+
+
+@pytest.mark.parametrize(
+    "error_type", [psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess]
+)
+@pytest.mark.parametrize("failure_site", ["lookup", "children"])
+def test_snapshot_errors_do_not_prevent_shutdown(monkeypatch, error_type, failure_site):
+    inaccessible = Mock()
+    error = error_type(10)
+    if failure_site == "children":
+        inaccessible.children.side_effect = error
+        first = inaccessible
+    else:
+        first = error
+    worker = Mock(pid=42)
+    accessible = Mock()
+    accessible.children.return_value = [worker]
+    monkeypatch.setattr(
+        shutdown.psutil, "Process", Mock(side_effect=[first, accessible])
+    )
+    cleanup = Mock()
+    monkeypatch.setattr(shutdown, "_cleanup_workers", cleanup)
+    calls = []
+
+    def original(processes, timeout=None):
+        calls.append((processes, timeout))
+        return "shutdown completed"
+
+    processes = [SimpleNamespace(pid=10), SimpleNamespace(pid=20)]
+    assert (
+        shutdown._with_worker_cleanup(original)(processes, timeout=3)
+        == "shutdown completed"
+    )
+    assert calls == [(processes, 3)]
+    cleanup.assert_called_once_with([worker])

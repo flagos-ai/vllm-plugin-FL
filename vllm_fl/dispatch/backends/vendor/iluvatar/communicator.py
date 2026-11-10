@@ -47,6 +47,11 @@ class IluvatarCommunicatorFL(CommunicatorFL, CudaCommunicator):
                 self.world_size,
                 self.device,
             )
+        # vLLM 0.32.0 contract: GroupCoordinator.graph_capture requires a
+        # CudaCommunicator instance and reads ca_comm. Do not initialize the
+        # CUDA base: that would create a second, NCCL-based communication stack.
+        # Keep these disabled CUDA fields in sync on upstream upgrades; the
+        # test_cuda_bridge_graph_contract test executes upstream graph_capture.
         self.use_custom_allreduce = False
         self.use_torch_symm_mem = False
         self.use_flashinfer_allreduce = False

@@ -31,6 +31,9 @@ def _wrap_mrope_forward(original):
             or query.device.type != "cuda"
         ):
             return original(self, positions, query, key, offsets)
+        # The opaque op mutates Q/K in place; forward_native must leave its
+        # inputs unchanged. Keep per-call outputs: a shared scratch buffer would
+        # alias live results across concurrent calls or CUDA graph captures.
         query_out = query.clone(memory_format=torch.contiguous_format)
         key_out = key.clone(memory_format=torch.contiguous_format)
         torch.ops.vllm.mrope(
