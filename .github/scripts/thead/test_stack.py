@@ -11,7 +11,15 @@ SPEC = importlib.util.spec_from_file_location("thead_ci_stack", HERE / "stack.py
 stack = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(stack)
 
-CHECKED_PACKAGES = {"torch", "torchvision", "numpy", "vllm", "triton", "flagtree", "flag-gems"}
+CHECKED_PACKAGES = {
+    "torch",
+    "torchvision",
+    "numpy",
+    "vllm",
+    "triton",
+    "flagtree",
+    "flag-gems",
+}
 
 
 class VersionDictionaryTests(unittest.TestCase):
@@ -26,7 +34,9 @@ class VersionDictionaryTests(unittest.TestCase):
             self.assertTrue(direct or (looped and '"' + name + '"' in source), name)
 
     def test_flag_packages_come_from_the_runtime_record(self):
-        self.assertEqual(stack.VERSIONS["flag-gems"], stack.STACK["flaggems"]["version"])
+        self.assertEqual(
+            stack.VERSIONS["flag-gems"], stack.STACK["flaggems"]["version"]
+        )
         self.assertEqual(stack.VERSIONS["flagtree"], stack.STACK["flagtree"]["version"])
 
     def test_runtime_versions_match_the_reviewed_runtime(self):
