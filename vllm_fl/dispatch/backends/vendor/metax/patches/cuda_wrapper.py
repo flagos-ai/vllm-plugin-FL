@@ -244,14 +244,19 @@ class CudaRTLibrary:
 
 import vllm.distributed.device_communicators.cuda_wrapper as _cuda_wrapper
 
-# Match vLLM-metax 440ec38e9508: consumers can bind these symbols before
-# import_kernels runs, including all_reduce_utils and the host-memory helper.
+# These vLLM 0.32 consumers can bind the original symbols before import_kernels.
+# Later imports read the patched definitions directly from cuda_wrapper.
+_cuda_wrapper_consumers = (
+    "vllm.distributed.device_communicators.all_reduce_utils",
+    "vllm.v1.kv_offload.cpu.host_register",
+)
 for _name, _replacement in (
     ("CudaRTLibrary", CudaRTLibrary),
     ("cudaIpcMemHandle_t", cudaIpcMemHandle_t),
 ):
     _original = getattr(_cuda_wrapper, _name)
-    for _module_name, _module in list(sys.modules.items()):
-        if _module_name.startswith("vllm.") and _module is not None:
-            if vars(_module).get(_name) is _original:
-                setattr(_module, _name, _replacement)
+    setattr(_cuda_wrapper, _name, _replacement)
+    for _module_name in _cuda_wrapper_consumers:
+        _module = sys.modules.get(_module_name)
+        if _module is not None and vars(_module).get(_name) is _original:
+            setattr(_module, _name, _replacement)

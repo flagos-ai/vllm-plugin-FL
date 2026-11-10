@@ -21,6 +21,7 @@ class TestMacaRuntime(unittest.TestCase):
             "vllm.distributed.device_communicators",
             "vllm.distributed.device_communicators.cuda_wrapper",
             "vllm.distributed.device_communicators.all_reduce_utils",
+            "vllm.v1.kv_offload.cpu.host_register",
             "vllm.unrelated",
         )
         modules = {name: types.ModuleType(name) for name in names}
@@ -30,14 +31,17 @@ class TestMacaRuntime(unittest.TestCase):
                 if parent in modules:
                     setattr(modules[parent], child, module)
         self.target = modules[names[5]]
-        self.alias = modules[names[6]]
-        for name in ("CudaRTLibrary", "cudaIpcMemHandle_t"):
-            original = type(name, (), {})
-            setattr(self.target, name, original)
-            setattr(self.alias, name, original)
+        self.all_reduce_utils = modules[names[6]]
+        self.host_register = modules[names[7]]
         self.unrelated = modules["vllm.unrelated"]
-        self.unrelated.CudaRTLibrary = object()
-        self.unrelated_original = self.unrelated.CudaRTLibrary
+        self.original_runtime = type("CudaRTLibrary", (), {})
+        self.original_handle = type("cudaIpcMemHandle_t", (), {})
+        self.target.CudaRTLibrary = self.original_runtime
+        self.target.cudaIpcMemHandle_t = self.original_handle
+        for consumer in (self.all_reduce_utils, self.host_register, self.unrelated):
+            consumer.CudaRTLibrary = self.original_runtime
+        self.unrelated.cudaIpcMemHandle_t = self.original_handle
+        self.custom_handle = self.host_register.cudaIpcMemHandle_t = object()
         self.modules_patch = patch.dict(sys.modules, modules)
         self.modules_patch.start()
         self.addCleanup(self.modules_patch.stop)
@@ -51,11 +55,14 @@ class TestMacaRuntime(unittest.TestCase):
         spec.loader.exec_module(self.module)
         self.runtime = self.module.CudaRTLibrary.__new__(self.module.CudaRTLibrary)
 
-    def test_loaded_aliases_and_ipc_handle_use_maca_abi(self):
-        self.assertIs(self.alias.CudaRTLibrary, self.module.CudaRTLibrary)
-        self.assertIs(self.alias.cudaIpcMemHandle_t, self.module.cudaIpcMemHandle_t)
-        self.assertEqual(ctypes.sizeof(self.alias.cudaIpcMemHandle_t), 128)
-        self.assertIs(self.unrelated.CudaRTLibrary, self.unrelated_original)
+    def test_loaded_consumers_and_ipc_handle_use_maca_abi(self):
+        for consumer in (self.target, self.all_reduce_utils, self.host_register):
+            self.assertIs(consumer.CudaRTLibrary, self.module.CudaRTLibrary)
+        self.assertIs(self.target.cudaIpcMemHandle_t, self.module.cudaIpcMemHandle_t)
+        self.assertEqual(ctypes.sizeof(self.target.cudaIpcMemHandle_t), 128)
+        self.assertIs(self.unrelated.CudaRTLibrary, self.original_runtime)
+        self.assertIs(self.unrelated.cudaIpcMemHandle_t, self.original_handle)
+        self.assertIs(self.host_register.cudaIpcMemHandle_t, self.custom_handle)
 
     def test_host_registration_returns_errors_for_pageable_fallback(self):
         register, unregister, last_error = (

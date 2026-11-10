@@ -284,9 +284,15 @@ def test_zero_draft_spec_batch_keeps_decode_state_offset_and_masks_prefill():
             self.gpu[:count].copy_(self.cpu[:count])
 
     runner = _runner_class(
-        {"_prepare_inputs", "_get_cumsum_and_arange", "_compute_prev_positions"},
+        {
+            "_prepare_inputs",
+            "_get_cumsum_and_arange",
+            "_compute_prev_positions",
+            "_kl_guard_on",
+        },
         torch=torch,
         np=np,
+        current_platform=SimpleNamespace(vendor_name="metax"),
     )()
     token_ids = torch.arange(24, dtype=torch.int32).view(3, 8)
     computed = torch.tensor([5, 2, 0, 0], dtype=torch.int32)
