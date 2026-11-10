@@ -111,6 +111,12 @@ flagos_blacklist:
   # rand/rand_like exceed the Ascend UB limit for a 257x257 FP32 tensor.
   - rand
   - rand_like
+  # FlagGems in-place log_ drops the first 1024 elements for N >= 65536
+  # (leaves them untouched). torch_npu builds exponential_ on top of log_,
+  # and vLLM samples with probs / exponential_ + argmax, so a masked vocab
+  # makes every sampled token id collapse to 0 -- greedy sampling is
+  # unaffected, which hides the bug from argmax-only smoke tests.
+  - log_
   # FlagGems FLA overflows UB at T=65, K=V=64. Keep the Ascend adapter for
   # vLLM's packed/GQA, v-first-state GDN contract.
   - chunk_gated_delta_rule_fwd

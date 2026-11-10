@@ -238,6 +238,7 @@ from vllm.v1.worker.utils import (
 from vllm.v1.worker.workspace import lock_workspace
 
 from vllm_fl.compilation.graph import GraphWrapper
+from vllm_fl.dispatch import warmup_cached_ops
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.dispatch.io_dumper import (
     advance_io_step,
@@ -2196,11 +2197,12 @@ class ModelRunnerFL(
         # CPU values are optimistic (all drafts accepted). The kernel
         # corrects on GPU using the previous step's
         # valid_sampled_token_count_gpu. Otherwise, just copy from CPU.
-        if (
+        async_spec_decode_gpu_fixup = (
             self.use_async_spec_decode
             and self.valid_sampled_token_count_gpu is not None
-            and prev_req_id_to_index
-        ):
+            and bool(prev_req_id_to_index)
+        )
+        if async_spec_decode_gpu_fixup:
             self.prev_positions.copy_to_gpu(num_reqs)
             self.prev_num_draft_tokens.copy_to_gpu()
             cpu_values = self.input_batch.num_computed_tokens_cpu_tensor[:num_reqs].to(
@@ -2228,10 +2230,25 @@ class ModelRunnerFL(
         self.num_scheduled_tokens.np[:num_reqs] = num_scheduled_tokens
         self.num_scheduled_tokens.copy_to_gpu(num_reqs)
         num_scheduled_tokens_gpu = self.num_scheduled_tokens.gpu[:num_reqs]
-        self.positions[:total_num_scheduled_tokens] = (
-            self.num_computed_tokens[req_indices_gpu].to(torch.int64)
-            + self.query_pos.gpu[:total_num_scheduled_tokens]
-        )
+        if self._kl_guard_on() and not async_spec_decode_gpu_fixup:
+            # `aten::index` on the P800 kills every TP worker with
+            # `Exception in kernel execution (err_code 714)` on the first decode
+            # step of the Qwen3.6-35B-A3B graph run (`indices_len=1`): the
+            # FlagGems generated `index` kernel faults, and so does the xdnn
+            # lowering (`index_select.cpp` / `math_gather_nd.cpp`).  The values
+            # gathered here are already available on the CPU: without the async
+            # spec-decode fixup above, the device copy of `num_computed_tokens`
+            # was just refreshed from the very same CPU array, and `positions_np`
+            # has num_computed_tokens + query_pos folded in already.  Fill
+            # `positions` from the CPU instead of launching a device gather.
+            self.positions[:total_num_scheduled_tokens] = torch.from_numpy(
+                positions_np
+            ).to(self.device, non_blocking=True)
+        else:
+            self.positions[:total_num_scheduled_tokens] = (
+                self.num_computed_tokens[req_indices_gpu].to(torch.int64)
+                + self.query_pos.gpu[:total_num_scheduled_tokens]
+            )
         self.seq_lens[:num_reqs] = (
             self.num_computed_tokens[:num_reqs] + num_scheduled_tokens_gpu
         )
@@ -5338,6 +5355,11 @@ class ModelRunnerFL(
             format_gib(self.model_memory_usage),
             time_after_load - time_before_load,
         )
+
+        # All model modules are loaded now, while compilation and CUDA Graph
+        # capture have not started yet. Resolve CachedOps outside either graph.
+        warmup_cached_ops()
+
         if not load_dummy_weights:
             register_io_module_hooks(self.model)
         mm_config = self.model_config.multimodal_config
@@ -5366,7 +5388,9 @@ class ModelRunnerFL(
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
             # because fullgraph compilation cannot enter that context manager.
-            from vllm_fl.dispatch import warmup_cached_ops
+            # Aliased on purpose: a plain import here would shadow the
+            # module-level symbol used by the earlier warmup in this function.
+            from vllm_fl.dispatch import warmup_cached_ops as _warmup_cached_ops
 
             if current_platform.device_type == "musa":
                 import logging
@@ -5375,7 +5399,7 @@ class ModelRunnerFL(
 
                 dynamo_config.ignore_logger_methods.add(logging.Logger.debug)
 
-            warmup_cached_ops()
+            _warmup_cached_ops()
 
         if (
             self.vllm_config.compilation_config.mode
@@ -6664,12 +6688,25 @@ class ModelRunnerFL(
             + list(GraphWrapper._all_instances)
             + list(BreakableCUDAGraphWrapper._all_instances)
         )
+        # Kunlunxin: Breakable PIECEWISE wrappers with graph_pool=None own
+        # independent pools; profiling must preserve that runtime policy.
+        private_breakable_graphs = any(
+            instance.graph_pool is None
+            for instance in BreakableCUDAGraphWrapper._all_instances
+        )
         for instance in all_wrappers:
             original_pools[id(instance)] = instance.graph_pool
-            instance.graph_pool = profiling_pool
+            if instance.graph_pool is not None:
+                instance.graph_pool = profiling_pool
 
         shared_memory_estimate = {}
         per_graph_estimate = {}
+        private_memory_estimate = 0
+        # Kunlunxin private-pool budget guard is an optional capability:
+        # mock/stub runners (and non-Kunlunxin test doubles) may not provide it.
+        kl_guard_supported = callable(getattr(self, "_kl_guard_on", None))
+        if kl_guard_supported:
+            self._kl_budget_reset()
         encoder_memory_estimate = 0
 
         # On ROCm, capture these throwaway profiling graphs on vLLM's dedicated
@@ -6703,11 +6740,24 @@ class ModelRunnerFL(
                 torch.accelerator.empty_cache()
 
                 for mode, descs in capture_descs:
+                    # Native Breakable PIECEWISE also owns private pools when
+                    # no compiled runner exists. Measure every descriptor;
+                    # extrapolating a shared-pool sample can under-budget it.
+                    private_pools = private_breakable_graphs
                     # MUSA retains shape-specific graph inputs. Measure every
                     # original shape instead of extrapolating the second-largest
                     # shape's retained allocation to all smaller shapes.
                     is_musa = current_platform.device_type == "musa"
-                    profile_descs = descs if is_musa else descs[:2]
+                    # Private pools cannot overlay allocations across sizes or
+                    # segments. Capture every descriptor and add its full cost.
+                    profile_descs = descs if (private_pools or is_musa) else descs[:2]
+                    kl_guard = (
+                        private_pools
+                        and kl_guard_supported
+                        and self._kl_guard_on()
+                    )
+                    if kl_guard:
+                        profile_descs = self._kl_filter_descs(profile_descs)
                     mem_samples: list[int] = []
                     if is_musa:
                         # Use vLLM's configured logger hierarchy for startup evidence.
@@ -6742,6 +6792,14 @@ class ModelRunnerFL(
                         torch.accelerator.synchronize()
                         free_after = torch.accelerator.get_memory_info()[0]
                         mem_samples.append(mem_before - free_after)
+                        if kl_guard:
+                            self._kl_note(mode, desc.num_tokens, mem_samples[-1])
+                            BreakableCUDAGraphWrapper.clear_all_graphs()
+                            torch.accelerator.synchronize()
+                            torch.accelerator.empty_cache()
+                            if self._kl_over_budget():
+                                break
+
                         if is_musa:
                             profile_logger.info(
                                 "MUSA graph profile bucket completed: "
@@ -6757,6 +6815,17 @@ class ModelRunnerFL(
                                 free_after,
                                 mem_samples[-1],
                             )
+
+                    if private_pools:
+                        private_memory_estimate += sum(
+                            max(sample, 1 << 20) for sample in mem_samples
+                        )
+                        logger.debug(
+                            "Measured private graph memory: %.2f MiB for %d graphs",
+                            private_memory_estimate / (1 << 20),
+                            len(descs),
+                        )
+                        continue
 
                     if is_musa:
                         shared_memory_estimate[mode] = max(mem_samples[0], 0)
@@ -6829,11 +6898,14 @@ class ModelRunnerFL(
             self._cleanup_profiling_kv_cache()
             compilation_counter.num_cudagraph_captured = saved_num_cudagraph_captured
 
-        # FULL and PIECEWISE graphs share the global pool at runtime and are
-        # never replayed concurrently, so the pool overlays their memory.
-        # Take the max to avoid double-counting the overlap.
-        decoder_estimate = max(shared_memory_estimate.values(), default=0) + sum(
-            per_graph_estimate.values()
+        if kl_guard_supported:
+            self._kl_apply(capture_descs)
+        # Overlay shared-pool modes, but add private Breakable pools: neither their
+        # sizes nor their breakable segments can share activation storage.
+        decoder_estimate = (
+            private_memory_estimate
+            + max(shared_memory_estimate.values(), default=0)
+            + sum(per_graph_estimate.values())
         )
         # Encoder graphs use a manager-local pool at runtime, separate from the
         # decoder pool, so add their estimate instead of overlaying it.
@@ -6960,6 +7032,64 @@ class ModelRunnerFL(
             cuda_graph_size / (1 << 30),
         )
         return cuda_graph_size
+
+    def _kl_guard_on(self) -> bool:
+        return getattr(current_platform, "vendor_name", None) == "kunlunxin"
+
+    def _kl_budget_reset(self) -> None:
+        self._kl_captured = {}
+        self._kl_used = 0
+        self._kl_budget = 0
+        self._kl_stop = False
+
+    def _kl_filter_descs(self, descs):
+        if self._kl_budget == 0:
+            free, total = current_platform.torch_device_fn.mem_get_info()
+            self._kl_budget = int(min(int(total) * 0.30, int(free) * 0.75))
+            logger.warning(
+                "Kunlunxin: private-graph-pool budget %.2f GiB "
+                "(free %.2f GiB, total %.2f GiB)",
+                self._kl_budget / (1 << 30), free / (1 << 30), total / (1 << 30),
+            )
+        if self._kl_stop or self._kl_used >= self._kl_budget:
+            self._kl_stop = True
+            return []
+        return descs
+
+    def _kl_note(self, mode, num_tokens: int, sample: int) -> None:
+        self._kl_used += max(sample, 0)
+        self._kl_captured[(mode.name, num_tokens)] = max(sample, 0)
+
+    def _kl_over_budget(self) -> bool:
+        if self._kl_used >= self._kl_budget:
+            self._kl_stop = True
+        return self._kl_stop
+
+    def _kl_apply(self, capture_descs) -> None:
+        if self._kl_budget == 0 or not self._kl_stop:
+            return
+        modes = [(m, ds) for m, ds in capture_descs if ds]
+        if not modes:
+            return
+        sizes = sorted({d.num_tokens for _, ds in modes for d in ds})
+        kept = []
+        for sz in sizes:
+            if all((m.name, sz) in self._kl_captured for m, _ in modes):
+                kept.append(sz)
+            else:
+                break
+        if not kept:
+            kept = sizes[:1]
+        if kept == sizes:
+            return
+        cc = self.compilation_config
+        cc.cudagraph_capture_sizes = kept
+        cc.max_cudagraph_capture_size = kept[-1]
+        logger.warning(
+            "Kunlunxin: reduced CUDA graph capture sizes %d -> %d "
+            "(largest=%d, used=%.2f GiB) for per-descriptor private pools",
+            len(sizes), len(kept), kept[-1], self._kl_used / (1 << 30),
+        )
 
     def _warmup_and_capture(
         self,
