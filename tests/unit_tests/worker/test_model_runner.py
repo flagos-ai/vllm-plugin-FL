@@ -535,4 +535,3 @@ class TestVllm032Compatibility:
             _get_model_runner_type(SimpleNamespace(is_pooling_model=True))
             == "pooling"
         )
-

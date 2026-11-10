@@ -100,6 +100,7 @@ from vllm.v1.worker.startup_plan import (
 )
 from vllm.v1.worker.utils import request_memory
 
+
 def _is_sp_enabled(pass_config: Any) -> bool:
     return bool(
         getattr(

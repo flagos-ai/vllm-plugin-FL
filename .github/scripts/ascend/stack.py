@@ -273,6 +273,7 @@ def check_stack(*, runtime_only=False):
 
         from vllm import LLM
         from vllm.platforms import current_platform
+
         from vllm_fl.dispatch.backends.vendor.ascend.ascend import AscendBackend
 
         fused_origin = fused_dist.locate_file("flaggems_vllm/__init__.py")

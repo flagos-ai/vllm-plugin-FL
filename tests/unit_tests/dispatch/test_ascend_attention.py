@@ -44,6 +44,7 @@ def test_upstream_creates_ascend_metadata_builder():
         model_config=SimpleNamespace(max_model_len=2048),
         scheduler_config=SimpleNamespace(enable_chunked_prefill=False),
         speculative_config=None,
+        parallel_config=SimpleNamespace(decode_context_parallel_size=1),
     )
     group = AttentionGroup(AscendAttentionBackend, ["attention"], spec, 0)
     group.create_metadata_builders(config, torch.device("cpu"), kernel_block_size=128)

@@ -50,17 +50,65 @@ Run and verify on an Ascend NPU host (for example on Ascend 910B with devices `0
 ```bash
 podman run --rm -it --ipc=host --privileged \
   -e ASCEND_RT_VISIBLE_DEVICES=0,1 \
+  -e VLLM_FL_FLAGOS_WHITELIST=zeros \
   -v /usr/local/dcmi:/usr/local/dcmi \
   -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
   -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
   -v /etc/ascend_install.info:/etc/ascend_install.info \
+  -v /path/to/Qwen3-0.6B:/data/models/Qwen3-0.6B:ro \
   harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-ascend-ci bash
 # Inside the container:
 bash .github/scripts/ascend/check.sh
 bash .github/scripts/ascend/setup.sh
-python tests/run.py --platform ascend --scope unit
-python tests/run.py --platform ascend --scope functional
+# Explicit 910B selection; two workers avoid excessive CPU thread creation.
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  python -m pytest tests/unit_tests --platform=ascend --device=910b \
+  -n 2 -m "not multi_gpu and not serial" --timeout=120
+python -m pytest tests/unit_tests --platform=ascend --device=910b \
+  -m "multi_gpu or serial" --timeout=120
+python -m pytest tests/functional_tests --platform=ascend --device=910b
 ```
+
+### Minimal inference on 910B
+
+Replace `/path/to/Qwen3-0.6B` above with your local model directory before
+starting the container. Keep `VLLM_FL_FLAGOS_WHITELIST=zeros`: the verified configuration
+limits FlagGems registration to this operator. Unrestricted registration is not
+validated by this recipe. Use a script file with a main guard so worker processes
+can import it when Python uses `spawn`:
+
+```bash
+cat > /tmp/ascend_smoke.py <<'PY'
+import argparse
+from vllm import LLM, SamplingParams
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--tp", type=int, default=1)
+    args = parser.parse_args()
+    llm = LLM(
+        model=args.model, tensor_parallel_size=args.tp,
+        dtype="bfloat16", enforce_eager=True, max_model_len=512,
+        gpu_memory_utilization=0.3, enable_prefix_caching=False,
+        enable_chunked_prefill=False,
+    )
+    outputs = llm.generate(
+        ["Hello, my name is", "The capital of France is"],
+        SamplingParams(temperature=0.0, max_tokens=16),
+    )
+    for output in outputs:
+        assert output.outputs[0].token_ids, "No tokens generated"
+        print(repr(output.prompt), "->", repr(output.outputs[0].text))
+PY
+ASCEND_RT_VISIBLE_DEVICES=0 python /tmp/ascend_smoke.py --model /data/models/Qwen3-0.6B
+ASCEND_RT_VISIBLE_DEVICES=0,1 python /tmp/ascend_smoke.py --model /data/models/Qwen3-0.6B --tp 2
+```
+
+These commands check text generation in eager mode. They do not establish graph,
+long-context, performance or Qwen3.5/3.6 hybrid-cache support. The verified host
+used driver 25.5.2; the Runtime documentation lists 26.1.1. This records the tested
+configuration rather than a general driver compatibility guarantee.
 
 ---
 

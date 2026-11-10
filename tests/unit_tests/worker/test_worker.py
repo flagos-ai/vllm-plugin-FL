@@ -260,4 +260,3 @@ def test_platform_default_ir_op_priority_supports_gelu_and_mul_sparse():
     if any(f.name == "gelu_and_mul_sparse" for f in fields(IrOpPriorityConfig)):
         assert eager_priority.gelu_and_mul_sparse == ["triton", "native"]
         assert "vllm_c" not in eager_priority.gelu_and_mul_sparse
-
