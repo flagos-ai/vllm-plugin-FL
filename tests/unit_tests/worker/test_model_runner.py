@@ -421,9 +421,7 @@ class TestVllm032Compatibility:
         runner.vllm_config = SimpleNamespace(
             parallel_config=SimpleNamespace(tensor_parallel_size=4)
         )
-        runner.compilation_config = SimpleNamespace(
-            pass_config=SimpleNamespace()
-        )
+        runner.compilation_config = SimpleNamespace(pass_config=SimpleNamespace())
         pad_fn = ModelRunnerFL._pad_for_sequence_parallelism.__get__(
             runner, ModelRunnerFL
         )
@@ -521,17 +519,13 @@ class TestVllm032Compatibility:
         )
 
         assert AscendAttentionBackend.get_supported_kernel_block_sizes() == [128]
-        assert (
-            AscendAttentionBackend.get_supported_kernel_block_sizes(
-                SimpleNamespace(block_size=128)
-            )
-            == [128]
-        )
+        assert AscendAttentionBackend.get_supported_kernel_block_sizes(
+            SimpleNamespace(block_size=128)
+        ) == [128]
         assert (
             _get_model_runner_type(SimpleNamespace(is_pooling_model=False))
             == "generate"
         )
         assert (
-            _get_model_runner_type(SimpleNamespace(is_pooling_model=True))
-            == "pooling"
+            _get_model_runner_type(SimpleNamespace(is_pooling_model=True)) == "pooling"
         )

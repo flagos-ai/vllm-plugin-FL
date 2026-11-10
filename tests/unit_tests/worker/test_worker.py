@@ -212,9 +212,7 @@ def test_is_residual_scattered_for_sp_preserves_semantics():
         )
 
     # vLLM 0.32 PassConfig without enable_sp/enable_sequence_parallelism -> False
-    assert (
-        worker_module.is_residual_scattered_for_sp(make_vllm_config(2), 4) is False
-    )
+    assert worker_module.is_residual_scattered_for_sp(make_vllm_config(2), 4) is False
     # SP enabled via legacy enable_sp
     assert (
         worker_module.is_residual_scattered_for_sp(
