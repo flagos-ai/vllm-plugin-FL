@@ -9,7 +9,6 @@ import os
 import sys
 import threading
 from types import SimpleNamespace
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -26,24 +25,32 @@ _flagcx_path = os.getenv('FLAGCX_PATH')
 if _flagcx_path and os.path.isdir(_flagcx_path):
     sys.path.append(_flagcx_path)
 
-try:
-    from plugin.interservice.flagcx_wrapper import (
-        FLAGCXLibrary,
-        buffer_type,
-        flagcxComm_t,
-        flagcxDataTypeEnum,
-        flagcxUniqueId,
-        flagcxRedOpTypeEnum,
-    )
-    _flagcx_available = True
-except (ImportError, ModuleNotFoundError):
-    _flagcx_available = False
-    FLAGCXLibrary = None
-    buffer_type = None
-    flagcxComm_t = None
-    flagcxDataTypeEnum = None
-    flagcxUniqueId = None
-    flagcxRedOpTypeEnum = None
+def _flagcx_api():
+    if _flagcx_path:
+        try:
+            from plugin.interservice import flagcx_wrapper
+
+            return flagcx_wrapper
+        except ImportError:
+            pass
+
+    try:
+        from flagcx import api
+
+        return api
+    except (ImportError, OSError):
+        return None
+
+
+_flagcx_module = _flagcx_api()
+FLAGCXLibrary = getattr(_flagcx_module, "FLAGCXLibrary", None)
+buffer_type = getattr(_flagcx_module, "buffer_type", None)
+flagcxComm_t = getattr(_flagcx_module, "flagcxComm_t", None)
+flagcxDataTypeEnum = getattr(_flagcx_module, "flagcxDataTypeEnum", None)
+flagcxUniqueId = getattr(_flagcx_module, "flagcxUniqueId", None)
+flagcxRedOpTypeEnum = getattr(_flagcx_module, "flagcxRedOpTypeEnum", None)
+_flagcx_available = FLAGCXLibrary is not None
+
 
 _FAKE_TENSOR_CLS = ()
 try:  # FakeTensor lives in torch._subclasses; keep the import optional.
@@ -74,9 +81,9 @@ def is_trace_tensor(tensor) -> bool:
 class PyFlagcxCommunicator:
     def __init__(
         self,
-        group: Union[ProcessGroup, StatelessProcessGroup],
-        device: Union[str, torch.device],
-        library_path: Optional[str] = None,
+        group: ProcessGroup | StatelessProcessGroup,
+        device: str | torch.device,
+        library_path: str | None = None,
     ):
         """
         Args:
@@ -114,13 +121,13 @@ class PyFlagcxCommunicator:
             self.disabled = True
             return
         try:
-            ### TODO(lms): simplify it
-            if library_path is None:
-                flagcx_path = os.getenv('FLAGCX_PATH')
-                library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
-                self.flagcx = FLAGCXLibrary(library_path)
-            else:
-                self.flagcx = FLAGCXLibrary(library_path)
+            if (
+                library_path is None
+                and _flagcx_module is not None
+                and _flagcx_module.__name__ != "flagcx.api"
+            ):
+                library_path = os.path.join(_flagcx_path, "build/lib/libflagcx.so")
+            self.flagcx = FLAGCXLibrary(library_path)
         except Exception as exc:
             # disable because of missing NCCL library
             # e.g. in a non-GPU environment

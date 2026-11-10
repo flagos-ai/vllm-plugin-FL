@@ -3,6 +3,14 @@
 # Check Kunlunxin P800 availability.
 set -euo pipefail
 
+if [[ -r /etc/bash_env.sh ]]; then
+  # shellcheck disable=SC1091
+  source /etc/bash_env.sh
+fi
+if [[ -x /flagos/bin/python ]]; then
+  export PATH="/flagos/bin:${PATH}"
+fi
+
 echo "Current time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=== Checking Kunlunxin P800 availability ==="
 

@@ -248,6 +248,23 @@ def register():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
+    if vendor_name in (
+        "ascend",
+        "mthreads",
+        "enflame",
+        "gcu",
+        "tsingmicro",
+        "kunlunxin",
+    ):
+        # These backends use ModelRunnerFL. Set the default before imports
+        # that can read the upstream runner selection.
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+
+    if vendor_name == "kunlunxin":
+        # Padding-aware routing in vLLM 0.32 calls the CUDA-only _moe_C op.
+        # The FL vendor router handles every row and uses valid expert IDs.
+        os.environ["VLLM_MOE_SKIP_PADDING"] = "0"
+
     if vendor_name != "nvidia":
         # Other accelerators still use EMPTY wheels. NVIDIA uses upstream's
         # native CUDA extensions and must not replace failed imports with stubs.
@@ -265,11 +282,6 @@ def register():
 
     if vendor_name == "kunlunxin":
         _install_kunlunxin_fla_alias()
-
-    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
-        # These backends use ModelRunnerFL; choose it before VllmConfig reads
-        # model defaults for the upstream V2 runner.
-        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
 

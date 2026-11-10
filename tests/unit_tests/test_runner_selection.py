@@ -56,7 +56,7 @@ def _make_ascend_vllm_config(
 
 
 @pytest.mark.parametrize(
-    "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro"]
+    "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro", "kunlunxin"]
 )
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
@@ -70,17 +70,22 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
         monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
     else:
         monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    monkeypatch.setenv("VLLM_MOE_SKIP_PADDING", "1")
     monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
     monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
     monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_install_kunlunxin_fla_alias", lambda: None)
     monkeypatch.setattr(
         vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name=vendor)
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+    assert os.environ["VLLM_MOE_SKIP_PADDING"] == (
+        "0" if vendor == "kunlunxin" else "1"
+    )
 
 
 @pytest.mark.parametrize(
@@ -91,6 +96,7 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("cuda", "kunlunxin", "Kunlunxin.*VLLM_USE_V2_MODEL_RUNNER=0"),
     ],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(
@@ -104,6 +110,40 @@ def test_accelerator_rejects_explicit_upstream_v2_runner(
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
     with pytest.raises(ValueError, match=error_pattern):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        ("FULL_AND_PIECEWISE", "FULL_DECODE_ONLY"),
+        ("PIECEWISE", "NONE"),
+        ("NONE", "NONE"),
+    ],
+)
+def test_kunlunxin_uses_bounded_native_decode_graphs(monkeypatch, requested, expected):
+    from types import SimpleNamespace
+
+    from vllm.config import CUDAGraphMode
+    from vllm.config.compilation import CompilationMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "kunlunxin")
+    config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode[requested])
+    config.compilation_config.cudagraph_capture_sizes = [1, 2, 4, 8, 16, 32]
+    config.kernel_config = SimpleNamespace(enable_jit_warmup=True)
+
+    PlatformFL.apply_config_platform_defaults(config)
+    assert config.compilation_config.mode == CompilationMode.NONE
+
+    PlatformFL.check_and_update_config(config)
+
+    assert config.compilation_config.cudagraph_mode == CUDAGraphMode[expected]
+    assert config.kernel_config.enable_jit_warmup is False
+    if expected == "FULL_DECODE_ONLY":
+        assert config.compilation_config.cudagraph_capture_sizes == [1, 2, 4, 8]
+        assert config.compilation_config.max_cudagraph_capture_size == 8
 
 
 @pytest.mark.parametrize("tp", [1, 4])

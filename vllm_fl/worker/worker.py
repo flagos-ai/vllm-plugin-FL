@@ -84,6 +84,7 @@ from vllm.utils.gpu_sync_debug import enable_gpu_sync_check, with_gpu_sync_check
 from vllm.utils.mem_constants import GiB_bytes
 from vllm.utils.mem_utils import MemorySnapshot, format_gib, memory_profiling
 from vllm.utils.torch_utils import set_random_seed, set_torch_threads_for_runtime
+from vllm.v1.attention.backends.utils import record_kv_cache_layout
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import (
@@ -865,6 +866,13 @@ class WorkerFL(WorkerBase):
         # so that it's available to the warmup stage.
         self.cache_config.num_gpu_blocks = kv_cache_config.num_blocks
 
+        if kv_cache_config.kv_cache_layout is not None:
+            record_kv_cache_layout(self.cache_config, kv_cache_config.kv_cache_layout)
+        self.cache_config.hash_block_size = kv_cache_config.hash_block_size
+        self.cache_config.cache_hit_alignment_tokens = (
+            kv_cache_config.cache_hit_alignment_tokens
+        )
+
         # Init kv cache connector here, because it requires
         # `kv_cache_config`.
         # NOTE(Kuntai): This need to be done before `initialize_kv_cache`,
@@ -872,10 +880,18 @@ class WorkerFL(WorkerBase):
         # related to kv cache connector (e.g. kv cache sharing layers).
         ensure_kv_transfer_initialized(self.vllm_config, kv_cache_config)
 
-        with self._maybe_get_memory_pool_context(tag="kv_cache"):
-            self.model_runner.initialize_kv_cache(kv_cache_config)
+        allocation_context = (
+            get_kv_transfer_group().get_mem_pool_context()
+            if has_kv_transfer_group()
+            else None
+        )
+        if allocation_context is None:
+            allocation_context = self._maybe_get_memory_pool_context(tag="kv_cache")
+        self.model_runner.initialize_kv_cache(
+            kv_cache_config, kv_cache_allocation_context=allocation_context
+        )
 
-        if self.model_config.enable_return_routed_experts:
+        if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -1065,10 +1081,11 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        activate_jit_monitor(
-            mode=self.observability_config.jit_monitor_mode,
-            verbose=self.observability_config.jit_monitor_verbose,
-        )
+        if self.vllm_config.kernel_config.enable_jit_warmup:
+            activate_jit_monitor(
+                mode=self.observability_config.jit_monitor_mode,
+                verbose=self.observability_config.jit_monitor_verbose,
+            )
 
         # Freeze the worker heap so the GC won't scan static objects
         # (model weights, KV caches, CUDA graphs) during inference.
@@ -1285,7 +1302,7 @@ class WorkerFL(WorkerBase):
 
         if (
             parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
+            and getattr(compilation_config.pass_config, "enable_sp", False)
             and forward_pass
         ):
             # currently only supported by V1 GPUModelRunner
@@ -1620,7 +1637,14 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    try:
+        from vllm.model_executor.determinism.batch_invariant import (
+            init_batch_invariance,
+        )
+    except ImportError:  # vLLM <= 0.28 kept it under layers/
+        from vllm.model_executor.layers.batch_invariant import (
+            init_batch_invariance,
+        )
 
     init_batch_invariance()
     override_envs_for_eplb(

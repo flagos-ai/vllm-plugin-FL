@@ -101,11 +101,42 @@ def _install_graph_patch(owner, name, replacement, replacements):
         )
 
 
+def _weak_ref_graph_tensor(tensor):
+    """Borrow a captured output while its P800 graph pool owns the memory."""
+    if not isinstance(tensor, torch.Tensor) or not tensor.is_cuda:
+        return tensor
+    if tensor.numel() == 0:
+        return tensor
+
+    source = tensor.untyped_storage()
+    metadata = {
+        "data_ptr": source.data_ptr(),
+        "nbytes": source.nbytes(),
+        "size": tensor.size(),
+        "stride": tensor.stride(),
+        "dtype": tensor.dtype,
+        "device": tensor.device,
+        "storage_offset": tensor.storage_offset(),
+    }
+    borrowed = torch._C._construct_storage_from_data_pointer(
+        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+    )
+    result = torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(
+        metadata, borrowed
+    )
+    if tensor.is_conj():
+        torch._C._set_conj(result, True)
+    if tensor.is_neg():
+        torch._C._set_neg(result, True)
+    return result
+
+
 def patch_graph_adaptations():
     """Preflight and stage the dependent graph patches before publishing any."""
     try:
         import vllm.compilation.breakable_cudagraph as breakable
         import vllm.v1.worker.gpu_model_runner as gpu_model_runner
+        from vllm.utils import torch_utils
         from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 
         import vllm_fl.worker.model_runner as fl_model_runner
@@ -145,6 +176,9 @@ def patch_graph_adaptations():
             signature.bind(**dict.fromkeys(parameters))
 
         replacements = []
+        _install_graph_patch(
+            torch_utils, "weak_ref_tensor", _weak_ref_graph_tensor, replacements
+        )
         for prepare in (
             patch_cudagraph_dispatcher,
             patch_breakable_cudagraph_mode,
@@ -645,80 +679,38 @@ def patch_eager_all_gather(replacements=None):
 
 # ── RESTORED: block_table slot_mapping (Triton kernel bypass) ──
 def patch_block_table_slot_mapping():
-    """Replace Triton-based compute_slot_mapping with CPU numpy implementation.
+    """Compute vLLM's DCP slot mapping with PyTorch on P800."""
+    from vllm.v1.attention.backends.utils import PAD_SLOT_ID
+    from vllm.v1.worker.block_table import BlockTable, SlotMappingMode
 
-    vLLM 0.20 moved compute_slot_mapping to a Triton kernel which fails on
-    Kunlunxin XPU (err_code -714). Replace with a numpy-based approach.
-    """
-    try:
-        import torch
+    def compute_slot_mapping(self, num_reqs, query_start_loc, positions):
+        if self.slot_mapping_mode == SlotMappingMode.NONE:
+            return
+        assert self.slot_mapping_mode == SlotMappingMode.TOKEN_TO_KV_SLOT
 
-        from vllm.v1.worker.block_table import BlockTable
-
-        PAD_SLOT_ID = -1
-
-        def compute_slot_mapping_xpu(self, num_reqs, query_start_loc, positions):
-            device = positions.device
-            num_tokens = positions.shape[0]
-
-            total_cp_world_size = self.pcp_world_size * self.dcp_world_size
-            total_cp_rank = self.pcp_rank * self.dcp_world_size + self.dcp_rank
-
-            # Build req_indices: repeat_interleave on XPU, no CPU copy
-            counts = query_start_loc[1 : num_reqs + 1] - query_start_loc[:num_reqs]
-            req_indices = torch.repeat_interleave(
-                torch.arange(num_reqs, device=device), counts
-            )
-
-            # Direct GPU indexing: use .gpu tensors, skip .np and copy_to_gpu
-            if total_cp_world_size > 1:
-                virtual_block_size = self.block_size * total_cp_world_size
-                bt_indices = (
-                    req_indices * self.max_num_blocks_per_req
-                    + positions // virtual_block_size
-                )
-                block_numbers = self.block_table.gpu.view(-1)[bt_indices]
-                virtual_block_offsets = positions % virtual_block_size
-                mask = (
-                    virtual_block_offsets
-                    // self.cp_kv_cache_interleave_size
-                    % total_cp_world_size
-                    == total_cp_rank
-                )
-                block_offsets = (
-                    virtual_block_offsets
-                    // (total_cp_world_size * self.cp_kv_cache_interleave_size)
-                    * self.cp_kv_cache_interleave_size
-                    + virtual_block_offsets % self.cp_kv_cache_interleave_size
-                )
-                slot_vals = block_numbers * self.block_size + block_offsets
-                self.slot_mapping.gpu[:num_tokens] = torch.where(
-                    mask,
-                    slot_vals,
-                    torch.full((), PAD_SLOT_ID, dtype=slot_vals.dtype, device=device),
-                )
-            else:
-                bt_indices = (
-                    req_indices * self.max_num_blocks_per_req
-                    + positions // self.block_size
-                )
-                block_numbers = self.block_table.gpu.view(-1)[bt_indices]
-                block_offsets = positions % self.block_size
-                self.slot_mapping.gpu[:num_tokens] = (
-                    block_numbers * self.block_size + block_offsets
-                )
-
-            # Pad remaining slots
-            self.slot_mapping.gpu[num_tokens : self.max_num_batched_tokens] = (
-                PAD_SLOT_ID
-            )
-
-        BlockTable.compute_slot_mapping = compute_slot_mapping_xpu
-        logger.info(
-            "Patched BlockTable.compute_slot_mapping to XPU torch path for Kunlunxin"
+        num_tokens = positions.shape[0]
+        counts = query_start_loc[1 : num_reqs + 1] - query_start_loc[:num_reqs]
+        req_indices = torch.repeat_interleave(
+            torch.arange(num_reqs, device=positions.device),
+            counts,
+            output_size=num_tokens,
         )
-    except Exception as e:
-        logger.warning("Failed to patch compute_slot_mapping: %s", e)
+        virtual_block_size = self.block_size * self.dcp_world_size
+        block_indices = positions // virtual_block_size
+        block_numbers = self.block_table.gpu[req_indices, block_indices].long()
+        virtual_offsets = positions % virtual_block_size
+        interleave = self.cp_kv_cache_interleave_size
+        offsets = (
+            virtual_offsets // (self.dcp_world_size * interleave) * interleave
+            + virtual_offsets % interleave
+        )
+        is_local = virtual_offsets // interleave % self.dcp_world_size == self.dcp_rank
+        slots = block_numbers * self.block_size + offsets
+        self.slot_mapping.gpu[:num_tokens] = torch.where(is_local, slots, PAD_SLOT_ID)
+        self.slot_mapping.gpu[num_tokens:].fill_(PAD_SLOT_ID)
+
+    BlockTable.compute_slot_mapping = compute_slot_mapping
+    logger.info("Patched BlockTable.compute_slot_mapping for Kunlunxin")
 
 
 # ── RESTORED: attention backend registry ──
