@@ -12,7 +12,8 @@ COPY docker/thead/requirements.lock /opt/fl-ci/requirements.lock
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /flagos/bin/python --no-deps --require-hashes \
         -r /opt/fl-ci/requirements.lock \
-    && /flagos/bin/python -m pip check
+    && /flagos/bin/python -m pip check \
+    && /flagos/bin/python -c 'import torch, torchvision, flash_attn_3._C; assert torchvision.extension._has_ops()'
 
 COPY .github/scripts/install_flaggems_vllm.py /opt/fl-ci/install_flaggems_vllm.py
 RUN /flagos/bin/python /opt/fl-ci/install_flaggems_vllm.py
@@ -21,16 +22,17 @@ FROM runtime AS plugin-wheel
 ARG PLUGIN_SOURCE_SHA
 ENV VLLM_VENDOR=""
 WORKDIR /src
-COPY pyproject.toml setup.py README.md LICENSE ./
-COPY vllm_fl ./vllm_fl
+COPY plugin/ ./
 RUN [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] \
     && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="0.5.0.dev0+g${PLUGIN_SOURCE_SHA:0:12}" \
        /flagos/bin/python -m pip wheel --no-deps --no-index --no-build-isolation \
            --wheel-dir /wheels .
 
-FROM runtime AS ci
+FROM runtime AS inference
+ARG BUILD_SOURCE_SHA
 ARG PLUGIN_SOURCE_SHA
-LABEL org.opencontainers.image.revision="${PLUGIN_SOURCE_SHA}" \
+LABEL org.opencontainers.image.revision="${BUILD_SOURCE_SHA}" \
+      org.flagos.vllm-plugin-fl.revision="${PLUGIN_SOURCE_SHA}" \
       org.opencontainers.image.base.name="harbor.baai.ac.cn/flagos-runtime/flagos-runtime-thead-ppu2.1.0:2.3.0" \
       org.opencontainers.image.base.digest="sha256:ee5b2b9420dedc8eb6ad6658397e9d9602533f1c6e74a53b924ff976a113d4ab"
 
@@ -51,4 +53,5 @@ ENV VLLM_PLUGINS=fl \
     USE_FLAGGEMS=1
 
 WORKDIR /workspace
+ENTRYPOINT ["/bin/bash", "-c", "exec \"$@\"", "--"]
 CMD ["/bin/bash"]

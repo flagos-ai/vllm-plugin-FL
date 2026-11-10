@@ -11,7 +11,8 @@ supplies `vllm==0.32.0+flagos`. Its wheel SHA-256 is
 The dependency lock covers the wheels added to the pinned Runtime. The build
 verifies their hashes with uv and checks the installed environment with pip.
 The T-Head index also supplies the PPU FlashAttention 3 wheel used by the
-vendor attention backend. The Runtime
+vendor attention backend. The matching PyTorch CPU TorchVision wheel supplies
+the image preprocessing imports used by the multimodal models. The Runtime
 supplies the PPU SDK, vendor Torch and Triton, and the default FlagTree
 compiler. The shared CI installer pins the FlagGems-vLLM source commit.
 
@@ -21,11 +22,12 @@ compiler. The shared CI installer pins the FlagGems-vLLM source commit.
 bash docker/thead/build.sh --progress=plain \
   --iidfile thead-image.id --tag vllm-fl-thead:0.32.0-candidate
 docker image inspect "$(cat thead-image.id)" \
-  --format '{{.Id}} {{index .Config.Labels "org.opencontainers.image.revision"}}'
+  --format '{{.Id}} {{index .Config.Labels "org.opencontainers.image.revision"}} {{index .Config.Labels "org.flagos.vllm-plugin-fl.revision"}}'
 ```
 
-The build reads only the committed Git tree and records its revision and
-the plugin wheel hash. The image contains the installed FL wheel and the
+The build reads the committed recipe and the plugin commit recorded in
+`plugin-source.ref`. It records both revisions and the plugin wheel hash.
+The image contains the installed FL wheel and the
 test dependencies. The build emits the installed package list under
 `/opt/fl-ci`.
 
@@ -33,5 +35,5 @@ test dependencies. The build emits the installed package list under
 
 The FL adaptation and regression cases come from
 [#706 at `758884b4`](https://github.com/flagos-ai/vllm-plugin-FL/commit/758884b4845c87b22db70016952faddc1932283f)
-and were ported onto `0.5.0-dev`. The Runtime image and build layout follow
+and were ported onto `0.5.0-dev` in the pinned plugin commit. The Runtime image and build layout follow
 the structure of [#728](https://github.com/flagos-ai/vllm-plugin-FL/pull/728).
