@@ -42,7 +42,7 @@ def test_upstream_creates_ascend_metadata_builder():
     )
     config = SimpleNamespace(
         model_config=SimpleNamespace(max_model_len=2048),
-        scheduler_config=SimpleNamespace(enable_chunked_prefill=False),
+        scheduler_config=SimpleNamespace(enable_chunked_prefill=False, max_num_seqs=2),
         speculative_config=None,
         parallel_config=SimpleNamespace(decode_context_parallel_size=1),
     )
