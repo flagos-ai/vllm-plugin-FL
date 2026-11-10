@@ -1,0 +1,54 @@
+# Copyright 2026 FlagOS Contributors
+
+FROM harbor.baai.ac.cn/flagos-runtime/flagos-runtime-thead-ppu2.1.0:2.3.0@sha256:ee5b2b9420dedc8eb6ad6658397e9d9602533f1c6e74a53b924ff976a113d4ab AS runtime
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_CONFIG_FILE=/dev/null \
+    UV_HTTP_TIMEOUT=120 \
+    UV_LINK_MODE=copy
+
+COPY docker/thead/requirements.lock /opt/fl-ci/requirements.lock
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /flagos/bin/python --no-deps --require-hashes \
+        -r /opt/fl-ci/requirements.lock \
+    && /flagos/bin/python -m pip check
+
+COPY .github/scripts/install_flaggems_vllm.py /opt/fl-ci/install_flaggems_vllm.py
+RUN /flagos/bin/python /opt/fl-ci/install_flaggems_vllm.py
+
+FROM runtime AS plugin-wheel
+ARG PLUGIN_SOURCE_SHA
+ENV VLLM_VENDOR=""
+WORKDIR /src
+COPY pyproject.toml setup.py README.md LICENSE ./
+COPY vllm_fl ./vllm_fl
+RUN [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] \
+    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="0.5.0.dev0+g${PLUGIN_SOURCE_SHA:0:12}" \
+       /flagos/bin/python -m pip wheel --no-deps --no-index --no-build-isolation \
+           --wheel-dir /wheels .
+
+FROM runtime AS ci
+ARG PLUGIN_SOURCE_SHA
+LABEL org.opencontainers.image.revision="${PLUGIN_SOURCE_SHA}" \
+      org.opencontainers.image.base.name="harbor.baai.ac.cn/flagos-runtime/flagos-runtime-thead-ppu2.1.0:2.3.0" \
+      org.opencontainers.image.base.digest="sha256:ee5b2b9420dedc8eb6ad6658397e9d9602533f1c6e74a53b924ff976a113d4ab"
+
+RUN --mount=type=bind,from=plugin-wheel,source=/wheels,target=/wheels \
+    cd /wheels \
+    && sha256sum vllm_plugin_fl-*.whl > /opt/fl-ci/plugin-wheel.sha256 \
+    && /flagos/bin/python -m pip install --no-index --no-deps vllm_plugin_fl-*.whl \
+    && /flagos/bin/python -m pip check \
+    && /flagos/bin/python -m pip list --format=json > /opt/fl-ci/packages.json
+
+ENV VLLM_PLUGINS=fl \
+    VLLM_TARGET_DEVICE=empty \
+    VLLM_VENDOR="" \
+    VLLM_USE_V2_MODEL_RUNNER=0 \
+    VLLM_WORKER_MULTIPROC_METHOD=spawn \
+    TORCH_DEVICE_BACKEND_AUTOLOAD=1 \
+    GEMS_VENDOR=thead \
+    USE_FLAGGEMS=1
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
