@@ -154,9 +154,7 @@ def test_reference_moe_align_block_size_keeps_every_token():
 
     topk_ids = torch.tensor([[0, 0], [1, 1]], dtype=torch.int32)
 
-    sorted_ids, _, num_post = ReferenceBackend().moe_align_block_size(
-        topk_ids, 2, 2
-    )
+    sorted_ids, _, num_post = ReferenceBackend().moe_align_block_size(topk_ids, 2, 2)
 
     keep = int(num_post.item())
     assert sorted(sorted_ids[:keep].tolist()) == [0, 1, 2, 3]
@@ -181,4 +179,3 @@ def test_reference_moe_align_block_size_remaps_expert_ids_without_ignore_flag():
     assert placed == [0, 1, 2, 3]
     # ... and the returned expert ids are mapped into the local shard.
     assert expert_ids[:4].tolist() == [0, -1, 1, -1]
-
