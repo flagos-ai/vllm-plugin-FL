@@ -30,3 +30,6 @@ flagos_blacklist:
   # FlagGems 5.4 exports only functional GCU mm. Its generic mm_out cannot
   # consume the Enflame SPLIT_K tuning config used by Inductor's out variant.
   - mm_out
+  # FlagGems 5.5.0.dev0 rejects bool slices used by padding masks. Native
+  # aten::slice is a zero-copy view and preserves storage aliasing for all dtypes.
+  - slice

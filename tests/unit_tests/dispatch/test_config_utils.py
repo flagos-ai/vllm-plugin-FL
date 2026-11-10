@@ -66,6 +66,7 @@ def test_gcu_vendor_alias_loads_enflame_native_config():
         "index_put_",
         "_index_put_impl_",
         "mm_out",
+        "slice",
     ]
 
 
@@ -96,6 +97,7 @@ def test_enflame_default_policy_keeps_unsupported_variants_native(monkeypatch):
                     "index_put_",
                     "_index_put_impl_",
                     "mm_out",
+                    "slice",
                 ],
             )
             assert use_flaggems_op("index_put_") is False
@@ -103,6 +105,7 @@ def test_enflame_default_policy_keeps_unsupported_variants_native(monkeypatch):
             # Native GCU index_fill_ aborts for penalty int32 rows / int64 indices.
             assert use_flaggems_op("index_fill_") is True
             assert use_flaggems_op("index_fill") is True
+            assert use_flaggems_op("slice") is False
             assert use_flaggems_op("mm_out") is False
             assert use_flaggems_op("mm") is True
             assert use_flaggems_op("index_put") is True

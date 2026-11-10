@@ -329,7 +329,10 @@ def source_provider(tmp_path, monkeypatch):
     return module
 
 
-@pytest.mark.parametrize("installed_version", ["5.4.0", "5.4.0+g6fe7709e7717"])
+@pytest.mark.parametrize(
+    "installed_version",
+    ["5.4.0", "5.4.0+g6fe7709e7717", "5.5.0.dev0", "5.5.0.dev0+g2bcfe265"],
+)
 def test_patch_accepts_supported_public_version(
     tmp_path, monkeypatch, installed_version
 ):
@@ -339,7 +342,16 @@ def test_patch_accepts_supported_public_version(
 
 
 @pytest.mark.parametrize(
-    "installed_version", ["5.5.0", "5.4.0rc1", "5.4.0.dev1", "5.4.0.post1", "invalid"]
+    "installed_version",
+    [
+        "5.5.0",
+        "5.5.0.dev1",
+        "5.5.0rc1",
+        "5.4.0rc1",
+        "5.4.0.dev1",
+        "5.4.0.post1",
+        "invalid",
+    ],
 )
 def test_patch_rejects_other_public_versions(tmp_path, monkeypatch, installed_version):
     module = source_provider(tmp_path, monkeypatch)
