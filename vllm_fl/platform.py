@@ -444,23 +444,6 @@ class PlatformFL(Platform):
                 f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
-        if cls.vendor_name == "thead":
-            # Upstream 0.32 selects the V2 runner by default, but the T-Head
-            # adaptation lives in the V1 ModelRunnerFL. Fall back explicitly and
-            # keep ``vllm_config`` in sync with what actually runs, so upstream
-            # code that reads ``use_v2_model_runner`` does not take V2 paths.
-            if os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1":
-                raise ValueError(
-                    "T-Head PPU requires ModelRunnerFL; the upstream V2 runner is "
-                    "not supported. Unset VLLM_USE_V2_MODEL_RUNNER or set it to 0."
-                )
-            if vllm_config.use_v2_model_runner:
-                logger.warning(
-                    "T-Head PPU forces the V1 ModelRunnerFL; ignoring the upstream "
-                    "V2 default. Set VLLM_USE_V2_MODEL_RUNNER=0 to silence this "
-                    "warning."
-                )
-                vllm_config.use_v2_model_runner = False
         model_config = vllm_config.model_config
         parallel_config = vllm_config.parallel_config
         if cls.device_type == "txda":

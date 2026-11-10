@@ -24,6 +24,7 @@ separately below.
 | Imported Triton | `3.6.0`, supplied by the FlagTree PPU wheel |
 | FlagGems | Complete upstream commit `317b763204391d530d6024b52b6235de150443d8`; wheel metadata `5.5.0.dev0+g317b76320` |
 | Model execution | BF16, TP=4, eager and graph; maximum model length 32768, maximum sequences 8, memory utilization 0.85 |
+| Model runner | Upstream V2 (`vllm/v1/worker/gpu`), selected by default as on NVIDIA; `VLLM_USE_V2_MODEL_RUNNER=0` falls back to the V1 `ModelRunnerFL` |
 
 The vLLM distribution version is `0.32.0+empty`, while its generated module
 version (`vllm.__version__`) is `0.32.0`. The empty build suffix is added to
@@ -308,9 +309,8 @@ else
 fi
 unset PYTHONPATH PYTHONHOME
 export VLLM_PLUGINS=fl
-# vLLM 0.32 selects the V2 runner by default; the T-Head adaptation runs on
-# the V1 ModelRunnerFL, which the platform layer enforces.
-export VLLM_USE_V2_MODEL_RUNNER=0
+# The platform follows upstream and runs the V2 model runner by default.
+# Export VLLM_USE_V2_MODEL_RUNNER=0 to fall back to the V1 ModelRunnerFL.
 export TORCH_DEVICE_BACKEND_AUTOLOAD=1
 export GEMS_VENDOR=thead
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
@@ -533,13 +533,18 @@ JUnit reports, per-request JSON results, source/provider snapshots, and logs.
 
 ## Recorded acceptance
 
-The vLLM 0.32 adaptation was accepted on the CI stack above: the unit scope
-passed (2/2), and all four model Gate modes passed 104/104 requests
-(`Qwen3.6-27B` and `Qwen3.6-35B-A3B`, eager and graph, TP4). The earlier results
-below belong to the previous vLLM 0.28 runtime and are kept for provenance only.
-The earlier CI run passed all 93 unit tests (43 shared reference, 5 CPU cache,
-and 45 PPU cache/attention cases) and all four model Gate modes. These historical
-results do not validate the updated wheel.
+The vLLM 0.32 adaptation was accepted on the CI stack above with the default V2
+model runner: the unit scope passed (2/2), and all four model Gate modes passed
+(`Qwen3.6-27B` and `Qwen3.6-35B-A3B`, eager and graph, TP4), 5/5 Gate cases per
+mode. The runner needs two adaptations that the platform now applies itself: the
+V2 UVA buffers fall back to explicit device copies because this `+empty` build
+has no mapped-host-memory op, and graph capture reuses the plugin's
+device-agnostic context instead of the CUDA/Xpu communicator assertion.
+`VLLM_USE_V2_MODEL_RUNNER=0` still selects the V1 `ModelRunnerFL`. The earlier
+results below belong to the previous vLLM 0.28 runtime and are kept for
+provenance only. The earlier CI run passed all 93 unit tests (43 shared
+reference, 5 CPU cache, and 45 PPU cache/attention cases) and all four model Gate
+modes. These historical results do not validate the updated wheel.
 
 That earlier runtime passed the serial TP4 matrix on 2026-10-09 with the
 original shared Gate checks:

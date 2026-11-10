@@ -64,7 +64,6 @@ unsupported_features: []
 env_defaults:
   VLLM_PLUGINS: "fl"
   VLLM_TARGET_DEVICE: "empty"
-  VLLM_USE_V2_MODEL_RUNNER: "0"
   GEMS_VENDOR: "thead"
   USE_FLAGGEMS: "1"
   TORCH_DEVICE_BACKEND_AUTOLOAD: "1"

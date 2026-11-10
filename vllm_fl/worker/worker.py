@@ -125,6 +125,67 @@ def _normalize_process_group_backend(backend: str) -> str:
     return backend
 
 
+def _mapped_host_buffers_available() -> bool:
+    """Whether the vLLM build can expose pinned host memory as a device view.
+
+    The V2 runner stages CPU-side writes through ``UvaBuffer`` and only takes
+    its explicit-copy ``NonUvaBuffer`` path when ``is_uva_available()`` is
+    False. An ``+empty`` vLLM build cannot provide
+    ``_C::get_cuda_view_from_cpu_tensor``, so probe the op instead of trusting
+    the pinned-memory capability: a backend can pin memory without being able
+    to map it into its device address space.
+    """
+    from vllm.utils.platform_utils import is_uva_available
+    from vllm.utils.torch_utils import get_accelerator_view_from_cpu_tensor
+
+    if not is_uva_available():
+        return False
+    try:
+        get_accelerator_view_from_cpu_tensor(
+            torch.zeros(1, dtype=torch.int32, pin_memory=True)
+        )
+    except RuntimeError:
+        logger.warning_once(
+            "Pinned host memory cannot be mapped into the device address space "
+            "by this vLLM build; the V2 runner will copy its UVA buffers "
+            "explicitly instead."
+        )
+        return False
+    return True
+
+
+def _uva_unavailable() -> bool:
+    """Stand-in for ``is_uva_available`` on builds without mapped host memory."""
+    return False
+
+
+def _install_v2_runner_compat() -> None:
+    """Adapt upstream V2 runner internals that assume a CUDA build/runtime.
+
+    Install before the V2 runner is constructed so that buffers and graph
+    capture are created with the adapted helpers.
+    """
+    from vllm.v1.worker.gpu import buffer_utils
+
+    # See _mapped_host_buffers_available for why the upstream probe is not
+    # enough. Only override the answer when this build cannot map host memory,
+    # so CUDA builds keep the upstream path untouched. Remove once the vLLM
+    # build or the device runtime exposes
+    # _C::get_cuda_view_from_cpu_tensor.
+    if not _mapped_host_buffers_available():
+        buffer_utils.is_uva_available = _uva_unavailable
+
+    # cudagraph_utils binds the process-group context manager at import time.
+    # Upstream asserts on a CUDA/Xpu communicator, which non-NCCL collectives
+    # (e.g. FlagCX) do not satisfy; reuse the same capture context that the V1
+    # ModelRunnerFL resolves for this platform.
+    from vllm.v1.worker.gpu import cudagraph_utils
+
+    from vllm_fl.worker.model_runner import graph_capture as fl_graph_capture
+
+    cudagraph_utils.graph_capture = fl_graph_capture
+
+
 if TYPE_CHECKING:
     from vllm.device_allocator.sleep_mode_backend import SleepModeBackend
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
@@ -214,12 +275,11 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
-        # this flag to select the matching block-table and KV-cache kernels.
-        # vLLM >= 0.32 defaults VllmConfig.use_v2_model_runner to True, and
-        # PlatformFL.check_and_update_config already forces it to False for
-        # vendors that only ship the V1 ModelRunnerFL (with a warning).
-        self.use_v2_model_runner = False
+        # Follow the upstream selection (V2 unless the config or the platform
+        # rules it out). Vendors that only ship the V1 ModelRunnerFL reject V2
+        # in PlatformFL.check_and_update_config, so the value seen here is
+        # already the runner this process is going to build.
+        self.use_v2_model_runner = vllm_config.use_v2_model_runner
 
         _initialize_fl_runtime(self.rank)
 
@@ -512,6 +572,7 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
+            _install_v2_runner_compat()
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
