@@ -9,7 +9,16 @@ from typing import ClassVar
 
 import numpy as np
 import torch
-from flaggems_vllm import flash_attn_varlen_func
+
+try:
+    from flaggems_vllm import flash_attn_varlen_func
+except ImportError:  # optional provider: importing this module must not fail
+
+    def flash_attn_varlen_func(*args, **kwargs):
+        raise ImportError(
+            "The FlagGems attention backend requires the optional "
+            "flaggems_vllm package."
+        )
 
 from vllm import envs
 from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config

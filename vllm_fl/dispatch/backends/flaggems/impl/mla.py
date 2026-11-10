@@ -7,7 +7,20 @@
 from typing import Optional, Union
 
 import torch
-from flaggems_vllm import flash_attn_varlen_func, flash_mla
+
+try:
+    from flaggems_vllm import flash_attn_varlen_func, flash_mla
+except ImportError:  # optional provider: importing this module must not fail
+
+    def flash_attn_varlen_func(*args, **kwargs):
+        raise ImportError(
+            "The FlagGems MLA backend requires the optional flaggems_vllm package."
+        )
+
+    def flash_mla(*args, **kwargs):
+        raise ImportError(
+            "The FlagGems MLA backend requires the optional flaggems_vllm package."
+        )
 
 # from vllm.attention.ops.triton_decode_attention import decode_attention_fwd
 # from vllm.attention.ops.triton_flash_attention import triton_attention

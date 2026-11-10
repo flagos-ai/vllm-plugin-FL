@@ -30,6 +30,21 @@ def _bind_is_available(fn, is_available_fn):
     return wrapper
 
 
+def _provider_installed() -> bool:
+    """Whether the optional ``flaggems_vllm`` provider package is importable.
+
+    Most FlagGems operators delegate to it, but ``rms_norm``, the in-tree
+    Triton quantizer and ``attention_backend`` only need ``flag_gems``; images
+    that ship ``flag_gems`` without the provider must keep those.
+    """
+    try:
+        import flaggems_vllm  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def register_builtins(registry) -> None:
     """
     Register all FlagGems (DEFAULT) operator implementations.
@@ -37,17 +52,29 @@ def register_builtins(registry) -> None:
     Args:
         registry: Registry to register into
     """
-    import flaggems_vllm
-
     from .flaggems import FlagGemsBackend
 
-    logger.info_once(
-        "FlagGems-vllm integration activated: package=%s",
-        getattr(flaggems_vllm, "__file__", "<unknown>"),
-    )
+    provider_installed = _provider_installed()
+    if provider_installed:
+        import flaggems_vllm
+
+        logger.info_once(
+            "FlagGems-vllm integration activated: package=%s",
+            getattr(flaggems_vllm, "__file__", "<unknown>"),
+        )
+    else:
+        logger.warning_once(
+            "flaggems_vllm provider is not installed: operators that delegate "
+            "to it are registered as unavailable and dispatch falls back to "
+            "the next backend"
+        )
 
     backend = FlagGemsBackend()
     is_avail = backend.is_available
+
+    def is_provider_avail() -> bool:
+        return is_avail() and provider_installed
+
     from .impl.w8a8_moe import w8a8_moe_experts
 
     impls = [
@@ -58,7 +85,7 @@ def register_builtins(registry) -> None:
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(
                 backend.dynamic_per_token_quant_int8,
-                is_avail,
+                is_provider_avail,
             ),
             vendor=None,
             priority=BackendPriority.DEFAULT + 10,
@@ -79,7 +106,7 @@ def register_builtins(registry) -> None:
             op_name="silu_and_mul",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
+            fn=_bind_is_available(backend.silu_and_mul, is_provider_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -87,7 +114,7 @@ def register_builtins(registry) -> None:
             op_name="gelu_and_mul",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.gelu_and_mul, is_avail),
+            fn=_bind_is_available(backend.gelu_and_mul, is_provider_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -105,7 +132,7 @@ def register_builtins(registry) -> None:
             op_name="rotary_embedding",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            fn=_bind_is_available(backend.rotary_embedding, is_provider_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -123,7 +150,7 @@ def register_builtins(registry) -> None:
             op_name="moe_align_block_size",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            fn=_bind_is_available(backend.moe_align_block_size, is_provider_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -132,7 +159,7 @@ def register_builtins(registry) -> None:
             op_name="moe_sum",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.moe_sum, is_avail),
+            fn=_bind_is_available(backend.moe_sum, is_provider_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -141,7 +168,7 @@ def register_builtins(registry) -> None:
             op_name="topk_softmax",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.topk_softmax, is_avail),
+            fn=_bind_is_available(backend.topk_softmax, is_provider_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -150,7 +177,9 @@ def register_builtins(registry) -> None:
             op_name="invoke_fused_moe_triton_kernel",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
+            fn=_bind_is_available(
+                backend.invoke_fused_moe_triton_kernel, is_provider_avail
+            ),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -159,7 +188,7 @@ def register_builtins(registry) -> None:
             op_name="grouped_topk",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.grouped_topk, is_avail),
+            fn=_bind_is_available(backend.grouped_topk, is_provider_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -167,7 +196,7 @@ def register_builtins(registry) -> None:
             op_name="w8a8_moe_experts",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(w8a8_moe_experts, is_avail),
+            fn=_bind_is_available(w8a8_moe_experts, is_provider_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
