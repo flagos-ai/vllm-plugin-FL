@@ -144,6 +144,14 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
                 "Ascend pooling requires PIECEWISE attention boundaries; "
                 "the requested compiler passes require full graph capture"
             )
+        if compilation.cudagraph_mode == CUDAGraphMode.PIECEWISE and not (
+            compilation.splitting_ops_contain_attention()
+            and compilation.splitting_ops_contain_kv_cache_update()
+        ):
+            raise NotImplementedError(
+                "Ascend pooling PIECEWISE graphs require attention and KV-cache "
+                "update splitting ops; the explicit splitting_ops list is incomplete"
+            )
     else:
         compilation.splitting_ops = []
     compilation.cudagraph_num_of_warmups = 1
