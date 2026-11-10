@@ -334,8 +334,11 @@ def test_scoped_reference_dispatch(native):
     assert manager.get_selected_impl_id("w8a8_dynamic_linear") == before
 
 
-@pytest.mark.parametrize("groups", [1, 2])
-def test_grouped_wo_a_dynamic_projection(groups):
+@pytest.mark.parametrize(
+    "groups,input_width,output_width,tokens",
+    [(1, 128, 64, 3), (2, 128, 64, 3), (2, 16, 32768, 1)],
+)
+def test_grouped_wo_a_dynamic_projection(groups, input_width, output_width, tokens):
     from vllm_fl.dispatch.backends.reference.impl.quantization import (
         w8a8_dynamic_linear,
     )
@@ -350,10 +353,10 @@ def test_grouped_wo_a_dynamic_projection(groups):
     method.configure_grouped(groups)
     method.create_weights(
         layer,
-        128,
-        [64 * groups],
-        128,
-        64 * groups,
+        input_width,
+        [output_width * groups],
+        input_width,
+        output_width * groups,
         torch.bfloat16,
         weight_loader=lambda *args: None,
     )
@@ -363,19 +366,19 @@ def test_grouped_wo_a_dynamic_projection(groups):
             torch.randint(-32, 32, layer.weight.shape, device="npu", dtype=torch.int8)
         )
         # Values deliberately not representable in BF16: verify lossless loading.
-        scales = torch.linspace(0.010001, 0.020003, 64 * groups, device="npu").reshape(
-            -1, 1
-        )
+        scales = torch.linspace(
+            0.010001, 0.020003, output_width * groups, device="npu"
+        ).reshape(-1, 1)
         layer.weight_scale.copy_(scales)
     weight = layer.weight.detach().clone()
     torch.testing.assert_close(layer.weight_scale, scales, rtol=0, atol=0)
     assert layer.weight_scale.dtype == torch.float32
     method.process_weights_after_loading(layer)
-    x = torch.randn(3, groups * 128, dtype=torch.bfloat16, device="npu")
+    x = torch.randn(tokens, groups * input_width, dtype=torch.bfloat16, device="npu")
     expected = torch.cat(
         [
             w8a8_dynamic_linear(
-                x.reshape(3, groups, 128)[:, i].contiguous(),
+                x.reshape(tokens, groups, input_width)[:, i].contiguous(),
                 weight.chunk(groups)[i].t().contiguous(),
                 scales.chunk(groups)[i].flatten(),
             )
@@ -384,7 +387,41 @@ def test_grouped_wo_a_dynamic_projection(groups):
         dim=-1,
     )
     actual = method.apply_grouped(layer, x)
+    assert actual.shape == (tokens, groups * output_width)
+    assert torch.isfinite(actual).all()
     torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.04)
+
+
+@pytest.mark.parametrize("groups", [None, 2])
+def test_native_output_width_guard_before_preparation(groups):
+    from vllm.model_executor.kernels.linear import Int8ScaledMMLinearLayerConfig
+
+    from vllm_fl.quantization.w8a8.compressed_tensors import (
+        AscendGroupedW8A8LinearMethod,
+    )
+    from vllm_fl.quantization.w8a8.linear import AscendInt8ScaledMMLinearKernel
+
+    # Metadata-only tensors test rejection without allocating a large NPU weight.
+    rows = 65536 * (groups or 1)
+    layer = torch.nn.Module()
+    layer.weight = torch.nn.Parameter(
+        torch.empty(rows, 16, device="meta", dtype=torch.int8), requires_grad=False
+    )
+    layer.weight_scale = torch.nn.Parameter(
+        torch.empty(rows, 1, device="meta", dtype=torch.float32), requires_grad=False
+    )
+    if groups is None:
+        method = AscendInt8ScaledMMLinearKernel(
+            Int8ScaledMMLinearLayerConfig(
+                is_channelwise=True, is_static_input_scheme=False, input_symmetric=True
+            ),
+            ["weight", "weight_scale", "input_scale", "input_zero_point", "azp_adj"],
+        )
+    else:
+        method = AscendGroupedW8A8LinearMethod(_config())
+        method.configure_grouped(groups)
+    with pytest.raises(NotImplementedError, match="output width N=65536"):
+        method.process_weights_after_loading(layer)
 
 
 def _lm_head_layer():

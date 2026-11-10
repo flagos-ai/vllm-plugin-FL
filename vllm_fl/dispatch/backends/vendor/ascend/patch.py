@@ -8,10 +8,15 @@ _patches_applied = False
 
 
 @cache
-def register_deepseek_v4():
-    """Register the lazy DeepSeek model in each Ascend process."""
+def register_ascend_models():
+    """Register Ascend model and quantization adapters before model inspection."""
     from vllm.model_executor.models import ModelRegistry
 
+    from vllm_fl.quantization.w8a8.compressed_tensors import (
+        register_ascend_compressed_tensors,
+    )
+
+    register_ascend_compressed_tensors()
     ModelRegistry.register_model(
         "DeepseekV4ForCausalLM",
         "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM",

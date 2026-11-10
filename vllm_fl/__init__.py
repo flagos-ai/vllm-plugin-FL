@@ -269,13 +269,9 @@ def register_model():
         current_platform.device_type == "npu"
         and getattr(current_platform, "vendor_name", None) == "ascend"
     ):
-        from vllm_fl.dispatch.backends.vendor.ascend.patch import register_deepseek_v4
-        from vllm_fl.quantization.w8a8.compressed_tensors import (
-            register_ascend_compressed_tensors,
-        )
+        from vllm_fl.dispatch.backends.vendor.ascend.patch import register_ascend_models
 
-        register_ascend_compressed_tensors()
-        register_deepseek_v4()
+        register_ascend_models()
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
         from vllm_fl.patches.arm_cpu_gdn import (
             apply_arm_cpu_gdn_state_indices_patch,

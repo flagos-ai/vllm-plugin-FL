@@ -121,8 +121,9 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
 class AscendInt8ScaledMMLinearKernel(Int8ScaledMMLinearKernel):
     """Use upstream checkpoint parameters and native NPU dynamic W8A8 math.
 
-    CompressedTensorsW8A8Int8 owns allocation and checkpoint loading. This
-    kernel prepares its logical [N,K] weights once into native [K,N] layout.
+    CompressedTensorsW8A8Int8 owns allocation and checkpoint loading of
+    logical INT8 [N,K] weights and FP32 channel scales [N,1]. Preparation
+    transposes weights to native [K,N], optionally casts NZ, and flattens scales.
     """
 
     @classmethod
@@ -160,7 +161,8 @@ class AscendInt8ScaledMMLinearKernel(Int8ScaledMMLinearKernel):
             raise ValueError("Expected one W8A8 scale per output channel")
         if weight.shape[0] >= 65536:
             raise NotImplementedError(
-                "Large-output DSA-CP Linear splitting is not enabled"
+                "Ascend W8A8 does not support unchunked output width "
+                f"N={weight.shape[0]} (requires N < 65536)"
             )
         weight_nz_mode = getattr(layer, "_fl_ascend_weight_nz_mode", 1)
         if weight_nz_mode not in (0, 1, 2):
@@ -182,6 +184,7 @@ class AscendInt8ScaledMMLinearKernel(Int8ScaledMMLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Dynamically quantize inputs and execute native INT8 GEMM with bias."""
         weight, scale, _, _, _ = self._get_layer_params(layer)
         if x.dtype not in (torch.bfloat16, torch.float16):
             raise NotImplementedError("Dynamic W8A8 Linear requires BF16/FP16 input")

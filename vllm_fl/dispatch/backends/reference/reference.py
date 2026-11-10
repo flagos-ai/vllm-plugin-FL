@@ -42,37 +42,37 @@ class ReferenceBackend(Backend):
 
     # ==================== Operator Implementations ====================
     def deepseek_v4_partial_rope(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_partial_rope
+        from .impl.deepseek_v4_ops import deepseek_v4_partial_rope
 
         return deepseek_v4_partial_rope(*args, **kwargs)
 
     def deepseek_v4_hadamard(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_hadamard
+        from .impl.deepseek_v4_ops import deepseek_v4_hadamard
 
         return deepseek_v4_hadamard(*args, **kwargs)
 
     def deepseek_v4_index_quant(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_index_quant
+        from .impl.deepseek_v4_ops import deepseek_v4_index_quant
 
         return deepseek_v4_index_quant(*args, **kwargs)
 
     def deepseek_v4_grouped_project(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_grouped_project
+        from .impl.deepseek_v4_ops import deepseek_v4_grouped_project
 
         return deepseek_v4_grouped_project(*args, **kwargs)
 
     def deepseek_v4_hc_pre(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_hc_pre
+        from .impl.deepseek_v4_ops import deepseek_v4_hc_pre
 
         return deepseek_v4_hc_pre(*args, **kwargs)
 
     def deepseek_v4_hc_post(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_hc_post
+        from .impl.deepseek_v4_ops import deepseek_v4_hc_post
 
         return deepseek_v4_hc_post(*args, **kwargs)
 
     def deepseek_v4_hc_head(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_hc_head
+        from .impl.deepseek_v4_ops import deepseek_v4_hc_head
 
         return deepseek_v4_hc_head(*args, **kwargs)
 

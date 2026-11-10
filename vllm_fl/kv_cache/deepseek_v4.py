@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Scheduler-owned cache leaves for dispatch-backed DeepSeek V4 execution."""
+"""Plain-row cache leaves for dispatch-backed DeepSeek V4 execution.
+
+Reuse upstream AttentionLayerBase/specs and scheduler allocation. This
+module defines leaf registration and plain-row layouts, not a cache manager.
+The upstream model-specific owners couple their imports to GPU backend entry
+points and carry different page/scale layouts.
+"""
 
 import torch
 from torch import nn

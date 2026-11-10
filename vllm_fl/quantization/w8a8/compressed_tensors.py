@@ -25,8 +25,10 @@ from vllm_fl.quantization.w8a8.moe import AscendW8A8DynamicMoEMethod
 class AscendCompressedTensorsConfig(CompressedTensorsConfig):
     """Keep the upstream parser and checkpoint matching; replace supported math.
 
-    Metadata uses checkpoint names, including regexes. Matching before model
-    name translation preserves the exporter's ignore rules and packed shards.
+    The parent owns checkpoint parsing and Linear weight allocation. This
+    adapter selects NPU methods and validates dynamic W8A8 contracts. Metadata
+    uses checkpoint names, including regexes; matching before name translation
+    preserves the exporter's ignore rules and packed shards.
     """
 
     def __init__(self, *args, **kwargs):
@@ -265,17 +267,18 @@ _linear = CachedOp("w8a8_dynamic_linear")
 
 
 class AscendGroupedW8A8LinearMethod(CompressedTensorsLinearMethod):
-    """Group projection adapter; ordinary Linear allocation stays upstream."""
+    """Project independent output groups; this is not quantization group_size.
+
+    Upstream allocates logical INT8 weights [G*O,I] and FP32 scales [G*O,1].
+    Each input group [T,I] uses its own weight [O,I], prepared as [I,O] with
+    optional NZ layout and flat scales; concatenate the G outputs to [T,G*O].
+    """
 
     def process_weights_after_loading(self, layer):
         if layer.weight.dtype != torch.int8 or layer.weight.ndim != 2:
             raise ValueError("Expected W8A8 [N,K] int8 weight")
         if layer.weight_scale.shape != (layer.weight.shape[0], 1):
             raise ValueError("Expected one W8A8 scale per output channel")
-        if layer.weight.shape[0] >= 65536:
-            raise NotImplementedError(
-                "Large-output DSA-CP Linear splitting is not enabled"
-            )
         if getattr(self, "output_groups", None) is None:
             raise ValueError(
                 "Grouped W8A8 requires configure_grouped before preparation"
@@ -285,6 +288,12 @@ class AscendGroupedW8A8LinearMethod(CompressedTensorsLinearMethod):
         groups = self.output_groups
         if groups < 1 or layer.weight.shape[0] % groups:
             raise ValueError("Grouped W8A8 outputs must divide the weight rows")
+        output_width = layer.weight.shape[0] // groups
+        if output_width >= 65536:
+            raise NotImplementedError(
+                "Ascend W8A8 does not support per-group output width "
+                f"N={output_width} (requires N < 65536)"
+            )
         self.group_input_size = layer.weight.shape[1]
         for group, (weight, scale) in enumerate(
             zip(
@@ -314,6 +323,7 @@ class AscendGroupedW8A8LinearMethod(CompressedTensorsLinearMethod):
         self.output_groups = groups
 
     def apply_grouped(self, layer, x):
+        """Run dynamic quantization/GEMM per input group and concatenate outputs."""
         groups = self.output_groups
         tokens = x.shape[0]
         grouped = x.reshape(tokens, groups, self.group_input_size)

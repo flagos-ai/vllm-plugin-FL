@@ -118,7 +118,7 @@ def _rms(x, weight):
 def _compressor(ratio):
     from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
-    from vllm_fl.models.deepseek_v4 import DeepseekV4Compressor
+    from vllm_fl.models.deepseek_v4_attention import DeepseekV4Compressor
 
     module = DeepseekV4Compressor(
         8, 4, ratio, prefix="model.layers.0.self_attn.compressor"

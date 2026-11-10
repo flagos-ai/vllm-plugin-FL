@@ -690,7 +690,7 @@ def test_duplicate_prefix_and_invalid_spec_rejected(pools):
 
 
 def _compressor(ratio):
-    from vllm_fl.models.deepseek_v4 import DeepseekV4Compressor
+    from vllm_fl.models.deepseek_v4_attention import DeepseekV4Compressor
 
     module = DeepseekV4Compressor(8, 4, ratio).to("npu")
     for name, param in module.named_parameters():

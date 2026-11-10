@@ -83,7 +83,7 @@ def make_attention(runtime):
     from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
 
     from vllm_fl.kv_cache.deepseek_v4 import DeepseekV4CacheLayer
-    from vllm_fl.models.deepseek_v4 import DeepseekV4Attention
+    from vllm_fl.models.deepseek_v4_attention import DeepseekV4Attention
     from vllm_fl.worker.kv_cache_utils import bind_kv_cache
     from vllm_fl.worker.model_runner import ModelRunnerFL
 
