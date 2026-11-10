@@ -2,6 +2,8 @@
 
 """Runner-selection contracts for vLLM 0.32.0."""
 
+import logging
+
 import pytest
 
 
@@ -59,7 +61,9 @@ def _make_ascend_vllm_config(
     "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro"]
 )
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
-def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
+def test_accelerator_defaults_to_fl_runner(
+    monkeypatch, caplog, vendor, requested, expected
+):
     import os
     from types import SimpleNamespace
 
@@ -79,8 +83,17 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
         vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name=vendor)
     )
 
-    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    with caplog.at_level(logging.WARNING, logger="vllm_fl"):
+        assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+
+    # The V1 default must be announced, and only when the user did not choose.
+    announced = [
+        record
+        for record in caplog.records
+        if "cannot execute the upstream V2 model runner" in record.getMessage()
+    ]
+    assert len(announced) == (1 if requested is None else 0)
 
 
 @pytest.mark.parametrize(

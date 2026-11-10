@@ -128,7 +128,7 @@ variables serve different layers:
 | `VLLM_PLUGINS=fl` | Enable the FL platform/model plugin in vLLM. |
 | `MTHREADS_VISIBLE_DEVICES` | Give the Mthreads container runtime the allocated **host physical** card IDs. Never replace a job's allocation with `all`. |
 | `MUSA_VISIBLE_DEVICES` | Limit the MUSA SDK/TorchMUSA logical device IDs inside the container. The single exposed card in this example is logical `0`, even when its host ID is different. |
-| `VLLM_USE_V2_MODEL_RUNNER=0` | Required: the plugin implements the V1 `ModelRunnerFL`; the upstream V2 runner uses CUDA/UVA APIs MUSA does not provide. The plugin sets this default itself. |
+| `VLLM_USE_V2_MODEL_RUNNER=0` | Required: the plugin implements the V1 `ModelRunnerFL`; the upstream V2 runner uses CUDA/UVA APIs MUSA does not provide. When the variable is unset the plugin derives this default at registration time and logs a warning with the reason; an explicit `=1` is rejected during config validation. |
 | `USE_FLAGTUNE` | The plugin sets `USE_FLAGTUNE=0` on MUSA so FlagGems does not fetch the FlagTune cost-model bundle; set `VLLM_FL_MUSA_FLAGTUNE=1` to opt back in. |
 
 The CI runner has a separate fixed four-card allocation: host cards `4,5,6,7`

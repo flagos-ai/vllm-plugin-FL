@@ -241,12 +241,25 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
-        # These backends use ModelRunnerFL; choose it before VllmConfig reads
-        # model defaults for the upstream V2 runner.  The upstream V2 runner
-        # drives raw ``torch.cuda`` streams/allocs, which torch_musa cannot
-        # satisfy, so MUSA stays on the FL V1 runner.
-        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+    # These backends cannot execute the upstream V2 runner: it drives raw
+    # CUDA/UVA streams and allocations the vendor runtime does not provide,
+    # so they stay on ModelRunnerFL (V1). Mirror vLLM's own handling of a
+    # known-unsupported configuration -- fall back to V1 but say why,
+    # instead of rewriting the environment silently. An explicit
+    # VLLM_USE_V2_MODEL_RUNNER is never overridden; platform.py rejects
+    # "=1" with the same reasoning.
+    if (
+        vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro")
+        and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") is None
+    ):
+        os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
+        logger.warning(
+            "[vllm_fl] %s cannot execute the upstream V2 model runner "
+            "(it requires CUDA/UVA streams and allocations the vendor "
+            "runtime does not provide); defaulting "
+            "VLLM_USE_V2_MODEL_RUNNER=0 to ModelRunnerFL (V1).",
+            vendor_name,
+        )
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
 

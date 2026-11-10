@@ -583,9 +583,16 @@ class PlatformFL(Platform):
             _pc = getattr(compilation_config, "pass_config", None)
             if _pc is not None:
                 _pc.fuse_rope_kvcache_cat_mla = False
-            os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
             # Iluvatar lacks is_cuda_alike(): the vLLM UVA helper is
-            # unavailable while Model Runner V2 needs UvaBuffer. Use V1.
+            # unavailable while Model Runner V2 needs UvaBuffer. Default to V1
+            # and say so; an explicit value is left untouched.
+            if os.environ.get("VLLM_USE_V2_MODEL_RUNNER") is None:
+                os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
+                logger.warning(
+                    "[vllm_fl] iluvatar cannot execute the upstream V2 model "
+                    "runner (no is_cuda_alike()/UvaBuffer); defaulting "
+                    "VLLM_USE_V2_MODEL_RUNNER=0 to ModelRunnerFL (V1)."
+                )
 
         if cls.device_type == "npu":
             _configure_ascend_compilation(vllm_config)
