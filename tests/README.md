@@ -1,5 +1,28 @@
 # Tests
 
+## Hygon asynchronous Graph/RCCL regression
+
+`functional_tests/distributed/hygon_async_graph_probe.py` is a standalone,
+model-free two-node regression, not an automatically discovered pytest suite.
+It targets the GLM hidden size 6144, seven decode graph buckets, four eager
+payload sizes and two overlapping steps. It does not qualify arbitrary
+collective operations, model accuracy or performance.
+
+Only run after reserving one idle GPU per node and selecting the same Plugin,
+vLLM, FlagGems and ROCm/RCCL/shca environment on both nodes. GPU masks must expose
+exactly the reserved card as device 0. The reference machine-local toolchain is
+registered in the glm-5.2 session card (10.232.2.18 / yxa-plugin-glm5_2); its
+`/opt/dtk` library path and network configuration are not portable assumptions.
+
+Run both ranks together under an external 120-second timeout, using the same
+`--master` and `--port` (the plugin mode also uses port+1). The integration
+candidate requires `VLLM_FL_HYGON_SPLIT_GRAPH_COMM=1` and
+`--via-plugin --vary-inputs --steps 100 --rank 0` / `--rank 1`.
+The baseline omits `--via-plugin`; `--execution graph` / `eager` are isolation
+controls, not substitutes for the mixed test. A valid result requires both
+rank PASS records, all numerical assertions, successful exits and released
+devices. A timeout or process failure is not a performance sample.
+
 Platform-agnostic test suite for the vllm-plugin-FL project. All tests are designed to run on both NVIDIA CUDA and Huawei Ascend NPU without modification.
 
 ## Architecture Overview

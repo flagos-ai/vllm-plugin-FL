@@ -1,0 +1,1 @@
+"""Categorized Hygon compatibility patches."""
