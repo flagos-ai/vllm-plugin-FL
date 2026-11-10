@@ -1059,17 +1059,26 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Match CUDA's IR-op defaults without hardcoding CUDA APIs."""
+        from dataclasses import fields
+
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"] if using_inductor else ["vllm_c", "native"]
+        kwargs = {
+            "rms_norm": default,
+            "fused_add_rms_norm": default,
+        }
+        if any(f.name == "gelu_and_mul_sparse" for f in fields(IrOpPriorityConfig)):
+            kwargs["gelu_and_mul_sparse"] = (
+                ["native"] if using_inductor else ["triton", "native"]
+            )
         return IrOpPriorityConfig.with_default(
-            default,
-            rms_norm=default,
-            fused_add_rms_norm=default,
+            ["native"],
+            **kwargs,
         )
 
     @classmethod

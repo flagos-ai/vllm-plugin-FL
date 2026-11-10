@@ -98,7 +98,30 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
+
+def _is_sp_enabled(pass_config: Any) -> bool:
+    return bool(
+        getattr(
+            pass_config,
+            "enable_sp",
+            getattr(pass_config, "enable_sequence_parallelism", False),
+        )
+    )
+
+
+try:  # pragma: no cover - vLLM < 0.32 compat
+    from vllm.v1.worker.utils import is_residual_scattered_for_sp
+except ImportError:  # vLLM >= 0.32 removed PassConfig.enable_sp / enable_sequence_parallelism
+
+    def is_residual_scattered_for_sp(
+        vllm_config: VllmConfig, num_tokens: int
+    ) -> bool:
+        pass_config = getattr(vllm_config.compilation_config, "pass_config", None)
+        if not _is_sp_enabled(pass_config):
+            return False
+        tp = vllm_config.parallel_config.tensor_parallel_size
+        return tp > 1 and num_tokens % tp == 0
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -875,7 +898,7 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -1285,7 +1308,7 @@ class WorkerFL(WorkerBase):
 
         if (
             parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
+            and _is_sp_enabled(compilation_config.pass_config)
             and forward_pass
         ):
             # currently only supported by V1 GPUModelRunner
@@ -1620,7 +1643,12 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    try:
+        from vllm.model_executor.determinism.batch_invariant import (
+            init_batch_invariance,
+        )
+    except ImportError:  # pragma: no cover - vLLM < 0.32 compat
+        from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
     init_batch_invariance()
     override_envs_for_eplb(

@@ -89,10 +89,12 @@ from vllm.model_executor.layers.fused_moe.routed_experts_capturer import (
 from vllm.model_executor.layers.mamba.ops.ssu_dispatch import (
     initialize_mamba_ssu_backend,
 )
-from vllm.model_executor.layers.rotary_embedding import (
-    MRotaryEmbedding,
-    XDRotaryEmbedding,
-)
+from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
+
+try:  # pragma: no cover - vLLM < 0.32 compat
+    from vllm.model_executor.layers.rotary_embedding import XDRotaryEmbedding
+except ImportError:
+    XDRotaryEmbedding = None  # type: ignore[assignment,misc]
 from vllm.model_executor.model_loader import get_model_loader
 from vllm.model_executor.model_loader.reload import (
     finalize_layerwise_reload,
@@ -103,15 +105,24 @@ from vllm.model_executor.models.interfaces import (
     MultiModalEmbeddings,
     SupportsMRoPE,
     SupportsMultiModal,
-    SupportsXDRoPE,
     get_mixture_of_experts_model,
     supports_eagle3,
     supports_mrope,
     supports_multimodal_pruning,
     supports_realtime,
     supports_transcription,
-    supports_xdrope,
 )
+
+try:  # pragma: no cover - vLLM < 0.32 compat
+    from vllm.model_executor.models.interfaces import (
+        SupportsXDRoPE,
+        supports_xdrope,
+    )
+except ImportError:
+    SupportsXDRoPE = Any  # type: ignore[assignment,misc]
+
+    def supports_xdrope(model: Any) -> bool:
+        return False
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling,
     is_pooling_model,
@@ -192,6 +203,9 @@ from vllm.v1.kv_cache_interface import (
     UniformTypeKVCacheSpecs,
     get_kv_cache_spec_kind,
 )
+import inspect
+from dataclasses import fields as _dataclass_fields
+
 from vllm.v1.kv_cache_spec_registry import KVCacheSpecRegistry
 from vllm.v1.outputs import (
     EMPTY_MODEL_RUNNER_OUTPUT,
@@ -203,11 +217,22 @@ from vllm.v1.outputs import (
     LogprobsTensors,
     ModelRunnerOutput,
     PoolerOutput,
-    RoutedExpertsLists,
-    RoutedExpertsTensors,
     SamplerOutput,
     make_empty_encoder_model_runner_output,
 )
+
+try:  # pragma: no cover - vLLM < 0.32 compat
+    from vllm.v1.outputs import RoutedExpertsLists, RoutedExpertsTensors
+except ImportError:
+
+    class RoutedExpertsLists(NamedTuple):  # type: ignore[no-redef]
+        routing_data: np.ndarray
+        slot_mapping: np.ndarray
+
+    class RoutedExpertsTensors(NamedTuple):  # type: ignore[no-redef]
+        routing_data: torch.Tensor
+        slot_mapping: torch.Tensor
+
 from vllm.v1.pool.late_interaction_runner import LateInteractionRunner
 from vllm.v1.pool.metadata import PoolingMetadata, PoolingStates
 from vllm.v1.sample.logits_processor import LogitsProcessors, build_logitsprocs
@@ -245,12 +270,65 @@ try:
         get_total_cp_world_size,
     )
 except ImportError:  # vLLM >= 0.28: CP merged into DCP; KV cache shards over DCP
-    from vllm.v1.worker.cp_utils import (
-        get_kv_cache_shard_count as get_total_cp_world_size,
-    )
+    try:
+        from vllm.v1.worker.cp_utils import (
+            get_kv_cache_shard_count as get_total_cp_world_size,
+        )
+    except ImportError:  # vLLM >= 0.32 removed get_kv_cache_shard_count from cp_utils
+
+        def get_total_cp_world_size() -> int:
+            return get_dcp_group().world_size
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
-from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
+
+try:  # pragma: no cover - vLLM < 0.32 compat
+    from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
+except ImportError:
+
+    def _reshape_attention_kv_cache(
+        raw_tensor: torch.Tensor,
+        kv_cache_spec: AttentionSpec,
+        kv_cache_shape: tuple[int, ...],
+        kv_cache_stride_order: tuple[int, ...],
+        kernel_num_blocks: int,
+        packing: tuple[int, int] | None = None,
+    ) -> torch.Tensor:
+        if packing is not None:
+            raise NotImplementedError(
+                "Packed KV cache views require vLLM's create_kv_cache_views"
+            )
+        typed_tensor = raw_tensor.view(kv_cache_spec.dtype)
+        physical_shape = tuple(kv_cache_shape[i] for i in kv_cache_stride_order)
+        inv_order = [
+            kv_cache_stride_order.index(i) for i in range(len(kv_cache_shape))
+        ]
+        return typed_tensor.view(physical_shape).permute(*inv_order)
+
+
+def _get_tensor_num_blocks(
+    kv_cache_config: KVCacheConfig, kv_cache_tensor: Any
+) -> int:
+    if hasattr(kv_cache_config, "num_blocks_of"):
+        return kv_cache_config.num_blocks_of(kv_cache_tensor)
+    return int(getattr(kv_cache_config, "num_blocks", 0))
+
+
+def _is_packed_kv_cache_tensor(
+    kv_cache_config: KVCacheConfig, kv_cache_tensor: Any
+) -> bool:
+    """Return whether ``kv_cache_tensor`` interleaves pages across layers."""
+    block_stride = getattr(kv_cache_tensor, "block_stride", 0)
+    if block_stride <= 0:
+        return False
+    layer_stride = getattr(kv_cache_tensor, "layer_stride", 0)
+    if layer_stride <= 0:
+        # vLLM < 0.32 only sets block_stride > 0 on block-outermost packed pools.
+        return True
+    tensor_layers = (
+        getattr(kv_cache_tensor, "shared_by", None) or kv_cache_tensor.layers
+    )
+    num_blocks = _get_tensor_num_blocks(kv_cache_config, kv_cache_tensor)
+    return len(tensor_layers) > 1 and layer_stride < num_blocks * block_stride
 try:
     from vllm.v1.worker.gpu.pool.late_interaction_runner import (
         LateInteractionRunner,
@@ -274,10 +352,61 @@ from vllm.v1.worker.utils import (
     add_kv_sharing_layers_to_kv_cache_groups,
     bind_kv_cache,
     copy_kv_cache_blocks_inplace,
-    is_residual_scattered_for_sp,
     prepare_kernel_block_sizes,
     raise_if_nan_logits,
     sanity_check_mm_encoder_outputs,
+)
+
+def _is_sp_enabled(pass_config: Any) -> bool:
+    return bool(
+        getattr(
+            pass_config,
+            "enable_sp",
+            getattr(pass_config, "enable_sequence_parallelism", False),
+        )
+    )
+
+
+try:  # pragma: no cover - vLLM < 0.32 compat
+    from vllm.v1.worker.utils import is_residual_scattered_for_sp
+except ImportError:  # vLLM >= 0.32 removed PassConfig.enable_sp / enable_sequence_parallelism
+
+    def is_residual_scattered_for_sp(
+        vllm_config: VllmConfig, num_tokens: int
+    ) -> bool:
+        pass_config = getattr(vllm_config.compilation_config, "pass_config", None)
+        if not _is_sp_enabled(pass_config):
+            return False
+        tp = vllm_config.parallel_config.tensor_parallel_size
+        return tp > 1 and num_tokens % tp == 0
+
+
+try:  # pragma: no cover - vLLM >= 0.32 KV cache helpers
+    from vllm.v1.worker.utils import (
+        allocate_kv_cache,
+        customize_attention_spec,
+        map_kv_caches_to_kernel_blocks,
+    )
+except ImportError:
+    allocate_kv_cache = None  # type: ignore[assignment]
+    customize_attention_spec = None  # type: ignore[assignment]
+    map_kv_caches_to_kernel_blocks = None  # type: ignore[assignment]
+
+_INPUT_BATCH_ACCEPTS_KERNEL_BLOCK_SIZES = (
+    "kernel_block_sizes" in inspect.signature(InputBatch.__init__).parameters
+)
+_KV_BLOCK_ZEROER_ACCEPTS_NUM_BLOCKS = (
+    "num_blocks" in inspect.signature(KVBlockZeroer.__init__).parameters
+)
+_COMMON_ATTN_META_HAS_PRIVATE_CPU_LENS = any(
+    f.name == "_seq_lens_cpu" for f in _dataclass_fields(CommonAttentionMetadata)
+)
+_MODEL_RUNNER_OUTPUT_HAS_ROUTED_EXPERTS = any(
+    f.name == "routed_experts" for f in _dataclass_fields(ModelRunnerOutput)
+)
+_ROUTED_EXPERTS_CAPTURER_ACCEPTS_KV_CACHE_CONFIG = (
+    "kv_cache_config"
+    in inspect.signature(RoutedExpertsCapturer.__init__).parameters
 )
 from vllm.v1.worker.workspace import lock_workspace
 
@@ -633,7 +762,11 @@ class ModelRunnerFL(
             cache_config.cache_dtype, self.model_config
         )
 
-        self.is_pooling_model = model_config.runner_type == "pooling"
+        self.is_pooling_model = getattr(
+            model_config,
+            "is_pooling_model",
+            getattr(model_config, "runner_type", None) == "pooling",
+        )
         self.enable_prompt_embeds = model_config.enable_prompt_embeds
         self.is_multimodal_raw_input_only_model = (
             model_config.is_multimodal_raw_input_only_model
@@ -670,17 +803,22 @@ class ModelRunnerFL(
         self.num_query_heads = model_config.get_num_attention_heads(parallel_config)
         self.inputs_embeds_size = model_config.get_inputs_embeds_size()
         # Only relevant for models using ALiBi (e.g, MPT)
-        self.use_alibi = model_config.uses_alibi
+        self.use_alibi = getattr(model_config, "uses_alibi", False)
 
-        self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
+        self.cascade_attn_enabled = not getattr(
+            self.model_config, "disable_cascade_attn", True
+        )
         self.is_mm_prefix_lm = self.model_config.is_mm_prefix_lm
 
         # Multi-modal data support
         self.mm_registry = MULTIMODAL_REGISTRY
         self.uses_mrope = model_config.uses_mrope
-        self.uses_xdrope_dim = model_config.uses_xdrope_dim
-        self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
-            model_config
+        self.mrope_num_dims = getattr(model_config, "mrope_num_dims", 3)
+        self.uses_xdrope_dim = getattr(model_config, "uses_xdrope_dim", 0)
+        self.supports_mm_inputs = (
+            self.mm_registry.supports_multimodal_inputs(model_config)
+            if hasattr(self.mm_registry, "supports_multimodal_inputs")
+            else model_config.supports_multimodal_inputs
         )
 
         if self.model_config.is_encoder_decoder:
@@ -857,6 +995,9 @@ class ModelRunnerFL(
         # FL: vLLM >= 0.28 requires these on InputBatch
         self._init_max_num_blocks = [placeholder_max_num_blocks]
         self._init_slot_mapping_modes = [SlotMappingMode.TOKEN_TO_KV_SLOT]
+        _init_input_batch_kwargs: dict[str, Any] = {}
+        if _INPUT_BATCH_ACCEPTS_KERNEL_BLOCK_SIZES:
+            _init_input_batch_kwargs["kernel_block_sizes"] = [placeholder_block_size]
         self.input_batch = InputBatch(
             max_num_reqs=self.max_num_reqs,
             # We need to use the encoder length for encoder-decoder
@@ -866,7 +1007,6 @@ class ModelRunnerFL(
             device=self.device,
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[placeholder_block_size],
-            kernel_block_sizes=[placeholder_block_size],
             max_num_blocks_per_req=[placeholder_max_num_blocks],
             num_spec_tokens=self.num_spec_tokens,
             logitsprocs=build_logitsprocs(
@@ -884,6 +1024,7 @@ class ModelRunnerFL(
             cp_kv_cache_interleave_size=self.parallel_config.cp_kv_cache_interleave_size,
             reasoning_config=self.vllm_config.reasoning_config,
             use_replayssm=self.cache_config.use_replayssm,
+            **_init_input_batch_kwargs,
         )
 
         # Separate cuda stream for overlapping transfer of sampled token ids from
@@ -1316,13 +1457,18 @@ class ModelRunnerFL(
 
         Called from gpu_worker.py outside the CuMem pool context.
         """
+        _zeroer_kwargs: dict[str, Any] = {}
+        if _KV_BLOCK_ZEROER_ACCEPTS_NUM_BLOCKS:
+            _zeroer_kwargs["num_blocks"] = self.kv_cache_config.num_blocks
+        else:
+            _zeroer_kwargs["cache_dtype"] = self.cache_config.cache_dtype
         self._kv_block_zeroer = KVBlockZeroer(
             self.device,
             attn_groups_iter=self._kv_cache_spec_attn_group_iterator(),
             kernel_block_sizes=self._kernel_block_sizes,
-            cache_dtype=self.cache_config.cache_dtype,
             runner_only_attn_layers=self.runner_only_attn_layers,
             static_forward_context=self.compilation_config.static_forward_context,
+            **_zeroer_kwargs,
         )
 
     def _zero_block_ids(self, block_ids: list[int]) -> None:
@@ -2657,12 +2803,15 @@ class ModelRunnerFL(
                 self.input_batch.replayssm_decode_base_cpu_tensor[:num_reqs_padded]
             )
 
+        _cm_extra_kwargs: dict[str, Any] = {}
+        if _COMMON_ATTN_META_HAS_PRIVATE_CPU_LENS:
+            _cm_extra_kwargs["_seq_lens_cpu"] = seq_lens_cpu
+            _cm_extra_kwargs["_num_computed_tokens_cpu"] = num_computed_tokens_cpu
+
         cm_base = CommonAttentionMetadata(
             query_start_loc=self.query_start_loc.gpu[: num_reqs_padded + 1],
             query_start_loc_cpu=self.query_start_loc.cpu[: num_reqs_padded + 1],
             seq_lens=self.seq_lens[:num_reqs_padded],
-            _seq_lens_cpu=seq_lens_cpu,
-            _num_computed_tokens_cpu=num_computed_tokens_cpu,
             seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             replayssm_decode_base_cpu=replayssm_decode_base_cpu,
             num_reqs=num_reqs_padded,
@@ -2676,6 +2825,7 @@ class ModelRunnerFL(
             positions=self.positions[:num_tokens_padded],
             mm_req_doc_ranges=req_doc_ranges,
             rswa_prefix_lens=rswa_prefix_lens,
+            **_cm_extra_kwargs,
         )
 
         if self.use_ascend_attention:
@@ -3644,10 +3794,16 @@ class ModelRunnerFL(
     def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         tasks = list[SupportedTask]()
 
-        if self.model_config.runner_type == "generate":
-            tasks.extend(self.get_supported_generation_tasks())
-        if self.model_config.runner_type == "pooling":
+        runner_type = getattr(self.model_config, "runner_type", None)
+        if runner_type is not None:
+            if runner_type == "generate":
+                tasks.extend(self.get_supported_generation_tasks())
+            if runner_type == "pooling":
+                tasks.extend(self.get_supported_pooling_tasks())
+        elif self.is_pooling_model:
             tasks.extend(self.get_supported_pooling_tasks())
+        else:
+            tasks.extend(self.get_supported_generation_tasks())
 
         return tuple(tasks)
 
@@ -3782,7 +3938,7 @@ class ModelRunnerFL(
         # Pad tokens to multiple of tensor_parallel_size when
         # enabled collective fusion for SP
         tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-        if self.compilation_config.pass_config.enable_sp and tp_size > 1:
+        if _is_sp_enabled(self.compilation_config.pass_config) and tp_size > 1:
             return round_up(num_scheduled_tokens, tp_size)
         return num_scheduled_tokens
 
@@ -4339,7 +4495,7 @@ class ModelRunnerFL(
 
         cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded)
         num_tokens_padded = batch_descriptor.num_tokens
-        if self.compilation_config.pass_config.enable_sp:
+        if _is_sp_enabled(self.compilation_config.pass_config):
             assert (
                 batch_descriptor.num_tokens
                 % self.vllm_config.parallel_config.tensor_parallel_size
@@ -5128,6 +5284,9 @@ class ModelRunnerFL(
         self.kv_connector_output = None
 
         with record_function_or_nullcontext("gpu_model_runner: ModelRunnerOutput"):
+            _output_extra_kwargs: dict[str, Any] = {}
+            if _MODEL_RUNNER_OUTPUT_HAS_ROUTED_EXPERTS:
+                _output_extra_kwargs["routed_experts"] = None
             output = ModelRunnerOutput(
                 req_ids=req_ids_output_copy,
                 req_id_to_index=req_id_to_index_output_copy,
@@ -5140,7 +5299,7 @@ class ModelRunnerFL(
                 else None,
                 num_nans_in_logits=num_nans_in_logits,
                 cudagraph_stats=cudagraph_stats,
-                routed_experts=None,
+                **_output_extra_kwargs,
             )
 
         # One IO-dump step covers the full forward + sampling cycle.
@@ -7867,15 +8026,24 @@ class ModelRunnerFL(
                 if cg_support.value < min_cg_support.value:
                     min_cg_support = cg_support
                     min_cg_attn_backend = attn_backend.__name__
+        _resolve_cg_kwargs: dict[str, Any] = {
+            "use_v2_model_runner": False,
+            "tensor_parallel_size": self.parallel_config.tensor_parallel_size,
+            "kv_cache_config": self.kv_cache_config,
+            "max_num_reqs": self.max_num_reqs,
+            "is_profiling": is_profiling,
+        }
+        _resolve_cg_params = inspect.signature(
+            self.compilation_config.resolve_cudagraph_mode_and_sizes
+        ).parameters
+        _resolve_cg_kwargs = {
+            k: v for k, v in _resolve_cg_kwargs.items() if k in _resolve_cg_params
+        }
         cudagraph_mode = self.compilation_config.resolve_cudagraph_mode_and_sizes(
             min_cg_support,
             min_cg_attn_backend,
             self.uniform_decode_query_len,
-            use_v2_model_runner=False,
-            tensor_parallel_size=self.parallel_config.tensor_parallel_size,
-            kv_cache_config=self.kv_cache_config,
-            max_num_reqs=self.max_num_reqs,
-            is_profiling=is_profiling,
+            **_resolve_cg_kwargs,
         )
         # Trigger cudagraph dispatching keys initialization after
         # resolved cudagraph mode.
@@ -7963,6 +8131,9 @@ class ModelRunnerFL(
             self._init_kernel_block_sizes = kernel_block_sizes
             self._init_max_num_blocks = max_num_blocks
             self._init_slot_mapping_modes = slot_mapping_modes
+            _reinit_input_batch_kwargs: dict[str, Any] = {}
+            if _INPUT_BATCH_ACCEPTS_KERNEL_BLOCK_SIZES:
+                _reinit_input_batch_kwargs["kernel_block_sizes"] = kernel_block_sizes
             self.input_batch = InputBatch(
                 max_num_reqs=self.max_num_reqs,
                 max_model_len=max_model_len,
@@ -7970,7 +8141,6 @@ class ModelRunnerFL(
                 device=self.device,
                 vocab_size=self.model_config.get_vocab_size(),
                 block_sizes=block_sizes,
-                kernel_block_sizes=kernel_block_sizes,
                 max_num_blocks_per_req=max_num_blocks,
                 num_spec_tokens=self.num_spec_tokens,
                 logitsprocs=self.input_batch.logitsprocs,
@@ -7980,6 +8150,7 @@ class ModelRunnerFL(
                 reasoning_config=self.vllm_config.reasoning_config,
                 use_replayssm=self.cache_config.use_replayssm,
                 slot_mapping_modes=slot_mapping_modes,
+                **_reinit_input_batch_kwargs,
             )
 
         assert self._init_block_sizes == block_sizes, (
@@ -8007,25 +8178,45 @@ class ModelRunnerFL(
         kv_cache_raw_tensors: dict[str, torch.Tensor] = {}
         packed_backing: torch.Tensor | None = None
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
-            if self.use_ascend_hybrid_cache and kv_cache_tensor.block_stride > 0:
+            is_packed = _is_packed_kv_cache_tensor(kv_cache_config, kv_cache_tensor)
+            if self.use_ascend_hybrid_cache and is_packed:
                 raise NotImplementedError(
                     "Ascend dense hybrid cache does not support packed pools"
                 )
+            tensor_layers = (
+                getattr(kv_cache_tensor, "shared_by", None) or kv_cache_tensor.layers
+            )
             if kv_cache_tensor.block_stride > 0:
-                # Allocate once; all packed tensors alias the same backing.
+                # Allocate once; all tensors in the pool alias the same backing.
                 if packed_backing is None:
                     packed_backing = torch.zeros(
                         kv_cache_tensor.size,
                         dtype=torch.int8,
                         device=self.device,
                     )
-                tensor = packed_backing
+                if is_packed:
+                    for layer_name in tensor_layers:
+                        kv_cache_raw_tensors[layer_name] = packed_backing
+                else:
+                    num_blocks = _get_tensor_num_blocks(
+                        kv_cache_config, kv_cache_tensor
+                    )
+                    layer_nbytes = num_blocks * kv_cache_tensor.block_stride
+                    base_offset = getattr(kv_cache_tensor, "offset", 0)
+                    layer_stride = getattr(
+                        kv_cache_tensor, "layer_stride", layer_nbytes
+                    )
+                    for idx, layer_name in enumerate(tensor_layers):
+                        start = base_offset + idx * layer_stride
+                        kv_cache_raw_tensors[layer_name] = packed_backing[
+                            start : start + layer_nbytes
+                        ]
             else:
                 tensor = torch.zeros(
                     kv_cache_tensor.size, dtype=torch.int8, device=self.device
                 )
-            for layer_name in kv_cache_tensor.shared_by:
-                kv_cache_raw_tensors[layer_name] = tensor
+                for layer_name in tensor_layers:
+                    kv_cache_raw_tensors[layer_name] = tensor
 
         layer_names = set()
         for group in kv_cache_config.kv_cache_groups:
@@ -8070,8 +8261,11 @@ class ModelRunnerFL(
         # backing tensor so we can create strided views per layer.
         layer_packing: dict[str, tuple[int, int]] = {}
         for kv_tensor in self.kv_cache_config.kv_cache_tensors:
-            if kv_tensor.block_stride > 0:
-                for ln in kv_tensor.shared_by:
+            if _is_packed_kv_cache_tensor(self.kv_cache_config, kv_tensor):
+                tensor_layers = (
+                    getattr(kv_tensor, "shared_by", None) or kv_tensor.layers
+                )
+                for ln in tensor_layers:
                     layer_packing[ln] = (kv_tensor.offset, kv_tensor.block_stride)
         for group in self._kv_cache_spec_attn_group_iterator():
             kv_cache_spec = group.kv_cache_spec
@@ -8099,8 +8293,11 @@ class ModelRunnerFL(
                     kernel_num_blocks = num_blocks * num_blocks_per_kv_block
 
                     # For MLA with compression, storage_block_size != block_size
-                    if kv_cache_spec.storage_block_size != kv_cache_spec.block_size:
-                        shape_block_size = kv_cache_spec.storage_block_size
+                    storage_block_size = getattr(
+                        kv_cache_spec, "storage_block_size", kv_cache_spec.block_size
+                    )
+                    if storage_block_size != kv_cache_spec.block_size:
+                        shape_block_size = storage_block_size
                     else:
                         shape_block_size = kernel_block_size
 
@@ -8194,6 +8391,8 @@ class ModelRunnerFL(
                 continue
             if group.kv_cache_group_id == len(kernel_block_sizes):
                 continue
+            if not hasattr(group.backend, "get_kv_cache_block_dim"):
+                continue
             block_dims.add(
                 group.backend.get_kv_cache_block_dim(
                     kernel_block_sizes[group.kv_cache_group_id],
@@ -8253,9 +8452,46 @@ class ModelRunnerFL(
             corresponding memory buffer for KV cache.
         """
 
+        # vLLM >= 0.32 unified KV cache allocation path (4D [B, H, N, C] views).
+        # Ascend attention and Ascend hybrid cache require 5D (2, B, N, H, D)
+        # contiguous per-layer K/V views and therefore use the reshape path below.
+        if (
+            allocate_kv_cache is not None
+            and map_kv_caches_to_kernel_blocks is not None
+            and not self.use_ascend_attention
+            and not self.use_ascend_hybrid_cache
+        ):
+            kv_caches = allocate_kv_cache(
+                kv_cache_config,
+                self.device,
+                self.cache_config.get_resolved_kv_cache_layout(),
+                kernel_block_sizes,
+            )
+            for layer_name, target_layer_name in self.shared_kv_cache_layers.items():
+                logger.debug("%s reuses KV cache of %s", layer_name, target_layer_name)
+                kv_caches[layer_name] = kv_caches[target_layer_name]
+
+            num_attn_module = (
+                2 if self.model_config.hf_config.model_type == "longcat_flash" else 1
+            )
+            attn_groups = [g for groups in self.attn_groups for g in groups]
+            if self.speculative_config:
+                attn_groups += getattr(self.drafter, "draft_attn_groups", [])
+            bind_kv_cache(
+                kv_caches,
+                self.compilation_config.static_forward_context,
+                self.kv_caches,
+                num_attn_module,
+                kv_cache_groups=kv_cache_config.kv_cache_groups,
+                layer_kv_caches=map_kv_caches_to_kernel_blocks(kv_caches, attn_groups),
+            )
+            return kv_caches
+
         # Try creating KV caches optimized for kv-connector transfers
         cache_dtype = self.cache_config.cache_dtype
-        if self.use_uniform_kv_cache(self.attn_groups):
+        if hasattr(self, "use_uniform_kv_cache") and self.use_uniform_kv_cache(
+            self.attn_groups
+        ):
             kv_caches, cross_layers_kv_cache, attn_backend = (
                 self.allocate_uniform_kv_caches(
                     kv_cache_config,
@@ -8398,12 +8634,15 @@ class ModelRunnerFL(
     def init_routed_experts_capturer(self):
         logger.info(
             "Initializing routed experts capturer, enable_return_routed_experts: %s",
-            self.model_config.enable_return_routed_experts,
+            getattr(self.model_config, "enable_return_routed_experts", False),
         )
+        _capturer_kwargs: dict[str, Any] = {}
+        if _ROUTED_EXPERTS_CAPTURER_ACCEPTS_KV_CACHE_CONFIG:
+            _capturer_kwargs["kv_cache_config"] = self.kv_cache_config
         self.routed_experts_capturer = RoutedExpertsCapturer(
             max_num_batched_tokens=self.scheduler_config.max_num_batched_tokens,
             vllm_config=self.vllm_config,
-            kv_cache_config=self.kv_cache_config,
+            **_capturer_kwargs,
         )
         bind_routed_experts_capturer(self.model, self.routed_experts_capturer)
 
@@ -8493,12 +8732,15 @@ class ModelRunnerFL(
             if spec := attn_module.get_kv_cache_spec(self.vllm_config):
                 if isinstance(spec, AttentionSpec):
                     backend = attn_module.get_attn_backend()
-                    # indexes_kv_by_block_stride() -> get_kv_cache_stride_order()
-                    # -> get_kv_cache_layout() needs the current vLLM config.
-                    with set_current_vllm_config(self.vllm_config):
-                        indexes = backend.indexes_kv_by_block_stride()
-                    spec = replace(spec, indexes_kv_by_block_stride=indexes)
-                    spec = backend.customize_spec(spec)
+                    if customize_attention_spec is not None:
+                        spec = customize_attention_spec(backend, spec)
+                    else:
+                        # indexes_kv_by_block_stride() -> get_kv_cache_stride_order()
+                        # -> get_kv_cache_layout() needs the current vLLM config.
+                        with set_current_vllm_config(self.vllm_config):
+                            indexes = backend.indexes_kv_by_block_stride()
+                        spec = replace(spec, indexes_kv_by_block_stride=indexes)
+                        spec = backend.customize_spec(spec)
                 kv_cache_spec[layer_name] = spec
 
         if self.use_ascend_hybrid_cache:
