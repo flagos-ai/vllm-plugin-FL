@@ -129,7 +129,6 @@ def test_thead_rotary_contract_preserves_values_storage_and_strides(
     else:
         query = packed[:, 0, :, :8].contiguous()
         key = packed[:, 1, :, :8].contiguous()
-        packed_before = packed.clone()
     query_before, key_before = query.clone(), key.clone()
     _, _, cos, sin, positions = _rotary_inputs(torch.bfloat16)
     expected_query = _expected_rotary(query_before, cos, sin, positions, interleaved)

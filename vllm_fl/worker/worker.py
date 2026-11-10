@@ -96,14 +96,6 @@ from vllm.v1.worker.startup_plan import (
     maybe_save_startup_plan,
 )
 from vllm.v1.worker.utils import request_memory
-
-try:
-    from vllm.v1.worker.utils import is_residual_scattered_for_sp
-except ImportError:
-    # vLLM >= 0.32 removed sequence parallelism (PassConfig.enable_sp),
-    # so the residual tensor is never sharded across TP ranks.
-    def is_residual_scattered_for_sp(vllm_config, num_input_tokens: int) -> bool:
-        return False
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -224,8 +216,9 @@ class WorkerFL(WorkerBase):
         )
         # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
         # this flag to select the matching block-table and KV-cache kernels.
-        # vLLM >= 0.32 defaults VllmConfig.use_v2_model_runner to True, so the
-        # flag is pinned here instead of being mirrored from the config.
+        # vLLM >= 0.32 defaults VllmConfig.use_v2_model_runner to True, and
+        # PlatformFL.check_and_update_config already forces it to False for
+        # vendors that only ship the V1 ModelRunnerFL (with a warning).
         self.use_v2_model_runner = False
 
         _initialize_fl_runtime(self.rank)
@@ -1276,11 +1269,9 @@ class WorkerFL(WorkerBase):
                     use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
                 )
             )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
-                )
-            }
+            # vLLM >= 0.32 removed sequence parallelism, so the residual
+            # tensor is never sharded across TP ranks.
+            all_gather_tensors = {"residual": True}
 
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (

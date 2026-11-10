@@ -462,13 +462,27 @@ def test_explicit_list_keeps_identity_and_existing_order():
     ],
 )
 def test_initializer_graph_mode_changes_are_preserved(passes):
-    _, reference, _ = fixture(split=[] if not passes else None, **passes)
+    if not passes:
+        # Explicit contract for the bare configuration: no passes and no SP
+        # means no piecewise graph and no splitting ops, regardless of what
+        # the upstream initializer decides.
+        platform, vconfig, _ = fixture(split=[])
+        platform.check_and_update_config(vconfig)
+        assert vconfig.compilation_config.cudagraph_mode is GraphMode.NONE
+        assert vconfig.compilation_config.splitting_ops == []
+        vconfig.compilation_config.set_splitting_ops_for_v1(
+            "allgather_reducescatter", 3
+        )
+        assert vconfig.compilation_config.cudagraph_mode is GraphMode.NONE
+        return
+
+    _, reference, _ = fixture(split=None, **passes)
     reference.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
     expected = reference.compilation_config.cudagraph_mode
     expected_ops = list(reference.compilation_config.splitting_ops)
     if expected.has_piecewise_cudagraphs() and "vllm::all_reduce" not in expected_ops:
         expected_ops.append("vllm::all_reduce")
-    platform, vconfig, _ = fixture(split=[] if not passes else None, **passes)
+    platform, vconfig, _ = fixture(split=None, **passes)
     platform.check_and_update_config(vconfig)
     assert vconfig.compilation_config.cudagraph_mode is expected
     assert vconfig.compilation_config.splitting_ops == expected_ops

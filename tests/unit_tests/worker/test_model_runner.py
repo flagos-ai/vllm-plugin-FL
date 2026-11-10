@@ -359,12 +359,7 @@ class TestGetPositions:
         mock_runner.mrope_positions = MagicMock()
         mock_runner.mrope_positions.gpu = torch.arange(300).reshape(3, 100)
 
-        # XDRoPE positions (2D)
-        mock_runner.xdrope_positions = MagicMock()
-        mock_runner.xdrope_positions.gpu = torch.arange(200).reshape(2, 100)
-
         mock_runner.uses_mrope = False
-        mock_runner.uses_xdrope_dim = 0
 
         mock_runner._get_positions = ModelRunnerFL._get_positions.__get__(
             mock_runner, ModelRunnerFL
@@ -391,14 +386,4 @@ class TestGetPositions:
 
         expected = mock_model_runner.mrope_positions.gpu[:, :10]
         assert result.shape == (3, 10)
-        torch.testing.assert_close(result, expected)
-
-    def test_xdrope_returns_2d_positions(self, mock_model_runner):
-        """XDRoPE: returns [2, num_tokens] positions."""
-        mock_model_runner.uses_xdrope_dim = 64
-
-        result = mock_model_runner._get_positions(10)
-
-        expected = mock_model_runner.xdrope_positions.gpu[:, :10]
-        assert result.shape == (2, 10)
         torch.testing.assert_close(result, expected)
