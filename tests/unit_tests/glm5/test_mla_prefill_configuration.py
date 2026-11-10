@@ -369,25 +369,51 @@ def test_ppu_backend_numerical_and_changed_input_graph(
         ("nvidia", "glm5_next", False),
     ],
 )
+@pytest.mark.parametrize("with_config", [False, True])
 def test_worker_configures_prefill_before_plan_early_return(
-    monkeypatch, vendor, plan_name, expected
+    monkeypatch, vendor, plan_name, expected, with_config
 ):
     import vllm.config
 
     import vllm_fl.activation as activation
     from vllm_fl.platform import PlatformFL
 
-    config = object()
+    config = object() if with_config else None
     calls = []
     plan = SimpleNamespace(
         name=plan_name, attention_backend=lambda **kw: "selected.Backend"
     )
     monkeypatch.setattr(activation, "get_active_plan", lambda: plan)
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
-    monkeypatch.setattr(vllm.config, "get_current_vllm_config", lambda: config)
+    monkeypatch.setattr(vllm.config, "get_current_vllm_config_or_none", lambda: config)
     monkeypatch.setattr(
         prefill, "configure_mla_prefill", lambda value: calls.append(value)
     )
     selector = SimpleNamespace(use_mla=True, use_sparse=True)
     assert PlatformFL.get_attn_backend_cls(None, selector) == "selected.Backend"
-    assert calls == ([config] if expected else [])
+    assert calls == ([config] if expected and with_config else [])
+
+
+def test_worker_propagates_prefill_configuration_error(monkeypatch):
+    import vllm.config
+
+    import vllm_fl.activation as activation
+    from vllm_fl.platform import PlatformFL
+
+    plan = SimpleNamespace(
+        name="glm5_next",
+        attention_backend=lambda **kw: pytest.fail("configuration failure was ignored"),
+    )
+    monkeypatch.setattr(activation, "get_active_plan", lambda: plan)
+    monkeypatch.setattr(PlatformFL, "vendor_name", "thead")
+    monkeypatch.setattr(
+        vllm.config, "get_current_vllm_config_or_none", lambda: object()
+    )
+
+    def fail(_):
+        raise ValueError("invalid prefill configuration")
+
+    monkeypatch.setattr(prefill, "configure_mla_prefill", fail)
+    selector = SimpleNamespace(use_mla=True, use_sparse=True)
+    with pytest.raises(ValueError, match="invalid prefill configuration"):
+        PlatformFL.get_attn_backend_cls(None, selector)
