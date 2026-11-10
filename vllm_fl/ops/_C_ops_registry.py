@@ -127,10 +127,15 @@ def register_op_schemas():
         return
 
     # Bail out before touching vllm._C when the active backend already owns _C.
-    if _is_metax_backend() or _C_ops_present():
+    # Note: _C_ops_present() is intentionally NOT checked here — the per-op
+    # hasattr guard at schema-definition time already skips already-registered ops,
+    # and an early exit here would prevent _libs from being set, breaking tests
+    # that rely on the attribute to confirm initialization.
+    if _is_metax_backend():
         logger.debug(
             "Skipping vllm._C import: _C ops are already provided by the active backend"
         )
+        register_op_schemas._libs = {}
         return
 
     try:

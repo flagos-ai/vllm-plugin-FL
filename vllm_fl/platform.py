@@ -478,8 +478,7 @@ class PlatformFL(Platform):
             "musa": "MUSA",
             "txda": "Tsingmicro TXDA",
         }.get(cls.device_type)
-        if cls.device_type == "cuda" and cls.vendor_name == "kunlunxin":
-            platform_name = "Kunlunxin"
+        # Kunlunxin supports the V2 model runner; do not block it here.
         if platform_name and vllm_config.use_v2_model_runner:
             raise ValueError(
                 f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "

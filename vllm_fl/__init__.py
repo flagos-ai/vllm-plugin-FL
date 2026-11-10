@@ -254,7 +254,6 @@ def register():
         "enflame",
         "gcu",
         "tsingmicro",
-        "kunlunxin",
     ):
         # These backends use ModelRunnerFL. Set the default before imports
         # that can read the upstream runner selection.
