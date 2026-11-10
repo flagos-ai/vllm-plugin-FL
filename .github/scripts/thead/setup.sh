@@ -78,6 +78,32 @@ print(wheels[0])
 PY
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
   --ignore-installed --no-index --no-deps --no-compile "$(cat "$WORK/plugin-wheel.txt")"
+# Bind the installed plugin to the wheel that was just built: a dist-info without
+# WHEEL/RECORD or with another version means the payload drifted from the artifact.
+"$PY" -I -B - "$(cat "$WORK/plugin-wheel.txt")" <<'PY'
+import importlib.metadata as metadata
+import json
+import sys
+from pathlib import Path
+
+wheel = Path(sys.argv[1])
+expected = wheel.name.split("-")[1]
+distribution = metadata.distribution("vllm-plugin-fl")
+root = Path(distribution._path)
+for name in ("WHEEL", "RECORD"):
+    if not (root / name).is_file():
+        raise RuntimeError(f"Installed plugin must ship its {name} file")
+if distribution.version != expected:
+    raise RuntimeError(
+        f"Installed plugin {distribution.version} does not match wheel {expected}"
+    )
+direct = root / "direct_url.json"
+if direct.is_file():
+    info = json.loads(direct.read_text())
+    if info.get("dir_info", {}).get("editable"):
+        raise RuntimeError("Editable plugin install is not allowed in CI")
+print(f"plugin payload verified: {expected} from {wheel.name}")
+PY
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
   "pytest-xdist>=3.0.0" \
   "pytest-cov>=7.0.0" \

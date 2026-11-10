@@ -1,7 +1,14 @@
 {
+  "runtime_versions": {
+    "torch": "2.10.0+v0.1.0.ppu2.1.1",
+    "torchvision": "0.25.0+cpu",
+    "numpy": "1.26.4",
+    "vllm": "0.32.0+flagos",
+    "triton": "3.6.0"
+  },
   "flaggems": {
-    "commit": "317b763204391d530d6024b52b6235de150443d8",
-    "version": "5.5.0.dev0+g317b76320"
+    "version": "5.4.0",
+    "source": "FlagOS Runtime 2.3.0 wheel"
   },
   "flagtree": {
     "version": "0.7.0+ppu3.6",
