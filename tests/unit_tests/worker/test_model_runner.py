@@ -387,3 +387,77 @@ class TestGetPositions:
         expected = mock_model_runner.mrope_positions.gpu[:, :10]
         assert result.shape == (3, 10)
         torch.testing.assert_close(result, expected)
+
+
+# =============================================================================
+# Layer 2: DCP metadata field contract
+# =============================================================================
+
+
+class TestDcpAttentionMetadataContract:
+    """Guard the vLLM 0.32 DCP field names used to build attention metadata.
+
+    ``CommonAttentionMetadata`` is a plain dataclass, so assigning a field that
+    no longer exists upstream silently creates a new attribute instead of
+    raising. Every backend that runs DCP (Metax, GCU, Sunrise, ...) would then
+    read ``None`` and fail much later, so pin the names here.
+    """
+
+    def test_upstream_defines_upper_bound_field(self):
+        from vllm.v1.attention.backend import CommonAttentionMetadata
+
+        names = set(getattr(CommonAttentionMetadata, "__annotations__", {}))
+        assert "dcp_local_seq_lens_cpu_upper_bound" in names
+        # vLLM 0.32 dropped the old name; re-introducing it would be a no-op.
+        assert "dcp_local_seq_lens_cpu" not in names
+
+    def test_runner_populates_upper_bound_field_only(self):
+        import inspect
+
+        from vllm_fl.worker.model_runner import ModelRunnerFL
+
+        src = inspect.getsource(ModelRunnerFL._build_attention_metadata)
+        assert "cm_base.dcp_local_seq_lens_cpu_upper_bound = " in src
+        assert "cm_base.dcp_local_seq_lens_cpu = " not in src
+
+
+# =============================================================================
+# Layer 2: JIT warmup registry lifecycle
+# =============================================================================
+
+
+class TestJitWarmupRegistryCapture:
+    """Registry must be active while ``__init__`` runs, not just constructed."""
+
+    def test_init_is_wrapped_by_capture(self):
+        import pytest
+
+        pytest.importorskip("vllm.model_executor.warmup.jit_warmup")
+        from vllm_fl.worker.model_runner import ModelRunnerFL
+
+        assert hasattr(ModelRunnerFL.__init__, "__wrapped__"), (
+            "ModelRunnerFL.__init__ must be wrapped by JitWarmupRegistry.capture; "
+            "a bare registry instance never activates the registration ContextVar "
+            "and every register_warmup() call is silently dropped."
+        )
+
+    def test_registry_is_active_while_init_body_runs(self, monkeypatch):
+        import pytest
+
+        module = pytest.importorskip("vllm.model_executor.warmup.jit_warmup")
+        from vllm_fl.worker import model_runner as mr
+
+        seen = {}
+
+        def probe(self, vllm_config, device):
+            seen["active"] = module.JitWarmupRegistry._active.get()
+            seen["attached"] = getattr(self, "jit_warmup_registry", None)
+
+        monkeypatch.setattr(
+            mr.ModelRunnerFL, "__init__", module.JitWarmupRegistry.capture(probe)
+        )
+        instance = object.__new__(mr.ModelRunnerFL)
+        mr.ModelRunnerFL.__init__(instance, "cfg", None)
+
+        assert seen["active"] is not None
+        assert seen["attached"] is seen["active"]

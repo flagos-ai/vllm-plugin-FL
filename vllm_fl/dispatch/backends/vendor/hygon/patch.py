@@ -3,20 +3,20 @@
 """Hygon (HCU/DCU) patches for vLLM 0.32 compatibility."""
 
 import logging
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-_patches_applied = False
 
-
+@lru_cache(maxsize=1)
 def apply_hygon_patches():
-    """Apply Hygon patches that must run before model construction."""
-    global _patches_applied
-    if _patches_applied:
-        return
+    """Apply Hygon patches that must run before model construction.
+
+    Cached so the patches run once per process. ``lru_cache`` does not cache
+    exceptions, so a failed call can be retried.
+    """
     force_v1_model_runner()
     patch_accelerator_missing_attrs()
-    _patches_applied = True
 
 
 def force_v1_model_runner() -> None:
@@ -27,13 +27,23 @@ def force_v1_model_runner() -> None:
     ``mamba_aligned_state_indices`` that only the V2 runner populates, so the
     FL runner cannot drive them. ``VllmConfig.use_v2_model_runner`` is a
     read-only property backed by this env var, hence it is set before any
-    VllmConfig is created. An explicit user setting is respected.
+    VllmConfig is created.
+
+    Hygon cannot run the V2 runner at all, so an explicit opt-in is rejected
+    instead of silently degrading: ``=0`` is honoured, anything else raises.
     """
     import os
 
-    if os.environ.get("VLLM_USE_V2_MODEL_RUNNER") is None:
+    value = os.environ.get("VLLM_USE_V2_MODEL_RUNNER")
+    if value is None:
         os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
         logger.info("Set VLLM_USE_V2_MODEL_RUNNER=0 (vLLM-FL uses the v1 runner)")
+    elif value.strip() not in ("", "0"):
+        raise RuntimeError(
+            f"VLLM_USE_V2_MODEL_RUNNER={value} is not supported on Hygon: vLLM-FL "
+            "only implements the v1 model runner. Unset the variable (the "
+            "plugin selects v1) or set it to 0."
+        )
 
 
 def patch_accelerator_missing_attrs() -> bool:
@@ -58,13 +68,22 @@ def patch_accelerator_missing_attrs() -> bool:
         if getattr(torch.accelerator, "_hcu_attrs_patched", False):
             return True
 
-        bindings = {
-            "get_memory_info": torch.cuda.mem_get_info,
+        # Only fill in attributes the installed Torch does not provide, so a
+        # newer DTK that ships the real implementations keeps them instead of
+        # being shadowed by the CUDA-shaped fallbacks below.
+        candidates = {
+            "get_memory_info": lambda device_index=None: torch.cuda.mem_get_info(
+                device_index
+            ),
             "current_device": torch.cuda.current_device,
             "set_device": torch.cuda.set_device,
+            "empty_host_cache": lambda device_index=None: None,
         }
-        if not hasattr(torch.accelerator, "empty_host_cache"):
-            bindings["empty_host_cache"] = lambda device_index=None: None
+        bindings = {
+            name: fn
+            for name, fn in candidates.items()
+            if not hasattr(torch.accelerator, name)
+        }
 
         for name, fn in bindings.items():
             setattr(torch.accelerator, name, fn)

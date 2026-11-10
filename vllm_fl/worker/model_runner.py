@@ -578,12 +578,13 @@ class ModelRunnerFL(
         self.speculative_config = vllm_config.speculative_config
         self.observability_config = vllm_config.observability_config
 
-        # vLLM 0.32's kernel_warmup expects every V1 runner to expose the
-        # JIT-warmup registry (the upstream runner creates it via the
-        # ``JitWarmupRegistry.capture`` decorator on ``__init__``).
-        from vllm.model_executor.warmup.jit_warmup import JitWarmupRegistry
-
-        self.jit_warmup_registry = JitWarmupRegistry(vllm_config)
+        # ``self.jit_warmup_registry`` is injected by wrapping this ``__init__``
+        # with ``JitWarmupRegistry.capture`` at the bottom of this module. The
+        # wrapper creates the registry and activates it for the whole body, so
+        # every ``register_warmup()`` call made while the runner is built is
+        # collected. Assigning a bare ``JitWarmupRegistry(vllm_config)`` here
+        # would leave the active-registry ContextVar unset and silently drop
+        # all registrations.
 
         model_config = self.model_config
         cache_config = self.cache_config
@@ -7993,3 +7994,31 @@ class ModelRunnerFL(
                     stats = self.encoder_timing_registry[req_id]
                     stats.encoder_forward_secs += per_request_time
                     stats.num_encoder_calls += 1
+
+
+_jit_warmup_capture_installed = False
+
+
+def _install_jit_warmup_capture() -> None:
+    """Collect JIT-warmup registrations made while the FL runner is built.
+
+    vLLM 0.32's ``kernel_warmup`` calls ``runner.jit_warmup_registry.warmup()``
+    and expects the registry to have been filled during ``__init__``. Upstream
+    achieves that by decorating the v1 runner's ``__init__`` with
+    ``JitWarmupRegistry.capture``, whose wrapper activates the registry through
+    a ``ContextVar`` for the duration of the call; ``register_warmup()`` is a
+    no-op when no registry is active. ModelRunnerFL cannot use the decorator
+    directly (it would have to re-indent the whole body), so wrap it here.
+    """
+    global _jit_warmup_capture_installed
+    if _jit_warmup_capture_installed:
+        return
+    try:
+        from vllm.model_executor.warmup.jit_warmup import JitWarmupRegistry
+    except ImportError:  # vLLM without the V2 runner / JIT warmup registry
+        return
+    ModelRunnerFL.__init__ = JitWarmupRegistry.capture(ModelRunnerFL.__init__)
+    _jit_warmup_capture_installed = True
+
+
+_install_jit_warmup_capture()

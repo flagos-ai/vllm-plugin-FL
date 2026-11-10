@@ -245,21 +245,14 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        # The FL plugin only implements vLLM's v1 model runner. vLLM 0.32
-        # enables the V2 runner (vllm.v1.worker.gpu.model_runner) by default,
-        # which has not been ported to vLLM-FL on Hygon yet.
-        if (
-            getattr(current_platform, "vendor_name", "") == "hygon"
-            and vllm_config.use_v2_model_runner
-        ):
-            logger.warning(
-                "The vLLM 0.32 V2 model runner is not supported by vLLM-FL on "
-                "Hygon; falling back to the FL (v1) model runner."
-            )
-        self.use_v2_model_runner = (
-            vllm_config.use_v2_model_runner
-            and getattr(current_platform, "vendor_name", "") != "hygon"
-        )
+        # The FL plugin only implements vLLM's v1 model runner. On Hygon the
+        # V2 runner is disabled before any VllmConfig exists (see
+        # ``hygon/patch.py:force_v1_model_runner``), because
+        # ``VllmConfig.use_v2_model_runner`` is a read-only property backed by
+        # ``VLLM_USE_V2_MODEL_RUNNER``. Overriding the instance attribute here
+        # would leave the property reporting V2 to any upstream code that
+        # reads it, so the env-var patch is the single source of truth.
+        self.use_v2_model_runner = vllm_config.use_v2_model_runner
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 

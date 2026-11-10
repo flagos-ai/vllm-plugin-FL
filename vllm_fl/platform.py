@@ -448,7 +448,7 @@ class PlatformFL(Platform):
                         capture_cap
                     ]
                     compilation_config.cudagraph_capture_sizes = capped
-                    compilation_config.max_cudagraph_capture_size = capped[-1]
+                    compilation_config.max_cudagraph_capture_size = max(capped)
                     logger.info(
                         "Hygon: cudagraph capture sizes capped at %s to stay "
                         "within the DCU memory budget.",
@@ -1024,7 +1024,7 @@ class PlatformFL(Platform):
 
         try:
             from vllm.ir.op import IrOp
-        except Exception:
+        except ImportError:
             IrOp = None  # type: ignore[assignment]
 
         def for_op(name: str) -> list[str]:

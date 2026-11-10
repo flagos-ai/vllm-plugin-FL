@@ -50,14 +50,30 @@ python -I -B -m pip install "pytest-xdist>=3.0.0"
 # installer when the release is genuinely absent.
 FLAGGEMS_VLLM_INSTALLER="${REPO_ROOT}/.github/scripts/install_flaggems_vllm.py"
 if ! python -I -B - "${FLAGGEMS_VLLM_INSTALLER}" <<'PY'
-import importlib.util
+import ast
 import json
 import sys
 from importlib.metadata import PackageNotFoundError, distribution
 
-spec = importlib.util.spec_from_file_location("install_flaggems_vllm", sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+# Read COMMIT / RELEASE as literals instead of importing the installer:
+# exec_module would run its top-level code (network probes, logging setup,
+# file writes) on every CI run even when no reinstall is needed.
+consts = {}
+with open(sys.argv[1], encoding="utf-8") as fh:
+    tree = ast.parse(fh.read(), filename=sys.argv[1])
+for node in tree.body:
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and target.id in ("COMMIT", "RELEASE"):
+            try:
+                consts[target.id] = ast.literal_eval(node.value)
+            except ValueError:
+                pass
+
+commit = consts.get("COMMIT")
+release = consts.get("RELEASE")
+if not commit or not release:
+    raise SystemExit(1)
 
 try:
     direct_url = distribution("flaggems-vllm").read_text("direct_url.json")
@@ -66,12 +82,12 @@ except (PackageNotFoundError, ValueError):
     raise SystemExit(1)
 
 if (
-    source.get("vcs_info", {}).get("commit_id") != module.COMMIT
+    source.get("vcs_info", {}).get("commit_id") != commit
     or "flagos-ai/FlagGems-vllm" not in source.get("url", "")
 ):
     raise SystemExit(1)
 
-print(f"FlagGems-vllm {module.RELEASE} (commit {module.COMMIT}) already installed")
+print(f"FlagGems-vllm {release} (commit {commit}) already installed")
 PY
 then
     python -I -B "${FLAGGEMS_VLLM_INSTALLER}"
