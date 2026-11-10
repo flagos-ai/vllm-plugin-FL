@@ -15,6 +15,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
+# Keep this checksum in sync with the download pin in install-vllm.sh.
 WHEEL_SHA256 = "2363ecc4c39173f075f4e431bab5d74eac8ea57fac5cbdac136f29bc5e6d8771"
 
 TYPING_BACKPORTS = frozenset(

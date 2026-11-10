@@ -19,6 +19,11 @@ def _collect_kv_segments(
     """Collect the block-first attention views bound by the vLLM 0.32 runner."""
     from vllm.v1.kv_cache_interface import AttentionSpec
 
+    if num_blocks <= 0:
+        raise ValueError(
+            f"Expected a positive KV cache manager block count, got {num_blocks}"
+        )
+
     segments = []
     seen_views = set()
     for group in attn_groups:
@@ -34,12 +39,17 @@ def _collect_kv_segments(
                 continue
             if group.kernel_block_stride:
                 kv = group.map_kv_cache_to_manager_blocks(kv, num_blocks)
-            assert kv.shape[0] % num_blocks == 0
+            num_cache_blocks = kv.shape[0]
+            if num_cache_blocks == 0 or num_cache_blocks % num_blocks:
+                raise ValueError(
+                    f"{layer_name}: expected a positive multiple of {num_blocks} "
+                    f"KV cache manager blocks, got {num_cache_blocks} cache blocks"
+                )
             view = (kv.data_ptr(), kv.dtype, kv.shape, kv.stride())
             # Packed overlays can have the same address and different spans.
             if view not in seen_views:
                 seen_views.add(view)
-                segments.append((kv, kv.shape[0] // num_blocks))
+                segments.append((kv, num_cache_blocks // num_blocks))
     return segments
 
 

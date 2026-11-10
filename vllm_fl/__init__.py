@@ -261,8 +261,8 @@ def register():
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
 
     if vendor_name == "kunlunxin":
-        # Padding-aware routing in vLLM 0.32 calls the CUDA-only _moe_C op.
-        # The FL vendor router handles every row and uses valid expert IDs.
+        # Override explicit values because vLLM's padding-aware route calls
+        # the CUDA-only _moe_C op. The FL router handles every row on Kunlunxin.
         os.environ["VLLM_MOE_SKIP_PADDING"] = "0"
 
     if vendor_name != "nvidia":

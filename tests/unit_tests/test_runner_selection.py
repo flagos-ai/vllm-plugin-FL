@@ -113,14 +113,17 @@ def test_accelerator_rejects_explicit_upstream_v2_runner(
 
 
 @pytest.mark.parametrize(
-    ("requested", "expected"),
+    ("requested", "sizes", "expected_mode", "expected_sizes"),
     [
-        ("FULL_AND_PIECEWISE", "FULL_DECODE_ONLY"),
-        ("PIECEWISE", "NONE"),
-        ("NONE", "NONE"),
+        ("FULL_AND_PIECEWISE", [1, 2, 4, 8, 16, 32], "FULL_DECODE_ONLY", [1, 2, 4, 8]),
+        ("FULL_AND_PIECEWISE", [16, 32], "NONE", []),
+        ("PIECEWISE", [1, 2, 4, 8], "NONE", []),
+        ("NONE", [], "NONE", []),
     ],
 )
-def test_kunlunxin_uses_bounded_native_decode_graphs(monkeypatch, requested, expected):
+def test_kunlunxin_uses_bounded_native_decode_graphs(
+    monkeypatch, caplog, requested, sizes, expected_mode, expected_sizes
+):
     from types import SimpleNamespace
 
     from vllm.config import CUDAGraphMode
@@ -131,7 +134,8 @@ def test_kunlunxin_uses_bounded_native_decode_graphs(monkeypatch, requested, exp
     monkeypatch.setattr(PlatformFL, "device_type", "cuda")
     monkeypatch.setattr(PlatformFL, "vendor_name", "kunlunxin")
     config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode[requested])
-    config.compilation_config.cudagraph_capture_sizes = [1, 2, 4, 8, 16, 32]
+    config.compilation_config.cudagraph_capture_sizes = sizes
+    config.compilation_config.max_cudagraph_capture_size = max(sizes, default=0)
     config.kernel_config = SimpleNamespace(enable_jit_warmup=True)
 
     PlatformFL.apply_config_platform_defaults(config)
@@ -139,11 +143,16 @@ def test_kunlunxin_uses_bounded_native_decode_graphs(monkeypatch, requested, exp
 
     PlatformFL.check_and_update_config(config)
 
-    assert config.compilation_config.cudagraph_mode == CUDAGraphMode[expected]
+    assert config.compilation_config.cudagraph_mode == CUDAGraphMode[expected_mode]
     assert config.kernel_config.enable_jit_warmup is False
-    if expected == "FULL_DECODE_ONLY":
-        assert config.compilation_config.cudagraph_capture_sizes == [1, 2, 4, 8]
-        assert config.compilation_config.max_cudagraph_capture_size == 8
+    assert config.compilation_config.cudagraph_capture_sizes == expected_sizes
+    assert config.compilation_config.max_cudagraph_capture_size == max(
+        expected_sizes, default=0
+    )
+    warned = "Kunlunxin graph capture disabled" in caplog.text
+    assert warned is (requested == "FULL_AND_PIECEWISE" and not expected_sizes)
+    if warned:
+        assert str(sizes) in caplog.text
 
 
 @pytest.mark.parametrize("tp", [1, 4])

@@ -4,9 +4,10 @@
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-index_url="${INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+index_url="${INDEX_URL:-https://pypi.org/simple}"
 vendor_index=https://resource.flagos.net/repository/flagos-pypi-kunlunxin/simple
 package_url=https://resource.flagos.net/repository/flagos-pypi-kunlunxin/packages
+# Update WHEEL_SHA256 in python310_compat.py when changing this wheel.
 wheel_url="$package_url/vllm/0.32.0+flagos/vllm-0.32.0+flagos-py3-none-any.whl"
 flagcx_url="$package_url/flagcx/0.14.1+xre5.37.1/flagcx-0.14.1+xre5.37.1-cp310-cp310-linux_x86_64.whl"
 flagcx_sha=b49203511f7906aaa3cebdbf304aff521a86f0540f6b57c6af6154092f8a658e

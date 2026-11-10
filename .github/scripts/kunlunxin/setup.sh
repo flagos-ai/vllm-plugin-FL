@@ -3,6 +3,8 @@
 # Setup script for Kunlunxin P800 CI environment.
 set -euo pipefail
 
+index_url="${INDEX_URL:-https://pypi.org/simple}"
+
 if [[ -r /etc/bash_env.sh ]]; then
   # The release image adds FlagTree under /opt through its vendor profile.
   # shellcheck disable=SC1091
@@ -16,10 +18,16 @@ fi
 # The published application image carries the native P800 libraries. Upgrade
 # its vLLM runtime through the same installer used by docker/kunlunxin.
 if [[ -x /flagos/bin/python ]] && python -c '
-from importlib.metadata import version
-raise SystemExit(version("vllm") != "0.24.0+flagos")
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    installed_vllm = version("vllm")
+except PackageNotFoundError:
+    installed_vllm = None
+
+raise SystemExit(installed_vllm not in {None, "0.24.0+flagos"})
 '; then
-  bash docker/kunlunxin/install-vllm.sh
+  INDEX_URL="$index_url" bash docker/kunlunxin/install-vllm.sh
 fi
 
 # The selected Python must come from the image's Kunlunxin runtime environment.
@@ -94,11 +102,11 @@ fi
 # exactly the failure mode this job has hit.
 python -m pip uninstall -y vllm-plugin-fl || true
 python -m pip install --no-build-isolation --no-deps -e .
-python -m pip install --index-url "${INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}" \
+python -m pip install --index-url "$index_url" \
   pytest pytest-cov pytest-timeout pytest-json-report "pytest-xdist>=3.0.0" \
   requests openai pillow decorator pyyaml sqlalchemy pybind11
 
-python .github/scripts/install_flaggems_vllm.py --source-archive
+PIP_INDEX_URL="$index_url" python .github/scripts/install_flaggems_vllm.py --source-archive
 
 python - <<'PY'
 import os

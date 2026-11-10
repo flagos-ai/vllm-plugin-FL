@@ -10,7 +10,7 @@ pytest.importorskip("vllm.v1.kv_cache_layout")
 from vllm.v1.kv_cache_interface import FullAttentionSpec
 from vllm.v1.kv_cache_layout import KVCacheLayout
 from vllm.v1.worker.block_table import BlockTable, SlotMappingMode
-from vllm.v1.worker.utils import KVBlockZeroer
+from vllm.v1.worker.utils import AttentionGroup, KVBlockZeroer
 
 from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
     KunlunxinAttentionBackend,
@@ -51,30 +51,38 @@ def test_cache_planes_match_native_hnd_layout(layout):
     assert torch.count_nonzero(cache[0]) == 0
 
 
-def test_kv_zeroer_clears_virtual_blocks_without_touching_neighbors(monkeypatch):
+@pytest.fixture
+def kunlunxin_zeroer(monkeypatch):
     monkeypatch.setattr(KVBlockZeroer, "__init__", KVBlockZeroer.__init__)
     monkeypatch.setattr(KVBlockZeroer, "zero_block_ids", KVBlockZeroer.zero_block_ids)
     apply_kv_block_zero_compat()
+    return KVBlockZeroer
 
+
+def test_kv_zeroer_patch_is_idempotent(kunlunxin_zeroer):
+    init = kunlunxin_zeroer.__init__
+    zero_block_ids = kunlunxin_zeroer.zero_block_ids
+    apply_kv_block_zero_compat()
+    assert kunlunxin_zeroer.__init__ is init
+    assert kunlunxin_zeroer.zero_block_ids is zero_block_ids
+
+
+def test_kv_zeroer_clears_virtual_blocks_without_touching_neighbors(kunlunxin_zeroer):
     # The two aliases start at the same address. The wider view must also be
     # cleared, even if the narrower view is encountered first.
     storage = torch.ones((8, 2, 4, 32))
     spec = FullAttentionSpec(
         block_size=8, num_kv_heads=1, head_size=32, dtype=torch.float32
     )
-    groups = iter(
-        [
-            SimpleNamespace(
-                kv_cache_spec=spec,
-                kv_cache_group_id=0,
-                layer_names=["narrow", "wide"],
-                kernel_block_stride=0,
-            )
-        ]
+    group = AttentionGroup(
+        backend=KunlunxinAttentionBackend,
+        layer_names=["narrow", "wide"],
+        kv_cache_spec=spec,
+        kv_cache_group_id=0,
     )
-    zeroer = KVBlockZeroer(
+    zeroer = kunlunxin_zeroer(
         torch.device("cpu"),
-        attn_groups_iter=groups,
+        attn_groups_iter=iter([group]),
         kernel_block_sizes=[4],
         static_forward_context={
             "narrow": SimpleNamespace(kv_cache=storage[:, :1]),
@@ -86,6 +94,73 @@ def test_kv_zeroer_clears_virtual_blocks_without_touching_neighbors(monkeypatch)
     assert torch.all(storage[:2] == 1)
     assert torch.count_nonzero(storage[2:6]) == 0
     assert torch.all(storage[6:] == 1)
+
+
+@pytest.mark.parametrize(
+    ("num_blocks", "num_cache_blocks", "message"),
+    [
+        (0, 4, "positive KV cache manager block count, got 0"),
+        (-1, 4, "positive KV cache manager block count, got -1"),
+        (4, 0, "layer: expected a positive multiple of 4.*got 0 cache blocks"),
+        (4, 6, "layer: expected a positive multiple of 4.*got 6 cache blocks"),
+    ],
+)
+def test_kv_zeroer_rejects_invalid_block_counts(
+    kunlunxin_zeroer, num_blocks, num_cache_blocks, message
+):
+    spec = FullAttentionSpec(
+        block_size=8, num_kv_heads=1, head_size=32, dtype=torch.float32
+    )
+    group = AttentionGroup(
+        backend=KunlunxinAttentionBackend,
+        layer_names=["layer"],
+        kv_cache_spec=spec,
+        kv_cache_group_id=0,
+    )
+    cache = torch.empty((num_cache_blocks, 1, 4, 64))
+    with pytest.raises(ValueError, match=message):
+        kunlunxin_zeroer(
+            torch.device("cpu"),
+            attn_groups_iter=iter([group]),
+            kernel_block_sizes=[4],
+            static_forward_context={"layer": SimpleNamespace(kv_cache=cache)},
+            num_blocks=num_blocks,
+        )
+
+
+def test_kv_zeroer_maps_packed_blocks_to_manager_blocks(kunlunxin_zeroer):
+    spec = FullAttentionSpec(
+        block_size=8,
+        num_kv_heads=1,
+        head_size=32,
+        dtype=torch.float32,
+        tokens_per_state=2,
+    )
+    group = AttentionGroup(
+        backend=KunlunxinAttentionBackend,
+        layer_names=["layer"],
+        kv_cache_spec=spec,
+        kv_cache_group_id=0,
+        kernel_block_size=4,
+    )
+    # Each manager block contains pages from two layers. The kernel view of
+    # the first layer spans the interleaved pages of the second layer.
+    storage = torch.ones((3, 2, 1, 4, 64))
+    cache = group.map_kv_cache_to_kernel_blocks(storage[:, 0])
+    assert group.kernel_block_stride == 4
+
+    zeroer = kunlunxin_zeroer(
+        torch.device("cpu"),
+        attn_groups_iter=iter([group]),
+        kernel_block_sizes=[4],
+        static_forward_context={"layer": SimpleNamespace(kv_cache=cache)},
+        num_blocks=3,
+    )
+    zeroer.zero_block_ids([1])
+
+    expected = torch.ones_like(storage)
+    expected[1, 0].zero_()
+    torch.testing.assert_close(storage, expected)
 
 
 def test_slot_mapping_respects_dcp_and_skips_recurrent_groups(monkeypatch):

@@ -712,6 +712,13 @@ class PlatformFL(Platform):
                     compilation_config.max_cudagraph_capture_size = max(sizes)
                     logger.info("Kunlunxin: capturing decode graph sizes %s", sizes)
                 else:
+                    if graph_mode.has_full_cudagraphs():
+                        logger.warning(
+                            "Kunlunxin graph capture disabled because none of the "
+                            "requested sizes %s fit the supported range of 1 to 8. "
+                            "Falling back to eager execution.",
+                            compilation_config.cudagraph_capture_sizes,
+                        )
                     compilation_config.cudagraph_mode = CUDAGraphMode.NONE
                     compilation_config.cudagraph_capture_sizes = []
                     compilation_config.max_cudagraph_capture_size = 0

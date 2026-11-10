@@ -39,7 +39,7 @@ RUN bash /opt/kunlunxin-build/install-vllm.sh
 
 # Register the vLLM FlagGems providers in every derived image.
 COPY .github/scripts/install_flaggems_vllm.py /opt/kunlunxin-build/install_flaggems_vllm.py
-RUN PIP_INDEX_URL="${INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}" \
+RUN PIP_INDEX_URL="${INDEX_URL:-https://pypi.org/simple}" \
     python /opt/kunlunxin-build/install_flaggems_vllm.py --source-archive
 
 ENV VLLM_FL_FLAGOS_WHITELIST=silu_and_mul,rms_norm,rotary_embedding
@@ -50,14 +50,12 @@ RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.dev0 \
     && python -c 'from importlib.metadata import version; assert version("vllm") == "0.32.0+flagos"; import vllm.utils.import_utils'
 
 FROM base AS ci
-ENV PIP_INDEX_URL="${INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
         pytest pytest-cov pytest-timeout pytest-json-report pytest-xdist \
         requests openai pillow decorator pyyaml sqlalchemy pybind11
 
-FROM base AS dev
-RUN python -m pip install --no-cache-dir \
-        --index-url "${INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}" \
-        pytest pytest-cov pre-commit ruff
+FROM ci AS dev
+RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+        pre-commit ruff
 
 FROM base AS release
