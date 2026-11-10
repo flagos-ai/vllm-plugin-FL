@@ -18,7 +18,7 @@ def _iluvatar_compilation_branch():
         and isinstance(n.test, ast.Compare)
         and ast.unparse(n.test) == "getattr(cls, 'vendor_name', None) == 'iluvatar'"
         and any(
-            isinstance(c, ast.Constant) and c.value == "pass_config"
+            isinstance(c, ast.Name) and c.id == "configure_compilation"
             for c in ast.walk(n)
         )
     )

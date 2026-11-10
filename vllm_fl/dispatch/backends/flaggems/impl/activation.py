@@ -14,20 +14,6 @@ if current_platform.device_type == "musa":
     from .musa_ops import silu_and_mul as musa_silu_and_mul
 
 
-@torch.library.custom_op("vllm_fl::iluvatar_gems_silu_and_mul", mutates_args=())
-def _iluvatar_gems_silu_and_mul(x: torch.Tensor) -> torch.Tensor:
-    # Keep FlagGems Python dtype inference outside Dynamo tracing.
-    from flaggems_vllm import silu_and_mul
-
-    d = x.shape[-1] // 2
-    return silu_and_mul(x[..., :d], x[..., d:])
-
-
-@_iluvatar_gems_silu_and_mul.register_fake
-def _iluvatar_gems_silu_and_mul_fake(x: torch.Tensor) -> torch.Tensor:
-    return x.new_empty((*x.shape[:-1], x.shape[-1] // 2))
-
-
 def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     """
     SiLU activation followed by element-wise multiplication using FlagGems.
@@ -40,6 +26,10 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
         Output tensor of shape [..., d]
     """
     if getattr(current_platform, "vendor_name", None) == "iluvatar":
+        from vllm_fl.dispatch.backends.vendor.iluvatar.activation import (
+            _iluvatar_gems_silu_and_mul,
+        )
+
         return _iluvatar_gems_silu_and_mul(x)
     if (
         current_platform.device_type == "musa"

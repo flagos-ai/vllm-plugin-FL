@@ -96,8 +96,8 @@ def test_worker_propagates_required_patch_failure(monkeypatch, failing):
             SimpleNamespace(**{function: Mock()}),
         )
     patch = load_function(
-        "vllm_fl/worker/worker.py",
-        "_apply_worker_vendor_patches",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/worker.py",
+        "apply_worker_patches",
         current_platform=SimpleNamespace(vendor_name="iluvatar"),
         patch_autotune_memory=Mock(),
         patch_v2_uva=Mock(),
@@ -145,3 +145,33 @@ def test_sampler_strict_success_is_idempotent(monkeypatch):
     patch(strict=True)
     for module, attr in modules:
         assert getattr(module, attr) is eager
+
+
+@pytest.mark.parametrize("vendor", ["iluvatar", "nvidia", "ascend", ""])
+def test_public_worker_hook_dispatches_only_iluvatar(monkeypatch, vendor):
+    apply = Mock()
+    key = "vllm_fl.dispatch.backends.vendor.iluvatar.worker"
+    monkeypatch.setitem(sys.modules, key, SimpleNamespace(apply_worker_patches=apply))
+    hook = load_function(
+        "vllm_fl/worker/worker.py",
+        "_apply_worker_vendor_patches",
+        current_platform=SimpleNamespace(vendor_name=vendor),
+    )
+    hook()
+    assert apply.call_count == (1 if vendor == "iluvatar" else 0)
+
+
+def test_public_worker_hook_propagates_failure(monkeypatch):
+    apply = Mock(side_effect=RuntimeError("required vendor patch failed"))
+    monkeypatch.setitem(
+        sys.modules,
+        "vllm_fl.dispatch.backends.vendor.iluvatar.worker",
+        SimpleNamespace(apply_worker_patches=apply),
+    )
+    hook = load_function(
+        "vllm_fl/worker/worker.py",
+        "_apply_worker_vendor_patches",
+        current_platform=SimpleNamespace(vendor_name="iluvatar"),
+    )
+    with pytest.raises(RuntimeError, match="required vendor patch failed"):
+        hook()

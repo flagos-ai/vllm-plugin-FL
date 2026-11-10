@@ -9,9 +9,9 @@ import torch
 def test_iluvatar_recursive_refs(monkeypatch):
     from vllm.sequence import IntermediateTensors
 
-    module = import_module("vllm_fl.compilation.graph")
+    module = import_module("vllm_fl.dispatch.backends.vendor.iluvatar.graph")
     monkeypatch.setattr(
-        module,
+        import_module("vllm_fl.compilation.graph"),
         "current_platform",
         SimpleNamespace(device_type="cuda", vendor_name="iluvatar"),
     )
@@ -22,7 +22,7 @@ def test_iluvatar_recursive_refs(monkeypatch):
 
     monkeypatch.setattr(module, "_weak_ref_iluvatar_tensor", replace)
     a, b = torch.ones(1), torch.ones(2)
-    result = module.weak_ref_tensors(
+    result = import_module("vllm_fl.compilation.graph").weak_ref_tensors(
         {"a": [a, (b,)], "pp": IntermediateTensors({"hidden": a}), "meta": None}
     )
     assert result["a"][0] is refs[id(a)]
@@ -32,15 +32,22 @@ def test_iluvatar_recursive_refs(monkeypatch):
 
 
 def test_iluvatar_cpu_unchanged():
-    module = import_module("vllm_fl.compilation.graph")
+    module = import_module("vllm_fl.dispatch.backends.vendor.iluvatar.graph")
     tensor = torch.ones(2)
     assert module._weak_ref_iluvatar_tensor(tensor) is tensor
 
 
 @pytest.mark.gpu
 def test_iluvatar_borrowed_view_and_lifetime():
-    module = import_module("vllm_fl.compilation.graph")
-    if getattr(module.current_platform, "vendor_name", None) != "iluvatar":
+    module = import_module("vllm_fl.dispatch.backends.vendor.iluvatar.graph")
+    if (
+        getattr(
+            import_module("vllm_fl.compilation.graph").current_platform,
+            "vendor_name",
+            None,
+        )
+        != "iluvatar"
+    ):
         pytest.skip("Requires Iluvatar")
     x = torch.arange(64, device="cuda").reshape(8, 8)[1::2, ::2].T
     for value in (x, torch._neg_view(x)):
@@ -113,7 +120,7 @@ def test_iluvatar_graph_outputs_reuse_shared_pool():
 
 
 def test_iluvatar_missing_primitives_fail_closed(monkeypatch):
-    module = import_module("vllm_fl.compilation.graph")
+    module = import_module("vllm_fl.dispatch.backends.vendor.iluvatar.graph")
     monkeypatch.setattr(torch._C, "_construct_storage_from_data_pointer", None)
     value = SimpleNamespace(device=SimpleNamespace(type="cuda"))
     with pytest.raises(RuntimeError, match="Disable graph mode or update PyTorch"):
@@ -124,7 +131,7 @@ def test_nvidia_keeps_upstream_refs(monkeypatch):
     module = import_module("vllm_fl.compilation.graph")
     upstream = import_module("vllm.utils.torch_utils")
     monkeypatch.setattr(
-        module,
+        import_module("vllm_fl.compilation.graph"),
         "current_platform",
         SimpleNamespace(device_type="cuda", vendor_name="nvidia"),
     )
