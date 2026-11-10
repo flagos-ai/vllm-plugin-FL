@@ -94,10 +94,13 @@ def _is_metax_backend() -> bool:
 
     resolved = getattr(sys.modules.get("vllm.platforms"), "_current_platform", None)
     if resolved is not None:
-        is_metax = getattr(resolved, "is_metax", None)
+        # Look the hook up on the class: ``Platform.__getattr__`` logs a
+        # "does not have this attribute" warning via ``vllm.distributed``, which
+        # is a circular import while the plugin is still registering.
+        is_metax = getattr(type(resolved), "is_metax", None)
         if callable(is_metax):
             try:
-                return bool(is_metax())
+                return bool(is_metax(resolved))
             except Exception:
                 pass
     if os.environ.get("GEMS_VENDOR", "").strip().lower() == "metax":

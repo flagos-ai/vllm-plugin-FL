@@ -228,12 +228,29 @@ def test_compiled_gcu_dispatch_warmup():
         and any(
             isinstance(call, ast.Call)
             and isinstance(call.func, ast.Name)
-            and call.func.id == "warmup_cached_ops"
+            and call.func.id in {"warmup_cached_ops", "_warmup_cached_ops"}
             for call in ast.walk(node)
         )
     ]
     guard = min(guards, key=lambda node: len(list(ast.walk(node))))
+    early_calls = [
+        node
+        for node in tree.body[0].body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "warmup_cached_ops"
+    ]
+    assert len(early_calls) == 1
+    assert early_calls[0].lineno < guard.lineno
     warmup = Mock()
+    exec(
+        compile(
+            ast.Module(body=early_calls, type_ignores=[]), "<early warmup>", "exec"
+        ),
+        {"warmup_cached_ops": warmup},
+    )
+    warmup.assert_called_once_with()
     body = [
         node
         for node in guard.body
@@ -258,6 +275,7 @@ def test_compiled_gcu_dispatch_warmup():
                 "self": SimpleNamespace(compilation_config=SimpleNamespace(mode=mode)),
                 "CompilationMode": SimpleNamespace(NONE=0),
                 "warmup_cached_ops": warmup,
+                "_warmup_cached_ops": warmup,
             },
         )
         assert warmup.call_count == expected
