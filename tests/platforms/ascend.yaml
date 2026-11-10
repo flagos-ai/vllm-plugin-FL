@@ -33,6 +33,9 @@ platform: ascend
 vendor: huawei
 
 device_types:
+  910b:
+    memory_gb: 64
+    tags: [ascend, bf16]
   910c:
     memory_gb: 64
     tags: [ascend, bf16]
@@ -49,6 +52,27 @@ tolerance:
 # Matrix follows the 0.4.0-dev line: eager only — decode graphs land with the
 # ascend graph work (see the ascend graph branch), not with this CI sync.
 device_overrides:
+  910b:
+    cases:
+      - qwen3_6/27b_tp2_eager
+      - qwen3_6/35b_a3b_tp2_eager
+    llm:
+      max_model_len: 4096
+      max_num_batched_tokens: 4096
+      gpu_memory_utilization: 0.8
+      trust_remote_code: true
+      disable_custom_all_reduce: false
+      enable_chunked_prefill: false
+      async_scheduling: false
+      enable_prefix_caching: false
+    serve:
+      startup_retries: 180
+      extra_args:
+        - "--no-enable-chunked-prefill"
+        - "--no-async-scheduling"
+        - "--no-enable-prefix-caching"
+      stream: true
+      max_tokens: 1024
   910c:
     cases:
       - qwen3_6/27b_tp2_eager
@@ -83,6 +107,52 @@ env_defaults:
   VLLM_FL_FLAGOS_WHITELIST: "zeros"
 
 # ---- Device-specific test configurations ------------------------------------
+910b:
+  name: "910b"
+  tests:
+    e2e:
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+    functional:
+      include: "*"
+      exclude:
+        - ops/test_ops_correctness.py
+    unit:
+      include: "*"
+      exclude:
+        - test_musa_collective_splitting.py
+        - test_musa_accelerator_patch.py
+        - test_op_schema_registry.py
+    benchmark:
+      pr:
+        enabled: true
+        types:
+          - throughput
+          - latency
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - throughput
+          - latency
+          - serve
+
 910c:
   name: "910c"
   tests:
