@@ -5,6 +5,10 @@ x86-64. The Dockerfile pins the Runtime manifest digest. See the
 [FlagOS Runtime prerequisites](https://flagos-ai.github.io/release-info/zh-cn/runtime/thead-ppu2.1.0/)
 for the PAI-DSW host driver requirement.
 
+The published image is
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-thead-ci`, index digest
+`sha256:79acb682a977650cc6174214bbbab2d486fc23d2f3c5db522373831adfdb9e62`.
+
 The [T-Head package index](https://resource.flagos.net/repository/flagos-pypi-thead/simple/vllm/)
 supplies `vllm==0.32.0+flagos`. Its wheel SHA-256 is
 `445821b41d2494c595a89bc476bdbcf18d70e9c1e78ab5b60b587f5c0454580d`.
@@ -35,5 +39,4 @@ test dependencies. The build emits the installed package list under
 
 The FL adaptation and regression cases come from
 [#706 at `758884b4`](https://github.com/flagos-ai/vllm-plugin-FL/commit/758884b4845c87b22db70016952faddc1932283f)
-and were ported onto `0.5.0-dev` in the pinned plugin commit. The Runtime image and build layout follow
-the structure of [#728](https://github.com/flagos-ai/vllm-plugin-FL/pull/728).
+and were ported onto `0.5.0-dev` in the pinned plugin commit.
