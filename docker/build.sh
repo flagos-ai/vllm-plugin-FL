@@ -241,8 +241,8 @@ BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
     DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.ci"
-elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.28.0" ]]; then
-    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.28.0"
+elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.32.0" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.32.0"
 elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.18.0" ]]; then
     DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.18.0"
 elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.13.0" ]]; then
@@ -500,7 +500,9 @@ elif [[ "${ARCHIVE_SOURCE:-0}" == "1" ]]; then
     source_context="$(mktemp -d)"
     trap 'rm -rf -- "${source_context}"' EXIT
     git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | tar -x -C "${source_context}"
-    DOCKERFILE="${source_context}/docker/ascend/Dockerfile"
+    git -C "${BUILD_CONTEXT}" archive --format=tar HEAD docker/ascend .github/scripts/install_flaggems_vllm.py .github/scripts/ascend \
+        | tar -x -C "${source_context}"
+    DOCKERFILE="${source_context}/docker/ascend/Dockerfile.v0.32.0"
     docker_build "${source_context}"
 else
     docker_build "${BUILD_CONTEXT}"

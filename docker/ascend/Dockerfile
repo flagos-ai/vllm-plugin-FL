@@ -1,54 +1,95 @@
 # Copyright 2026 FlagOS Contributors
-# Ascend vLLM 0.32.0 inference/CI image based on FlagOS Runtime 2.3.0 (CANN 9.2.1).
-# Build context: repository root. Pin the verified FlagOS Runtime 2.3.0 manifest digest.
-ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.2.1:2.3.0@sha256:92600f84feee2a2a738bbc77abdb02c8c7af925a6da379b23dde6ded6cba50db
-FROM ${BASE_IMAGE} AS ci
-SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-ARG FLAGOS_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-ascend/simple
-ARG INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
-ARG EXTRA_INDEX_URL
-ENV UV_PYTHON=/flagos/bin/python \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    UV_HTTP_TIMEOUT=600
+# Reuse its CANN 9.0 / torch_npu 2.10 runtime, then replace vLLM with empty.
+ARG ASCEND_BASE_IMAGE=quay.io/ascend/vllm-ascend:v0.20.2rc1-a3
 
-COPY docker/ascend/constraints.txt docker/ascend/requirements-ci.txt /opt/fl-ci/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /flagos/bin/python \
-        --index "${FLAGOS_INDEX_URL}" \
-        ${EXTRA_INDEX_URL:+--index "${EXTRA_INDEX_URL}"} \
-        --default-index "${INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}" \
-        --index-strategy unsafe-first-match \
-        --constraint /opt/fl-ci/constraints.txt \
-        -r /opt/fl-ci/requirements-ci.txt 'vllm==0.32.0+flagos' \
-    && uv cache clean
+# ---------- base stage ----------
+FROM ${ASCEND_BASE_IMAGE} AS base
 
-COPY .github/scripts/install_flaggems_vllm.py /opt/fl-ci/install_flaggems_vllm.py
-# Explicit bash invocation ensures BASH_ENV=/etc/bash_env.sh is loaded even
-# when built by Podman/Buildah in default OCI mode (which ignores SHELL).
-RUN bash -euo pipefail -c "python /opt/fl-ci/install_flaggems_vllm.py"
+ARG VLLM_VERSION=0.28.0
+ARG FLAGTREE_VERSION=0.6.2a1+ascend3.5
+# Official FlagTree Ascend manual's qwen-vllm_for_ascend branch.
+ARG FLAGGEMS_VERSION=3b406c36212744b98b9720bf6d0a5387c09fe96b
 
-COPY .github/scripts/ascend/stack.py /opt/fl-ci/stack.py
-RUN bash -euo pipefail -c "python -B /opt/fl-ci/stack.py --build-only"
-
-COPY . /workspace/vllm-plugin-FL
-WORKDIR /workspace/vllm-plugin-FL
-ARG PLUGIN_SOURCE_SHA
-ARG PLUGIN_SOURCE_VERSION=0.5.0.dev0
-LABEL org.opencontainers.image.revision="${PLUGIN_SOURCE_SHA}"
-RUN bash -euo pipefail -c 'test -n "${PLUGIN_SOURCE_SHA}" || { echo "ERROR: PLUGIN_SOURCE_SHA must be set" >&2; exit 1; }; \
-    env -u VLLM_VENDOR SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="${PLUGIN_SOURCE_VERSION}" \
-        python -m pip install --no-deps --no-build-isolation -e . \
-    && python -m pip list --format=json > /opt/fl-ci/packages.json'
-
-ENV VLLM_PLUGINS=fl \
+ENV DEBIAN_FRONTEND=noninteractive \
+    VLLM_PLUGINS=fl \
     VLLM_FL_PLATFORM=ascend \
-    VLLM_USE_V2_MODEL_RUNNER=0 \
-    USE_FLAGGEMS=1 \
-    GEMS_VENDOR=ascend \
-    USE_FLAGTUNE=0 \
-    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="${PLUGIN_SOURCE_VERSION}" \
     HF_ENDPOINT=https://hf-mirror.com \
     FL_MODEL_BASE_PATH=/data/models
-ENTRYPOINT []
-CMD ["/bin/bash"]
+
+COPY runtime-constraints.txt /workspace/ascend-runtime-constraints.txt
+
+RUN python -m pip uninstall -y vllm vllm-ascend triton triton-ascend flagtree flag-gems \
+    && python -m pip install --upgrade pip "setuptools>=77.0.3,<80" \
+    && python -m pip install --no-cache-dir \
+        scikit-build-core==0.12.2 \
+        "setuptools-scm>=8" \
+        "setuptools-rust>=1.9" \
+        wheel \
+        jinja2 \
+        pybind11 \
+        ninja \
+        cmake \
+    && git clone --depth 1 --branch "v${VLLM_VERSION}" \
+        https://github.com/vllm-project/vllm.git /workspace/vllm \
+    && VLLM_TARGET_DEVICE=empty VLLM_VERSION_OVERRIDE="${VLLM_VERSION}+empty" \
+        python -m pip install --no-build-isolation --no-deps /workspace/vllm \
+    && python -m pip install --no-cache-dir \
+        -c /workspace/ascend-runtime-constraints.txt \
+        -r /workspace/vllm/requirements/common.txt \
+    && python -m pip install --no-cache-dir --no-deps \
+        "flagtree===${FLAGTREE_VERSION}" \
+        --index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple \
+    && python -m pip install --no-cache-dir --no-deps cann-shmem==1.6.0 \
+        --index-url https://ascend.devcloud.huaweicloud.com/cann/pypi/simple/ \
+    && git clone https://github.com/flagos-ai/FlagGems.git /workspace/FlagGems \
+    && git -C /workspace/FlagGems checkout "${FLAGGEMS_VERSION}" \
+    && python -m pip install --no-cache-dir \
+        packaging==26.0 PyYAML==6.0.3 sqlalchemy==2.0.48 numpy==1.26.4 \
+    && python -m pip install --no-build-isolation --no-deps /workspace/FlagGems \
+    && python -c "from importlib.metadata import version; assert version('vllm') == '${VLLM_VERSION}+empty'; assert version('flagtree') == '${FLAGTREE_VERSION}'" \
+    && python -m pip cache purge
+
+WORKDIR /workspace
+
+# ---------- dev stage ----------
+FROM base AS dev
+
+RUN python -m pip install --no-cache-dir \
+        pytest==8.3.2 \
+        coverage==7.16.1 \
+        pytest-cov==7.1.0 \
+        pytest-json-report==1.5.0 \
+        ruff \
+        pre-commit
+
+# ---------- ci stage ----------
+FROM dev AS ci
+
+RUN python -m pip install --no-cache-dir \
+        pytest-timeout==2.4.0 \
+        pytest-metadata==3.1.1 \
+        numpy==1.26.4 \
+        requests \
+        openai \
+        decorator \
+        pyyaml \
+        "modelscope>=1.18.1" \
+        "huggingface_hub>=0.34"
+
+# ---------- release stage ----------
+FROM base AS release
+
+WORKDIR /workspace
