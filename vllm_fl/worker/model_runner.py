@@ -1038,7 +1038,8 @@ class ModelRunnerFL(
                 self.effective_drafter_max_model_len = self.max_model_len
 
     def reset_mm_cache(self) -> None:
-        """Clear the multi-modal cache that was used during profiling,
+        """
+        Clear the multi-modal cache that was used during profiling,
         but no longer needed during inference.
         """
         if self.mm_budget:
@@ -1173,14 +1174,14 @@ class ModelRunnerFL(
         return model_kwargs
 
     def _may_reorder_batch(self, scheduler_output: "SchedulerOutput") -> None:
-        """Update the order of requests in the batch based on the attention
+        """
+        Update the order of requests in the batch based on the attention
         backend's needs. For example, some attention backends (namely MLA) may
         want to separate requests based on if the attention computation will be
         compute-bound or memory-bound.
 
         Args:
             scheduler_output: The scheduler output.
-
         """
         # Attention free models have zero kv_cache_groups, however models
         # like Mamba are also attention free but use the kv_cache for
@@ -2005,9 +2006,9 @@ class ModelRunnerFL(
         SpecDecodeMetadata | None,
         int,
     ]:
-        """Returns:
-        tuple[logits_indices, spec_decode_metadata, max_num_sampled_tokens]
-
+        """
+        Returns:
+            tuple[logits_indices, spec_decode_metadata, max_num_sampled_tokens]
         """
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         assert total_num_scheduled_tokens > 0
@@ -2375,9 +2376,9 @@ class ModelRunnerFL(
         slot_mappings: dict[int, torch.Tensor] | None = None,
         ascend_attn_state: Any | None = None,
     ) -> tuple[PerLayerAttnMetadata, CommonAttentionMetadata | None]:
-        """Returns:
-        tuple[attn_metadata, spec_decode_common_attn_metadata]
-
+        """
+        Returns:
+            tuple[attn_metadata, spec_decode_common_attn_metadata]
         """
         # Attention metadata is not needed for attention free models
         if len(self.kv_cache_config.kv_cache_groups) == 0:
@@ -2865,7 +2866,6 @@ class ModelRunnerFL(
             - mm_hashes: List of multimodal hashes for each item
             - mm_kwargs: List of multimodal kwargs for each item
             - mm_lora_refs: List of (req_id, placeholder_range) for each item
-
         """
         scheduled_encoder_inputs = scheduler_output.scheduled_encoder_inputs
         if not scheduled_encoder_inputs:
@@ -3322,7 +3322,9 @@ class ModelRunnerFL(
         )
 
     def eplb_step(self, is_dummy: bool = False, is_profile: bool = False) -> None:
-        """Step for the EPLB (Expert Parallelism Load Balancing) state."""
+        """
+        Step for the EPLB (Expert Parallelism Load Balancing) state.
+        """
         if not self.parallel_config.enable_eplb or self.eep_eplb_suppressed:
             return
 
@@ -3817,7 +3819,6 @@ class ModelRunnerFL(
 
         Returns:
             Model output tensor
-
         """
         return self.model(
             input_ids=input_ids,
@@ -3835,7 +3836,8 @@ class ModelRunnerFL(
         num_reqs: int,
         force_uniform_decode: bool | None = None,
     ) -> bool:
-        """Checks if it's a decode batch with same amount scheduled tokens
+        """
+        Checks if it's a decode batch with same amount scheduled tokens
         across all requests.
         """
         return (
@@ -3998,7 +4000,8 @@ class ModelRunnerFL(
         )
 
     def _register_layerwise_nvtx_hooks(self) -> None:
-        """Register layerwise NVTX hooks if --enable-layerwise-nvtx-tracing is enabled
+        """
+        Register layerwise NVTX hooks if --enable-layerwise-nvtx-tracing is enabled
         to trace detailed information of each layer or module in the model.
         """
         if (
@@ -4041,7 +4044,8 @@ class ModelRunnerFL(
         dict[int, torch.Tensor] | None,
         dict[str, torch.Tensor] | list[dict[str, torch.Tensor]] | None,
     ]:
-        """Build slot mappings in both formats needed by the system.
+        """
+        Build slot mappings in both formats needed by the system.
 
         Args:
             num_tokens_padded: Total number of tokens (padded)
@@ -4053,7 +4057,6 @@ class ModelRunnerFL(
             A tuple of:
             - slot_mappings_by_gid: dict[int, torch.Tensor] for attention metadata
             - slot_mappings_by_layer: dict[str, torch.Tensor] or list for ForwardContext
-
         """
         if not (
             hasattr(self, "kv_cache_config")
@@ -5499,7 +5502,6 @@ class ModelRunnerFL(
         Returns:
             Tuple of layer indices if found in draft model config,
             None otherwise.
-
         """
         if not (self.speculative_config and self.speculative_config.draft_model_config):
             return None
@@ -5678,7 +5680,8 @@ class ModelRunnerFL(
         inputs_embeds: torch.Tensor | None,
         randomize_inputs: bool = False,
     ):
-        """Randomize input_ids if VLLM_RANDOMIZE_DP_DUMMY_INPUTS is set.
+        """
+        Randomize input_ids if VLLM_RANDOMIZE_DP_DUMMY_INPUTS is set.
         This is to help balance expert-selection
          - during profile_run
          - during DP rank dummy run
@@ -7196,7 +7199,9 @@ class ModelRunnerFL(
         kv_cache_config: KVCacheConfig,
         is_profiling: bool = False,
     ) -> None:
-        """Initialize the attention backends and attention metadata builders."""
+        """
+        Initialize the attention backends and attention metadata builders.
+        """
         assert len(self.attn_groups) == 0, "Attention backends are already initialized"
 
         class AttentionGroupKey(NamedTuple):
@@ -7299,7 +7304,9 @@ class ModelRunnerFL(
     def initialize_metadata_builders(
         self, kv_cache_config: KVCacheConfig, kernel_block_sizes: list[int]
     ) -> None:
-        """Create the metadata builders for all KV cache groups and attn groups."""
+        """
+        Create the metadata builders for all KV cache groups and attn groups.
+        """
         for kv_cache_group_id in range(len(kv_cache_config.kv_cache_groups)):
             for attn_group in self.attn_groups[kv_cache_group_id]:
                 attn_group.create_metadata_builders(
@@ -7334,7 +7341,8 @@ class ModelRunnerFL(
         kv_cache_groups: list[KVCacheGroupSpec],
         is_profiling: bool = False,
     ) -> None:
-        """Resolve the cudagraph_mode when there are multiple attention
+        """
+        Resolve the cudagraph_mode when there are multiple attention
         groups with potential conflicting CUDA graph support.
         Then initialize the cudagraph_dispatcher based on the resolved
         cudagraph_mode.
@@ -7386,7 +7394,8 @@ class ModelRunnerFL(
             self.drafter.initialize_cudagraph_keys(cudagraph_mode)
 
     def calculate_reorder_batch_threshold(self) -> None:
-        """Choose the minimum reorder batch threshold from all attention groups.
+        """
+        Choose the minimum reorder batch threshold from all attention groups.
         Backends should be able to support lower threshold then what they request
         just may have a performance penalty due to that backend treating decodes
         as prefills.
@@ -7554,7 +7563,8 @@ class ModelRunnerFL(
     def maybe_add_kv_sharing_layers_to_kv_cache_groups(
         self, kv_cache_config: KVCacheConfig
     ) -> None:
-        """Add layers that re-use KV cache to KV cache group of its target layer.
+        """
+        Add layers that re-use KV cache to KV cache group of its target layer.
         Mapping of KV cache tensors happens in `initialize_kv_cache_tensors()`
         """
         if not self.shared_kv_cache_layers:
@@ -7648,7 +7658,9 @@ class ModelRunnerFL(
             kv_transfer_group.set_host_xfer_buffer_ops(copy_kv_blocks)
 
     def may_add_encoder_only_layers_to_kv_cache_config(self) -> None:
-        """Add encoder-only layers to the KV cache config."""
+        """
+        Add encoder-only layers to the KV cache config.
+        """
         block_size = self.vllm_config.cache_config.block_size
         encoder_only_attn_specs: dict[AttentionSpec, list[str]] = defaultdict(list)
         attn_layers = get_layers_from_vllm_config(self.vllm_config, Attention)
@@ -7672,13 +7684,12 @@ class ModelRunnerFL(
             )
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
-        """Generates the KVCacheSpec by parsing the kv cache format from each
+        """
+        Generates the KVCacheSpec by parsing the kv cache format from each
         Attention module in the static forward context.
-
         Returns:
             KVCacheSpec: A dictionary mapping layer names to their KV cache
             format. Layers that do not need KV cache are not included.
-
         """
         if has_ec_transfer() and not get_ec_transfer().is_consumer:
             return {}
@@ -7730,11 +7741,11 @@ class ModelRunnerFL(
         return pinned.tolist()
 
     def get_encoder_timing_stats(self) -> dict[str, dict[str, float | int]]:
-        """Get encoder timing stats for all requests and clear the registry.
+        """
+        Get encoder timing stats for all requests and clear the registry.
 
         Returns:
             Dictionary mapping request_id to stats dict.
-
         """
         with self._encoder_timing_lock:
             stats = {
@@ -7752,14 +7763,14 @@ class ModelRunnerFL(
         current_item_idx: int,
         num_items: int,
     ):
-        """Context manager to time encoder forward operations.
+        """
+        Context manager to time encoder forward operations.
 
         Args:
             should_time: Whether timing is enabled
             group_lora_refs: Full list of (request_id, pos_info) tuples
             current_item_idx: Starting index for this group
             num_items: Number of items in this group
-
         """
         if not should_time:
             yield

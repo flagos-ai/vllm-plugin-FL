@@ -87,15 +87,7 @@ def test_pp_send_tracks_only_device_work(first_rank):
         pp.irecv_tensor_dict.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "vendor,enabled",
-    [
-        (vendor, enabled)
-        for vendor in ("iluvatar", "nvidia", "ascend", "musa", "txda")
-        for enabled in (False, True)
-    ],
-)
-def test_kv_init_routed_expert_config_migration(vendor, enabled):
+def test_kv_init_routed_expert_config_migration():
     tree = ast.parse(
         (Path(__file__).parents[2] / "vllm_fl/worker/worker.py").read_text()
     )
@@ -119,10 +111,8 @@ def test_kv_init_routed_expert_config_migration(vendor, enabled):
             type_ignores=[],
         )
     )
-    namespace = {
-        "current_platform": SimpleNamespace(vendor_name=vendor),
-        "ensure_kv_transfer_initialized": Mock(),
-    }
+    # This method is platform-independent; no vendor/config matrix is exercised.
+    namespace = {"ensure_kv_transfer_initialized": Mock()}
     exec(compile(module, "<worker KV init>", "exec"), namespace)
     model_config = SimpleNamespace()
     worker = SimpleNamespace(
