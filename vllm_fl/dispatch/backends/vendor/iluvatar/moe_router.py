@@ -3,15 +3,16 @@
 
 import importlib
 
-import torch
+# Routing math lives in the shared reference backend.
 
 
 def topk_softmax(topk_weights, topk_indices, token_expert_indices,
                  gating_output, renormalize=False, e_score_correction_bias=None):
-    from vllm_fl.dispatch import call_op
     from vllm.model_executor.layers.fused_moe.router.fused_topk_router import (
         _get_padding_mask,
     )
+
+    from vllm_fl.dispatch import call_op
 
     if e_score_correction_bias is None:
         weights, indices = call_op(
@@ -22,20 +23,14 @@ def topk_softmax(topk_weights, topk_indices, token_expert_indices,
         topk_weights.copy_(weights)
         topk_indices.copy_(indices)
     else:
-        # Bias affects selection only; the returned scores remain unbiased.
-        scores = torch.softmax(gating_output.float(), dim=-1)
-        indices = torch.topk(scores + e_score_correction_bias.float(),
-                             topk_indices.shape[1], dim=-1).indices
-        weights = scores.gather(1, indices)
-        if renormalize:
-            denominator = weights.sum(dim=-1, keepdim=True)
-            weights = weights / torch.where(
-                denominator > 0, denominator, torch.ones_like(denominator))
-        topk_weights.copy_(weights)
-        topk_indices.copy_(indices)
-        rows = torch.arange(gating_output.shape[0], device=gating_output.device)
-        slots = torch.arange(topk_indices.shape[1], device=gating_output.device)
-        token_expert_indices.copy_(rows[:, None] + slots * gating_output.shape[0])
+        from vllm_fl.dispatch.backends.reference.impl.fused_moe import (
+            topk_softmax as reference_topk_softmax,
+        )
+
+        reference_topk_softmax(
+            topk_weights, topk_indices, token_expert_indices,
+            gating_output, renormalize, e_score_correction_bias,
+        )
     padding = _get_padding_mask(topk_indices.shape[0])
     if padding is not None:
         topk_indices.masked_fill_(padding[:, None], -1)

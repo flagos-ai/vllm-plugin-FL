@@ -1,7 +1,8 @@
 """Exercise the upstream selection property, without assigning its result."""
+
 import pytest
-from vllm.config import VllmConfig
-from vllm.config import vllm as config_module
+
+from vllm.config import VllmConfig, vllm as config_module
 
 
 @pytest.mark.parametrize("explicit,expected", [(None, True), ("0", False), ("1", True)])

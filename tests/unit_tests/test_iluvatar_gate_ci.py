@@ -181,22 +181,28 @@ def test_iluvatar_is_discovered_and_uses_vendor_runners(monkeypatch):
 
 
 def test_gate_checks_out_requested_ref_and_records_commit():
-    platform = yaml.safe_load((ROOT / ".github/workflows/_platform_test.yml").read_text())
+    platform = yaml.safe_load(
+        (ROOT / ".github/workflows/_platform_test.yml").read_text()
+    )
     gate = platform["jobs"]["iluvatar-gates"]
     assert gate["with"]["branch"] == "${{ needs.setup.outputs.revision }}"
     setup = platform["jobs"]["setup"]
     assert setup["outputs"]["revision"] == "${{ steps.revision.outputs.sha }}"
     freeze = next(s for s in setup["steps"] if s.get("id") == "revision")
     result = subprocess.run(
-        ["bash", "-c", freeze["run"]], cwd=ROOT,
-        env=dict(os.environ, GITHUB_OUTPUT=os.devnull), capture_output=True,
+        ["bash", "-c", freeze["run"]],
+        cwd=ROOT,
+        env=dict(os.environ, GITHUB_OUTPUT=os.devnull),
+        capture_output=True,
     )
     assert result.returncode == 0
     for name in ("functional", "unit", "e2e", "benchmark", "iluvatar-gates"):
         assert platform["jobs"][name]["with"]["branch"] == (
             "${{ needs.setup.outputs.revision }}"
         )
-    workflow = yaml.safe_load((ROOT / ".github/workflows/_iluvatar_gate.yml").read_text())
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/_iluvatar_gate.yml").read_text()
+    )
     steps = workflow["jobs"]["gates"]["steps"]
     checkout = next(s for s in steps if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["ref"] == "${{ inputs.branch }}"

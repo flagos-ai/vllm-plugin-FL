@@ -3,12 +3,15 @@
 CPU tests exercise worker methods without allocating a device/model; they do
 not replace vendor model-generation acceptance.
 """
+
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 import torch
+
 from vllm.config import LoadConfig
+
 from vllm_fl.worker.worker import WorkerFL
 
 
