@@ -59,7 +59,7 @@ container_volumes:
 # there (mirrors iluvatar.yml's --shm-size=64g).
 container_options: >-
   --privileged
-  --gpus all
+  --gpus "device=${NVIDIA_VISIBLE_DEVICES:-all}"
   --ipc=host
   --shm-size 64g
   --hostname vllm-plugin-fl
