@@ -10,7 +10,7 @@ container_volumes: ["/mnt/airs-business/cicd/models:/data/models"]
 visible_devices: "12,13,14,15"
 model_27b: /models/Qwen3.8-27B
 model_35b: /models/Qwen3.6-35B-A3B
-base_python: /flagos/bin/python
+base_python: /opt/thead/venv/bin/python
 container_options: >-
   --hostname vllm-plugin-fl
   --env CUDA_VISIBLE_DEVICES=12,13,14,15
