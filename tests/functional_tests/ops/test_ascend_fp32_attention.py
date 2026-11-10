@@ -157,3 +157,88 @@ def test_fp32_rejects_unsupported_attention(unsupported):
         forward_fp32(
             model, None, q, q, q, None, NS(causal=unsupported != "noncausal"), q
         )
+
+
+@pytest.mark.parametrize("slots", [(-1, -1), (-1, 0), (0, -1)])
+@pytest.mark.parametrize("full_graph", [False, True])
+def test_fp32_padding_preserves_cache(slots, full_graph):
+    from vllm.forward_context import BatchDescriptor
+
+    from vllm_fl.dispatch.backends.vendor.ascend.impl import fp32_attention as fp32
+
+    heads, dim, block_size = 2, 16, 128
+    cache = torch.randn(2, 2, block_size, heads, dim, device="npu")
+    layer = NS(layer_name="layer", kv_cache=cache)
+    model = NS(num_heads=heads, num_kv_heads=heads, head_size=dim, scale=dim**-0.5)
+    meta = NS(
+        num_actual_tokens=2,
+        seq_lens_list=[1, 1],
+        seq_lens=torch.ones(2, dtype=torch.int32),
+        slot_mapping=torch.tensor(slots, device="npu", dtype=torch.int64),
+        block_tables=torch.tensor([[0], [1]], device="npu", dtype=torch.int32),
+        actual_seq_lengths_q=[1, 2],
+    )
+    descriptor = BatchDescriptor(num_tokens=2)
+    wrapper = object.__new__(fp32.FP32GraphWrapper)
+    wrapper.vllm_config = NS(model_config=NS(max_model_len=block_size))
+    wrapper.concrete_graph_entries = {}
+    context = NS(
+        attn_metadata={"layer": meta},
+        batch_descriptor=descriptor,
+        no_compile_layers={"layer": layer},
+    )
+    q, k, v = [torch.randn(2, heads, dim, device="npu") for _ in range(3)]
+    output = torch.empty_like(q)
+
+    def eager():
+        fp32._paged_attention(
+            q,
+            k,
+            v,
+            cache[0],
+            cache[1],
+            meta,
+            heads,
+            heads,
+            dim,
+            model.scale,
+            output,
+        )
+
+    with patch("vllm.forward_context.get_forward_context", return_value=context):
+        # Exercise the mandatory NONE-mode warmup before capture too.
+        before = cache.clone()
+        eager()
+        expected = before.clone()
+        for row, slot in enumerate(slots):
+            if slot >= 0:
+                expected[0].view(-1, heads, dim)[slot].copy_(k[row])
+                expected[1].view(-1, heads, dim)[slot].copy_(v[row])
+        torch.testing.assert_close(cache, expected, atol=0, rtol=0)
+        graph = None
+        if full_graph:
+            assert fp32.prepare_graph(wrapper, context)
+            with fp32.graph_owner(wrapper):
+                fp32._full_attention(layer, model, q, k, v, cache, meta, output)
+                graph = torch.npu.NPUGraph()
+                with torch.npu.graph(graph):
+                    fp32._full_attention(layer, model, q, k, v, cache, meta, output)
+        # Reverse real/padded order across replays to catch a padded write
+        # overwriting a real slot-zero update and stale captured masks.
+        for active_slots in (slots, tuple(reversed(slots))):
+            meta.slot_mapping.copy_(torch.tensor(active_slots, device="npu"))
+            k.copy_(torch.randn_like(k))
+            v.copy_(torch.randn_like(v))
+            expected = cache.clone()
+            for row, slot in enumerate(active_slots):
+                if slot >= 0:
+                    expected[0].view(-1, heads, dim)[slot].copy_(k[row])
+                    expected[1].view(-1, heads, dim)[slot].copy_(v[row])
+            if full_graph:
+                fp32.prepare_graph(wrapper, context)
+                graph.replay()
+            else:
+                eager()
+            torch.npu.synchronize()
+            torch.testing.assert_close(cache, expected, atol=0, rtol=0)
+            assert torch.isfinite(output).all()

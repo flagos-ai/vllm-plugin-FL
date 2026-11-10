@@ -145,12 +145,23 @@ def _full_attention(layer, model, query, key, value, cache, meta, output):
     with torch.autocast(device_type="npu", enabled=False):
         kflat = kc.view(-1, model.num_kv_heads, model.head_size)
         vflat = vc.view_as(kflat)
-        slots = state.slots.clamp_min(0)
-        kflat.index_copy_(0, slots, key.view(n, model.num_kv_heads, model.head_size))
-        vflat.index_copy_(0, slots, value.view(n, model.num_kv_heads, model.head_size))
         positions = torch.arange(state.limit, device=query.device, dtype=torch.int64)
         repeat = model.num_heads // model.num_kv_heads
         for i in range(n):
+            # Keep a fixed graph shape while preserving padding slots. Update
+            # rows sequentially: a padded row must read the current value,
+            # including any earlier real write to slot zero in this batch.
+            slot = state.slots[i : i + 1]
+            safe_slot = slot.clamp_min(0)
+            valid = (slot >= 0).view(1, 1, 1)
+            for flat, source in ((kflat, key), (vflat, value)):
+                previous = flat.index_select(0, safe_slot)
+                update = torch.where(
+                    valid,
+                    source[i : i + 1].reshape_as(previous),
+                    previous,
+                )
+                flat.index_copy_(0, safe_slot, update)
             physical = (
                 state.table[i].index_select(0, positions // kc.shape[1]) * kc.shape[1]
                 + positions % kc.shape[1]
@@ -204,11 +215,15 @@ def _paged_attention(
     values_flat = value_cache.view(-1, num_kv_heads, head_size)
     if key is not None:
         slots = metadata.slot_mapping[:count].to(device=query.device, dtype=torch.int64)
+        # Dummy warmup uses PAD_SLOT_ID=-1. Eager prefill may filter rows;
+        # FULL decode uses the fixed-shape updates above instead.
+        valid = slots >= 0
+        slots = slots[valid]
         keys_flat.index_copy_(
-            0, slots, key.reshape(-1, num_kv_heads, head_size)[:count]
+            0, slots, key.reshape(-1, num_kv_heads, head_size)[:count][valid]
         )
         values_flat.index_copy_(
-            0, slots, value.reshape(-1, num_kv_heads, head_size)[:count]
+            0, slots, value.reshape(-1, num_kv_heads, head_size)[:count][valid]
         )
     output.zero_()
     start = 0
