@@ -515,17 +515,14 @@ class PlatformFL(Platform):
 
         plan = get_active_plan()
         if use_mla and plan is not None and plan.attention_backend is not None:
+            if cls.vendor_name == "thead" and plan.name == "glm5_next":
+                from vllm.config import get_current_vllm_config
+                from vllm_fl.attention.mla_prefill import configure_mla_prefill
+
+                configure_mla_prefill(get_current_vllm_config())
             override = plan.attention_backend(use_mla=use_mla, use_sparse=use_sparse)
             if override:
                 return override
-
-        if use_mla:
-            # The registry is process-local, so spawned workers configure it
-            # again before vLLM resolves its MLA prefill implementation.
-            from vllm.config import get_current_vllm_config
-            from vllm_fl.attention.mla_prefill import configure_mla_prefill
-
-            configure_mla_prefill(get_current_vllm_config())
 
         backend_path = call_op(
             "attention_backend", use_mla=use_mla, use_sparse=use_sparse

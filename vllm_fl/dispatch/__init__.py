@@ -77,7 +77,6 @@ Configuration File (YAML):
 """
 
 import os
-import weakref
 
 import torch
 
@@ -151,7 +150,7 @@ def resolve_op(op_name: str):
 # Fast-path opt-out: set VLLM_FL_OP_FAST_PATH=0 to disable per-op fn caching
 # in hot OOT layers and route every call back through OpManager.call.
 _OP_FAST_PATH_ENABLED = os.environ.get("VLLM_FL_OP_FAST_PATH", "1") == "1"
-_CACHED_OPS = weakref.WeakSet()
+_CACHED_OPS = []
 
 
 class CachedOp:
@@ -179,7 +178,6 @@ class CachedOp:
         "_manager_id",
         "_manager_epoch",
         "_policy_epoch",
-        "__weakref__",
     )
 
     def __init__(self, op_name: str) -> None:
@@ -190,24 +188,7 @@ class CachedOp:
         self._manager_id = -1
         self._manager_epoch = -1
         self._policy_epoch = -1
-        _CACHED_OPS.add(self)
-
-    def prepare(self) -> None:
-        """Resolve and import the selected implementation before graph capture."""
-        if not _OP_FAST_PATH_ENABLED:
-            return
-        mgr = get_default_manager()
-        impl = mgr._resolve_impl(self._op_name)
-        prepare = getattr(impl.fn, "_prepare", None)
-        if prepare is not None:
-            prepare()
-        mgr._record_first_use(self._op_name, impl)
-        self._impl = impl
-        self._frozen = _OP_FAST_PATH_ENABLED and not is_dump_enabled()
-        self._use_manager_call = False
-        self._manager_id = id(mgr)
-        self._manager_epoch = mgr.policy_epoch
-        self._policy_epoch = get_policy_epoch()
+        _CACHED_OPS.append(self)
 
     def __call__(self, *args, **kwargs):
         # Model construction prewarms and freezes CachedOps before Dynamo
@@ -284,9 +265,6 @@ def prewarm_cached_ops() -> int:
     for cached in tuple(_CACHED_OPS):
         try:
             impl = mgr._resolve_impl(cached._op_name)
-            prepare = getattr(impl.fn, "_prepare", None)
-            if prepare is not None:
-                prepare()
             mgr._record_first_use(cached._op_name, impl)
             cached._impl = impl
             cached._frozen = _OP_FAST_PATH_ENABLED and not is_dump_enabled()
@@ -299,11 +277,6 @@ def prewarm_cached_ops() -> int:
             # Some optional ops are unavailable on the active platform.
             continue
     return resolved
-
-def prepare_cached_ops() -> None:
-    """Prepare all live CachedOp call sites before torch.compile tracing."""
-    for op in tuple(_CACHED_OPS):
-        op.prepare()
 
 
 __all__ = [
@@ -358,6 +331,4 @@ __all__ = [
     "resolve_op",
     "CachedOp",
     "prewarm_cached_ops",
-
-    "prepare_cached_ops",
 ]

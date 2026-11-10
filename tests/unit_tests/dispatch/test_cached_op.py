@@ -1,7 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 import os
-import weakref
 
 import pytest
 
@@ -20,7 +19,7 @@ def isolated_dispatch(monkeypatch):
     manager._state.init_pid = os.getpid()
 
     reset_global_policy()
-    monkeypatch.setattr(dispatch, "_CACHED_OPS", weakref.WeakSet())
+    monkeypatch.setattr(dispatch, "_CACHED_OPS", [])
     monkeypatch.setattr(dispatch, "_OP_FAST_PATH_ENABLED", True)
     monkeypatch.setattr(dispatch, "get_default_manager", lambda: manager)
     yield manager, registry

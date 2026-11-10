@@ -148,26 +148,6 @@ preserves layer order, cache order within a layer, tensor identity and shared
 aliases. This cache initialization fix does not enable graph capture or establish
 model or operator support; validate those separately in the target environment.
 
-### Optional T-Head native kernels
-
-The T-Head backend can use an optional, version-pinned native extension bundle.
-Those binaries are not stored in this repository and are not included in the
-Python wheel. To enable them, provision the complete bundle in a deployment
-directory and point the plugin to its absolute path before starting vLLM:
-
-```sh
-export VLLM_FL_THEAD_NATIVE_LIB_DIR=/absolute/path/to/thead-native-libs
-```
-
-The directory must contain `_C_stable_libtorch.abi3.so`, `_C.abi3.so`, and
-`_moe_C.abi3.so`. If the bundle is absent or incomplete, the plugin logs one
-warning per process and uses the configured FlagGems/reference fallbacks.
-Library load failures caused by an incompatible ABI or a missing transitive
-dependency are not suppressed. See
-[`PROVENANCE.md`](./vllm_fl/dispatch/backends/vendor/thead/lib/PROVENANCE.md)
-for the exact bundle that has been validated.
-
-
 ### Operator profiling
 
 See the [operator profiling tools](./tools/operator_profile/README.md) for a

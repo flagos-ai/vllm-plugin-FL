@@ -64,21 +64,6 @@ class FlagGemsBackend(Backend):
 
         return dynamic_per_token_quant_int8_flaggems_triton(x)
 
-    def bf16_indexer_cache_write(
-        self,
-        keys: torch.Tensor,
-        cache: torch.Tensor,
-        slot_mapping: torch.Tensor,
-    ) -> None:
-        from .impl.bf16_indexer import bf16_indexer_cache_write_flaggems
-
-        bf16_indexer_cache_write_flaggems(keys, cache, slot_mapping)
-
-    def bf16_indexer_decode(self, *args, **kwargs) -> None:
-        from .impl.bf16_indexer import bf16_indexer_decode_flaggems
-
-        bf16_indexer_decode_flaggems(*args, **kwargs)
-
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
@@ -284,11 +269,9 @@ class FlagGemsBackend(Backend):
         block_shape=None,
         B_bias=None,
     ):
-        from .impl.fused_moe import (
-            invoke_fused_moe_triton_kernel_flaggems_vllm,
-        )
+        from .impl.fused_moe import invoke_fused_moe_triton_kernel_flaggems
 
-        invoke_fused_moe_triton_kernel_flaggems_vllm(
+        invoke_fused_moe_triton_kernel_flaggems(
             A,
             B,
             C,

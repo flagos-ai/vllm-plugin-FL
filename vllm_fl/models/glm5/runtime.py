@@ -42,7 +42,7 @@ _GLM5_PORTABLE_MOE_OPS = (
 
 
 def glm5_portable_moe_defaults() -> MoEDispatchDefaults:
-    """FlagOS dispatch defaults for the GLM5 portable execution path.
+    """FlagOS dispatch defaults for the GLM5 portable MoE path.
 
     Returned to the activation plan instead of mutating ``os.environ``: a plain
     plugin import must never rewrite the process environment, and a non-GLM
@@ -62,9 +62,6 @@ def glm5_portable_moe_defaults() -> MoEDispatchDefaults:
         whitelist_ops=portable_ops,
         per_op_order=tuple(
             (op_name, order) for op_name, order in zip(portable_ops, portable_order)
-        ) + (
-            ("causal_conv1d_fn", ("flagos",)),
-            ("chunk_kda_with_safe_gate", ("flagos",)),
         ),
         required_impls=tuple(
             (op_name, order) for op_name, order in zip(portable_ops, portable_order)
@@ -195,9 +192,7 @@ def _make_portable_binding(owner, name, flag):
     from vllm_fl.dispatch.types import BackendImplKind, OpImpl
     from vllm_fl.utils import use_flaggems_op
 
-    # Only the clamp shares the built-in object-plus-tensor ABI. MHC adapters
-    # include a CustomOp state argument that tensor-only shared entries lack.
-    manager = OpManager(register_builtins=name == "silu_and_mul_with_clamp")
+    manager = OpManager()
     if flag is not None:
         # Main owns the enabled shared clamp. Keep the model adapter only for
         # GLM's existing opt-in path when the global fused switch is disabled.

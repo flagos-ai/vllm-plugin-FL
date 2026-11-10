@@ -308,12 +308,6 @@ def register_model():
 
     register_minimax_m3_support()
 
-    from vllm_fl.patches.thead_kda_prefill import (
-        apply_thead_kda_prefill_metadata_patch,
-    )
-
-    apply_thead_kda_prefill_metadata_patch()
-
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
@@ -334,11 +328,3 @@ def register_model():
         # glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
-
-    from vllm.reasoning import ReasoningParserManager
-
-    ReasoningParserManager.register_lazy_module(
-        "hy_v4",
-        "vllm_fl.reasoning.hy_v4_reasoning",
-        "HYV4ReasoningParser",
-    )

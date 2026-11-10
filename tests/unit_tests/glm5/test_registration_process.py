@@ -24,4 +24,6 @@ def test_general_plugin_keeps_glm_adapter_registration():
                 assert entry.class_name == architecture
                 assert MODELS_CONFIG_MAP[architecture].__module__ == 'vllm_fl.models.glm5.runtime'
     """
-    subprocess.run([sys.executable, "-c", textwrap.dedent(code)], check=True)
+    subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(code)], check=True, timeout=60
+    )
