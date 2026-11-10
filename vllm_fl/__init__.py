@@ -308,10 +308,6 @@ def register_model():
 
     register_minimax_m3_support()
 
-    from vllm_fl.patches.glm5next import apply_glm5next_patches
-
-    apply_glm5next_patches()
-
     from vllm_fl.patches.thead_kda_prefill import (
         apply_thead_kda_prefill_metadata_patch,
     )

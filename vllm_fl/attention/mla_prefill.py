@@ -202,15 +202,12 @@ def configure_mla_prefill(vllm_config):
     if attention_config.mla_prefill_backend not in (None, backend):
         return False
     if backend.is_overridden() and backend.get_path() != _BACKEND_PATH:
-        # HY4 registers its default CUSTOM class during general-plugin setup.
-        # Only replace that default for this hybrid model, never an explicit choice.
+        # Spawn serializes CUSTOM without its process-local class registration.
+        # Rebind our built-in default for this model; preserve external CUSTOM paths.
         mainline_path = (
             "vllm_fl.attention.mla_prefill.FlagGemsMLAPrefillBackend"
         )
-        if (
-            attention_config.mla_prefill_backend is not None
-            or backend.get_path() != mainline_path
-        ):
+        if backend.get_path() != mainline_path:
             return False
     try:
         resolve_op("mla_prefill")
