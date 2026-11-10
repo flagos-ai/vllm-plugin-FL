@@ -91,8 +91,12 @@ RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
 # Transitive dependencies of the list above (skipped by --no-deps), plus extras
 # such as fastapi[standard] -> uvloop. rpds-py is pinned to the last release that
 # ships a cp310 wheel; newer releases are Rust sdists and would bootstrap a
-# toolchain from static.rust-lang.org during the build. websockets is pinned to
-# the last release that still supports Python 3.10: 17.x drops the 3.10 branch in
+# toolchain from static.rust-lang.org during the build. jiter is pinned for the
+# same reason: 0.19.0 is published as an sdist only on the mirror, so building it
+# pulls maturin from the network and can stall the build indefinitely, while
+# 0.18.0 ships a cp310 wheel and still satisfies openai (>=0.16) and anthropic
+# (>=0.4). websockets is pinned to the last release that still supports Python
+# 3.10: 17.x drops the 3.10 branch in
 # its typing module (``logging.LoggerAdapter[Any]``), which is a TypeError at
 # import time, and --ignore-requires-python above means pip no longer filters
 # such wheels out by Requires-Python.
@@ -101,7 +105,7 @@ RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
     python -m pip install --no-cache-dir --ignore-requires-python \
         aiohappyeyeballs \
         aiosignal \
-        annotated-doc \
+        annotated-types \
         anyio \
         apache-tvm-ffi \
         astor \
@@ -121,7 +125,7 @@ RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
         httpx2 \
         idna \
         interegular \
-        jiter \
+        jiter==0.18.0 \
         jmespath \
         jsonschema-specifications \
         loguru \

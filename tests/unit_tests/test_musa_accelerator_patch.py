@@ -197,7 +197,6 @@ def test_patch_entry_point_retries_after_incomplete_vendor_api(
     del musa.mem_get_info
     other_patches = [
         "patch_topk_topp_sampler",
-        "patch_triton_reshape_and_cache_flash",
         "patch_cuda_get_device_properties",
         "patch_cuda_stream_for_musa",
         "patch_inductor_triton_for_musa",

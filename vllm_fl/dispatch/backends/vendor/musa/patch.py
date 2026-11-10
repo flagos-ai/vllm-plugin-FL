@@ -8,6 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
+_moe_bias_warned = False
 
 
 def apply_musa_patches():
@@ -18,7 +19,6 @@ def apply_musa_patches():
 
     # Every patch below is idempotent, so a retry only repeats cheap lookups.
     patch_topk_topp_sampler()
-    patch_triton_reshape_and_cache_flash()
     patch_cuda_get_device_properties()
     patch_cuda_stream_for_musa()
     patch_inductor_triton_for_musa()
@@ -50,11 +50,6 @@ def patch_topk_topp_sampler():
         logger.info("Patched apply_top_k_top_p to use PyTorch-native path for MUSA")
     except Exception as e:
         logger.warning("Failed to patch apply_top_k_top_p for MUSA: %s", e)
-
-
-def patch_triton_reshape_and_cache_flash():
-    """No-op stub: reshape_and_cache_flash is handled by vllm_fl attention backends."""
-    pass
 
 
 def patch_cuda_get_device_properties():
@@ -371,7 +366,8 @@ def patch_moe_topk_softmax_for_musa():
     vLLM 0.32 passes ``is_padding`` (a padding-row mask) and
     ``e_score_correction_bias``; the dispatched kernels implement neither
     argument, so both are accepted and ignored. Padded rows are discarded by
-    the caller, and MoE bias correction is not exercised on MUSA yet.
+    the caller, so only the bias needs a warning: dropping it changes which
+    experts get routed to.
 
     TODO: remove once MUSA ships a compiled _moe_C extension.
     """
@@ -397,6 +393,15 @@ def patch_moe_topk_softmax_for_musa():
         # The dispatch call modifies topk_weights/topk_ids in-place.
         # Must return (topk_weights, topk_ids) to match vllm_topk_softmax
         # signature which callers unpack as: topk_weights, topk_ids = topk_func(...)
+        if e_score_correction_bias is not None:
+            global _moe_bias_warned
+            if not _moe_bias_warned:
+                _moe_bias_warned = True
+                logger.warning(
+                    "MUSA topk_softmax ignores e_score_correction_bias: the "
+                    "dispatched kernel has no bias-aware expert selection, so "
+                    "routed experts are chosen without the correction bias."
+                )
         call_op(
             "topk_softmax",
             topk_weights,
@@ -709,7 +714,14 @@ def patch_flag_gems_capture_safe_tuning():
             config = configs[0] if configs else None
         if config is None:
             self.nargs = None
-            return _orig_run(self, *args, **kwargs)
+            # Never autotune inside the captured region: benchmarking syncs the
+            # device and aborts the capture. A tuner without cache and without
+            # static configs cannot launch anything either, so fail loudly.
+            raise RuntimeError(
+                "flag_gems LibTuner has no cached or static config to launch "
+                "during MUSA graph capture; refusing to benchmark inside the "
+                "captured region."
+            )
 
         self.best_config = config
         try:
