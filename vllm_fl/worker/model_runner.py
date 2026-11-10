@@ -8095,7 +8095,7 @@ class ModelRunnerFL(
         """Allocate vLLM 0.32 manager views and bind each backend's kernel views."""
         allocation_context = kv_cache_allocation_context or nullcontext()
         attn_groups = [group for groups in self.attn_groups for group in groups]
-        if self.speculative_config:
+        if self.speculative_config and get_pp_group().is_last_rank:
             attn_groups += getattr(self.drafter, "draft_attn_groups", [])
         with allocation_context:
             if self.use_ascend_attention:

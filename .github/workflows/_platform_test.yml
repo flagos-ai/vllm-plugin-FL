@@ -131,6 +131,7 @@ jobs:
   # job on that device's runner (device_runner_labels override).
   unit:
     needs: setup
+    if: fromJson(needs.setup.outputs.config).unit_devices[0] != null
     strategy:
       fail-fast: false
       matrix:

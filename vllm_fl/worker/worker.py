@@ -284,7 +284,6 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        self.use_v2_model_runner = vllm_config.use_v2_model_runner
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 
