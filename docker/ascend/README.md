@@ -1,4 +1,70 @@
-# Ascend 910C: vLLM 0.28.0 empty
+# Ascend Runtime-based vLLM 0.32 CI image (`Dockerfile.v0.32.0`)
+
+Build from the repository root using the FlagOS Runtime 2.3.0 (CANN 9.2.1) base
+image `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.2.1:2.3.0@sha256:92600f84feee2a2a738bbc77abdb02c8c7af925a6da379b23dde6ded6cba50db`.
+The versioned recipe `docker/ascend/Dockerfile.v0.32.0` installs
+`vllm==0.32.0+flagos` while preserving the existing 910C `v0.28.0+empty` recipe
+in `docker/ascend/Dockerfile`.
+
+```bash
+ASCEND_VLLM_VERSION=0.32.0 bash docker/build.sh --platform ascend --target ci
+# On Podman-only hosts (without creating a docker alias):
+CONTAINER_ENGINE=podman ASCEND_VLLM_VERSION=0.32.0 bash docker/build.sh --platform ascend --target ci
+# Equivalent direct build command:
+podman build --build-arg PLUGIN_SOURCE_SHA="$(git rev-parse HEAD)" \
+  --target ci -f docker/ascend/Dockerfile.v0.32.0 \
+  -t harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-ascend-ci .
+```
+
+| Component | Version / source |
+| --- | --- |
+| Base image | `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.2.1:2.3.0@sha256:92600f84feee2a2a738bbc77abdb02c8c7af925a6da379b23dde6ded6cba50db` |
+| Python | 3.12.13 (`/flagos/bin/python`), aarch64 |
+| PyTorch / torch_npu | `2.13.0+cpu` / `2.13.0` |
+| torchvision / torchaudio | `0.28.0+cpu` / `2.11.0+cpu` |
+| vLLM | `0.32.0+flagos` (pure-Python wheel from `flagos-pypi-ascend`) |
+| FlagGems | `5.4.0` |
+| FlagGems-vllm | `v0.2.0` (`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`) |
+| FlagTree (default compiler) | `0.7.1a1+ascend3.5` (`/opt/flagtree`, supplying Triton `3.5.1`) |
+| Vendor Triton (fallback) | `triton 3.6.0` / `triton_ascend 3.6.0` (`/opt/triton`) |
+| FlagCX / cann-shmem | `0.14.1+cann9.2.1` / `1.6.0` |
+| NumPy | `1.26.4` |
+
+The vendor index (`https://resource.flagos.net/repository/flagos-pypi-ascend/simple`)
+supplies the pure-Python `vllm==0.32.0+flagos` wheel and its repacked dependencies
+(`xgrammar==0.2.8+flagos`, `opencv-python-headless==5.0.0.93+flagos`,
+`compressed-tensors==0.17.0+flagos`); missing ordinary dependencies fall back to
+`INDEX_URL` via `uv --index-strategy unsafe-first-match`. `constraints.txt`
+protects all Runtime 2.3.0 core packages (`torch`, `torch-npu`, `torchvision`,
+`torchaudio`, `numpy`, `flag-gems`, `flagtree`, `flagcx`, `cann-shmem`) from
+replacement.
+
+FlagOS Runtime 2.3.0 isolates its compilers outside `/flagos/lib/python3.12/site-packages`:
+`/opt/flagtree` is active by default via `PYTHONPATH` (`/etc/profile.d/zz-flagos.sh`),
+and `source compiler triton` switches to `/opt/triton` (`triton 3.6.0` /
+`triton_ascend 3.6.0`). Do not pass Python's `-I` flag when running
+`.github/scripts/ascend/stack.py`, as `-I` strips `PYTHONPATH`.
+
+Run and verify on an Ascend NPU host (for example on Ascend 910B with devices `0,1`):
+
+```bash
+podman run --rm -it --ipc=host --privileged \
+  -e ASCEND_RT_VISIBLE_DEVICES=0,1 \
+  -v /usr/local/dcmi:/usr/local/dcmi \
+  -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
+  -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
+  -v /etc/ascend_install.info:/etc/ascend_install.info \
+  harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-ascend-ci bash
+# Inside the container:
+bash .github/scripts/ascend/check.sh
+bash .github/scripts/ascend/setup.sh
+python tests/run.py --platform ascend --scope unit
+python tests/run.py --platform ascend --scope functional
+```
+
+---
+
+# Ascend 910C: vLLM 0.28.0 empty (`Dockerfile`)
 
 The image keeps the CANN 9.0.0 and torch_npu 2.10 runtime from the earlier
 910C environment:

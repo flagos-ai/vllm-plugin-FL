@@ -23,3 +23,9 @@ venv
 build
 dist
 *.egg-info
+.coverage
+.coverage.*
+coverage-*.json
+report-*.json
+test-results-*.json
+test-results-*.xml
