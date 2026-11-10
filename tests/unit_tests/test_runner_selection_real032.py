@@ -91,9 +91,6 @@ def test_retained_v1_registration_to_real_config(
     else:
         from vllm.config import CompilationConfig, CompilationMode, CUDAGraphMode
 
-        if device_type == "txda":
-            with pytest.raises(ValueError, match="eager execution only"):
-                VllmConfig(device_config=DeviceConfig(device="cpu"))
         config = VllmConfig(
             device_config=DeviceConfig(device="cpu"),
             compilation_config=CompilationConfig(
@@ -101,3 +98,20 @@ def test_retained_v1_registration_to_real_config(
             ),
         )
         assert config.use_v2_model_runner is False
+        if device_type == "txda":
+            for mode, graph_mode, message in (
+                (
+                    CompilationMode.NONE,
+                    CUDAGraphMode.FULL,
+                    "TXDA graph mode is not supported",
+                ),
+                (
+                    CompilationMode.VLLM_COMPILE,
+                    CUDAGraphMode.NONE,
+                    "eager execution only",
+                ),
+            ):
+                config.compilation_config.mode = mode
+                config.compilation_config.cudagraph_mode = graph_mode
+                with pytest.raises(ValueError, match=message):
+                    PlatformFL.check_and_update_config(config)
