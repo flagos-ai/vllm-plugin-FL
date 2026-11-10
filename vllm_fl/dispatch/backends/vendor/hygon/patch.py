@@ -29,15 +29,20 @@ def force_v1_model_runner() -> None:
     read-only property backed by this env var, hence it is set before any
     VllmConfig is created.
 
-    Hygon cannot run the V2 runner at all, so an explicit opt-in is rejected
-    instead of silently degrading: ``=0`` is honoured, anything else raises.
+    Hygon cannot run the V2 runner: vLLM-FL ships only the v1 runner, and
+    0.32's V2-only attention metadata paths are CUDA-shaped. Upstream defaults
+    to V2, so the fallback is announced as a warning and an explicit opt-in is
+    rejected instead of degrading silently. ``=0`` is honoured quietly.
     """
     import os
 
     value = os.environ.get("VLLM_USE_V2_MODEL_RUNNER")
     if value is None:
         os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
-        logger.info("Set VLLM_USE_V2_MODEL_RUNNER=0 (vLLM-FL uses the v1 runner)")
+        logger.warning(
+            "Hygon does not support the vLLM 0.32 V2 model runner (vLLM-FL "
+            "implements the v1 runner); falling back to V1."
+        )
     elif value.strip() not in ("", "0"):
         raise RuntimeError(
             f"VLLM_USE_V2_MODEL_RUNNER={value} is not supported on Hygon: vLLM-FL "

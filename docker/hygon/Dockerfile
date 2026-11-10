@@ -45,7 +45,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     GEMS_VENDOR=hygon \
     USE_FLAGGEMS=1 \
     VLLM_PLUGINS=fl \
-    VLLM_USE_V2_MODEL_RUNNER=0 \
     VLLM_VENDOR="" \
     VIRTUAL_ENV=/flagos \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \

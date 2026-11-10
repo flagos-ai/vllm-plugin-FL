@@ -21,7 +21,7 @@ editable installation is required. The recipe uses two Hygon BW1000 64 GiB DCUs.
 | FlagTree distribution | `0.6.0+hcu3.6` |
 | FlagTree wheel SHA256 | `0fd81f0e691486dfaf85f6a196f9f09d66118b7d2064b4f8c70b6c8bfdb4d52c` |
 | Triton distribution | `3.6.0+gitc73250c4.staging`, coexists with FlagTree |
-| Model runner | `ModelRunnerFL`, `VLLM_USE_V2_MODEL_RUNNER=0` |
+| Model runner | `ModelRunnerFL` (v1); selected by the plugin at startup, see below |
 | Communication | Vendor HIP/RCCL, TP2; `FLAGCX_PATH` unset |
 
 The FlagGems commit identifies matching installed source content (1,944 files,
@@ -267,11 +267,13 @@ Steps that differ from the 0.28 recipe:
 2. **Install FlagGems-vllm** (`v0.2.0`). Without `flaggems_vllm` the FlagGems
    backend cannot register and dispatch falls back to `reference.torch`.
 3. **Keep the v1 model runner.** `ModelRunnerFL` is a fork of vLLM's v1 runner.
-   0.32 enables the V2 runner by default; the plugin sets
-   `VLLM_USE_V2_MODEL_RUNNER=0` before any `VllmConfig` is created, because
-   0.32 attention metadata builders (e.g. GDN/GDN-hybrid) take CUDA-only V2
-   paths (`mamba_aligned_state_indices`, `update_block_table`) that the FL
-   runner does not populate.
+   0.32 enables the V2 runner by default; the plugin falls back to V1 before any
+   `VllmConfig` is created and logs a warning naming the reason, because 0.32
+   attention metadata builders (e.g. GDN/GDN-hybrid) take CUDA-only V2 paths
+   (`mamba_aligned_state_indices`, `update_block_table`) that the FL runner does
+   not populate. Do not pin `VLLM_USE_V2_MODEL_RUNNER=0` in images or launch
+   scripts: leaving it unset is what lets the plugin report the fallback, and an
+   explicit `=1` is rejected instead of degrading silently.
 4. **Blacklist `zeros` / `zero_` in the Hygon dispatch policy.** FlagGems'
    Triton zero kernels pass the element count as int32, so zeroing the multi-GB
    KV-cache backing buffer (`> 2**31` int8 elements) fails with
