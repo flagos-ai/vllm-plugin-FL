@@ -56,7 +56,7 @@ def _make_ascend_vllm_config(
 
 
 @pytest.mark.parametrize(
-    "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro", "kunlunxin"]
+    "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro"]
 )
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
@@ -96,7 +96,6 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
-        ("cuda", "kunlunxin", "Kunlunxin.*VLLM_USE_V2_MODEL_RUNNER=0"),
     ],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(
@@ -110,6 +109,70 @@ def test_accelerator_rejects_explicit_upstream_v2_runner(
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
     with pytest.raises(ValueError, match=error_pattern):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
+
+
+def test_kunlunxin_accepts_v2_model_runner(monkeypatch):
+    """Kunlunxin P800 supports the V2 model runner as of vLLM 0.32."""
+    from types import SimpleNamespace
+
+    from vllm.config import CUDAGraphMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "kunlunxin")
+    parallel_config = SimpleNamespace(
+        worker_cls=None,
+        all2all_backend=None,
+        data_parallel_size=1,
+        tensor_parallel_size=1,
+    )
+    vllm_config = SimpleNamespace(
+        parallel_config=parallel_config,
+        model_config=None,
+        scheduler_config=SimpleNamespace(),
+        cache_config=None,
+        compilation_config=SimpleNamespace(
+            compile_sizes=[],
+            cudagraph_mode=CUDAGraphMode.NONE,
+        ),
+        attention_config=None,
+        use_v2_model_runner=True,
+    )
+    # Must not raise; kunlunxin no longer blocks the upstream V2 runner.
+    PlatformFL.check_and_update_config(vllm_config)
+    assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+
+@pytest.mark.parametrize("requested, expected", [(None, None), ("0", "0"), ("1", "1")])
+def test_kunlunxin_register_preserves_v2_default(monkeypatch, requested, expected):
+    """Kunlunxin no longer forces VLLM_USE_V2_MODEL_RUNNER=0 at registration."""
+    import os
+    from types import SimpleNamespace
+
+    import vllm_fl
+    import vllm_fl.utils
+
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    monkeypatch.setenv("VLLM_MOE_SKIP_PADDING", "1")
+    monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_install_kunlunxin_fla_alias", lambda: None)
+    monkeypatch.setattr(
+        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="kunlunxin")
+    )
+
+    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    if expected is None:
+        assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
+    else:
+        assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
 
 
 @pytest.mark.parametrize(
