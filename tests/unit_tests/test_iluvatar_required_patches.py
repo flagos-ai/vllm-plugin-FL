@@ -96,11 +96,13 @@ def test_worker_propagates_required_patch_failure(monkeypatch, failing):
             SimpleNamespace(**{function: Mock()}),
         )
     patch = load_function(
-        "vllm_fl/dispatch/backends/vendor/iluvatar/worker.py",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/iluvatar.py",
         "apply_worker_patches",
         current_platform=SimpleNamespace(vendor_name="iluvatar"),
         patch_autotune_memory=Mock(),
         patch_v2_uva=Mock(),
+        patch_torch_inductor_for_iluvatar=patches["inductor"],
+        patch_sampler_compile_for_iluvatar=patches["sampler"],
     )
     with pytest.raises(RuntimeError, match="required patch failed"):
         patch()
@@ -150,7 +152,7 @@ def test_sampler_strict_success_is_idempotent(monkeypatch):
 @pytest.mark.parametrize("vendor", ["iluvatar", "nvidia", "ascend", ""])
 def test_public_worker_hook_dispatches_only_iluvatar(monkeypatch, vendor):
     apply = Mock()
-    key = "vllm_fl.dispatch.backends.vendor.iluvatar.worker"
+    key = "vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar"
     monkeypatch.setitem(sys.modules, key, SimpleNamespace(apply_worker_patches=apply))
     hook = load_function(
         "vllm_fl/worker/worker.py",
@@ -165,7 +167,7 @@ def test_public_worker_hook_propagates_failure(monkeypatch):
     apply = Mock(side_effect=RuntimeError("required vendor patch failed"))
     monkeypatch.setitem(
         sys.modules,
-        "vllm_fl.dispatch.backends.vendor.iluvatar.worker",
+        "vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar",
         SimpleNamespace(apply_worker_patches=apply),
     )
     hook = load_function(

@@ -106,35 +106,89 @@ def test_ci_leaves_memory_budget_at_vllm_default():
     assert "--gpu-memory-utilization" not in source
 
 
-def test_ci_graph_config_default_and_override():
-    import json
-
+@pytest.mark.parametrize("override", [None, '{"mode":3,"cudagraph_mode":"FULL"}'])
+def test_ci_graph_groups_keep_default_separate(override, tmp_path):
     source = (ROOT / ".github/scripts/iluvatar/run_gates.sh").read_text()
-    start = source.index("if [[ -z ${GRAPH_COMPILATION_CONFIG:-} ]]")
-    end = source.index("\nfi", start) + len("\nfi")
-    block = source[start:end] + '\nprintf "%s" "$GRAPH_COMPILATION_CONFIG"'
-    for override in (None, '{"mode":3,"cudagraph_mode":"FULL"}'):
-        env = dict(os.environ)
+    assert "for mode in eager graph-workaround graph-default" in source
+    assignment = next(
+        line
+        for line in source.splitlines()
+        if line.startswith("WORKAROUND_COMPILATION_CONFIG=")
+    )
+    start = source.index("        unset GRAPH_COMPILATION_CONFIG")
+    end = source.index("        printf", start)
+    block = source[start:end]
+    capture = tmp_path / "argv.json"
+    launcher = tmp_path / "vllm"
+    launcher.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        f"open({str(capture)!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+    )
+    launcher.chmod(0o755)
+    model = tmp_path / "model"
+    model.mkdir()
+    for mode in ("eager", "graph-default", "graph-workaround"):
+        env = dict(os.environ, mode=mode)
         env.pop("GRAPH_COMPILATION_CONFIG", None)
         if override is not None:
             env["GRAPH_COMPILATION_CONFIG"] = override
         result = subprocess.run(
-            ["bash", "-c", f"set -e\n{block}"],
+            [
+                "bash",
+                "-c",
+                assignment
+                + "\n"
+                + block
+                + '\nprintf "%s\\n%s" "$serve_mode" "${GRAPH_COMPILATION_CONFIG:-unset}"',
+            ],
             env=env,
-            capture_output=True,
             text=True,
+            capture_output=True,
             check=True,
         )
-        actual = json.loads(result.stdout)
-        if override is not None:
-            assert actual == json.loads(override)
+        serve_mode, actual = result.stdout.split("\n", 1)
+        assert serve_mode == ("eager" if mode == "eager" else "graph")
+        if mode == "graph-workaround":
+            assert json.loads(actual) == (
+                json.loads(override)
+                if override
+                else {
+                    "mode": 0,
+                    "cudagraph_mode": "FULL",
+                    "custom_ops": ["all"],
+                    "ir_enable_torch_wrap": False,
+                }
+            )
         else:
-            assert actual == {
-                "mode": 0,
-                "cudagraph_mode": "FULL",
-                "custom_ops": ["all"],
-                "ir_enable_torch_wrap": False,
-            }
+            assert actual == "unset"
+        subprocess.run(
+            [
+                "bash",
+                "-c",
+                assignment + "\n" + block + '\nbash "$LAUNCHER"',
+            ],
+            env=dict(
+                env,
+                PATH=f"{tmp_path}:{os.environ['PATH']}",
+                MODEL_PATH=str(model),
+                PORT="8123",
+                SERVER_PID_FILE=str(tmp_path / "server.pid"),
+                LAUNCHER=str(ROOT / "tools/adaptation-gate-cases/run_serve_graph.sh"),
+            ),
+            check=True,
+        )
+        argv = json.loads(capture.read_text())
+        assert "--enforce-eager" not in argv
+        assert "--no-async-scheduling" not in argv
+        if mode == "graph-workaround":
+            assert json.loads(argv[argv.index("--compilation-config") + 1]) == (
+                json.loads(actual)
+            )
+        else:
+            assert "--compilation-config" not in argv
+    assert '"$group/config.txt"' in source
+    assert '"$group/commit.txt"' in source
 
 
 def test_iluvatar_is_discovered_and_uses_vendor_runners(monkeypatch):

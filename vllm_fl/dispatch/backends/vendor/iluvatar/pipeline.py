@@ -42,7 +42,7 @@ def _send(group, tensor_dict, dst=None, all_gather_group=None, all_gather_tensor
         if tensor.is_cpu:
             torch.distributed.send(tensor, dst=group.ranks[dst], group=group.cpu_group)
         else:
-            group.device_communicator.send(tensor, dst=dst)
+            group.send(tensor, dst=dst)
             torch.cuda.synchronize(tensor.device)
     # Worker reserves handles[0] for metadata. All transfers are complete.
     return [_Completed()]
@@ -75,7 +75,7 @@ def _receive(group, src=None, all_gather_group=None, all_gather_tensors=None):
         if target.is_cpu:
             torch.distributed.recv(target, src=group.ranks[src], group=group.cpu_group)
         else:
-            received = group.device_communicator.recv(target.size(), target.dtype, src)
+            received = group.recv(target.size(), target.dtype, src)
             target.copy_(received)
             torch.cuda.synchronize(target.device)
         result[key] = target

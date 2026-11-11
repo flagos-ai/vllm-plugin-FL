@@ -17,10 +17,8 @@ export VLLM_PLUGINS=fl USE_FLAGGEMS=1 GEMS_VENDOR=iluvatar
 python .github/scripts/iluvatar/verify_stack.py
 export TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-4}
 export MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
-# Keep FULL graph replay; Inductor lowering currently fails generation gates.
-if [[ -z ${GRAPH_COMPILATION_CONFIG:-} ]]; then
-    export GRAPH_COMPILATION_CONFIG='{"mode":0,"cudagraph_mode":"FULL","custom_ops":["all"],"ir_enable_torch_wrap":false}'
-fi
+# Keep the no-Inductor workaround separate from the upstream default gate.
+WORKAROUND_COMPILATION_CONFIG=${GRAPH_COMPILATION_CONFIG:-'{"mode":0,"cudagraph_mode":"FULL","custom_ops":["all"],"ir_enable_torch_wrap":false}'}
 export PORT=${PORT:-8132}
 out=${ILUVATAR_GATE_RESULTS:-ci-results/iluvatar-gates}
 mkdir -p "$out"
@@ -50,11 +48,23 @@ for model in 27b 35b; do
     else
         export MODEL_PATH="$ILUVATAR_MODEL_35B"
     fi
-    for mode in eager graph; do
+    for mode in eager graph-workaround graph-default; do
         group="$out/$model-$mode"
         mkdir -p "$group"
+        unset GRAPH_COMPILATION_CONFIG
+        serve_mode=graph
+        if [[ "$mode" == eager ]]; then
+            serve_mode=eager
+        elif [[ "$mode" == graph-workaround ]]; then
+            export GRAPH_COMPILATION_CONFIG="$WORKAROUND_COMPILATION_CONFIG"
+        fi
+        printf '%s\n' "model=$MODEL_PATH" "mode=$mode" \
+            "compilation=${GRAPH_COMPILATION_CONFIG:-upstream-default}" \
+            "tp=$TENSOR_PARALLEL_SIZE" "max_model_len=$MAX_MODEL_LEN" \
+            >"$group/config.txt"
+        git rev-parse HEAD >"$group/commit.txt"
         export SERVER_PID_FILE="$group/server.pid" RESULTS_DIR="$group/results"
-        setsid bash "tools/adaptation-gate-cases/run_serve_$mode.sh" >"$group/server.log" 2>&1 &
+        setsid bash "tools/adaptation-gate-cases/run_serve_$serve_mode.sh" >"$group/server.log" 2>&1 &
         server=$!
         if bash tools/adaptation-gate-cases/run_test.sh >"$group/tests.log" 2>&1; then
             echo "$model $mode PASS" | tee -a "$out/status.txt"

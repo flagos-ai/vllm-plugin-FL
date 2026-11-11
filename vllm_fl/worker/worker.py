@@ -158,7 +158,7 @@ def _is_hybrid_kv_model(vllm_config: VllmConfig) -> bool:
 
 def _apply_worker_vendor_patches() -> None:
     if getattr(current_platform, "vendor_name", "") == "iluvatar":
-        from vllm_fl.dispatch.backends.vendor.iluvatar.worker import (
+        from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
             apply_worker_patches,
         )
 

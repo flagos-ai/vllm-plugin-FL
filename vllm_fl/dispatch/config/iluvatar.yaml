@@ -28,7 +28,11 @@ strict: false
 #   - vendor      : Any available vendor backend (auto-detected)
 #   - vendor:iluvatar : Iluvatar-specific vendor backend
 op_backends:
-  # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
+  # The pinned generic provider attempts a cooperative TLE barrier unsupported
+  # by CoreX. This adapter uses the same provider's four-stage FlagGems kernel.
+  moe_align_block_size:
+    - vendor:iluvatar
+  # Other operators: prioritize FlagGems, fallback to vendor, then reference
   attention_backend:
     - flagos
     - vendor:iluvatar

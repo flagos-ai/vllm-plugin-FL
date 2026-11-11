@@ -123,6 +123,25 @@ MODEL_PATH=/models/Qwen3.6-27B PORT=8000 \
     pytest -sv test_image.py::test_image_single
 ```
 
+## Iluvatar CI matrix
+
+`.github/scripts/iluvatar/run_gates.sh` runs both models in three separate
+groups: `eager`, `graph-workaround`, and `graph-default`. Each group runs the
+complete five-scenario inventory above (26 requests), for 156 requests in total.
+The dependency preflight and request fixtures are shared across all groups.
+
+`graph-workaround` retains the explicit no-Inductor FULL graph configuration
+(`mode=0`, `custom_ops=["all"]`, `ir_enable_torch_wrap=false`). An incoming
+`GRAPH_COMPILATION_CONFIG` overrides only this group. `graph-default` clears
+that variable and starts the graph launcher without `--compilation-config`,
+using the platform's normal compilation and scheduling configuration.
+
+Each model/group has its own directory under `ILUVATAR_GATE_RESULTS`, containing
+`config.txt`, `commit.txt`, `server.log`, `tests.log`, and request reports under
+`results/`. The server log records the effective vLLM compilation configuration.
+`status.txt` records each group separately; any failed group fails the job.
+A workaround pass alone does not establish default-compilation acceptance.
+
 ## Results and quality checks
 
 Each pytest case writes one JSON file under

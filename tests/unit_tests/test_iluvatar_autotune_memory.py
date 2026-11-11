@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vllm_fl.dispatch.backends.vendor.iluvatar.worker import (
+from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
     _release_benchmark_tensors,
 )
 
