@@ -279,10 +279,13 @@ Steps that differ from the 0.28 recipe:
    KV-cache backing buffer (`> 2**31` int8 elements) fails with
    `Triton Error [HIP]: invalid argument`. The native ATen memset is used
    instead (`torch.zeros` lowers to `empty` + `zero_`).
-5. **Shim Torch 2.9 accelerator attributes.** 0.32 queries
-   `torch.accelerator.get_memory_info` / `empty_host_cache` and
-   `torch.cuda.get_device_count`; the Hygon patch module binds them to their
-   `torch.cuda` counterparts.
+5. **Shim the Torch 2.9 accelerator attribute.** 0.32 queries
+   `torch.accelerator.get_memory_info` on the worker startup path
+   (`MemorySnapshot`) and for the KV-cache memory budget; the Hygon patch
+   module binds it to `torch.cuda.mem_get_info`. The other accelerator entry
+   points 0.32 uses (`current_device_index` / `set_device_index`) already ship
+   with DTK Torch 2.9, and 0.32 guards its only `empty_host_cache` call with
+   `try/except AttributeError`, so no other shim is installed.
 6. **Filter IR-op providers per operator.** 0.32 asserts that every provider in
    the priority list is registered for that op. The DCU wheel ships no
    `vllm._C`, so `vllm_c` is only kept when the op actually registered it and

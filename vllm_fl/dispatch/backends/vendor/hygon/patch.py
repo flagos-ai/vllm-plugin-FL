@@ -3,6 +3,7 @@
 """Hygon (HCU/DCU) patches for vLLM 0.32 compatibility."""
 
 import logging
+import os
 from functools import lru_cache
 
 logger = logging.getLogger(__name__)
@@ -34,8 +35,6 @@ def force_v1_model_runner() -> None:
     to V2, so the fallback is announced as a warning and an explicit opt-in is
     rejected instead of degrading silently. ``=0`` is honoured quietly.
     """
-    import os
-
     value = os.environ.get("VLLM_USE_V2_MODEL_RUNNER")
     if value is None:
         os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
@@ -52,18 +51,20 @@ def force_v1_model_runner() -> None:
 
 
 def patch_accelerator_missing_attrs() -> bool:
-    """Fill in ``torch.accelerator`` APIs that DTK's Torch 2.9 does not ship.
+    """Fill in ``torch.accelerator.get_memory_info``, which DTK's Torch 2.9 lacks.
 
     vLLM 0.32 targets Torch 2.13, whose ``torch.accelerator`` namespace exposes
-    the generic device-management entry points. The FlagOS Hygon image pins
-    ``torch 2.9.0+das`` (DTK 26.04), where only the allocator helpers exist:
+    ``get_memory_info``; 0.32 calls it on the worker startup path
+    (``vllm.utils.mem_utils.MemorySnapshot``) and whenever the KV-cache memory
+    budget is computed. The FlagOS Hygon image pins ``torch 2.9.0+das``
+    (DTK 26.04), whose ``torch.accelerator`` has no ``get_memory_info``, so it
+    is bound to ``torch.cuda.mem_get_info`` (HCU devices go through the
+    CUDA-shaped API).
 
-    - ``get_memory_info`` — used by ``vllm.utils.mem_utils.MemorySnapshot``
-      during worker startup. Delegated to ``torch.cuda.mem_get_info`` (HCU
-      devices go through the CUDA-shaped API).
-    - ``empty_host_cache`` — used when releasing pinned host memory.
-      Torch 2.9 has no host cache concept on HCU, so this is a no-op.
-    - ``current_device`` / ``set_device`` — the CUDA-shaped equivalents.
+    Nothing else is filled in: DTK already ships the other ``torch.accelerator``
+    entry points 0.32 uses (``current_device_index`` / ``set_device_index`` /
+    ``device_count``), and 0.32 guards its only ``empty_host_cache`` call site
+    with ``try/except AttributeError``.
 
     Return True when the accelerator namespace is complete afterwards.
     """
@@ -73,28 +74,17 @@ def patch_accelerator_missing_attrs() -> bool:
         if getattr(torch.accelerator, "_hcu_attrs_patched", False):
             return True
 
-        # Only fill in attributes the installed Torch does not provide, so a
-        # newer DTK that ships the real implementations keeps them instead of
-        # being shadowed by the CUDA-shaped fallbacks below.
-        candidates = {
-            "get_memory_info": lambda device_index=None: torch.cuda.mem_get_info(
-                device_index
-            ),
-            "current_device": torch.cuda.current_device,
-            "set_device": torch.cuda.set_device,
-            "empty_host_cache": lambda device_index=None: None,
-        }
-        bindings = {
-            name: fn
-            for name, fn in candidates.items()
-            if not hasattr(torch.accelerator, name)
-        }
+        # Only fill in the attribute if the installed Torch does not provide
+        # it, so a newer DTK that ships the real implementation keeps it
+        # instead of being shadowed by the CUDA-shaped fallback below.
+        bindings = {}
+        if not hasattr(torch.accelerator, "get_memory_info"):
+            bindings["get_memory_info"] = (
+                lambda device_index=None: torch.cuda.mem_get_info(device_index)
+            )
 
         for name, fn in bindings.items():
             setattr(torch.accelerator, name, fn)
-
-        if not hasattr(torch.cuda, "get_device_count"):
-            torch.cuda.get_device_count = torch.cuda.device_count
 
         torch.accelerator._hcu_attrs_patched = True
         logger.info(
