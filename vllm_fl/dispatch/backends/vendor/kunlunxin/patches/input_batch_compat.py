@@ -446,3 +446,26 @@ def apply_input_batch_compat() -> None:
             )
     except ImportError:
         pass
+
+    # sampler.py and rejection_sampler.py also import get_num_sampled_and_rejected
+    # directly by name (sampler.py:20, rejection_sampler.py:17), so the
+    # already-bound module-level name there still calls the Triton kernel after
+    # input_batch is patched.  Propagate into those modules too.
+    gnsr_fn = getattr(input_batch, "get_num_sampled_and_rejected", None)
+    if gnsr_fn is not None:
+        for mod_path in (
+            "vllm.v1.worker.gpu.sample.sampler",
+            "vllm.v1.worker.gpu.spec_decode.rejection_sampler",
+        ):
+            try:
+                import importlib
+                _mod = importlib.import_module(mod_path)
+                if hasattr(_mod, "get_num_sampled_and_rejected"):
+                    setattr(_mod, "get_num_sampled_and_rejected", gnsr_fn)
+                    logger.info(
+                        "kunlunxin input_batch_compat: propagated "
+                        "get_num_sampled_and_rejected → torch into %s",
+                        mod_path,
+                    )
+            except ImportError:
+                pass
