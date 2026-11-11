@@ -84,24 +84,26 @@ platforms:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
+  # Enablement follows the 0.5.0-dev line's own registry (the per-line
+  # compatibility matrix is the line's state, not main's): NVIDIA first for
+  # the vLLM 0.32 rollout, other backends re-enabled after their runtime
+  # and CI adaptations are ready.
   ascend:
-    # Enablement follows the 0.4.0-dev line's own registry (the per-line
-    # compatibility matrix is the line's state, not main's).
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/ascend.yaml
       - tests/platforms/ascend.yaml
     exempt_from_global:
       - vllm_fl/dispatch/config/ascend.yaml
   hygon:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/hygon.yaml
       - tests/platforms/hygon.yaml
     exempt_from_global:
       - vllm_fl/dispatch/config/hygon.yaml
   metax:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
@@ -110,7 +112,7 @@ platforms:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
   musa:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/musa.yaml
       - vllm_fl/dispatch/backends/vendor/musa/
@@ -119,7 +121,7 @@ platforms:
       - vllm_fl/dispatch/config/musa.yaml
       - vllm_fl/dispatch/backends/vendor/musa/
   enflame:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/
@@ -127,10 +129,8 @@ platforms:
     exempt_from_global:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/
-  # Image published; needs a self-hosted runner with labels in configs/kunlunxin.yml.
-  # Kunlunxin is added on top of the existing vendor suites, not in place of them.
   kunlunxin:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
@@ -139,7 +139,7 @@ platforms:
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
   thead:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
@@ -148,7 +148,7 @@ platforms:
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
   iluvatar:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/

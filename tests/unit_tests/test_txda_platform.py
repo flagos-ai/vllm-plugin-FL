@@ -59,18 +59,8 @@ def test_txda_registration_defaults_to_fl_runner_and_preserves_explicit_choice(
         "_patch_custom_ops",
         "_patch_flash_attn_import",
         "_get_op_config",
-        # register() also guards against re-entrant platform resolution and a
-        # cached fallback platform, so it references these module-level hooks.
-        "_preload_platform_class",
-        "_install_xpu_device_guard",
-        "_install_fla_relocation_alias",
-        "_patch_transformers_compat",
     ):
         namespace[name] = lambda: None
-    namespace["_run_best_effort"] = lambda *steps: [step() for step in steps]
-    namespace["_force_adopt_platform"] = lambda: False
-    namespace["_register_in_progress"] = False
-    namespace["_PLATFORM_QUALNAME"] = "vllm_fl.platform.PlatformFL"
     register = _load_function("vllm_fl/__init__.py", "register", namespace)
 
     assert register() == "vllm_fl.platform.PlatformFL"

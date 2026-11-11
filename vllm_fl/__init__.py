@@ -4,19 +4,7 @@ import importlib
 import logging
 import os
 import sys
-
-# torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
-# vllm.ir.tolerances references it at module level, so we inject a sentinel
-# before any vllm.ir import can happen.
-if "torch" in sys.modules:
-    _torch = sys.modules["torch"]
-    if not hasattr(_torch, "float4_e2m1fn_x2"):
-        _torch.float4_e2m1fn_x2 = _torch.uint8
-else:
-    import torch as _torch
-    if not hasattr(_torch, "float4_e2m1fn_x2"):
-        _torch.float4_e2m1fn_x2 = _torch.uint8
-del _torch
+from threading import Lock
 
 
 def _patch_flag_gems_triton_import_compat():
@@ -62,54 +50,24 @@ def _patch_flag_gems_triton_import_compat():
 
 _patch_flag_gems_triton_import_compat()
 
+# torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
+# vllm.ir.tolerances references it at module level, so we inject a sentinel
+# before any vllm.ir import can happen.
+if "torch" in sys.modules:
+    _torch = sys.modules["torch"]
+    if not hasattr(_torch, "float4_e2m1fn_x2"):
+        _torch.float4_e2m1fn_x2 = _torch.uint8
+else:
+    import torch as _torch
+
+    if not hasattr(_torch, "float4_e2m1fn_x2"):
+        _torch.float4_e2m1fn_x2 = _torch.uint8
+del _torch
+
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 from vllm_fl.utils import get_op_config as _get_op_config
 
 logger = logging.getLogger(__name__)
-
-def _install_xpu_device_guard() -> None:
-    """Install the torch.xpu.get_device_name wrapper BEFORE any FLA import.
-
-    ``_install_fla_relocation_alias()`` probes
-    ``vllm.model_executor.layers.fla``, which on 0.28 pulls in the FLA ops
-    package whose module body calls ``torch.xpu.get_device_name(0)``.  On
-    Kunlunxin that raises "Torch not compiled with XPU enabled" and aborts the
-    alias install, so the wrapper must already be in place.
-
-    Kunlunxin-only; ``register()`` calls it after the vendor is known.
-    """
-    try:
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (  # noqa: E501
-            _install_xpu_get_device_wrapper,
-        )
-
-        _install_xpu_get_device_wrapper()
-    except Exception as _xpu_guard_exc:  # pragma: no cover - vendor dependent
-        logger.debug("[vllm_fl] XPU device guard unavailable: %s", _xpu_guard_exc)
-
-
-def _install_fla_relocation_alias() -> None:
-    """Alias the pre-0.28 FLA path onto the 0.28 layout (deferred to register).
-
-    vLLM 0.28 relocated the Flash-Linear-Attention kernels from
-    ``vllm.model_executor.layers.fla`` to
-    ``vllm.third_party.flash_linear_attention``.  The alias keeps the old
-    spelling working verbatim, and is a no-op on <= 0.24 where the real
-    package still exists.
-
-    Deferred to ``register()`` because probing the old path imports the parent
-    ``vllm.model_executor.layers`` package, which resolves ``current_platform``
-    and re-enters the platform-plugin loader while this module is only
-    partially initialised.  Kunlunxin-only: no other vendor spells the old
-    path, and importing those modules for them perturbs vLLM's own import
-    order.
-    """
-    try:
-        from vllm_fl.patches.fla_module_relocation import install as _install
-
-        _install()
-    except Exception as _fla_reloc_exc:  # pragma: no cover - version dependent
-        logger.debug("[vllm_fl] FLA module relocation unavailable: %s", _fla_reloc_exc)
 
 
 def _arm_cpu_platform() -> str | None:
@@ -126,19 +84,11 @@ def _arm_cpu_platform() -> str | None:
 def __getattr__(name):
     if name == "distributed":
         import importlib
+
         module = importlib.import_module(f".{name}", __name__)
         globals()[name] = module
         return module
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def _patch_transformers_compat():
-    """Patch transformers compatibility for ALLOWED_LAYER_TYPES and tokenizer."""
-    import transformers.configuration_utils as cfg
-    if not hasattr(cfg, "ALLOWED_LAYER_TYPES"):
-        cfg.ALLOWED_LAYER_TYPES = getattr(
-            cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ()
-        )
 
 
 def _register_flagcx_connector():
@@ -158,6 +108,7 @@ def _register_flagcx_connector():
 def _patch_flash_attn_import():
     """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing."""
     import sys
+
     if "vllm.vllm_flash_attn" in sys.modules:
         return
     try:
@@ -176,8 +127,11 @@ def _patch_flash_attn_import():
         stub = types.ModuleType("vllm.vllm_flash_attn")
         stub.FA2_AVAILABLE = False
         stub.FA3_AVAILABLE = False
-        stub.fa_version_unsupported_reason = lambda *a, **kw: "flash_attn C extensions not available"
+        stub.fa_version_unsupported_reason = lambda *a, **kw: (
+            "flash_attn C extensions not available"
+        )
         stub.flash_attn_varlen_func = None
+        stub.compile_flash_attn_varlen_func_from_specs = None
         stub.get_scheduler_metadata = None
         stub.is_fa_version_supported = lambda *a, **kw: False
         sys.modules["vllm.vllm_flash_attn"] = stub
@@ -213,6 +167,7 @@ def _patch_custom_ops():
         logger.debug("Failed to import vllm_fl._C: %s", e)
 
     from vllm_fl.ops._C_ops_registry import register_op_schemas
+
     register_op_schemas()
 
 
@@ -240,101 +195,6 @@ def _init_vendor_device():
         _patch_xpu_get_device()
 
 
-_register_in_progress = False
-
-# vLLM resolves ``vllm.platforms.current_platform`` from this qualname, so the
-# value lives in one place: register() must always hand vLLM a non-None string.
-_PLATFORM_QUALNAME = "vllm_fl.platform.PlatformFL"
-
-
-def _preload_platform_class():
-    """Import PlatformFL early so a nested resolution cannot fail mid-way.
-
-    The class body resolves the vendor/device_type from the FlagGems detector.
-    Importing it *inside* register() before the side effects below means a
-    re-entrant resolve (which imports ``vllm.model_executor.layers`` and
-    therefore ``vllm.platforms``) can instantiate it immediately instead of
-    failing while this module is still executing.
-    """
-    try:
-        from vllm_fl.platform import PlatformFL
-
-        return PlatformFL
-    except Exception as _platform_exc:  # pragma: no cover - vendor dependent
-        logger.debug("[vllm_fl] PlatformFL unavailable: %s", _platform_exc)
-        return None
-
-
-def _run_best_effort(*steps) -> None:
-    """Run compatibility hooks without ever letting one abort registration."""
-    for step in steps:
-        try:
-            step()
-        except Exception as _step_exc:  # pragma: no cover - vendor dependent
-            logger.warning("[vllm_fl] %s failed: %s", step.__name__, _step_exc)
-
-
-def _is_fallback_platform(platform) -> bool:
-    """True when the cached platform cannot serve an accelerator.
-
-    The class-name check is kept as a fallback because the import path of
-    ``UnspecifiedPlatform`` has moved between vLLM releases, and a platform
-    that reports an empty ``device_type`` is unusable whatever it is called.
-    """
-    try:
-        from vllm.platforms.interface import UnspecifiedPlatform
-
-        if isinstance(platform, UnspecifiedPlatform):
-            return True
-    except Exception as _iface_exc:  # pragma: no cover - layout dependent
-        logger.debug("[vllm_fl] UnspecifiedPlatform unavailable: %s", _iface_exc)
-    if type(platform).__name__ == "UnspecifiedPlatform":
-        return True
-    return not getattr(platform, "device_type", "")
-
-
-def _force_adopt_platform() -> bool:
-    """Re-assert PlatformFL when vLLM already cached a fallback platform.
-
-    ``vllm.platforms`` resolves ``current_platform`` lazily but **only once**:
-    its module-level ``__getattr__`` stores the first result in the global
-    ``_current_platform``.  That resolution is re-entrant, and the *outer*
-    resolution wins because it performs the final assignment.  So if any step of
-    the outer ``register()`` raises, vLLM wraps the plugin callable in
-    ``except Exception: pass``, counts this plugin as "not activated", and
-    overwrites the good platform a nested resolution already installed with
-    ``UnspecifiedPlatform``.
-
-    Reading the module global ``_current_platform`` (not the ``current_platform``
-    attribute) deliberately avoids triggering yet another nested resolution,
-    and the assignment goes through vLLM's module ``__setattr__``, which is the
-    supported way for a plugin to set the platform.
-    """
-    try:
-        import vllm.platforms as _platforms
-    except Exception as _platform_exc:  # pragma: no cover - version dependent
-        logger.debug("[vllm_fl] cannot inspect current_platform: %s", _platform_exc)
-        return False
-
-    current = getattr(_platforms, "_current_platform", None)
-    if current is None or not _is_fallback_platform(current):
-        # Nothing resolved yet (vLLM will call register() again), or a real
-        # platform is already in place.
-        return False
-
-    _platform_cls = _preload_platform_class()
-    if _platform_cls is None:
-        return False
-
-    _platforms.current_platform = _platform_cls()
-    logger.info(
-        "[vllm_fl] vLLM had cached %s; re-adopted %s",
-        type(current).__name__,
-        _PLATFORM_QUALNAME,
-    )
-    return True
-
-
 def _install_metax_compat():
     """Apply the MetaX vLLM 0.28 compatibility shims before any kernel runs.
 
@@ -353,125 +213,94 @@ def _install_metax_compat():
         logger.warning("[vllm_fl] MetaX compatibility shims not installed: %s", exc)
 
 
-def register():
-    """Register the FL platform.
+_kunlunxin_fla_alias_lock = Lock()
 
-    The body follows the upstream order step by step: vLLM resolves the
-    platform from inside its own import chain, so every extra import here
-    changes the order in which vLLM's modules get bound.  Vendor-specific
-    hooks therefore run only after ``vendor_name`` is known, and only for the
-    vendor that needs them.
 
-    vLLM 0.28 also calls this entry point inside a bare
-    ``except Exception: pass``, so an escaping exception is not a traceback: it
-    silently pins ``current_platform`` to ``UnspecifiedPlatform`` for the life
-    of the process.  Optional patches are installed best-effort for that
-    reason.  The one required step -- the vendor allocator bridge -- still
-    surfaces, because an unusable allocator cannot be papered over here.
-    """
-    global _register_in_progress
-    if _register_in_progress:
-        # Re-entrant call while the outer register() is still installing
-        # aliases / vendor hooks (vLLM loads platform plugins more than once,
-        # and register() itself can trigger a nested platform resolution).
-        return _PLATFORM_QUALNAME
-    _register_in_progress = True
-    required_failure = False
+def _install_kunlunxin_fla_alias() -> None:
+    # Importing the alias can re-enter platform registration.
+    if not _kunlunxin_fla_alias_lock.acquire(blocking=False):
+        return
     try:
-        # The MUSA allocator bridge is a hard precondition: when the vendor
-        # patch cannot rebind torch.accelerator, the engine fails later with an
-        # opaque allocator assert, so that failure must reach the caller instead
-        # of degrading to a log line like the optional hooks do.
-        try:
-            _init_vendor_device()
-        except Exception as _vendor_exc:
-            if isinstance(_vendor_exc, RuntimeError) and (
-                "initialize MUSA accelerator allocator APIs" in str(_vendor_exc)
-            ):
-                required_failure = True
-                raise
-            logger.warning("[vllm_fl] vendor device hooks failed: %s", _vendor_exc)
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
+            _fix_platform_vars,
+        )
+        from vllm_fl.patches.fla_module_relocation import install
 
-        # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
-        # preserve vLLM's stock CPU platform and install kernels in register_model().
-        try:
-            arm_cpu_platform = _arm_cpu_platform()
-        except Exception as _arm_exc:  # pragma: no cover - version dependent
-            logger.debug("[vllm_fl] ARM CPU platform probe unavailable: %s", _arm_exc)
-            arm_cpu_platform = None
-        if arm_cpu_platform is not None:
-            logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
-            return arm_cpu_platform
-
-        _run_best_effort(_patch_custom_ops, _patch_flash_attn_import)
-
-        # Note: FlagCX connector registration is deferred to register_model()
-        # to avoid circular imports during VllmConfig.__post_init__ in spawned
-        # subprocesses.
-
-        multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
-        if multiproc_method is None:
-            os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-        _run_best_effort(_get_op_config)
-
-        from vllm_fl.utils import DeviceInfo
-
-        vendor_name = DeviceInfo().vendor_name
-
-        # Kunlunxin-only compatibility hooks. The XPU guard has to be in place
-        # before anything imports the FLA ops package (its module body calls
-        # torch.xpu.get_device_name), and the 0.28 FLA alias only matters for
-        # the pre-0.28 ``vllm.model_executor.layers.fla`` spelling, which no
-        # other vendor uses. Both import heavy vLLM model modules, so they must
-        # not run for other vendors while vLLM is still initialising.
-        if vendor_name == "kunlunxin":
-            _run_best_effort(
-                _install_xpu_device_guard,
-                _install_fla_relocation_alias,
-                _patch_transformers_compat,
-            )
-
-        if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
-            # v0.28 defaults some models to the upstream V2 runner. These
-            # backends use ModelRunnerFL; choose it before VllmConfig reads
-            # model defaults.
-            os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
-        if vendor_name == "nvidia":
-            _force_adopt_platform()
-            return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
-
-        _force_adopt_platform()
-        return _PLATFORM_QUALNAME
-    except Exception as _register_exc:
-        logger.warning("[vllm_fl] register() failed: %s", _register_exc)
-        if required_failure:
-            raise
-        # Optional hooks have already degraded to log lines; report the
-        # platform anyway so a missing patch cannot pin current_platform to
-        # UnspecifiedPlatform for the life of the process.
-        return _PLATFORM_QUALNAME
+        install()
+        _fix_platform_vars()
+    except Exception as exc:
+        logger.debug("Kunlunxin FLA module alias unavailable: %s", exc)
     finally:
-        _register_in_progress = False
+        _kunlunxin_fla_alias_lock.release()
+
+
+def register():
+    """Register the FL platform."""
+    _init_vendor_device()
+
+    # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
+    # preserve vLLM's stock CPU platform and install kernels in register_model().
+    arm_cpu_platform = _arm_cpu_platform()
+    if arm_cpu_platform is not None:
+        logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
+        return arm_cpu_platform
+
+    from vllm_fl.utils import DeviceInfo
+
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name != "nvidia":
+        # Other accelerators still use EMPTY wheels. NVIDIA uses upstream's
+        # native CUDA extensions and must not replace failed imports with stubs.
+        _patch_custom_ops()
+        _patch_flash_attn_import()
+
+    # Note: FlagCX connector registration is deferred to register_model()
+    # to avoid circular imports during VllmConfig.__post_init__ in spawned
+    # subprocesses.
+
+    multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
+    if multiproc_method is None:
+        os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+    _get_op_config()
+
+    if vendor_name == "kunlunxin":
+        _install_kunlunxin_fla_alias()
+
+    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
+        # These backends use ModelRunnerFL; choose it before VllmConfig reads
+        # model defaults for the upstream V2 runner.
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+    if vendor_name == "nvidia":
+        return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+
+    return "vllm_fl.platform.PlatformFL"
+
 
 def register_quant_linear():
     from vllm.platforms import current_platform
+
     # vllm.model_executor.kernels.linear triggers cutlass_scaled_mm_supports_fp8
     # at module level, which requires torch.ops._C — not available on these
     # platforms.
     if current_platform.device_type in {"musa", "gcu"}:
         return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
+
     add_oot_quant_kernel()
+
 
 def register_router():
     from vllm.platforms import current_platform
+
     # fused_moe import chain triggers cutlass_scaled_mm_supports_fp8 on MUSA
     if current_platform.device_type == "musa":
         return
     from vllm_fl.utils import is_oot_enabled
+
     if not is_oot_enabled():
         return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
+
     replace_router_with_fl()
 
 
@@ -494,10 +323,10 @@ def _register_gdn_packed_decode_patch() -> bool:
 
 
 def register_model():
-    """Register FL-specific models not yet upstream."""
-    # General plugins are loaded independently in spawned model-inspection and
-    # worker processes, so all runtime compatibility hooks must be idempotent.
+    """Register FL runtime extensions after vLLM model discovery."""
+
     from vllm.platforms import current_platform
+
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
         from vllm_fl.patches.arm_cpu_gdn import (
             apply_arm_cpu_gdn_state_indices_patch,
@@ -538,11 +367,21 @@ def register_model():
     register_quant_linear()
     register_router()
 
-    _register_gdn_packed_decode_patch()
-
     from vllm_fl.utils import DeviceInfo
 
-    if DeviceInfo().vendor_name == "ascend":
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name != "nvidia":
+        # NVIDIA's native vLLM 0.32 already preserves packed GDN beta precision.
+        _register_gdn_packed_decode_patch()
+
+    if vendor_name == "nvidia":
+        from vllm_fl.patches.minicpmo_audio import patch_minicpmo_audio_budget
+
+        # General plugins run before encoder budgets are built in the engine
+        # frontend and spawned workers, for both upstream model runners.
+        patch_minicpmo_audio_budget()
+
+    if vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
         # configuration resolution in worker processes.
         from vllm.model_executor.models import ModelRegistry
@@ -559,15 +398,3 @@ def register_model():
             "GlmMoeDsaForCausalLM",
             "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM",
         )
-
-    # Register GLM-5 (GlmMoeDsa) — config not yet upstream
-    try:
-        from vllm.transformers_utils.config import _CONFIG_REGISTRY
-
-        from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
-        _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
-
-        #from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
-        #glm5_model()
-    except Exception as e:
-        logger.error(f"Register GlmMoeDsa model error: {str(e)}")

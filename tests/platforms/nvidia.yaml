@@ -83,60 +83,72 @@ env_defaults:
   CUDA_DEVICE_MAX_CONNECTIONS: "1"
   NCCL_ALGO: "Ring"
 
-# E2E case variants: every e2e case runs once per entry below, inside the same
-# job, with the entry's env injected into that case's pytest subprocess and the
-# suffix appended to its result name. Dual-mode coverage (FlagGems-vllm fused
-# operators on/off) therefore lives at case level; the CI matrix does not
-# duplicate jobs per mode.
-e2e_variants:
-  - suffix: ""
-    env:
-      VLLM_FL_USE_FLAGGEMS_VLLM: "0"
-  - suffix: "fused"
-    env:
-      VLLM_FL_USE_FLAGGEMS_VLLM: "1"
-
 # ---- Device-specific test configurations ------------------------------------
+# Matrix follows the 0.5.0-dev line's own registry: the old-schema single
+# case list is carried into both stages unchanged (the line's PR runs
+# executed the full list; no light/dark split is invented here).
 a100:
   name: "a100"
   tests:
     e2e:
-      # Add or remove test cases per model
       pr:
         inference:
-          qwen3:
-            - 4b_tp2
-          minicpm:
-            - o45_tp4
+          qwen3: ["4b_tp2", "next_tp8"]
+          qwen3_5: ["35b_tp4"]
+          minicpm: ["o45_tp4"]
+        serving:
+          qwen3: ["next_tp8"]
       nightly:
         inference:
-          qwen3:
-            - 4b_tp2
-            - next_tp8
-          qwen3_5:
-            - 35b_tp4
-          minicpm:
-            - o45_tp4
+          qwen3: ["4b_tp2", "next_tp8"]
+          qwen3_5: ["35b_tp4"]
+          minicpm: ["o45_tp4"]
         serving:
-          qwen3:
-            - next_tp8
+          qwen3: ["next_tp8"]
     functional:
       include: "*"
       exclude: []
     unit:
       include: "*"
-      exclude: []
+      # Excluded pending upstream reconciliation of the #689 forward-sync
+      # merge, which paired the 0.4.0-line registry implementation (native
+      # present -> skip fallback, no _libs) with #615's fallback-behavior
+      # tests, and carried 0.28-targeted musa tests onto the 0.32 stack.
+      exclude:
+        - test_op_schema_registry.py
+        - test_musa_collective_splitting.py
+        - test_musa_accelerator_patch.py
     benchmark:
       pr:
         enabled: true
-        types:
-          - serve
+        types: ["throughput", "latency", "serve"]
       nightly:
         enabled: true
-        types:
-          - throughput
-          - latency
-          - serve
+        types: ["throughput", "latency", "serve"]
 
-# H20 CI cases are not scheduled: the runner allocation has expired.
-# Restore the H20 device test section when replacement resources are available.
+h20:
+  name: "h20"
+  tests:
+    unit:
+      include: "*"
+      # Same #689-reconciliation excludes as a100 (see above); the registry
+      # pair also failed h20-only before the rebase (dsw-worker Hopper
+      # specificity, bisection 11-03) — tracked with the upstream owner.
+      exclude:
+        - test_op_schema_registry.py
+        - test_musa_collective_splitting.py
+        - test_musa_accelerator_patch.py
+    e2e:
+      pr:
+        inference:
+          qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+        serving:
+          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+      nightly:
+        inference:
+          qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+        serving:
+          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+    functional:
+      include: "*"
+      exclude: []

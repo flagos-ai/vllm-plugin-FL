@@ -44,8 +44,6 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-_patched = False
-
 
 def _collect_kv_segments(
     attn_groups,
@@ -136,16 +134,12 @@ def _zero_block_ids_pytorch(self, block_ids) -> None:
 
 def apply_kv_block_zero_compat() -> None:
     """Replace the Triton KV-block zeroing kernel with tensor-op zeroing."""
-    global _patched
-    if _patched:
-        return
     try:
         from vllm.v1.worker.utils import KVBlockZeroer
     except Exception:  # pragma: no cover - vLLM without the zeroer
         return
 
     if getattr(KVBlockZeroer.zero_block_ids, "_kunlunxin_pytorch_zero", False):
-        _patched = True
         return
 
     original_init = KVBlockZeroer.__init__
@@ -187,7 +181,6 @@ def apply_kv_block_zero_compat() -> None:
     _zero_block_ids_pytorch._kunlunxin_pytorch_zero = True
     KVBlockZeroer.__init__ = init_and_collect
     KVBlockZeroer.zero_block_ids = _zero_block_ids_pytorch
-    _patched = True
     logger.info(
         "kunlunxin kv_block_zero_compat: KV block zeroing uses tensor ops "
         "instead of the Triton absolute-address kernel"
