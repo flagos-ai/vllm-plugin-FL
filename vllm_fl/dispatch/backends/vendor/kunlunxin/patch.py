@@ -727,13 +727,22 @@ def patch_block_table_slot_mapping():
     try:
         import torch
 
-        from vllm.v1.worker.block_table import BlockTable
+        from vllm.v1.worker.block_table import BlockTable, SlotMappingMode
 
         PAD_SLOT_ID = -1
 
         def compute_slot_mapping_xpu(self, num_reqs, query_start_loc, positions):
+            if self.slot_mapping_mode == SlotMappingMode.NONE:
+                return
+
             device = positions.device
             num_tokens = positions.shape[0]
+
+            # Derive max_num_blocks_per_req from the block table tensor when
+            # the attribute is not present (e.g. in unit-test stubs).
+            max_num_blocks_per_req = getattr(
+                self, "max_num_blocks_per_req", self.block_table.gpu.shape[1]
+            )
 
             total_cp_world_size = self.pcp_world_size * self.dcp_world_size
             total_cp_rank = self.pcp_rank * self.dcp_world_size + self.dcp_rank
@@ -748,7 +757,7 @@ def patch_block_table_slot_mapping():
             if total_cp_world_size > 1:
                 virtual_block_size = self.block_size * total_cp_world_size
                 bt_indices = (
-                    req_indices * self.max_num_blocks_per_req
+                    req_indices * max_num_blocks_per_req
                     + positions // virtual_block_size
                 )
                 block_numbers = self.block_table.gpu.view(-1)[bt_indices]
@@ -773,7 +782,7 @@ def patch_block_table_slot_mapping():
                 )
             else:
                 bt_indices = (
-                    req_indices * self.max_num_blocks_per_req
+                    req_indices * max_num_blocks_per_req
                     + positions // self.block_size
                 )
                 block_numbers = self.block_table.gpu.view(-1)[bt_indices]
