@@ -51,9 +51,14 @@ LABEL org.opencontainers.image.revision="${BUILD_SOURCE_SHA}" \
       org.opencontainers.image.base.digest="sha256:ee5b2b9420dedc8eb6ad6658397e9d9602533f1c6e74a53b924ff976a113d4ab"
 
 RUN --mount=type=bind,from=plugin-wheel,source=/wheels,target=/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
     cd /wheels \
     && sha256sum vllm_plugin_fl-*.whl > /opt/fl-ci/plugin-wheel.sha256 \
-    && /flagos/bin/python -m pip install --no-index --no-deps vllm_plugin_fl-*.whl \
+    && /flagos/bin/python -m pip --isolated install --only-binary=:all: \
+        --index-url "${INDEX_URL}" --extra-index-url "${FLAGOS_INDEX_URL}" \
+        ${EXTRA_INDEX_URL:+--extra-index-url "${EXTRA_INDEX_URL}"} \
+        --constraint /opt/fl-ci/constraints.txt --report /opt/fl-ci/plugin-install.json \
+        vllm_plugin_fl-*.whl \
     && /flagos/bin/python -m pip check \
     && /flagos/bin/python -m pip list --format=json > /opt/fl-ci/packages.json
 

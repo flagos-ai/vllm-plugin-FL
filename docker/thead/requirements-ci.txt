@@ -8,7 +8,6 @@ wheel
 pybind11
 sqlalchemy
 decorator
-modelscope
 pytest
 pytest-cov>=7
 pytest-json-report>=1.5
