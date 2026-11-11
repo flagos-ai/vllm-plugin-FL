@@ -30,7 +30,7 @@ pytest plugins support the repository's existing NVIDIA setup and test entry
 points. setuptools 80.10.2 satisfies vLLM's <81 constraint. Standalone Triton
 3.7.1 satisfies Torch's package metadata; the active compiler remains Runtime
 FlagTree via `PYTHONPATH=/opt/flagtree`, which the checker verifies by origin.
-Both the Docker image and CI container options export `PYTHONPATH=/opt/flagtree`
+The Docker image exports `PYTHONPATH=/opt/flagtree`
 explicitly: the Runtime only sources its compiler selection through `BASH_ENV`,
 whereas GitHub container run steps default to `sh`. A setup check in bash can pass
 while a later sh/Python step imports standalone Triton and crashes.
@@ -90,6 +90,8 @@ manifests, build logs and `/opt/fl-ci/packages.json` with the validation evidenc
 Image pins do not freeze online APT or pip repositories during a future rebuild.
 
 
-NVIDIA's combined unit/functional job uses the `flagcicd-h20` runner and explicitly
-passes `--device h20`; selecting a runner alone does not change tests/run.py's
-first-device default. A passing H20 run does not establish A100 compatibility.
+NVIDIA's default jobs use the shared `flagcicd-a100` runner label and inherit
+the runner's `CUDA_VISIBLE_DEVICES` mask. The reusable workflows accept an optional
+device profile; without one, tests/run.py uses the platform default. H20-specific
+jobs retain their `flagcicd-h20` override. A passing H20 run does not establish
+A100 compatibility.

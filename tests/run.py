@@ -41,6 +41,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,7 +52,7 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from tests.utils.cleanup import device_cleanup, wait_for_memory
+from tests.utils.cleanup import RUN_ID_ENV, device_cleanup, wait_for_memory
 from tests.utils.device_scheduler import DeviceScheduler
 from tests.utils.device_utils import get_device_count, get_visible_device_env_var
 from tests.utils.model_config import ModelConfig
@@ -135,6 +136,11 @@ class TestRunner:
         # Inject platform info as env vars for conftest.py to read
         os.environ["FL_TEST_PLATFORM"] = self.config.platform
         os.environ["FL_TEST_DEVICE"] = self.config.device
+        # Tag every subprocess (and the vllm workers it spawns) with this
+        # run's id so device cleanup never kills processes owned by another
+        # runner sharing the host. An id inherited from a caller is kept.
+        os.environ.setdefault(RUN_ID_ENV, uuid.uuid4().hex)
+        print(f"[run] Run id:   {os.environ[RUN_ID_ENV]}  ({RUN_ID_ENV})")
 
         test_cases = self.discover_tests()
 
@@ -189,8 +195,37 @@ class TestRunner:
         total_devices = get_device_count()
         visible_env_var = get_visible_device_env_var()
 
+        def _skip_oversized(tc: TestCase) -> TestResult | None:
+            """Skip a case that needs more devices than this runner exposes.
+
+            E.g. a tp8 case on a runner pinned to 4 of a host's 8 GPUs can
+            never be scheduled; report it as skipped instead of letting
+            DeviceScheduler.acquire raise (parallel) or the engine fail to
+            initialize (serial).
+            """
+            if total_devices == 0 or tc.num_devices <= total_devices:
+                return None
+            message = (
+                f"skipped: requires {tc.num_devices} devices, only "
+                f"{total_devices} visible on this runner"
+            )
+            print(f"::warning::{tc.name} {message}", flush=True)
+            return TestResult(
+                name=tc.name,
+                passed=True,
+                skipped=True,
+                message=message,
+                task=tc.task,
+                model=tc.model,
+                case=tc.case,
+            )
+
         def _run_serial() -> None:
             for tc in cases:
+                skipped = _skip_oversized(tc)
+                if skipped is not None:
+                    self.report.results.append(skipped)
+                    continue
                 result = self._run_single(tc)
                 self.report.results.append(result)
                 device_cleanup(self.config.platform)
@@ -223,25 +258,41 @@ class TestRunner:
             _run_serial()
             return
 
-        # A visible-devices mask naming a subset of the physical cards (e.g.
-        # a locally pinned run, or a host partition policy expressed as env)
-        # means the counted devices are subset-relative: re-pinning a case
-        # with slot indices could be reinterpreted against physical cards.
-        # Keep the inherited visibility and run serially instead.
+        # A visible-devices mask is how a host partition is expressed (a
+        # locally pinned run, or a per-runner GPU split such as two 4-GPU
+        # runners on one 8-GPU box pinned to 0,1,2,3 and 4,5,6,7). torch
+        # renumbers the visible cards to 0..total_devices-1, so the scheduler
+        # works on those 0-based slots; each slot is translated back to the
+        # id the mask names before it is written into a child's env, since a
+        # child resolves VISIBLE_DEVICES against the cards it can see — the
+        # same ones this process sees. A mask that does not name exactly the
+        # counted cards (or one that is unparseable, e.g. GPU UUIDs) cannot
+        # be translated safely; keep inherited visibility and run serially.
+        device_ids = list(range(total_devices))
         mask = os.environ.get(visible_env_var, "").strip()
         if mask and mask.lower() != "all":
             try:
-                masked = {int(x) for x in mask.split(",") if x.strip()}
+                masked = [int(x) for x in mask.split(",") if x.strip()]
             except ValueError:
                 masked = None
-            if masked is not None and masked != set(range(total_devices)):
+            if (
+                masked is None
+                or len(masked) != total_devices
+                or len(set(masked)) != len(masked)
+            ):
                 print(
-                    f"[run] E2E parallel: {visible_env_var}={mask} pins a "
-                    f"subset of the {total_devices} counted devices; keeping "
+                    f"[run] E2E parallel: {visible_env_var}={mask} does not "
+                    f"name exactly the {total_devices} counted devices; keeping "
                     "inherited visibility and running serially"
                 )
                 _run_serial()
                 return
+            device_ids = masked
+            print(
+                f"[run] E2E parallel: {visible_env_var}={mask} pins this "
+                f"runner to {total_devices} devices; slots 0-{total_devices - 1} "
+                f"map to devices {mask}"
+            )
 
         scheduler = DeviceScheduler(total_devices)
 
@@ -249,18 +300,30 @@ class TestRunner:
         max_workers = total_devices
 
         # --- 调度总览 ---
-        max_concurrent = max(total_devices // tc.num_devices for tc in cases)
+        # Cases needing more devices than this runner exposes can never be
+        # satisfied; they are reported as skipped by _run_one. Exclude them
+        # from the concurrency estimate so a lone tp8 case on a 4-GPU runner
+        # does not drive max_concurrent to 0.
+        schedulable = [tc for tc in cases if tc.num_devices <= total_devices]
+        max_concurrent = (
+            max(total_devices // tc.num_devices for tc in schedulable)
+            if schedulable
+            else 0
+        )
         print()
         print(f"[run] {'=' * 60}")
         print("[run] E2E parallel schedule")
         print(f"[run]   Total devices : {total_devices}  ({visible_env_var})")
-        print(f"[run]   Cases         : {len(cases)}")
+        print(
+            f"[run]   Cases         : {len(cases)}  ({len(cases) - len(schedulable)} will be skipped)"
+        )
         print(f"[run]   Max concurrent: {max_concurrent}  (limited by largest tp)")
         print(f"[run] {'─' * 60}")
         print(f"[run]   {'Case':<40} {'devices':>7}")
         print(f"[run]   {'─' * 40} {'─' * 7}")
         for tc in cases:
-            print(f"[run]   {tc.name:<40} {tc.num_devices:>7}")
+            note = "" if tc.num_devices <= total_devices else "  (skip: too many)"
+            print(f"[run]   {tc.name:<40} {tc.num_devices:>7}{note}")
         print(f"[run] {'=' * 60}")
         print()
 
@@ -271,8 +334,16 @@ class TestRunner:
             return time.strftime("%H:%M:%S")
 
         def _run_one(tc: TestCase) -> None:
+            skipped = _skip_oversized(tc)
+            if skipped is not None:
+                with results_lock:
+                    results.append(skipped)
+                return
             slots = scheduler.acquire(tc.num_devices)
-            visible = ",".join(str(s) for s in slots)
+            # Slots index this process's visible cards; children get the ids
+            # the inherited mask names (identical when no mask is set).
+            ids = [device_ids[s] for s in slots]
+            visible = ",".join(str(d) for d in ids)
             print(
                 f"[run] [{_ts()}] START  {tc.name}  "
                 f"{visible_env_var}={visible}  (devices={tc.num_devices}, stdout buffered until done)",
@@ -292,7 +363,11 @@ class TestRunner:
                     f"{port_base}-{port_base + 19}"
                 )
                 result = self._run_single(
-                    tc, extra_env_override=device_env, _quiet=True
+                    tc,
+                    extra_env_override=device_env,
+                    _quiet=True,
+                    device_slots=slots,
+                    device_ids=ids,
                 )
                 status = "PASS" if result.passed else "FAIL"
                 # Flush captured subprocess output with per-case prefix so
@@ -300,7 +375,7 @@ class TestRunner:
                 if result.stdout:
                     for line in result.stdout.splitlines():
                         print(f"[{tc.name}] {line}", flush=True)
-                device_cleanup(self.config.platform, slots=slots)
+                device_cleanup(self.config.platform, slots=ids)
             finally:
                 scheduler.release(slots)
                 print(
@@ -713,6 +788,8 @@ class TestRunner:
         tc: TestCase,
         extra_env_override: dict[str, str] | None = None,
         _quiet: bool = False,
+        device_slots: list[int] | None = None,
+        device_ids: list[int] | None = None,
     ) -> TestResult:
         """Run a single test case via pytest subprocess.
 
@@ -722,6 +799,12 @@ class TestRunner:
                 Used by the device scheduler to inject VISIBLE_DEVICES.
             _quiet: If True, skip the header/command log lines (used by the
                 parallel e2e path, which already emits a timestamped START line).
+            device_slots: Scheduler slots this case owns — indices into this
+                process's visible devices, used for the memory check.
+            device_ids: The same devices as named in the child's
+                VISIBLE_DEVICES, used to match stale processes for cleanup.
+                Differs from *device_slots* when the runner inherits a mask
+                such as ``4,5,6,7``.
         """
         cmd = self._build_pytest_cmd(tc)
 
@@ -756,22 +839,13 @@ class TestRunner:
                 platform=self.config.platform,
                 device=self.config.device,
             ).engine.get("gpu_memory_utilization", 0.9)
-            # Extract device indices from VISIBLE_DEVICES override so the
-            # memory check only inspects this case's assigned slots and does
+            # Only inspect this case's assigned slots so the memory check does
             # not block on memory held by other concurrently running cases.
-            device_indices: list[int] | None = None
-            if extra_env_override:
-                for val in extra_env_override.values():
-                    parsed = [
-                        int(x)
-                        for x in val.split(",")
-                        if x.strip().lstrip("-").isdigit()
-                    ]
-                    if parsed:
-                        device_indices = parsed
-                        break
             ok, info = wait_for_memory(
-                self.config.platform, gpu_util, device_indices=device_indices
+                self.config.platform,
+                gpu_util,
+                device_indices=device_slots,
+                kill_slots=device_ids,
             )
             if not ok:
                 print("[run] FAILED: timed out waiting for device memory")
