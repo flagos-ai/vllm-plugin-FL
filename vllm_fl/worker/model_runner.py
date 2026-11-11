@@ -91,7 +91,6 @@ from vllm.model_executor.layers.mamba.ops.ssu_dispatch import (
 )
 from vllm.model_executor.layers.rotary_embedding import (
     MRotaryEmbedding,
-    XDRotaryEmbedding,
 )
 from vllm.model_executor.model_loader import get_model_loader
 from vllm.model_executor.model_loader.reload import (
@@ -3082,9 +3081,10 @@ class ModelRunnerFL(
                 dst_start = xdrope_pos_ptr
                 dst_end = xdrope_pos_ptr + completion_part_len
 
-                XDRotaryEmbedding.get_next_input_positions_tensor(
+                MRotaryEmbedding.get_next_input_positions_tensor(
                     out=self.xdrope_positions.np,
                     out_offset=dst_start,
+                    mrope_position_delta=0,
                     context_len=num_computed_tokens + prompt_part_len,
                     num_new_tokens=completion_part_len,
                 )
