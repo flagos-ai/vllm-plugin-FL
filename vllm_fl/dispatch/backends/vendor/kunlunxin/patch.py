@@ -123,6 +123,15 @@ def _apply_legacy_kunlunxin_patches():
 
     apply_block_table_compat()
 
+    # FlagTree's XPU backend cannot lower a 3-D broadcast, which is how the V2
+    # runner's Mamba path gathers every group's aligned state indices in one
+    # launch. Swap in a form that keeps each access 2-D.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_utils_compat import (
+        apply_mamba_utils_compat,
+    )
+
+    apply_mamba_utils_compat()
+
     # Disable Triton kernels incompatible with Kunlunxin XPU
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
