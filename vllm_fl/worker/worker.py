@@ -693,6 +693,9 @@ class WorkerFL(WorkerBase):
                 from vllm_fl.patches.gcu_v2_buffers import install_gcu_v2_buffers
 
                 install_gcu_v2_buffers()
+                from vllm_fl.patches.gcu_v2_runtime import install_gcu_v2_runtime
+
+                install_gcu_v2_runtime()
             if self.vllm_config.is_mm_encoder_only:
                 from vllm.v1.worker.mm_encoder_model_runner import (
                     MMEncoderModelRunner as GPUModelRunnerV2,

@@ -10,7 +10,15 @@ PyTorch, TorchGCU, FlagTree, FlagGems, and FlagCX. Install the plugin with
 Enflame follows upstream vLLM 0.32 V2 model-runner selection. The plugin no
 longer defaults GCU to V1 or rejects V2. Do not disable V2 to bypass adaptation
 failures. On GCU, V2 uses upstream explicit-copy buffers and translates block
-table pointer handles to device addresses before Triton indirect loads.
+table pointer handles to device addresses before Triton indirect loads. The same
+translation applies to Mamba state and aligned-block-table pointers, without
+replacing their stable tensor storage. V2 graph capture uses the platform stream
+context rather than upstream CUDA/XPU-only communicator checks.
+
+Enflame keeps `fill_.Scalar` on the native backend (`fill_scalar_` in the
+FlagGems blacklist). A controlled GCU regression reproduced corrupt successive
+int64 scalar assignments with the FlagGems override; excluding only that
+operator restored pointer metadata. This does not disable tensor fills or copies.
 
 V2 validation on Qwen3-0.6B, BF16, TP=1, eager mode confirmed the actual worker
 runner as `vllm.v1.worker.gpu.model_runner.GPUModelRunner` and generated five

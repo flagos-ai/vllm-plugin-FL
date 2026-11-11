@@ -34,3 +34,6 @@ flagos_blacklist:
   # FlagGems 5.5.0.dev0 rejects bool slices used by padding masks. Native
   # aten::slice is a zero-copy view and preserves storage aliasing for all dtypes.
   - slice
+  # FlagGems scalar fill corrupts successive int64 scalar assignments on GCU
+  # (including V2 Mamba pointer/stride metadata). Keep the native in-place fill.
+  - fill_scalar_
