@@ -45,6 +45,8 @@ container_options: >-
   --env USE_FLAGGEMS=1
   --env GEMS_VENDOR=nvidia
   --env USE_FLAGTUNE=0
+  --env OMP_NUM_THREADS=1
+  --env VLLM_USE_V2_MODEL_RUNNER=1
   --ulimit nofile=65535:65535
 
 # Per-device configuration
@@ -75,5 +77,7 @@ devices:
       --env USE_FLAGGEMS=1
       --env GEMS_VENDOR=nvidia
       --env USE_FLAGTUNE=0
+      --env OMP_NUM_THREADS=1
+      --env VLLM_USE_V2_MODEL_RUNNER=1
       --env NCCL_NVLS_ENABLE=0
       --ulimit nofile=65535:65535
