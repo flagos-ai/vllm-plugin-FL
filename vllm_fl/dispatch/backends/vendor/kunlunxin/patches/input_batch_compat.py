@@ -288,7 +288,9 @@ def _make_post_update_torch():
                     tok = sampled_tokens[r, i]
                     all_token_ids[req_idx, tlen + i] = tok
                     if output_bin_counts is not None:
-                        output_bin_counts[req_idx, tok.item()] += 1
+                        tid = tok.item()
+                        if tid < output_bin_counts.shape[1]:
+                            output_bin_counts[req_idx, tid] += 1
             ql = (
                 (query_start_loc[r + 1] - query_start_loc[r]).item()
                 if query_start_loc is not None
