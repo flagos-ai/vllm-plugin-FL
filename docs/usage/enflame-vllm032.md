@@ -20,6 +20,24 @@ FlagGems blacklist). A controlled GCU regression reproduced corrupt successive
 int64 scalar assignments with the FlagGems override; excluding only that
 operator restored pointer metadata. This does not disable tensor fills or copies.
 
+The GCU FLA adapters flatten launch coordinates for chunk output and fused
+sigmoid-gating updates, avoiding the device's 255-block secondary-axis limit.
+The kernel arithmetic is unchanged; actual-device boundary tests at 256 chunks
+and 256 sequences matched partitioned upstream execution exactly.
+
+V2 staged penalty statistics use a host histogram fallback because the installed
+GCU Triton compiler cannot legalize the required atomic OR (or atomic CAS).
+Only newly staged request rows are copied back to the device; penalty application
+and model graph replay remain on GCU. Tests cover repeated tokens, signed bit 31,
+empty prompts, multiple token blocks, and preservation of unselected rows.
+
+V2 logprob collection selects top-k token IDs on the host, then copies the
+selected values and indices back to GCU. This avoids excessive cold compilation
+in the installed FlagGems top-k kernel and the native GCU index-dtype mismatch.
+The adapter preserves upstream score and rank computation and does not replace
+global `torch.topk`. Actual-device checks cover the full vocabulary and both
+raw-logit and normalized-logprob output.
+
 V2 validation on Qwen3-0.6B, BF16, TP=1, eager mode confirmed the actual worker
 runner as `vllm.v1.worker.gpu.model_runner.GPUModelRunner` and generated five
 requests of 32 tokens. Updated regression tests passed (194 tests). Multi-group
@@ -36,6 +54,24 @@ per model (text, image, and mixed requests, including eight-way concurrency),
 10 scenarios and 52 requests in total. This includes the formerly failing
 35B-A3B eager single-text assertion. Graph-mode acceptance is tracked separately;
 eager success does not establish graph support or NVIDIA precision alignment.
+
+At commit `f55376c`, both Qwen3.6-27B and Qwen3.6-35B-A3B passed the
+complete V2 serving gate in BF16, TP=2, in both eager and graph modes:
+
+| Model | Eager | Graph |
+|---|---:|---:|
+| Qwen3.6-27B | 26/26 requests | 26/26 requests |
+| Qwen3.6-35B-A3B | 26/26 requests | 26/26 requests |
+
+All 20 scenarios and 104 requests passed, including text, image, and mixed
+eight-way concurrency. An independent audit replayed the original inputs and
+output quality assertions, confirmed one tested commit and closed service ports;
+all four test and server exit codes were zero. The 35B graph run used
+`max_num_seqs=128` and `custom_ops=["none", "+SiluAndMul"]`.
+The scoped regression suite passed 549 tests with one skip; actual-GCU checks
+also covered penalty statistics, full-vocabulary logprobs in both output modes,
+and the FLA launch-grid boundary. These are functional and operator-level
+checks, not strict NVIDIA token-level precision alignment.
 
 The historical validation below used ModelRunnerFL (V1) and is not V2 validation.
 
