@@ -232,15 +232,28 @@ def test_vendor_index_reuses_output_and_masks_padding(monkeypatch, mode):
     torch.testing.assert_close(result, expected)
 
 
-def test_gemma_residual_uses_unrounded_sum():
-    from vllm_fl.models.minimax_m3_ascend import AscendGemmaRMSNorm
+@pytest.mark.parametrize("with_residual", [False, True])
+def test_gemma_residual_uses_unrounded_sum(with_residual, monkeypatch):
+    from vllm_fl.models import minimax_m3_ascend as model
 
-    norm = AscendGemmaRMSNorm(128).to(device="npu", dtype=torch.bfloat16)
+    norm = model.AscendGemmaRMSNorm(128).to(device="npu", dtype=torch.bfloat16)
+    calls = []
+
+    def selected_norm(value, weight, eps):
+        calls.append((value, weight, eps))
+        return MiniMaxM3Kernels.gemma_norm(value, weight, eps)
+
+    norm._fl_kernels = SimpleNamespace(gemma_norm=selected_norm)
+
+    def unexpected_selection():
+        pytest.fail("Provider must be bound before forward")
+
+    monkeypatch.setattr(model, "_get_kernels", unexpected_selection)
     with torch.no_grad():
         norm.weight.fill_(0.002)
     x = torch.randn(8, 128, device="npu", dtype=torch.bfloat16)
     residual = torch.randn_like(x)
-    expected_sum = x.float() + residual.float()
+    expected_sum = x.float() + residual.float() if with_residual else x.float()
     expected = (
         expected_sum
         * torch.rsqrt(
@@ -248,11 +261,16 @@ def test_gemma_residual_uses_unrounded_sum():
         )
         * (1 + norm.weight.float())
     )
-    actual, returned_residual = norm(x, residual)
+    result = norm(x, residual) if with_residual else norm(x)
+    actual = result[0] if with_residual else result
     torch.testing.assert_close(actual, expected.to(x.dtype), atol=0, rtol=0)
-    torch.testing.assert_close(
-        returned_residual, expected_sum.to(x.dtype), atol=0, rtol=0
-    )
+    assert len(calls) == 1
+    value, weight, eps = calls[0]
+    assert weight is norm.weight and eps == norm.variance_epsilon
+    assert value.dtype == (torch.float32 if with_residual else x.dtype)
+    torch.testing.assert_close(value.float(), expected_sum, atol=0, rtol=0)
+    if with_residual:
+        torch.testing.assert_close(result[1], expected_sum.to(x.dtype), atol=0, rtol=0)
 
 
 def test_provider_adapts_actual_upstream_implementation_layout():

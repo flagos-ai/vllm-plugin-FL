@@ -22,6 +22,19 @@ def topk_softmax(topk_weights, topk_ids, token_expert_indices, gating_output, re
     return topk_weights, topk_ids
 
 
+def _validate_activation(activation, alpha, beta, limit):
+    if activation == "swigluoai_uninterleave":
+        if limit is None or alpha is None or beta is None:
+            raise ValueError(
+                "Packed SwiGLU-OAI requires explicit alpha, beta and limit"
+            )
+    elif activation == "silu":
+        if alpha not in (None, 1.0) or beta not in (None, 0.0):
+            raise NotImplementedError("Non-default SILU alpha/beta")
+    elif activation not in ("gelu", "gelu_tanh", "silu_no_mul", "gelu_no_mul"):
+        raise NotImplementedError(f"Unsupported Ascend MoE activation: {activation}")
+
+
 def bf16_grouped_experts(
     hidden_states,
     w1,
@@ -35,6 +48,7 @@ def bf16_grouped_experts(
     limit=None,
 ):
     """rc1 unquantized MLP for already routed rows, with packaged NPU ops."""
+    _validate_activation(activation, alpha, beta, limit)
     if (
         hidden_states.dtype not in (torch.bfloat16, torch.float16)
         or w1.dtype != hidden_states.dtype
@@ -56,10 +70,6 @@ def bf16_grouped_experts(
         group_list=group_list,
     )[0]
     if activation == "swigluoai_uninterleave":
-        if limit is None or alpha is None or beta is None:
-            raise ValueError(
-                "Packed SwiGLU-OAI requires explicit alpha, beta and limit"
-            )
         activated = torch_npu.npu_clipped_swiglu(
             gate_up,
             interleaved=False,
@@ -68,8 +78,6 @@ def bf16_grouped_experts(
             limit=limit,
         )
     elif activation == "silu":
-        if alpha not in (None, 1.0) or beta not in (None, 0.0):
-            raise NotImplementedError("Non-default SILU alpha/beta")
         if limit is not None and limit > 0:
             gate, up = gate_up.chunk(2, dim=-1)
             gate_up = torch.cat((gate.clamp(max=limit), up.clamp(-limit, limit)), -1)
@@ -84,8 +92,6 @@ def bf16_grouped_experts(
         activated = F.silu(gate_up)
     elif activation == "gelu_no_mul":
         activated = F.gelu(gate_up)
-    else:
-        raise NotImplementedError(f"Unsupported Ascend MoE activation: {activation}")
     return torch_npu.npu_grouped_matmul(
         x=[activated],
         weight=[w2.transpose(1, 2)],
@@ -115,6 +121,7 @@ def _torch_fused_experts_impl(
     Routing produces fixed-size expanded tensors; no host reads or dynamic
     boolean-indexed expert batches occur during graph capture.
     """
+    _validate_activation(activation, alpha, beta, limit)
     num_tokens = hidden_states.size(0)
     num_experts = w1.size(0)
     first_expert = 0
@@ -136,8 +143,6 @@ def _torch_fused_experts_impl(
         global_num_experts = num_experts
     if apply_router_weight_on_input:
         raise NotImplementedError("Ascend grouped MoE requires output router weights")
-    if activation not in ("silu", "swigluoai_uninterleave", "gelu", "gelu_tanh", "silu_no_mul", "gelu_no_mul"):
-        raise NotImplementedError(f"Unsupported Ascend MoE activation: {activation}")
     if num_tokens == 0:
         return hidden_states if inplace else torch.empty_like(hidden_states)
 

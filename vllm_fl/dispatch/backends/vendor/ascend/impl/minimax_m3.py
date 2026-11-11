@@ -148,6 +148,7 @@ class MiniMaxM3Kernels:
     cache_contract = "minimax_m3_block_major_bf16"
     sparse_backend = AscendMiniMaxSparseBackend
     indexer_backend = AscendMiniMaxIndexerBackend
+    gemma_norm = staticmethod(gemma_norm)
     norm_rope = staticmethod(norm_rope)
 
     @staticmethod

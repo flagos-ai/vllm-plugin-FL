@@ -17,7 +17,7 @@ _get_kernels = CachedOp("minimax_m3_kernels")
 
 class AscendGemmaRMSNorm(upstream.MiniMAXGemmaRMSNorm):
     def forward(self, x, residual=None):
-        from vllm_fl.dispatch.backends.vendor.ascend.impl.minimax_m3 import gemma_norm
+        gemma_norm = self._fl_kernels.gemma_norm
 
         if residual is None:
             return gemma_norm(x, self.weight, self.variance_epsilon)
@@ -128,11 +128,14 @@ class AscendMiniMaxM3Model(upstream.MiniMaxM3Model):
         kernels = _get_kernels()
         if getattr(kernels, "cache_contract", None) != "minimax_m3_block_major_bf16":
             raise ValueError("MiniMax provider must preserve BF16 block-major caches")
+        if not callable(getattr(kernels, "gemma_norm", None)):
+            raise ValueError("MiniMax provider must implement Gemma normalization")
         # Adapt instances after upstream construction: weight names, registered
         # cache owners and upstream module globals keep their identity.
         for module in self.modules():
             if type(module) is upstream.MiniMAXGemmaRMSNorm:
                 module.__class__ = AscendGemmaRMSNorm
+                module._fl_kernels = kernels
             elif type(module) is upstream.MiniMaxM3SparseAttention:
                 module.__class__ = AscendMiniMaxM3SparseAttention
                 module._fl_kernels = kernels

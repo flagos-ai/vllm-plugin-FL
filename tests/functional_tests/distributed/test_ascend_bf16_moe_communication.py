@@ -153,3 +153,37 @@ def test_ascend_bf16_moe_communication(mode, communication_group):
 
 if __name__ == "__main__":
     main()
+
+
+@pytest.mark.parametrize(
+    "activation,alpha,beta,limit,error",
+    [
+        ("swigluoai_uninterleave", None, 1.0, 7.0, ValueError),
+        ("swigluoai_uninterleave", 1.702, None, 7.0, ValueError),
+        ("swigluoai_uninterleave", 1.702, 1.0, None, ValueError),
+        ("silu", 2.0, None, None, NotImplementedError),
+        ("silu", None, 1.0, None, NotImplementedError),
+        ("unknown", None, None, None, NotImplementedError),
+    ],
+)
+@pytest.mark.parametrize("entry", ["grouped", "routed"])
+def test_activation_rejected_before_device_work(
+    activation, alpha, beta, limit, error, entry, monkeypatch
+):
+    from vllm_fl.dispatch.backends.vendor.ascend.impl import fused_moe
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("device work started before activation validation")
+
+    monkeypatch.setattr(fused_moe.torch_npu, "npu_grouped_matmul", unexpected)
+    monkeypatch.setattr(fused_moe.torch_npu, "npu_moe_init_routing_v2", unexpected)
+    kwargs = dict(activation=activation, alpha=alpha, beta=beta, limit=limit)
+    with pytest.raises(error):
+        if entry == "grouped":
+            fused_moe.bf16_grouped_experts(
+                None, None, None, group_list=None, group_list_type=1, **kwargs
+            )
+        else:
+            fused_moe._torch_fused_experts_impl(
+                None, None, None, None, None, expert_map=object(), **kwargs
+            )
