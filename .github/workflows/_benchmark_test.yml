@@ -27,6 +27,11 @@ on:
         description: "Platform name (e.g., nvidia, ascend)"
         required: true
         type: string
+      device:
+        description: "Device profile (empty = platform default)"
+        required: false
+        type: string
+        default: ""
       branch:
         description: "Branch/ref under test (empty = caller ref)"
         required: false
@@ -101,6 +106,7 @@ jobs:
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
+            --device "${{ inputs.device }}" \
             --scope benchmark \
             --stage ${{ inputs.ci_stage }}
 

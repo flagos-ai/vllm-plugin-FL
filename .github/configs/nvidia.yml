@@ -18,16 +18,17 @@
 platform: nvidia
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-cuda-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-cuda-ci@sha256:3ebf9f27e6936fe67500b277ff17b954736050b63ccfdae05dd971e5ad7a14dc
 
 # Runner labels for this hardware (self-hosted)
 runner_labels:
   - self-hosted
   - Linux
   - X64
-  - nvidia
-  - gpu-8
-  - cuda130
+  - flagcicd-h20
+
+# Pass the matching device profile to the combined unit/functional job.
+functional_device: h20
 
 # Exercise native CUDA and FlagGems paths on Hopper via the new
 # flagcicd-h20 runner; the default-runner unit pass already runs inside
@@ -51,6 +52,8 @@ container_volumes:
   - /data:/data
 
 # Container options (hardware-specific settings)
+# Actions uses sh for run steps, which does not source the Runtime BASH_ENV.
+# Export FlagTree explicitly so setup (bash) and tests (sh/Python) agree.
 # FlagTune has no H20 candidates for some Qwen3.6 matmul shapes yet. Keep
 # FlagGems enabled and fall back to its default Triton configs.
 # --shm-size: the dsw-hosted h20 runner does not honor --ipc=host (the
@@ -66,6 +69,7 @@ container_options: >-
   --shm-size 64g
   --hostname vllm-plugin-fl
   --user root
+  --env PYTHONPATH=/opt/flagtree
   --env VLLM_PLUGINS=fl
   --env VLLM_USE_V2_MODEL_RUNNER=1
   --env USE_FLAGGEMS=1

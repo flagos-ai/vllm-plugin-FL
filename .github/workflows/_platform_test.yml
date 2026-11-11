@@ -119,6 +119,7 @@ jobs:
     secrets: inherit
     with:
       platform: ${{ inputs.platform }}
+      device: ${{ fromJson(needs.setup.outputs.config).functional_device || '' }}
       branch: ${{ inputs.branch }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
@@ -179,6 +180,7 @@ jobs:
     secrets: inherit
     with:
       platform: ${{ inputs.platform }}
+      device: ${{ fromJson(needs.setup.outputs.config).functional_device || '' }}
       branch: ${{ inputs.branch }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
