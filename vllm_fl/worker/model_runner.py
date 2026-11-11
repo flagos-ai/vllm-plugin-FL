@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+# Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
+# module that uses them is imported.  The shim is idempotent and a no-op when
+# the installed vLLM already ships the symbols.
+from vllm_fl.patches.worker_symbols_032 import apply_worker_symbols_032
+
+apply_worker_symbols_032()
+
 import functools
 import gc
 import itertools
@@ -91,6 +98,7 @@ from vllm.model_executor.layers.mamba.ops.ssu_dispatch import (
 )
 from vllm.model_executor.layers.rotary_embedding import (
     MRotaryEmbedding,
+    XDRotaryEmbedding,
 )
 from vllm.model_executor.model_loader import get_model_loader
 from vllm.model_executor.model_loader.reload import (
@@ -3081,10 +3089,9 @@ class ModelRunnerFL(
                 dst_start = xdrope_pos_ptr
                 dst_end = xdrope_pos_ptr + completion_part_len
 
-                MRotaryEmbedding.get_next_input_positions_tensor(
+                XDRotaryEmbedding.get_next_input_positions_tensor(
                     out=self.xdrope_positions.np,
                     out_offset=dst_start,
-                    mrope_position_delta=0,
                     context_len=num_computed_tokens + prompt_part_len,
                     num_new_tokens=completion_part_len,
                 )
