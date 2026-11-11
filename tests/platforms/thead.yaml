@@ -37,10 +37,11 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.85
       trust_remote_code: true
-      # This CI runner captures graphs at ~51s/size, so upstream's 51-size
-      # default table costs ~41 min per graph case and pushes both e2e jobs
-      # past the 2h job limit. Cap the table to keep the same graph coverage
-      # inside the time budget (same approach as hygon's bw1000 overrides).
+      # Upstream's default table captures 51 sizes. With this 9-size table a
+      # graph case measures ~26 min (35b_a3b_tp4_graph, 1584s), so the 51-size
+      # default would push both e2e jobs past the job limit. Cap the table and
+      # keep the same graph coverage inside the time budget (same approach as
+      # hygon's bw1000 overrides).
       compilation_config:
         cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32, 64, 128, 256]
         max_cudagraph_capture_size: 256
@@ -77,22 +78,26 @@ zw810e:
         inference:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
         serving:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
         serving:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
         concurrent:
@@ -102,9 +107,9 @@ zw810e:
     timeouts:
       e2e:
         # Inference serializes (every case is TP4 over the only 4 visible
-        # cards). Measured: eager 7+5 min, then the graph case was at 30/51
-        # captures (48.9s/it, ~17 min ETA) when the 90-min wall hit — total
-        # need ~105-110 min. 120 covers it with headroom.
+        # cards). Measured with the 9-size capture table: 27B eager 8.4 min,
+        # 35B eager 6.7 min, 35B graph 26.4 min (~42 min total). The added 27B
+        # graph case keeps the job near 70 min. 120 covers it with headroom.
         inference: 120
         serving: 180
         concurrent: 180
