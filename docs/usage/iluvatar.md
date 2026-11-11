@@ -101,12 +101,13 @@ Additional testing on November 7, 2026 used plugin commit
 | vLLM | `0.32.0+empty` | upstream `v0.32.0` |
 
 The base CI image contains an older stack. Checking out the plugin does not
-update FlagGems, FlagGems-vllm, or FlagTree. At the tested revision, the shared
-`.github/scripts/install_flaggems_vllm.py` still installs helper commit
-`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`, and Iluvatar's `verify_stack.py`
-still requires FlagGems `5.3.5`. Align both the installation and verification
-steps with the chosen stack before claiming to reproduce development results.
-Do not replace the shared helper pin for other vendors without validating them.
+update FlagGems, FlagGems-vllm, or FlagTree. Iluvatar's `setup.sh` now installs
+the two source revisions above, and `verify_stack.py` requires FlagGems
+`5.5.0.dev0` and FlagGems-vllm `0.3.0.dev1`. Other vendors retain the shared
+helper installer and its pin. The Iluvatar gate runs eager and compiled graph
+modes; its default graph configuration is
+`{"cudagraph_capture_sizes":[1,2,4,8,16,32]}`, not the historical mode-0 workaround.
+This wiring change is not itself a new full-model gate result.
 
 Qwen3.6-35B-A3B still showed an intermittent text regression with the compiled
 `FULL_AND_PIECEWISE` configuration above. Under eight concurrent text requests,

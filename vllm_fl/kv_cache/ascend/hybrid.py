@@ -10,17 +10,10 @@ IDs; the views must not allocate independent storage or change those IDs.
 import math
 from dataclasses import replace
 
-import torch
-
 from vllm.model_executor.models import ModelRegistry
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE, get_dtype_size
-from vllm.v1.kv_cache_interface import (
-    AttentionSpec,
-    KVCacheConfig,
-    MambaSpec,
-    UniformTypeKVCacheSpecs,
-)
+from vllm.v1.kv_cache_interface import AttentionSpec
 
 
 def uses_dense_hybrid_cache(model_config) -> bool:
@@ -104,61 +97,3 @@ def dense_mamba_views(raw, shapes, dtypes, num_blocks):
         states.append(raw[offset:end].view(dtype).view(num_blocks, *shape))
         offset = end
     return states
-
-
-def allocate_hybrid_kv_cache(
-    config: KVCacheConfig,
-    device: torch.device,
-    attention_backends: dict,
-    kernel_block_sizes: list[int],
-    cache_dtype: str,
-) -> dict[str, torch.Tensor]:
-    if not config.kv_cache_tensors:
-        return {}
-    if any(tensor.host_resident for tensor in config.kv_cache_tensors):
-        raise NotImplementedError(
-            "Ascend hybrid KV cache requires device-resident pools"
-        )
-    size = max(tensor.size for tensor in config.kv_cache_tensors)
-    backing = torch.zeros(size, dtype=torch.uint8, device=device)
-    raw_caches = {}
-    for tensor in config.kv_cache_tensors:
-        for layer_index, layer_name in enumerate(tensor.layers):
-            offset = tensor.offset + layer_index * tensor.layer_stride
-            raw_caches[layer_name] = (tensor, offset)
-
-    caches = {}
-    for group_index, group in enumerate(config.kv_cache_groups):
-        for layer_name in group.layer_names:
-            spec = group.kv_cache_spec
-            if isinstance(spec, UniformTypeKVCacheSpecs):
-                spec = spec.kv_cache_specs[layer_name]
-            tensor, offset = raw_caches[layer_name]
-            if tensor.block_stride != spec.page_size_bytes:
-                raise ValueError("Ascend hybrid KV cache requires planar layer pages")
-            num_blocks = config.num_blocks_of(tensor)
-            byte_count = num_blocks * spec.page_size_bytes
-            raw = backing[offset : offset + byte_count]
-            if raw.numel() != byte_count:
-                raise ValueError("Ascend hybrid KV cache layer exceeds backing storage")
-            if isinstance(spec, AttentionSpec):
-                kernel_block_size = kernel_block_sizes[group_index]
-                if spec.block_size % kernel_block_size:
-                    raise ValueError(
-                        "Kernel block size must divide the cache block size"
-                    )
-                shape = attention_backends[layer_name].get_kv_cache_shape(
-                    num_blocks * spec.block_size // kernel_block_size,
-                    kernel_block_size,
-                    spec.num_kv_heads,
-                    spec.head_size,
-                    cache_dtype,
-                )
-                caches[layer_name] = dense_attention_view(raw, spec, shape)
-            elif isinstance(spec, MambaSpec):
-                caches[layer_name] = raw.view(num_blocks, 1, 1, spec.page_size_bytes)
-            else:
-                raise TypeError(
-                    f"Unsupported Ascend hybrid KV cache spec: {type(spec)}"
-                )
-    return caches

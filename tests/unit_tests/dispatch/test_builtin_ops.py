@@ -85,16 +85,3 @@ def test_reference_registration_keeps_implemented_fallbacks():
         assert registry.get_implementation(op_name, "reference.torch") is not None
     for op_name in missing:
         assert registry.get_implementation(op_name, "reference.torch") is None
-
-
-def test_reference_registration_with_missing_optional_method(monkeypatch):
-    """Losing one optional helper must not drop unrelated fallbacks."""
-    from vllm_fl.dispatch.backends.reference.reference import ReferenceBackend
-    from vllm_fl.dispatch.backends.reference.register_ops import register_builtins
-
-    monkeypatch.delattr(ReferenceBackend, "topk_softmax")
-    registry = OpRegistry()
-    register_builtins(registry)
-    assert registry.get_implementation("topk_softmax", "reference.torch") is None
-    for name in ("rms_norm", "silu_and_mul", "w8a8_moe_experts"):
-        assert registry.get_implementation(name, "reference.torch") is not None

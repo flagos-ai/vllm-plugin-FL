@@ -17,7 +17,8 @@ import vllm_fl
 root = Path(__file__).resolve().parents[3]
 assert root in Path(vllm_fl.__file__).resolve().parents, vllm_fl.__file__
 assert vllm.__version__.split("+")[0] == "0.32.0", vllm.__version__
-assert metadata.version("flag-gems") == "5.3.5"
+assert metadata.version("flag-gems") == "5.5.0.dev0"
+assert metadata.version("flaggems-vllm") == "0.3.0.dev1"
 assert metadata.version("flagtree") == "0.7.0+iluvatar3.6"
 assert torch.__version__.split("+")[0] == "2.10.0", torch.__version__
 # Graph output aliases require these primitives in the vendor PyTorch build.

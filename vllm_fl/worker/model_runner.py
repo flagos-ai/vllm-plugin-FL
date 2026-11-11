@@ -7512,28 +7512,12 @@ class ModelRunnerFL(
         """
         allocation_context = kv_cache_allocation_context or nullcontext()
         with allocation_context:
-            if self.use_ascend_hybrid_cache:
-                from vllm_fl.kv_cache.ascend.hybrid import allocate_hybrid_kv_cache
-
-                attention_backends = {
-                    layer_name: group.backend
-                    for group in self._kv_cache_spec_attn_group_iterator()
-                    for layer_name in group.layer_names
-                }
-                kv_caches = allocate_hybrid_kv_cache(
-                    kv_cache_config,
-                    self.device,
-                    attention_backends,
-                    kernel_block_sizes,
-                    self.cache_config.cache_dtype,
-                )
-            else:
-                kv_caches = allocate_kv_cache(
-                    kv_cache_config,
-                    self.device,
-                    self.cache_config.get_resolved_kv_cache_layout(),
-                    kernel_block_sizes,
-                )
+            kv_caches = allocate_kv_cache(
+                kv_cache_config,
+                self.device,
+                self.cache_config.get_resolved_kv_cache_layout(),
+                kernel_block_sizes,
+            )
 
         # Set up cross-layer KV cache sharing
         for layer_name, target_layer_name in self.shared_kv_cache_layers.items():
@@ -7552,11 +7536,7 @@ class ModelRunnerFL(
             self.kv_caches,
             num_attn_module,
             kv_cache_groups=kv_cache_config.kv_cache_groups,
-            layer_kv_caches=(
-                kv_caches
-                if self.use_ascend_hybrid_cache
-                else map_kv_caches_to_kernel_blocks(kv_caches, attn_groups)
-            ),
+            layer_kv_caches=map_kv_caches_to_kernel_blocks(kv_caches, attn_groups),
         )
         return kv_caches
 

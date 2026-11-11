@@ -17,8 +17,7 @@ export VLLM_PLUGINS=fl USE_FLAGGEMS=1 GEMS_VENDOR=iluvatar
 python .github/scripts/iluvatar/verify_stack.py
 export TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-4}
 export MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
-# Keep the no-Inductor workaround separate from the upstream default gate.
-WORKAROUND_COMPILATION_CONFIG=${GRAPH_COMPILATION_CONFIG:-'{"mode":0,"cudagraph_mode":"FULL","custom_ops":["all"],"ir_enable_torch_wrap":false}'}
+export GRAPH_COMPILATION_CONFIG=${GRAPH_COMPILATION_CONFIG:-'{"cudagraph_capture_sizes":[1,2,4,8,16,32]}'}
 export PORT=${PORT:-8132}
 out=${ILUVATAR_GATE_RESULTS:-ci-results/iluvatar-gates}
 mkdir -p "$out"
@@ -48,15 +47,12 @@ for model in 27b 35b; do
     else
         export MODEL_PATH="$ILUVATAR_MODEL_35B"
     fi
-    for mode in eager graph-workaround graph-default; do
+    for mode in eager graph; do
         group="$out/$model-$mode"
         mkdir -p "$group"
-        unset GRAPH_COMPILATION_CONFIG
         serve_mode=graph
         if [[ "$mode" == eager ]]; then
             serve_mode=eager
-        elif [[ "$mode" == graph-workaround ]]; then
-            export GRAPH_COMPILATION_CONFIG="$WORKAROUND_COMPILATION_CONFIG"
         fi
         printf '%s\n' "model=$MODEL_PATH" "mode=$mode" \
             "compilation=${GRAPH_COMPILATION_CONFIG:-upstream-default}" \
