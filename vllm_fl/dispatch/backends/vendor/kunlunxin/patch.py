@@ -155,6 +155,16 @@ def _apply_legacy_kunlunxin_patches():
     )
     apply_mamba_hybrid_compat()
 
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mm_rope_compat import (
+        apply_mm_rope_compat,
+    )
+    apply_mm_rope_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.block_tables_compat import (
+        apply_block_tables_compat,
+    )
+    apply_block_tables_compat()
+
 
 def _install_graph_patch(owner, name, replacement, replacements):
     if replacements is None:
