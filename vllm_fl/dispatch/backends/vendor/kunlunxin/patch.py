@@ -130,6 +130,11 @@ def _apply_legacy_kunlunxin_patches():
     )
     apply_structured_outputs_compat()
 
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.topk_topp_compat import (
+        apply_topk_topp_compat,
+    )
+    apply_topk_topp_compat()
+
 
 def _install_graph_patch(owner, name, replacement, replacements):
     if replacements is None:
