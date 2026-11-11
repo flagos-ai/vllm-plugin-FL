@@ -115,6 +115,14 @@ def _apply_legacy_kunlunxin_patches():
 
     apply_input_batch_compat()
 
+    # Same early-return limitation in the V2 runner's slot-mapping kernel,
+    # whose last program pads the tail of the mapping and then returns.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.block_table_compat import (
+        apply_block_table_compat,
+    )
+
+    apply_block_table_compat()
+
     # Disable Triton kernels incompatible with Kunlunxin XPU
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
