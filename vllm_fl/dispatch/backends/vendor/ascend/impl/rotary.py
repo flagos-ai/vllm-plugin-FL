@@ -64,7 +64,15 @@ def rotary_embedding_ascend(
             def rotate(x):
                 first, second = x.chunk(2, dim=-1)
                 return torch.cat((-second, first), dim=-1)
-        return tuple(x * cos_selected + rotate(x) * sin_selected for x in (query, key))
+
+        q_embed, k_embed = (
+            x * cos_selected + rotate(x) * sin_selected for x in (query, key)
+        )
+        if inplace:
+            query.copy_(q_embed)
+            key.copy_(k_embed)
+            return query, key
+        return q_embed, k_embed
 
     import torch_npu
 
