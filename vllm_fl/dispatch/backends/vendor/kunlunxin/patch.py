@@ -75,71 +75,6 @@ def _apply_legacy_kunlunxin_patches():
 
     apply_kv_block_zero_compat()
 
-    # P800 has pinned host memory but no UVA, so vLLM's UVA probe
-    # (is_pin_memory_available() or is_cpu()) wrongly reports True and the V2
-    # model runner maps CPU buffers into device space -- which fails at worker
-    # init_device. Report UVA honestly so upstream picks its NonUvaBuffer /
-    # device-resident paths instead.
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.uva_compat import (
-        apply_uva_compat,
-    )
-
-    apply_uva_compat()
-
-    # FlagTree's XPU backend cannot lower an scf.if that yields a tensor of 256
-    # or more elements, which is how the V2 runner's M-RoPE position kernel
-    # selects its positions (at BLOCK_SIZE=1024). Swap in a tl.where form.
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.rope_compat import (
-        apply_rope_compat,
-    )
-
-    apply_rope_compat()
-
-    # FlagTree's XPU backend cannot lower either V2 penalty kernel:
-    # _bincount_kernel fails in TritonXPULegalize (arith.divsi type mismatch),
-    # _penalties_kernel fails in ConvertTritonToTritonXPU (uni_sram).
-    # Both are reached during warmup_kernels even when no request uses penalties.
-    # Replace with torch implementations that are functionally equivalent.
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
-        apply_penalties_compat,
-    )
-
-    apply_penalties_compat()
-
-    # FlagTree's XPU backend cannot lower an early return that follows tensor
-    # work, which is how the V2 runner's _combine_sampled_and_draft_tokens_kernel
-    # skips prefill-only requests. Swap in a single-exit form.
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.input_batch_compat import (
-        apply_input_batch_compat,
-    )
-
-    apply_input_batch_compat()
-
-    # Same early-return limitation in the V2 runner's slot-mapping kernel,
-    # whose last program pads the tail of the mapping and then returns.
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.block_table_compat import (
-        apply_block_table_compat,
-    )
-
-    apply_block_table_compat()
-
-    # FlagTree's XPU backend cannot lower a 3-D broadcast, which is how the V2
-    # runner's Mamba path gathers every group's aligned state indices in one
-    # launch. Swap in a form that keeps each access 2-D.
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_utils_compat import (
-        apply_mamba_utils_compat,
-    )
-
-    apply_mamba_utils_compat()
-
-    # FlagTree's XPU backend cannot lower the reshape in the V2 grammar bitmask
-    # kernel and miscompiles its bit unpacking, so apply the mask with torch.
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.structured_outputs_compat import (  # noqa: E501
-        apply_structured_outputs_compat,
-    )
-
-    apply_structured_outputs_compat()
-
     # Disable Triton kernels incompatible with Kunlunxin XPU
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
@@ -156,6 +91,45 @@ def _apply_legacy_kunlunxin_patches():
     patch_ssm_cache_update()
     patch_sampler_rng()
 
+    # V2 model runner compatibility shims — applied in every process so that
+    # worker subprocesses (which re-import independently) also get them.  Each
+    # shim tolerates a missing upstream module and is idempotent, so they are
+    # safe to call unconditionally regardless of VLLM_USE_V2_MODEL_RUNNER.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.uva_compat import (
+        apply_uva_compat,
+    )
+    apply_uva_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.rope_compat import (
+        apply_rope_compat,
+    )
+    apply_rope_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
+        apply_penalties_compat,
+    )
+    apply_penalties_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.input_batch_compat import (
+        apply_input_batch_compat,
+    )
+    apply_input_batch_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.block_table_compat import (
+        apply_block_table_compat,
+    )
+    apply_block_table_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_utils_compat import (
+        apply_mamba_utils_compat,
+    )
+    apply_mamba_utils_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.structured_outputs_compat import (
+        apply_structured_outputs_compat,
+    )
+    apply_structured_outputs_compat()
+
 
 def _install_graph_patch(owner, name, replacement, replacements):
     if replacements is None:
@@ -166,42 +140,11 @@ def _install_graph_patch(owner, name, replacement, replacements):
         )
 
 
-def _weak_ref_graph_tensor(tensor):
-    """Borrow a captured output while its P800 graph pool owns the memory."""
-    if not isinstance(tensor, torch.Tensor) or not tensor.is_cuda:
-        return tensor
-    if tensor.numel() == 0:
-        return tensor
-
-    source = tensor.untyped_storage()
-    metadata = {
-        "data_ptr": source.data_ptr(),
-        "nbytes": source.nbytes(),
-        "size": tensor.size(),
-        "stride": tensor.stride(),
-        "dtype": tensor.dtype,
-        "device": tensor.device,
-        "storage_offset": tensor.storage_offset(),
-    }
-    borrowed = torch._C._construct_storage_from_data_pointer(
-        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
-    )
-    result = torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(
-        metadata, borrowed
-    )
-    if tensor.is_conj():
-        torch._C._set_conj(result, True)
-    if tensor.is_neg():
-        torch._C._set_neg(result, True)
-    return result
-
-
 def patch_graph_adaptations():
     """Preflight and stage the dependent graph patches before publishing any."""
     try:
         import vllm.compilation.breakable_cudagraph as breakable
         import vllm.v1.worker.gpu_model_runner as gpu_model_runner
-        from vllm.utils import torch_utils
         from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 
         import vllm_fl.worker.model_runner as fl_model_runner
@@ -241,9 +184,6 @@ def patch_graph_adaptations():
             signature.bind(**dict.fromkeys(parameters))
 
         replacements = []
-        _install_graph_patch(
-            torch_utils, "weak_ref_tensor", _weak_ref_graph_tensor, replacements
-        )
         for prepare in (
             patch_cudagraph_dispatcher,
             patch_breakable_cudagraph_mode,
@@ -744,38 +684,80 @@ def patch_eager_all_gather(replacements=None):
 
 # ── RESTORED: block_table slot_mapping (Triton kernel bypass) ──
 def patch_block_table_slot_mapping():
-    """Compute vLLM's DCP slot mapping with PyTorch on P800."""
-    from vllm.v1.attention.backends.utils import PAD_SLOT_ID
-    from vllm.v1.worker.block_table import BlockTable, SlotMappingMode
+    """Replace Triton-based compute_slot_mapping with CPU numpy implementation.
 
-    def compute_slot_mapping(self, num_reqs, query_start_loc, positions):
-        if self.slot_mapping_mode == SlotMappingMode.NONE:
-            return
-        assert self.slot_mapping_mode == SlotMappingMode.TOKEN_TO_KV_SLOT
+    vLLM 0.20 moved compute_slot_mapping to a Triton kernel which fails on
+    Kunlunxin XPU (err_code -714). Replace with a numpy-based approach.
+    """
+    try:
+        import torch
 
-        num_tokens = positions.shape[0]
-        counts = query_start_loc[1 : num_reqs + 1] - query_start_loc[:num_reqs]
-        req_indices = torch.repeat_interleave(
-            torch.arange(num_reqs, device=positions.device),
-            counts,
-            output_size=num_tokens,
+        from vllm.v1.worker.block_table import BlockTable
+
+        PAD_SLOT_ID = -1
+
+        def compute_slot_mapping_xpu(self, num_reqs, query_start_loc, positions):
+            device = positions.device
+            num_tokens = positions.shape[0]
+
+            total_cp_world_size = self.pcp_world_size * self.dcp_world_size
+            total_cp_rank = self.pcp_rank * self.dcp_world_size + self.dcp_rank
+
+            # Build req_indices: repeat_interleave on XPU, no CPU copy
+            counts = query_start_loc[1 : num_reqs + 1] - query_start_loc[:num_reqs]
+            req_indices = torch.repeat_interleave(
+                torch.arange(num_reqs, device=device), counts
+            )
+
+            # Direct GPU indexing: use .gpu tensors, skip .np and copy_to_gpu
+            if total_cp_world_size > 1:
+                virtual_block_size = self.block_size * total_cp_world_size
+                bt_indices = (
+                    req_indices * self.max_num_blocks_per_req
+                    + positions // virtual_block_size
+                )
+                block_numbers = self.block_table.gpu.view(-1)[bt_indices]
+                virtual_block_offsets = positions % virtual_block_size
+                mask = (
+                    virtual_block_offsets
+                    // self.cp_kv_cache_interleave_size
+                    % total_cp_world_size
+                    == total_cp_rank
+                )
+                block_offsets = (
+                    virtual_block_offsets
+                    // (total_cp_world_size * self.cp_kv_cache_interleave_size)
+                    * self.cp_kv_cache_interleave_size
+                    + virtual_block_offsets % self.cp_kv_cache_interleave_size
+                )
+                slot_vals = block_numbers * self.block_size + block_offsets
+                self.slot_mapping.gpu[:num_tokens] = torch.where(
+                    mask,
+                    slot_vals,
+                    torch.full((), PAD_SLOT_ID, dtype=slot_vals.dtype, device=device),
+                )
+            else:
+                bt_indices = (
+                    req_indices * self.max_num_blocks_per_req
+                    + positions // self.block_size
+                )
+                block_numbers = self.block_table.gpu.view(-1)[bt_indices]
+                block_offsets = positions % self.block_size
+                self.slot_mapping.gpu[:num_tokens] = (
+                    block_numbers * self.block_size + block_offsets
+                )
+
+            # Pad remaining slots
+            self.slot_mapping.gpu[num_tokens : self.max_num_batched_tokens] = (
+                PAD_SLOT_ID
+            )
+
+        BlockTable.compute_slot_mapping = compute_slot_mapping_xpu
+        logger.info(
+            "Patched BlockTable.compute_slot_mapping to XPU torch path for Kunlunxin"
         )
-        virtual_block_size = self.block_size * self.dcp_world_size
-        block_indices = positions // virtual_block_size
-        block_numbers = self.block_table.gpu[req_indices, block_indices].long()
-        virtual_offsets = positions % virtual_block_size
-        interleave = self.cp_kv_cache_interleave_size
-        offsets = (
-            virtual_offsets // (self.dcp_world_size * interleave) * interleave
-            + virtual_offsets % interleave
-        )
-        is_local = virtual_offsets // interleave % self.dcp_world_size == self.dcp_rank
-        slots = block_numbers * self.block_size + offsets
-        self.slot_mapping.gpu[:num_tokens] = torch.where(is_local, slots, PAD_SLOT_ID)
-        self.slot_mapping.gpu[num_tokens:].fill_(PAD_SLOT_ID)
-
-    BlockTable.compute_slot_mapping = compute_slot_mapping
-    logger.info("Patched BlockTable.compute_slot_mapping for Kunlunxin")
+    except Exception as e:
+        logger.warning("Failed to patch compute_slot_mapping: %s", e)
 
 
 # ── RESTORED: attention backend registry ──
