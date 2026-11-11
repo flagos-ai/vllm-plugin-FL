@@ -33,9 +33,7 @@ def fake_structured_outputs(monkeypatch):
     module = types.ModuleType("vllm.v1.worker.gpu.structured_outputs")
     module.StructuredOutputsWorker = StructuredOutputsWorker
     module._build_grammar_mapping = _build_grammar_mapping
-    monkeypatch.setitem(
-        sys.modules, "vllm.v1.worker.gpu.structured_outputs", module
-    )
+    monkeypatch.setitem(sys.modules, "vllm.v1.worker.gpu.structured_outputs", module)
     # ``from vllm.v1.worker.gpu import structured_outputs`` reads the attribute
     # off the parent package, so in a build that ships the real module the
     # sys.modules entry alone is not enough to redirect the shim.
@@ -148,7 +146,9 @@ def test_torch_path_matches_reference_on_cpu():
     )
     # Second entry's position is past its request's logit count, so it is
     # skipped; the others are active.
-    logits_indices = torch.tensor([0, mask_stride * 0 + 3, mask_stride * 1], dtype=torch.int32)
+    logits_indices = torch.tensor(
+        [0, mask_stride * 0 + 3, mask_stride * 1], dtype=torch.int32
+    )
 
     expected = _reference(logits, logits_indices, cu, bitmask, mask_stride)
     got = logits.clone()

@@ -21,6 +21,7 @@ def fake_mamba_hybrid(monkeypatch):
 
     class _FakeKernel:
         """Stand-in for a Triton kernel before the compat patch runs."""
+
         def __getitem__(self, _grid):
             raise RuntimeError(
                 "original Triton kernel shim should not be called after patch"
@@ -57,6 +58,7 @@ def test_scatter_basic(fake_mamba_hybrid):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_hybrid_compat import (
         apply_mamba_hybrid_compat,
     )
+
     apply_mamba_hybrid_compat()
 
     idx_mapping = torch.tensor([2, -1, 0, 1], dtype=torch.int64)
@@ -79,6 +81,7 @@ def test_scatter_clamp_to_one(fake_mamba_hybrid):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_hybrid_compat import (
         apply_mamba_hybrid_compat,
     )
+
     apply_mamba_hybrid_compat()
 
     idx_mapping = torch.tensor([0], dtype=torch.int64)
@@ -97,6 +100,7 @@ def test_scatter_all_negative(fake_mamba_hybrid):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_hybrid_compat import (
         apply_mamba_hybrid_compat,
     )
+
     apply_mamba_hybrid_compat()
 
     idx_mapping = torch.tensor([-1, -1, -1], dtype=torch.int64)
@@ -115,6 +119,7 @@ def test_fill_basic(fake_mamba_hybrid):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_hybrid_compat import (
         apply_mamba_hybrid_compat,
     )
+
     apply_mamba_hybrid_compat()
 
     idx_mapping = torch.tensor([3, -1, 1], dtype=torch.int64)
@@ -136,6 +141,7 @@ def test_idempotent(fake_mamba_hybrid):
         _PATCH_FLAG,
         apply_mamba_hybrid_compat,
     )
+
     apply_mamba_hybrid_compat()
     apply_mamba_hybrid_compat()
     assert getattr(mh, _PATCH_FLAG, False)

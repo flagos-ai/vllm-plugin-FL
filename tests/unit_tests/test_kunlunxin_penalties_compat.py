@@ -13,8 +13,15 @@ import torch
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _ref_bincount(expanded_idx_mapping, all_token_ids, prompt_len, prefill_len,
-                   prompt_bin_mask, output_bin_counts):
+
+def _ref_bincount(
+    expanded_idx_mapping,
+    all_token_ids,
+    prompt_len,
+    prefill_len,
+    prompt_bin_mask,
+    output_bin_counts,
+):
     """Pure-python reference for _bincount_kernel."""
     idx = expanded_idx_mapping.tolist()
     prompt_bin_mask.index_fill_(0, expanded_idx_mapping.long(), 0)
@@ -37,10 +44,17 @@ def _ref_bincount(expanded_idx_mapping, all_token_ids, prompt_len, prefill_len,
                 output_bin_counts[req, tok] += 1
 
 
-def _ref_apply_penalties(logits, expanded_idx_mapping, token_ids,
-                          expanded_local_pos, repetition_penalty,
-                          frequency_penalty, presence_penalty,
-                          prompt_bin_mask, output_bin_counts):
+def _ref_apply_penalties(
+    logits,
+    expanded_idx_mapping,
+    token_ids,
+    expanded_local_pos,
+    repetition_penalty,
+    frequency_penalty,
+    presence_penalty,
+    prompt_bin_mask,
+    output_bin_counts,
+):
     """Pure-python reference for _penalties_kernel."""
     logits = logits.clone().float()
     num_tokens, vocab_size = logits.shape
@@ -83,6 +97,7 @@ def _ref_apply_penalties(logits, expanded_idx_mapping, token_ids,
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def small_state():
     """A tiny penalties state with 3 requests, 2 penalty reqs."""
@@ -96,10 +111,14 @@ def small_state():
     pbm = torch.zeros(MAX_REQS, num_words, dtype=torch.int32)
     obc = torch.zeros(MAX_REQS, VOCAB, dtype=torch.int32)
     return {
-        "idx": idx, "all_token_ids": all_token_ids,
-        "prompt_len": prompt_len, "prefill_len": prefill_len,
-        "pbm": pbm, "obc": obc,
-        "VOCAB": VOCAB, "MAX_REQS": MAX_REQS,
+        "idx": idx,
+        "all_token_ids": all_token_ids,
+        "prompt_len": prompt_len,
+        "prefill_len": prefill_len,
+        "pbm": pbm,
+        "obc": obc,
+        "VOCAB": VOCAB,
+        "MAX_REQS": MAX_REQS,
     }
 
 
@@ -107,9 +126,11 @@ def small_state():
 # Tests: penalties_compat module
 # ---------------------------------------------------------------------------
 
+
 def test_import():
     """Module must import cleanly and expose the two public functions."""
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches import penalties_compat
+
     assert callable(penalties_compat._bincount)
     assert callable(penalties_compat._apply_penalties)
     assert callable(penalties_compat.apply_penalties_compat)
@@ -126,13 +147,26 @@ def test_bincount_matches_reference(small_state):
 
     pbm_ref = s["pbm"].clone()
     obc_ref = s["obc"].clone()
-    _ref_bincount(s["idx"], s["all_token_ids"], s["prompt_len"], s["prefill_len"],
-                  pbm_ref, obc_ref)
+    _ref_bincount(
+        s["idx"],
+        s["all_token_ids"],
+        s["prompt_len"],
+        s["prefill_len"],
+        pbm_ref,
+        obc_ref,
+    )
 
     pbm_got = s["pbm"].clone()
     obc_got = s["obc"].clone()
-    _bincount(s["idx"], s["all_token_ids"], s["prompt_len"], s["prefill_len"],
-              pbm_got, obc_got, max_pf)
+    _bincount(
+        s["idx"],
+        s["all_token_ids"],
+        s["prompt_len"],
+        s["prefill_len"],
+        pbm_got,
+        obc_got,
+        max_pf,
+    )
 
     assert torch.equal(pbm_got, pbm_ref), "prompt_bin_mask mismatch"
     assert torch.equal(obc_got, obc_ref), "output_bin_counts mismatch"
@@ -143,6 +177,7 @@ def test_bincount_empty_idx():
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
         _bincount,
     )
+
     pbm = torch.zeros(4, 2, dtype=torch.int32)
     obc = torch.zeros(4, 64, dtype=torch.int32)
     idx = torch.zeros(0, dtype=torch.int64)
@@ -158,6 +193,7 @@ def test_apply_penalties_no_penalty():
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
         _apply_penalties,
     )
+
     NT, VOCAB, MAXR = 4, 32, 8
     logits = torch.randn(NT, VOCAB)
     orig = logits.clone()
@@ -170,7 +206,9 @@ def test_apply_penalties_no_penalty():
     pbm = torch.zeros(MAXR, (VOCAB + 31) // 32, dtype=torch.int32)
     obc = torch.zeros(MAXR, VOCAB, dtype=torch.int32)
     _apply_penalties(logits, eim, tok, pos, rep, freq, pres, pbm, obc)
-    assert torch.allclose(logits, orig), "logits must not change when no penalty is active"
+    assert torch.allclose(logits, orig), (
+        "logits must not change when no penalty is active"
+    )
 
 
 def test_apply_penalties_matches_reference():
@@ -178,13 +216,14 @@ def test_apply_penalties_matches_reference():
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
         _apply_penalties,
     )
+
     torch.manual_seed(7)
     NT, VOCAB, MAXR = 6, 64, 8
     logits = torch.randn(NT, VOCAB, dtype=torch.float32)
     eim = torch.randint(0, MAXR, (NT,), dtype=torch.int64)
     tok = torch.randint(0, VOCAB, (NT,), dtype=torch.int32)
     pos = torch.randint(0, 3, (NT,), dtype=torch.int32)
-    rep = torch.rand(MAXR) * 0.5 + 0.5   # 0.5..1.0 — some ≠ 1.0
+    rep = torch.rand(MAXR) * 0.5 + 0.5  # 0.5..1.0 — some ≠ 1.0
     freq = torch.rand(MAXR) * 0.1
     pres = torch.rand(MAXR) * 0.1
     pbm = torch.randint(0, 2**31, (MAXR, (VOCAB + 31) // 32), dtype=torch.int32)
@@ -192,15 +231,19 @@ def test_apply_penalties_matches_reference():
 
     logits_got = logits.clone()
     _apply_penalties(logits_got, eim, tok, pos, rep, freq, pres, pbm, obc)
-    logits_ref = _ref_apply_penalties(logits.clone(), eim, tok, pos, rep, freq, pres, pbm, obc)
+    logits_ref = _ref_apply_penalties(
+        logits.clone(), eim, tok, pos, rep, freq, pres, pbm, obc
+    )
 
-    assert torch.allclose(logits_got, logits_ref, atol=1e-4, rtol=1e-4), \
+    assert torch.allclose(logits_got, logits_ref, atol=1e-4, rtol=1e-4), (
         f"max diff: {(logits_got - logits_ref).abs().max()}"
+    )
 
 
 def test_apply_penalties_compat_patches_module():
     """apply_penalties_compat must replace bincount and apply_penalties in-module."""
     import sys
+
     # Remove any cached import so we start clean
     for key in list(sys.modules):
         if "vllm.v1.worker.gpu.sample.penalties" in key:
@@ -212,15 +255,18 @@ def test_apply_penalties_compat_patches_module():
         _bincount,
         apply_penalties_compat,
     )
+
     # Reset the flag in case a previous test already patched
     try:
         from vllm.v1.worker.gpu.sample import penalties
+
         setattr(penalties, _PATCH_FLAG, False)
     except ImportError:
         pytest.skip("vllm.v1.worker.gpu.sample.penalties not installed")
 
     apply_penalties_compat()
     from vllm.v1.worker.gpu.sample import penalties
+
     assert penalties.bincount is _bincount
     assert penalties.apply_penalties is _apply_penalties
     assert getattr(penalties, _PATCH_FLAG, False)
@@ -232,6 +278,7 @@ def test_apply_penalties_compat_idempotent():
         _bincount,
         apply_penalties_compat,
     )
+
     try:
         from vllm.v1.worker.gpu.sample import penalties
     except ImportError:

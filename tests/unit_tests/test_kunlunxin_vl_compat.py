@@ -26,13 +26,17 @@ def _setup_fake_qwen3_vl(triton_present: bool, native_present: bool = True):
     mod = types.ModuleType(_MOD_NAME)
 
     if native_present:
+
         def pos_embed_interpolate_native(*args, **kwargs):
             return "native"
+
         mod.pos_embed_interpolate_native = pos_embed_interpolate_native
 
     if triton_present:
+
         def triton_pos_embed_interpolate(*args, **kwargs):
             return "triton"
+
         mod.triton_pos_embed_interpolate = triton_pos_embed_interpolate
 
     sys.modules[_MOD_NAME] = mod
@@ -43,6 +47,7 @@ def _setup_fake_qwen3_vl(triton_present: bool, native_present: bool = True):
 def _fresh_patch_flag():
     """Remove the patch flag from vl_compat before each test."""
     import vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat as vc
+
     # Remove flag so each test starts with an un-patched state
     for attr in list(vars(vc).keys()):
         if attr.startswith("_vllm_fl_kunlunxin_vl"):
@@ -56,6 +61,7 @@ def _get_vc():
     import importlib
 
     import vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat as vc
+
     # Force a fresh module-level state by removing the patch flag from module
     # and from any previously patched qwen3_vl module
     sys.modules.pop(_MOD_NAME, None)

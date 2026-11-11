@@ -55,6 +55,7 @@ def test_replaces_apply_write(fake_buffer_utils):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.buffer_utils_compat import (
         apply_buffer_utils_compat,
     )
+
     apply_buffer_utils_compat()
     t = fake_buffer_utils.StagedWriteTensor()
     t.stage_write(1, 2, [10, 20, 30])
@@ -67,6 +68,7 @@ def test_replaces_fused_apply(fake_buffer_utils):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.buffer_utils_compat import (
         apply_buffer_utils_compat,
     )
+
     apply_buffer_utils_compat()
     t = fake_buffer_utils.StagedWriteTensor()
     t.stage_write(0, 1, [42])
@@ -80,6 +82,7 @@ def test_multiple_writes(fake_buffer_utils):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.buffer_utils_compat import (
         apply_buffer_utils_compat,
     )
+
     apply_buffer_utils_compat()
     t = fake_buffer_utils.StagedWriteTensor()
     t.stage_write(0, 0, [5, 6])
@@ -93,6 +96,7 @@ def test_empty_apply_write(fake_buffer_utils):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.buffer_utils_compat import (
         apply_buffer_utils_compat,
     )
+
     apply_buffer_utils_compat()
     t = fake_buffer_utils.StagedWriteTensor()
     fake_buffer_utils.StagedWriteTensor.apply_write(t)  # should not raise
@@ -103,6 +107,7 @@ def test_idempotent(fake_buffer_utils):
         _PATCH_FLAG,
         apply_buffer_utils_compat,
     )
+
     apply_buffer_utils_compat()
     apply_buffer_utils_compat()
     assert getattr(fake_buffer_utils, _PATCH_FLAG, False)
