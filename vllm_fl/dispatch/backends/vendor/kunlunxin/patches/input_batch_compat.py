@@ -419,3 +419,28 @@ def apply_input_batch_compat() -> None:
             "miscompilation during decode",
             len(patched),
         )
+
+    # model_runner.py imports these names directly at the top of the module
+    # (lines 118-123: combine_sampled_and_draft_tokens, expand_idx_mapping,
+    # post_update, post_update_num_computed_tokens, prepare_pos_seq_lens,
+    # prepare_prefill_inputs).  Patching input_batch alone does not reach those
+    # already-bound module-level names; we must also overwrite them in
+    # model_runner so the functions called at lines 1450, 1461, 1692, 2331 use
+    # the pure-torch versions.
+    try:
+        from vllm.v1.worker.gpu import model_runner as _mr
+        mr_patched = []
+        for attr in patched:
+            fn = getattr(input_batch, attr, None)
+            if fn is not None and hasattr(_mr, attr):
+                setattr(_mr, attr, fn)
+                mr_patched.append(attr)
+        if mr_patched:
+            logger.info(
+                "kunlunxin input_batch_compat: propagated %d torch launcher(s) "
+                "into model_runner module namespace: %s",
+                len(mr_patched),
+                ", ".join(mr_patched),
+            )
+    except ImportError:
+        pass
