@@ -63,7 +63,10 @@ def _broadcast_scale(scale: torch.Tensor, x: torch.Tensor, group_shape) -> torch
     """Expand a checkpoint scale to the elementwise shape of ``x``.
 
     ``group_shape == (gm, gn)`` with ``-1`` meaning "whole extent"; ``None``
-    means per-tensor scaling.
+    means per-tensor scaling.  The layout is always derived from
+    ``group_shape`` -- never from ``scale.numel()`` -- mirroring
+    ``quant_utils.prep_scale_for_group_broadcast``: matching element counts
+    cannot tell per-row from per-column scales on a square input.
     """
     s = scale.to(torch.float32)
     if group_shape is None or s.numel() == 1:
@@ -76,17 +79,21 @@ def _broadcast_scale(scale: torch.Tensor, x: torch.Tensor, group_shape) -> torch
     if gn in (-1, 0):
         gn = cols
 
+    if s.ndim == 1:
+        # One scale per column (group spans all rows) or per row (group spans
+        # all columns); the 1D length itself is ambiguous.
+        if gm == rows:
+            return s.view(1, -1)
+        if gn == cols:
+            return s.view(-1, 1)
+        raise ValueError(
+            f"1D scale with shape {tuple(scale.shape)} cannot be broadcast to "
+            f"x with shape {tuple(x.shape)}, group_shape={tuple(group_shape)}"
+        )
+
     blocks_m = (rows + gm - 1) // gm
     blocks_n = (cols + gn - 1) // gn
-    s = s.reshape(-1)
-    if s.numel() == rows:  # per-channel / per-token along rows
-        return s.view(-1, 1)
-    if s.numel() == cols:  # per-channel along columns
-        return s.view(1, -1)
-    if s.numel() < blocks_m * blocks_n:
-        s = s[: blocks_m * blocks_n]
-    s = s.view(blocks_m, blocks_n)
-    s = s.repeat_interleave(gm, dim=0)[:rows]
+    s = s.reshape(blocks_m, blocks_n).repeat_interleave(gm, dim=0)[:rows]
     return s.repeat_interleave(gn, dim=1)[:, :cols]
 
 
@@ -96,12 +103,32 @@ def _quant_from_scale(x: torch.Tensor, s: torch.Tensor, out_dtype) -> torch.Tens
     return out.to(out_dtype)
 
 
+def _copy_valid_rows(dst: torch.Tensor, src: torch.Tensor, pad_value: float) -> None:
+    """Write ``src`` into the leading rows of ``dst`` and fill the padding.
+
+    ``scaled_fp8_quant`` sizes ``result`` (and the per-token ``scale``) as
+    ``max(num_token_padding, num_tokens)`` rows, so ``dst`` can have more rows
+    than the quantized input.  Only the leading ``src.shape[0]`` rows are
+    meaningful; the rest must be handled explicitly instead of shaped to the
+    padded extent.
+    """
+    rows = src.shape[0]
+    if dst.shape[0] < rows:
+        raise ValueError(
+            f"output buffer has {dst.shape[0]} rows but quantization produced {rows}"
+        )
+    if rows:
+        dst[:rows].copy_(src.reshape(dst[:rows].shape))
+    if dst.shape[0] > rows:
+        dst[rows:].fill_(pad_value)
+
+
 def static_scaled_fp8_quant(
     result, input, scale, group_shape=None
 ) -> None:
     """``result = clamp(input / scale)`` with a checkpoint-provided scale."""
     s = _broadcast_scale(scale, input, group_shape)
-    result.copy_(_quant_from_scale(input, s, result.dtype))
+    _copy_valid_rows(result, _quant_from_scale(input, s, result.dtype), 0.0)
 
 
 def dynamic_scaled_fp8_quant(result, input, scale) -> None:
@@ -110,7 +137,7 @@ def dynamic_scaled_fp8_quant(result, input, scale) -> None:
     amax = input.to(torch.float32).abs().max().reshape(1)
     s = (amax / fp8_max).clamp(min=min_scale)
     scale.copy_(s.to(scale.dtype))
-    result.copy_(_quant_from_scale(input, s, result.dtype))
+    _copy_valid_rows(result, _quant_from_scale(input, s, result.dtype), 0.0)
 
 
 def dynamic_per_token_scaled_fp8_quant(result, input, scale, scale_ub=None) -> None:
@@ -121,8 +148,9 @@ def dynamic_per_token_scaled_fp8_quant(result, input, scale, scale_ub=None) -> N
     if scale_ub is not None:
         amax = amax.clamp(max=float(scale_ub.max()))
     s = (amax / fp8_max).clamp(min=min_scale)
-    scale.copy_(s.reshape(scale.shape).to(scale.dtype))
-    result.copy_(_quant_from_scale(x, s, result.dtype))
+    # Padded rows keep a neutral scale of 1.0 (their fp8 output rows are 0).
+    _copy_valid_rows(scale, s, 1.0)
+    _copy_valid_rows(result, _quant_from_scale(x, s, result.dtype), 0.0)
 
 
 _GCU_IMPLS = (
