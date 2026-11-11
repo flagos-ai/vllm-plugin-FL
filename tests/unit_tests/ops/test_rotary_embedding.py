@@ -164,6 +164,36 @@ def test_apply_rotary_emb_flaggems_matches_reference(
     torch.testing.assert_close(x, original)
 
 
+@pytest.mark.gpu
+@pytest.mark.parametrize("heads", [8, 16])
+def test_apply_rotary_emb_flaggems_dense_dummy_key_npu(heads):
+    pytest.importorskip("torch_npu")
+    pytest.importorskip("flag_gems")
+    if not torch.npu.is_available():
+        pytest.skip("Ascend NPU is required")
+
+    from vllm_fl.dispatch.backends.flaggems.impl import rotary
+    from vllm_fl.dispatch.backends.reference.impl.rotary import apply_rotary_emb_torch
+
+    op = _make_apply_rotary_emb()
+    x = torch.randn(2, 196, heads, 72, device="npu", dtype=torch.bfloat16)
+    original = x.clone()
+    angles = torch.randn(196, 36, device="npu", dtype=torch.float32)
+    cos, sin = angles.cos(), angles.sin()
+    expected = apply_rotary_emb_torch(op, x, cos, sin)
+    backend = rotary.rotary_embedding_flaggems
+
+    def checked_backend(obj, query, key, *args, **kwargs):
+        assert query.is_contiguous() and key.is_contiguous()
+        return backend(obj, query, key, *args, **kwargs)
+
+    with patch.object(rotary, "rotary_embedding_flaggems", checked_backend):
+        actual = rotary.apply_rotary_emb_flaggems(op, x, cos, sin)
+    torch.npu.synchronize()
+    torch.testing.assert_close(actual, expected, atol=0.04, rtol=0.02)
+    assert torch.equal(x, original)
+
+
 class TestRotaryEmbeddingFL:
     """Test RotaryEmbeddingFL class behavior."""
 
