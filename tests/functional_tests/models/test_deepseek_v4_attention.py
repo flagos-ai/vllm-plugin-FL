@@ -28,6 +28,7 @@ def runtime():
 
     def config_factory():
         return VllmConfig(
+            additional_config={"weight_nz_mode": 0},
             compilation_config=CompilationConfig(
                 mode=CompilationMode.NONE, custom_ops=["all"]
             ),
@@ -41,6 +42,9 @@ def runtime():
         )
 
     with ascend_single_rank_runtime(config_factory) as config:
+        from vllm_fl import register_quant_linear
+
+        register_quant_linear()
         yield config
 
 
@@ -214,11 +218,11 @@ def make_attention(runtime):
         rope = torch.stack([angle.cos(), angle.sin()], -1)
         old_quant = runtime.quant_config
         if mixed:
-            from vllm_fl.quantization.w8a8.compressed_tensors import (
-                AscendCompressedTensorsConfig,
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+                CompressedTensorsConfig,
             )
 
-            runtime.quant_config = AscendCompressedTensorsConfig.from_config(
+            runtime.quant_config = CompressedTensorsConfig.from_config(
                 {
                     "quant_method": "compressed-tensors",
                     "format": "int-quantized",
@@ -249,7 +253,6 @@ def make_attention(runtime):
                     "ignore": [],
                 }
             )
-            runtime.quant_config.weight_nz_mode = 0
         try:
             module = DeepseekV4Attention(runtime, cfg, leaves, rope, prefix=prefix).to(
                 "npu"

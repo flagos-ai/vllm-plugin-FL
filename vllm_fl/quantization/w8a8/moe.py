@@ -88,6 +88,8 @@ def install_fl_w8a8_moe_selector() -> bool:
         )
         scheme_module.make_int8_moe_quant_config = make_int8_moe_quant_config_fl
 
+    _install_ascend_moe_method_factory()
+
     current_selector = oracle_module.select_int8_moe_backend
     if getattr(current_selector, _ADAPTER_MARKER, False):
         scheme_module.select_int8_moe_backend = current_selector
@@ -230,6 +232,48 @@ def install_fl_w8a8_moe_selector() -> bool:
     # The compressed-tensors scheme imported the selector by name.
     scheme_module.select_int8_moe_backend = select_int8_moe_backend_fl
     return True
+
+
+_METHOD_FACTORY_MARKER = "_fl_ascend_w8a8_method_factory"
+
+
+def _install_ascend_moe_method_factory():
+    from vllm.platforms import current_platform
+
+    if (
+        getattr(current_platform, "vendor_name", None) != "ascend"
+        or current_platform.device_type != "npu"
+    ):
+        return
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import (
+        CompressedTensorsMoEMethod,
+    )
+
+    current = CompressedTensorsMoEMethod.get_moe_method
+    if getattr(current, _METHOD_FACTORY_MARKER, False):
+        return
+
+    def get_moe_method(config, layer, layer_name):
+        # The framework still parses and matches the checkpoint scheme. Only
+        # the selected native INT8 method needs a different post-load contract.
+        method = current(config, layer, layer_name)
+        from vllm.platforms import current_platform
+
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+            and type(method) is CompressedTensorsW8A8Int8MoEMethod
+        ):
+            return AscendW8A8DynamicMoEMethod(
+                method.weight_quant,
+                method.input_quant,
+                layer.moe_config,
+                layer_name=layer_name,
+            )
+        return method
+
+    setattr(get_moe_method, _METHOD_FACTORY_MARKER, True)
+    CompressedTensorsMoEMethod.get_moe_method = staticmethod(get_moe_method)
 
 
 _prepare = CachedOp("w8a8_prepare_experts")

@@ -30,7 +30,11 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
 )
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
-from vllm.model_executor.models.interfaces import MixtureOfExperts, SupportsPP
+from vllm.model_executor.models.interfaces import (
+    MixtureOfExperts,
+    SupportsPP,
+    SupportsQuant,
+)
 from vllm.model_executor.models.utils import (
     PPMissingLayer,
     WeightsMapper,
@@ -359,7 +363,7 @@ class DeepseekV4Model(nn.Module):
         return self.norm(hidden)
 
 
-class DeepseekV4ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts):
+class DeepseekV4ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts, SupportsQuant):
     """Checkpoint-facing envelope; operator implementations remain dispatched."""
 
     packed_modules_mapping = {"gate_up_proj": ["gate_proj", "up_proj"]}
@@ -389,6 +393,16 @@ class DeepseekV4ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts):
         },
         orig_to_new_suffix={".scale": ".weight_scale"},
     )
+
+    def _maybe_apply_model_mapping(self):
+        from vllm_fl.quantization.w8a8.compressed_tensors import (
+            bind_compressed_tensors_model,
+        )
+
+        if not bind_compressed_tensors_model(
+            self.quant_config, self.hf_to_vllm_mapper, self.packed_modules_mapping
+        ):
+            super()._maybe_apply_model_mapping()
 
     def __init__(self, *, vllm_config, prefix=""):
         super().__init__()

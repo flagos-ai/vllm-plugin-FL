@@ -18,12 +18,12 @@ from vllm.model_executor.models.utils import extract_layer_index
 
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.layernorm import RMSNormFL as RMSNorm
+from vllm_fl.quantization.w8a8.linear import configure_grouped_projection
 
 _compressor = CachedOp("deepseek_v4_compressor")
 _rope = CachedOp("deepseek_v4_partial_rope")
 _hadamard = CachedOp("deepseek_v4_hadamard")
 _index_quant = CachedOp("deepseek_v4_index_quant")
-_grouped_project = CachedOp("deepseek_v4_grouped_project")
 _index = CachedOp("deepseek_v4_indexer")
 _sparse_attention = CachedOp("deepseek_v4_sparse_attention")
 
@@ -352,34 +352,7 @@ class DeepseekV4Attention(nn.Module):
                     params_dtype=params_dtype,
                 ),
             )
-        if self.wo_a.weight.dtype != params_dtype:
-            configure_grouped = getattr(
-                self.wo_a.quant_method, "configure_grouped", None
-            )
-            if configure_grouped is None:
-                from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
-                    CompressedTensorsLinearMethod,
-                )
-                from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
-                    CompressedTensorsW8A8Int8,
-                )
-
-                if isinstance(
-                    self.wo_a.quant_method, CompressedTensorsLinearMethod
-                ) and isinstance(self.wo_a.scheme, CompressedTensorsW8A8Int8):
-                    from vllm_fl.quantization.w8a8.compressed_tensors import (
-                        AscendGroupedW8A8LinearMethod,
-                    )
-
-                    self.wo_a.quant_method = AscendGroupedW8A8LinearMethod(
-                        self.wo_a.quant_method.quantization_config
-                    )
-                    configure_grouped = self.wo_a.quant_method.configure_grouped
-            if configure_grouped is None:
-                raise NotImplementedError(
-                    "Grouped output projection requires a grouped quantization method"
-                )
-            configure_grouped(self.n_local_groups)
+        configure_grouped_projection(self.wo_a, self.n_local_groups)
         self.q_norm = RMSNorm(
             config.q_lora_rank, config.rms_norm_eps, dtype=params_dtype
         )
@@ -478,11 +451,6 @@ class DeepseekV4Attention(nn.Module):
             attn_sink=self.attn_sink,
         )
         output = _rope(output, positions, self.cos_sin_cache, inverse=True)
-        # wo_a applies independent head groups rather than one shared Linear.
-        # The INT8 adapter also owns each group's prepared weight and scales.
-        if self.wo_a.weight.dtype == torch.int8:
-            output = self.wo_a.quant_method.apply_grouped(self.wo_a, output)
-        else:
-            output = _grouped_project(output, self.wo_a.weight, self.n_local_groups)
+        output = self.wo_a(output)
         output = self.wo_b(output)
         return torch.where(active[:, None], output, 0)

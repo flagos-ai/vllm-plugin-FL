@@ -438,14 +438,6 @@ class AscendW8A8DynamicExperts(mk.FusedMoEExpertsModular):
             or (parallel.dp_size > 1 and not agrs)
         )
 
-    @staticmethod
-    def _supports_batch_invariance():
-        return False
-
-    @staticmethod
-    def supports_lora():
-        return False
-
     def finalize_weight_and_reduce_impl(self):
         from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
             TopKWeightAndReduceNoOP,

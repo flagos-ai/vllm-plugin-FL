@@ -1,66 +1,43 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Ascend dynamic W8A8 execution for compressed-tensors checkpoints."""
+"""Opt-in checkpoint-name matching for upstream compressed-tensors configs."""
+
+from __future__ import annotations
 
 from copy import copy
-from functools import cache
+from functools import update_wrapper
+from typing import TYPE_CHECKING
 
 import regex as re
-import torch
 
-from vllm.model_executor.layers.linear import LinearBase
 from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
     CompressedTensorsConfig,
-    CompressedTensorsLinearMethod,
 )
-from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
-    CompressedTensorsW8A8Int8,
-)
-from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 
-from vllm_fl.dispatch import CachedOp
-from vllm_fl.quantization.w8a8.moe import AscendW8A8DynamicMoEMethod
+if TYPE_CHECKING:
+    from vllm.model_executor.models.utils import WeightsMapper
+
+_CONTRACT_ATTRIBUTE = "_fl_checkpoint_contract"
+_WRAPPER_MARKER = "_fl_checkpoint_contract_wrapper"
 
 
-class AscendCompressedTensorsConfig(CompressedTensorsConfig):
-    """Keep the upstream parser and checkpoint matching; replace supported math.
+class _CheckpointContract:
+    """Serializable metadata state, without bound callbacks or device policy."""
 
-    The parent owns checkpoint parsing and Linear weight allocation. This
-    adapter selects NPU methods and validates dynamic W8A8 contracts. Metadata
-    uses checkpoint names, including regexes; matching before name translation
-    preserves the exporter's ignore rules and packed shards.
-    """
+    def __init__(self, mapper):
+        self.mapper = mapper
+        self.mapper_applied = False
+        self.checkpoint_names_enabled = False
+        self.ignore_cache = None
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._weight_mapper = None
-        self._applied_mapper = None
-        self.weight_nz_mode = 1
-        self._ignore_cache = None
-        self._add_fused_moe_to_target_scheme_map()
-
-    def apply_vllm_mapper(self, mapper):
-        if self._applied_mapper is mapper:
-            return
-        if self._applied_mapper is not None:
-            raise ValueError("Quantization mapper already applied")
-        self._applied_mapper = mapper
-        # Regex substitution cannot in general be reversed. Such models retain
-        # the upstream canonical-name contract instead of guessing an inverse.
-        if mapper.orig_to_new_regex or mapper.orig_to_new_renamings:
-            super().apply_vllm_mapper(mapper)
-        else:
-            self._weight_mapper = mapper
-
-    def _checkpoint_names(self, name):
-        """Resolve literal aliases without translating exporter regexes."""
-        mapper = self._weight_mapper
-        if mapper is None:
+    def checkpoint_names(self, name):
+        mapper = self.mapper
+        if not self.checkpoint_names_enabled or mapper is None:
             return [name]
         canonical = name + ".weight"
         candidates = {canonical}
-        # Several checkpoint roots can map to one runtime root. Keep every
-        # valid inverse, then verify it through the model's forward mapper.
+        # Multiple checkpoint roots may map to the same runtime root. Verify
+        # each inverse through the model's unchanged forward weight mapper.
         for mappings, kind in (
             (mapper.orig_to_new_suffix, "suffix"),
             (mapper.orig_to_new_prefix, "prefix"),
@@ -90,16 +67,15 @@ class AscendCompressedTensorsConfig(CompressedTensorsConfig):
             if mapper._map_name(key) == canonical
         )
 
-    def _should_ignore_cached(self, name):
-        """Retain compiled rules while preserving upstream fused consistency."""
+    def should_ignore(self, config, name):
         from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
             should_ignore_layer,
         )
 
         if name is None:
             return False
-        signature = tuple(self.ignore)
-        cached = self._ignore_cache
+        signature = tuple(config.ignore)
+        cached = self.ignore_cache
         if cached is None or cached[0] != signature:
             literals = frozenset(
                 rule for rule in signature if not rule.startswith("re:")
@@ -108,231 +84,167 @@ class AscendCompressedTensorsConfig(CompressedTensorsConfig):
                 re.compile(rule[3:]) for rule in signature if rule.startswith("re:")
             )
             cached = (signature, literals, patterns)
-            self._ignore_cache = cached
+            self.ignore_cache = cached
         _, literals, patterns = cached
         proj_name = name.split(".")[-1]
-        if proj_name in self.packed_modules_mapping and name not in literals:
+        if proj_name in config.packed_modules_mapping and name not in literals:
             names = [
                 name.replace(proj_name, shard)
-                for shard in self.packed_modules_mapping[proj_name]
+                for shard in config.packed_modules_mapping[proj_name]
             ]
         else:
             names = [name]
-        # Pass only resolved exact names back through the upstream predicate.
-        # A regex matching a packed root must not bypass its shard checks.
+        # A regex match on a packed root must not become a literal exemption
+        # from upstream's shard-consistency checks.
         matched = tuple(
             candidate
             for candidate in names
             if candidate in literals
             or any(pattern.match(candidate) for pattern in patterns)
         )
-        return should_ignore_layer(name, matched, self.packed_modules_mapping)
+        return should_ignore_layer(name, matched, config.packed_modules_mapping)
 
-    def _scheme(self, layer, prefix):
-        names = self._checkpoint_names(prefix)
-        if any(self._should_ignore_cached(name) for name in names):
-            return None
-        # Ignore rules have already been resolved across every alias. Keep
-        # upstream target/class/fused matching without repeating the regex scan.
-        # A fresh shallow view observes current mapper/packed metadata.
-        view = copy(self)
-        view.ignore = ()
-        schemes = [
-            CompressedTensorsConfig.get_scheme_dict(view, layer, name) for name in names
-        ]
-        matched = [scheme for scheme in schemes if scheme is not None]
-        if matched and any(scheme != matched[0] for scheme in matched[1:]):
-            raise ValueError(f"Conflicting quantization aliases for {prefix}")
-        return matched[0] if matched else None
 
-    def _validated_scheme(self, layer, prefix, names):
-        schemes = [self._scheme(layer, name) for name in names]
-        if all(scheme is None for scheme in schemes):
+def _resolve_scheme(config, contract, layer, name, original_lookup):
+    names = contract.checkpoint_names(name)
+    if any(contract.should_ignore(config, alias) for alias in names):
+        return None
+    # Keep upstream target/class/fused matching and format defaults. A fresh
+    # view sees metadata mutations without repeating the resolved ignore scan.
+    view = copy(config)
+    view.ignore = ()
+    schemes = [original_lookup(view, layer, alias) for alias in names]
+    matched = [scheme for scheme in schemes if scheme is not None]
+    if matched and any(scheme != matched[0] for scheme in matched[1:]):
+        raise ValueError(f"Conflicting quantization aliases for {name}")
+    return matched[0] if matched else None
+
+
+def _uniform_scheme(schemes, prefix):
+    if all(scheme is None for scheme in schemes):
+        return None
+    if any(scheme is None or scheme != schemes[0] for scheme in schemes):
+        raise ValueError(f"Mixed quantization schemes in packed layer {prefix}")
+    return schemes[0]
+
+
+def _install_checkpoint_contract_wrappers():
+    """Extend only explicitly bound configs; preserve other callers exactly."""
+    config_cls = CompressedTensorsConfig
+    current_mapper = config_cls.apply_vllm_mapper
+    if getattr(current_mapper, _WRAPPER_MARKER, False):
+        return
+    current_lookup = config_cls.get_scheme_dict
+    current_method = config_cls.get_quant_method
+
+    def apply_vllm_mapper(self, mapper):
+        contract = getattr(self, _CONTRACT_ATTRIBUTE, None)
+        if contract is None:
+            return current_mapper(self, mapper)
+        if contract.mapper != mapper:
+            raise ValueError("Quantization mapper already applied")
+        if contract.mapper_applied:
             return None
-        if any(scheme is None for scheme in schemes):
-            raise ValueError(f"Mixed W8A8 schemes in packed layer {prefix}")
-        if not all(self._dynamic_w8a8(scheme) for scheme in schemes):
-            raise NotImplementedError(
-                f"Unsupported Ascend compressed-tensors scheme at {prefix}"
-            )
-        if any(scheme != schemes[0] for scheme in schemes[1:]):
-            raise ValueError(f"Mixed W8A8 schemes in packed layer {prefix}")
-        if self.kv_cache_scheme or self.transform_config:
-            raise NotImplementedError(
-                "Ascend W8A8 does not implement KV quantization or transforms"
-            )
-        return schemes[0]
+        # Arbitrary regex/renaming rewrites cannot be inverted. Retain the
+        # captured upstream mapper behavior for these existing mapper forms.
+        if mapper.orig_to_new_regex or mapper.orig_to_new_renamings:
+            result = current_mapper(self, mapper)
+        else:
+            contract.checkpoint_names_enabled = True
+            result = None
+        contract.mapper_applied = True
+        return result
 
     def get_scheme_dict(self, layer, layer_name=None):
-        if layer_name is None:
-            return super().get_scheme_dict(layer, layer_name)
+        contract = getattr(self, _CONTRACT_ATTRIBUTE, None)
+        if contract is None or layer_name is None:
+            return current_lookup(self, layer, layer_name)
+        from vllm.model_executor.layers.linear import LinearBase
+        from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
+
         if isinstance(layer, (LinearBase, ParallelLMHead)):
             name = layer_name.rsplit(".", 1)[-1]
-            base = layer_name[: -len(name)]
-            names = [base + n for n in self.packed_modules_mapping.get(name, [name])]
-            return self._validated_scheme(layer, layer_name, names)
-        return self._scheme(layer, layer_name)
-
-    def get_scheme(self, layer, layer_name=None):
-        scheme = super().get_scheme(layer, layer_name)
-        if type(scheme) is CompressedTensorsW8A8Int8:
-            return AscendW8A8Int8(
-                scheme.strategy, scheme.is_static_input_scheme, scheme.input_symmetric
-            )
-        return scheme
-
-    @staticmethod
-    def _dynamic_w8a8(scheme):
-        if scheme is None:
-            return False
-        w, a = scheme.get("weights"), scheme.get("input_activations")
-        return (
-            scheme.get("format") == "int-quantized"
-            and w is not None
-            and a is not None
-            and w.num_bits == a.num_bits == 8
-            and w.type == a.type == "int"
-            and w.strategy == "channel"
-            and a.strategy == "token"
-            and w.symmetric
-            and a.symmetric
-            and not w.dynamic
-            and a.dynamic
-            and w.group_size is None
-        )
+            components = self.packed_modules_mapping.get(name)
+            if components is not None:
+                if any(
+                    contract.should_ignore(self, alias)
+                    for alias in contract.checkpoint_names(layer_name)
+                ):
+                    return None
+                base = layer_name[: -len(name)]
+                return _uniform_scheme(
+                    [
+                        _resolve_scheme(
+                            self, contract, layer, base + component, current_lookup
+                        )
+                        for component in components
+                    ],
+                    layer_name,
+                )
+        return _resolve_scheme(self, contract, layer, layer_name, current_lookup)
 
     def get_quant_method(self, layer, prefix):
+        contract = getattr(self, _CONTRACT_ATTRIBUTE, None)
+        if contract is None:
+            return current_method(self, layer, prefix)
         from vllm.model_executor.layers.fused_moe.routed_experts import RoutedExperts
-        from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
+        from vllm.model_executor.layers.linear import LinearBase
+        from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 
-        if isinstance(layer, (RoutedExperts, MoERunner)):
-            names = [
-                f"{prefix}.{i}.{proj}"
-                for i in range(layer.moe_config.num_experts)
-                for proj in ("gate_proj", "up_proj", "down_proj")
-            ]
-            scheme = self._validated_scheme(layer, prefix, names)
-            if scheme is None:
-                return None
-            return AscendW8A8DynamicMoEMethod(
-                scheme["weights"],
-                scheme["input_activations"],
-                layer.moe_config,
-                layer_name=prefix,
+        if isinstance(layer, RoutedExperts):
+            self._add_fused_moe_to_target_scheme_map()
+            _uniform_scheme(
+                [
+                    self.get_scheme_dict(layer, f"{prefix}.{expert}.{projection}")
+                    for expert in range(layer.moe_config.num_experts)
+                    for projection in ("gate_proj", "up_proj", "down_proj")
+                ],
+                prefix,
             )
-        if isinstance(layer, (LinearBase, ParallelLMHead)):
-            # Validate before upstream's LMHead compatibility fallback, which
-            # intentionally catches ValueError for unsupported embedding schemes.
+        elif isinstance(layer, (LinearBase, ParallelLMHead)):
+            # Upstream LMHead compatibility fallback catches ValueError. Check
+            # metadata consistency before entering that fallback.
             self.get_scheme_dict(layer, prefix)
-            layer._fl_ascend_weight_nz_mode = self.weight_nz_mode
-        return super().get_quant_method(layer, prefix)
+        return current_method(self, layer, prefix)
 
-
-@cache
-def register_ascend_compressed_tensors():
-    """Override compressed-tensors only in Ascend integration processes."""
-    from vllm.model_executor.layers.quantization import register_quantization_config
-
-    register_quantization_config("compressed-tensors")(AscendCompressedTensorsConfig)
-
-
-class AscendW8A8Int8(CompressedTensorsW8A8Int8):
-    """Keep the NPU activation contract around upstream weight allocation."""
-
-    def create_weights(
-        self,
-        layer,
-        output_partition_sizes,
-        input_size_per_partition,
-        params_dtype,
-        weight_loader,
-        **kwargs,
+    for wrapper, original in (
+        (apply_vllm_mapper, current_mapper),
+        (get_scheme_dict, current_lookup),
+        (get_quant_method, current_method),
     ):
-        if params_dtype not in (torch.bfloat16, torch.float16):
-            raise NotImplementedError("Dynamic W8A8 Linear requires BF16/FP16")
-        return super().create_weights(
-            layer,
-            output_partition_sizes,
-            input_size_per_partition,
-            params_dtype,
-            weight_loader,
-            **kwargs,
-        )
+        update_wrapper(wrapper, original)
+        setattr(wrapper, _WRAPPER_MARKER, True)
+    config_cls.apply_vllm_mapper = apply_vllm_mapper
+    config_cls.get_scheme_dict = get_scheme_dict
+    config_cls.get_quant_method = get_quant_method
 
 
-_prepare_weight = CachedOp("w8a8_prepare_weight")
+def bind_compressed_tensors_model(
+    config,
+    mapper: WeightsMapper | None,
+    packed_mapping: dict[str, list[str]] | None,
+) -> bool:
+    """Opt an existing upstream config into a model's checkpoint-name contract.
 
-
-_linear = CachedOp("w8a8_dynamic_linear")
-
-
-class AscendGroupedW8A8LinearMethod(CompressedTensorsLinearMethod):
-    """Project independent output groups; this is not quantization group_size.
-
-    Upstream allocates logical INT8 weights [G*O,I] and FP32 scales [G*O,1].
-    Each input group [T,I] uses its own weight [O,I], prepared as [I,O] with
-    optional NZ layout and flat scales; concatenate the G outputs to [T,G*O].
+    Call from the model's SupportsQuant mapping hook before upstream rewrites
+    targets. Non-compressed-tensors configs are untouched and return False.
+    Rebinding an equivalent mapper is idempotent, including after serialization;
+    a different mapping is rejected.
     """
+    if not isinstance(config, CompressedTensorsConfig):
+        return False
+    _install_checkpoint_contract_wrappers()
+    contract = getattr(config, _CONTRACT_ATTRIBUTE, None)
+    if contract is None:
+        contract = _CheckpointContract(mapper)
+        setattr(config, _CONTRACT_ATTRIBUTE, contract)
+    elif contract.mapper != mapper:
+        raise ValueError("Quantization mapper already applied")
+    if packed_mapping is not None:
+        config.packed_modules_mapping = packed_mapping
+    if mapper is not None:
+        config.apply_vllm_mapper(mapper)
+    return True
 
-    def process_weights_after_loading(self, layer):
-        if layer.weight.dtype != torch.int8 or layer.weight.ndim != 2:
-            raise ValueError("Expected W8A8 [N,K] int8 weight")
-        if layer.weight_scale.shape != (layer.weight.shape[0], 1):
-            raise ValueError("Expected one W8A8 scale per output channel")
-        if getattr(self, "output_groups", None) is None:
-            raise ValueError(
-                "Grouped W8A8 requires configure_grouped before preparation"
-            )
-        if self.quantization_config.weight_nz_mode not in (0, 1, 2):
-            raise ValueError("weight_nz_mode must be 0, 1 or 2")
-        groups = self.output_groups
-        if groups < 1 or layer.weight.shape[0] % groups:
-            raise ValueError("Grouped W8A8 outputs must divide the weight rows")
-        output_width = layer.weight.shape[0] // groups
-        if output_width >= 65536:
-            raise NotImplementedError(
-                "Ascend W8A8 does not support per-group output width "
-                f"N={output_width} (requires N < 65536)"
-            )
-        self.group_input_size = layer.weight.shape[1]
-        for group, (weight, scale) in enumerate(
-            zip(
-                layer.weight.data.chunk(groups, dim=0),
-                layer.weight_scale.data.chunk(groups, dim=0),
-            )
-        ):
-            weight, scale = _prepare_weight(
-                weight.transpose(0, 1).contiguous(),
-                scale.flatten(),
-                self.quantization_config.weight_nz_mode,
-            )
-            layer.register_buffer(
-                f"_grouped_w8a8_weight_{group}", weight, persistent=False
-            )
-            layer.register_buffer(
-                f"_grouped_w8a8_scale_{group}", scale, persistent=False
-            )
-        # Keep parameter ownership while releasing the unused logical bank.
-        # Other groups remain module-owned buffers, moved with the layer.
-        layer.weight.data = layer._grouped_w8a8_weight_0
 
-    def configure_grouped(self, groups):
-        """Set the independent output groups before post-load preparation."""
-        if groups < 1:
-            raise ValueError("Grouped W8A8 requires positive groups")
-        self.output_groups = groups
-
-    def apply_grouped(self, layer, x):
-        """Run dynamic quantization/GEMM per input group and concatenate outputs."""
-        groups = self.output_groups
-        tokens = x.shape[0]
-        grouped = x.reshape(tokens, groups, self.group_input_size)
-        outputs = [
-            _linear(
-                grouped[:, group].contiguous(),
-                getattr(layer, f"_grouped_w8a8_weight_{group}"),
-                getattr(layer, f"_grouped_w8a8_scale_{group}"),
-            )
-            for group in range(groups)
-        ]
-        return torch.cat(outputs, dim=-1)
+__all__ = ["bind_compressed_tensors_model"]

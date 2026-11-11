@@ -51,13 +51,13 @@ def test_attention_graph_updates_mixed_backends(order, linear_quantized):
     )
 
     torch.npu.set_device(0)
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendCompressedTensorsConfig,
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
     )
 
     config = SimpleNamespace(
         speculative_config=None,
-        quant_config=AscendCompressedTensorsConfig(
+        quant_config=CompressedTensorsConfig(
             target_scheme_map={}, ignore=[], quant_format="int-quantized"
         )
         if linear_quantized
@@ -190,16 +190,16 @@ def test_attention_graph_updates_mixed_backends(order, linear_quantized):
 )
 def test_attention_graph_quantization_gate(method, kv_dtype, cache_dtype, rejected):
     from vllm.model_executor.layers.linear import UnquantizedLinearMethod
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
+    )
 
     from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
         AscendAttentionBackendImpl,
         AscendAttentionState,
     )
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendCompressedTensorsConfig,
-    )
 
-    quant_config = AscendCompressedTensorsConfig(
+    quant_config = CompressedTensorsConfig(
         target_scheme_map={},
         ignore=[],
         quant_format="int-quantized",

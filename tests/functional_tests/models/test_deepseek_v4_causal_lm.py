@@ -138,14 +138,15 @@ def _runtime_config(pipeline_parallel_size=1):
         SchedulerConfig,
         VllmConfig,
     )
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
+    )
 
     from vllm_fl import register_quant_linear
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendCompressedTensorsConfig,
-    )
 
     register_quant_linear()
     config = VllmConfig(
+        additional_config={"weight_nz_mode": 0},
         device_config=DeviceConfig(device="npu"),
         compilation_config=CompilationConfig(
             mode=CompilationMode.NONE, custom_ops=["all"]
@@ -170,10 +171,7 @@ def _runtime_config(pipeline_parallel_size=1):
         is_moe=True,
         enforce_eager=False,
     )
-    config.quant_config = AscendCompressedTensorsConfig.from_config(
-        _quantization_config()
-    )
-    config.quant_config.weight_nz_mode = 0
+    config.quant_config = CompressedTensorsConfig.from_config(_quantization_config())
     return config
 
 
@@ -492,13 +490,13 @@ def model_env(runtime):
 @pytest.mark.parametrize("aliases", ["raw", "canonical", "model-prefixed"])
 def test_checkpoint_mapper_quantized_head_and_scale_aliases(runtime, aliases):
     """Actual NPU allocations use the same names for quant matching and loading."""
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
+    )
     from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
     from vllm.model_executor.model_loader.utils import initialize_model
 
     from vllm_fl.models.deepseek_v4 import DeepseekV4ForCausalLM
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendCompressedTensorsConfig,
-    )
 
     mapper = DeepseekV4ForCausalLM.hf_to_vllm_mapper
 
@@ -516,8 +514,7 @@ def test_checkpoint_mapper_quantized_head_and_scale_aliases(runtime, aliases):
     quantization["config_groups"]["w8a8"]["targets"] = [
         alias(name + ".weight").removesuffix(".weight") for name in targets
     ]
-    quant_config = AscendCompressedTensorsConfig.from_config(quantization)
-    quant_config.weight_nz_mode = 0
+    quant_config = CompressedTensorsConfig.from_config(quantization)
     previous_quant = runtime.quant_config
     previous_dtype = torch.get_default_dtype()
     context = runtime.compilation_config.static_forward_context
