@@ -4,8 +4,7 @@ The Dockerfile now targets official vLLM 0.32.0 at commit
 `5df63a7203cdb9328d824a27b682e77c7b9928be`. This updated image has not been
 built or published in the adaptation environment (Docker is unavailable).
 The published 0.28 images and validation results below are historical;
-CI setup now rejects their vLLM version. See
-[the adaptation status](../../docs/usage/enflame-vllm032.md) for current checks.
+CI setup now rejects their vLLM version.
 
 The recipe keeps the vendor torch 2.11.0+cpu / torch_gcu
 2.11.0+3.8.20260713 stack and installs the official vLLM 0.32.0 empty-device
@@ -86,9 +85,8 @@ configuration retains the `enflame-s60` runner label, devices `2,3` and
 `/data:/data` mount. Its strict setup gate rejects the old dependency image;
 this is an external image-publication blocker, not a passing hardware CI run.
 Keep the gate and platform enabled. Select a replacement digest only after
-building, publishing and validating a real 0.32 dependency image. See the
-[current publication audit](../../docs/ci-pr675-latest.md#enflame-image-publication-audit)
-for the required base-image access, builder and registry permissions.
+building, publishing and validating a real 0.32 dependency image. This requires
+access to the vendor base image, a Docker builder and registry push permissions.
 The reference is main commit `6182281a42ce857fa52ef73ec1abafca941cdf3a`.
 Publishing the image and selecting this configuration do not establish
 that hardware CI has passed; record the actual workflow results separately.
