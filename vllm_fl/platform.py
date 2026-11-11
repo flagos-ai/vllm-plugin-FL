@@ -224,6 +224,37 @@ class PlatformFL(Platform):
     # multi-node in particular).
     device_control_env_var: str = get_device_control_env_var(device_info.vendor_name)
 
+    @classmethod
+    def set_additional_forward_context(cls, *args, **kwargs):
+        if cls.vendor_name != "ascend":
+            return super().set_additional_forward_context(*args, **kwargs)
+        config = kwargs["vllm_config"]
+        if (
+            not config.parallel_config.enable_expert_parallel
+            or config.parallel_config.is_moe_model is False
+        ):
+            return {}
+        from vllm_fl.distributed.device_communicators.npu_moe_runtime import (
+            get_moe_runtime,
+        )
+        from vllm_fl.forward_context import get_forward_execution_facts
+
+        runtime = get_moe_runtime()
+        if runtime is None:
+            return {}
+        facts = get_forward_execution_facts()
+        if facts is None:
+            raise RuntimeError("A3 MoE forward must use the FL runner facts scope")
+        return {
+            "npu_moe": runtime.prepare_forward(
+                num_tokens=kwargs["num_tokens"],
+                num_actual_tokens=facts.num_actual_tokens,
+                dp_metadata=kwargs["dp_metadata"],
+                cudagraph_runtime_mode=kwargs["cudagraph_runtime_mode"],
+                in_profile_run=facts.in_profile_run,
+            )
+        }
+
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         if self.vendor_name == "iluvatar":
