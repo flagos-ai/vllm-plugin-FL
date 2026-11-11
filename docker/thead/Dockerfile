@@ -109,39 +109,102 @@ RUN --mount=type=bind,from=thead_wheels,target=/run/wheels,ro \
 
 # The +empty wheel above is installed with --no-deps so the vendor torch stays
 # in place, which leaves vLLM's own runtime requirements uninstalled. Derive
-# exactly those from the installed metadata, skipping the accelerator stack the
-# base image pins.
-RUN "$VENV/bin/python" -I -B - <<'PY' > /tmp/thead-vllm-deps.txt
+# exactly those from the installed metadata, skipping what the base image pins:
+# the accelerator stack, plus numpy (the system scipy is built against 1.x) and
+# opencv, which would drag numpy 2 in. xgrammar is split out too because it
+# depends on triton, and resolving that overwrites the FlagTree triton module.
+RUN "$VENV/bin/python" -I -B - <<'PY'
 import importlib.metadata as md
-from packaging.requirements import Requirement
 
-pinned = ("torch", "triton", "nvidia-", "flashinfer", "cuda-python", "xformers")
-installed = {
-    d.metadata["Name"].lower().replace("_", "-") for d in md.distributions()
-}
+from packaging.requirements import Requirement
+from packaging.version import Version
+
+pinned = (
+    "torch",
+    "triton",
+    "numpy",
+    "opencv-python-headless",
+    "nvidia-",
+    "flashinfer",
+    "cuda-python",
+    "xformers",
+)
+solved, no_deps = [], []
 for raw in md.requires("vllm") or []:
     req = Requirement(raw)
     if req.marker is not None and not req.marker.evaluate():
         continue
     name = req.name.lower().replace("_", "-")
-    if name in installed or name.startswith(pinned):
+    if name.startswith(pinned):
         continue
-    print(str(req))
+    try:
+        have = Version(md.version(req.name))
+    except md.PackageNotFoundError:
+        have = None
+    if have is not None and (not req.specifier or have in req.specifier):
+        continue
+    (no_deps if name == "xgrammar" else solved).append(str(req))
+
+open("/tmp/thead-vllm-deps.txt", "w").write("\n".join(solved) + "\n")
+open("/tmp/thead-vllm-nodeps.txt", "w").write("\n".join(no_deps) + "\n")
 PY
 
+# torch and numpy stay at the versions the vendor stack was built against;
+# the remaining dependencies resolve normally so packages such as pydantic
+# pick up a matching core.
 RUN "$VENV/bin/python" -I -B - <<'PY' > /tmp/thead-constraints.txt
 import importlib.metadata as md
 
-for name in ("torch", "triton"):
-    try:
-        print(f"{name}=={md.version(name)}")
-    except md.PackageNotFoundError:
-        pass
+for name in ("torch", "numpy"):
+    print(f"{name}=={md.version(name)}")
 PY
 
 RUN "$VENV/bin/python" -I -B -m pip install --no-cache-dir \
         -r /tmp/thead-vllm-deps.txt -c /tmp/thead-constraints.txt \
-    && rm -f /tmp/thead-vllm-deps.txt /tmp/thead-constraints.txt
+    && "$VENV/bin/python" -I -B -m pip install --no-cache-dir --no-deps \
+        -r /tmp/thead-vllm-nodeps.txt \
+    && rm -f /tmp/thead-vllm-deps.txt /tmp/thead-vllm-nodeps.txt \
+        /tmp/thead-constraints.txt
+
+# Fail the build rather than CI when a requirement is still unsatisfied or the
+# PyPI triton wheel replaced the FlagTree module.
+RUN "$VENV/bin/python" -I -B - <<'PY'
+import importlib.metadata as md
+
+from packaging.requirements import Requirement
+from packaging.version import Version
+
+pinned = (
+    "torch",
+    "triton",
+    "numpy",
+    "opencv-python-headless",
+    "nvidia-",
+    "flashinfer",
+    "cuda-python",
+    "xformers",
+)
+bad = []
+for raw in md.requires("vllm") or []:
+    req = Requirement(raw)
+    if req.marker is not None and not req.marker.evaluate():
+        continue
+    if req.name.lower().replace("_", "-").startswith(pinned):
+        continue
+    try:
+        have = Version(md.version(req.name))
+    except md.PackageNotFoundError:
+        have = None
+    if have is None or (req.specifier and have not in req.specifier):
+        bad.append(str(req))
+assert not bad, bad
+try:
+    md.version("triton")
+except md.PackageNotFoundError:
+    pass
+else:
+    raise AssertionError("PyPI triton replaced the FlagTree module")
+PY
 
 # The CI stack assertions in .github/scripts/thead/stack.py depend on these
 # exact versions and origins, so fail the build here rather than in CI.
