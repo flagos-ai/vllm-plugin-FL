@@ -75,9 +75,7 @@ def test_non_metax_offers_vllm_c_only_when_present(monkeypatch):
 
     # Extension present -> vllm_c offered; absent -> native only.
     captured = _capture_default(monkeypatch)
-    monkeypatch.setattr(
-        importlib.util, "find_spec", lambda name, *a, **k: object()
-    )
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a, **k: object())
     platform_mod.PlatformFL.get_default_ir_op_priority(_vllm_config())
     assert captured["default"] == ["vllm_c", "native"]
 
