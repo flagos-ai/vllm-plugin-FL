@@ -1,6 +1,7 @@
 """Execute the CI package gate without installing or importing device packages."""
 
 import os
+import runpy
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -20,11 +21,11 @@ VERSIONS = {
 
 
 def run_gate(vllm_version, **overrides):
-    script = (ROOT / ".github/scripts/enflame/setup.sh").read_text()
-    gate = script.split("python - <<'PY'\n", 1)[1].split("\nPY", 1)[0]
     versions = {**VERSIONS, "vllm": vllm_version, **overrides}
     with patch("importlib.metadata.version", side_effect=versions.__getitem__):
-        exec(compile(gate, "enflame-ci-version-gate", "exec"), {})
+        # Reload within the patch: the script imports the metadata function.
+        gate = runpy.run_path(str(ROOT / ".github/scripts/enflame/verify_stack.py"))
+        gate["verify_stack"]()
 
 
 def test_current_empty_release_passes():

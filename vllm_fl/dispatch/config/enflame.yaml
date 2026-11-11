@@ -9,13 +9,14 @@ op_backends:
     - vendor:gcu
     - flagos
     - reference
+  # Preserve the CUDA rounding contract through explicit vendor selection.
   rms_norm:
-    - flagos
     - vendor:gcu
+    - flagos
     - reference
   silu_and_mul:
-    - flagos
     - vendor:gcu
+    - flagos
     - reference
   rotary_embedding:
     - flagos

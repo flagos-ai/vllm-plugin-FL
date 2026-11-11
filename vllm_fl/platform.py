@@ -157,6 +157,7 @@ def _safe_device_type(device_info, vendor: str) -> str:
         logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
         return ""
 
+
 dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
@@ -468,9 +469,18 @@ class PlatformFL(Platform):
             additional = getattr(vllm_config, "additional_config", {})
             if not isinstance(additional, dict):
                 raise TypeError("Enflame additional_config must be a dictionary")
+            from vllm_fl.dispatch.backends.vendor.gcu.impl.inductor import (
+                gcu_codegen_mode,
+            )
+
+            mode = gcu_codegen_mode()
+            if "fl_gcu_codegen" in additional and additional["fl_gcu_codegen"] != mode:
+                raise ValueError(
+                    "additional_config.fl_gcu_codegen is reserved for the GCU backend"
+                )
             vllm_config.additional_config = {
                 **additional,
-                "fl_gcu_codegen": "preserve_dtype_v1",
+                "fl_gcu_codegen": mode,
             }
             from vllm_fl.attention.utils import patch_mm_encoder_attention
 

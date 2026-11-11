@@ -531,6 +531,11 @@ class AttentionGCUImpl(AttentionImpl):
         # For decoder and cross-attention, use KV cache as before
         # vLLM 0.32 binds a standardized (B, H, N, 2*D) cache view.
         # Vendor kernels consume separate (B, N, H, D) K/V views.
+        if kv_cache.ndim != 4 or kv_cache.shape[-1] != 2 * self.head_size:
+            raise ValueError(
+                "GCU attention requires a (B, H, N, 2*head_size) KV cache "
+                "with equal K/V head sizes"
+            )
         key_cache, value_cache = kv_cache.transpose(1, 2).split(self.head_size, dim=-1)
 
         if (

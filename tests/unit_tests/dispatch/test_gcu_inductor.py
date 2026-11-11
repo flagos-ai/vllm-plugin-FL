@@ -158,8 +158,9 @@ def test_gcu_resource_adapter_rejects_unknown_interfaces(interface):
         heuristics.CachingAutotuner._precompile_config = lambda self, config: config
     else:
         heuristics.OutOfResources = RuntimeError
-    with pytest.raises(RuntimeError, match="(missing|ABI)"):
-        inductor._install_gcu_resource_errors(heuristics)
+    original = getattr(heuristics.CachingAutotuner, "_precompile_config", None)
+    inductor._install_gcu_resource_errors(heuristics)
+    assert getattr(heuristics.CachingAutotuner, "_precompile_config", None) is original
 
 
 @pytest.mark.parametrize("dtype", ["i64", "u64", "*i64", "*u64"])

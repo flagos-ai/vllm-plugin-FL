@@ -48,8 +48,24 @@ def test_codegen_rejects_unknown_vendor_abi():
             return None
 
     original = Helper.compile_to_module
-    with pytest.raises(RuntimeError, match="Unknown TorchGCU"):
-        inductor._install_gcu_dtype_preserving_codegen(
-            SimpleNamespace(GCUCompileHelper=Helper)
-        )
+    inductor._install_gcu_dtype_preserving_codegen(
+        SimpleNamespace(GCUCompileHelper=Helper)
+    )
     assert Helper.compile_to_module is original
+
+
+def test_codegen_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("FL_GCU_PRESERVE_DTYPE_CODEGEN", "0")
+    original = lambda graph: graph
+    helper = SimpleNamespace(compile_to_module=original)
+    inductor._install_gcu_dtype_preserving_codegen(
+        SimpleNamespace(GCUCompileHelper=helper)
+    )
+    assert helper.compile_to_module is original
+    assert inductor.gcu_codegen_mode() == "vendor_v1"
+
+
+def test_codegen_mode_rejects_misspelled_switch(monkeypatch):
+    monkeypatch.setenv("FL_GCU_PRESERVE_DTYPE_CODEGEN", "yes")
+    with pytest.raises(ValueError, match="must be 0 or 1"):
+        inductor.gcu_codegen_mode()

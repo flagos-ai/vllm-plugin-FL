@@ -134,3 +134,20 @@ def test_other_vendor_does_not_change_additional_config(monkeypatch):
     simulate_platform(monkeypatch, "iluvatar")
     PlatformFL.check_and_update_config(config)
     assert config.additional_config == {"customer_option": 4}
+
+
+def test_codegen_cache_salt_respects_disabled_adapter(monkeypatch):
+    monkeypatch.setenv("FL_GCU_PRESERVE_DTYPE_CODEGEN", "0")
+    config = config_for_platform()
+    simulate_platform(monkeypatch, "enflame")
+    PlatformFL.check_and_update_config(config)
+    assert config.additional_config["fl_gcu_codegen"] == "vendor_v1"
+
+
+def test_codegen_cache_key_conflict_is_explicit(monkeypatch):
+    config = config_for_platform()
+    config.additional_config = {"fl_gcu_codegen": "customer"}
+    simulate_platform(monkeypatch, "enflame")
+    with pytest.raises(ValueError, match="reserved"):
+        PlatformFL.check_and_update_config(config)
+    assert config.additional_config == {"fl_gcu_codegen": "customer"}

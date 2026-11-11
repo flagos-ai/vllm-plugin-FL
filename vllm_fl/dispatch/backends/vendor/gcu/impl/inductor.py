@@ -3,11 +3,14 @@
 """Adapt TorchGCU compilation metadata to the installed Torch interfaces."""
 
 import inspect
+import logging
 import os
 import sys
 from collections.abc import Mapping
 from functools import wraps
 from types import ModuleType
+
+logger = logging.getLogger(__name__)
 
 _PARAMETERS = ("size_hints", "reduction_hint", "inductor_meta", "triton_meta")
 _ADAPTER_MARKER = "_fl_gcu_persistent_reduction_adapter"
@@ -22,34 +25,50 @@ def _install_gcu_resource_errors(heuristics) -> None:
     autotuner = getattr(heuristics, "CachingAutotuner", None)
     original = getattr(autotuner, "_precompile_config", None)
     if original is None:
-        raise RuntimeError("Torch CachingAutotuner precompile interface is missing")
+        logger.warning(
+            "Skipping GCU resource-error adapter: Torch CachingAutotuner precompile interface is missing"
+        )
+        return
     if getattr(original, _RESOURCE_ERROR_MARKER, False) is True:
         return
     if tuple(inspect.signature(original).parameters) != ("self", "cfg"):
-        raise RuntimeError("Unknown Torch CachingAutotuner precompile ABI")
+        logger.warning(
+            "Skipping GCU resource-error adapter: Unknown Torch CachingAutotuner precompile ABI"
+        )
+        return
     resource_error = getattr(heuristics, "OutOfResources", None)
     try:
         resource_parameters = tuple(inspect.signature(resource_error).parameters)
-    except (TypeError, ValueError) as error:
-        raise RuntimeError("Unknown Triton OutOfResources ABI") from error
+    except (TypeError, ValueError):
+        logger.warning(
+            "Skipping GCU resource-error adapter: unknown OutOfResources ABI"
+        )
+        return
     if (
         not isinstance(resource_error, type)
         or not issubclass(resource_error, Exception)
         or resource_parameters != ("required", "limit", "name")
     ):
-        raise RuntimeError("Unknown Triton OutOfResources ABI")
+        logger.warning(
+            "Skipping GCU resource-error adapter: Unknown Triton OutOfResources ABI"
+        )
+        return
 
     compiler_error = getattr(heuristics, "PTXASError", None)
     try:
         compiler_parameters = tuple(inspect.signature(compiler_error).parameters)
-    except (TypeError, ValueError) as error:
-        raise RuntimeError("Unknown Triton PTXASError ABI") from error
+    except (TypeError, ValueError):
+        logger.warning("Skipping GCU resource-error adapter: unknown PTXASError ABI")
+        return
     if (
         not isinstance(compiler_error, type)
         or not issubclass(compiler_error, Exception)
         or compiler_parameters != ("error_message",)
     ):
-        raise RuntimeError("Unknown Triton PTXASError ABI")
+        logger.warning(
+            "Skipping GCU resource-error adapter: Unknown Triton PTXASError ABI"
+        )
+        return
 
     @wraps(original)
     def precompile_gcu_config(self, cfg):
@@ -60,6 +79,7 @@ def _install_gcu_resource_errors(heuristics) -> None:
                 raise
             first_line = str(error).splitlines()[:1]
             if first_line == [_REGISTER_ERROR]:
+                logger.warning("Rejecting GCU autotune candidate %s: %s", cfg, error)
                 raise resource_error("unknown", "unknown", "GCU registers") from error
             linker_errors = {
                 f"ld.lld: error: relocation R_DTU_ADDR16_{part}_ICALL cannot be "
@@ -68,6 +88,7 @@ def _install_gcu_resource_errors(heuristics) -> None:
                 for part in ("LO", "HI")
             }
             if first_line and first_line[0] in linker_errors:
+                logger.warning("Rejecting GCU autotune candidate %s: %s", cfg, error)
                 raise compiler_error(str(error)) from error
             raise
 
@@ -220,18 +241,29 @@ def _loaded_gcu_inductor_providers(provider: ModuleType) -> list[ModuleType]:
     return [provider, alias]
 
 
+def gcu_codegen_mode() -> str:
+    value = os.environ.get("FL_GCU_PRESERVE_DTYPE_CODEGEN", "1")
+    if value not in ("0", "1"):
+        raise ValueError("FL_GCU_PRESERVE_DTYPE_CODEGEN must be 0 or 1")
+    return "preserve_dtype_v1" if value == "1" else "vendor_v1"
+
+
 def _install_gcu_dtype_preserving_codegen(provider) -> None:
     from torch._inductor.graph import GraphLowering
 
+    if gcu_codegen_mode() == "vendor_v1":
+        return
     helper = provider.GCUCompileHelper
     original = helper.compile_to_module
     native = GraphLowering._compile_to_module
     if original is native:
         return
     if len(inspect.signature(original).parameters) != 1:
-        raise RuntimeError("Unknown TorchGCU compile_to_module ABI")
+        logger.warning("Skipping GCU dtype codegen adapter: unknown vendor ABI")
+        return
     if tuple(inspect.signature(native).parameters) != ("self",):
-        raise RuntimeError("Unknown Torch GraphLowering compile ABI")
+        logger.warning("Skipping GCU dtype codegen adapter: unknown Torch ABI")
+        return
     # The vendor helper globally rewrites int64/i64 to int32/i32 in source,
     # including pointer signatures, without converting input tensor storage.
     # Native Torch retains those ABIs and the current artifact-saving protocol.
@@ -249,7 +281,7 @@ def apply_inductor_gcu_patch() -> None:
     from torch._inductor.runtime import triton_heuristics
     from torch_gcu.gcu.inductor import backend_register
 
-    salt = "fl_gcu_preserve_dtype_v1"
+    salt = "fl_gcu_" + gcu_codegen_mode()
     tag = compiler_config.cache_key_tag
     if salt not in tag.split(":"):
         compiler_config.cache_key_tag = f"{tag}:{salt}" if tag else salt

@@ -208,3 +208,17 @@ def test_ascend_910c_caps_offline_profile_batch():
         cfg.serve_args()[cfg.serve_args().index("--max-num-batched-tokens") + 1]
         == "4096"
     )
+
+
+def test_enflame_ci_does_not_mask_known_failures_or_expand_defaults():
+    from tests.utils.platform_config import PlatformConfig
+
+    config = PlatformConfig.load("enflame", device="s60")
+    assert "TORCHINDUCTOR_EMULATE_PRECISION_CASTS" not in config.env_defaults
+    overrides = config.get_device_case_overrides("qwen3_6", "35b_a3b_tp2_graph")
+    assert overrides["llm"]["gpu_memory_utilization"] == 0.90
+    assert "serve" not in overrides
+    for phase in ("pr", "nightly"):
+        tasks = config.device_tests["s60"]["tests"]["e2e"][phase]
+        for families in tasks.values():
+            assert "35b_a3b_tp2_eager" not in families.get("qwen3_6", [])

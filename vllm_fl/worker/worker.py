@@ -698,7 +698,7 @@ class WorkerFL(WorkerBase):
                     GPUModelRunner as GPUModelRunnerV2,
                 )
 
-            # HACK(woosuk): This is a temporary fix to avoid type errors.
+            # V2 and encoder-only runners share the worker execution contract.
             return GPUModelRunnerV2(self.vllm_config, self.device)  # type: ignore
         from vllm_fl.worker.model_runner import ModelRunnerFL as GPUModelRunnerV1
 

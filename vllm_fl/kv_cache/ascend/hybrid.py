@@ -118,6 +118,9 @@ def allocate_dense_hybrid_cache(
     }
     caches = {}
     for tensor in config.kv_cache_tensors:
+        # A tensor may pack multiple layers. layer_stride separates their
+        # ranges; block_stride must equal the page size because the dense
+        # views below cannot represent padded or host-resident pages.
         num_blocks = config.num_blocks_of(tensor)
         for layer_index, name in enumerate(tensor.layers):
             group = groups[name]
