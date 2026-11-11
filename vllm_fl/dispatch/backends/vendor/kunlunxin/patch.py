@@ -140,6 +140,11 @@ def _apply_legacy_kunlunxin_patches():
     )
     apply_postprocess_mamba_compat()
 
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat import (
+        apply_vl_compat,
+    )
+    apply_vl_compat()
+
 
 def _install_graph_patch(owner, name, replacement, replacements):
     if replacements is None:
