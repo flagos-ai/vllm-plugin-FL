@@ -123,9 +123,7 @@ def test_rewritten_kernel_keeps_the_upstream_signature(fake_block_table, stub_tr
     module, _ = fake_block_table
     block_table_compat.apply_block_table_compat()
 
-    params = list(
-        inspect.signature(module._compute_slot_mappings_kernel).parameters
-    )
+    params = list(inspect.signature(module._compute_slot_mappings_kernel).parameters)
     assert params == [
         "max_num_tokens",
         "idx_mapping",
