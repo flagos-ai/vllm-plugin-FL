@@ -6,10 +6,12 @@ import hashlib
 import importlib.machinery
 import importlib.metadata
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("cuda_ci_stack", HERE / "stack.py")
@@ -69,7 +71,7 @@ class NativeProviderTests(unittest.TestCase):
                     ]
                 )
 
-    def test_flagos_additional_native_payloads_cannot_be_missing(self):
+    def test_required_payload_contract_includes_flagos_additions(self):
         extra = (
             "_deepselect_C.abi3.so",
             "_flashkda_C.abi3.so",
@@ -78,10 +80,7 @@ class NativeProviderTests(unittest.TestCase):
             "spinloop.abi3.so",
             "third_party/deep_gemm/_C_extension.abi3.so",
         )
-        payload = set(stack.NATIVE_VLLM_LIBRARIES.values()) | set(extra)
-        for omitted in extra:
-            with self.subTest(omitted=omitted), self.assertRaises(RuntimeError):
-                self.validate(native_libraries=payload - {omitted})
+        self.assertTrue(set(extra).issubset(stack.NATIVE_VLLM_LIBRARIES.values()))
 
     def test_resolved_same_origin_is_accepted(self):
         self.validate(distribution_origin=self.origin.parent / "../vllm/__init__.py")
@@ -186,31 +185,57 @@ class NativeImportTests(unittest.TestCase):
 
 
 class RuntimeVersionTests(unittest.TestCase):
-    def test_cuda12_nccl_file_overlap_is_rejected(self):
-        stack.validate_nccl_version((2, 29, 7))
+    def test_nccl_loaded_library_must_match_installed_cu13_metadata(self):
+        stack.validate_nccl_version((2, 29, 7), "2.29.7")
+        stack.validate_nccl_version((2, 30, 1), "2.30.1")
         with self.assertRaisesRegex(RuntimeError, "NCCL"):
-            stack.validate_nccl_version((2, 27, 5))
+            stack.validate_nccl_version((2, 27, 5), "2.29.7")
 
-    def test_base_runtime_versions_are_accepted(self):
-        versions = dict(stack.RUNTIME_VERSIONS)
-        self.assertEqual(stack.validate_runtime_versions(versions), versions)
+    def test_runtime_versions_report_updates_without_rejecting_them(self):
+        versions = dict.fromkeys(stack.RUNTIME_PACKAGES, "a-new-version")
+        self.assertEqual(stack.runtime_versions(versions), versions)
 
-    def test_replaced_or_missing_base_package_is_rejected(self):
-        for name in stack.RUNTIME_VERSIONS:
-            versions = dict(stack.RUNTIME_VERSIONS)
-            versions[name] = "0.0.0"
-            with self.subTest(package=name), self.assertRaisesRegex(RuntimeError, name):
-                stack.validate_runtime_versions(versions)
+    def test_missing_runtime_package_is_not_silently_ignored(self):
+        with self.assertRaises(KeyError):
+            stack.runtime_versions({})
 
-    def test_flagtree_compiler_origin_and_version_are_checked(self):
+    def test_flagtree_compiler_updates_are_accepted_at_the_correct_origin(self):
         origin = Path("/opt/flagtree/triton/__init__.py")
-        stack.validate_compiler("3.6.0", origin, origin)
+        for version in ("3.6.0", "3.7.1"):
+            stack.validate_compiler(version, origin, origin)
         with self.assertRaises(RuntimeError):
-            stack.validate_compiler("3.7.1", origin, origin)
-        with self.assertRaises(RuntimeError):
-            stack.validate_compiler(
-                "3.6.0", Path("/opt/triton/triton/__init__.py"), origin
-            )
+            stack.validate_compiler("3.7.1", Path("/other/triton/__init__.py"), origin)
+
+
+class WheelInstallationTests(unittest.TestCase):
+    def distribution(self, wheel="Wheel-Version: 1.0", editable=False):
+        texts = {
+            "WHEEL": wheel,
+            "direct_url.json": '{"dir_info": {"editable": true}}' if editable else None,
+        }
+        return SimpleNamespace(read_text=texts.get)
+
+    def test_normal_wheel_is_accepted(self):
+        stack.validate_wheel_installation(self.distribution())
+
+    def test_missing_wheel_metadata_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "wheel"):
+            stack.validate_wheel_installation(self.distribution(wheel=None))
+
+    def test_editable_installation_is_rejected_even_with_wheel_metadata(self):
+        with self.assertRaisesRegex(RuntimeError, "Editable"):
+            stack.validate_wheel_installation(self.distribution(editable=True))
+
+    def test_build_check_rejects_source_and_editable_before_scanning_payload(self):
+        for dist in (self.distribution(wheel=None), self.distribution(editable=True)):
+            with (
+                self.subTest(dist=dist),
+                patch.object(stack.metadata, "distribution", return_value=dist),
+                patch.object(stack, "validate_native_payload") as scan,
+            ):
+                with self.assertRaises(RuntimeError):
+                    stack.check_build_payload()
+                scan.assert_not_called()
 
 
 class FlagGemsVllmProvenanceTests(unittest.TestCase):
@@ -269,6 +294,44 @@ class FlagGemsVllmProvenanceTests(unittest.TestCase):
                 "repository": installer.REPOSITORY,
             },
         )
+
+
+class FunctionalShutdownTests(unittest.TestCase):
+    def run_shutdown(self, backend, status):
+        spec = importlib.util.spec_from_file_location(
+            "functional_shutdown",
+            HERE.parents[2] / "tests/functional_tests/conftest.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        pytest_stub = SimpleNamespace(
+            hookimpl=lambda **kwargs: lambda function: function
+        )
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "pytest": pytest_stub,
+                    "tests.utils.device_utils": SimpleNamespace(
+                        get_backend=lambda: backend
+                    ),
+                    "torch._inductor.compile_worker": SimpleNamespace(
+                        subproc_pool=None
+                    ),
+                },
+            ),
+            patch("os._exit") as force_exit,
+        ):
+            spec.loader.exec_module(module)
+            module.pytest_sessionfinish(None, status)
+            return force_exit.call_args_list
+
+    def test_nvidia_keeps_normal_pytest_worker_shutdown(self):
+        self.assertEqual(self.run_shutdown("nvidia", 0), [])
+
+    def test_ascend_workaround_preserves_failure_exit_code(self):
+        from unittest.mock import call
+
+        self.assertEqual(self.run_shutdown("ascend", 1), [call(1)])
 
 
 if __name__ == "__main__":

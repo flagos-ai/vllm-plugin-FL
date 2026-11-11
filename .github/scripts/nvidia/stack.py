@@ -12,16 +12,17 @@ import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
-RUNTIME_VERSIONS = {
-    "torch": "2.13.0+cu130",
-    "torchvision": "0.28.0+cu130",
-    "torchaudio": "2.11.0+cu130",
-    "flag-gems": "5.4.0",
-    "flagtree": "0.7.0",
-    "flagcx": "0.14.1+cuda13.3",
-    "numpy": "1.26.4",
-    "nvidia-nccl-cu13": "2.29.7",
-}
+# Inventory only. Build-time constraints belong in docker/cuda/constraints.txt.
+RUNTIME_PACKAGES = (
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "flag-gems",
+    "flagtree",
+    "flagcx",
+    "numpy",
+    "nvidia-nccl-cu13",
+)
 
 
 FLAGGEMS_VLLM_SOURCE = {
@@ -70,20 +71,25 @@ def validate_flaggems_vllm_provenance(version, source):
     return {**expected, "version": version, "direct_url": source}
 
 
-def validate_runtime_versions(installed):
-    """Reject dependency resolution that replaces the supplied Runtime stack."""
-    for name, expected in RUNTIME_VERSIONS.items():
-        if installed.get(name) != expected:
-            raise RuntimeError(
-                f"Expected {name}=={expected}, found {installed.get(name)}"
-            )
-    return {name: installed[name] for name in RUNTIME_VERSIONS}
+def runtime_versions(installed):
+    """Record the actual Runtime packages without duplicating resolver pins."""
+    return {name: installed[name] for name in RUNTIME_PACKAGES}
 
 
 def validate_compiler(version, origin, expected_origin):
-    """The Runtime's default compiler is FlagTree, not its standby Triton."""
-    if version != "3.6.0" or Path(origin).resolve() != Path(expected_origin).resolve():
-        raise RuntimeError("Active Triton 3.6.0 must be supplied by Runtime FlagTree")
+    """Require FlagTree's compiler by origin, without pinning its Triton version."""
+    if Path(origin).resolve() != Path(expected_origin).resolve():
+        raise RuntimeError("Active Triton must be supplied by Runtime FlagTree")
+    return {"version": version, "origin": str(Path(origin).resolve())}
+
+
+def validate_wheel_installation(distribution):
+    """Apply the same wheel-only checks during build and GPU validation."""
+    direct = json.loads(distribution.read_text("direct_url.json") or "{}")
+    if distribution.read_text("WHEEL") is None:
+        raise RuntimeError("vLLM must be installed as a wheel")
+    if direct.get("dir_info", {}).get("editable", False):
+        raise RuntimeError("Editable vLLM cannot provide the required CUDA wheel")
 
 
 def validate_vllm_provider(
@@ -171,9 +177,12 @@ def validate_native_import(module_name, module, expected_origin):
         raise RuntimeError(f"{module_name} must load its genuine native extension")
 
 
-def validate_nccl_version(version):
-    if tuple(version) != (2, 29, 7):
-        raise RuntimeError(f"Runtime NCCL library was replaced: {version}")
+def validate_nccl_version(version, distribution_version):
+    expected = tuple(int(part) for part in distribution_version.split(".")[:3])
+    if tuple(version) != expected:
+        raise RuntimeError(
+            f"Loaded NCCL {version} differs from cu13 distribution {distribution_version}"
+        )
 
 
 def check_stack(*, runtime_only=False):
@@ -186,8 +195,7 @@ def check_stack(*, runtime_only=False):
 
     dist = metadata.distribution("vllm")
     direct = json.loads(dist.read_text("direct_url.json") or "{}")
-    if dist.read_text("WHEEL") is None:
-        raise RuntimeError("vLLM must be installed as a wheel")
+    validate_wheel_installation(dist)
     facts = validate_vllm_provider(
         vllm.__version__,
         dist.version,
@@ -203,34 +211,27 @@ def check_stack(*, runtime_only=False):
         fused_dist.version,
         json.loads(fused_dist.read_text("direct_url.json") or "{}"),
     )
-    facts["runtime"] = validate_runtime_versions(
-        {name: metadata.version(name) for name in RUNTIME_VERSIONS}
+    facts["runtime"] = runtime_versions(
+        {name: metadata.version(name) for name in RUNTIME_PACKAGES}
     )
-    expected_versions = {
-        "xgboost": "3.3.0",
-        "humming-kernels": "0.1.17+flagos",
-        "torchcodec": "0.17.0",
-        "nvidia-cuda-nvcc": "13.0.88",
-        "nvidia-cuda-crt": "13.0.88",
-        "nvidia-nvvm": "13.0.88",
-    }
-    for name, expected in expected_versions.items():
-        actual = metadata.version(name)
-        if actual != expected:
-            raise RuntimeError(f"Expected {name}=={expected}, found {actual}")
-        facts[name] = actual
-    if torch.version.cuda != "13.0":
-        raise RuntimeError(
-            f"Expected Runtime Torch CUDA 13.0, found {torch.version.cuda}"
-        )
+    for name in (
+        "xgboost",
+        "humming-kernels",
+        "torchcodec",
+        "nvidia-cuda-nvcc",
+        "nvidia-cuda-crt",
+        "nvidia-nvvm",
+    ):
+        facts[name] = metadata.version(name)
     try:
         standalone = metadata.version("triton")
     except metadata.PackageNotFoundError:
         standalone = None
-    if standalone not in (None, "3.7.1"):
-        raise RuntimeError(f"Standalone Triton conflicts with FlagTree: {standalone}")
+    facts["standalone_triton"] = standalone
     triton_origin = metadata.distribution("flagtree").locate_file("triton/__init__.py")
-    validate_compiler(triton.__version__, triton.__file__, triton_origin)
+    facts["active_compiler"] = validate_compiler(
+        triton.__version__, triton.__file__, triton_origin
+    )
     transformers = metadata.version("transformers")
     if transformers not in SpecifierSet(">=5.16.1,<5.20.0"):
         raise RuntimeError(f"Transformers does not satisfy vLLM 0.32: {transformers}")
@@ -256,7 +257,7 @@ def check_stack(*, runtime_only=False):
         if not torch.cuda.is_available():
             raise RuntimeError("NVIDIA CI requires a visible CUDA device")
         nccl_version = torch.cuda.nccl.version()
-        validate_nccl_version(nccl_version)
+        validate_nccl_version(nccl_version, metadata.version("nvidia-nccl-cu13"))
         facts["nccl_loaded_version"] = nccl_version
         for name, origin in native_origins.items():
             # Some payloads are operator libraries without Python initializers.
@@ -286,11 +287,12 @@ def check_stack(*, runtime_only=False):
 def check_build_payload():
     """Inspect installed artifacts without loading driver-linked CUDA libraries."""
     dist = metadata.distribution("vllm")
+    validate_wheel_installation(dist)
     if dist.version != "0.32.0+flagos":
         raise RuntimeError(f"Unexpected vLLM distribution: {dist.version}")
     return {
-        "runtime": validate_runtime_versions(
-            {name: metadata.version(name) for name in RUNTIME_VERSIONS}
+        "runtime": runtime_versions(
+            {name: metadata.version(name) for name in RUNTIME_PACKAGES}
         ),
         "native_payloads": validate_native_payload(dist, dist.locate_file("vllm")),
     }

@@ -28,6 +28,11 @@ def pytest_sessionfinish(session, exitstatus):
     It also drains any residual inductor SubprocPool whose _read_thread could
     segfault when the subprocess pipe breaks during NPU teardown.
     """
+    from tests.utils.device_utils import get_backend
+
+    if get_backend() != "ascend":
+        return
+
     import contextlib
     import os
     import threading
