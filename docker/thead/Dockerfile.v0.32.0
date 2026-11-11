@@ -4,14 +4,27 @@ FROM harbor.baai.ac.cn/flagos-runtime/flagos-runtime-thead-ppu2.1.0:2.3.0@sha256
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_CONFIG_FILE=/dev/null \
-    UV_HTTP_TIMEOUT=120 \
-    UV_LINK_MODE=copy
+    PIP_CONFIG_FILE=/dev/null
 
-COPY docker/thead/requirements.lock /opt/fl-ci/requirements.lock
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /flagos/bin/python --no-deps --require-hashes \
-        -r /opt/fl-ci/requirements.lock \
+ARG INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+ARG EXTRA_INDEX_URL
+ARG FLAGOS_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-thead/simple
+
+COPY docker/thead/constraints.txt docker/thead/requirements-ci.txt /opt/fl-ci/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    mkdir -p /tmp/thead-wheels \
+    && /flagos/bin/python -m pip --isolated download --no-deps \
+        --index-url "${FLAGOS_INDEX_URL}" --dest /tmp/thead-wheels 'vllm==0.32.0+flagos' \
+    && cd /tmp/thead-wheels \
+    && echo '445821b41d2494c595a89bc476bdbcf18d70e9c1e78ab5b60b587f5c0454580d  vllm-0.32.0+flagos-py3-none-any.whl' > /opt/fl-ci/vllm-wheel.sha256 \
+    && sha256sum -c /opt/fl-ci/vllm-wheel.sha256 \
+    && /flagos/bin/python -m pip --isolated install --only-binary=:all: \
+        --index-url "${INDEX_URL}" --extra-index-url "${FLAGOS_INDEX_URL}" \
+        ${EXTRA_INDEX_URL:+--extra-index-url "${EXTRA_INDEX_URL}"} \
+        --constraint /opt/fl-ci/constraints.txt --requirement /opt/fl-ci/requirements-ci.txt \
+        --report /opt/fl-ci/runtime-install.json \
+        'vllm[audio] @ file:///tmp/thead-wheels/vllm-0.32.0+flagos-py3-none-any.whl' \
+    && cd / && rm -rf /tmp/thead-wheels \
     && /flagos/bin/python -m pip check \
     && /flagos/bin/python -c 'import torch, torchvision, flash_attn_3._C; assert torchvision.extension._has_ops()'
 
@@ -23,12 +36,13 @@ ARG PLUGIN_SOURCE_SHA
 ENV VLLM_VENDOR=""
 WORKDIR /src
 COPY plugin/ ./
+# Reuse the Runtime build toolchain and vendor Torch while building the FL wheel.
 RUN [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] \
     && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="0.5.0.dev0+g${PLUGIN_SOURCE_SHA:0:12}" \
-       /flagos/bin/python -m pip wheel --no-deps --no-index --no-build-isolation \
+       /flagos/bin/python -m pip wheel --no-deps --no-build-isolation \
            --wheel-dir /wheels .
 
-FROM runtime AS inference
+FROM runtime AS ci
 ARG BUILD_SOURCE_SHA
 ARG PLUGIN_SOURCE_SHA
 LABEL org.opencontainers.image.revision="${BUILD_SOURCE_SHA}" \
@@ -46,7 +60,6 @@ RUN --mount=type=bind,from=plugin-wheel,source=/wheels,target=/wheels \
 ENV VLLM_PLUGINS=fl \
     VLLM_TARGET_DEVICE=empty \
     VLLM_VENDOR="" \
-    VLLM_USE_V2_MODEL_RUNNER=0 \
     VLLM_WORKER_MULTIPROC_METHOD=spawn \
     TORCH_DEVICE_BACKEND_AUTOLOAD=1 \
     GEMS_VENDOR=thead \

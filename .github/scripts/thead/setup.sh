@@ -1,7 +1,6 @@
 #!/bin/bash
 # Copyright 2026 FlagOS Contributors
-# The managed image supplies the fixed SDK/Torch/empty-vLLM/Gems/Tree stack
-# and runtime/test/build dependencies. Never resolve upstream Torch 2.13.
+# The managed image supplies the fixed PPU runtime and build dependencies.
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd -- "$HERE/../../.." && pwd)"
@@ -23,7 +22,8 @@ export TORCH_DEVICE_BACKEND_AUTOLOAD=1
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_VENDOR="" VLLM_TARGET_DEVICE=empty
 export VLLM_PLUGINS=fl GEMS_VENDOR=thead USE_FLAGGEMS=1
-unset FL_BACKEND PYTHONPATH PYTHONHOME
+# The Runtime sets PYTHONPATH to its active FlagTree compiler.
+unset FL_BACKEND PYTHONHOME
 export HOME="$WORK/home" XDG_CACHE_HOME="$WORK/cache"
 export FLAGGEMS_CACHE_DIR="$WORK/cache/flaggems" TRITON_CACHE_DIR="$WORK/cache/triton"
 export HF_HOME="$WORK/cache/huggingface"
@@ -64,6 +64,17 @@ if site.resolve() == base:
     raise RuntimeError("CI child venv was not created")
 (site / "00_thead_image_site.pth").write_text(str(base) + "\n")
 PY
+
+# The image's vLLM console script uses the base interpreter. Serving tests
+# must resolve the same plugin wheel as the Python API in the child venv.
+cat > "$VIRTUAL_ENV/bin/vllm" <<EOF
+#!$PY
+from vllm.entrypoints.cli.main import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+EOF
+chmod +x "$VIRTUAL_ENV/bin/vllm"
 
 # Build and install an ordinary wheel of this checkout in the fresh venv only.
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir wheel \
@@ -109,7 +120,7 @@ PY
   "pytest-cov>=7.0.0" \
   "pytest-json-report>=1.5.0"
 "$PY" -I -B "$HERE/../install_flaggems_vllm.py"
-"$PY" -I -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
+"$PY" -P -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   for name in THEAD_CI_WORK_DIR THEAD_CI_PYTHON VIRTUAL_ENV PATH HOME XDG_CACHE_HOME \
     FLAGGEMS_CACHE_DIR TRITON_CACHE_DIR HF_HOME TMPDIR PIP_CONFIG_FILE \

@@ -1,0 +1,6 @@
+# Keep the ABI and compiler stack supplied by the pinned FlagOS Runtime.
+torch==2.10.0+v0.1.0.ppu2.1.1
+numpy==1.26.4
+flagtree==0.7.0+ppu3.6
+triton==3.6.0
+flag-gems==5.4.0

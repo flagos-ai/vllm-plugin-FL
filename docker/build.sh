@@ -96,7 +96,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, kunlunxin, thead (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -186,6 +186,9 @@ EXAMPLES:
     # Build Kunlunxin CI image
     ./build.sh --platform kunlunxin --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
 
+    # Build the T-Head PPU inference/CI image from committed sources
+    ./build.sh --platform thead --target ci
+
     # Build with custom PyPI mirror
     ./build.sh --target dev --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
@@ -240,6 +243,9 @@ BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
     DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.ci"
+elif [[ "${PLATFORM}" == "thead" ]]; then
+    [[ "${TARGET}" == "ci" ]] || err "T-Head supports only --target ci."
+    DOCKERFILE="${SCRIPT_DIR}/thead/Dockerfile.v0.32.0"
 fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
@@ -389,8 +395,36 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-ci"
     fi
+elif [[ "${PLATFORM}" == "thead" ]]; then
+    VLLM_VERSION="0.32.0"
+    REPO="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)"
+    BUILD_SOURCE_SHA="$(git -C "${REPO}" rev-parse --verify HEAD)"
+    PLUGIN_SOURCE_SHA="$(git -C "${REPO}" show "${BUILD_SOURCE_SHA}:docker/thead/plugin-source.ref")"
+    [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || err "T-Head plugin-source.ref must contain a full commit SHA."
+    if ! git -C "${REPO}" cat-file -e "${PLUGIN_SOURCE_SHA}^{commit}"; then
+        git -C "${REPO}" fetch --no-tags https://github.com/flagos-ai/vllm-plugin-FL.git "${PLUGIN_SOURCE_SHA}"
+    fi
+    BUILD_CONTEXT="$(mktemp -d)"
+    trap 'rm -rf -- "${BUILD_CONTEXT}"' EXIT
+    mkdir "${BUILD_CONTEXT}/plugin"
+    git -C "${REPO}" archive "${BUILD_SOURCE_SHA}" docker/thead .github/scripts/install_flaggems_vllm.py \
+        | tar -x -C "${BUILD_CONTEXT}"
+    git -C "${REPO}" archive "${PLUGIN_SOURCE_SHA}" pyproject.toml setup.py README.md LICENSE vllm_fl \
+        | tar -x -C "${BUILD_CONTEXT}/plugin"
+    DOCKERFILE="${BUILD_CONTEXT}/docker/thead/Dockerfile.v0.32.0"
+    BUILD_ARGS+=(
+        --platform linux/amd64
+        --build-arg "BUILD_SOURCE_SHA=${BUILD_SOURCE_SHA}"
+        --build-arg "PLUGIN_SOURCE_SHA=${PLUGIN_SOURCE_SHA}"
+    )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
+    IMAGE_TAG="${IMAGE_TAG:-v${VLLM_VERSION}-thead-ci}"
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', or 'kunlunxin'."
+    err "Unknown platform '${PLATFORM}'. See --help for supported platforms."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -432,8 +466,11 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     msg "  FlagGems:       ${KUNLUNXIN_FLAGGEMS_REF}"
     msg "  FlagCX:         ${KUNLUNXIN_FLAGCX_REF}"
     msg "  Plugin:         ${KUNLUNXIN_PLUGIN_FL_REF}"
+elif [[ "${PLATFORM}" == "thead" ]]; then
+    msg "  Build source:   ${BUILD_SOURCE_SHA}"
+    msg "  Plugin source:  ${PLUGIN_SOURCE_SHA}"
 fi
-if [[ "${PLATFORM}" != "ascend" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
+if [[ "${PLATFORM}" != "ascend" && "${PLATFORM}" != "thead" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"
     msg "  Python:         ${PYTHON_VERSION}"
 fi

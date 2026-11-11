@@ -83,11 +83,11 @@ def validate_vllm_provider(
 def check_stack():
     # Preserve the ordinary import order used for the verified vendor stack.
     torch = importlib.import_module("torch")
-    vllm = importlib.import_module("vllm")
-    triton_utils = importlib.import_module("vllm.triton_utils")
     vllm_fl = importlib.import_module("vllm_fl")
-    WorkerFL = importlib.import_module("vllm_fl.worker.worker").WorkerFL
+    vllm = importlib.import_module("vllm")
     current_platform = importlib.import_module("vllm.platforms").current_platform
+    triton_utils = importlib.import_module("vllm.triton_utils")
+    WorkerFL = importlib.import_module("vllm_fl.worker.worker").WorkerFL
     flag_gems = importlib.import_module("flag_gems")
     triton = importlib.import_module("triton")
 
@@ -150,7 +150,6 @@ def check_stack():
         "normal_import_only": True,
         "python_prefix": sys.prefix,
         "plugin_install": "ordinary wheel in isolated CI venv",
-        "upstream_declared_torch_2_13_requirement_satisfied": False,
     }
 
 

@@ -1,0 +1,16 @@
+# Native PPU attention extension and the Torch 2.10-compatible CPU vision wheel.
+flash-attn-3==2.8.2+v0.1.0.ppu2.1.1
+torchvision @ https://download-r2.pytorch.org/whl/cpu/torchvision-0.25.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=c1be164e93c68b2dbf460fd58975377c892dbcf3358fb72941709c3857351bba
+
+# FL and FlagGems-vllm build tools and FL test entry points.
+setuptools-scm>=8
+wheel
+pybind11
+sqlalchemy
+decorator
+modelscope
+pytest
+pytest-cov>=7
+pytest-json-report>=1.5
+pytest-timeout
+pytest-xdist>=3
