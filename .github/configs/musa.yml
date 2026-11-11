@@ -23,6 +23,13 @@ ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:8147137
 runner_labels:
   - mt-cicd-vllm-plugin
 
+# _platform_test.yml derives the reusable unit-workflow matrix from this list.
+# Leaving it unset yields an empty matrix: GitHub then creates no unit job but
+# marks the whole called workflow as failed, which turns ci-gate red even
+# though every real job passed. MUSA only has s5000, so this leg runs the same
+# device as the default unit pass inside the functional job.
+unit_devices: [s5000]
+
 container_volumes:
   - /data:/data:ro
 
