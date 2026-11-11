@@ -361,6 +361,69 @@ def _make_prepare_prefill_inputs_torch():
     return prepare_prefill_inputs_torch
 
 
+def _make_combine_sampled_and_draft_tokens_torch():
+    """Pure-torch replacement for combine_sampled_and_draft_tokens.
+
+    _combine_sampled_and_draft_tokens_kernel JIT-compiles on FlagTree during
+    the first concurrent image+text batch and silently writes wrong tokens to
+    input_ids for some requests, producing ' senare' as a first decode token.
+    The torch loop is semantically identical to the kernel.
+    """
+    import torch
+
+    def combine_sampled_and_draft_tokens_torch(
+        input_ids,
+        idx_mapping,
+        last_sampled_tokens,
+        query_start_loc,
+        seq_lens,
+        prefill_len,
+        draft_tokens,
+        cu_num_logits,
+        num_logits,
+        num_new_sampled_tokens=1,
+    ):
+        num_reqs = idx_mapping.shape[0]
+        logits_indices = torch.empty(
+            num_logits, dtype=torch.int64, device=input_ids.device
+        )
+        num_speculative_steps = draft_tokens.shape[-1]
+
+        for batch_idx in range(num_reqs):
+            req_state_idx = idx_mapping[batch_idx].item()
+            cu_start = cu_num_logits[batch_idx].item()
+            cu_end = cu_num_logits[batch_idx + 1].item()
+            n_logits = cu_end - cu_start
+            n_draft = n_logits - num_new_sampled_tokens
+
+            query_end = query_start_loc[batch_idx + 1].item()
+            logits_start = query_end - n_logits
+
+            # Fill logits_indices
+            for k in range(n_logits):
+                logits_indices[cu_start + k] = logits_start + k
+
+            sl = seq_lens[batch_idx].item()
+            pl = prefill_len[req_state_idx].item()
+            active = sl > pl
+
+            # Write sampled token back to input_ids (decode step only)
+            if num_new_sampled_tokens > 0 and active:
+                if (sl - n_logits) >= pl:
+                    input_ids[logits_start] = last_sampled_tokens[req_state_idx]
+
+            # Write draft tokens
+            if n_draft > 0 and active:
+                for di in range(n_draft):
+                    input_ids[query_end - n_draft + di] = draft_tokens[
+                        req_state_idx, di
+                    ]
+
+        return logits_indices
+
+    return combine_sampled_and_draft_tokens_torch
+
+
 def apply_input_batch_compat() -> None:
     """Swap in a single-exit token combiner that FlagTree can lower,
     and replace the input-batch launcher functions with pure-torch versions."""
@@ -390,6 +453,14 @@ def apply_input_batch_compat() -> None:
     patched = []
 
     for attr, factory, desc in (
+        (
+            "combine_sampled_and_draft_tokens",
+            _make_combine_sampled_and_draft_tokens_torch,
+            "combine_sampled_and_draft_tokens → torch (FlagTree silently "
+            "miscompiles _combine_sampled_and_draft_tokens_kernel during first "
+            "concurrent image+text batch, corrupting input_ids and producing "
+            "wrong first decode tokens such as ' senare')",
+        ),
         (
             "prepare_pos_seq_lens",
             _make_prepare_pos_seq_lens_torch,
