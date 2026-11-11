@@ -145,6 +145,11 @@ def _apply_legacy_kunlunxin_patches():
     )
     apply_vl_compat()
 
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.buffer_utils_compat import (
+        apply_buffer_utils_compat,
+    )
+    apply_buffer_utils_compat()
+
 
 def _install_graph_patch(owner, name, replacement, replacements):
     if replacements is None:
