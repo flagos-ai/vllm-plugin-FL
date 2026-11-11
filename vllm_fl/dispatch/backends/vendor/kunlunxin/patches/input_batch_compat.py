@@ -424,6 +424,67 @@ def _make_combine_sampled_and_draft_tokens_torch():
     return combine_sampled_and_draft_tokens_torch
 
 
+def _make_expand_idx_mapping_torch():
+    """Pure-torch replacement for expand_idx_mapping.
+
+    _expand_idx_mapping_kernel runs on FlagTree and may silently miscompile,
+    corrupting the expanded_idx_mapping used by the sampler to route logits
+    to the correct request — producing truncated or wrong-token decode output.
+    """
+    import torch
+
+    def expand_idx_mapping_torch(
+        idx_mapping,
+        total_num_logits,
+        cu_num_logits,
+        max_expand_len,
+    ):
+        num_reqs = idx_mapping.shape[0]
+        expanded_idx_mapping = idx_mapping.new_empty(total_num_logits)
+        expanded_local_pos = torch.empty(
+            total_num_logits, dtype=torch.int32, device=idx_mapping.device
+        )
+        for r in range(num_reqs):
+            start = cu_num_logits[r].item()
+            end = cu_num_logits[r + 1].item()
+            n = end - start
+            if n > 0:
+                req_state_idx = idx_mapping[r]
+                expanded_idx_mapping[start:end] = req_state_idx
+                expanded_local_pos[start:end] = torch.arange(
+                    n, dtype=torch.int32, device=idx_mapping.device
+                )
+        return expanded_idx_mapping, expanded_local_pos
+
+    return expand_idx_mapping_torch
+
+
+def _make_post_update_num_computed_tokens_torch():
+    """Pure-torch replacement for post_update_num_computed_tokens.
+
+    _post_update_num_computed_tokens_kernel advances num_computed_tokens
+    per request. FlagTree may silently miscompile the scalar load-add-store,
+    causing the runner to skip tokens and produce truncated output.
+    """
+
+    def post_update_num_computed_tokens_torch(
+        idx_mapping,
+        num_computed_tokens,
+        query_start_loc,
+    ):
+        num_reqs = idx_mapping.shape[0]
+        for r in range(num_reqs):
+            query_len = (
+                query_start_loc[r + 1] - query_start_loc[r]
+            ).item()
+            req_state_idx = idx_mapping[r].item()
+            num_computed_tokens[req_state_idx] = (
+                num_computed_tokens[req_state_idx] + query_len
+            )
+
+    return post_update_num_computed_tokens_torch
+
+
 def apply_input_batch_compat() -> None:
     """Swap in a single-exit token combiner that FlagTree can lower,
     and replace the input-batch launcher functions with pure-torch versions."""
@@ -484,6 +545,20 @@ def apply_input_batch_compat() -> None:
             _make_prepare_prefill_inputs_torch,
             "prepare_prefill_inputs → torch (FlagTree miscompiles "
             "_prepare_prefill_inputs_kernel)",
+        ),
+        (
+            "expand_idx_mapping",
+            _make_expand_idx_mapping_torch,
+            "expand_idx_mapping → torch (FlagTree may silently miscompile "
+            "_expand_idx_mapping_kernel, corrupting expanded_idx_mapping and "
+            "producing truncated or wrong-token decode output)",
+        ),
+        (
+            "post_update_num_computed_tokens",
+            _make_post_update_num_computed_tokens_torch,
+            "post_update_num_computed_tokens → torch (FlagTree may silently "
+            "miscompile _post_update_num_computed_tokens_kernel, causing the "
+            "runner to skip tokens and produce truncated output)",
         ),
     ):
         if hasattr(input_batch, attr):
