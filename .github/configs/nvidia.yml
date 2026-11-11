@@ -67,6 +67,7 @@ container_options: >-
   --hostname vllm-plugin-fl
   --user root
   --env CUDA_VISIBLE_DEVICES
+  --env OMP_NUM_THREADS=1
   --env VLLM_PLUGINS=fl
   --env VLLM_USE_V2_MODEL_RUNNER=1
   --env USE_FLAGGEMS=1

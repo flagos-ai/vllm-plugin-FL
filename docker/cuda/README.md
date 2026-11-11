@@ -95,3 +95,10 @@ the runner's `CUDA_VISIBLE_DEVICES` mask. The reusable workflows accept an optio
 device profile; without one, tests/run.py uses the platform default. H20-specific
 jobs retain their `flagcicd-h20` override. A passing H20 run does not establish
 A100 compatibility.
+
+NVIDIA CI sets `OMP_NUM_THREADS=1` to avoid oversubscribing CPU cores while
+tensor-parallel workers load MoE weights. On the A100 host, the default Torch
+thread pool had 128 threads despite each worker's 32-logical-CPU affinity;
+Qwen3.5-35B remained in weight copies after more than eight minutes. With one
+OpenMP thread, the same case loaded weights in about 13 seconds and passed
+without changing model parameters or GPU allocation.
