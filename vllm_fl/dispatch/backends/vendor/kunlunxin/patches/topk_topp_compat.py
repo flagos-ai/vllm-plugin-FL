@@ -9,6 +9,13 @@ point ``apply_top_k_top_p_triton`` with a torch implementation that has
 the same semantics: top-k first (by logit value), then top-p applied to
 the surviving k values (by probability), masking with ``mask_value``.
 
+Additionally, ``TopKTopPSampler.forward_xpu`` bypasses
+``apply_top_k_top_p_triton`` entirely: it calls ``xpu_sample()`` which
+invokes ``_gumbel_sample_kernel`` (Triton) directly via FlagTree,
+silently producing wrong results on every decode step (token `!` repeated).
+Patching ``xpu_sampler_supported`` → ``False`` forces ``forward_xpu`` to
+fall through to ``forward_native`` (pure torch), which is correct.
+
 The torch path sorts the row, which is O(vocab * log vocab) per row
 versus the Triton kernel's linear scan, so it is slower at large
 vocab.  Correctness over speed: the V1 runner already samples on CPU
@@ -133,20 +140,39 @@ def apply_topk_topp_compat() -> None:
             mod_name,
         )
 
-    if patched_any:
-        # Also patch the wrapper that calls it by local name
-        try:
-            import importlib
-            sampler = importlib.import_module(
-                "vllm.v1.sample.ops.topk_topp_sampler"
-            )
-            if getattr(
-                getattr(sampler, "apply_top_k_top_p_triton", None),
-                _PATCH_FLAG,
-                False,
-            ):
-                return
-            # apply_top_k_top_p calls apply_top_k_top_p_triton via the
-            # module-level name; patching the attribute on sampler is enough.
-        except ImportError:
-            pass
+    # Always patch xpu_sampler_supported regardless of whether the triton
+    # apply_top_k_top_p_triton was found. forward_xpu calls xpu_sample() ->
+    # _gumbel_sample_kernel (Triton) directly, completely bypassing
+    # apply_top_k_top_p_triton. Making xpu_sampler_supported() return False
+    # causes forward_xpu to fall through to forward_native (pure torch), which
+    # is the same sampling path V1 uses on Kunlunxin and produces correct output.
+    _patch_xpu_sampler_supported()
+
+
+def _patch_xpu_sampler_supported() -> None:
+    """Force xpu_sampler_supported() → False so forward_xpu uses forward_native."""
+    _xpu_flag = "_vllm_fl_kunlunxin_xpu_sampler_disabled"
+    try:
+        import importlib
+        sampler = importlib.import_module("vllm.v1.sample.ops.topk_topp_sampler")
+    except ImportError:
+        logger.debug("topk_topp_sampler not importable; skipping xpu_sampler_supported patch")
+        return
+
+    current = getattr(sampler, "xpu_sampler_supported", None)
+    if current is None:
+        logger.debug("xpu_sampler_supported not found in topk_topp_sampler; skipping")
+        return
+    if getattr(current, _xpu_flag, False):
+        return  # already patched
+
+    def _xpu_sampler_not_supported() -> bool:
+        """Disabled for Kunlunxin: _gumbel_sample_kernel produces wrong results on FlagTree."""
+        return False
+
+    setattr(_xpu_sampler_not_supported, _xpu_flag, True)
+    sampler.xpu_sampler_supported = _xpu_sampler_not_supported
+    logger.info(
+        "Patched xpu_sampler_supported → False; TopKTopPSampler.forward_xpu "
+        "will use forward_native (pure torch) on Kunlunxin"
+    )
