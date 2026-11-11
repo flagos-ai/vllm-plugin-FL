@@ -193,23 +193,23 @@ def apply_structured_outputs_compat() -> None:
         structured_outputs = importlib.import_module(
             "vllm.v1.worker.gpu.structured_outputs"
         )
+
+        worker_cls = getattr(structured_outputs, "StructuredOutputsWorker", None)
+        if worker_cls is None:
+            return
+
+        current = getattr(worker_cls, "apply_grammar_bitmask", None)
+        if current is None or getattr(current, _PATCH_FLAG, False):
+            return
+
+        replacement = _build_apply(current)
+        setattr(replacement, _PATCH_FLAG, True)
+        worker_cls.apply_grammar_bitmask = replacement
+        logger.info(
+            "kunlunxin structured_outputs_compat: applying grammar bitmasks with "
+            "torch; FlagTree's XPU backend cannot lower the reshape in "
+            "_apply_grammar_bitmask_kernel and miscompiles its bit unpacking"
+        )
     except ImportError:
         # Builds without the V2 structured-output path have nothing to patch.
         return
-
-    worker_cls = getattr(structured_outputs, "StructuredOutputsWorker", None)
-    if worker_cls is None:
-        return
-
-    current = getattr(worker_cls, "apply_grammar_bitmask", None)
-    if current is None or getattr(current, _PATCH_FLAG, False):
-        return
-
-    replacement = _build_apply(current)
-    setattr(replacement, _PATCH_FLAG, True)
-    worker_cls.apply_grammar_bitmask = replacement
-    logger.info(
-        "kunlunxin structured_outputs_compat: applying grammar bitmasks with "
-        "torch; FlagTree's XPU backend cannot lower the reshape in "
-        "_apply_grammar_bitmask_kernel and miscompiles its bit unpacking"
-    )

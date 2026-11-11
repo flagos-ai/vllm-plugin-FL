@@ -791,10 +791,12 @@ def patch_block_table_slot_mapping():
                     block_numbers * self.block_size + block_offsets
                 )
 
-            # Pad remaining slots
-            self.slot_mapping.gpu[num_tokens : self.max_num_batched_tokens] = (
-                PAD_SLOT_ID
+            # Pad remaining slots; derive length from the slot_mapping tensor
+            # when max_num_batched_tokens is absent (unit-test stubs).
+            max_batched = getattr(
+                self, "max_num_batched_tokens", self.slot_mapping.gpu.shape[0]
             )
+            self.slot_mapping.gpu[num_tokens:max_batched] = PAD_SLOT_ID
 
         BlockTable.compute_slot_mapping = compute_slot_mapping_xpu
         logger.info(
