@@ -132,6 +132,14 @@ def _apply_legacy_kunlunxin_patches():
 
     apply_mamba_utils_compat()
 
+    # FlagTree's XPU backend cannot lower the reshape in the V2 grammar bitmask
+    # kernel and miscompiles its bit unpacking, so apply the mask with torch.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.structured_outputs_compat import (  # noqa: E501
+        apply_structured_outputs_compat,
+    )
+
+    apply_structured_outputs_compat()
+
     # Disable Triton kernels incompatible with Kunlunxin XPU
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
