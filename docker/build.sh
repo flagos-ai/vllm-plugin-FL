@@ -238,8 +238,8 @@ fi
 
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
-if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
-    DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.v0.32.0"
+if [[ "${PLATFORM}" == "cuda" && "${TARGET}" != "ci" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.v0.24.0"
 fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"

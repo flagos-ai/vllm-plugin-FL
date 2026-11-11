@@ -1,154 +1,73 @@
 # Copyright 2026 FlagOS Contributors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# NVIDIA vLLM 0.32.0 inference/CI image based on FlagOS Runtime 2.3.0.
+# Build context: repository root. Pin the previously validated Runtime artifact.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-nvidia-cuda13.3:2.3.0@sha256:edf29b9a28badaf72fc75fd0e057325df9610694914cca3f571e587038bf17e8
+FROM ${BASE_IMAGE} AS ci
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
-ARG CUDA_VERSION=13.0.2
-ARG UBUNTU_VERSION=24.04
+ARG FLAGOS_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-nvidia/simple
+ARG INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+ARG EXTRA_INDEX_URL
+ARG UBUNTU_MIRROR=https://mirrors.aliyun.com/ubuntu
+ENV UV_PYTHON=/flagos/bin/python \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_HTTP_TIMEOUT=120
 
-# ---------- base stage ----------
-FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
-
-ARG PYTHON_VERSION=3.12
-ARG UV_VERSION=0.12.6
-ARG VLLM_VERSION=0.24.0
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-# System dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        ccache \
-        git \
-        curl \
-        ca-certificates \
-        vim \
-        wget \
-        python3-pip \
-        libibverbs-dev \
-        gcc-11 \
-        g++-11 \
-        librdmacm-dev \
-        libnuma-dev \
-        software-properties-common \
-    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 --slave /usr/bin/g++ g++ /usr/bin/g++-11 \
-    && add-apt-repository ppa:deadsnakes/ppa \
+# TorchCodec needs FFmpeg shared libraries; the Runtime supplies build tools.
+RUN sed -i -e "s|http://archive.ubuntu.com/ubuntu|${UBUNTU_MIRROR}|g" \
+        -e "s|http://security.ubuntu.com/ubuntu|${UBUNTU_MIRROR}|g" \
+        /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python${PYTHON_VERSION} \
-        python${PYTHON_VERSION}-dev \
-        python${PYTHON_VERSION}-venv \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 \
+    && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh
-ENV PATH="/root/.local/bin:${PATH}"
+COPY docker/cuda/constraints.txt docker/cuda/requirements-ci.txt /opt/fl-ci/
+# XGBoost cu12 NCCL shares library paths with cu13; reinstall Runtime cu13 last.
+RUN uv pip install --python /flagos/bin/python \
+        --index "${FLAGOS_INDEX_URL}" \
+        ${EXTRA_INDEX_URL:+--index "${EXTRA_INDEX_URL}"} \
+        --default-index "${INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}" \
+        --index-strategy unsafe-first-match \
+        --constraint /opt/fl-ci/constraints.txt \
+        -r /opt/fl-ci/requirements-ci.txt 'vllm[audio]==0.32.0+flagos' \
+    && uv pip install --python /flagos/bin/python \
+        --reinstall-package nvidia-nccl-cu13 \
+        --index "${FLAGOS_INDEX_URL}" \
+        --default-index "${INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}" \
+        --index-strategy unsafe-first-match 'nvidia-nccl-cu13==2.29.7' \
+    && uv cache clean
 
-# Verify GCC version
-RUN gcc --version
+# Runtime BASH_ENV selects FlagTree only in bash; sh and direct Python need ENV.
+ENV PYTHONPATH=/opt/flagtree
 
-# Install pip via uv
-RUN uv pip install --system --break-system-packages pip setuptools setuptools-scm wheel
+COPY .github/scripts/install_flaggems_vllm.py /opt/fl-ci/install_flaggems_vllm.py
+COPY .github/scripts/nvidia/stack.py /opt/fl-ci/stack.py
+RUN python /opt/fl-ci/install_flaggems_vllm.py \
+    && python -B /opt/fl-ci/stack.py --build-only
 
-ENV PATH="/usr/local/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+COPY . /workspace/vllm-plugin-FL
+WORKDIR /workspace/vllm-plugin-FL
+ARG PLUGIN_SOURCE_SHA
+ARG PLUGIN_SOURCE_VERSION=0.5.0.dev0
+LABEL org.opencontainers.image.revision="${PLUGIN_SOURCE_SHA}"
+RUN { test -n "${PLUGIN_SOURCE_SHA}" || { echo "ERROR: PLUGIN_SOURCE_SHA must be set" >&2; exit 1; }; } \
+    && env -u VLLM_VENDOR SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="${PLUGIN_SOURCE_VERSION}" \
+        python -m pip install --no-deps --no-build-isolation -e . \
+    && python -m pip list --format=json > /opt/fl-ci/packages.json
 
-ENV VLLM_ENABLE_CUDA_COMPATIBILITY=0
-
-# ---------- dev stage ----------
-FROM base AS dev
-
-ARG INDEX_URL
-ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.24.0
-
-# Install vLLM
-RUN uv pip install --system --break-system-packages \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        "vllm==${VLLM_VERSION}"
-
-# Install dev tools
-RUN uv pip install --system --break-system-packages \
-        pytest \
-        pytest-cov \
-        pytest-json-report \
-        ruff \
-        pre-commit \
-        ninja \
-        cmake
-
-# ---------- ci stage ----------
-FROM base AS ci
-
-ARG INDEX_URL
-ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.24.0
-
-# Install vLLM
-RUN uv pip install --system --break-system-packages \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        "vllm[audio]==${VLLM_VERSION}"
-
-# Install dev/test tools
-RUN uv pip install --system --break-system-packages \
-        pytest \
-        pytest-cov \
-        pytest-timeout \
-        pytest-json-report \
-        numpy \
-        requests \
-        decorator \
-        "modelscope>=1.18.1" \
-        ruff \
-        pre-commit \
-        ninja \
-        cmake
-ARG FLAGGEMS_VERSION=v5.3.5
-
-# Install FlagGems
-RUN uv pip install --system --break-system-packages scikit-build-core==0.11 pybind11 \
-    && git clone --branch ${FLAGGEMS_VERSION} --depth 1 https://github.com/flagos-ai/FlagGems /workspace/FlagGems \
-    && touch /workspace/FlagGems/src/flag_gems/fused/DSA/__init__.py \
-    && uv pip install --system --break-system-packages --no-build-isolation /workspace/FlagGems
-
-# Install DeepGEMM
-RUN git clone https://github.com/deepseek-ai/DeepGEMM.git /workspace/DeepGEMM \
-    && cd /workspace/DeepGEMM \
-    && git checkout 891d57b \
-    && git submodule update --init --recursive \
-    && TORCH_DEVICE_BACKEND_AUTOLOAD=0 uv pip install --system --break-system-packages --no-build-isolation .
-
-ENV VLLM_PLUGINS=fl
-
-WORKDIR /workspace
-
-# ---------- release stage ----------
-FROM base AS release
-
-ARG INDEX_URL
-ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.24.0
-
-# Install vLLM
-RUN uv pip install --system --break-system-packages \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        "vllm==${VLLM_VERSION}"
-
-WORKDIR /workspace
-
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV VLLM_PLUGINS=fl \
+    VLLM_USE_V2_MODEL_RUNNER=1 \
+    USE_FLAGGEMS=1 \
+    GEMS_VENDOR=nvidia \
+    USE_FLAGTUNE=0
+# The wheel closure supplies nvcc as a Python package, outside /usr/local/cuda.
+RUN toolkit="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib") + "/nvidia/cu13")')" \
+    && test -x "${toolkit}/bin/nvcc" \
+    && ln -s "${toolkit}" /opt/cuda-toolkit \
+    && ln -sfn lib "${toolkit}/lib64" \
+    && ln -sfn libcudart.so.13 "${toolkit}/lib/libcudart.so"
+ENV CUDA_HOME=/opt/cuda-toolkit \
+    CUDA_PATH=/opt/cuda-toolkit \
+    PATH="/opt/cuda-toolkit/bin:${PATH}"
+ENTRYPOINT []
+CMD ["/bin/bash"]

@@ -2,9 +2,11 @@
 # vLLM 0.32 CI/development additions; core Runtime pins are in constraints.txt.
 uv==0.13.4
 setuptools==80.10.2
-setuptools-scm>=8.0
+setuptools-scm==9.2.2
 wheel==0.48.0
 build==1.6.1
+# pyproject.toml build-system requires the Python CMake distribution too.
+cmake>=3.26
 scikit-build-core==0.11.0
 # Satisfy Torch's distribution dependency; Runtime PYTHONPATH keeps FlagTree
 # as the active compiler. stack.py verifies the actual module origin.
