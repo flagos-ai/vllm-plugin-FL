@@ -27,7 +27,15 @@ block table writes and gathering reordered requests also passed on hardware.
 Against the existing same-weight NVIDIA upstream baseline, three requests were
 exact; Paris first differed at token 11 and arithmetic at token 7 (one-based).
 The strict precision gate therefore remains open. These results do not verify
-V2 graph capture, TP>1, prompt embeddings, multimodal models or PCP.
+V2 graph capture, TP>1, prompt embeddings, multimodal models or PCP on that
+small-model run.
+
+Additional V2 validation at commit `525b527` passed both Qwen3.6-27B and
+Qwen3.6-35B-A3B in BF16, TP=2, eager serving: all five adaptation-gate scenarios
+per model (text, image, and mixed requests, including eight-way concurrency),
+10 scenarios and 52 requests in total. This includes the formerly failing
+35B-A3B eager single-text assertion. Graph-mode acceptance is tracked separately;
+eager success does not establish graph support or NVIDIA precision alignment.
 
 The historical validation below used ModelRunnerFL (V1) and is not V2 validation.
 
@@ -66,8 +74,8 @@ identity and requires independent integer-pointer correctness validation.
 - NVIDIA reference comparison found token-level differences for some prompts;
   the observed numerical differences are accepted for the recorded Qwen3-0.6B
   scope, but this is not a strict token-match pass.
-- The Qwen3.6 35B-A3B eager single-text scenario has a known semantic assertion
-  failure and is not counted as a complete gate pass.
+- The recorded V2 eager passes do not yet establish the complete four-group
+  eager/graph adaptation gate.
 - Other model architectures, hybrid speculative decoding, and unlisted graph
   shapes require separate validation.
 - Enflame CI uses the pinned 0.28 image as a vendor dependency base. During

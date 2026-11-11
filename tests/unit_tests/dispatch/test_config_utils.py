@@ -67,6 +67,7 @@ def test_gcu_vendor_alias_loads_enflame_native_config():
         "_index_put_impl_",
         "mm_out",
         "slice",
+        "fill_scalar_",
     ]
 
 
@@ -98,6 +99,7 @@ def test_enflame_default_policy_keeps_unsupported_variants_native(monkeypatch):
                     "_index_put_impl_",
                     "mm_out",
                     "slice",
+                    "fill_scalar_",
                 ],
             )
             assert use_flaggems_op("index_put_") is False
