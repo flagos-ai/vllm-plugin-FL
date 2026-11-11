@@ -147,6 +147,47 @@ def test_reference_moe_align_block_size_drops_unowned_experts():
     assert expert_ids[:2].tolist() == [0, 1]
 
 
+def test_reference_moe_align_block_size_filters_raw_padding_ids():
+    """Raw -1 ids written by the top-k kernel for padded rows are dropped."""
+    import torch
+
+    from vllm_fl.dispatch.backends.reference.reference import ReferenceBackend
+
+    # Slots 0 and 2 hold real routes; slots 1 and 3 are padding sentinels.
+    topk_ids = torch.tensor([[0, -1], [1, -1]], dtype=torch.int32)
+
+    sorted_ids, expert_ids, num_post = ReferenceBackend().moe_align_block_size(
+        topk_ids, 2, 2
+    )
+
+    keep = int(num_post.item())
+    placed = [slot for slot in sorted_ids[:keep].tolist() if slot < 4]
+    assert placed == [0, 2]
+    assert (sorted_ids[keep:] == 4).all()
+    assert expert_ids[:2].tolist() == [0, 1]
+
+
+def test_reference_moe_align_block_size_filters_raw_ids_before_mapping():
+    """Raw -1 / out-of-range ids must not be looked up through ``expert_map``."""
+    import torch
+
+    from vllm_fl.dispatch.backends.reference.reference import ReferenceBackend
+
+    # Slot 2 also carries an id no rank owns (== num_experts).
+    topk_ids = torch.tensor([[0, -1], [1, 2]], dtype=torch.int32)
+    expert_map = torch.tensor([0, 1], dtype=torch.int32)
+
+    sorted_ids, expert_ids, num_post = ReferenceBackend().moe_align_block_size(
+        topk_ids, 2, 2, expert_map, ignore_invalid_experts=True
+    )
+
+    keep = int(num_post.item())
+    placed = [slot for slot in sorted_ids[:keep].tolist() if slot < 4]
+    assert placed == [0, 2]
+    assert (sorted_ids[keep:] == 4).all()
+    assert expert_ids[:2].tolist() == [0, 1]
+
+
 def test_reference_moe_align_block_size_keeps_every_token():
     import torch
 

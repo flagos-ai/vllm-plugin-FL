@@ -74,17 +74,28 @@ class ReferenceBackend(Backend):
         """
         device = topk_ids.device
         flat = topk_ids.reshape(-1).to(torch.int64)
+        # Upstream's top-k kernel writes -1 for padded rows, so screen the raw
+        # ids before they index anything: a negative or out-of-range id must not
+        # reach ``expert_map`` (where -1 selects its last entry) nor the bucket
+        # ranking below (where it would overwrite the last expert's slots).
+        # With a map the raw ids are global, so the map length is the bound.
+        raw_count = expert_map.numel() if expert_map is not None else num_experts
+        raw_valid = (flat >= 0) & (flat < raw_count)
         # Mirror upstream: with ``ignore_invalid_experts`` the map is applied
         # while bucketing, so ids owned by another rank are dropped; without it
         # buckets are built from global ids and the returned expert ids are
         # remapped at the end instead.
         remap_output = expert_map is not None and not ignore_invalid_experts
         if expert_map is not None and ignore_invalid_experts:
-            flat = expert_map.to(device=device, dtype=torch.int64)[flat]
-            valid = (flat >= 0) & (flat < num_experts)
+            mapped = expert_map.to(device=device, dtype=torch.int64)[
+                torch.where(raw_valid, flat, torch.zeros_like(flat))
+            ]
+            valid = raw_valid & (mapped >= 0) & (mapped < num_experts)
+            ids = mapped
         else:
-            valid = torch.ones_like(flat, dtype=torch.bool)
-        local = torch.where(valid, flat, torch.zeros_like(flat))
+            valid = raw_valid
+            ids = flat
+        local = torch.where(valid, ids, torch.zeros_like(ids))
         num_valid = flat.numel()
         same_expert = (
             local.unsqueeze(0)
