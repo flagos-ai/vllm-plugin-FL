@@ -287,6 +287,15 @@ def register():
     _patch_transformers_compat()
 
     # Model-specific platform patches
+    # gpt-oss BF16 packed-expert checkpoints: remap names to vLLM 0.24's
+    # routed_experts layout instead of patching vLLM's loader.
+    try:
+        from vllm_fl.patches.gpt_oss_weights import apply_model_patches as gpt_oss_weights
+
+        gpt_oss_weights()
+    except Exception as exc:  # pragma: no cover - keep registration resilient
+        logger.debug("gpt-oss weight patch skipped: %s", exc)
+
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
 
     glm5_platform()
