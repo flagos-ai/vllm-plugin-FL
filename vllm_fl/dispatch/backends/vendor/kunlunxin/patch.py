@@ -762,17 +762,19 @@ def patch_block_table_slot_mapping():
                 )
                 block_numbers = self.block_table.gpu.view(-1)[bt_indices]
                 virtual_block_offsets = positions % virtual_block_size
+
+                # DCP controls per-token ownership; use dcp_world_size and
+                # dcp_rank (NOT total_cp_rank) so each DCP rank sees exactly
+                # block_size / dcp_world_size slots per virtual block.
+                interleave = self.cp_kv_cache_interleave_size
                 mask = (
-                    virtual_block_offsets
-                    // self.cp_kv_cache_interleave_size
-                    % total_cp_world_size
-                    == total_cp_rank
+                    virtual_block_offsets // interleave % self.dcp_world_size
+                    == self.dcp_rank
                 )
                 block_offsets = (
-                    virtual_block_offsets
-                    // (total_cp_world_size * self.cp_kv_cache_interleave_size)
-                    * self.cp_kv_cache_interleave_size
-                    + virtual_block_offsets % self.cp_kv_cache_interleave_size
+                    virtual_block_offsets // (self.dcp_world_size * interleave)
+                    * interleave
+                    + virtual_block_offsets % interleave
                 )
                 slot_vals = block_numbers * self.block_size + block_offsets
                 self.slot_mapping.gpu[:num_tokens] = torch.where(
