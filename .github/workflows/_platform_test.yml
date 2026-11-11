@@ -129,21 +129,14 @@ jobs:
   # runtime). The default-runner unit pass already runs inside the
   # functional job; each entry in the config's unit_devices adds one unit
   # job on that device's runner (device_runner_labels override).
-  unit:
-    needs: setup
-    strategy:
-      fail-fast: false
-      matrix:
-        device: ${{ fromJson(needs.setup.outputs.config).unit_devices || fromJson('[]') }}
-    uses: ./.github/workflows/_unit_test.yml
-    secrets: inherit
-    with:
-      platform: ${{ inputs.platform }}
-      device: ${{ matrix.device }}
-      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
-      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
-      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+  # NOTE: this job is superseded by the per-device e2e matrix which now
+  # carries full device_config (runner_labels, ci_image, container_options)
+  # for each device. It is kept as a no-op (unit_devices: [] on all
+  # platforms) and will be removed once all platforms migrate to devices:.
+  #
+  # unit:
+  #   needs: setup
+  #   ...
 
   # End-to-end model tests.
   # pr stage: pr subset cases (text + multimodal, one device).
@@ -164,9 +157,9 @@ jobs:
       device: ${{ matrix.test.device }}
       cases: ${{ matrix.test.cases }}
       ci_image: ${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
+      runner_labels: ${{ toJson(matrix.test.runner_labels) || toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
-      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+      container_options: ${{ matrix.test.container_options || fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
   # Benchmark validation — actual test selection is controlled by the

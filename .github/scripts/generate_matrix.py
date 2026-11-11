@@ -101,6 +101,7 @@ def build_e2e_matrix(
     devices: list[str],
     unsupported: list[str],
     ci_stage: str = "nightly",
+    device_configs: dict[str, dict] | None = None,
 ) -> list[dict]:
     """End-to-end model tests (inference, serving, concurrent).
 
@@ -151,14 +152,20 @@ def build_e2e_matrix(
     entries = []
     for (task_dir, device), case_list in groups.items():
         timeout = resolve_e2e_timeout(config, device, task_dir)
-        entries.append(
-            {
-                "task": task_dir,
-                "device": device,
-                "cases": json.dumps(case_list, separators=(",", ":")),
-                "timeout": timeout,
-            }
-        )
+        entry = {
+            "task": task_dir,
+            "device": device,
+            "cases": json.dumps(case_list, separators=(",", ":")),
+            "timeout": timeout,
+        }
+        # Attach per-device hardware config so the workflow can pick image /
+        # runner_labels / container_options directly from the matrix entry.
+        if device_configs and device in device_configs:
+            dcfg = device_configs[device]
+            entry["image"] = dcfg.get("ci_image")
+            entry["runner_labels"] = dcfg.get("runner_labels")
+            entry["container_options"] = dcfg.get("container_options")
+        entries.append(entry)
     return entries
 
 
@@ -382,8 +389,33 @@ def main(argv: list[str] | None = None) -> int:
     if not devices:
         print(f"::warning::No device sections found in {args.platform}.yaml")
 
+    # Load per-device hardware configs (.github/configs/<platform>.yml).
+    # When the config declares a devices: map, attach each device's hardware
+    # settings to its e2e matrix entry so workflows can read them directly.
+    device_configs = {}
+    configs_dir = REPO_ROOT / ".github" / "configs"
+    hw_path = configs_dir / f"{args.platform}.yml"
+    if hw_path.exists():
+        with open(hw_path) as f:
+            hw_cfg = yaml.safe_load(f) or {}
+        devices_map = hw_cfg.get("devices", {})
+        if devices_map:
+            base = {
+                k: v
+                for k, v in hw_cfg.items()
+                if k not in ("devices", "unit_devices", "device_runner_labels")
+            }
+            for dev, overrides in devices_map.items():
+                device_configs[dev] = {**base, **overrides, "device": dev}
+
     ci_stage = args.ci_stage
-    e2e_matrix = build_e2e_matrix(config, devices, unsupported, ci_stage=ci_stage)
+    e2e_matrix = build_e2e_matrix(
+        config,
+        devices,
+        unsupported,
+        ci_stage=ci_stage,
+        device_configs=device_configs,
+    )
     unit_matrix = build_unit_matrix(config, devices)
 
     # Apply PR smart-skip filtering when changed files are provided.
