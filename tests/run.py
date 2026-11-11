@@ -353,6 +353,20 @@ class TestRunner:
 
         return cases
 
+    def _stage_ignore_args(self) -> list[str]:
+        """Return pytest --ignore args excluding supplementary tests.
+
+        Supplementary coverage tests (``flagcicd_cov/``) run only in the
+        nightly stage. On any other stage both scopes exclude the directory
+        so PR and weekly runs stay unchanged in duration and selection.
+        """
+        if self.stage == "nightly":
+            return []
+        return [
+            "--ignore=tests/unit_tests/flagcicd_cov",
+            "--ignore=tests/functional_tests/flagcicd_cov",
+        ]
+
     def _discover_unit_tests(self) -> list[TestCase]:
         """Build unit test case from platform config."""
         unit_filter = self.config.get_unit_filter()
@@ -385,9 +399,16 @@ class TestRunner:
             f"--json-report-file=report-{self.config.platform}.json",
         ]
 
-        # Apply exclude patterns
-        for pattern in unit_filter.exclude:
-            extra_args.extend(["--ignore", f"tests/unit_tests/{pattern}"])
+        # Apply ignored_tests: repo-rooted paths become --ignore, entries
+        # with :: are node IDs and become --deselect.
+        for entry in unit_filter.ignored_tests:
+            if "::" in entry:
+                extra_args.extend(["--deselect", entry])
+            else:
+                extra_args.extend(["--ignore", entry])
+
+        # Supplementary coverage tests only run in the nightly stage.
+        extra_args.extend(self._stage_ignore_args())
 
         # Apply include filter (if not wildcard, use -k)
         if unit_filter.include != "*" and isinstance(unit_filter.include, list):
@@ -406,8 +427,12 @@ class TestRunner:
             "--json-report",
             f"--json-report-file=report-{self.config.platform}-multigpu.json",
         ]
-        for pattern in unit_filter.exclude:
-            serial_args.extend(["--ignore", f"tests/unit_tests/{pattern}"])
+        for entry in unit_filter.ignored_tests:
+            if "::" in entry:
+                serial_args.extend(["--deselect", entry])
+            else:
+                serial_args.extend(["--ignore", entry])
+        serial_args.extend(self._stage_ignore_args())
         if unit_filter.include != "*" and isinstance(unit_filter.include, list):
             serial_args.extend(["-k", " or ".join(unit_filter.include)])
 
@@ -622,9 +647,16 @@ class TestRunner:
             f"--cov-report=json:coverage-{self.config.platform}.json",
         ]
 
-        # Apply exclude patterns
-        for pattern in func_filter.exclude:
-            extra_args.extend(["--ignore", f"tests/functional_tests/{pattern}"])
+        # Apply ignored_tests: repo-rooted paths become --ignore, entries
+        # with :: are node IDs and become --deselect.
+        for entry in func_filter.ignored_tests:
+            if "::" in entry:
+                extra_args.extend(["--deselect", entry])
+            else:
+                extra_args.extend(["--ignore", entry])
+
+        # Supplementary coverage tests only run in the nightly stage.
+        extra_args.extend(self._stage_ignore_args())
 
         # Apply include filter (if not wildcard, use -k)
         if func_filter.include != "*" and isinstance(func_filter.include, list):

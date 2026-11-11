@@ -51,6 +51,11 @@ on:
         required: false
         type: string
         default: ""
+      ci_stage:
+        description: "CI stage: pr / nightly / weekly (controls supplementary flagcicd_cov collection)"
+        required: false
+        type: string
+        default: "nightly"
       timeout:
         description: "Timeout for the job in minutes"
         required: false
@@ -100,13 +105,15 @@ jobs:
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
-            --scope unit
+            --scope unit \
+            --stage ${{ inputs.ci_stage }}
 
       - name: Run functional tests
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
-            --scope functional
+            --scope functional \
+            --stage ${{ inputs.ci_stage }}
 
       - name: Compute platform-effective coverage
         if: ${{ !cancelled() && hashFiles(format('coverage-{0}.json', inputs.platform)) != '' }}
