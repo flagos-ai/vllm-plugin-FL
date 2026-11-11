@@ -76,6 +76,14 @@ jobs:
     name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
+    # H20 runner instances share one host and expose all GPUs. Their local
+    # schedulers both allocate from GPU 0, so inference and serving must not
+    # overlap until runner-level device isolation is configured. Keep the
+    # group independent of task/ref so separate workflow runs cannot collide.
+    concurrency:
+      group: ${{ inputs.platform == 'nvidia' && inputs.device == 'h20' && 'nvidia-h20-e2e-gpus' || format('e2e-{0}-{1}-{2}-{3}-{4}', github.run_id, github.run_attempt, inputs.platform, inputs.device, inputs.task) }}
+      cancel-in-progress: false
+      queue: max
     container:
       image: ${{ inputs.ci_image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
