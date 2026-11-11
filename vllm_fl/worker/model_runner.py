@@ -4,6 +4,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+# Defer annotation evaluation so expressions like
+# ``current_platform.torch_device_fn.Stream`` in function signatures are not
+# evaluated at import time (when the platform may not be initialised yet).
+from __future__ import annotations
+
 # Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
 # module that uses them is imported.  The shim is idempotent and a no-op when
 # the installed vLLM already ships the symbols.
