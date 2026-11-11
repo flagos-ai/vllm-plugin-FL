@@ -172,6 +172,27 @@ def _patch_xpu_sampler_supported() -> None:
 
     setattr(_xpu_sampler_not_supported, _xpu_flag, True)
     sampler.xpu_sampler_supported = _xpu_sampler_not_supported
+
+    # Also patch the forward_xpu method on the class itself.  __init__ binds
+    # self.forward = self.forward_xpu BEFORE our patch runs, so existing
+    # instances keep the old binding even after xpu_sampler_supported → False.
+    # Redirecting the method on the class makes all instances — existing and
+    # future — call forward_native regardless.
+    cls = getattr(sampler, "TopKTopPSampler", None)
+    if cls is not None and not getattr(
+        getattr(cls, "forward_xpu", None), _xpu_flag, False
+    ):
+        orig_forward_xpu = cls.forward_xpu
+
+        def _forward_xpu_native(self, logits, generators, k, p):
+            return self.forward_native(logits, generators, k, p)
+
+        setattr(_forward_xpu_native, _xpu_flag, True)
+        cls.forward_xpu = _forward_xpu_native
+        logger.debug(
+            "Patched TopKTopPSampler.forward_xpu → forward_native on Kunlunxin"
+        )
+
     logger.info(
         "Patched xpu_sampler_supported → False; TopKTopPSampler.forward_xpu "
         "will use forward_native (pure torch) on Kunlunxin"
