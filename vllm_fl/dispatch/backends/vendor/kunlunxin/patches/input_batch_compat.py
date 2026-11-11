@@ -229,16 +229,24 @@ def _make_prepare_pos_seq_lens_torch():
 
 
 def _make_get_num_sampled_and_rejected_torch():
-    """Pure-torch replacement for get_num_sampled_and_rejected."""
+    """Pure-torch replacement for get_num_sampled_and_rejected.
+
+    Real signature (input_batch.py:536-553):
+        get_num_sampled_and_rejected(num_sampled, seq_lens, cu_num_logits,
+                                     idx_mapping, prefill_len)
+            -> (num_sampled, num_rejected)
+    num_rejected is allocated here; num_sampled is updated in-place.
+    """
+    import torch
 
     def get_num_sampled_and_rejected_torch(
         num_sampled,
-        num_rejected,
         seq_lens,
         cu_num_logits,
         idx_mapping,
         prefill_len,
     ):
+        num_rejected = torch.empty_like(num_sampled)
         for r in range(idx_mapping.shape[0]):
             req_idx = idx_mapping[r].item()
             is_cp = seq_lens[r].item() < prefill_len[req_idx].item()
@@ -249,6 +257,7 @@ def _make_get_num_sampled_and_rejected_torch():
             else:
                 ns = num_sampled[r].item()
                 num_rejected[r] = nl - ns
+        return num_sampled, num_rejected
 
     return get_num_sampled_and_rejected_torch
 
