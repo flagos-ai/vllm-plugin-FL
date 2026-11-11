@@ -188,24 +188,234 @@ def _build_kernel():
     return _combine_sampled_and_draft_tokens_kernel
 
 
+_PATCH_FLAG_LAUNCHERS = "_vllm_fl_kunlunxin_input_batch_launchers_torch"
+
+
+def _make_prepare_pos_seq_lens_torch():
+    """Pure-torch replacement for prepare_pos_seq_lens.
+
+    FlagTree silently miscompiles _prepare_pos_seq_lens_kernel at decode time,
+    producing wrong position IDs and sequence lengths from the second request
+    onward in a concurrent batch.  The torch implementation is semantically
+    identical and runs in a Python loop (batch sizes are always small).
+    """
+    import torch
+
+    def prepare_pos_seq_lens_torch(
+        idx_mapping,
+        query_start_loc,
+        num_computed_tokens,
+        pos,
+        seq_lens,
+    ):
+        num_reqs = idx_mapping.shape[0]
+        max_num_reqs = seq_lens.shape[0]
+        for r in range(num_reqs):
+            req_idx = idx_mapping[r].item()
+            nc = num_computed_tokens[req_idx].item()
+            qs = query_start_loc[r].item()
+            qe = query_start_loc[r + 1].item()
+            ql = qe - qs
+            seq_lens[r] = nc + ql
+            if ql > 0:
+                pos[qs:qe] = torch.arange(
+                    nc, nc + ql, device=pos.device, dtype=pos.dtype
+                )
+        # Pad unused seq_lens entries (matches the special last thread block).
+        if num_reqs < max_num_reqs:
+            seq_lens[num_reqs:] = 0
+
+    return prepare_pos_seq_lens_torch
+
+
+def _make_get_num_sampled_and_rejected_torch():
+    """Pure-torch replacement for get_num_sampled_and_rejected."""
+
+    def get_num_sampled_and_rejected_torch(
+        num_sampled,
+        num_rejected,
+        seq_lens,
+        cu_num_logits,
+        idx_mapping,
+        prefill_len,
+    ):
+        for r in range(idx_mapping.shape[0]):
+            req_idx = idx_mapping[r].item()
+            is_cp = seq_lens[r].item() < prefill_len[req_idx].item()
+            nl = cu_num_logits[r + 1].item() - cu_num_logits[r].item()
+            if is_cp:
+                num_sampled[r] = 0
+                num_rejected[r] = 0
+            else:
+                ns = num_sampled[r].item()
+                num_rejected[r] = nl - ns
+
+    return get_num_sampled_and_rejected_torch
+
+
+def _make_post_update_torch():
+    """Pure-torch replacement for post_update.
+
+    _post_update_kernel writes each newly-sampled token into all_token_ids and
+    advances num_computed_tokens — it runs on every decode step.  FlagTree
+    silently miscompiles the scalar loop ``for i in range(num_sampled)`` inside
+    the kernel, corrupting the entire token-id history from step 2 onward and
+    causing ``!`` to be produced for all subsequent tokens.
+    """
+
+    def post_update_torch(
+        idx_mapping,
+        num_computed_tokens,
+        last_sampled_tokens,
+        output_bin_counts,
+        sampled_tokens,
+        num_sampled,
+        num_rejected,
+        query_start_loc,
+        all_token_ids,
+        total_len,
+    ):
+        for r in range(idx_mapping.shape[0]):
+            req_idx = idx_mapping[r].item()
+            if req_idx < 0:
+                continue
+            ns = num_sampled[r].item()
+            tlen = total_len[req_idx].item()
+            if ns > 0:
+                last_sampled_tokens[req_idx] = sampled_tokens[r, ns - 1]
+                total_len[req_idx] = tlen + ns
+                for i in range(ns):
+                    tok = sampled_tokens[r, i]
+                    all_token_ids[req_idx, tlen + i] = tok
+                    if output_bin_counts is not None:
+                        output_bin_counts[req_idx, tok.item()] += 1
+            ql = (
+                (query_start_loc[r + 1] - query_start_loc[r]).item()
+                if query_start_loc is not None
+                else 0
+            )
+            delta = ql - num_rejected[r].item()
+            if delta != 0:
+                num_computed_tokens[req_idx] = (
+                    num_computed_tokens[req_idx] + delta
+                )
+
+    return post_update_torch
+
+
+def _make_prepare_prefill_inputs_torch():
+    """Pure-torch replacement for prepare_prefill_inputs.
+
+    _prepare_prefill_inputs_kernel JIT-compiles during the first concurrent
+    batch. Its early-return branch is safe from a lowering standpoint but
+    FlagTree produces wrong ``input_ids`` for requests that are not at their
+    prefill boundary, causing decode tokens to be fed back as prefill tokens.
+    """
+    import torch
+
+    def prepare_prefill_inputs_torch(
+        input_ids,
+        next_prefill_tokens,
+        idx_mapping,
+        query_start_loc,
+        all_token_ids,
+        prefill_len,
+        num_computed_tokens,
+    ):
+        num_reqs = idx_mapping.shape[0]
+        num_lookahead = next_prefill_tokens.shape[0]
+        for r in range(num_reqs):
+            req_idx = idx_mapping[r].item()
+            pl = prefill_len[req_idx].item()
+            nc = num_computed_tokens[req_idx].item()
+            if nc >= pl:
+                continue
+            qs = query_start_loc[r].item()
+            qe = query_start_loc[r + 1].item()
+            ql = qe - qs
+            if ql > 0:
+                input_ids[qs:qe] = all_token_ids[req_idx, nc: nc + ql]
+            if num_lookahead > 0:
+                lookahead_start = nc + ql
+                for li in range(num_lookahead):
+                    pos = lookahead_start + li
+                    tok = (
+                        all_token_ids[req_idx, pos]
+                        if pos < pl
+                        else torch.zeros(1, dtype=next_prefill_tokens.dtype,
+                                         device=next_prefill_tokens.device)[0]
+                    )
+                    next_prefill_tokens[li, req_idx] = tok
+
+    return prepare_prefill_inputs_torch
+
+
 def apply_input_batch_compat() -> None:
-    """Swap in a single-exit token combiner that FlagTree can lower."""
+    """Swap in a single-exit token combiner that FlagTree can lower,
+    and replace the input-batch launcher functions with pure-torch versions."""
     try:
         from vllm.v1.worker.gpu import input_batch
     except ImportError:
         # Builds without the V2 runner have nothing to patch.
         return
 
+    # --- Triton kernel: _combine_sampled_and_draft_tokens_kernel ---
     current = getattr(input_batch, "_combine_sampled_and_draft_tokens_kernel", None)
-    if current is None or getattr(current, _PATCH_FLAG, False):
+    if current is not None and not getattr(current, _PATCH_FLAG, False):
+        kernel = _build_kernel()
+        setattr(kernel, _PATCH_FLAG, True)
+        input_batch._combine_sampled_and_draft_tokens_kernel = kernel
+        logger.info(
+            "kunlunxin input_batch_compat: replaced "
+            "_combine_sampled_and_draft_tokens_kernel with a single-exit form; "
+            "FlagTree's XPU backend cannot lower an early return that follows "
+            "tensor work"
+        )
+
+    # --- Python launcher functions: replace with pure-torch versions ---
+    if getattr(input_batch, _PATCH_FLAG_LAUNCHERS, False):
         return
 
-    kernel = _build_kernel()
-    setattr(kernel, _PATCH_FLAG, True)
-    input_batch._combine_sampled_and_draft_tokens_kernel = kernel
-    logger.info(
-        "kunlunxin input_batch_compat: replaced "
-        "_combine_sampled_and_draft_tokens_kernel with a single-exit form; "
-        "FlagTree's XPU backend cannot lower an early return that follows "
-        "tensor work"
-    )
+    patched = []
+
+    for attr, factory, desc in (
+        (
+            "prepare_pos_seq_lens",
+            _make_prepare_pos_seq_lens_torch,
+            "prepare_pos_seq_lens → torch (FlagTree miscompiles "
+            "_prepare_pos_seq_lens_kernel, producing wrong positions)",
+        ),
+        (
+            "get_num_sampled_and_rejected",
+            _make_get_num_sampled_and_rejected_torch,
+            "get_num_sampled_and_rejected → torch (FlagTree miscompiles "
+            "_get_num_sampled_and_rejected_kernel)",
+        ),
+        (
+            "post_update",
+            _make_post_update_torch,
+            "post_update → torch (FlagTree miscompiles _post_update_kernel; "
+            "corrupts all_token_ids from step 2 onward, producing '!' tokens)",
+        ),
+        (
+            "prepare_prefill_inputs",
+            _make_prepare_prefill_inputs_torch,
+            "prepare_prefill_inputs → torch (FlagTree miscompiles "
+            "_prepare_prefill_inputs_kernel)",
+        ),
+    ):
+        if hasattr(input_batch, attr):
+            fn = factory()
+            setattr(fn, _PATCH_FLAG_LAUNCHERS, True)
+            setattr(input_batch, attr, fn)
+            patched.append(attr)
+            logger.info("kunlunxin input_batch_compat: %s", desc)
+
+    if patched:
+        setattr(input_batch, _PATCH_FLAG_LAUNCHERS, True)
+        logger.info(
+            "kunlunxin input_batch_compat: patched %d launcher(s) with "
+            "pure-torch implementations to prevent FlagTree silent "
+            "miscompilation during decode",
+            len(patched),
+        )
