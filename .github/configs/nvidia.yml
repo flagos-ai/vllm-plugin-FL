@@ -17,18 +17,39 @@
 
 platform: nvidia
 
-# Docker image for this hardware
+# Docker image for this hardware (default for all devices)
 ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci@sha256:02b65e788e4ce2352ff1f41099744c33e196707b36a2e68461f78bfbe799a884
 
-# Runner labels for this hardware (self-hosted, default for all devices)
-runner_labels:
-  - self-hosted
-  - Linux
-  - X64
-  - flagcicd-a100
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /data:/data
+
+# Container options (default for all devices)
+# FlagTune has no H20 candidates for some Qwen3.6 matmul shapes yet. Keep
+# FlagGems enabled and fall back to its default Triton configs.
+# --shm-size: the dsw-hosted h20 runner does not honor --ipc=host (the
+# container gets a private 64MB /dev/shm); tmpfs charges 4KB per POSIX
+# semaphore file, so the unit pass's 16 xdist workers x flag_gems' ~1k
+# libentry locks fill it and every worker dies with SemLock ENOSPC. Where
+# --ipc=host DOES apply, docker ignores --shm-size, so this is a no-op
+# there (mirrors iluvatar.yml's --shm-size=64g).
+container_options: >-
+  --privileged
+  --gpus all
+  --ipc=host
+  --shm-size 64g
+  --hostname vllm-plugin-fl
+  --user root
+  --env CUDA_VISIBLE_DEVICES
+  --env VLLM_PLUGINS=fl
+  --env USE_FLAGGEMS=1
+  --env GEMS_VENDOR=nvidia
+  --env USE_FLAGTUNE=0
+  --ulimit nofile=65535:65535
 
 # Per-device configuration
-# Each device inherits platform-level defaults and can override any field.
+# Each device inherits all platform-level defaults above and can override
+# any field. Only fields that differ from the defaults need to be specified.
 devices:
   a100:
     runner_labels:
@@ -56,34 +77,3 @@ devices:
       --env USE_FLAGTUNE=0
       --env NCCL_NVLS_ENABLE=0
       --ulimit nofile=65535:65535
-
-# Runner labels for this hardware (Platform hosted)
-# runner_labels:
-#   - ci-vllm-plugin-fl
-
-# Container volumes (hardware-specific paths)
-container_volumes:
-  - /data:/data
-
-# Container options (hardware-specific settings)
-# FlagTune has no H20 candidates for some Qwen3.6 matmul shapes yet. Keep
-# FlagGems enabled and fall back to its default Triton configs.
-# --shm-size: the dsw-hosted h20 runner does not honor --ipc=host (the
-# container gets a private 64MB /dev/shm); tmpfs charges 4KB per POSIX
-# semaphore file, so the unit pass's 16 xdist workers x flag_gems' ~1k
-# libentry locks fill it and every worker dies with SemLock ENOSPC. Where
-# --ipc=host DOES apply, docker ignores --shm-size, so this is a no-op
-# there (mirrors iluvatar.yml's --shm-size=64g).
-container_options: >-
-  --privileged
-  --gpus all
-  --ipc=host
-  --shm-size 64g
-  --hostname vllm-plugin-fl
-  --user root
-  --env CUDA_VISIBLE_DEVICES
-  --env VLLM_PLUGINS=fl
-  --env USE_FLAGGEMS=1
-  --env GEMS_VENDOR=nvidia
-  --env USE_FLAGTUNE=0
-  --ulimit nofile=65535:65535
