@@ -1,10 +1,10 @@
-# Ascend Runtime-based vLLM 0.32 CI image (`Dockerfile.v0.32.0`)
+# Ascend Runtime-based vLLM 0.32 CI image (`Dockerfile`)
 
 Build from the repository root using the FlagOS Runtime 2.3.0 (CANN 9.2.1) base
 image `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.2.1:2.3.0@sha256:92600f84feee2a2a738bbc77abdb02c8c7af925a6da379b23dde6ded6cba50db`.
-The recipe `docker/ascend/Dockerfile.v0.32.0` installs
+The recipe `docker/ascend/Dockerfile` installs
 `vllm==0.32.0+flagos` on FlagOS Runtime 2.3.0 for `0.5.0-dev`, while the historical
-910C `v0.28.0+empty` recipe is preserved in `docker/ascend/Dockerfile`.
+910C `v0.28.0+empty` recipe is preserved in `docker/ascend/Dockerfile.v0.28.0`.
 
 ```bash
 bash docker/build.sh --platform ascend --target ci
@@ -13,8 +13,8 @@ CONTAINER_ENGINE=podman bash docker/build.sh --platform ascend --target ci
 ```
 
 The script builds from the plugin commit pinned in `docker/ascend/plugin-source.ref`
-(the vLLM 0.32 Ascend adapter), using that commit's Dockerfile and sources rather
-than the working tree.
+(the vLLM 0.32 Ascend adapter). It overlays the CI packaging files from HEAD and
+uses the selected `docker/ascend/Dockerfile` from the checkout.
 
 | Component | Version / source |
 | --- | --- |
@@ -112,7 +112,7 @@ configuration rather than a general driver compatibility guarantee.
 
 ---
 
-# Ascend 910C: vLLM 0.28.0 empty (`Dockerfile`)
+# Ascend 910C: vLLM 0.28.0 empty (`Dockerfile.v0.28.0`)
 
 The image keeps the CANN 9.0.0 and torch_npu 2.10 runtime from the earlier
 910C environment:
@@ -156,17 +156,17 @@ optional dependency conflicts.
 
 ## Build and CI
 
-Build the image from the repository root:
+Build the legacy image from the repository root:
 
 ```bash
-docker/build.sh \
+ASCEND_VLLM_VERSION=0.28.0 bash docker/build.sh \
   --platform ascend \
   --target ci \
   --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
 ```
 
-The shared CI currently uses the published
-`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` image. Build and publish a
+The legacy CI image was published as
+`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean`. Build and publish a
 replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
 changing the configuration does not publish it.
 `.github/scripts/ascend/setup.sh` checks the runtime versions and rejects an

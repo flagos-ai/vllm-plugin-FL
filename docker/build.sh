@@ -241,12 +241,12 @@ BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
     DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.ci"
-elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.32.0" ]]; then
-    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.32.0"
 elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.18.0" ]]; then
     DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.18.0"
 elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.13.0" ]]; then
     DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.13.0"
+elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" != "0.32.0" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.28.0"
 fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
@@ -293,7 +293,7 @@ elif [[ "${PLATFORM}" == "ascend" && "${TARGET}" == "ci" && "${ASCEND_VLLM_VERSI
     VLLM_VERSION="0.32.0"
     BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
     # The vLLM 0.32 adapter is pinned as a separate source commit; build from
-    # that commit's tree (Dockerfile and COPY inputs), never working-tree files.
+    # that commit's tree and overlay the CI packaging files.
     PLUGIN_SOURCE_SHA="$(tr -d '[:space:]' < "${SCRIPT_DIR}/ascend/plugin-source.ref")"
     [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || err "docker/ascend/plugin-source.ref must hold a full Git revision."
     if ! git -C "${BUILD_CONTEXT}" cat-file -e "${PLUGIN_SOURCE_SHA}^{commit}" 2>/dev/null; then
@@ -502,7 +502,9 @@ elif [[ "${ARCHIVE_SOURCE:-0}" == "1" ]]; then
     git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | tar -x -C "${source_context}"
     git -C "${BUILD_CONTEXT}" archive --format=tar HEAD docker/ascend .github/scripts/install_flaggems_vllm.py .github/scripts/ascend \
         | tar -x -C "${source_context}"
-    DOCKERFILE="${source_context}/docker/ascend/Dockerfile.v0.32.0"
+    # Use the selected recipe even when its rename is still in the working tree.
+    cp -- "${DOCKERFILE}" "${source_context}/docker/ascend/Dockerfile"
+    DOCKERFILE="${source_context}/docker/ascend/Dockerfile"
     docker_build "${source_context}"
 else
     docker_build "${BUILD_CONTEXT}"
