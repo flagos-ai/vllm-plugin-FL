@@ -55,7 +55,7 @@ export PPU_IMAGE="harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci"
 ```
 
 The published image digest is
-`sha256:410d4bbb69586a22dbf63badebc100d5b8664a93c2bcc202d9f8f8ca52b49af1`.
+`sha256:abb224ad4e56ce9a978c1b868a65b439d6ddd8b9260bf5dc1baa97180ae14174`.
 The image includes vendor PyTorch, the PPU SDK and `flash_attn_3`, plus the
 ordinary Python stack in the table.
 The following versions were confirmed on 2026-10-14 on the same host and

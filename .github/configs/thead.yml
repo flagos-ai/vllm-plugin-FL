@@ -4,7 +4,7 @@
 # This config grants device access; it does not prove fresh idle telemetry.
 # Approved defaults also work when a PR run receives empty repository variables.
 platform: thead
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci@sha256:410d4bbb69586a22dbf63badebc100d5b8664a93c2bcc202d9f8f8ca52b49af1
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci@sha256:abb224ad4e56ce9a978c1b868a65b439d6ddd8b9260bf5dc1baa97180ae14174
 runner_labels: [flagcicd-810e]
 # One extra unit leg on the flagcicd-810e pool. The default-runner unit pass
 # already runs inside the functional job, so this is a second pass on another

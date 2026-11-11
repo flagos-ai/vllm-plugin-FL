@@ -110,10 +110,10 @@ RUN --mount=type=bind,from=thead_wheels,target=/run/wheels,ro \
 # The +empty wheel above is installed with --no-deps so the vendor torch stays
 # in place, which leaves vLLM's own runtime requirements uninstalled. Derive
 # exactly those from the installed metadata, skipping what the base image pins:
-# the accelerator stack, plus numpy (the system scipy is built against 1.x) and
-# opencv, which would drag numpy 2 in. xgrammar is split out too because it
-# depends on triton, and resolving that overwrites the FlagTree triton module.
-RUN "$VENV/bin/python" -I -B - <<'PY'
+# the accelerator stack, numpy (the system scipy is built against 1.x), opencv
+# (which would drag numpy 2 in) and xgrammar (the image ships the vendor build,
+# whose loader matches the vendor tvm-ffi; the PyPI wheel needs a newer one).
+RUN "$VENV/bin/python" -I -B - <<'PY' > /tmp/thead-vllm-deps.txt
 import importlib.metadata as md
 
 from packaging.requirements import Requirement
@@ -124,18 +124,17 @@ pinned = (
     "triton",
     "numpy",
     "opencv-python-headless",
+    "xgrammar",
     "nvidia-",
     "flashinfer",
     "cuda-python",
     "xformers",
 )
-solved, no_deps = [], []
 for raw in md.requires("vllm") or []:
     req = Requirement(raw)
     if req.marker is not None and not req.marker.evaluate():
         continue
-    name = req.name.lower().replace("_", "-")
-    if name.startswith(pinned):
+    if req.name.lower().replace("_", "-").startswith(pinned):
         continue
     try:
         have = Version(md.version(req.name))
@@ -143,28 +142,35 @@ for raw in md.requires("vllm") or []:
         have = None
     if have is not None and (not req.specifier or have in req.specifier):
         continue
-    (no_deps if name == "xgrammar" else solved).append(str(req))
-
-open("/tmp/thead-vllm-deps.txt", "w").write("\n".join(solved) + "\n")
-open("/tmp/thead-vllm-nodeps.txt", "w").write("\n".join(no_deps) + "\n")
+    print(str(req))
 PY
 
-# torch and numpy stay at the versions the vendor stack was built against;
-# the remaining dependencies resolve normally so packages such as pydantic
-# pick up a matching core.
+# torch and numpy stay at the versions the vendor stack was built against; the
+# remaining dependencies resolve normally so packages such as pydantic pick up
+# a matching core.
 RUN "$VENV/bin/python" -I -B - <<'PY' > /tmp/thead-constraints.txt
 import importlib.metadata as md
 
 for name in ("torch", "numpy"):
-    print(f"{name}=={md.version(name)}")
+    try:
+        print(f"{name}=={md.version(name)}")
+    except md.PackageNotFoundError:
+        pass
 PY
 
 RUN "$VENV/bin/python" -I -B -m pip install --no-cache-dir \
         -r /tmp/thead-vllm-deps.txt -c /tmp/thead-constraints.txt \
-    && "$VENV/bin/python" -I -B -m pip install --no-cache-dir --no-deps \
-        -r /tmp/thead-vllm-nodeps.txt \
-    && rm -f /tmp/thead-vllm-deps.txt /tmp/thead-vllm-nodeps.txt \
+    && rm -f /tmp/thead-vllm-deps.txt \
         /tmp/thead-constraints.txt
+
+# The base image ships xgrammar 0.1.27, which predates the API vLLM 0.32
+# imports (``normalize_tool_choice``). Install the version vLLM pins together
+# with the tvm-ffi build its loader expects; resolving xgrammar normally would
+# drag in the PyPI triton wheel through outlines-core.
+RUN "$VENV/bin/python" -I -B -m pip install --no-cache-dir \
+        "apache-tvm-ffi==0.1.15.post2" \
+    && "$VENV/bin/python" -I -B -m pip install --no-cache-dir --no-deps \
+        "xgrammar==0.2.8"
 
 # Fail the build rather than CI when a requirement is still unsatisfied or the
 # PyPI triton wheel replaced the FlagTree module.
@@ -179,6 +185,7 @@ pinned = (
     "triton",
     "numpy",
     "opencv-python-headless",
+    "xgrammar",
     "nvidia-",
     "flashinfer",
     "cuda-python",
@@ -225,6 +232,12 @@ assert triton.__version__ == "3.6.0", triton.__version__
 import vllm
 
 assert vllm.__version__ == "0.32.0", vllm.__version__
+# vLLM imports this on the request path; a base-image xgrammar is too old and
+# a mismatched tvm-ffi only shows up here, so fail the build instead of every
+# CI job.
+import xgrammar  # noqa: F401
+
+assert hasattr(xgrammar, "normalize_tool_choice"), "xgrammar is too old for vLLM 0.32"
 PY
 
 # Keep the image free of the plugin: setup.sh builds the checkout into the CI
