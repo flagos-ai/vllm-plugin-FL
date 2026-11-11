@@ -155,6 +155,10 @@ python tests/run.py --platform cuda --device a100 --scope unit
 # Run only functional tests (ops, compilation, distributed)
 python tests/run.py --platform cuda --device a100 --scope functional
 
+# Stage selection: supplementary flagcicd_cov tests run in nightly only
+python tests/run.py --platform cuda --device a100 --scope unit --stage pr
+python tests/run.py --platform cuda --device a100 --scope unit --stage nightly
+
 # Run only E2E tests (inference + serving)
 python tests/run.py --platform cuda --device a100 --scope e2e
 
@@ -334,11 +338,44 @@ a100:
         minicpm: ["o45_tp4"]
     functional:
       include: "*"
-      exclude: []
+      ignored_tests: []
     unit:
       include: "*"
-      exclude: []
+      ignored_tests: []
 ```
+
+#### `ignored_tests`: skipping tests on a platform
+
+`ignored_tests` replaces the old `exclude` key. Entries are **repo-rooted**
+path strings; an entry containing `::` is a pytest node ID and is turned into
+`--deselect`, any other entry is a file or directory and is turned into
+`--ignore`. Loading fails fast when an entry is not a string, does not start
+with the matching `tests/<scope>_tests/` prefix, or points to a path that
+does not exist — so a renamed test file cannot silently restore a skip.
+
+Every entry requires a reason comment above it, with the issue/PR that
+introduced it and the condition under which it will be restored:
+
+```yaml
+p800:
+  tests:
+    unit:
+      include: "*"
+      ignored_tests:
+        # Dispatch
+        # flaggems quantization dispatch is unsupported on p800; introduced
+        # in #561. Restore when the kunlunxin dispatch supports it.
+        - tests/unit_tests/dispatch/test_flaggems_quantization.py
+
+        # Supplementary coverage
+        # Image lacks <pkg>; restore when ci_image >= <tag>.
+        - tests/unit_tests/flagcicd_cov/ops/test_cov_fused_moe.py::TestRouting::test_topk_fp8
+```
+
+Supplementary coverage tests under `tests/unit_tests/flagcicd_cov/` and
+`tests/functional_tests/flagcicd_cov/` are collected **only in the nightly
+stage** (`tests/run.py --stage nightly`); PR and weekly runs pass
+`--ignore` for both directories automatically.
 
 ## Writing New Tests
 

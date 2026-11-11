@@ -81,10 +81,10 @@ zw810e:
         concurrent: 180
     functional:
       include: "*"
-      exclude: []
+      ignored_tests: []
     unit:
       include: "*"
-      exclude: []
+      ignored_tests: []
     benchmark:
       pr:
         enabled: false

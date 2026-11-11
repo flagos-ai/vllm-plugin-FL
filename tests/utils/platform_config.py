@@ -137,10 +137,62 @@ class DeviceType:
 
 @dataclass
 class TestFilter:
-    """Include/exclude patterns for unit tests."""
+    """Include patterns and ignored tests for a test scope.
+
+    ``ignored_tests`` entries are repo-rooted path strings. Entries with
+    ``::`` are pytest node IDs (deselected); the rest are files or
+    directories (ignored). See ``tests/README.md`` for the required
+    reason-comment format.
+    """
 
     include: str | list[str] = "*"
-    exclude: list[str] = field(default_factory=list)
+    ignored_tests: list[str] = field(default_factory=list)
+
+    @staticmethod
+    def validate_entries(
+        entries: list[Any],
+        scope_dir: str,
+        config_path: Path,
+    ) -> list[str]:
+        """Validate ignored_tests entries and return them as strings.
+
+        Args:
+            entries: raw YAML value for ``ignored_tests``.
+            scope_dir: expected prefix, ``tests/unit_tests`` or
+                ``tests/functional_tests``.
+            config_path: platform YAML being loaded (for error messages).
+
+        Raises:
+            ValueError: on any malformed entry (non-string, wrong prefix,
+                or a path part before ``::`` that does not exist).
+        """
+        if not isinstance(entries, list):
+            raise ValueError(
+                f"{config_path}: ignored_tests must be a list of strings, "
+                f"got {type(entries).__name__}"
+            )
+        validated: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, str) or not entry.strip():
+                raise ValueError(
+                    f"{config_path}: ignored_tests entries must be non-empty "
+                    f"strings, got {entry!r}"
+                )
+            path_part = entry.split("::", 1)[0]
+            # Normalise trailing slashes so directory entries validate too.
+            check_path = _REPO_ROOT / path_part.rstrip("/")
+            if not check_path.exists():
+                raise ValueError(
+                    f"{config_path}: ignored_tests entry {entry!r} points to a "
+                    f"missing path {path_part!r}"
+                )
+            if not path_part.startswith(scope_dir.rstrip("/") + "/"):
+                raise ValueError(
+                    f"{config_path}: ignored_tests entry {entry!r} must start "
+                    f"with {scope_dir}/"
+                )
+            validated.append(entry)
+        return validated
 
 
 @dataclass
@@ -215,6 +267,9 @@ class PlatformConfig:
     # --- Active device (set after load) ---
     device: str = ""
 
+    # Path of the YAML this config was loaded from (diagnostics).
+    config_path: Path = Path("tests/platforms/<unknown>.yaml")
+
     @classmethod
     def load(
         cls,
@@ -284,6 +339,7 @@ class PlatformConfig:
             e2e_variants=raw.get("e2e_variants") or [],
             e2e_serial=bool(raw.get("e2e_serial", False)),
             device=active_device,
+            config_path=config_path,
         )
         return config
 
@@ -378,22 +434,42 @@ class PlatformConfig:
         return benchmark
 
     def get_functional_filter(self) -> TestFilter:
-        """Return functional test include/exclude for the active device."""
+        """Return functional test include/ignored list for the active device."""
         dt = self.device_tests.get(self.device, {})
         func_raw = dt.get("tests", {}).get("functional", {})
+        self._reject_legacy_exclude(func_raw, "functional")
         return TestFilter(
             include=func_raw.get("include", "*"),
-            exclude=func_raw.get("exclude", []),
+            ignored_tests=TestFilter.validate_entries(
+                func_raw.get("ignored_tests", []),
+                "tests/functional_tests",
+                self.config_path,
+            ),
         )
 
     def get_unit_filter(self) -> TestFilter:
-        """Return unit test include/exclude for the active device."""
+        """Return unit test include/ignored list for the active device."""
         dt = self.device_tests.get(self.device, {})
         unit_raw = dt.get("tests", {}).get("unit", {})
+        self._reject_legacy_exclude(unit_raw, "unit")
         return TestFilter(
             include=unit_raw.get("include", "*"),
-            exclude=unit_raw.get("exclude", []),
+            ignored_tests=TestFilter.validate_entries(
+                unit_raw.get("ignored_tests", []),
+                "tests/unit_tests",
+                self.config_path,
+            ),
         )
+
+    def _reject_legacy_exclude(self, scope_raw: dict[str, Any], scope: str) -> None:
+        """Reject the legacy ``exclude`` key with a migration pointer."""
+        if isinstance(scope_raw, dict) and "exclude" in scope_raw:
+            raise ValueError(
+                f"{self.config_path}: {self.device}.tests.{scope}.exclude was "
+                "renamed to ignored_tests; entries are now repo-rooted paths "
+                "(or file::node ids) and every entry needs a reason comment. "
+                "See tests/README.md."
+            )
 
     def should_skip_model(self, model_name: str) -> bool:
         """Return True if model_name matches any unsupported feature."""
