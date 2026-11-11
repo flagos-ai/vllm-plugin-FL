@@ -128,5 +128,9 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     VLLM_VENDOR VLLM_TARGET_DEVICE VLLM_WORKER_MULTIPROC_METHOD; do
     printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
   done
+  # Subsequent Actions steps use sh and do not load the Runtime's BASH_ENV.
+  if [[ -n "${PYTHONPATH:-}" ]]; then
+    printf 'PYTHONPATH=%s\n' "$PYTHONPATH" >> "$GITHUB_ENV"
+  fi
 fi
 echo "THead CI Python: $PY"
