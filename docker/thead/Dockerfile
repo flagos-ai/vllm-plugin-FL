@@ -107,6 +107,42 @@ RUN --mount=type=bind,from=thead_wheels,target=/run/wheels,ro \
     && "$VENV/bin/python" -I -B -m pip install --no-deps --no-index \
         --no-compile "${wheels[0]}"
 
+# The +empty wheel above is installed with --no-deps so the vendor torch stays
+# in place, which leaves vLLM's own runtime requirements uninstalled. Derive
+# exactly those from the installed metadata, skipping the accelerator stack the
+# base image pins.
+RUN "$VENV/bin/python" -I -B - <<'PY' > /tmp/thead-vllm-deps.txt
+import importlib.metadata as md
+from packaging.requirements import Requirement
+
+pinned = ("torch", "triton", "nvidia-", "flashinfer", "cuda-python", "xformers")
+installed = {
+    d.metadata["Name"].lower().replace("_", "-") for d in md.distributions()
+}
+for raw in md.requires("vllm") or []:
+    req = Requirement(raw)
+    if req.marker is not None and not req.marker.evaluate():
+        continue
+    name = req.name.lower().replace("_", "-")
+    if name in installed or name.startswith(pinned):
+        continue
+    print(str(req))
+PY
+
+RUN "$VENV/bin/python" -I -B - <<'PY' > /tmp/thead-constraints.txt
+import importlib.metadata as md
+
+for name in ("torch", "triton"):
+    try:
+        print(f"{name}=={md.version(name)}")
+    except md.PackageNotFoundError:
+        pass
+PY
+
+RUN "$VENV/bin/python" -I -B -m pip install --no-cache-dir \
+        -r /tmp/thead-vllm-deps.txt -c /tmp/thead-constraints.txt \
+    && rm -f /tmp/thead-vllm-deps.txt /tmp/thead-constraints.txt
+
 # The CI stack assertions in .github/scripts/thead/stack.py depend on these
 # exact versions and origins, so fail the build here rather than in CI.
 RUN "$VENV/bin/python" -I -B - "${FLAGTREE_VERSION}" "${FLAGGEMS_VERSION}" <<'PY'
@@ -139,6 +175,13 @@ LABEL org.opencontainers.image.title="vllm-plugin-fl thead CI" \
 WORKDIR /workspace
 
 FROM base AS ci
+# .github/scripts/thead/setup.sh builds the plugin wheel with
+# --no-build-isolation, so the build requirements from pyproject.toml must
+# already be in the venv; the base interpreter only carries setuptools 69,
+# which rejects PEP 639 license metadata.
 RUN "$VENV/bin/python" -I -B -m pip install --no-compile \
-        "pytest-xdist>=3.0.0" "pytest-cov>=7.0.0" "pytest-json-report>=1.5.0"
+        "setuptools>=78.1.1,<81.0.0" wheel "setuptools-scm>=8.0" \
+        "scikit-build-core==0.11" pybind11 ninja cmake \
+        "pytest-xdist>=3.0.0" "pytest-cov>=7.0.0" "pytest-json-report>=1.5.0" \
+        packaging pyyaml sqlalchemy
 WORKDIR /workspace
