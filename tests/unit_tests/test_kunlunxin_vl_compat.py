@@ -54,6 +54,7 @@ def _fresh_patch_flag():
 
 def _get_vc():
     import importlib
+
     import vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat as vc
     # Force a fresh module-level state by removing the patch flag from module
     # and from any previously patched qwen3_vl module
@@ -91,7 +92,7 @@ def test_idempotent():
 def test_missing_native_fn_no_crash(caplog):
     """If pos_embed_interpolate_native is absent, logs a warning."""
     vc = _get_vc()
-    mod = _setup_fake_qwen3_vl(triton_present=True, native_present=False)
+    _setup_fake_qwen3_vl(triton_present=True, native_present=False)
     # Ensure the vc logger propagates to root so caplog can catch it
     vc_logger = logging.getLogger(vc.__name__)
     vc_logger.propagate = True

@@ -222,7 +222,8 @@ def test_apply_penalties_compat_patches_module():
 def test_apply_penalties_compat_idempotent():
     """Calling apply_penalties_compat twice must not raise or double-patch."""
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
-        apply_penalties_compat, _bincount
+        _bincount,
+        apply_penalties_compat,
     )
     try:
         from vllm.v1.worker.gpu.sample import penalties

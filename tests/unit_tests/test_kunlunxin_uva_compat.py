@@ -13,7 +13,8 @@ from functools import cache
 from types import ModuleType
 
 import pytest
-from vllm.utils import platform_utils
+
+from vllm.utils import platform_utils  # noqa: E402
 
 from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.uva_compat import (
     apply_uva_compat,
