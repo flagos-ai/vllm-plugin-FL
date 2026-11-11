@@ -401,6 +401,12 @@ elif [[ "${PLATFORM}" == "thead" ]]; then
     BUILD_SOURCE_SHA="$(git -C "${REPO}" rev-parse --verify HEAD)"
     PLUGIN_SOURCE_SHA="$(git -C "${REPO}" show "${BUILD_SOURCE_SHA}:docker/thead/plugin-source.ref")"
     [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || err "T-Head plugin-source.ref must contain a full commit SHA."
+    for arg in "${EXTRA_BUILD_ARGS[@]}"; do
+        case "${arg}" in
+            BUILD_SOURCE_SHA|BUILD_SOURCE_SHA=*|PLUGIN_SOURCE_SHA|PLUGIN_SOURCE_SHA=*)
+                err "T-Head source revisions come from Git HEAD and plugin-source.ref." ;;
+        esac
+    done
     if ! git -C "${REPO}" cat-file -e "${PLUGIN_SOURCE_SHA}^{commit}"; then
         git -C "${REPO}" fetch --no-tags https://github.com/flagos-ai/vllm-plugin-FL.git "${PLUGIN_SOURCE_SHA}"
     fi

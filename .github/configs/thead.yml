@@ -14,7 +14,6 @@ base_python: /opt/thead/venv/bin/python
 container_options: >-
   --hostname vllm-plugin-fl
   --env CUDA_VISIBLE_DEVICES=12,13,14,15
-  --env VLLM_USE_V2_MODEL_RUNNER=0
   --shm-size=64g
   --ulimit memlock=-1
   --ulimit stack=67108864
