@@ -26,7 +26,7 @@ def test_context_nested_exception_and_idempotence():
 
     @_wrap_vision_forward
     def outer():
-        assert _wrap_vision_forward(lambda: in_vision_forward())()
+        assert _wrap_vision_forward(in_vision_forward)()
         assert in_vision_forward()
 
     outer()

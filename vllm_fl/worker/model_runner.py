@@ -248,7 +248,7 @@ from vllm_fl.dispatch.io_dumper import (
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
-    from vllm.v1.spec_decode.ngram_proposer import NgramProposer
+    from vllm.v1.spec_decode import ngram_proposer
     from vllm.v1.worker.encoder_cudagraph import EncoderCudaGraphManager
 
 logger = init_logger(__name__)
@@ -663,7 +663,7 @@ class ModelRunnerFL(
         # layers in the draft model.
         if self.speculative_config and get_pp_group().is_last_rank:
             self.drafter: (
-                NgramProposer  # noqa: F823
+                ngram_proposer.NgramProposer
                 | NgramProposerGPU
                 | SuffixDecodingProposer
                 | EagleProposer
@@ -1236,7 +1236,6 @@ class ModelRunnerFL(
         req_state: CachedRequestState | None,
     ) -> None:
         """Hook for platform runners to clean request-scoped side caches."""
-        del req_id, req_state
 
     def _process_encoder_cache_scheduler_output(
         self,
@@ -2735,7 +2734,6 @@ class ModelRunnerFL(
             if completion_part_len > 0:
                 # compute completion's mrope_positions on-the-fly
                 dst_start = mrope_pos_ptr
-                dst_end = mrope_pos_ptr + completion_part_len
 
                 assert req.mrope_position_delta is not None
                 MRotaryEmbedding.get_next_input_positions_tensor(

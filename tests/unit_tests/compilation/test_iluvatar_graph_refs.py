@@ -65,7 +65,6 @@ def test_iluvatar_borrowed_view_and_lifetime():
     del x
     gc.collect()
     assert torch.cuda.memory_allocated() == baseline
-    del ref
 
 
 @pytest.mark.gpu

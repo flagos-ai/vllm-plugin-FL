@@ -104,21 +104,36 @@ def test_device_payload_reuses_group_send_recv(monkeypatch):
     from unittest.mock import Mock
 
     tensor = SimpleNamespace(
-        numel=lambda: 4, is_cpu=False, device="cuda", dtype=torch.float32,
-        size=lambda: (4,), copy_=Mock(),
+        numel=lambda: 4,
+        is_cpu=False,
+        device="cuda",
+        dtype=torch.float32,
+        size=lambda: (4,),
+        copy_=Mock(),
     )
     metadata = pipeline.TensorMetadata("cuda", torch.float32, (4,))
     group = SimpleNamespace(
-        world_size=2, rank_in_group=0, ranks=[4, 7],
+        world_size=2,
+        rank_in_group=0,
+        ranks=[4, 7],
         _should_use_all_gather=lambda *args: False,
-        send_object=Mock(), recv_object=lambda src: [("x", metadata)],
-        send=Mock(), recv=Mock(return_value=tensor),
+        send_object=Mock(),
+        recv_object=lambda src: [("x", metadata)],
+        send=Mock(),
+        recv=Mock(return_value=tensor),
     )
-    monkeypatch.setattr(pipeline, "_split_tensor_dict", lambda values: ([("x", metadata)], [tensor]))
-    monkeypatch.setattr(pipeline, "torch", SimpleNamespace(
-        Tensor=SimpleNamespace, empty=lambda *a, **kw: tensor,
-        cuda=SimpleNamespace(synchronize=Mock()),
-    ))
+    monkeypatch.setattr(
+        pipeline, "_split_tensor_dict", lambda values: ([("x", metadata)], [tensor])
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "torch",
+        SimpleNamespace(
+            Tensor=SimpleNamespace,
+            empty=lambda *a, **kw: tensor,
+            cuda=SimpleNamespace(synchronize=Mock()),
+        ),
+    )
     pipeline._send(group, {"x": tensor})
     group.send.assert_called_once_with(tensor, dst=1)
     group.rank_in_group = 1

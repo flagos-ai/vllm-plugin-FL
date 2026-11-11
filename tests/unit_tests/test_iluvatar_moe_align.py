@@ -47,10 +47,35 @@ def test_vendor_fallbacks_reuse_reference_functions():
     from vllm_fl.dispatch.backends.reference.impl.activation import silu_and_mul_torch
     from vllm_fl.dispatch.backends.reference.impl.normalization import rms_norm_torch
     from vllm_fl.dispatch.backends.reference.impl.rotary import rotary_embedding_torch
-    from vllm_fl.dispatch.backends.vendor.iluvatar.impl.activation import silu_and_mul_iluvatar
-    from vllm_fl.dispatch.backends.vendor.iluvatar.impl.normalization import rms_norm_iluvatar
-    from vllm_fl.dispatch.backends.vendor.iluvatar.impl.rotary import rotary_embedding_iluvatar
+    from vllm_fl.dispatch.backends.vendor.iluvatar.impl.activation import (
+        silu_and_mul_iluvatar,
+    )
+    from vllm_fl.dispatch.backends.vendor.iluvatar.impl.normalization import (
+        rms_norm_iluvatar,
+    )
+    from vllm_fl.dispatch.backends.vendor.iluvatar.impl.rotary import (
+        rotary_embedding_iluvatar,
+    )
 
     assert silu_and_mul_iluvatar is silu_and_mul_torch
     assert rms_norm_iluvatar is rms_norm_torch
     assert rotary_embedding_iluvatar is rotary_embedding_torch
+
+
+def test_vendor_fallbacks_explicitly_export_reference_aliases():
+    from vllm_fl.dispatch.backends.vendor.iluvatar.impl import (
+        activation,
+        normalization,
+        rotary,
+    )
+
+    for module, symbol in (
+        (activation, "silu_and_mul_iluvatar"),
+        (normalization, "rms_norm_iluvatar"),
+        (rotary, "rotary_embedding_iluvatar"),
+    ):
+        assert module.__all__ == [symbol]
+        exports = {}
+        exec(f"from {module.__name__} import *", exports)
+        assert exports[symbol] is getattr(module, symbol)
+        assert {name for name in exports if not name.startswith("__")} == {symbol}
