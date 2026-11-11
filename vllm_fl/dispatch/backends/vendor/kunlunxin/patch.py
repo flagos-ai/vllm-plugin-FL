@@ -75,6 +75,37 @@ def _apply_legacy_kunlunxin_patches():
 
     apply_kv_block_zero_compat()
 
+    # P800 has pinned host memory but no UVA, so vLLM's UVA probe
+    # (is_pin_memory_available() or is_cpu()) wrongly reports True and the V2
+    # model runner maps CPU buffers into device space -- which fails at worker
+    # init_device. Report UVA honestly so upstream picks its NonUvaBuffer /
+    # device-resident paths instead.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.uva_compat import (
+        apply_uva_compat,
+    )
+
+    apply_uva_compat()
+
+    # FlagTree's XPU backend cannot lower an scf.if that yields a tensor of 256
+    # or more elements, which is how the V2 runner's M-RoPE position kernel
+    # selects its positions (at BLOCK_SIZE=1024). Swap in a tl.where form.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.rope_compat import (
+        apply_rope_compat,
+    )
+
+    apply_rope_compat()
+
+    # FlagTree's XPU backend cannot lower either V2 penalty kernel:
+    # _bincount_kernel fails in TritonXPULegalize (arith.divsi type mismatch),
+    # _penalties_kernel fails in ConvertTritonToTritonXPU (uni_sram).
+    # Both are reached during warmup_kernels even when no request uses penalties.
+    # Replace with torch implementations that are functionally equivalent.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
+        apply_penalties_compat,
+    )
+
+    apply_penalties_compat()
+
     # Disable Triton kernels incompatible with Kunlunxin XPU
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
