@@ -250,7 +250,7 @@ except ImportError:  # vLLM >= 0.28: CP merged into DCP; KV cache shards over DC
     )
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
-from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
+
 try:
     from vllm.v1.worker.gpu.pool.late_interaction_runner import (
         LateInteractionRunner,
@@ -272,6 +272,7 @@ from vllm.v1.worker.utils import (
     EncoderTimingStats,
     KVBlockZeroer,
     add_kv_sharing_layers_to_kv_cache_groups,
+    allocate_kv_cache,
     bind_kv_cache,
     copy_kv_cache_blocks_inplace,
     is_residual_scattered_for_sp,
@@ -8130,19 +8131,12 @@ class ModelRunnerFL(
                             raw_tensor, kv_cache_spec, kv_cache_shape
                         )
                         continue
-                    try:
-                        kv_cache_stride_order = attn_backend.get_kv_cache_stride_order()
-                        assert len(kv_cache_stride_order) == len(kv_cache_shape)
-                    except (AttributeError, NotImplementedError):
-                        kv_cache_stride_order = tuple(range(len(kv_cache_shape)))
-                    raw_tensor = kv_cache_raw_tensors[layer_name]
-                    kv_caches[layer_name] = _reshape_attention_kv_cache(
-                        raw_tensor,
-                        kv_cache_spec,
-                        kv_cache_shape,
-                        kv_cache_stride_order,
-                        kernel_num_blocks,
-                        packing,
+                    # This path is unreachable: _reshape_kv_cache_tensors is
+                    # only called when use_ascend_hybrid_cache=True; the
+                    # standard (non-Ascend) path uses allocate_kv_cache.
+                    raise AssertionError(
+                        "_reshape_kv_cache_tensors reached non-Ascend attention "
+                        "branch; use initialize_kv_cache_tensors instead."
                     )
 
                 elif isinstance(kv_cache_spec, MambaSpec):
@@ -8267,14 +8261,22 @@ class ModelRunnerFL(
             )
             self.cross_layers_kv_cache = cross_layers_kv_cache
             self.cross_layers_attn_backend = attn_backend
-        else:
-            # Fallback to the general case
-            # Initialize the memory buffer for KV cache
+        elif self.use_ascend_hybrid_cache:
+            # Ascend dense-hybrid layout requires fine-grained per-layer
+            # control that the unified allocate_kv_cache flow does not expose;
+            # keep the custom raw-allocate + reshape path for this backend.
             kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
-
-            # Change the memory buffer to the desired shape
             kv_caches = self._reshape_kv_cache_tensors(
                 kv_cache_raw_tensors, kernel_block_sizes
+            )
+        else:
+            # Standard path (vLLM 0.32.0+): allocate_kv_cache handles all
+            # layout, packing, and dtype-reinterpretation in one step.
+            kv_caches = allocate_kv_cache(
+                kv_cache_config,
+                self.device,
+                self.cache_config.get_resolved_kv_cache_layout(),
+                kernel_block_sizes,
             )
 
         # Set up cross-layer KV cache sharing
