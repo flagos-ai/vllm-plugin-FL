@@ -100,8 +100,8 @@ def test_empty_apply_write(fake_buffer_utils):
 
 def test_idempotent(fake_buffer_utils):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.buffer_utils_compat import (
-        apply_buffer_utils_compat,
         _PATCH_FLAG,
+        apply_buffer_utils_compat,
     )
     apply_buffer_utils_compat()
     apply_buffer_utils_compat()

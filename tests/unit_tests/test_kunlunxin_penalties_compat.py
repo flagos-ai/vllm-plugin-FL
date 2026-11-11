@@ -9,7 +9,6 @@ implementations produce the same results as a reference written in plain Python
 import pytest
 import torch
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -20,8 +19,6 @@ def _ref_bincount(expanded_idx_mapping, all_token_ids, prompt_len, prefill_len,
     idx = expanded_idx_mapping.tolist()
     prompt_bin_mask.index_fill_(0, expanded_idx_mapping.long(), 0)
     output_bin_counts.index_fill_(0, expanded_idx_mapping.long(), 0)
-    vocab_size = output_bin_counts.shape[1]
-    num_words = prompt_bin_mask.shape[1]
     for req in idx:
         p = int(prompt_len[req])
         pf = int(prefill_len[req])
@@ -68,9 +65,8 @@ def _ref_apply_penalties(logits, expanded_idx_mapping, token_ids,
             word = int(prompt_bin_mask[req, w])
             for b in range(32):
                 tok_id = w * 32 + b
-                if tok_id < vocab_size:
-                    if (word >> b) & 1:
-                        prompt_mask[tok_id] = True
+                if tok_id < vocab_size and (word >> b) & 1:
+                    prompt_mask[tok_id] = True
         combined = prompt_mask | output_mask
         for v in range(vocab_size):
             if rep != 1.0 and combined[v]:
@@ -121,7 +117,9 @@ def test_import():
 
 def test_bincount_matches_reference(small_state):
     """_bincount must match the pure-python reference on small tensors."""
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import _bincount
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
+        _bincount,
+    )
 
     s = small_state
     max_pf = int(s["prefill_len"][s["idx"]].max())
@@ -142,7 +140,9 @@ def test_bincount_matches_reference(small_state):
 
 def test_bincount_empty_idx():
     """_bincount with an empty idx mapping should not raise or modify tensors."""
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import _bincount
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
+        _bincount,
+    )
     pbm = torch.zeros(4, 2, dtype=torch.int32)
     obc = torch.zeros(4, 64, dtype=torch.int32)
     idx = torch.zeros(0, dtype=torch.int64)
@@ -155,7 +155,9 @@ def test_bincount_empty_idx():
 
 def test_apply_penalties_no_penalty():
     """_apply_penalties must leave logits unchanged when no penalties are active."""
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import _apply_penalties
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
+        _apply_penalties,
+    )
     NT, VOCAB, MAXR = 4, 32, 8
     logits = torch.randn(NT, VOCAB)
     orig = logits.clone()
@@ -173,7 +175,9 @@ def test_apply_penalties_no_penalty():
 
 def test_apply_penalties_matches_reference():
     """_apply_penalties must match the pure-python reference."""
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import _apply_penalties
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
+        _apply_penalties,
+    )
     torch.manual_seed(7)
     NT, VOCAB, MAXR = 6, 64, 8
     logits = torch.randn(NT, VOCAB, dtype=torch.float32)
@@ -203,7 +207,10 @@ def test_apply_penalties_compat_patches_module():
             del sys.modules[key]
 
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
-        apply_penalties_compat, _bincount, _apply_penalties, _PATCH_FLAG
+        _PATCH_FLAG,
+        _apply_penalties,
+        _bincount,
+        apply_penalties_compat,
     )
     # Reset the flag in case a previous test already patched
     try:

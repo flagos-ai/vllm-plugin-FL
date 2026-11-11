@@ -2,8 +2,8 @@
 
 """Unit tests for mamba_hybrid_compat."""
 
-import types
 import sys
+import types
 
 import pytest
 import torch
@@ -133,8 +133,8 @@ def test_idempotent(fake_mamba_hybrid):
         delattr(mh, "_vllm_fl_kunlunxin_mamba_hybrid_scatter_torch")
 
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_hybrid_compat import (
-        apply_mamba_hybrid_compat,
         _PATCH_FLAG,
+        apply_mamba_hybrid_compat,
     )
     apply_mamba_hybrid_compat()
     apply_mamba_hybrid_compat()
