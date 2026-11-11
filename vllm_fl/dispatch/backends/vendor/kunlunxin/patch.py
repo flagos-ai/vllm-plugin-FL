@@ -106,6 +106,15 @@ def _apply_legacy_kunlunxin_patches():
 
     apply_penalties_compat()
 
+    # FlagTree's XPU backend cannot lower an early return that follows tensor
+    # work, which is how the V2 runner's _combine_sampled_and_draft_tokens_kernel
+    # skips prefill-only requests. Swap in a single-exit form.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.input_batch_compat import (
+        apply_input_batch_compat,
+    )
+
+    apply_input_batch_compat()
+
     # Disable Triton kernels incompatible with Kunlunxin XPU
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
