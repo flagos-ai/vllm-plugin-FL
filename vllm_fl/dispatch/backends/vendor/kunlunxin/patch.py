@@ -150,6 +150,11 @@ def _apply_legacy_kunlunxin_patches():
     )
     apply_buffer_utils_compat()
 
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_hybrid_compat import (
+        apply_mamba_hybrid_compat,
+    )
+    apply_mamba_hybrid_compat()
+
 
 def _install_graph_patch(owner, name, replacement, replacements):
     if replacements is None:

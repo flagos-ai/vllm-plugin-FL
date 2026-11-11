@@ -50,9 +50,16 @@ def apply_vl_compat() -> None:
     # fast_pos_embed_interpolate's `triton_pos_embed_interpolate if HAS_TRITON`
     # branch resolves to the torch implementation on every call.
     setattr(qwen3_vl_mod, "triton_pos_embed_interpolate", native_fn)
+    # Also force HAS_TRITON = False so the conditional branch in
+    # fast_pos_embed_interpolate never selects the Triton path, even
+    # if _bilinear_pos_embed_kernel is called via other routes (e.g.
+    # CUDA graph capture warmup that runs before the name-swap above
+    # takes effect for a particular call site).
+    setattr(qwen3_vl_mod, "HAS_TRITON", False)
     setattr(qwen3_vl_mod, _PATCH_FLAG, True)
     logger.info(
         "kunlunxin vl_compat: triton_pos_embed_interpolate → "
-        "pos_embed_interpolate_native (FlagTree miscompiles bilinear "
-        "interpolation kernel, producing wrong pos-embeds for image inputs)"
+        "pos_embed_interpolate_native, HAS_TRITON → False "
+        "(FlagTree miscompiles bilinear interpolation kernel, "
+        "producing wrong pos-embeds for image inputs)"
     )
