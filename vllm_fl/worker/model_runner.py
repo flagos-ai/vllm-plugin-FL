@@ -247,14 +247,9 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
-try:
-    from vllm.v1.worker.cp_utils import (
-        get_total_cp_world_size,
-    )
-except ImportError:  # vLLM >= 0.28: CP merged into DCP; KV cache shards over DCP
-    from vllm.v1.worker.cp_utils import (
-        get_kv_cache_shard_count as get_total_cp_world_size,
-    )
+# NOTE: cp_utils.get_total_cp_world_size (0.28) / get_kv_cache_shard_count
+# (intermediate rename) are both absent from vLLM 0.32; nothing in this
+# module calls them, so the import is dropped rather than guarded.
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 
