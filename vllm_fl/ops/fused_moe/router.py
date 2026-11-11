@@ -79,12 +79,9 @@ def fused_topk(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
-    # The FL kernel currently implements the unpadded softmax path. Preserve
-    # v0.28.0 padding and sigmoid semantics by delegating those cases upstream.
-    if (
-        scoring_func != "softmax"
-        or _get_padding_mask(hidden_states.shape[0]) is not None
-    ):
+    # The FL kernel implements the unpadded softmax path. Preserve v0.28.0
+    # sigmoid semantics by delegating those cases upstream.
+    if scoring_func != "softmax":
         return upstream_fused_topk(
             hidden_states=hidden_states,
             gating_output=gating_output,
@@ -93,6 +90,13 @@ def fused_topk(
             indices_type=indices_type,
             scoring_func=scoring_func,
         )
+
+    # Model Runner V2 pads the token batch and flags the extra rows with
+    # ``is_padding``. Delegating those rows upstream needs
+    # ``torch.ops._moe_C.topk_softmax``, which non-CUDA-alike vendors do not
+    # ship, so run the kernel over every row and zero the routing weights of
+    # the padding rows instead.
+    padding_mask = _get_padding_mask(hidden_states.shape[0])
 
     M, _ = hidden_states.size()
 
@@ -117,6 +121,9 @@ def fused_topk(
         gating_output,
         renormalize,
     )
+
+    if padding_mask is not None:
+        topk_weights = topk_weights.masked_fill(padding_mask.unsqueeze(-1), 0.0)
 
     return topk_weights, topk_ids, token_expert_indices
 

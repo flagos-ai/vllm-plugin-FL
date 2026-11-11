@@ -266,14 +266,12 @@ Steps that differ from the 0.28 recipe:
    `typing.ParamSpec(..., infer_variance=...)`, which Python 3.10 rejects.
 2. **Install FlagGems-vllm** (`v0.2.0`). Without `flaggems_vllm` the FlagGems
    backend cannot register and dispatch falls back to `reference.torch`.
-3. **Keep the v1 model runner.** `ModelRunnerFL` is a fork of vLLM's v1 runner.
-   0.32 enables the V2 runner by default; the plugin falls back to V1 before any
-   `VllmConfig` is created and logs a warning naming the reason, because 0.32
-   attention metadata builders (e.g. GDN/GDN-hybrid) take CUDA-only V2 paths
-   (`mamba_aligned_state_indices`, `update_block_table`) that the FL runner does
-   not populate. Do not pin `VLLM_USE_V2_MODEL_RUNNER=0` in images or launch
-   scripts: leaving it unset is what lets the plugin report the fallback, and an
-   explicit `=1` is rejected instead of degrading silently.
+3. **Model runner selection follows upstream.** 0.32 defaults to the V2 model
+   runner and Hygon keeps that default, matching the NVIDIA path. The plugin
+   ships no V2 runner of its own, so the default runs vLLM's own V2 runner.
+   `VLLM_USE_V2_MODEL_RUNNER=0` selects the plugin's `ModelRunnerFL` (a fork of
+   the v1 runner) and goes through upstream's v1 feature validation. Do not pin
+   the variable in images or launch scripts.
 4. **Blacklist `zeros` / `zero_` in the Hygon dispatch policy.** FlagGems'
    Triton zero kernels pass the element count as int32, so zeroing the multi-GB
    KV-cache backing buffer (`> 2**31` int8 elements) fails with

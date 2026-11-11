@@ -3,7 +3,6 @@
 """Hygon (HCU/DCU) patches for vLLM 0.32 compatibility."""
 
 import logging
-import os
 from functools import lru_cache
 
 logger = logging.getLogger(__name__)
@@ -16,38 +15,53 @@ def apply_hygon_patches():
     Cached so the patches run once per process. ``lru_cache`` does not cache
     exceptions, so a failed call can be retried.
     """
-    force_v1_model_runner()
     patch_accelerator_missing_attrs()
+    patch_uva_unavailable()
 
 
-def force_v1_model_runner() -> None:
-    """Disable vLLM 0.32's default V2 model runner.
+def patch_uva_unavailable() -> bool:
+    """Report UVA as unavailable so Model Runner V2 uses its copy fallback.
 
-    ``ModelRunnerFL`` is a fork of vLLM's v1 runner. With the V2 runner enabled,
-    0.32's attention metadata builders (e.g. GDN) take CUDA-only paths such as
-    ``mamba_aligned_state_indices`` that only the V2 runner populates, so the
-    FL runner cannot drive them. ``VllmConfig.use_v2_model_runner`` is a
-    read-only property backed by this env var, hence it is set before any
-    VllmConfig is created.
+    vLLM 0.32 derives UVA support from pinned memory alone
+    (``vllm.utils.platform_utils.is_uva_available``), but ``UvaBuffer`` also
+    needs ``get_accelerator_view_from_cpu_tensor``, which only handles XPU and
+    CUDA-alike platforms. HCU is not CUDA-alike and this DTK build ships no
+    ``torch.ops._C.get_cuda_view_from_cpu_tensor``, so ``UvaBuffer`` aborts
+    Model Runner V2 construction. Reporting no UVA makes ``StagedWriteTensor``
+    and ``UvaBufferPool`` take upstream's explicit-copy ``NonUvaBuffer`` path.
 
-    Hygon cannot run the V2 runner: vLLM-FL ships only the v1 runner, and
-    0.32's V2-only attention metadata paths are CUDA-shaped. Upstream defaults
-    to V2, so the fallback is announced as a warning and an explicit opt-in is
-    rejected instead of degrading silently. ``=0`` is honoured quietly.
+    Remove once DTK provides an HCU ``get_cuda_view_from_cpu_tensor``.
     """
-    value = os.environ.get("VLLM_USE_V2_MODEL_RUNNER")
-    if value is None:
-        os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
-        logger.warning(
-            "Hygon does not support the vLLM 0.32 V2 model runner (vLLM-FL "
-            "implements the v1 runner); falling back to V1."
+    try:
+        import sys
+
+        import vllm.utils.platform_utils as platform_utils
+
+        if getattr(platform_utils, "_hcu_uva_patched", False):
+            return True
+
+        def _uva_unavailable() -> bool:
+            return False
+
+        platform_utils.is_uva_available = _uva_unavailable
+        # ``from ... import is_uva_available`` copies the callable, so rebind it
+        # in vLLM modules that were imported before this patch ran.
+        for name, module in list(sys.modules.items()):
+            if not name.startswith("vllm.") or module is None:
+                continue
+            if getattr(module, "is_uva_available", None) is not None:
+                module.is_uva_available = _uva_unavailable
+
+        platform_utils._hcu_uva_patched = True
+        logger.info(
+            "Reported UVA as unavailable for Hygon: HCU has no "
+            "get_cuda_view_from_cpu_tensor, Model Runner V2 uses the "
+            "explicit-copy buffer fallback"
         )
-    elif value.strip() not in ("", "0"):
-        raise RuntimeError(
-            f"VLLM_USE_V2_MODEL_RUNNER={value} is not supported on Hygon: vLLM-FL "
-            "only implements the v1 model runner. Unset the variable (the "
-            "plugin selects v1) or set it to 0."
-        )
+        return True
+    except Exception as exc:  # pragma: no cover - never block registration
+        logger.warning("Failed to disable UVA for Hygon: %s", exc)
+        return False
 
 
 def patch_accelerator_missing_attrs() -> bool:
