@@ -1,7 +1,9 @@
 ﻿# MUSA deployment
 
-vLLM-Plugin-FL supports vLLM **0.32.0** on Moore Threads MUSA with the V1 model
-runner, native MCCL communication and piecewise MUSA graph capture.
+vLLM-Plugin-FL supports vLLM **0.32.0** on Moore Threads MUSA with the upstream
+V2 model runner by default (as on NVIDIA), native MCCL communication and
+piecewise MUSA graph capture. `VLLM_USE_V2_MODEL_RUNNER=0` selects the V1
+`ModelRunnerFL` fallback.
 
 ## Runtime requirements
 
@@ -128,7 +130,7 @@ variables serve different layers:
 | `VLLM_PLUGINS=fl` | Enable the FL platform/model plugin in vLLM. |
 | `MTHREADS_VISIBLE_DEVICES` | Give the Mthreads container runtime the allocated **host physical** card IDs. Never replace a job's allocation with `all`. |
 | `MUSA_VISIBLE_DEVICES` | Limit the MUSA SDK/TorchMUSA logical device IDs inside the container. The single exposed card in this example is logical `0`, even when its host ID is different. |
-| `VLLM_USE_V2_MODEL_RUNNER=0` | Required: the plugin implements the V1 `ModelRunnerFL`; the upstream V2 runner uses CUDA/UVA APIs MUSA does not provide. When the variable is unset the plugin derives this default at registration time and logs a warning with the reason; an explicit `=1` is rejected during config validation. |
+| `VLLM_USE_V2_MODEL_RUNNER` | Optional. MUSA runs the upstream V2 runner by default, as on NVIDIA. The plugin binds the `torch.cuda` stream/event/graph/device-property APIs the V2 internals use to their `torch.musa` counterparts and takes the explicit-copy buffer path, because MUSA can pin host memory but cannot map it into the device address space. Set `0` to use the V1 `ModelRunnerFL` instead. The V2 kernel warmup needs extra temporary device memory, so keep `--gpu-memory-utilization` at or below `0.6`. |
 | `USE_FLAGTUNE` | The plugin sets `USE_FLAGTUNE=0` on MUSA so FlagGems does not fetch the FlagTune cost-model bundle; set `VLLM_FL_MUSA_FLAGTUNE=1` to opt back in. |
 
 The CI runner has a separate fixed four-card allocation: host cards `4,5,6,7`
@@ -220,10 +222,12 @@ non-empty `choices[0].message.content`. Stop the server with Ctrl-C, then `exit`
 the container shell; `--rm` removes this container. If port 8000 is occupied,
 change the host side of `--publish` and the two curl URLs together.
 
-MUSA selects the V1 runner and MCCL communication. The default compiler adapter
-is FX/eager: Dynamo tracing, piecewise splitting and native graph replay remain
-enabled. This setting is different from `--enforce-eager`, which disables graph
-execution. Explicit Inductor selection remains experimental for this stack.
+MUSA runs the upstream V2 model runner by default and uses MCCL communication;
+`VLLM_USE_V2_MODEL_RUNNER=0` selects the V1 `ModelRunnerFL`. The default
+compiler adapter is FX/eager: Dynamo tracing, piecewise splitting and native
+graph replay remain enabled. This setting is different from `--enforce-eager`,
+which disables graph execution. Explicit Inductor selection remains experimental
+for this stack.
 
 Compiled inference with gradients disabled uses MUSA-specific RMSNorm, SiLU and
 rotary operator boundaries. Their fake metadata and mutation schemas keep
@@ -264,10 +268,19 @@ they do not establish a latency or throughput guarantee.
 - FlagCX is not available for MUSA; distributed runs use native MCCL (`mccl`).
   The FlagGems + FlagTree + FlagCX combined acceptance gate is therefore blocked
   for this platform and reported as such.
+- The V2 runner is the default. Two runtime adaptations are installed for it
+  and can be removed once torch_musa or upstream vLLM routes the V2 internals
+  through the vendor device abstraction: the `torch.cuda` stream/event/graph/
+  device-property APIs the V2 internals use are bound to their `torch.musa`
+  counterparts, and UVA buffers take the explicit device-copy path because MUSA
+  can pin host memory but cannot map it into the device address space.
+  `VLLM_USE_V2_MODEL_RUNNER=0` still selects the V1 `ModelRunnerFL`; hybrid
+  GDN/mamba models need `mamba_cache_mode=none` on that path.
 - FULL cudagraph mode is unsupported; graph runs stay PIECEWISE.
 - MoE `topk_softmax` is routed through the plugin dispatch (FlagGems/reference).
-  The 0.32-only `is_padding` mask and `e_score_correction_bias` arguments are
-  accepted but not applied; MoE bias correction is not exercised on MUSA yet.
+  The 0.32 `is_padding` mask is applied after the FL routing kernel when the
+  native `_moe_C` implementation is absent; `e_score_correction_bias` is
+  accepted but not applied, so MoE bias correction is not exercised on MUSA yet.
 
 ## CI coverage
 
@@ -292,7 +305,10 @@ Use the repository's `ci.yml` platform selection. Runner labels and device
 environment settings come from the
 [CI configuration](../../.github/configs/musa.yml); model cases and test settings
 come from the platform test configuration. Keep the original model checks,
-capture sizes, memory budgets and timeouts when validating changes. Consult the
+capture sizes, memory budgets and timeouts when validating changes. Graph cases
+must also leave graph-execution evidence (PIECEWISE capture logs from the V2
+runner); a pass produced with `enforce_eager` or a silent fallback to eager is
+not a graph pass. Consult the
 actual CI run for its source, platform results and conditional skips.
 
 Installation checks or CPU tests alone do not establish device-kernel,
@@ -310,10 +326,10 @@ The 0.32.0 adaptation was accepted on 2026-11-05:
 | Branch | `vllm-plugin-FL` `0.5.0-dev` (vLLM 0.32.0 `empty` build) |
 | Models | Qwen3.6-27B, Qwen3.6-35B-A3B (TP4) |
 | Runtime | `flagos-runtime-mthreads-musa4.3.6:2.2.0`, plugin installed editable |
-| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:8451d2437e2e57c25741aca964a8e12c755943e42c83d5af6b4438a04b93dcb4` |
+| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:9bcde3f187884dd201b7d1a8ad459ffe29d0773125d7fc36e2233fc24e81d6a0` |
 | Dependency tuple | torch 2.9.0 (`torch.version.musa` = 40306), FlagGems 5.4.0, FlagTree 0.7.0+mthreads3.6, Triton 3.6.0 |
 | Gate | 4/4 groups `GATE_TEST_RC=0` (27B and 35B-A3B × eager and graph) |
-| Unit tests | raw full suite 2004 passed, 225 skipped, 1 failed (`test_gcu_kv_zeroer`, outside MUSA); `FL_TEST_PLATFORM=musa` (CI path) 1884 passed, 231 skipped, 0 failed |
+| Unit tests | raw full suite 2004 passed, 225 skipped, 0 failed; `FL_TEST_PLATFORM=musa` (CI path) 1883 passed, 231 skipped, 0 failed |
 | Evidence | Validation host `/data/mt032/final_{27b,35b}_{graph,eager}/` (`*.server.log`, `*.test.log`, gate results) |
 | Status | Accepted for MUSA; FlagCX combined gate not applicable (native MCCL) |
 
@@ -330,3 +346,30 @@ Key changes in this adaptation:
   the remote cost-model bundle.
 - CI setup asserts the pinned tuple (vLLM 0.32, FlagGems 5.4, FlagTree 0.7,
   Triton 3.6, torch 2.9).
+
+### V2 runner acceptance (2026-11-12)
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-12 |
+| Runner | Upstream V2 `GPUModelRunner` by default; `VLLM_USE_V2_MODEL_RUNNER` unset |
+| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:9bcde3f187884dd201b7d1a8ad459ffe29d0773125d7fc36e2233fc24e81d6a0` |
+| Gate | 4/4 groups `GATE_TEST_RC=0` (27B and 35B-A3B × eager and graph); graph groups ran `cudagraph_mode=PIECEWISE` with per-rank `Graph capturing finished` records from the V2 runner (`model_runner.py:1127`) |
+| Unit tests | raw full suite 2004 passed, 225 skipped, 0 failed; `FL_TEST_PLATFORM=musa` (CI path) 1883 passed, 231 skipped, 0 failed |
+| Evidence | Validation host `/data/mt032/gate_v2_{eager,graph}/` (`*.server.log`, gate summaries), `/data/mt032/final_validation.log` |
+
+Key changes for the V2 default:
+
+- `register()` no longer forces `VLLM_USE_V2_MODEL_RUNNER=0` for mthreads, and
+  the platform no longer rejects an explicit `=1`; runner selection follows
+  upstream, as on NVIDIA.
+- `worker.py` installs the V2 compatibility shims only on MUSA: the
+  `torch.cuda` APIs used by the V2 internals are bound to `torch.musa`
+  (`is_available` is deliberately left untouched so Dynamo does not take the
+  CUDA RNG path), UVA buffers use explicit device copies, and dispatch ops are
+  warmed before the first compiled forward so `fullgraph` tracing never hits
+  the first-lookup dispatcher path.
+- MoE `topk_softmax` clears the 0.32 padding rows after the FL routing kernel
+  when the native `_moe_C` implementation is absent.
+- The CI platform configuration lowers `gpu_memory_utilization` to 0.6 for the
+  V2 warmup.

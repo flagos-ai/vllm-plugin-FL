@@ -57,9 +57,7 @@ def _make_ascend_vllm_config(
     )
 
 
-@pytest.mark.parametrize(
-    "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro"]
-)
+@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu", "tsingmicro"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(
     monkeypatch, caplog, vendor, requested, expected
@@ -96,11 +94,39 @@ def test_accelerator_defaults_to_fl_runner(
     assert len(announced) == (1 if requested is None else 0)
 
 
+def test_musa_keeps_the_upstream_v2_default(monkeypatch, caplog):
+    """MUSA runs V2 through the torch.cuda -> torch.musa shim, so it must not
+    rewrite VLLM_USE_V2_MODEL_RUNNER at registration time."""
+    import os
+    from types import SimpleNamespace
+
+    import vllm_fl
+    import vllm_fl.utils
+
+    monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
+    monkeypatch.setattr(
+        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="mthreads")
+    )
+
+    with caplog.at_level(logging.WARNING, logger="vllm_fl"):
+        assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
+    assert not [
+        record
+        for record in caplog.records
+        if "cannot execute the upstream V2 model runner" in record.getMessage()
+    ]
+
+
 @pytest.mark.parametrize(
     "device_type,vendor,error_pattern",
     [
         ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
-        ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),

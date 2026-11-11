@@ -269,19 +269,15 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
         "_fl_gcu_original_init",
         worker_utils.KVBlockZeroer.__init__,
     )
+    # Two kernel blocks per manager block: the builder splits each manager
+    # block into one virtual segment per kernel block.
     kv = torch.empty((2, 8, 16, 2, 16), dtype=torch.int32)
-    backend_calls = []
-
-    def block_dim(*args, **kwargs):
-        backend_calls.append((args, kwargs))
-        return 1
-
     group = SimpleNamespace(
         kv_cache_spec=FullAttentionSpec(
             block_size=32, num_kv_heads=2, head_size=16, dtype=torch.int32
         ),
         kv_cache_group_id=0,
-        backend=SimpleNamespace(get_kv_cache_block_dim=block_dim),
+        kernel_block_stride=0,
         layer_names=["real", "alias", "runner", "non_tensor"],
     )
     context = {
@@ -311,21 +307,22 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
         torch.device("cpu"),
         (g for g in [group]),
         [16],
-        "auto",
         context,
+        1,
         {"runner"},
     )
-    addresses = [kv.data_ptr() + offset for offset in (0, 2048, 16384, 18432)]
-    assert backend_calls == [((16, 2, 16), {"cache_dtype_str": "auto"})]
+    # One segment per virtual block; "alias" reuses the same storage and must
+    # not add duplicate segments.
+    addresses = [kv.data_ptr(), kv.data_ptr() + 16384]
     assert len(snapshots) == 1
     assert snapshots[0][0].tolist() == addresses
     assert queried == addresses
     assert zeroer._meta[0].tolist() == [address + 256 for address in addresses]
     assert zeroer._meta[0].dtype == torch.uint64
     assert zeroer._meta[0].device == kv.device
-    assert zeroer._meta[1].tolist() == [1024] * 4
-    assert zeroer._meta[2].tolist() == [512] * 4
-    assert zeroer._meta[3:] == (1, 512, 4)
+    assert zeroer._meta[1].tolist() == [8192] * 2
+    assert zeroer._meta[2].tolist() == [4096] * 2
+    assert zeroer._meta[3:] == (4, 1024, 2)
     assert all(
         actual is expected
         for actual, expected in zip(zeroer._meta[1:], snapshots[0][1:])

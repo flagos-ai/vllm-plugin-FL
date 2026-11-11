@@ -18,7 +18,7 @@
 platform: musa
 
 # FlagOS 2.2 runtime base (flagos-runtime-mthreads-musa4.3.6:2.2.0) + vLLM 0.32.0 empty.
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:8147137a2a8665ece8769da00cd90b026b5f5f23ab32707d71aec7c59cb4ac8c
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:9bcde3f187884dd201b7d1a8ad459ffe29d0773125d7fc36e2233fc24e81d6a0
 
 runner_labels:
   - mt-cicd-vllm-plugin

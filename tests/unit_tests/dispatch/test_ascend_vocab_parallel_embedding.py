@@ -15,6 +15,8 @@ if _test_platform and _test_platform != "ascend":
 
 from vllm.model_executor.parameter import ModelWeightParameter
 
+pytest.importorskip("torch_npu")
+
 from vllm_fl.dispatch.backends.vendor.ascend.impl import (
     vocab_parallel_embedding as ascend_vocab,
 )

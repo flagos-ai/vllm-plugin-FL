@@ -273,8 +273,11 @@ def register():
     # instead of rewriting the environment silently. An explicit
     # VLLM_USE_V2_MODEL_RUNNER is never overridden; platform.py rejects
     # "=1" with the same reasoning.
+    #
+    # MUSA is not listed: it runs the upstream V2 runner through the
+    # torch.cuda -> torch.musa shim in worker.py.
     if (
-        vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro")
+        vendor_name in ("ascend", "enflame", "gcu", "tsingmicro")
         and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") is None
     ):
         os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
