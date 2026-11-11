@@ -54,7 +54,8 @@ def _force_uva_unavailable() -> None:
 
     import vllm.utils.platform_utils as _pu
 
-    if getattr(_pu.is_uva_available, "_fl_forced_false", False):
+    original = _pu.is_uva_available
+    if getattr(original, "_fl_forced_false", False):
         return
 
     def is_uva_available() -> bool:
@@ -62,11 +63,17 @@ def _force_uva_unavailable() -> None:
 
     is_uva_available._fl_forced_false = True  # type: ignore[attr-defined]
     _pu.is_uva_available = is_uva_available
-    # buffer_utils binds the name at its own import time; rebind there too if it
-    # is already loaded (otherwise its later `from ... import` gets the patch).
-    _bu = sys.modules.get("vllm.v1.worker.gpu.buffer_utils")
-    if _bu is not None:
-        _bu.is_uva_available = is_uva_available
+    # Modules that did ``from vllm.utils.platform_utils import is_uva_available``
+    # captured the original by value. Patching the canonical module above covers
+    # consumers imported after this; rebind the ones already imported — buffer_utils,
+    # the offloader, and the 0.32 models that read it at import — so none keep the
+    # original reference and keep reporting UVA as available.
+    for module in list(sys.modules.values()):
+        if module is None or module is _pu:
+            continue
+        if getattr(module, "is_uva_available", None) is original:
+            with suppress(Exception):
+                module.is_uva_available = is_uva_available
 
 
 def _unavailable_weak_ref(tensor):
