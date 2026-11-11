@@ -5,7 +5,25 @@ Enflame S60 runtime. The deployment must use matching vendor builds of
 PyTorch, TorchGCU, FlagTree, FlagGems, and FlagCX. Install the plugin with
 `--no-build-isolation --no-deps` so the validated vendor runtime is preserved.
 
-## Verified scope
+## Model runner
+
+Enflame follows upstream vLLM 0.32 V2 model-runner selection. The plugin no
+longer defaults GCU to V1 or rejects V2. Do not disable V2 to bypass adaptation
+failures. On GCU, V2 uses upstream explicit-copy buffers and translates block
+table pointer handles to device addresses before Triton indirect loads.
+
+V2 validation on Qwen3-0.6B, BF16, TP=1, eager mode confirmed the actual worker
+runner as `vllm.v1.worker.gpu.model_runner.GPUModelRunner` and generated five
+requests of 32 tokens. Updated regression tests passed (194 tests). Multi-group
+block table writes and gathering reordered requests also passed on hardware.
+Against the existing same-weight NVIDIA upstream baseline, three requests were
+exact; Paris first differed at token 11 and arithmetic at token 7 (one-based).
+The strict precision gate therefore remains open. These results do not verify
+V2 graph capture, TP>1, prompt embeddings, multimodal models or PCP.
+
+The historical validation below used ModelRunnerFL (V1) and is not V2 validation.
+
+## Historical V1 verified scope
 
 - Qwen3-0.6B BF16 eager and compiled execution on S60, including TP=2 and a
   real FlagCX collective.

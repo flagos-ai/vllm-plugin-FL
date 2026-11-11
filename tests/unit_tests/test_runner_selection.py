@@ -55,9 +55,7 @@ def _make_ascend_vllm_config(
     )
 
 
-@pytest.mark.parametrize(
-    "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro"]
-)
+@pytest.mark.parametrize("vendor", ["ascend", "mthreads", "tsingmicro"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
     import os
@@ -88,8 +86,6 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     [
         ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
-        ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
-        ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
     ],
 )
@@ -127,57 +123,6 @@ def test_musa_accepts_fl_runner_for_single_and_multiple_devices(monkeypatch, tp)
 
     assert config.use_v2_model_runner is False
     assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
-
-
-@pytest.mark.parametrize("vendor", ["enflame", "gcu"])
-@pytest.mark.parametrize(
-    "feature", ["DSpark", "mixed-KV DFlash", "DFlash2", "LiLiCorr", "diffusion"]
-)
-def test_enflame_rejects_v2_only_features_with_v1_override(
-    monkeypatch, vendor, feature
-):
-    from types import SimpleNamespace
-
-    from vllm.config import VllmConfig
-
-    from vllm_fl.platform import PlatformFL
-
-    class FeatureConfig(SimpleNamespace):
-        use_v2_model_runner = VllmConfig.use_v2_model_runner
-        _dflash_needs_multi_kv_group = VllmConfig._dflash_needs_multi_kv_group
-        _is_dflash_candidate_draft = VllmConfig._is_dflash_candidate_draft
-
-    monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "0")
-    monkeypatch.setattr(PlatformFL, "device_type", "gcu")
-    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
-    speculative_config = None
-    if feature == "DSpark":
-        speculative_config = SimpleNamespace(method="dspark")
-    elif feature in ("mixed-KV DFlash", "DFlash2", "LiLiCorr"):
-        speculative_config = SimpleNamespace(
-            method="dflash",
-            draft_model_config=SimpleNamespace(
-                architectures={
-                    "DFlash2": ["DFlash2DraftModel"],
-                    "LiLiCorr": ["LiLiCorrDraftModel"],
-                }.get(feature, []),
-                hf_config=SimpleNamespace(
-                    layer_types=(
-                        ["sliding_attention", "full_attention"]
-                        if feature == "mixed-KV DFlash"
-                        else ["full_attention"]
-                    )
-                ),
-            ),
-        )
-    config = FeatureConfig(
-        attention_config=SimpleNamespace(hisparse_config=None),
-        model_config=SimpleNamespace(is_diffusion=feature == "diffusion"),
-        speculative_config=speculative_config,
-    )
-    assert config.use_v2_model_runner is False
-    with pytest.raises(ValueError, match=feature):
-        PlatformFL.check_and_update_config(config)
 
 
 @pytest.mark.parametrize("vendor", ["enflame", "gcu", "iluvatar"])
@@ -464,3 +409,49 @@ def test_ascend_allows_layer_only_vllm_config(monkeypatch):
     assert config.model_config is None
     assert config.compilation_config.mode is CompilationMode.NONE
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.NONE
+
+
+@pytest.mark.parametrize("vendor", ["enflame", "gcu"])
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+def test_gcu_registration_preserves_upstream_v2_selection(
+    monkeypatch, vendor, requested
+):
+    import os
+    from types import SimpleNamespace
+
+    import vllm_fl
+    import vllm_fl.utils
+
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    for name in (
+        "_arm_cpu_platform",
+        "_init_vendor_device",
+        "_patch_custom_ops",
+        "_patch_flash_attn_import",
+        "_get_op_config",
+    ):
+        monkeypatch.setattr(vllm_fl, name, lambda: None)
+    monkeypatch.setattr(
+        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name=vendor)
+    )
+    vllm_fl.register()
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested
+
+
+@pytest.mark.parametrize("vendor", ["enflame", "gcu"])
+def test_gcu_config_accepts_v2_runner(monkeypatch, vendor):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "gcu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(
+        "vllm_fl.attention.utils.patch_mm_encoder_attention", lambda: None
+    )
+    config = _make_ascend_vllm_config()
+    config.use_v2_model_runner = True
+    PlatformFL.check_and_update_config(config)
+    assert config.use_v2_model_runner is True
+    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"

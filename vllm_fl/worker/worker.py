@@ -689,6 +689,10 @@ class WorkerFL(WorkerBase):
     def _make_model_runner(self) -> "GPUModelRunner":
         """Construct the platform's model runner; subclasses override this."""
         if self.use_v2_model_runner:
+            if current_platform.device_type == "gcu":
+                from vllm_fl.patches.gcu_v2_buffers import install_gcu_v2_buffers
+
+                install_gcu_v2_buffers()
             if self.vllm_config.is_mm_encoder_only:
                 from vllm.v1.worker.mm_encoder_model_runner import (
                     MMEncoderModelRunner as GPUModelRunnerV2,

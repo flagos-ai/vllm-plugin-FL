@@ -419,35 +419,8 @@ class PlatformFL(Platform):
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
         if cls.device_type == "gcu":
-            if vllm_config.use_v2_model_runner:
-                raise ValueError(
-                    "Enflame requires ModelRunnerFL; the upstream V2 runner is "
-                    "not supported on GCU. Set VLLM_USE_V2_MODEL_RUNNER=0."
-                )
-            # The default V1 override takes precedence over upstream's automatic
-            # V2 selection. Reject features that V1 cannot execute faithfully.
-            v2_only_features = []
-            speculative_config = getattr(vllm_config, "speculative_config", None)
-            if speculative_config is not None:
-                if speculative_config.method == "dspark":
-                    v2_only_features.append("DSpark")
-                elif speculative_config.method == "dflash":
-                    if vllm_config._dflash_needs_multi_kv_group():
-                        v2_only_features.append("mixed-KV DFlash")
-                    if vllm_config._is_dflash_candidate_draft():
-                        v2_only_features.append(
-                            "DFlash candidate head (DFlash2/LiLiCorr)"
-                        )
             model_config = getattr(vllm_config, "model_config", None)
-            if model_config is not None and getattr(
-                model_config, "is_diffusion", False
-            ):
-                v2_only_features.append("diffusion")
-            if v2_only_features:
-                raise ValueError(
-                    "Enflame ModelRunnerFL does not support these V2-only features: "
-                    + ", ".join(v2_only_features)
-                )
+            speculative_config = getattr(vllm_config, "speculative_config", None)
             if (
                 getattr(model_config, "is_hybrid", False)
                 and speculative_config is not None
