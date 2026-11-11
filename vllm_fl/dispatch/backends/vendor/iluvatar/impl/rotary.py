@@ -4,5 +4,3 @@
 from vllm_fl.dispatch.backends.reference.impl.rotary import (
     rotary_embedding_torch as rotary_embedding_iluvatar,
 )
-
-__all__ = ["rotary_embedding_iluvatar"]

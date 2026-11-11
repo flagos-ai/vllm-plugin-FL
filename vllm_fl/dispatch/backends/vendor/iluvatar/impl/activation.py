@@ -4,5 +4,3 @@
 from vllm_fl.dispatch.backends.reference.impl.activation import (
     silu_and_mul_torch as silu_and_mul_iluvatar,
 )
-
-__all__ = ["silu_and_mul_iluvatar"]
