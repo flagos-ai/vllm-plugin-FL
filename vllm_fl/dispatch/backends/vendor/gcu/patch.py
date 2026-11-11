@@ -13,6 +13,7 @@ from .impl.index_fill import apply_index_fill_gcu_patch
 from .impl.inductor import apply_inductor_gcu_patch
 from .impl.kv_zeroer import apply_kv_zeroer_gcu_patch
 from .impl.mamba_copy import apply_mamba_copy_gcu_patch
+from .impl.penalties import apply_penalties_gcu_patch
 from .impl.sampler import apply_sampler_cpu_detour
 from .impl.vocab_mask import apply_vocab_mask_gcu_patch
 
@@ -37,6 +38,7 @@ def apply_gcu_patches() -> None:
     apply_chunk_delta_h_gcu_patch()
     apply_fla_grid_gcu_patch()
     apply_sampler_cpu_detour()
+    apply_penalties_gcu_patch()
     apply_fused_recurrent_packed_decode_gcu_patch()
     apply_kv_zeroer_gcu_patch()
     apply_mamba_copy_gcu_patch()
