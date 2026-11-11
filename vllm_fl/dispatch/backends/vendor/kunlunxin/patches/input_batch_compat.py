@@ -489,7 +489,9 @@ def apply_input_batch_compat() -> None:
     """Swap in a single-exit token combiner that FlagTree can lower,
     and replace the input-batch launcher functions with pure-torch versions."""
     try:
-        from vllm.v1.worker.gpu import input_batch
+        import importlib
+
+        input_batch = importlib.import_module("vllm.v1.worker.gpu.input_batch")
     except ImportError:
         # Builds without the V2 runner have nothing to patch.
         return

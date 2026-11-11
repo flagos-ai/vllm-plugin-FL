@@ -21,7 +21,9 @@ _PATCH_FLAG = "_vllm_fl_kunlunxin_block_tables_torch"
 def apply_block_tables_compat() -> None:
     """Replace BlockTables.gather_block_tables and compute_slot_mappings."""
     try:
-        from vllm.v1.worker.gpu import block_table as bt_mod
+        import importlib
+
+        bt_mod = importlib.import_module("vllm.v1.worker.gpu.block_table")
     except ImportError:
         return
 

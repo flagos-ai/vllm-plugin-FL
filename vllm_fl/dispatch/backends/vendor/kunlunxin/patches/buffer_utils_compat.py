@@ -81,7 +81,9 @@ def _make_fused_apply_torch():
 def apply_buffer_utils_compat() -> None:
     """Replace Triton staged-write kernels with pure-torch loops."""
     try:
-        from vllm.v1.worker.gpu import buffer_utils
+        import importlib
+
+        buffer_utils = importlib.import_module("vllm.v1.worker.gpu.buffer_utils")
     except ImportError:
         return
 

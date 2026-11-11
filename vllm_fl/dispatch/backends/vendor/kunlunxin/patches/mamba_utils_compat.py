@@ -126,7 +126,9 @@ def _build_kernel():
 def apply_mamba_utils_compat() -> None:
     """Swap in a 2-D-per-group state-index kernel that FlagTree can lower."""
     try:
-        from vllm.v1.worker import mamba_utils
+        import importlib
+
+        mamba_utils = importlib.import_module("vllm.v1.worker.mamba_utils")
     except ImportError:
         # Builds without the V2 Mamba path have nothing to patch.
         return

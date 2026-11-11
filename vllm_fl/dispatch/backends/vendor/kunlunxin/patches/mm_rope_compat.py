@@ -23,7 +23,9 @@ _PATCH_FLAG = "_vllm_fl_kunlunxin_rope_prepare_positions_torch"
 def apply_mm_rope_compat() -> None:
     """Replace RopeState.prepare_positions with a pure-torch implementation."""
     try:
-        from vllm.v1.worker.gpu.mm import rope as rope_mod
+        import importlib
+
+        rope_mod = importlib.import_module("vllm.v1.worker.gpu.mm.rope")
     except ImportError:
         return
 

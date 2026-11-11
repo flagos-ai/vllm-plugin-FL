@@ -110,7 +110,9 @@ def _build_kernel():
 def apply_rope_compat() -> None:
     """Swap in a branch-free M-RoPE position kernel that FlagTree can lower."""
     try:
-        from vllm.v1.worker.gpu.mm import rope
+        import importlib
+
+        rope = importlib.import_module("vllm.v1.worker.gpu.mm.rope")
     except ImportError:
         # Builds without the V2 runner have nothing to patch.
         return

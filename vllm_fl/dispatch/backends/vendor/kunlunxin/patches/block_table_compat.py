@@ -162,7 +162,9 @@ def _build_kernel():
 def apply_block_table_compat() -> None:
     """Swap in a single-exit slot-mapping kernel that FlagTree can lower."""
     try:
-        from vllm.v1.worker.gpu import block_table
+        import importlib
+
+        block_table = importlib.import_module("vllm.v1.worker.gpu.block_table")
     except ImportError:
         # Builds without the V2 runner have nothing to patch.
         return

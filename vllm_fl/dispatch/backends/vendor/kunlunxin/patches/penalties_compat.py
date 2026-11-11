@@ -229,7 +229,9 @@ def _apply_penalties(
 def apply_penalties_compat() -> None:
     """Swap the V2 penalty kernels for torch code FlagTree does not have to lower."""
     try:
-        from vllm.v1.worker.gpu.sample import penalties
+        import importlib
+
+        penalties = importlib.import_module("vllm.v1.worker.gpu.sample.penalties")
     except ImportError:
         # Builds without the V2 runner have nothing to patch.
         return

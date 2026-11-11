@@ -188,7 +188,11 @@ def _build_apply(original_apply):
 def apply_structured_outputs_compat() -> None:
     """Apply grammar bitmasks with torch instead of the FlagTree-hostile kernel."""
     try:
-        from vllm.v1.worker.gpu import structured_outputs
+        import importlib
+
+        structured_outputs = importlib.import_module(
+            "vllm.v1.worker.gpu.structured_outputs"
+        )
     except ImportError:
         # Builds without the V2 structured-output path have nothing to patch.
         return
