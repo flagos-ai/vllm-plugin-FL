@@ -12,17 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Two-rank collective tests for CommunicatorFL through the flagcx backend.
+"""Two-rank collective tests for CommunicatorFL on the NVIDIA CI image.
 
-Pilot P2 of the supplementary coverage suite (flagcicd_cov). Uses the only
-sanctioned multi-GPU shape in this repo (see
-tests/unit_tests/test_kunlunxin_tp_graph_replay.py): the test process spawns
-two workers via torch.multiprocessing.spawn; each worker pins its own device,
-forms a gloo world plus a flagcx device group, and checks collective results
-against values derivable without communication.
+The v0.24.0-cuda-ci image ships torch.distributed NCCL but no flagcx
+package, so ``PyFlagcxCommunicator`` disables itself at construction
+(_flagcx_available=False) and every CommunicatorFL collective takes the
+``torch.distributed`` fallback. These tests exercise exactly that path —
+the one production takes on this platform — plus the CPU-testable
+flagcx import ladder, using the sanctioned multi-GPU spawn pattern (see
+tests/unit_tests/test_kunlunxin_tp_graph_replay.py).
 
-The controller asserts the workers succeeded; per-rank failures propagate as
-a nonzero worker exit.
+P2 pilot of the supplementary coverage suite (flagcicd_cov).
 """
 
 import datetime
@@ -39,7 +39,7 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(
         getattr(current_platform, "vendor_name", None) != "nvidia",
-        reason="P2 pilot targets the NVIDIA flagcx build",
+        reason="P2 pilot targets the NVIDIA CI image",
     ),
 ]
 
@@ -48,7 +48,7 @@ TIMEOUT_S = 180
 
 
 def _collective_worker(rank: int, port: int, result_queue) -> None:
-    """Worker: run each collective and push per-rank pass/fail results."""
+    """Worker: run collectives through CommunicatorFL, push per-rank results."""
     import torch.distributed as dist
 
     from vllm_fl.distributed.communicator import CommunicatorFL
@@ -66,12 +66,18 @@ def _collective_worker(rank: int, port: int, result_queue) -> None:
         comm = CommunicatorFL(
             dist.group.WORLD, torch.device("cuda", rank), device_group
         )
-        assert comm.world_size == WORLD_SIZE
-
         results = {}
 
-        # all_reduce: rank r contributes (r+1) ones; sum is world_size * (r+1)
-        # summed over ranks = 1+2 = 3 per element.
+        # On this image PyFlagcxCommunicator must disable itself and the
+        # collectives fall back to torch.distributed (nccl device group).
+        results["constructed"] = comm.world_size == WORLD_SIZE
+        pyc = comm.pyflagcx_comm
+        results["flagcx_disabled"] = bool(
+            pyc is None or (getattr(pyc, "available", None) is False)
+            or (getattr(pyc, "disabled", None) is True)
+        )
+
+        # all_reduce: rank r contributes (r+1) per element; sum is 3.
         x = torch.full((64, 16), rank + 1, device="cuda", dtype=torch.float32)
         out = comm.all_reduce(x)
         torch.cuda.synchronize()
@@ -79,16 +85,18 @@ def _collective_worker(rank: int, port: int, result_queue) -> None:
             torch.allclose(out.cpu(), torch.full((64, 16), 3.0))
         )
 
-        # reduce_scatter on dim=-1: each rank keeps its half of the sum.
+        # reduce_scatter on dim=-1: each rank keeps its half of the summed
+        # input (moved to dim 0 internally, scattered, moved back).
         y = torch.full((64, 32), rank + 1, device="cuda", dtype=torch.float32)
         out = comm.reduce_scatter(y, dim=-1)
         torch.cuda.synchronize()
         results["reduce_scatter"] = bool(
-            out.shape == (64, 16) and torch.allclose(out.cpu(), torch.full((64, 16), 3.0))
+            out.shape == (64, 16)
+            and torch.allclose(out.cpu(), torch.full((64, 16), 3.0))
         )
 
-        # all_gatherv with uniform sizes: rank r contributes rows of value r+1;
-        # the gathered tensor interleaves them in rank order.
+        # all_gatherv with uniform sizes: gathered tensor interleaves in
+        # rank order (rank r contributes rows of value r+1).
         z = torch.full((8, 4), rank + 1, device="cuda", dtype=torch.float32)
         out = comm.all_gatherv(z, dim=0, sizes=[8, 8])
         torch.cuda.synchronize()
@@ -119,13 +127,8 @@ def _collective_worker(rank: int, port: int, result_queue) -> None:
 
 
 @pytest.mark.timeout(TIMEOUT_S + 60)
-def test_flagcx_collectives_two_ranks():
-    """all_reduce/reduce_scatter/all_gatherv/send/recv match closed forms."""
-    try:
-        import flagcx  # noqa: F401  # the CommunicatorFL import needs it
-    except ImportError:
-        pytest.fail("flagcx package not available in the CI image")
-
+def test_collectives_two_ranks_nccl_fallback():
+    """Collectives via CommunicatorFL match closed forms on the NCCL path."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -133,7 +136,10 @@ def test_flagcx_collectives_two_ranks():
     ctx = torch.multiprocessing.get_context("spawn")
     result_queue = ctx.Queue()
     workers = torch.multiprocessing.spawn(
-        _collective_worker, args=(port, result_queue), nprocs=WORLD_SIZE, join=False
+        _collective_worker,
+        args=(port, result_queue),
+        nprocs=WORLD_SIZE,
+        join=False,
     )
     deadline = time.monotonic() + TIMEOUT_S
     try:
@@ -159,3 +165,25 @@ def test_flagcx_collectives_two_ranks():
         if not detail
     }
     assert not failures, f"collective mismatches: {sorted(failures)}"
+
+
+def test_flagcx_import_ladder_disabled_without_package(monkeypatch):
+    """Without flagcx installed and FLAGCX_PATH unset the module stays disabled.
+
+    The NVIDIA CI image ships no flagcx package; importing the communicator
+    module must yield _flagcx_available=False and FLAGCXLibrary=None so the
+    torch.distributed fallback is used (regression: a half-bound ctypes
+    facade would return uninitialized results).
+    """
+    import importlib
+    import sys
+
+    monkeypatch.delenv("FLAGCX_PATH", raising=False)
+    monkeypatch.delitem(sys.modules, "flagcx", raising=False)
+    monkeypatch.delitem(sys.modules, "flagcx.api", raising=False)
+    module_name = "vllm_fl.distributed.device_communicators.flagcx"
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+    fc = importlib.import_module(module_name)
+
+    assert fc._flagcx_available is False
+    assert fc.FLAGCXLibrary is None
