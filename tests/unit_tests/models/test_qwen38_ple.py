@@ -661,3 +661,86 @@ def test_shared_allocation_failure_closes_file_and_descriptor(
         with suppress(OSError):
             os.close(allocated["fd"])
         Path(allocated["path"]).unlink(missing_ok=True)
+
+
+def _checkpoint_cache_objects(root):
+    from types import SimpleNamespace
+
+    group = SimpleNamespace(world_size=1, rank_in_group=0)
+    lookup = SimpleNamespace(shared=SimpleNamespace(group=group))
+    return (
+        SimpleNamespace(model_config=SimpleNamespace(model=str(root))),
+        [SimpleNamespace(_uva_lookup=lookup)],
+    )
+
+
+def test_checkpoint_cache_release_scope_and_noop(tmp_path, monkeypatch):
+    import json
+    import os
+    from pathlib import Path
+
+    from _qwen38_cpu import loading
+
+    files = {name: tmp_path / name for name in ("a.safetensors", "b.safetensors")}
+    for name, path in files.items():
+        path.write_bytes(name.encode())
+    (tmp_path / "model.safetensors.index.json").write_text(
+        json.dumps(
+            {
+                "weight_map": {
+                    "x": "a.safetensors",
+                    "y": "a.safetensors",
+                    "z": "b.safetensors",
+                }
+            }
+        )
+    )
+    advised = []
+
+    def advise(fd, offset, length, mode):
+        assert (offset, length, mode) == (0, 0, os.POSIX_FADV_DONTNEED)
+        advised.append(Path(os.readlink(f"/proc/self/fd/{fd}")).name)
+
+    monkeypatch.setattr(os, "posix_fadvise", advise)
+    model, owners = _checkpoint_cache_objects(tmp_path)
+    loading._release_uva_checkpoint_cache(model, owners)
+    assert sorted(advised) == sorted(files)
+    assert all(path.read_bytes() == name.encode() for name, path in files.items())
+    loading._release_uva_checkpoint_cache(model, [])
+    model.model_config.model = str(tmp_path / "not-local")
+    loading._release_uva_checkpoint_cache(model, owners)
+    assert len(advised) == 2
+
+
+@pytest.mark.parametrize("failure", ["outside", "io"])
+def test_checkpoint_cache_release_failure_closes_files(tmp_path, monkeypatch, failure):
+    import json
+    import os
+
+    from _qwen38_cpu import loading
+
+    root = tmp_path / "checkpoint"
+    root.mkdir()
+    (root / "a.safetensors").write_bytes(b"unchanged")
+    target = "../outside.safetensors" if failure == "outside" else "a.safetensors"
+    (root / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"x": target}})
+    )
+    opened = []
+
+    def fail_advice(fd, *_):
+        opened.append(fd)
+        raise OSError("injected cache-advice failure")
+
+    monkeypatch.setattr(os, "posix_fadvise", fail_advice)
+    model, owners = _checkpoint_cache_objects(root)
+    match = "inside the model directory" if failure == "outside" else "injected"
+    with pytest.raises(RuntimeError, match=match):
+        loading._release_uva_checkpoint_cache(model, owners)
+    if failure == "outside":
+        assert not opened
+    else:
+        assert len(opened) == 1
+        with pytest.raises(OSError):
+            os.fstat(opened[0])
+    assert (root / "a.safetensors").read_bytes() == b"unchanged"

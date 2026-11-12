@@ -177,6 +177,69 @@ def initialize_ple_hash_buffers(module, config, layer_id, *, device=None):
     return ((total + divisor - 1) // divisor) * divisor
 
 
+def _release_uva_checkpoint_cache(model, owners):
+    """Release this local checkpoint's file cache before MetaX UVA pinning."""
+    import json
+    import os
+    from pathlib import Path
+
+    import torch.distributed as dist
+
+    lookup = next(
+        (
+            module._uva_lookup
+            for module in owners
+            if getattr(module, "_uva_lookup", None) is not None
+        ),
+        None,
+    )
+    source = getattr(getattr(model, "model_config", None), "model", None)
+    if lookup is None or source is None:
+        return
+    root = Path(source).resolve()
+    if not root.is_dir():
+        return
+    group = lookup.shared.group
+    if group.world_size > 1:
+        dist.barrier(group=group.cpu_group)
+    status = [None]
+    if group.rank_in_group == 0:
+        try:
+            index = root / "model.safetensors.index.json"
+            if index.is_file():
+                names = sorted(
+                    set(json.loads(index.read_text())["weight_map"].values())
+                )
+            else:
+                names = sorted(path.name for path in root.glob("*.safetensors"))
+            if not names:
+                raise ValueError("No safetensors checkpoint files found")
+            for name in names:
+                path = (root / name).resolve()
+                if not path.is_relative_to(root) or path.suffix != ".safetensors":
+                    raise ValueError(
+                        "Checkpoint shard must remain inside the model directory"
+                    )
+                fd = os.open(path, os.O_RDONLY)
+                try:
+                    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                finally:
+                    os.close(fd)
+            from vllm.logger import init_logger
+
+            init_logger(__name__).info(
+                "Advised release of %d checkpoint shard caches before PLE UVA registration",
+                len(names),
+            )
+        except Exception as error:  # noqa: BLE001
+            # Broadcast initialization failures before any TP rank proceeds.
+            status[0] = str(error)
+    if group.world_size > 1:
+        dist.broadcast_object_list(status, src=group.ranks[0], group=group.cpu_group)
+    if status[0] is not None:
+        raise RuntimeError("PLE checkpoint cache release failed: " + status[0])
+
+
 def validate_ple_embedding_weights(load_weights):
     """Validate row coverage at the outermost model-loading boundary.
 
@@ -205,6 +268,7 @@ def validate_ple_embedding_weights(load_weights):
             }
         try:
             loaded = load_weights(model, weights, *args, **kwargs)
+            _release_uva_checkpoint_cache(model, owners)
             for module in owners:
                 if getattr(module, "_uva_lookup", None) is not None:
                     module._finish_host_lookup_loading()

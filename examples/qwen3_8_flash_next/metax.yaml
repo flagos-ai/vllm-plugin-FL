@@ -38,3 +38,5 @@ additional-config:
 host: "127.0.0.1"
 port: 18170
 served-model-name: "qwen38"
+
+safetensors-load-strategy: "lazy"
