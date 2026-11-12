@@ -364,10 +364,18 @@ def test_nvidia_only_selection_rejects_gcu_alias(device_utils, gcu):
     assert mark.args == (gcu,)
 
 
-@pytest.mark.parametrize("vendor", ["hygon", "HYGON"])
-def test_hygon_vendor_keeps_cuda_api_as_a_distinct_backend(device_utils, vendor):
+@pytest.mark.parametrize(
+    "vendor,expected",
+    [
+        ("hygon", "hygon"),
+        ("HYGON", "hygon"),
+        ("thead", "thead"),
+        ("THEAD", "thead"),
+    ],
+)
+def test_vendor_keeps_cuda_api_as_a_distinct_backend(device_utils, vendor, expected):
     utils, _ = device_utils(vendor=vendor, cuda=True)
-    assert utils.get_backend() == "hygon"
+    assert utils.get_backend() == expected
     assert utils.is_accelerator_available()
     assert utils.get_device(3) == "cuda:3"
     assert utils.get_device_count() == 2
@@ -387,8 +395,9 @@ def test_hygon_vendor_does_not_override_native_gcu(device_utils):
     torch.cuda.is_available.assert_not_called()
 
 
-def test_hygon_vendor_requires_available_hardware(device_utils):
-    utils, _ = device_utils(vendor="hygon")
+@pytest.mark.parametrize("vendor", ["hygon", "thead"])
+def test_vendor_requires_available_hardware(device_utils, vendor):
+    utils, _ = device_utils(vendor=vendor)
     assert utils.get_backend() == "cpu"
     assert not utils.is_accelerator_available()
 
