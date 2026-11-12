@@ -119,6 +119,66 @@ def test_full_graph_exclusion_survives_dp_redispatch(
         )
 
 
+@pytest.mark.parametrize("num_tokens", [1, 10, 15])
+def test_batch_padding_ignores_tensor_parallel_size(monkeypatch, num_tokens):
+    """vLLM 0.32 dropped sequence parallelism, so TP never pads num_tokens."""
+    from vllm.config import CUDAGraphMode
+
+    module = import_module("vllm_fl.worker.model_runner")
+
+    dispatcher = MagicMock()
+    dispatcher.dispatch.return_value = (
+        CUDAGraphMode.NONE,
+        SimpleNamespace(num_tokens=num_tokens),
+    )
+    parallel = SimpleNamespace(
+        data_parallel_size=1,
+        data_parallel_rank=0,
+        tensor_parallel_size=4,
+    )
+    runner = SimpleNamespace(
+        _is_uniform_decode=module.ModelRunnerFL._is_uniform_decode,
+        uniform_decode_query_len=1,
+        model_config=SimpleNamespace(is_encoder_decoder=False),
+        input_batch=SimpleNamespace(lora_id_to_lora_request={}),
+        cudagraph_dispatcher=dispatcher,
+        compilation_config=SimpleNamespace(pass_config=SimpleNamespace()),
+        parallel_config=parallel,
+        vllm_config=SimpleNamespace(
+            parallel_config=parallel,
+            observability_config=SimpleNamespace(cudagraph_metrics=False),
+        ),
+    )
+
+    module.ModelRunnerFL._determine_batch_execution_and_padding(
+        runner,
+        num_tokens=num_tokens,
+        num_reqs=1,
+        num_scheduled_tokens_np=np.array([num_tokens]),
+        max_num_scheduled_tokens=num_tokens,
+        use_cascade_attn=False,
+    )
+
+    # Before 0.32 the token count was rounded up to a multiple of TP when
+    # sequence parallelism was on; the graph dispatch must now see it unchanged.
+    assert dispatcher.dispatch.call_args.kwargs["num_tokens"] == num_tokens
+
+
+def test_init_is_wrapped_by_jit_warmup_capture():
+    """The V1 runner must open its JIT warmup scope through upstream's capture.
+
+    Upstream decorates ``GPUModelRunner.__init__``; ``ModelRunnerFL`` does not
+    inherit that class, so the decorator is applied here instead. Dropping it
+    silently disables JIT warmup collection.
+    """
+    module = import_module("vllm_fl.worker.model_runner")
+
+    init = module.ModelRunnerFL.__init__
+
+    assert hasattr(init, "__wrapped__"), "ModelRunnerFL.__init__ is not decorated"
+    assert init.__wrapped__.__name__ == "__init__"
+
+
 # =============================================================================
 # Layer 1: ExecuteModelState Data Structure Tests
 # =============================================================================
