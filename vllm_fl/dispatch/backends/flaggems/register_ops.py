@@ -4,7 +4,8 @@
 FlagGems backend operator registrations.
 
 This module registers all DEFAULT (FlagGems) implementations.
-Only impls for which use_flaggems_op(op_name) is True are passed to the registry.
+Optional ATen implementations follow use_flaggems_op(op_name).
+Explicit model operator APIs are registered separately with capability checks.
 """
 
 from __future__ import annotations
