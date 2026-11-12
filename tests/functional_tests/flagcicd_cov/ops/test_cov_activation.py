@@ -38,9 +38,14 @@ SHAPES = [(1, 128), (8, 512), (64, 1024)]
 
 
 def _resolve_or_fail(op_name: str):
-    """Resolve an op or fail the test: the dispatch table must contain it."""
+    """Resolve an op or fail the test: the dispatch table must contain it.
+
+    Returns the implementation callable (OpManager.resolve returns the
+    selected implementation function directly).
+    """
     impl = resolve_op(op_name)
     assert impl is not None, f"op {op_name!r} has no implementation"
+    assert callable(impl), f"op {op_name!r} resolved to a non-callable"
     return impl
 
 
@@ -63,7 +68,7 @@ class TestSiluAndMulCov:
             assert torch.allclose(out, ref, rtol=1e-4, atol=1e-4 * 4), (
                 f"silu_and_mul mismatch at ({tokens}, {hidden})"
             )
-        assert callable(impl.fn)
+        assert impl is resolve_op("silu_and_mul"), "resolution must be stable"
 
     def test_forward_bfloat16_matches_fp32_reference(self, device):
         """bf16 input follows the fp32 reference within bf16 tolerance."""
@@ -106,7 +111,7 @@ class TestRMSNormCov:
         return x * torch.rsqrt(variance + eps) * weight
 
     def test_forward_and_residual_returned(self, device):
-        """Plain and residual calls normalize identically and pass residual through."""
+        """Plain call normalizes x; residual call normalizes x+residual and returns the sum."""
         _resolve_or_fail("rms_norm")
         hidden = 512
         weight = torch.randn(hidden, device=device, dtype=torch.float32)
@@ -116,7 +121,15 @@ class TestRMSNormCov:
         ref = self.reference(x, weight, 1e-6)
         assert torch.allclose(out, ref, rtol=1e-3, atol=1e-3), "rms_norm mismatch"
 
+        # Fused add semantics (vllm ir.ops.fused_add_rms_norm): the sum
+        # x + residual is normalized and also returned as the new residual.
         residual = torch.randn_like(x)
         out2, res2 = call_op("rms_norm", layer, x, residual)
-        assert torch.allclose(out2, ref, rtol=1e-3, atol=1e-3)
-        assert res2 is residual, "residual must be returned as the second value"
+        sum_ref = x + residual
+        ref2 = self.reference(sum_ref, weight, 1e-6)
+        assert torch.allclose(out2, ref2, rtol=1e-3, atol=1e-3), (
+            "rms_norm residual path must normalize x+residual"
+        )
+        assert torch.allclose(res2, sum_ref, rtol=1e-5, atol=1e-6), (
+            "returned residual must equal x+residual"
+        )
