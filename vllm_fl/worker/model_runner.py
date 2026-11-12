@@ -4,6 +4,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+# Defer annotation evaluation so expressions like
+# ``current_platform.torch_device_fn.Stream`` in function signatures are not
+# evaluated at import time (when the platform may not be initialised yet).
+from __future__ import annotations
+
+# Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
+# module that uses them is imported.  The shim is idempotent and a no-op when
+# the installed vLLM already ships the symbols.
+from vllm_fl.patches.worker_symbols_032 import apply_worker_symbols_032
+
+apply_worker_symbols_032()
+
 import functools
 import gc
 import itertools
@@ -240,17 +252,12 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
-try:
-    from vllm.v1.worker.cp_utils import (
-        get_total_cp_world_size,
-    )
-except ImportError:  # vLLM >= 0.28: CP merged into DCP; KV cache shards over DCP
-    from vllm.v1.worker.cp_utils import (
-        get_kv_cache_shard_count as get_total_cp_world_size,
-    )
+# NOTE: cp_utils.get_total_cp_world_size (0.28) / get_kv_cache_shard_count
+# (intermediate rename) are both absent from vLLM 0.32; nothing in this
+# module calls them, so the import is dropped rather than guarded.
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
-from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
+
 try:
     from vllm.v1.worker.gpu.pool.late_interaction_runner import (
         LateInteractionRunner,
@@ -272,6 +279,7 @@ from vllm.v1.worker.utils import (
     EncoderTimingStats,
     KVBlockZeroer,
     add_kv_sharing_layers_to_kv_cache_groups,
+    allocate_kv_cache,
     bind_kv_cache,
     copy_kv_cache_blocks_inplace,
     is_residual_scattered_for_sp,
@@ -8130,19 +8138,12 @@ class ModelRunnerFL(
                             raw_tensor, kv_cache_spec, kv_cache_shape
                         )
                         continue
-                    try:
-                        kv_cache_stride_order = attn_backend.get_kv_cache_stride_order()
-                        assert len(kv_cache_stride_order) == len(kv_cache_shape)
-                    except (AttributeError, NotImplementedError):
-                        kv_cache_stride_order = tuple(range(len(kv_cache_shape)))
-                    raw_tensor = kv_cache_raw_tensors[layer_name]
-                    kv_caches[layer_name] = _reshape_attention_kv_cache(
-                        raw_tensor,
-                        kv_cache_spec,
-                        kv_cache_shape,
-                        kv_cache_stride_order,
-                        kernel_num_blocks,
-                        packing,
+                    # This path is unreachable: _reshape_kv_cache_tensors is
+                    # only called when use_ascend_hybrid_cache=True; the
+                    # standard (non-Ascend) path uses allocate_kv_cache.
+                    raise AssertionError(
+                        "_reshape_kv_cache_tensors reached non-Ascend attention "
+                        "branch; use initialize_kv_cache_tensors instead."
                     )
 
                 elif isinstance(kv_cache_spec, MambaSpec):
@@ -8267,14 +8268,22 @@ class ModelRunnerFL(
             )
             self.cross_layers_kv_cache = cross_layers_kv_cache
             self.cross_layers_attn_backend = attn_backend
-        else:
-            # Fallback to the general case
-            # Initialize the memory buffer for KV cache
+        elif self.use_ascend_hybrid_cache:
+            # Ascend dense-hybrid layout requires fine-grained per-layer
+            # control that the unified allocate_kv_cache flow does not expose;
+            # keep the custom raw-allocate + reshape path for this backend.
             kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
-
-            # Change the memory buffer to the desired shape
             kv_caches = self._reshape_kv_cache_tensors(
                 kv_cache_raw_tensors, kernel_block_sizes
+            )
+        else:
+            # Standard path (vLLM 0.32.0+): allocate_kv_cache handles all
+            # layout, packing, and dtype-reinterpretation in one step.
+            kv_caches = allocate_kv_cache(
+                kv_cache_config,
+                self.device,
+                self.cache_config.get_resolved_kv_cache_layout(),
+                kernel_block_sizes,
             )
 
         # Set up cross-layer KV cache sharing
