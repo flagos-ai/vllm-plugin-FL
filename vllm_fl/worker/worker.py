@@ -1,5 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_worker.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.32.0/vllm/v1/worker/gpu_worker.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -240,8 +240,9 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
-        # this flag to select the matching block-table and KV-cache kernels.
+        # Provisional default; the real value comes from vllm_config below.
+        # The warmup paths read this flag to select the matching block-table
+        # and KV-cache kernels, so it must be set before they run.
         self.use_v2_model_runner = False
 
         # Hybrid models (mamba/linear attention + full attention) keep the
@@ -875,7 +876,10 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        # vLLM 0.32 dropped ModelConfig.enable_return_routed_experts when the
+        # routed-experts plumbing moved to the aux-output connector; treat an
+        # absent field as the feature being off.
+        if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -1620,7 +1624,14 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    try:
+        from vllm.model_executor.determinism.batch_invariant import (
+            init_batch_invariance,
+        )
+    except ImportError:  # vLLM <= 0.28 kept it under layers/
+        from vllm.model_executor.layers.batch_invariant import (
+            init_batch_invariance,
+        )
 
     init_batch_invariance()
     override_envs_for_eplb(

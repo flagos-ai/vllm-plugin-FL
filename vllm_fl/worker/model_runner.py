@@ -1,5 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_model_runner.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.32.0/vllm/v1/worker/gpu_model_runner.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -54,6 +54,7 @@ from vllm.config import (
 from vllm.config.cache import CacheConfig
 from vllm.config.ec_manager_config import EncoderCacheManagerMetadata
 from vllm.config.model import PROCESSED_LOGPROBS_MODES
+
 try:  # FL: vLLM >= 0.28 slot mapping mode enum
     from vllm.v1.worker.block_table import SlotMappingMode
 except ImportError:  # pragma: no cover - older vLLM
@@ -71,17 +72,12 @@ from vllm.distributed.parallel_state import (
     get_tp_group,
     is_global_first_rank,
 )
-try:
-    from vllm.distributed.weight_transfer.sparse_nccl_engine import (
-        SparseWeightPatch,
-    )
-except ImportError:  # older vLLM
-    from vllm.distributed.weight_transfer.base import SparseWeightPatch
 from vllm.forward_context import (
     BatchDescriptor,
     set_forward_context,
 )
 from vllm.logger import init_logger
+
 # FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
 try:  # pragma: no cover - vLLM version compat
     from vllm.distributed.parallel_state import (
@@ -5813,13 +5809,19 @@ class ModelRunnerFL(
 
         if (
             current_platform.device_type in ("npu", "musa")
-            and self.compilation_config.mode != CompilationMode.NONE
-        ):
+            or getattr(current_platform, "vendor_name", None) == "amd"
+        ) and self.compilation_config.mode != CompilationMode.NONE:
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
-            # because fullgraph compilation cannot enter that context manager.
+            # because fullgraph compilation cannot enter that context manager
+            # ("Dynamo does not know how to enter a `RLock` context manager").
             # Aliased on purpose: a plain import here would shadow the
             # module-level symbol used by the earlier warmup in this function.
+            #
+            # NOTE: the AMD arm above is currently dead code. AMD runs
+            # eager-only (CompilationMode.NONE), so the != NONE guard never
+            # passes. The arm is kept as a placeholder for when FlagGems#8460
+            # is resolved and graph mode becomes available on gfx1100.
             from vllm_fl.dispatch import warmup_cached_ops as _warmup_cached_ops
 
             if current_platform.device_type == "musa":
@@ -8155,11 +8157,11 @@ class ModelRunnerFL(
                     # each block's bytes into its conv/ssm state views. Keeping
                     # one tensor per layer lets the KV connector register it
                     # without special-casing Mamba.
-                    # vLLM 0.28 MambaBase.bind_kv_cache expects exactly this single
-                    # view: it squeezes dims (1,2) then unpacks the layer conv/ssm
-                    # states. The old 0.27 fork returned a list of state tensors ->
-                    # AttributeError: list object has no attribute squeeze at
-                    # mamba/abstract.py:35. Mirror native 0.28.
+                    # MambaBase.bind_kv_cache expects exactly this single view:
+                    # it squeezes dims (1,2) then unpacks the layer conv/ssm
+                    # states (unchanged through 0.32, see mamba/abstract.py).
+                    # An older fork returned a list of state tensors ->
+                    # AttributeError: list object has no attribute squeeze.
                     kv_caches[layer_name] = raw_tensor[
                         : num_blocks * page_size_bytes
                     ].view(num_blocks, 1, 1, page_size_bytes)
@@ -8407,7 +8409,7 @@ class ModelRunnerFL(
     def init_routed_experts_capturer(self):
         logger.info(
             "Initializing routed experts capturer, enable_return_routed_experts: %s",
-            self.model_config.enable_return_routed_experts,
+            getattr(self.model_config, "enable_return_routed_experts", False),
         )
         self.routed_experts_capturer = RoutedExpertsCapturer(
             max_num_batched_tokens=self.scheduler_config.max_num_batched_tokens,

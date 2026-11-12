@@ -1,4 +1,4 @@
-# Copyright 2026 FlagOS Contributors
+﻿# Copyright 2026 FlagOS Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -208,7 +208,7 @@ def _reshape_attention_kv_cache(
             .transpose(0, 1)
         )
     else:
-        # No padding — safe to use a contiguous view.
+        # No padding 鈥?safe to use a contiguous view.
         kv_cache = kv_raw_tensor.view(dtype).view(permuted_kv_cache_shape)
 
     return kv_cache.permute(*inv_order)
