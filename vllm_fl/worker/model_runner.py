@@ -1,8 +1,20 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.32.0/vllm/v1/worker/gpu_model_runner.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_model_runner.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+# Defer annotation evaluation so expressions like
+# ``current_platform.torch_device_fn.Stream`` in function signatures are not
+# evaluated at import time (when the platform may not be initialised yet).
+from __future__ import annotations
+
+# Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
+# module that uses them is imported.  The shim is idempotent and a no-op when
+# the installed vLLM already ships the symbols.
+from vllm_fl.patches.worker_symbols_032 import apply_worker_symbols_032
+
+apply_worker_symbols_032()
 
 import functools
 import gc
@@ -42,7 +54,6 @@ from vllm.config import (
 from vllm.config.cache import CacheConfig
 from vllm.config.ec_manager_config import EncoderCacheManagerMetadata
 from vllm.config.model import PROCESSED_LOGPROBS_MODES
-
 try:  # FL: vLLM >= 0.28 slot mapping mode enum
     from vllm.v1.worker.block_table import SlotMappingMode
 except ImportError:  # pragma: no cover - older vLLM
@@ -60,12 +71,17 @@ from vllm.distributed.parallel_state import (
     get_tp_group,
     is_global_first_rank,
 )
+try:
+    from vllm.distributed.weight_transfer.sparse_nccl_engine import (
+        SparseWeightPatch,
+    )
+except ImportError:  # older vLLM
+    from vllm.distributed.weight_transfer.base import SparseWeightPatch
 from vllm.forward_context import (
     BatchDescriptor,
     set_forward_context,
 )
 from vllm.logger import init_logger
-
 # FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
 try:  # pragma: no cover - vLLM version compat
     from vllm.distributed.parallel_state import (
@@ -236,15 +252,11 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
-
-# NOTE: ``cp_utils.get_total_cp_world_size`` (0.28-era, later renamed
-# ``get_kv_cache_shard_count``) used to be imported here. vLLM 0.32 exports
-# neither name, and nothing in this module ever called it, so the import is
-# dropped rather than guarded: keeping it made ModelRunnerFL unimportable on
-# 0.32 for every backend that selects it.
+# NOTE: cp_utils.get_total_cp_world_size (0.28) / get_kv_cache_shard_count
+# (intermediate rename) are both absent from vLLM 0.32; nothing in this
+# module calls them, so the import is dropped rather than guarded.
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
-from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
 
 try:
     from vllm.v1.worker.gpu.pool.late_interaction_runner import (
@@ -267,6 +279,7 @@ from vllm.v1.worker.utils import (
     EncoderTimingStats,
     KVBlockZeroer,
     add_kv_sharing_layers_to_kv_cache_groups,
+    allocate_kv_cache,
     bind_kv_cache,
     copy_kv_cache_blocks_inplace,
     is_residual_scattered_for_sp,
@@ -5800,19 +5813,13 @@ class ModelRunnerFL(
 
         if (
             current_platform.device_type in ("npu", "musa")
-            or getattr(current_platform, "vendor_name", None) == "amd"
-        ) and self.compilation_config.mode != CompilationMode.NONE:
+            and self.compilation_config.mode != CompilationMode.NONE
+        ):
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
-            # because fullgraph compilation cannot enter that context manager
-            # ("Dynamo does not know how to enter a `RLock` context manager").
+            # because fullgraph compilation cannot enter that context manager.
             # Aliased on purpose: a plain import here would shadow the
             # module-level symbol used by the earlier warmup in this function.
-            #
-            # NOTE: the AMD arm above is currently dead code. AMD runs
-            # eager-only (CompilationMode.NONE), so the != NONE guard never
-            # passes. The arm is kept as a placeholder for when FlagGems#8460
-            # is resolved and graph mode becomes available on gfx1100.
             from vllm_fl.dispatch import warmup_cached_ops as _warmup_cached_ops
 
             if current_platform.device_type == "musa":
@@ -8131,19 +8138,12 @@ class ModelRunnerFL(
                             raw_tensor, kv_cache_spec, kv_cache_shape
                         )
                         continue
-                    try:
-                        kv_cache_stride_order = attn_backend.get_kv_cache_stride_order()
-                        assert len(kv_cache_stride_order) == len(kv_cache_shape)
-                    except (AttributeError, NotImplementedError):
-                        kv_cache_stride_order = tuple(range(len(kv_cache_shape)))
-                    raw_tensor = kv_cache_raw_tensors[layer_name]
-                    kv_caches[layer_name] = _reshape_attention_kv_cache(
-                        raw_tensor,
-                        kv_cache_spec,
-                        kv_cache_shape,
-                        kv_cache_stride_order,
-                        kernel_num_blocks,
-                        packing,
+                    # This path is unreachable: _reshape_kv_cache_tensors is
+                    # only called when use_ascend_hybrid_cache=True; the
+                    # standard (non-Ascend) path uses allocate_kv_cache.
+                    raise AssertionError(
+                        "_reshape_kv_cache_tensors reached non-Ascend attention "
+                        "branch; use initialize_kv_cache_tensors instead."
                     )
 
                 elif isinstance(kv_cache_spec, MambaSpec):
@@ -8155,11 +8155,11 @@ class ModelRunnerFL(
                     # each block's bytes into its conv/ssm state views. Keeping
                     # one tensor per layer lets the KV connector register it
                     # without special-casing Mamba.
-                    # MambaBase.bind_kv_cache expects exactly this single view:
-                    # it squeezes dims (1,2) then unpacks the layer conv/ssm
-                    # states (unchanged through 0.32, see mamba/abstract.py).
-                    # An older fork returned a list of state tensors ->
-                    # AttributeError: list object has no attribute squeeze.
+                    # vLLM 0.28 MambaBase.bind_kv_cache expects exactly this single
+                    # view: it squeezes dims (1,2) then unpacks the layer conv/ssm
+                    # states. The old 0.27 fork returned a list of state tensors ->
+                    # AttributeError: list object has no attribute squeeze at
+                    # mamba/abstract.py:35. Mirror native 0.28.
                     kv_caches[layer_name] = raw_tensor[
                         : num_blocks * page_size_bytes
                     ].view(num_blocks, 1, 1, page_size_bytes)
@@ -8268,14 +8268,22 @@ class ModelRunnerFL(
             )
             self.cross_layers_kv_cache = cross_layers_kv_cache
             self.cross_layers_attn_backend = attn_backend
-        else:
-            # Fallback to the general case
-            # Initialize the memory buffer for KV cache
+        elif self.use_ascend_hybrid_cache:
+            # Ascend dense-hybrid layout requires fine-grained per-layer
+            # control that the unified allocate_kv_cache flow does not expose;
+            # keep the custom raw-allocate + reshape path for this backend.
             kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
-
-            # Change the memory buffer to the desired shape
             kv_caches = self._reshape_kv_cache_tensors(
                 kv_cache_raw_tensors, kernel_block_sizes
+            )
+        else:
+            # Standard path (vLLM 0.32.0+): allocate_kv_cache handles all
+            # layout, packing, and dtype-reinterpretation in one step.
+            kv_caches = allocate_kv_cache(
+                kv_cache_config,
+                self.device,
+                self.cache_config.get_resolved_kv_cache_layout(),
+                kernel_block_sizes,
             )
 
         # Set up cross-layer KV cache sharing
@@ -8399,7 +8407,7 @@ class ModelRunnerFL(
     def init_routed_experts_capturer(self):
         logger.info(
             "Initializing routed experts capturer, enable_return_routed_experts: %s",
-            getattr(self.model_config, "enable_return_routed_experts", False),
+            self.model_config.enable_return_routed_experts,
         )
         self.routed_experts_capturer = RoutedExpertsCapturer(
             max_num_batched_tokens=self.scheduler_config.max_num_batched_tokens,
