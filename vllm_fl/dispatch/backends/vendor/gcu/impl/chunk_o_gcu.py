@@ -158,7 +158,8 @@ def chunk_fwd_o(
     chunk_size: int = FLA_CHUNK_SIZE,
     core_attn_out: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    B, T, Hg, K, V = *q.shape, v.shape[-1]
+    B, T, Hg, K = q.shape
+    V = v.shape[-1]
     H = v.shape[-2]
     BT = chunk_size
     if chunk_indices is None and cu_seqlens is not None:
