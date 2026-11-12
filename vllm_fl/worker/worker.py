@@ -239,9 +239,11 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
-        # this flag to select the matching block-table and KV-cache kernels.
-        self.use_v2_model_runner = False
+        # Follow the upstream selection (V2 unless the config or the platform
+        # rules it out). Vendors that only ship the V1 ModelRunnerFL reject V2
+        # in PlatformFL.check_and_update_config, so the value seen here is
+        # already the runner this process is going to build.
+        self.use_v2_model_runner = vllm_config.use_v2_model_runner
 
         # Hybrid models (mamba/linear attention + full attention) keep the
         # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
@@ -284,7 +286,6 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        self.use_v2_model_runner = vllm_config.use_v2_model_runner
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 
@@ -552,6 +553,14 @@ class WorkerFL(WorkerBase):
                 from vllm_fl.worker.metax_v2 import prepare_metax_v2_runtime
 
                 prepare_metax_v2_runtime(self.vllm_config)
+            elif getattr(current_platform, "vendor_name", None) == "thead":
+                # Platform-side adaptations for the upstream V2 runner; see
+                # vllm_fl/dispatch/backends/vendor/thead/patches/.
+                from vllm_fl.dispatch.backends.vendor.thead.patches import (
+                    v2_runner_compat,
+                )
+
+                v2_runner_compat.install_v2_runner_compat()
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
@@ -907,7 +916,7 @@ class WorkerFL(WorkerBase):
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
         # allocator and are not discarded during sleep/wake cycles.
-        if kv_cache_config.needs_kv_cache_zeroing and hasattr(
+        if getattr(kv_cache_config, "needs_kv_cache_zeroing", False) and hasattr(
             self.model_runner, "_init_kv_zero_meta"
         ):
             self.model_runner._init_kv_zero_meta()

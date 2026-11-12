@@ -48,6 +48,14 @@ from vllm_fl.utils import (
 logger = init_logger(__name__)
 
 
+def _vllm_c_available() -> bool:
+    """True when this build ships upstream's CUDA IR kernels (``vllm._C``)."""
+    try:
+        return importlib.util.find_spec("vllm._C") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     """Configure eager FX execution with ordinary Ascend FULL decode graphs.
 
@@ -156,6 +164,7 @@ def _safe_device_type(device_info, vendor: str) -> str:
     except ValueError:
         logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
         return ""
+
 
 dist_backend_dict = {
     "npu": "hccl",
@@ -1106,6 +1115,9 @@ class PlatformFL(Platform):
                     for field in fields(IrOpPriorityConfig)
                 }
             )
+        # Empty wheels cannot select a CUDA implementation.
+        if not using_inductor and not _vllm_c_available():
+            default = ["native"]
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

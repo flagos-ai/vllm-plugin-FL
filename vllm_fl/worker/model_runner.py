@@ -1235,8 +1235,17 @@ class ModelRunnerFL(
         if self._mamba_state_copy_funcs is None:
             mamba_groups = mamba_utils.get_mamba_groups(self.kv_cache_config)
             mamba_types = {spec.mamba_type for spec in mamba_groups}
-            copy_funcs = self.model.get_mamba_state_copy_funcs(mamba_types)
-            mamba_utils.validate_mamba_state_copy_funcs(mamba_groups, copy_funcs)
+            get_copy_funcs = getattr(self.model, "get_mamba_state_copy_funcs", None)
+            if get_copy_funcs is None:
+                legacy_copy_funcs = self.model.get_mamba_state_copy_func()
+                copy_funcs = dict.fromkeys(mamba_types, legacy_copy_funcs)
+            else:
+                copy_funcs = get_copy_funcs(mamba_types)
+                validate_copy_funcs = getattr(
+                    mamba_utils, "validate_mamba_state_copy_funcs", None
+                )
+                if validate_copy_funcs is not None:
+                    validate_copy_funcs(mamba_groups, copy_funcs)
             self._mamba_state_copy_funcs = copy_funcs
         return self._mamba_state_copy_funcs
 

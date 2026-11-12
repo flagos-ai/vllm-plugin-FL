@@ -219,6 +219,7 @@ def _fl_router(monkeypatch, compat, vendor, padding, upstream, cached):
     namespace = {
         "torch": torch,
         "_get_padding_mask": lambda _: padding,
+        "_has_native_moe_topk": lambda: vendor == "nvidia",
         "upstream_fused_topk": upstream,
         "_topk_softmax": cached,
     }

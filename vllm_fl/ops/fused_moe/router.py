@@ -69,6 +69,12 @@ def _sqrtsoftplus_topk(
     return topk_weights.float(), topk_ids.to(output_dtype)
 
 
+def _has_native_moe_topk() -> bool:
+    """Whether this vLLM build ships the CUDA-only ``_moe_C`` routing kernel."""
+    moe_c = getattr(torch.ops, "_moe_C", None)
+    return moe_c is not None and hasattr(moe_c, "topk_softmax")
+
+
 def fused_topk(
     hidden_states: torch.Tensor,
     gating_output: torch.Tensor,
@@ -95,7 +101,7 @@ def fused_topk(
             )
 
             metax_topk = get_topk_operator(scoring_func)
-        else:
+        elif scoring_func != "softmax" or _has_native_moe_topk():
             return upstream_fused_topk(
                 hidden_states=hidden_states,
                 gating_output=gating_output,
@@ -138,6 +144,11 @@ def fused_topk(
         gating_output,
         renormalize,
     )
+
+    # Padded rows must not contribute expert weights; upstream hands the same
+    # mask to the native kernel.
+    if padding_mask is not None:
+        topk_weights = topk_weights.masked_fill(padding_mask.unsqueeze(1), 0.0)
 
     return topk_weights, topk_ids, token_expert_indices
 
