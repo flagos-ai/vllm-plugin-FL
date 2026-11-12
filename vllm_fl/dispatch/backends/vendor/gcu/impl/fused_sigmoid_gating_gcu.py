@@ -211,7 +211,8 @@ def fused_sigmoid_gating_delta_rule_update(
     This function uses a single fused kernel that combines both sigmoid gating
     computation and the recurrent delta rule update for better performance.
     """
-    B, T, H, K, V = *k.shape, v.shape[-1]
+    B, T, H, K = k.shape
+    V = v.shape[-1]
     HV = v.shape[2]
     N = B if cu_seqlens is None else len(cu_seqlens) - 1
     BK, BV = triton.next_power_of_2(K), min(triton.next_power_of_2(V), 32)
