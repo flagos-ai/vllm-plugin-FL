@@ -13,6 +13,9 @@ class SiluAndMulFL(SiluAndMul):
         super().__init__(compile_native=compile_native)
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
+        if torch.compiler.is_compiling():
+            from vllm_fl.dispatch.backends.vendor.amd.graph_ops import silu_and_mul_custom_op
+            return silu_and_mul_custom_op(x)
         return _silu_and_mul(self, x)
 
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
@@ -24,6 +27,9 @@ class GeluAndMulFL(GeluAndMul):
         super().__init__(approximate=approximate)
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
+        if torch.compiler.is_compiling():
+            from vllm_fl.dispatch.backends.vendor.amd.graph_ops import gelu_and_mul_custom_op
+            return gelu_and_mul_custom_op(x, self.approximate)
         return _gelu_and_mul(self, x)
 
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:

@@ -661,6 +661,17 @@ class WorkerFL(WorkerBase):
                 getattr(self.parallel_config, "_api_process_count", 1),
             )
 
+        # Resolve dispatch CachedOps before profile_run triggers torch.compile.
+        # The upstream model_runner.profile_run path runs in the EngineCore
+        # subprocess and does NOT call the plugin's load_model warmup branch,
+        # so we must warmup here to ensure self._impl is populated before
+        # Dynamo starts tracing. Without this, DispatchOp.__call__ hits the
+        # is_compiling() guard with self._impl == None.
+        if current_platform.vendor_name == "amd":
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops()
+
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
         with memory_profiling(

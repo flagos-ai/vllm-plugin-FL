@@ -24,6 +24,18 @@ class RMSNormFL(RMSNorm):
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        if torch.compiler.is_compiling():
+            from vllm_fl.dispatch.backends.vendor.amd.graph_ops import (
+                rms_norm_custom_op,
+            )
+            # rms_norm_custom_op always returns (output, residual_or_None).
+            # Caller expects a tuple when residual is passed, bare tensor otherwise.
+            out, out_residual = rms_norm_custom_op(
+                x, residual, self.weight, self.variance_epsilon
+            )
+            if residual is not None:
+                return out, out_residual
+            return out
         return _rms_norm(self, x, residual)
 
     def forward_cuda(

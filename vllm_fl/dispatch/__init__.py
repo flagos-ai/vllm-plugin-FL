@@ -199,6 +199,24 @@ class CachedOp:
         self._policy_epoch = get_policy_epoch()
 
     def __call__(self, *args, **kwargs):
+        # During torch.compile/Dynamo tracing every dispatch bookkeeping
+        # call (ContextVar.get, RLock.__enter__, os.getpid) is
+        # untraceable.  warmup_cached_ops() guarantees self._impl is
+        # populated before compilation begins, so we can safely skip the
+        # entire resolution path and call the kernel directly.
+        import torch
+        if torch.compiler.is_compiling():
+            impl = self._impl
+            if impl is None:
+                raise RuntimeError(
+                    f"DispatchOp '{self._op_name}': no cached impl during "
+                    "torch.compile tracing — ensure warmup_cached_ops() "
+                    "is called before torch.compile."
+                )
+            # impl.fn was pre-wrapped with torch._dynamo.disable during
+            # warmup_cached_ops(), so Dynamo treats it as opaque here.
+            return impl.fn(*args, **kwargs)
+
         mgr = get_default_manager()
 
         if not _OP_FAST_PATH_ENABLED:
@@ -248,7 +266,16 @@ class CachedOp:
 
 
 def warmup_cached_ops(mgr=None) -> None:
-    """Best-effort resolve imported CachedOps before model compilation."""
+    """Best-effort resolve imported CachedOps before model compilation.
+
+    On AMD (gfx1100) the upstream ``model_runner.profile_run`` path runs in
+    the EngineCore subprocess and never reaches the plugin's ``load_model``
+    warmup branch.  Call this from ``worker.determine_available_memory``
+    (which *is* on the profile_run path) so every CachedOp has a resolved
+    ``self._impl`` before Dynamo starts tracing.  Without this,
+    ``DispatchOp.__call__`` hits the ``is_compiling()`` guard with
+    ``self._impl is None``.
+    """
     if mgr is None:
         mgr = get_default_manager()
     # Discovery can import modules that create additional CachedOps. Complete

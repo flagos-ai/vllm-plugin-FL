@@ -15,7 +15,7 @@ active simultaneously.
 | PyTorch | `2.13.0+git733fca1` (ROCm, HIP 7.2.53211) |
 | Triton | `3.6.0`, **supplied by FlagTree** from `/opt/flagtree` |
 | FlagTree distribution | `0.7.0+amd3.6` |
-| FlagGems | `main`, post-5.4.0 — needs commit [a8fdfa0](https://github.com/flagos-ai/FlagGems/commit/a8fdfa082487e7ef73e65adcdaa79c134e6d790f) |
+| FlagGems | `main`, post-5.4.0 — minimum commit [9a51bed](https://github.com/flagos-ai/FlagGems/commit/9a51bed) (PR [#8893](https://github.com/flagos-ai/FlagGems/pull/8893): clone FakeTensor fix for torch.compile tracing) |
 | FlagGems-vllm | Commit [`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19) (`v0.2.0`; package metadata reports `0.1.0`) — the project-wide pin |
 | FlagCX | `0.15.0.dev52+g591cfbf`, built with `USE_AMD=1` (RCCL backend) |
 | Attention backend | `TRITON_ATTN` (dense), `TRITON_MLA` (MLA); ViT uses Torch SDPA |

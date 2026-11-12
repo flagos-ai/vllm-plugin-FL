@@ -943,16 +943,22 @@ class PlatformFL(Platform):
     def support_static_graph_mode(cls) -> bool:
         if cls.vendor_name == "amd":
             # Graph mode is not supported in this release; `--enforce-eager` is
-            # required. The capability itself is real (graph capture works on
-            # gfx1100 and warmup passes), so we return True rather than force
-            # vLLM to skip capture entirely -- but warn so users who omit the
-            # flag get a clear message rather than a cryptic FlagGems fake-tensor
-            # error. Upstream blocker: flagos-ai/FlagGems#8460.
+            # required.  Two blockers remain after FlagGems#8893 (clone
+            # FakeTensor fix, included from FlagGems commit 9a51bed):
+            #   1. FlagGems GDN kernels traced into by Dynamo — needs opaque
+            #      custom-op registration (flagos-ai/FlagGems#8095).
+            #   2. A lazily-resolved dispatch lock entered during graph tracing.
+            # The capability is real (graph capture initialises on gfx1100 and
+            # warmup passes), so we return True rather than skip capture
+            # entirely — but warn so users who omit --enforce-eager get a clear
+            # message instead of a cryptic tracing error.
             logger.warning_once(
                 "[vllm_fl] AMD backend is eager-only in this release. "
                 "Pass --enforce-eager to suppress this warning. "
-                "Graph-mode blockers are tracked at "
-                "https://github.com/flagos-ai/FlagGems/issues/8460"
+                "Remaining graph-mode blockers: FlagGems GDN kernel tracing "
+                "(https://github.com/flagos-ai/FlagGems/issues/8095) and a "
+                "lazily-resolved dispatch lock during torch.compile tracing. "
+                "Overall tracking: https://github.com/flagos-ai/FlagGems/issues/8460"
             )
         return cls.vendor_name in [
             "nvidia",
