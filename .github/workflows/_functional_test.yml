@@ -28,6 +28,11 @@ on:
         description: "Platform name (e.g., nvidia, ascend)"
         required: true
         type: string
+      device:
+        description: "Device name (e.g., a100, h20)"
+        required: false
+        type: string
+        default: ""
       branch:
         description: "Branch/ref under test (empty = caller ref)"
         required: false

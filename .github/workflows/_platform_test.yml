@@ -129,6 +129,7 @@ jobs:
     secrets: inherit
     with:
       platform: ${{ inputs.platform }}
+      device: ${{ matrix.test.device }}
       branch: ${{ inputs.branch }}
       ci_image: ${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(matrix.test.runner_labels) || toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
