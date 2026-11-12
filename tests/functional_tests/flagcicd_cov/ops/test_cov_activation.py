@@ -111,7 +111,13 @@ class TestRMSNormCov:
         return x * torch.rsqrt(variance + eps) * weight
 
     def test_forward_and_residual_returned(self, device):
-        """Plain call normalizes x; residual call normalizes x+residual and returns the sum."""
+        """Plain call normalizes x; residual call fuses add in place on x and residual.
+
+        The FlagGems fused path is in-place (vllm_fl dispatches to
+        gems_rms_forward -> flag_gems.fused_add_rms_norm): x becomes
+        rms_norm(x+residual)*w and residual becomes x+residual, both
+        returned as the same tensor objects.
+        """
         _resolve_or_fail("rms_norm")
         hidden = 512
         weight = torch.randn(hidden, device=device, dtype=torch.float32)
@@ -121,10 +127,10 @@ class TestRMSNormCov:
         ref = self.reference(x, weight, 1e-6)
         assert torch.allclose(out, ref, rtol=1e-3, atol=1e-3), "rms_norm mismatch"
 
-        # Fused add semantics (vllm ir.ops.fused_add_rms_norm): the sum
-        # x + residual is normalized and also returned as the new residual.
         residual = torch.randn_like(x)
-        out2, res2 = call_op("rms_norm", layer, x, residual)
+        x_in = x.clone()
+        res_in = residual.clone()
+        out2, res2 = call_op("rms_norm", layer, x_in, res_in)
         sum_ref = x + residual
         ref2 = self.reference(sum_ref, weight, 1e-6)
         assert torch.allclose(out2, ref2, rtol=1e-3, atol=1e-3), (

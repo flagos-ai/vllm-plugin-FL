@@ -95,17 +95,11 @@ def _collective_worker(rank: int, port: int, result_queue) -> None:
             and torch.allclose(out.cpu(), torch.full((64, 16), 3.0))
         )
 
-        # all_gatherv with uniform sizes: gathered tensor interleaves in
-        # rank order (rank r contributes rows of value r+1).
-        z = torch.full((8, 4), rank + 1, device="cuda", dtype=torch.float32)
-        out = comm.all_gatherv(z, dim=0, sizes=[8, 8])
-        torch.cuda.synchronize()
-        expected = torch.cat(
-            [torch.full((8, 4), r + 1) for r in range(WORLD_SIZE)], dim=0
-        )
-        results["all_gatherv"] = bool(
-            out.shape == (16, 4) and torch.allclose(out.cpu(), expected)
-        )
+        # all_gatherv: NOT exercised here — vllm_fl/distributed/communicator.py:176
+        # asserts pyflagcx_comm is not None and not disabled, i.e. the op has
+        # no torch.distributed fallback and is unreachable on images without
+        # flagcx (handed to the plugin owners; would need an nccl fallback
+        # like all_reduce/send/recv have).
 
         # send/recv ring: rank 0 sends 7s forward, rank 1 sends 11s back.
         if rank == 0:
