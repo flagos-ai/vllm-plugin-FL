@@ -30,13 +30,12 @@ def test_draft_attention_groups_are_only_added_on_last_pp_rank(is_last_rank):
     )
 
     caches = {}
-    map_kv_caches = Mock(return_value=caches)
+    bind_kv = Mock()
     namespace = {
         "nullcontext": nullcontext,
         "get_pp_group": lambda: SimpleNamespace(is_last_rank=is_last_rank),
         "allocate_kv_cache": Mock(return_value=caches),
-        "map_kv_caches_to_kernel_blocks": map_kv_caches,
-        "bind_kv_cache": Mock(),
+        "bind_kv_cache": bind_kv,
     }
     exec(
         compile(ast.Module(body=[method], type_ignores=[]), str(source), "exec"),
@@ -48,6 +47,8 @@ def test_draft_attention_groups_are_only_added_on_last_pp_rank(is_last_rank):
         attn_groups=[[model_group]],
         speculative_config=object(),
         use_ascend_attention=False,
+        use_ascend_hybrid_cache=False,
+        use_uniform_kv_cache=lambda groups: False,
         device="cpu",
         cache_config=SimpleNamespace(
             get_resolved_kv_cache_layout=lambda: "LBNHC",
@@ -58,11 +59,10 @@ def test_draft_attention_groups_are_only_added_on_last_pp_rank(is_last_rank):
         compilation_config=SimpleNamespace(static_forward_context={}),
         kv_caches=[],
     )
-    expected = [model_group]
     if is_last_rank:
         runner.drafter = SimpleNamespace(draft_attn_groups=[draft_group])
-        expected.append(draft_group)
 
     initialize = namespace["initialize_kv_cache_tensors"]
-    assert initialize(runner, SimpleNamespace(kv_cache_groups=[]), [128]) is caches
-    map_kv_caches.assert_called_once_with(caches, expected)
+    result = initialize(runner, SimpleNamespace(kv_cache_groups=[]), [128])
+    assert result is caches
+    bind_kv.assert_called_once()
