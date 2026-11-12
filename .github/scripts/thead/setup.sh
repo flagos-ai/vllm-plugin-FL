@@ -65,20 +65,6 @@ if site.resolve() == base:
 (site / "00_thead_image_site.pth").write_text(str(base) + "\n")
 PY
 
-# The image ships `vllm` with a base-interpreter shebang, so PATH would start
-# serving and benchmark tests without the plugin installed in this venv and
-# fall back to the CUDA platform. Expose a venv-local entry point instead.
-cat >"$WORK/env/bin/vllm" <<EOF
-#!$PY
-import sys
-
-from vllm.entrypoints.cli.main import main
-
-if __name__ == "__main__":
-    sys.exit(main())
-EOF
-chmod +x "$WORK/env/bin/vllm"
-
 # Build and install an ordinary wheel of this checkout in the fresh venv only.
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir wheel \
   --no-index --no-deps --no-build-isolation --wheel-dir "$WORK/wheels" "$REPO"

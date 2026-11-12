@@ -49,12 +49,12 @@ def validate_vllm_provider(
         and Path(module_origin).resolve() == Path(distribution_module_origin).resolve()
     )
     if (
-        module_version != "0.32.0"
-        or distribution_version != "0.32.0+empty"
+        module_version != "0.28.0"
+        or distribution_version != "0.28.0+empty"
         or not same_origin
     ):
         raise RuntimeError(
-            "CI requires vLLM module 0.32.0 from distribution 0.32.0+empty "
+            "CI requires vLLM module 0.28.0 from distribution 0.28.0+empty "
             "at the same origin; actual: " + repr(actual)
         )
     return actual

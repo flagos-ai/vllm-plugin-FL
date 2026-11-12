@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2026 FlagOS Contributors
+# Copyright (c) 2025 BAAI. All rights reserved.
 # Check T-Head PPU availability.
 set -euo pipefail
 

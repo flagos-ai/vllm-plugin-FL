@@ -18,16 +18,15 @@ separately below.
 | Accelerator | T-Head PPU-ZW810E; four visible cards for model tests |
 | Python | `3.12.3` |
 | PyTorch | Vendor PPU build, version `2.10.0` |
-| vLLM | `0.32.0+empty`, source tag `v0.32.0` |
+| vLLM | `0.28.0+empty`, source `2cf0a6915ce544dc493a0990f2ea38d81601128a` |
 | FL plugin | CI installs the tested checkout as an ordinary wheel |
 | FlagTree | `0.7.0+ppu3.6` |
 | Imported Triton | `3.6.0`, supplied by the FlagTree PPU wheel |
 | FlagGems | Complete upstream commit `317b763204391d530d6024b52b6235de150443d8`; wheel metadata `5.5.0.dev0+g317b76320` |
 | Model execution | BF16, TP=4, eager and graph; maximum model length 32768, maximum sequences 8, memory utilization 0.85 |
-| Model runner | Upstream V2 (`vllm/v1/worker/gpu`), selected by default as on NVIDIA; `VLLM_USE_V2_MODEL_RUNNER=0` falls back to the V1 `ModelRunnerFL` |
 
-The vLLM distribution version is `0.32.0+empty`, while its generated module
-version (`vllm.__version__`) is `0.32.0`. The empty build suffix is added to
+The vLLM distribution version is `0.28.0+empty`, while its generated module
+version (`vllm.__version__`) is `0.28.0`. The empty build suffix is added to
 wheel metadata. Verify both versions and confirm that the imported module
 belongs to that distribution; checking the module string for `+empty` rejects
 this valid build.
@@ -51,11 +50,11 @@ SDPA path. Passing text attention tests alone does not validate image inference.
 Use the published runtime image:
 
 ```bash
-export PPU_IMAGE="harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci"
+export PPU_IMAGE="harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-thead-ci"
 ```
 
 The published image digest is
-`sha256:abb224ad4e56ce9a978c1b868a65b439d6ddd8b9260bf5dc1baa97180ae14174`.
+`sha256:1ec87ed25bce8a523bd9a24f20695821363b385f7b58a878bb87df7bef58c414`.
 The image includes vendor PyTorch, the PPU SDK and `flash_attn_3`, plus the
 ordinary Python stack in the table.
 The following versions were confirmed on 2026-10-14 on the same host and
@@ -110,7 +109,7 @@ caches, and results. `MODEL_DIR` contains model directories with `config.json`
 and all weight shards.
 
 ```bash
-export PPU_IMAGE="${PPU_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci}"
+export PPU_IMAGE="${PPU_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-thead-ci}"
 export REPO_DIR="$PWD"
 export WORK_DIR=/data/thead-work
 export MODEL_DIR=/data/models
@@ -225,7 +224,7 @@ installation.
 ```bash
 mkdir -p /work/sources
 git clone https://github.com/vllm-project/vllm.git /work/sources/vllm
-git -C /work/sources/vllm checkout --detach v0.32.0
+git -C /work/sources/vllm checkout --detach 2cf0a6915ce544dc493a0990f2ea38d81601128a
 VLLM_TARGET_DEVICE=empty VLLM_USE_PRECOMPILED=0 VLLM_USE_PRECOMPILED_RUST=0 \
     VLLM_VENDOR= python -m pip install --no-build-isolation --no-deps /work/sources/vllm
 
@@ -309,8 +308,6 @@ else
 fi
 unset PYTHONPATH PYTHONHOME
 export VLLM_PLUGINS=fl
-# The platform follows upstream and runs the V2 model runner by default.
-# Export VLLM_USE_V2_MODEL_RUNNER=0 to fall back to the V1 ModelRunnerFL.
 export TORCH_DEVICE_BACKEND_AUTOLOAD=1
 export GEMS_VENDOR=thead
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
@@ -350,7 +347,7 @@ import vllm
 assert torch.__version__ == '2.10.0'
 assert version('flagtree') == '0.7.0+ppu3.6'
 assert triton.__version__ == '3.6.0'
-assert vllm.__version__.startswith('0.32.0')
+assert vllm.__version__.startswith('0.28.0')
 for module in (torch, triton, flag_gems, vllm):
     print(module.__name__, getattr(module, '__version__', None), module.__file__)
 print('FlagGems distribution:', version('flag-gems'))
@@ -459,7 +456,7 @@ every response, including repetition, encoding, and control-character checks.
 
 ## CI configuration
 
-The reusable workflow is [`.github/workflows/_platform_test.yml`](../../.github/workflows/_platform_test.yml).
+The reusable workflow is [`.github/workflows/_thead_test.yml`](../../.github/workflows/_thead_test.yml).
 It uses the same configuration loader as the other platforms, with
 [the T-Head configuration](../../.github/configs/thead.yml). Use the published
 versioned image below and reserve four PPU cards on a registered runner. Device mounts
@@ -473,7 +470,7 @@ same validation:
 
 | Variable | Value |
 |---|---|
-| `THEAD_CI_IMAGE` | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci` |
+| `THEAD_CI_IMAGE` | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-thead-ci` |
 | `THEAD_CI_VISIBLE_DEVICES` | Exactly four distinct, exclusively reserved PPU indices, comma-separated |
 | `THEAD_CI_MODEL_27B` | Absolute container path to the complete `Qwen3.8-27B` model |
 | `THEAD_CI_MODEL_35B` | Absolute container path to the complete `Qwen3.6-35B-A3B` model |
@@ -491,7 +488,7 @@ card selection, and privileged container options, including invalid explicit
 overrides instead of silently using defaults.
 
 The image must contain vendor PyTorch 2.10.0 and SDK/extensions, vLLM
-0.32.0+empty, FlagTree 0.7.0+ppu3.6, the complete FlagGems wheel from
+0.28.0+empty, FlagTree 0.7.0+ppu3.6, the complete FlagGems wheel from
 `317b763204391d530d6024b52b6235de150443d8`, and runtime/test/build dependencies.
 The [setup script](../../.github/scripts/thead/setup.sh) creates a fresh child
 venv, inherits the image-owned package directory, and builds/installs this
@@ -533,18 +530,13 @@ JUnit reports, per-request JSON results, source/provider snapshots, and logs.
 
 ## Recorded acceptance
 
-The vLLM 0.32 adaptation was accepted on the CI stack above with the default V2
-model runner: the unit scope passed (2/2), and all four model Gate modes passed
-(`Qwen3.6-27B` and `Qwen3.6-35B-A3B`, eager and graph, TP4), 5/5 Gate cases per
-mode. The runner needs two adaptations that the platform now applies itself: the
-V2 UVA buffers fall back to explicit device copies because this `+empty` build
-has no mapped-host-memory op, and graph capture reuses the plugin's
-device-agnostic context instead of the CUDA/Xpu communicator assertion.
-`VLLM_USE_V2_MODEL_RUNNER=0` still selects the V1 `ModelRunnerFL`. The earlier
-results below belong to the previous vLLM 0.28 runtime and are kept for
-provenance only. The earlier CI run passed all 93 unit tests (43 shared
-reference, 5 CPU cache, and 45 PPU cache/attention cases) and all four model Gate
-modes. These historical results do not validate the updated wheel.
+Acceptance of the complete upstream FlagGems wheel at `317b7632` is pending
+T-Head CI. The following results belong to the earlier repaired runtime,
+with FlagGems metadata `5.4.0rc2.post1+gb4b37a751` and image digest
+`sha256:fc75bd7811813ac824773f4719a76821e749f5f30ecb3f22fe7fc07bb7a107bb`.
+The earlier CI run passed all 93 unit tests (43 shared reference, 5 CPU cache,
+and 45 PPU cache/attention cases) and all four model Gate modes. These historical
+results do not validate the updated wheel.
 
 That earlier runtime passed the serial TP4 matrix on 2026-10-09 with the
 original shared Gate checks:

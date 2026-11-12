@@ -6,69 +6,6 @@ import torch
 import torch.nn.functional as F
 
 
-def test_fused_topk_zeroes_padded_rows_without_native_moe_kernel(monkeypatch):
-    """Padded rows must not reach the experts when ``_moe_C`` is absent."""
-    import vllm_fl.ops.fused_moe.router as router_mod
-
-    def fake_topk(weights, ids, token_expert_indices, gating_output, renormalize):
-        weights.fill_(1.0)
-        ids.fill_(0)
-        return weights, ids
-
-    monkeypatch.setattr(router_mod, "_topk_softmax", fake_topk)
-    monkeypatch.setattr(router_mod, "_has_native_moe_topk", lambda: False)
-    monkeypatch.setattr(
-        router_mod, "_get_padding_mask", lambda n: torch.tensor([False, True])[:n]
-    )
-    monkeypatch.setattr(
-        router_mod,
-        "upstream_fused_topk",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("the CUDA-only upstream kernel must not be required")
-        ),
-    )
-
-    weights, ids, token_expert_indices = router_mod.fused_topk(
-        hidden_states=torch.zeros(2, 4),
-        gating_output=torch.zeros(2, 3),
-        topk=2,
-        renormalize=False,
-    )
-
-    assert torch.equal(weights, torch.tensor([[1.0, 1.0], [0.0, 0.0]]))
-    assert ids.shape == (2, 2)
-    assert token_expert_indices.shape == (2, 2)
-
-
-def test_fused_topk_prefers_upstream_when_native_kernel_takes_the_mask(monkeypatch):
-    import vllm_fl.ops.fused_moe.router as router_mod
-
-    captured = {}
-
-    def upstream(**kwargs):
-        captured.update(kwargs)
-        return (
-            torch.zeros(2, 2),
-            torch.zeros(2, 2, dtype=torch.int32),
-            torch.zeros(2, 2),
-        )
-
-    monkeypatch.setattr(router_mod, "_has_native_moe_topk", lambda: True)
-    monkeypatch.setattr(
-        router_mod, "_get_padding_mask", lambda n: torch.tensor([False, True])[:n]
-    )
-    monkeypatch.setattr(router_mod, "upstream_fused_topk", upstream)
-
-    router_mod.fused_topk(
-        hidden_states=torch.zeros(2, 4),
-        gating_output=torch.zeros(2, 3),
-        topk=2,
-        renormalize=False,
-    )
-
-    assert captured["scoring_func"] == "softmax"
-
-
 def test_bias_router_preserves_hash_scaling_and_shared_experts(monkeypatch):
     import vllm_fl.ops.fused_moe.router as router_mod
 
