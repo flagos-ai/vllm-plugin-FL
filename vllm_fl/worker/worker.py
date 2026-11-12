@@ -14,6 +14,7 @@ from datetime import timedelta
 from types import NoneType
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import regex as re
 import torch
 import torch.nn as nn
@@ -60,8 +61,11 @@ try:  # pragma: no cover - vLLM version compat
         prepare_communication_buffer_for_model as _prepare_comm_buffer,
     )
 except ImportError:  # vLLM >= 0.28 dropped the symbol
+
     def _prepare_comm_buffer(*args, **kwargs):
         return None
+
+
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
@@ -94,7 +98,7 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import request_memory
+from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -128,6 +132,29 @@ if TYPE_CHECKING:
     from vllm.device_allocator.sleep_mode_backend import SleepModeBackend
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
+
+def _is_hybrid_kv_model(vllm_config: VllmConfig) -> bool:
+    """Whether the model mixes linear-attention layers with full attention.
+
+    Kunlunxin stores the attention KV cache of such models (Qwen3-Next /
+    Qwen3.5 / Qwen3.6) in the fused ``[2, blocks, ...]`` layout that only the
+    fused paged write path fills correctly.
+    """
+    cache_config = getattr(vllm_config, "cache_config", None)
+    if getattr(cache_config, "mamba_cache_mode", "none") in ("align", "all"):
+        return True
+    model_config = getattr(vllm_config, "model_config", None)
+    try:
+        if getattr(model_config, "is_hybrid", False):
+            return True
+    except Exception:
+        # Some model configs cannot resolve is_hybrid before initialization.
+        # Fall back to inspecting the Hugging Face layer types below.
+        pass
+    hf_config = getattr(model_config, "hf_text_config", None)
+    layer_types = getattr(hf_config, "layer_types", None) or ()
+    return any(layer_type != "full_attention" for layer_type in layer_types)
 
 
 def _apply_worker_vendor_patches() -> None:
@@ -213,9 +240,24 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
-        # this flag to select the matching block-table and KV-cache kernels.
-        self.use_v2_model_runner = False
+        # ``VllmConfig.use_v2_model_runner`` is a read-only property backed by
+        # ``VLLM_USE_V2_MODEL_RUNNER``. Mirror it instead of hard-coding False,
+        # which would leave the property reporting a different runner to any
+        # upstream code that reads it.
+        self.use_v2_model_runner = vllm_config.use_v2_model_runner
+
+        # Hybrid models (mamba/linear attention + full attention) keep the
+        # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
+        # Writing it through the split reshape_and_cache path drops each token
+        # into the *previous* block, so the first decode step reads a block that
+        # was never written: the logits come out entirely NaN and sampling
+        # degenerates to token id 0 ("!" in the Qwen tokenizer) right after one
+        # correct token.  The fused paged write path already exists behind
+        # USE_RESHAPE_AND_CACHE_FLASH; default it on for such models.
+        if getattr(
+            current_platform, "vendor_name", ""
+        ) == "kunlunxin" and _is_hybrid_kv_model(vllm_config):
+            os.environ.setdefault("USE_RESHAPE_AND_CACHE_FLASH", "1")
 
         _initialize_fl_runtime(self.rank)
 
@@ -245,10 +287,6 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        # ``VllmConfig.use_v2_model_runner`` is a read-only property backed by
-        # ``VLLM_USE_V2_MODEL_RUNNER``. Mirror it instead of overriding the
-        # instance attribute, which would leave the property reporting a
-        # different runner to any upstream code that reads it.
         self.use_v2_model_runner = vllm_config.use_v2_model_runner
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
@@ -399,8 +437,17 @@ class WorkerFL(WorkerBase):
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
             parallel_config = self.parallel_config
+            # vLLM slices physical IDs for non-CUDA-like platforms per DP rank.
+            # A local rank already indexes into this slice. A full device list
+            # (e.g. CUDA --device-ids) still requires the DP offset.
+            assigned_ids = parallel_config.assigned_physical_gpu_ids
+            local_world_size = parallel_config.local_world_size
+            rank_slice_assigned = (
+                assigned_ids is not None and len(assigned_ids) == local_world_size
+            )
             if (
-                parallel_config.distributed_executor_backend
+                not rank_slice_assigned
+                and parallel_config.distributed_executor_backend
                 not in ("ray", "external_launcher")
                 and parallel_config.data_parallel_backend != "ray"
                 and parallel_config.nnodes_within_dp == 1
@@ -410,24 +457,17 @@ class WorkerFL(WorkerBase):
                 if dp_local_rank is None:
                     dp_local_rank = self.parallel_config.data_parallel_index
 
-                tp_pp_world_size = (
-                    self.parallel_config.pipeline_parallel_size
-                    * self.parallel_config.tensor_parallel_size
-                )
-
-                # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
-                self.local_rank += dp_local_rank * tp_pp_world_size
+                self.local_rank += dp_local_rank * local_world_size
 
             # Publish the logical-to-physical mapping for topology queries
             # such as NIC affinity and P2P checks.
-            assigned_physical_gpu_ids = parallel_config.assigned_physical_gpu_ids
-            if assigned_physical_gpu_ids is not None:
+            if assigned_ids is not None:
                 from vllm.platforms.interface import set_assigned_physical_gpu_ids
 
-                set_assigned_physical_gpu_ids(assigned_physical_gpu_ids)
-                assert self.local_rank < len(assigned_physical_gpu_ids), (
+                set_assigned_physical_gpu_ids(assigned_ids)
+                assert self.local_rank < len(assigned_ids), (
                     f"local_rank {self.local_rank} is out of bounds for "
-                    f"assigned_physical_gpu_ids {assigned_physical_gpu_ids}"
+                    f"assigned_physical_gpu_ids {assigned_ids}"
                 )
                 # NOTE(patch pr45026): local_world_size is derived from
                 # parallel_config.nnodes, which is only set for the "mp"
@@ -441,12 +481,10 @@ class WorkerFL(WorkerBase):
                     "ray",
                     "external_launcher",
                 ):
-                    assert self.parallel_config.local_world_size <= len(
-                        assigned_physical_gpu_ids
-                    ), (
-                        f"local_world_size ({self.parallel_config.local_world_size})"
+                    assert local_world_size <= len(assigned_ids), (
+                        f"local_world_size ({local_world_size})"
                         " exceeds assigned_physical_gpu_ids count "
-                        f"({len(assigned_physical_gpu_ids)})"
+                        f"({len(assigned_ids)})"
                     )
             else:
                 assert self.local_rank < torch.accelerator.device_count(), (
@@ -645,40 +683,22 @@ class WorkerFL(WorkerBase):
         ):
             cudagraph_memory_estimate = self.model_runner.profile_cudagraph_memory()
 
-        # Hygon DCUs report is_cuda_alike() == False, so the upstream estimator
-        # above never runs and the KV cache takes the whole
-        # gpu_memory_utilization budget. Graph capture then has no room left and
-        # the first capture ends in `HIP out of memory`, which also leaves the
-        # DCU memory unreclaimable. Reserve a headroom instead, bounded by a
-        # share of the device budget so smaller cards are not starved.
-        hygon_graph_headroom = 0
-        compilation_config = getattr(self.vllm_config, "compilation_config", None)
-        if (
-            getattr(current_platform, "vendor_name", "") == "hygon"
-            and getattr(compilation_config, "cudagraph_mode", CUDAGraphMode.NONE)
-            != CUDAGraphMode.NONE
-        ):
-            requested = int(
-                float(os.environ.get("VLLM_FL_HYGON_GRAPH_HEADROOM_GB", "4")) * 1024**3
-            )
-            # At most 30% of one DCU, matching the budget shape used for the
-            # other DCU platform. On a 144 GiB card this leaves the 4 GiB
-            # default untouched; it only trims the request on small cards.
-            device_budget_cap = int(current_platform.get_device_total_memory() * 0.3)
-            hygon_graph_headroom = min(requested, device_budget_cap)
-            logger.info(
-                "Hygon: reserving %.1f GiB of the KV cache budget for graph "
-                "capture (requested %.1f GiB, device budget cap %.1f GiB).",
-                hygon_graph_headroom / 1024**3,
-                requested / 1024**3,
-                device_budget_cap / 1024**3,
+        # Platforms that the upstream estimator cannot cover reserve their own
+        # headroom; everything else keeps the original budget.
+        vendor_cudagraph_headroom = 0
+        if getattr(current_platform, "vendor_name", "") == "hygon":
+            from vllm_fl.dispatch.backends.vendor.hygon.worker import (
+                cudagraph_memory_headroom,
             )
 
+            vendor_cudagraph_headroom = cudagraph_memory_headroom(self.vllm_config)
+
+        # Respect the opt-in flag as originally designed.
         cudagraph_memory_estimate_applied = (
             cudagraph_memory_estimate
             if envs.VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS
             else 0
-        ) + hygon_graph_headroom
+        ) + vendor_cudagraph_headroom
 
         self.total_consumed = profile_result.total_consumed
         self.peak_activation_memory = (
@@ -867,9 +887,7 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if getattr(self.vllm_config, "aux_output_config", None) is not None and (
-            self.vllm_config.aux_output_config.enable_return_routed_experts
-        ):
+        if self.model_config.enable_return_routed_experts:
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -1272,11 +1290,45 @@ class WorkerFL(WorkerBase):
 
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
+        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+        all_gather_tensors = {}
+        compilation_config = self.vllm_config.compilation_config
+        parallel_config = self.vllm_config.parallel_config
+
+        if (
+            parallel_config.pipeline_parallel_size > 1
+            and compilation_config.pass_config.enable_sp
+            and forward_pass
+        ):
+            # currently only supported by V1 GPUModelRunner
+            assert not self.use_v2_model_runner
+            num_scheduled_tokens_np = np.array(
+                list(scheduler_output.num_scheduled_tokens.values()),
+                dtype=np.int32,
+            )
+            # TODO(lucas): This is pretty gross; ideally we should only ever call
+            # `_determine_batch_execution_and_padding` once (will get called again
+            # in `execute_model`) but this requires a larger refactor of PP.
+            _, batch_desc, _, _, _ = (
+                self.model_runner._determine_batch_execution_and_padding(
+                    num_tokens=num_scheduled_tokens,
+                    num_reqs=len(num_scheduled_tokens_np),
+                    num_scheduled_tokens_np=num_scheduled_tokens_np,
+                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
+                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
+                )
+            )
+            all_gather_tensors = {
+                "residual": not is_residual_scattered_for_sp(
+                    self.vllm_config, batch_desc.num_tokens
+                )
+            }
 
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (
                 get_pp_group().irecv_tensor_dict(
                     all_gather_group=get_tp_group(),
+                    all_gather_tensors=all_gather_tensors,
                 )
             )
             assert tensor_dict is not None
@@ -1312,6 +1364,7 @@ class WorkerFL(WorkerBase):
         self._pp_send_work = get_pp_group().isend_tensor_dict(
             output.tensors,
             all_gather_group=get_tp_group(),
+            all_gather_tensors=all_gather_tensors,
         )
 
         return None
@@ -1579,7 +1632,7 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.determinism.batch_invariant import init_batch_invariance
+    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
     init_batch_invariance()
     override_envs_for_eplb(

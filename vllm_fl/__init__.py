@@ -4,6 +4,7 @@ import importlib
 import logging
 import os
 import sys
+from threading import Lock
 
 
 def _patch_flag_gems_triton_import_compat():
@@ -218,6 +219,27 @@ def _install_metax_compat():
         logger.warning("[vllm_fl] MetaX compatibility shims not installed: %s", exc)
 
 
+_kunlunxin_fla_alias_lock = Lock()
+
+
+def _install_kunlunxin_fla_alias() -> None:
+    # Importing the alias can re-enter platform registration.
+    if not _kunlunxin_fla_alias_lock.acquire(blocking=False):
+        return
+    try:
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
+            _fix_platform_vars,
+        )
+        from vllm_fl.patches.fla_module_relocation import install
+
+        install()
+        _fix_platform_vars()
+    except Exception as exc:
+        logger.debug("Kunlunxin FLA module alias unavailable: %s", exc)
+    finally:
+        _kunlunxin_fla_alias_lock.release()
+
+
 def register():
     """Register the FL platform."""
     _init_vendor_device()
@@ -246,6 +268,9 @@ def register():
     if multiproc_method is None:
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
+
+    if vendor_name == "kunlunxin":
+        _install_kunlunxin_fla_alias()
 
     if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
         # These backends use ModelRunnerFL; choose it before VllmConfig reads
