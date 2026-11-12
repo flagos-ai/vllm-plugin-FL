@@ -34,6 +34,48 @@ def _unavailable_cuda_view(tensor):
     )
 
 
+def _force_uva_unavailable() -> None:
+    """Report UVA as unavailable on empty builds.
+
+    vLLM 0.32's ``StagedWriteTensor`` (gpu model-runner ``RequestState``) picks
+    ``UvaBuffer`` whenever ``is_uva_available()`` is true, then maps the host
+    buffer through ``torch.ops._C.get_cuda_view_from_cpu_tensor`` — the op we
+    stub to raise above. Upstream's ``is_uva_available()`` only checks pinned
+    memory, which is available on CUDA-alike devices (incl. PPU), so it stays
+    true and the engine never reaches its own ``NonUvaBuffer`` copy fallback.
+    Without the ``_C`` view op, UVA genuinely is not available here, so we make
+    ``is_uva_available`` report false and let the engine use ``NonUvaBuffer``.
+
+    Reached only on the empty-build path (backends that already own ``_C`` —
+    MetaX's mcoplib, a real ``vllm._C`` — return before the stubs register, so
+    their working UVA op is left untouched).
+    """
+    import sys
+
+    import vllm.utils.platform_utils as _pu
+
+    original = _pu.is_uva_available
+    if getattr(original, "_fl_forced_false", False):
+        return
+
+    def is_uva_available() -> bool:
+        return False
+
+    is_uva_available._fl_forced_false = True  # type: ignore[attr-defined]
+    _pu.is_uva_available = is_uva_available
+    # Modules that did ``from vllm.utils.platform_utils import is_uva_available``
+    # captured the original by value. Patching the canonical module above covers
+    # consumers imported after this; rebind the ones already imported — buffer_utils,
+    # the offloader, and the 0.32 models that read it at import — so none keep the
+    # original reference and keep reporting UVA as available.
+    for module in list(sys.modules.values()):
+        if module is None or module is _pu:
+            continue
+        if getattr(module, "is_uva_available", None) is original:
+            with suppress(Exception):
+                module.is_uva_available = is_uva_available
+
+
 def _unavailable_weak_ref(tensor):
     raise RuntimeError(
         "CUDA graph weak references require the vllm_fl._C extension; "
@@ -187,6 +229,10 @@ def register_op_schemas():
         for name, fn in _CUDA_FALLBACK_IMPLS:
             with suppress(RuntimeError):
                 c_lib.impl(name, fn, "CUDA")
+
+    # An empty build has no mapped-CUDA-view op; keep the engine off UVA
+    # buffers so it uses the NonUvaBuffer copy path instead of the stub above.
+    _force_uva_unavailable()
 
     # Library registrations are removed when the Library is garbage-collected.
     register_op_schemas._libs = libs

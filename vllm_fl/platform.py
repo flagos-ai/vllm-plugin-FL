@@ -1059,13 +1059,37 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Match CUDA's IR-op defaults, but only offer `vllm_c` when this build
+        actually owns the native extension.
+
+        vLLM 0.32's ``IrOp.set_default`` asserts every provider in the priority
+        is a registered impl. The ``vllm_c`` provider is registered only when FL
+        imports ``vllm._C``; empty builds never do, and the MetaX backend
+        deliberately skips it (``mcoplib._C`` owns ``_C`` there), so inheriting
+        CUDA's ``["vllm_c", "native"]`` default aborts engine startup. Probe with
+        ``find_spec`` — which locates the extension without *loading* it, so it
+        cannot dlopen a second copy and duplicate-register on MetaX — and drop
+        ``vllm_c`` whenever the extension is absent or MetaX owns ``_C``, leaving
+        ``native`` (always registered).
+        """
+        import importlib.util
+
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
+        from vllm_fl.ops._C_ops_registry import _is_metax_backend
+
+        have_vllm_c = (
+            not _is_metax_backend()
+            and importlib.util.find_spec("vllm._C") is not None
+        )
+
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        if using_inductor or not have_vllm_c:
+            default = ["native"]
+        else:
+            default = ["vllm_c", "native"]
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,
