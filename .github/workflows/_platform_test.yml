@@ -136,6 +136,8 @@ jobs:
   # job on that device's runner (device_runner_labels override).
   unit:
     needs: setup
+    # Job conditions are evaluated before expanding the optional device matrix.
+    if: ${{ needs.setup.result == 'success' && fromJson(needs.setup.outputs.config).unit_devices && fromJson(needs.setup.outputs.config).unit_devices[0] != null }}
     strategy:
       fail-fast: false
       matrix:
