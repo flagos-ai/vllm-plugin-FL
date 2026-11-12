@@ -126,16 +126,20 @@ def test_apply_rotary_emb_has_separate_dispatch_backends():
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(
-    "shape,rotary_dim,is_neox_style,cos_rank,enable_fp32_compute",
+    "shape,rotary_dim,is_neox_style,cos_rank,enable_fp32_compute,dtype",
     [
-        ((5, 2, 80), 78, True, 2, False),
-        ((5, 2, 80), 80, False, 2, False),
-        ((2, 5, 2, 80), 78, False, 3, False),
-        ((2, 5, 2, 80), 80, True, 3, True),
+        ((5, 2, 80), 78, True, 2, False, torch.float16),
+        ((5, 2, 80), 80, False, 2, False, torch.float16),
+        ((2, 5, 2, 80), 78, False, 3, False, torch.float16),
+        ((2, 5, 2, 80), 80, True, 3, True, torch.float16),
+        pytest.param((257, 16, 80), 78, True, 2, True, torch.bfloat16, id="m3_bf16_3d"),
+        pytest.param(
+            (2, 257, 16, 80), 78, True, 2, True, torch.bfloat16, id="m3_bf16_4d"
+        ),
     ],
 )
 def test_apply_rotary_emb_flaggems_matches_reference(
-    shape, rotary_dim, is_neox_style, cos_rank, enable_fp32_compute
+    shape, rotary_dim, is_neox_style, cos_rank, enable_fp32_compute, dtype
 ):
     pytest.importorskip("flag_gems")
     if not torch.cuda.is_available():
@@ -149,7 +153,7 @@ def test_apply_rotary_emb_flaggems_matches_reference(
     op = _make_apply_rotary_emb(
         is_neox_style=is_neox_style, enable_fp32_compute=enable_fp32_compute
     )
-    x = torch.randn(shape, device="cuda", dtype=torch.float16)
+    x = torch.randn(shape, device="cuda", dtype=dtype)
     original = x.clone()
     angles = torch.randn(shape[-3], rotary_dim // 2, device="cuda")
     cos, sin = angles.cos(), angles.sin()
@@ -159,7 +163,9 @@ def test_apply_rotary_emb_flaggems_matches_reference(
     actual = apply_rotary_emb_flaggems(op, x, cos, sin)
     expected = apply_rotary_emb_torch(op, x, cos, sin)
 
-    torch.testing.assert_close(actual, expected, rtol=5e-3, atol=5e-3)
+    # Retain the accepted M3 BF16 RoPE tolerance; existing FP16 cases are unchanged.
+    tolerance = 1e-2 if dtype == torch.bfloat16 else 5e-3
+    torch.testing.assert_close(actual, expected, rtol=tolerance, atol=tolerance)
     torch.testing.assert_close(actual[..., rotary_dim:], original[..., rotary_dim:])
     torch.testing.assert_close(x, original)
 

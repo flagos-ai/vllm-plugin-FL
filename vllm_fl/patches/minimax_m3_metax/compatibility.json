@@ -1,0 +1,295 @@
+[
+  {
+    "name": "fix_standalone_compile",
+    "reason": "FX standalone compile / autograd-cache / TF32 metadata compatibility",
+    "relative_source": "dispatch/backends/vendor/metax/patches/fix_standalone_compile.py",
+    "sha256": "e3f5f15b365079177c2a0eb73f1369c6f6752f5c10b95bebb35231434aa7e5cf",
+    "targets": [
+      {
+        "module": "torch._inductor",
+        "attribute": "standalone_compile",
+        "source_file": "torch/_inductor/standalone_compile.py",
+        "source_sha256": "79d15cedc4c83ced583b901f9adad5d0f3f705301d8bc0c87121794a0342010a",
+        "signature": [
+          [
+            "gm",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "example_inputs",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "dynamic_shapes",
+            "KEYWORD_ONLY"
+          ],
+          [
+            "options",
+            "KEYWORD_ONLY"
+          ],
+          [
+            "aot",
+            "KEYWORD_ONLY"
+          ]
+        ]
+      },
+      {
+        "module": "torch._functorch._aot_autograd.autograd_cache",
+        "attribute": "autograd_cache_key",
+        "source_file": "torch/_functorch/_aot_autograd/autograd_cache.py",
+        "source_sha256": "a18d16ac18ad3f13136f132b0b182f4b65a0e6d8b513bcf51bd89a1beafde874",
+        "signature": [
+          [
+            "gm",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "example_inputs",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "config",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "fx_config",
+            "POSITIONAL_OR_KEYWORD"
+          ]
+        ]
+      },
+      {
+        "module": "torch.backends.cuda",
+        "attribute": "matmul.__class__.__setattr__",
+        "source_file": "torch/backends/cuda/__init__.py",
+        "source_sha256": "c70bd54e7d4b995ddd822cb70d7d8e140b95a2d8e61635bf2c580b8045d83c11",
+        "signature": null
+      }
+    ],
+    "import_module": "vllm_fl.dispatch.backends.vendor.metax.patches.fix_standalone_compile"
+  },
+  {
+    "name": "pynccl_wrapper",
+    "reason": "MCCL API/ABI bridge and accepted in-place torch.distributed all_reduce",
+    "relative_source": "dispatch/backends/vendor/metax/patches/pynccl_vllm024.py",
+    "sha256": "0df9f5b6c133c5c36dcf9090854859a206ac38c2b262dca6112bc8b98ff395e6",
+    "targets": [
+      {
+        "module": "vllm.distributed.device_communicators.pynccl",
+        "attribute": "NCCLLibrary",
+        "source_file": "vllm/distributed/device_communicators/pynccl_wrapper.py",
+        "source_sha256": "5379921210d91f743bff98e57cb441a11eb6422f17dd687606c7326d64659541",
+        "signature": null
+      },
+      {
+        "module": "vllm.distributed.device_communicators.pynccl_wrapper",
+        "attribute": "NCCLLibrary",
+        "source_file": "vllm/distributed/device_communicators/pynccl_wrapper.py",
+        "source_sha256": "5379921210d91f743bff98e57cb441a11eb6422f17dd687606c7326d64659541",
+        "signature": null
+      },
+      {
+        "module": "vllm.distributed.device_communicators.cuda_communicator",
+        "attribute": "CudaCommunicator.all_reduce",
+        "source_file": "vllm/distributed/device_communicators/cuda_communicator.py",
+        "source_sha256": "5d9421a8af0476c73cb2872a38bfe3ede5091e0d5c431d72d479f7d699fdc871",
+        "signature": [
+          [
+            "self",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "input_",
+            "POSITIONAL_OR_KEYWORD"
+          ]
+        ]
+      }
+    ],
+    "import_module": "vllm_fl.dispatch.backends.vendor.metax.patches.pynccl_vllm024"
+  },
+  {
+    "name": "cuda_wrapper",
+    "reason": "MACA IPC handle and runtime ABI",
+    "relative_source": "dispatch/backends/vendor/metax/patches/cuda_wrapper.py",
+    "sha256": "49e0cb5f259d9dd576447c2121416ac65b3d3614016f97d67ecf4179d63b1f93",
+    "targets": [
+      {
+        "module": "vllm.distributed.device_communicators.cuda_wrapper",
+        "attribute": "CudaRTLibrary",
+        "source_file": "vllm/distributed/device_communicators/cuda_wrapper.py",
+        "source_sha256": "375ce7ce0c7f5200a6e572d756729db66b4c720ba198513407a97108fa157066",
+        "signature": null
+      }
+    ],
+    "import_module": "vllm_fl.dispatch.backends.vendor.metax.patches.cuda_wrapper"
+  },
+  {
+    "name": "utils_patch",
+    "reason": "Resolve MACA MCCL shared library",
+    "relative_source": "dispatch/backends/vendor/metax/patches/utils_patch.py",
+    "sha256": "1edfac73938b8e27c6554836d0f253bcd026e72f15dc5fcf48e1f02d082345d9",
+    "targets": [
+      {
+        "module": "vllm.utils.nccl",
+        "attribute": "find_nccl_library",
+        "source_file": "vllm/utils/nccl.py",
+        "source_sha256": "574c956318442918b6852581a8affb39a170bd547f440241350f9adf08020d70",
+        "signature": []
+      }
+    ],
+    "import_module": "vllm_fl.dispatch.backends.vendor.metax.patches.utils_patch"
+  },
+  {
+    "name": "topk_topp_sampler",
+    "reason": "Retain accepted non-Triton top-k/top-p sampler fallback",
+    "relative_source": "dispatch/backends/vendor/metax/patches/topk_topp_sampler.py",
+    "sha256": "30535591ccd3e909371d0f921bb71fe94774dd8a10f53fa8f745df21629a57f5",
+    "targets": [
+      {
+        "module": "vllm.v1.sample.ops.topk_topp_sampler",
+        "attribute": "apply_top_k_top_p",
+        "source_file": "vllm/v1/sample/ops/topk_topp_sampler.py",
+        "source_sha256": "35b9a1ffeb1e50b73b0ddd1ffc0f968910ee21cf9cc5455dd879fde547b6ddc1",
+        "signature": [
+          [
+            "logits",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "k",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "p",
+            "POSITIONAL_OR_KEYWORD"
+          ]
+        ]
+      }
+    ],
+    "import_module": "vllm_fl.dispatch.backends.vendor.metax.patches.topk_topp_sampler"
+  },
+  {
+    "name": "vllm024_compat",
+    "reason": "Pointer dtype, sampling penalties and sampling UVA compatibility; unrelated pooling hook removed",
+    "relative_source": "dispatch/backends/vendor/metax/patches/vllm024_compat.py",
+    "sha256": "8aa3f59db45e5906a06f9e236ebe3e07b7fb43c13898c16cf38bb17b204c8418",
+    "targets": [
+      {
+        "module": "vllm.v1.worker.gpu.buffer_utils",
+        "attribute": "_load_ptr",
+        "source_file": "vllm/v1/worker/gpu/buffer_utils.py",
+        "source_sha256": "51d37bde4f2f17d5aa9354faf35269ca1adde0eb16e73ae0d8b9860353ce57b7",
+        "signature": [
+          [
+            "ptr_to_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "elem_dtype",
+            "POSITIONAL_OR_KEYWORD"
+          ]
+        ]
+      },
+      {
+        "module": "vllm.v1.worker.gpu.block_table",
+        "attribute": "_load_ptr",
+        "source_file": "vllm/v1/worker/gpu/buffer_utils.py",
+        "source_sha256": "51d37bde4f2f17d5aa9354faf35269ca1adde0eb16e73ae0d8b9860353ce57b7",
+        "signature": [
+          [
+            "ptr_to_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "elem_dtype",
+            "POSITIONAL_OR_KEYWORD"
+          ]
+        ]
+      },
+      {
+        "module": "vllm.v1.worker.gpu.sample.penalties",
+        "attribute": "_penalties_kernel",
+        "source_file": "vllm/v1/worker/gpu/sample/penalties.py",
+        "source_sha256": "55bb278813d9a70aa0d420e5fc580dd1dcb301e052faf0146bf76517329dcc8e",
+        "signature": [
+          [
+            "logits_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "logits_stride",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "expanded_idx_mapping_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "token_ids_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "expanded_local_pos_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "repetition_penalty_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "frequency_penalty_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "presence_penalty_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "prompt_bin_mask_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "prompt_bin_mask_stride",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "output_bin_counts_ptr",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "output_bin_counts_stride",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "vocab_size",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "BLOCK_SIZE",
+            "POSITIONAL_OR_KEYWORD"
+          ]
+        ]
+      },
+      {
+        "module": "vllm.v1.worker.gpu.sample.states",
+        "attribute": "SamplingStates.get_top_k_top_p",
+        "source_file": "vllm/v1/worker/gpu/sample/states.py",
+        "source_sha256": "4e3671f93695ba5a48fad7d2d13beb231ac8741034904ed5a15d9f7b9b86662e",
+        "signature": [
+          [
+            "self",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "expanded_idx_mapping",
+            "POSITIONAL_OR_KEYWORD"
+          ],
+          [
+            "idx_mapping_np",
+            "POSITIONAL_OR_KEYWORD"
+          ]
+        ]
+      }
+    ],
+    "import_module": "vllm_fl.dispatch.backends.vendor.metax.patches.vllm024_compat"
+  }
+]
