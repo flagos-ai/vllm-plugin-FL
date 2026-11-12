@@ -33,9 +33,7 @@ python -m pip install --no-build-isolation --no-deps -e .
 python -m pip install "pytest-xdist>=3.0.0"
 
 # Match the validated Iluvatar development stack without changing other vendors.
-python -m pip install --no-build-isolation --no-deps \
-  'flag-gems @ git+https://github.com/flagos-ai/FlagGems.git@2bcfe2656dad0b654077fcfe7d66e6a93542afab' \
-  'flaggems-vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@b434eafb1715849d1019ddcd480c5fc39461665c'
+bash .github/scripts/iluvatar/install_flaggems.sh
 
 python - <<'PY'
 from importlib import metadata
