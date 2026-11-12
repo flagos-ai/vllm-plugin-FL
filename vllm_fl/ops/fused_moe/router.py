@@ -69,6 +69,12 @@ def _sqrtsoftplus_topk(
     return topk_weights.float(), topk_ids.to(output_dtype)
 
 
+def _has_native_moe_topk() -> bool:
+    """Whether this vLLM build ships the CUDA-only ``_moe_C`` routing kernel."""
+    moe_c = getattr(torch.ops, "_moe_C", None)
+    return moe_c is not None and hasattr(moe_c, "topk_softmax")
+
+
 def fused_topk(
     hidden_states: torch.Tensor,
     gating_output: torch.Tensor,
@@ -79,7 +85,15 @@ def fused_topk(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
-    if scoring_func != "softmax":
+    M, _ = hidden_states.size()
+    # vLLM 0.32 can pad the batch and marks the extra rows through
+    # ``is_padding``; the native ``_moe_C`` kernel accepts that mask, the FL
+    # kernel does not. Keep upstream's implementation where it exists and
+    # reproduce the mask below otherwise.
+    padding_mask = _get_padding_mask(M)
+    if scoring_func != "softmax" or (
+        padding_mask is not None and _has_native_moe_topk()
+    ):
         return upstream_fused_topk(
             hidden_states=hidden_states,
             gating_output=gating_output,
@@ -88,8 +102,6 @@ def fused_topk(
             indices_type=indices_type,
             scoring_func=scoring_func,
         )
-
-    M, _ = hidden_states.size()
 
     topk_weights = torch.empty(
         M, topk, dtype=torch.float32, device=hidden_states.device
@@ -113,8 +125,10 @@ def fused_topk(
         renormalize,
     )
 
-    padding_mask = _get_padding_mask(M)
+    # Padded rows must not contribute expert weights; upstream hands the same
+    # mask to the native kernel.
     if padding_mask is not None:
+        topk_weights = topk_weights.masked_fill(padding_mask.unsqueeze(1), 0.0)
         topk_ids = torch.where(padding_mask[:, None], -1, topk_ids)
 
     return topk_weights, topk_ids, token_expert_indices

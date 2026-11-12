@@ -19,6 +19,7 @@ def test_softmax_padding_stays_on_fl(monkeypatch, dtype, padding):
         return output_weights, output_ids
 
     monkeypatch.setattr(router, "_topk_softmax", kernel)
+    monkeypatch.setattr(router, "_has_native_moe_topk", lambda: False)
     monkeypatch.setattr(router, "_get_padding_mask", lambda count: padding_mask)
     monkeypatch.setattr(
         router, "upstream_fused_topk", lambda **kwargs: pytest.fail("CUDA fallback")
@@ -26,7 +27,8 @@ def test_softmax_padding_stays_on_fl(monkeypatch, dtype, padding):
     actual_weights, actual_ids, source_rows = router.fused_topk(
         torch.zeros(3, 4), torch.zeros(3, 3), 2, True, dtype
     )
-    torch.testing.assert_close(actual_weights, weights)
+    expected_weights = weights.masked_fill(padding_mask[:, None], 0.0)
+    torch.testing.assert_close(actual_weights, expected_weights)
     torch.testing.assert_close(actual_ids, torch.where(padding_mask[:, None], -1, ids))
     assert actual_ids.dtype == dtype
     torch.testing.assert_close(

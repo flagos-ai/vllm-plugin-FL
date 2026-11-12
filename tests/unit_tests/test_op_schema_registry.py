@@ -30,6 +30,7 @@ def _load_registry(monkeypatch, schemas, *, native=False):
     spec = importlib.util.spec_from_file_location("op_schema_registry_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # Isolate the native capability probe from earlier tests.
     monkeypatch.setattr(module, "_C_ops_present", lambda: native)
     return module
 

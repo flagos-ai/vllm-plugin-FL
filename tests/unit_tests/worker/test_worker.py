@@ -113,6 +113,37 @@ def test_sunrise_process_group_uses_pccl(monkeypatch):
     assert worker_module._normalize_process_group_backend("gloo") == "gloo"
 
 
+def test_mapped_host_buffers_probe_the_cuda_view_op(monkeypatch):
+    """The V2 UVA buffers need a real mapped-host-memory op, not just pinning."""
+    import torch
+
+    import vllm.utils.platform_utils as platform_utils
+    import vllm.utils.torch_utils as torch_utils
+
+    from vllm_fl.dispatch.backends.vendor.thead.patches import v2_runner_compat
+
+    probed = []
+
+    def unavailable_view(tensor):
+        probed.append(tensor)
+        raise RuntimeError("vLLM empty builds do not provide a mapped CUDA view")
+
+    monkeypatch.setattr(
+        torch_utils, "get_accelerator_view_from_cpu_tensor", unavailable_view
+    )
+    monkeypatch.setattr(
+        torch, "zeros", lambda *args, **kwargs: torch.empty(1, dtype=torch.int32)
+    )
+
+    monkeypatch.setattr(platform_utils, "is_uva_available", lambda: False)
+    assert v2_runner_compat.mapped_host_buffers_available() is False
+    assert probed == []
+
+    monkeypatch.setattr(platform_utils, "is_uva_available", lambda: True)
+    assert v2_runner_compat.mapped_host_buffers_available() is False
+    assert len(probed) == 1
+
+
 @pytest.mark.parametrize(
     "device_type,flagcx_backend",
     [
