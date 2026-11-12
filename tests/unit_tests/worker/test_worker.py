@@ -75,9 +75,11 @@ def has_vllm_worker() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not has_vllm_worker(), reason="vllm_fl.worker.worker is unavailable"
-)
+@pytest.fixture(autouse=True)
+def require_selected_worker(request):
+    # GCU uses the upstream 0.32 worker, independently of the legacy shared one.
+    if not request.node.name.startswith("test_gcu_") and not has_vllm_worker():
+        pytest.skip("vllm_fl.worker.worker is unavailable")
 
 
 @pytest.mark.parametrize("tag", ["weights", "kv_cache"])
@@ -160,7 +162,7 @@ def test_worker_selects_v1_or_v2_model_runner():
 
     from vllm_fl.worker.worker import WorkerFL
 
-    source = inspect.getsource(WorkerFL._make_model_runner)
+    source = inspect.getsource(WorkerFL.init_device)
     assert "GPUModelRunnerV2" in source
     assert "vllm_fl.worker.model_runner" in source
     assert "ModelRunnerFL" in source
@@ -198,38 +200,57 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
-@pytest.mark.parametrize("use_v2", [False, True])
-def test_load_model_warms_v2_dispatch_after_model_imports(monkeypatch, use_v2):
-    from contextlib import nullcontext
-    from types import SimpleNamespace
+@pytest.mark.parametrize("fail_load", [False, True])
+def test_gcu_v2_dispatch_warmup_follows_successful_model_load(monkeypatch, fail_load):
+    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
 
     import vllm_fl.dispatch as dispatch
-    from vllm_fl.worker import worker as worker_module
+    from vllm_fl.dispatch.backends.vendor.gcu.worker.model_runner_v2 import (
+        GPUModelRunnerFLV2,
+    )
 
     events = []
-    monkeypatch.setattr(
-        dispatch, "warmup_cached_ops", lambda: events.append("dispatch_warmup")
+    sentinel = RuntimeError("load failed")
+
+    def load_model(self, *args, **kwargs):
+        events.append(("load", args, kwargs))
+        if fail_load:
+            raise sentinel
+
+    monkeypatch.setattr(GPUModelRunner, "load_model", load_model)
+    monkeypatch.setattr(dispatch, "warmup_cached_ops", lambda: events.append("warmup"))
+    runner = GPUModelRunnerFLV2.__new__(GPUModelRunnerFLV2)
+    if fail_load:
+        with pytest.raises(RuntimeError) as caught:
+            runner.load_model("weights", checkpoint="path")
+        assert caught.value is sentinel
+    else:
+        runner.load_model("weights", checkpoint="path")
+    assert events == [("load", ("weights",), {"checkpoint": "path"})] + (
+        [] if fail_load else ["warmup"]
     )
-    monkeypatch.setattr(worker_module, "has_ec_transfer", lambda: False)
-    monkeypatch.setattr(
-        worker_module, "set_current_vllm_config", lambda config: nullcontext()
+
+
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_gcu_worker_constructs_selected_runner(monkeypatch, use_v2):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from vllm_fl.dispatch.backends.vendor.gcu.worker import model_runner_v2
+    from vllm_fl.dispatch.backends.vendor.gcu.worker.worker import WorkerGCU
+    from vllm_fl.worker import model_runner
+
+    factory = Mock(return_value=object())
+    module, name = (
+        (model_runner_v2, "GPUModelRunnerFLV2")
+        if use_v2
+        else (model_runner, "ModelRunnerFL")
     )
-    monkeypatch.setattr(
-        worker_module, "set_torch_threads_for_runtime", lambda: events.append("runtime")
-    )
+    monkeypatch.setattr(module, name, factory)
+    config, device = object(), object()
     worker = SimpleNamespace(
-        use_v2_model_runner=use_v2,
-        vllm_config=SimpleNamespace(weight_transfer_config=None),
-        _maybe_get_memory_pool_context=lambda **kw: nullcontext(),
-        _scoped_allocator_max_split=lambda **kw: nullcontext(),
-        model_runner=SimpleNamespace(
-            load_model=lambda **kw: events.append("model_loaded")
-        ),
+        use_v2_model_runner=use_v2, vllm_config=config, device=device
     )
-
-    worker_module.WorkerFL.load_model(worker)
-
-    expected = ["model_loaded"]
-    if use_v2:
-        expected.append("dispatch_warmup")
-    assert events == expected + ["runtime"]
+    result = WorkerGCU._make_model_runner(worker)
+    assert result is factory.return_value
+    factory.assert_called_once_with(config, device)

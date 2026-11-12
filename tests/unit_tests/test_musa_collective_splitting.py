@@ -713,7 +713,7 @@ def run_actual_load_model_dispatch_guard(device, mode, warmup):
         ("npu", Mode.VLLM_COMPILE, True),
         ("npu", Mode.NONE, False),
         ("cuda", Mode.VLLM_COMPILE, False),
-        ("gcu", Mode.VLLM_COMPILE, True),
+        ("gcu", Mode.VLLM_COMPILE, False),
     ],
 )
 def test_actual_load_model_warms_dispatch_before_tracing(device, mode, expected):

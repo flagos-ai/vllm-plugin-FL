@@ -163,7 +163,12 @@ def test_enflame_rejects_only_hybrid_speculative_align_cache(
         assert config.parallel_config.worker_cls is None
     else:
         PlatformFL.check_and_update_config(config)
-        assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+        expected_worker = (
+            "vllm_fl.dispatch.backends.vendor.gcu.worker.worker.WorkerGCU"
+            if vendor in ("enflame", "gcu")
+            else "vllm_fl.worker.worker.WorkerFL"
+        )
+        assert config.parallel_config.worker_cls == expected_worker
 
     # Validation must not silently disable speculative decoding or change the
     # requested Mamba cache policy to avoid the unsupported fused-copy path.
@@ -454,4 +459,6 @@ def test_gcu_config_accepts_v2_runner(monkeypatch, vendor):
     config.use_v2_model_runner = True
     PlatformFL.check_and_update_config(config)
     assert config.use_v2_model_runner is True
-    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+    assert config.parallel_config.worker_cls == (
+        "vllm_fl.dispatch.backends.vendor.gcu.worker.worker.WorkerGCU"
+    )

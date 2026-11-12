@@ -525,7 +525,12 @@ class PlatformFL(Platform):
                 # Revalidate after changing MLA/KV-head semantics so DCP and TP
                 # constraints are checked against the dense architecture.
                 model_config.verify_with_parallel_config(parallel_config)
-        parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+        if cls.device_type == "gcu":
+            parallel_config.worker_cls = (
+                "vllm_fl.dispatch.backends.vendor.gcu.worker.worker.WorkerGCU"
+            )
+        else:
+            parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         scheduler_config = vllm_config.scheduler_config
         if (
