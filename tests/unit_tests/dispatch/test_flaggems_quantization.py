@@ -92,11 +92,14 @@ def test_flaggems_quantization_registers_ordered_fallbacks(monkeypatch):
 
     register_ops.register_builtins(Registry())
 
-    assert [impl.impl_id for impl in registered] == [
+    quantization_impls = [
+        impl for impl in registered if impl.op_name == "dynamic_per_token_quant_int8"
+    ]
+    assert [impl.impl_id for impl in quantization_impls] == [
         "default.flagos",
         "default.flagos_triton",
     ]
-    assert [impl.priority for impl in registered] == [
+    assert [impl.priority for impl in quantization_impls] == [
         BackendPriority.DEFAULT + 10,
         BackendPriority.DEFAULT,
     ]

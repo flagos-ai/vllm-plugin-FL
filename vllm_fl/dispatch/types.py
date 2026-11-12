@@ -54,6 +54,8 @@ class OpImpl:
         priority: Priority for selection (higher = preferred)
         supported_dtypes: Set of supported data types (optional)
         min_arch: Minimum architecture requirement (optional)
+        allow_execution_fallback: Whether an execution error permits another
+            implementation to run. Stateful or asynchronous providers must disable it.
     """
 
     op_name: str
@@ -64,6 +66,7 @@ class OpImpl:
     priority: int = 0
     supported_dtypes: Optional[Set[str]] = None
     min_arch: Optional[str] = None
+    allow_execution_fallback: bool = True
 
     def __post_init__(self):
         if self.kind == BackendImplKind.VENDOR and not self.vendor:

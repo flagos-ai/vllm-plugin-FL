@@ -16,8 +16,30 @@ pytestmark = [
 ]
 
 
+def _attention_layer(name, quant_config=None, kv_dtype="auto"):
+    from vllm.model_executor.layers.attention.attention import (
+        Attention,
+        _init_kv_cache_quant,
+    )
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (  # noqa: E501
+        CompressedTensorsKVCacheMethod,
+    )
+
+    layer = Attention.__new__(Attention)
+    torch.nn.Module.__init__(layer)
+    layer.layer_name = name
+    layer.kv_cache_dtype = kv_dtype
+    layer.quant_method = None
+    _init_kv_cache_quant(layer, quant_config, name)
+    if quant_config is not None:
+        assert isinstance(layer.quant_method, CompressedTensorsKVCacheMethod)
+        assert layer.quant_method.quant_config is quant_config
+    return layer
+
+
 @pytest.mark.parametrize("order", [("pa", "fia"), ("fia", "pa"), ("pa", "pa")])
-def test_attention_graph_updates_mixed_backends(order):
+@pytest.mark.parametrize("linear_quantized", [False, True])
+def test_attention_graph_updates_mixed_backends(order, linear_quantized):
     import torch_npu
 
     from vllm_fl.compilation.graph_params import clear_graph_params, get_graph_params
@@ -29,9 +51,17 @@ def test_attention_graph_updates_mixed_backends(order):
     )
 
     torch.npu.set_device(0)
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
+    )
+
     config = SimpleNamespace(
         speculative_config=None,
-        quant_config=None,
+        quant_config=CompressedTensorsConfig(
+            target_scheme_map={}, ignore=[], quant_format="int-quantized"
+        )
+        if linear_quantized
+        else None,
         model_config=SimpleNamespace(hf_text_config=SimpleNamespace(sliding_window=64)),
     )
     mask = torch.triu(torch.ones(2048, 2048, dtype=torch.bool), 1).npu()
@@ -41,6 +71,7 @@ def test_attention_graph_updates_mixed_backends(order):
         impl.vllm_config = config
         impl.num_heads, impl.num_kv_heads, impl.head_size = 4, 2, 128
         impl.scale, impl.sinks = 128**-0.5, None
+        impl.kv_cache_dtype = "auto"
         impl.sliding_window = 64 if backend == "fia" else None
         impl.key_cache = torch.randn(8, 128, 2, 128, dtype=torch.bfloat16, device="npu")
         impl.value_cache = torch.randn_like(impl.key_cache)
@@ -99,6 +130,10 @@ def test_attention_graph_updates_mixed_backends(order):
             expected = torch_npu.npu_fused_infer_attention_score(**args)[0]
         return expected
 
+    attention_layers = {
+        name: _attention_layer(name, config.quant_config)
+        for _, _, _, _, _, name in layers
+    }
     for backend, impl, query, _, metadata, _ in layers:
         eager(backend, impl, query, metadata)
     torch.npu.synchronize()
@@ -113,7 +148,7 @@ def test_attention_graph_updates_mixed_backends(order):
     graph = torch.npu.NPUGraph()
     with runtime.capture_scope(context), torch.npu.graph(graph):
         for backend, impl, query, output, metadata, name in layers:
-            layer = SimpleNamespace(layer_name=name)
+            layer = attention_layers[name]
             if backend == "pa":
                 impl._capture_paged_attention(query, metadata, output, layer)
             else:
@@ -136,3 +171,67 @@ def test_attention_graph_updates_mixed_backends(order):
         for (_, _, _, output, _, _), reference in zip(layers, expected):
             torch.testing.assert_close(output, reference, rtol=0.01, atol=0.01)
     clear_graph_params()
+
+
+@pytest.mark.parametrize(
+    "method,kv_dtype,cache_dtype,rejected",
+    [
+        ("none", "auto", torch.bfloat16, False),
+        ("unquantized", "float16", torch.float16, False),
+        ("quantized", "auto", torch.bfloat16, True),
+        ("ct_linear", "auto", torch.bfloat16, False),
+        ("ct_linear", "float16", torch.float16, False),
+        ("ct_fp8", "auto", torch.bfloat16, True),
+        ("ct_linear", "auto", torch.int8, True),
+        ("none", "int8", torch.bfloat16, True),
+        ("none", "fp8", torch.bfloat16, True),
+        ("none", "auto", torch.int8, True),
+    ],
+)
+def test_attention_graph_quantization_gate(method, kv_dtype, cache_dtype, rejected):
+    from vllm.model_executor.layers.linear import UnquantizedLinearMethod
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
+    )
+
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+        AscendAttentionBackendImpl,
+        AscendAttentionState,
+    )
+
+    quant_config = CompressedTensorsConfig(
+        target_scheme_map={},
+        ignore=[],
+        quant_format="int-quantized",
+        kv_cache_scheme={
+            "num_bits": 8,
+            "type": "float",
+            "strategy": "tensor",
+            "symmetric": True,
+        }
+        if method == "ct_fp8"
+        else None,
+    )
+    impl = object.__new__(AscendAttentionBackendImpl)
+    impl.vllm_config = SimpleNamespace(
+        speculative_config=None, quant_config=quant_config
+    )
+    impl.sinks = None
+    impl.kv_cache_dtype = kv_dtype
+    impl.key_cache = torch.empty(1, dtype=cache_dtype, device="npu")
+    impl.value_cache = torch.empty_like(impl.key_cache)
+    layer = _attention_layer(
+        "layer", quant_config if method.startswith("ct_") else None, kv_dtype
+    )
+    if not method.startswith("ct_"):
+        layer.quant_method = {
+            "none": None,
+            "unquantized": UnquantizedLinearMethod(),
+            "quantized": object(),
+        }[method]
+    metadata = SimpleNamespace(attn_state=AscendAttentionState.DecodeOnly)
+    if rejected:
+        with pytest.raises(NotImplementedError, match="quantized attention"):
+            impl._require_regular_graph_capture(metadata, layer)
+    else:
+        assert impl._require_regular_graph_capture(metadata, layer) == "layer"

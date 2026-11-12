@@ -28,6 +28,7 @@ from vllm.model_executor.layers.fused_moe.fused_moe import (
 )
 
 import vllm_fl.envs as fl_envs
+from vllm_fl.dispatch import CachedOp
 
 
 def _flaggems_fused_experts_impl(**kwargs) -> torch.Tensor:
@@ -317,7 +318,214 @@ class FlagGemsW8A8Experts(TritonExperts):
         output.copy_(result)
 
 
+_experts = CachedOp("w8a8_experts")
+
+
+class AscendW8A8DynamicExperts(mk.FusedMoEExpertsModular):
+    """Native NPU experts; quantization and routing reduction stay vendor-owned."""
+
+    def __init__(self, moe_config, quant_config):
+        super().__init__(moe_config, quant_config)
+        self.gemm1_clamp_limit = quant_config.gemm1_clamp_limit
+
+    @staticmethod
+    def validate_config(moe):
+        """Validate the native execution and communication contract."""
+        parallel = moe.moe_parallel_config
+        if moe.moe_backend not in ("auto", "triton"):
+            raise NotImplementedError("Unsupported explicit W8A8 MoE backend")
+        if parallel.is_sequence_parallel and not (
+            parallel.use_ep
+            and parallel.dp_size > 1
+            and parallel.all2all_backend == "allgather_reducescatter"
+        ):
+            raise NotImplementedError("W8A8 MoE token splitting requires DP EP AgRs")
+        if (
+            moe.is_lora_enabled
+            or moe.has_bias
+            or parallel.enable_eplb
+            or parallel.pcp_size != 1
+            or parallel.use_batched_activation_format
+        ):
+            raise NotImplementedError(
+                "W8A8 experts do not support LoRA/bias/EPLB/PCP/batched routing"
+            )
+        if parallel.dp_size > 1 and (
+            not parallel.use_ep or parallel.all2all_backend != "allgather_reducescatter"
+        ):
+            raise NotImplementedError("W8A8 distributed experts require AgRs EP")
+        if moe.activation.value not in ("silu", "swiglustep"):
+            raise NotImplementedError("Unsupported W8A8 expert activation")
+        if moe.swiglu_alpha not in (None, 1.0) or moe.swiglu_beta not in (
+            None,
+            0.0,
+        ):
+            raise NotImplementedError("Unsupported W8A8 SwiGLU alpha/beta")
+        if parallel.use_ep:
+            from vllm.config import get_current_vllm_config
+            from vllm.platforms import current_platform
+
+            config = get_current_vllm_config()
+            if (
+                current_platform.dist_backend != "hccl"
+                or config.parallel_config.expert_placement_strategy != "linear"
+                or config.compilation_config.pass_config.enable_sp
+                or moe.num_experts % parallel.ep_size
+            ):
+                raise NotImplementedError(
+                    "W8A8 EP requires HCCL and equal linear experts without compiler SP"
+                )
+        if not moe.is_act_and_mul:
+            raise NotImplementedError("W8A8 experts require gated act-and-mul weights")
+
+    @staticmethod
+    def is_supported_config(
+        cls, moe_config, weight_key, activation_key, activation_format
+    ):
+        try:
+            cls.validate_config(moe_config)
+        except NotImplementedError as error:
+            return False, str(error)
+        return mk.FusedMoEExperts.is_supported_config(
+            cls, moe_config, weight_key, activation_key, activation_format
+        )
+
+    @staticmethod
+    def activation_format():
+        return mk.FusedMoEActivationFormat.Standard
+
+    @staticmethod
+    def _supports_current_device():
+        from vllm.platforms import current_platform
+
+        return (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+        )
+
+    @staticmethod
+    def _supports_no_act_and_mul():
+        return False
+
+    @staticmethod
+    def _supports_quant_scheme(weight_key, activation_key):
+        from vllm.model_executor.layers.quantization.utils.quant_utils import (
+            kInt8DynamicTokenSym,
+            kInt8StaticChannelSym,
+        )
+
+        return (weight_key, activation_key) == (
+            kInt8StaticChannelSym,
+            kInt8DynamicTokenSym,
+        )
+
+    @staticmethod
+    def _supports_activation(activation):
+        return activation in (MoEActivation.SILU, MoEActivation.SWIGLUSTEP)
+
+    @staticmethod
+    def _supports_parallel_config(parallel):
+        agrs = (
+            parallel.use_ep
+            and parallel.dp_size > 1
+            and parallel.all2all_backend == "allgather_reducescatter"
+        )
+        return not (
+            parallel.enable_eplb
+            or parallel.pcp_size != 1
+            or parallel.use_batched_activation_format
+            or (parallel.is_sequence_parallel and not agrs)
+            or (parallel.dp_size > 1 and not agrs)
+        )
+
+    def finalize_weight_and_reduce_impl(self):
+        from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
+            TopKWeightAndReduceNoOP,
+        )
+
+        return TopKWeightAndReduceNoOP()
+
+    @property
+    def expects_unquantized_inputs(self) -> bool:
+        # Prepare/AgRs must not quantize inputs through a CUDA-only kernel.
+        return True
+
+    def workspace_shapes(
+        self,
+        M,
+        N,
+        K,
+        topk,
+        global_num_experts,
+        local_num_experts,
+        expert_tokens_meta,
+        activation,
+    ):
+        return (0,), (0,), (M, K)
+
+    def apply(
+        self,
+        output,
+        hidden_states,
+        w1,
+        w2,
+        topk_weights,
+        topk_ids,
+        activation,
+        global_num_experts,
+        expert_map,
+        a1q_scale,
+        a2_scale,
+        workspace13,
+        workspace2,
+        expert_tokens_meta,
+        apply_router_weight_on_input,
+    ):
+        if a1q_scale is not None or a2_scale is not None:
+            raise ValueError("Dynamic W8A8 experts require floating prepare inputs")
+        if (
+            apply_router_weight_on_input
+            or self.moe_config.is_lora_enabled
+            or self.w1_bias is not None
+            or self.w2_bias is not None
+        ):
+            raise NotImplementedError(
+                "W8A8 experts require output routing and no LoRA/bias"
+            )
+        if hidden_states.dtype not in (torch.bfloat16, torch.float16):
+            raise TypeError("Dynamic W8A8 experts require BF16/FP16 input")
+        first_expert = 0
+        if expert_map is not None:
+            from vllm.distributed import get_ep_group
+
+            group = get_ep_group()
+            if (
+                expert_map.numel() != w1.shape[0] * group.world_size
+                or global_num_experts != expert_map.numel()
+            ):
+                raise NotImplementedError("W8A8 EP requires evenly partitioned experts")
+            first_expert = group.rank_in_group * w1.shape[0]
+        elif global_num_experts not in (-1, w1.shape[0]):
+            raise NotImplementedError("Sharded W8A8 experts require an expert map")
+        output.copy_(
+            _experts(
+                hidden_states,
+                w1,
+                w2,
+                self.w1_scale,
+                self.w2_scale,
+                topk_weights,
+                topk_ids,
+                first_expert=first_expert,
+                global_num_experts=global_num_experts,
+                activation=activation.value,
+                limit=self.gemm1_clamp_limit,
+            )
+        )
+
+
 __all__ = [
+    "AscendW8A8DynamicExperts",
     "FlagGemsW8A8Experts",
     "VllmFunctionalW8A8Experts",
 ]

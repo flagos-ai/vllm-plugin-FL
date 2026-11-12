@@ -1,9 +1,22 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 import logging
+from functools import cache
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
+
+
+@cache
+def register_ascend_models():
+    """Register Ascend model adapters before model inspection."""
+    from vllm.model_executor.models import ModelRegistry
+
+    ModelRegistry.register_model(
+        "DeepseekV4ForCausalLM",
+        "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM",
+    )
+
 
 def apply_ascend_patches():
     """Apply all Ascend-specific patches."""
@@ -27,6 +40,7 @@ def apply_ascend_patches():
 def patch_sampler_filter():
     """Use the packaged A2/A3 filter while retaining vLLM's sampler contract."""
     import torch_npu
+
     from vllm.v1.sample.ops import topk_topp_sampler
 
     def apply_top_k_top_p(logits, k, p):
@@ -71,8 +85,10 @@ def patch_causal_conv1d():
         import vllm.model_executor.layers.mamba.ops.causal_conv1d as _conv1d_lib
         import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
 
-        from .impl.causal_conv1d import causal_conv1d_fn as causal_conv1d_fn_npu
-        from .impl.causal_conv1d import causal_conv1d_update_npu
+        from .impl.causal_conv1d import (
+            causal_conv1d_fn as causal_conv1d_fn_npu,
+            causal_conv1d_update_npu,
+        )
 
         _conv1d_lib.causal_conv1d_fn = causal_conv1d_fn_npu
         _conv1d_lib.causal_conv1d_update = causal_conv1d_update_npu
@@ -98,6 +114,7 @@ def patch_fused_moe():
 def patch_fla_ops():
     """Patch FLA ops and fused_gdn_gating with Ascend implementations."""
     try:
+        # isort: off
         import vllm.model_executor.layers.fla.ops as _fla_ops_lib
         import vllm.model_executor.layers.fla.ops.chunk as _fla_chunk_lib
         import vllm.model_executor.layers.fla.ops.fused_recurrent as _fla_recurrent_lib
@@ -111,6 +128,7 @@ def patch_fla_ops():
             LayerNormFn as ascend_LayerNormFn,
         )
 
+        # isort: on
         from .impl.fla import chunk_gated_delta_rule_npu
 
         _fla_ops_lib.chunk_gated_delta_rule_fwd = chunk_gated_delta_rule_fwd
@@ -165,7 +183,12 @@ def refresh_block_size(vllm_config, block_size = 128):
         return
 
     # Hybrid state pages are aligned by the Mamba configuration verifier.
-    if not model_config.is_hybrid and cache_config.block_size != block_size:
-        if cache_config.enable_prefix_caching or scheduler_config.enable_chunked_prefill:
-            logger.info(f"Block size is set to {block_size} if prefix cache or chunked prefill is enabled.")
+    if not model_config.is_hybrid and cache_config.block_size != block_size:  # noqa: SIM102
+        if (
+            cache_config.enable_prefix_caching
+            or scheduler_config.enable_chunked_prefill
+        ):
+            logger.info(
+                f"Block size is set to {block_size} if prefix cache or chunked prefill is enabled."
+            )
             cache_config.block_size = block_size

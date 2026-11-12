@@ -132,3 +132,88 @@ def test_linear_reference_uses_int32_accumulation_and_flaggems_scale_order():
 
     actual = w8a8_linear_reference(x, weight, weight_scale, bias)
     assert torch.equal(actual, expected)
+
+
+def test_checkpoint_wrapper_installation_is_atomic(monkeypatch):
+    from functools import wraps
+
+    from vllm_fl.quantization.w8a8 import compressed_tensors as contract
+
+    class Base:
+        def apply_vllm_mapper(self, hf_to_vllm_mapper):
+            return hf_to_vllm_mapper
+
+        def get_scheme_dict(self, layer, layer_name=None):
+            return layer_name
+
+        def get_quant_method(self, layer, prefix):
+            return prefix
+
+    class FailingMeta(type):
+        fail = False
+
+        def __setattr__(cls, name, value):
+            if name == "get_scheme_dict" and cls.fail:
+                cls.fail = False
+                raise RuntimeError("assignment failed")
+            super().__setattr__(name, value)
+
+    class Config(Base, metaclass=FailingMeta):
+        pass
+
+    @wraps(Base.apply_vllm_mapper)
+    def external(*args, **kwargs):
+        return Base.apply_vllm_mapper(*args, **kwargs)
+
+    Config.apply_vllm_mapper = external
+    monkeypatch.setattr(contract, "CompressedTensorsConfig", Config)
+    before = dict(vars(Config))
+    Config.fail = True
+    with pytest.raises(RuntimeError, match="assignment failed"):
+        contract._install_checkpoint_contract_wrappers()
+    assert Config.apply_vllm_mapper is external
+    assert "get_scheme_dict" not in vars(Config)
+    assert "get_quant_method" not in vars(Config)
+    assert before["apply_vllm_mapper"] is vars(Config)["apply_vllm_mapper"]
+
+    contract._install_checkpoint_contract_wrappers()
+    installed = tuple(
+        getattr(Config, name)
+        for name in ("apply_vllm_mapper", "get_scheme_dict", "get_quant_method")
+    )
+    assert installed[0].__wrapped__ is external
+    instance = Config()
+    marker = object()
+    assert instance.apply_vllm_mapper(hf_to_vllm_mapper=marker) is marker
+    assert instance.get_scheme_dict(layer=marker, layer_name="layer") == "layer"
+    assert instance.get_quant_method(layer=marker, prefix="prefix") == "prefix"
+    contract._install_checkpoint_contract_wrappers()
+    assert installed == tuple(
+        getattr(Config, name)
+        for name in ("apply_vllm_mapper", "get_scheme_dict", "get_quant_method")
+    )
+
+
+def test_checkpoint_wrapper_rejects_incompatible_and_partial_install(monkeypatch):
+    from vllm_fl.quantization.w8a8 import compressed_tensors as contract
+
+    class Config:
+        def apply_vllm_mapper(self, hf_to_vllm_mapper):
+            pass
+
+        def get_scheme_dict(self, layer, layer_name=None):
+            pass
+
+        def get_quant_method(self, layer, prefix, required):
+            pass
+
+    monkeypatch.setattr(contract, "CompressedTensorsConfig", Config)
+    before = dict(vars(Config))
+    with pytest.raises(TypeError, match="get_quant_method signature"):
+        contract._install_checkpoint_contract_wrappers()
+    assert dict(vars(Config)) == before
+    setattr(Config.apply_vllm_mapper, contract._WRAPPER_MARKER, True)
+    before = dict(vars(Config))
+    with pytest.raises(RuntimeError, match="Incomplete"):
+        contract._install_checkpoint_contract_wrappers()
+    assert dict(vars(Config)) == before

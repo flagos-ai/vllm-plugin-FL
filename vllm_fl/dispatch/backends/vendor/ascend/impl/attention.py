@@ -27,7 +27,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, List, Optional, Tuple, Type
+from typing import Any, ClassVar
 
 import torch
 import torch.nn as nn
@@ -212,7 +212,7 @@ class AscendMetadata:
     """Metadata for Ascend attention."""
 
     # Basic properties
-    attn_mask: Optional[torch.Tensor] = None
+    attn_mask: torch.Tensor | None = None
     attn_state: AscendAttentionState = AscendAttentionState.PrefillNoCache
 
     # Token counts
@@ -223,11 +223,11 @@ class AscendMetadata:
 
     # Sequence lengths
     seq_lens: torch.Tensor = None
-    seq_lens_list: List[int] = None
-    actual_seq_lengths_q: List[int] = None
+    seq_lens_list: list[int] = None
+    actual_seq_lengths_q: list[int] = None
 
     query_start_loc: torch.Tensor = None
-    max_query_len: Optional[int] = None
+    max_query_len: int | None = None
 
     # KV Cache properties
     block_tables: torch.Tensor = None
@@ -247,8 +247,8 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
     reorder_batch_threshold: ClassVar[int] = 1
 
     # Class-level mask builder cache
-    _mask_builder: ClassVar[Optional[AttentionMaskBuilder]] = None
-    _mask_builder_device: ClassVar[Optional[torch.device]] = None
+    _mask_builder: ClassVar[AttentionMaskBuilder | None] = None
+    _mask_builder_device: ClassVar[torch.device | None] = None
 
     def __init__(
         self,
@@ -286,7 +286,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
     def _make_attention_mask(
         self,
         attn_state: AscendAttentionState,
-    ) -> Optional[torch.Tensor]:
+    ) -> torch.Tensor | None:
         """
         Create attention mask based on attention state.
 
@@ -325,8 +325,9 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         query_start_loc_cpu = common_attn_metadata.query_start_loc_cpu[:num_reqs + 1]
 
         # Split decodes and prefills
-        num_decodes, num_prefills, num_decode_tokens, num_prefill_tokens = \
+        num_decodes, num_prefills, num_decode_tokens, num_prefill_tokens = (
             self._split_decodes_and_prefills(common_attn_metadata)
+        )
 
         block_table = common_attn_metadata.block_table_tensor
         # The private buffer is the authoritative CPU view in current vLLM;
@@ -420,7 +421,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
     def build_for_cudagraph_capture(
         self,
         common_attn_metadata,
-        model: Optional[nn.Module] = None,
+        model: nn.Module | None = None,
     ):
         """Build metadata for CUDA graph capture (ACL graph on Ascend)."""
         return self.build_for_graph_capture(
@@ -433,7 +434,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         self,
         common_attn_metadata,
         attn_state: AscendAttentionState = AscendAttentionState.DecodeOnly,
-        model: Optional[nn.Module] = None,
+        model: nn.Module | None = None,
     ):
         """Build metadata for graph capture."""
         if attn_state == AscendAttentionState.DecodeOnly:
@@ -475,11 +476,11 @@ class AscendAttentionBackend(AttentionBackend):
         return "CUSTOM"
 
     @staticmethod
-    def get_impl_cls() -> Type["AscendAttentionBackendImpl"]:
+    def get_impl_cls() -> type[AscendAttentionBackendImpl]:
         return AscendAttentionBackendImpl
 
     @staticmethod
-    def get_builder_cls() -> Type["AscendAttentionMetadataBuilder"]:
+    def get_builder_cls() -> type[AscendAttentionMetadataBuilder]:
         return AscendAttentionMetadataBuilder
 
     @staticmethod
@@ -489,13 +490,13 @@ class AscendAttentionBackend(AttentionBackend):
         num_kv_heads: int,
         head_size: int,
         cache_dtype_str: str = "auto",
-    ) -> Tuple[int, ...]:
+    ) -> tuple[int, ...]:
         return (2, num_blocks, block_size, num_kv_heads, head_size)
 
     @staticmethod
     def swap_blocks(
-        src_kv_cache: List[torch.Tensor],
-        dst_kv_cache: List[torch.Tensor],
+        src_kv_cache: list[torch.Tensor],
+        dst_kv_cache: list[torch.Tensor],
         src_to_dst: torch.Tensor,
     ) -> None:
         src_key_cache, src_value_cache = src_kv_cache[0], src_kv_cache[1]
@@ -510,7 +511,7 @@ class AscendAttentionBackend(AttentionBackend):
 
     @staticmethod
     def copy_blocks(
-        kv_caches: List[torch.Tensor],
+        kv_caches: list[torch.Tensor],
         src_to_dists: torch.Tensor,
     ) -> None:
         src_indices = src_to_dists[:, 0]
@@ -543,12 +544,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
         head_size: int,
         scale: float,
         num_kv_heads: int,
-        alibi_slopes: Optional[List[float]],
-        sliding_window: Optional[int],
+        alibi_slopes: list[float] | None,
+        sliding_window: int | None,
         kv_cache_dtype: str,
-        logits_soft_cap: Optional[float],
+        logits_soft_cap: float | None,
         attn_type: str,
-        kv_sharing_target_layer_name: Optional[str],
+        kv_sharing_target_layer_name: str | None,
         **kwargs,
     ) -> None:
         if not _TORCH_NPU_AVAILABLE:
@@ -739,7 +740,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         self,
         key: torch.Tensor,
         value: torch.Tensor,
-        kv_cache: Tuple[torch.Tensor],
+        kv_cache: tuple[torch.Tensor],
         attn_metadata: AscendMetadata,
     ):
         """Reshape and cache key/value tensors."""
@@ -777,8 +778,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 query, key, value, attn_metadata, output, layer
             )
 
-        key, value, block_size, block_table, actual_seq_lengths_kv = \
+        key, value, block_size, block_table, actual_seq_lengths_kv = (
             self._get_fia_params(key, value, attn_metadata)
+        )
 
         num_tokens = attn_metadata.actual_seq_lengths_q[-1]
         query = query[:num_tokens]
@@ -824,7 +826,30 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 "Ascend FULL graph task capture does not yet support "
                 "speculative attention in FL"
             )
-        if self.vllm_config.quant_config is not None:
+        from vllm.model_executor.layers.attention.attention import (
+            should_load_quant_weights,
+        )
+
+        quant_method = getattr(layer, "quant_method", None)
+        quantized_attention = should_load_quant_weights(quant_method)
+        # Upstream installs this KV method even for Linear-only checkpoints.
+        if quantized_attention:
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (  # noqa: E501
+                CompressedTensorsKVCacheMethod,
+            )
+
+            if isinstance(quant_method, CompressedTensorsKVCacheMethod):
+                quantized_attention = (
+                    quant_method.quant_config.kv_cache_scheme is not None
+                )
+        if (
+            quantized_attention
+            or self.kv_cache_dtype not in ("auto", "float16", "bfloat16")
+            or any(
+                cache is not None and cache.dtype not in (torch.float16, torch.bfloat16)
+                for cache in (self.key_cache, self.value_cache)
+            )
+        ):
             raise NotImplementedError(
                 "Ascend FULL graph task capture does not yet support "
                 "quantized attention in FL"
@@ -947,7 +972,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         self,
         query: torch.Tensor,
         attn_metadata: AscendMetadata,
-        output: Optional[torch.Tensor] = None,
+        output: torch.Tensor | None = None,
         layer: AttentionLayer | None = None,
     ) -> torch.Tensor:
         """Forward pass using paged attention for decode."""
@@ -1077,7 +1102,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        kv_cache: Tuple[torch.Tensor],
+        kv_cache: tuple[torch.Tensor],
         attn_metadata: AscendMetadata,
         output: torch.Tensor,
         layer: AttentionLayer | None = None,
@@ -1106,11 +1131,11 @@ class AscendAttentionBackendImpl(AttentionImpl):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        kv_cache: Tuple[torch.Tensor],
+        kv_cache: tuple[torch.Tensor],
         attn_metadata: AscendMetadata,
-        output: Optional[torch.Tensor] = None,
-        output_scale: Optional[torch.Tensor] = None,
-        output_block_scale: Optional[torch.Tensor] = None,
+        output: torch.Tensor | None = None,
+        output_scale: torch.Tensor | None = None,
+        output_block_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Forward pass with Ascend attention.
