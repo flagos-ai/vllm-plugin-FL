@@ -1,0 +1,16 @@
+# Load the matched vendor runtime and the plugin's [pooling] extra first.
+served-model-name: bge-m3
+runner: pooling
+hf-overrides:
+  architectures: [BgeM3EmbeddingModelFL]
+pooler-config:
+  task: embed
+io-processor-plugin: bge_m3
+dtype: float32
+tensor-parallel-size: 1
+enforce-eager: true
+max-model-len: 8192
+max-num-seqs: 64
+max-num-batched-tokens: 32768
+enable-prefix-caching: false
+enable-chunked-prefill: false

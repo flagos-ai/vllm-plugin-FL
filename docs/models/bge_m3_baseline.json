@@ -1,0 +1,171 @@
+{
+  "measurement": "historical unoptimized B0 HTTP baseline",
+  "date": "2026-10-23",
+  "variant": "baseline_fp32_http600",
+  "hardware": "MetaX C550 64 GiB, one GPU",
+  "runtime": {
+    "vllm": "0.24.0",
+    "torch": "2.10.0+metax3.8.1.0",
+    "maca": "3.8.1.3",
+    "flagtree": "0.6.1+metax3.6"
+  },
+  "config": {
+    "tp": 1,
+    "dtype": "float32",
+    "eager": true,
+    "max_num_seqs": 8,
+    "max_num_batched_tokens": 8192,
+    "http_keepalive_seconds": 600
+  },
+  "contract": "TP1 FP32 eager; N64 C8; 1 text/request; warmup1+formal1; complete float JSON output and client parse/validation; sparse filtering/max reduction included; HTTP keepalive600s; no retries",
+  "provenance": {
+    "image": "bge-m3-metax:b0-20261023",
+    "image_id": "sha256:32ab310043ff980354066699ea9def811c738d989bc6da7a0f015bcf183cb7c4",
+    "fl_upstream_base": "5463eae824b1fbaa3d331564ab2fb4c51f1b6e09",
+    "fl_source_tree_sha256": "b8b64ccb4022d938cb8a6b4790594df3cd19b05e6605955705fed3a57d8a2259",
+    "fgv_upstream_base": "7417158440a80753fb21dab3a124c1be388ab7eb",
+    "fgv_source_tree_sha256": "1f20cb578e46e70f0eef9908bdedf9e113bb493d7839c82e5d30d2c83540b8b6",
+    "flaggems": "4897cc306cd83390c95b83b50df28f7edb1684c5"
+  },
+  "scope_note": "Separate pooling tasks and per-document FP32 SDPA before optimization; not throughput measurements of this PR's joint endpoint or packed FP32 varlen dependency.",
+  "rows": [
+    {
+      "round": "formal",
+      "mode": "dense",
+      "length": 1024,
+      "requests": 64,
+      "concurrency": 8,
+      "texts_per_request": 1,
+      "duration_s": 2.2301318403333426,
+      "success": 64,
+      "failures": 0,
+      "docs_per_s": 28.697854917148657,
+      "effective_input_tokens_per_s": 29386.603435160225,
+      "qps": 28.697854917148657,
+      "latency_ms": {
+        "p50": 277.0673306658864,
+        "p95": 287.7358742058277,
+        "p99": 288.7057443149388
+      },
+      "mean_latency_ms": 274.79510600096546,
+      "response_bytes": 1404927,
+      "peak_sampled_device_mib": 3981,
+      "memory_samples": 9
+    },
+    {
+      "round": "formal",
+      "mode": "dense",
+      "length": 4096,
+      "requests": 64,
+      "concurrency": 8,
+      "texts_per_request": 1,
+      "duration_s": 12.385241637006402,
+      "success": 64,
+      "failures": 0,
+      "docs_per_s": 5.167440561577064,
+      "effective_input_tokens_per_s": 21165.836540219654,
+      "qps": 5.167440561577064,
+      "latency_ms": {
+        "p50": 1545.7157120108604,
+        "p95": 1546.191134210676,
+        "p99": 1622.5981142744417
+      },
+      "mean_latency_ms": 1472.1550066315103,
+      "response_bytes": 1405528,
+      "peak_sampled_device_mib": 3981,
+      "memory_samples": 50
+    },
+    {
+      "round": "formal",
+      "mode": "sparse",
+      "length": 1024,
+      "requests": 64,
+      "concurrency": 8,
+      "texts_per_request": 1,
+      "duration_s": 2.2250344287604094,
+      "success": 64,
+      "failures": 0,
+      "docs_per_s": 28.763599867376026,
+      "effective_input_tokens_per_s": 29453.92626419305,
+      "qps": 28.763599867376026,
+      "latency_ms": {
+        "p50": 275.52090492099524,
+        "p95": 290.4542268253863,
+        "p99": 292.31385983526707
+      },
+      "mean_latency_ms": 273.5609356313944,
+      "response_bytes": 1288980,
+      "peak_sampled_device_mib": 3729,
+      "memory_samples": 9
+    },
+    {
+      "round": "formal",
+      "mode": "sparse",
+      "length": 4096,
+      "requests": 64,
+      "concurrency": 8,
+      "texts_per_request": 1,
+      "duration_s": 12.387705571949482,
+      "success": 64,
+      "failures": 0,
+      "docs_per_s": 5.16641274917936,
+      "effective_input_tokens_per_s": 21161.626620638657,
+      "qps": 5.16641274917936,
+      "latency_ms": {
+        "p50": 1545.233489945531,
+        "p95": 1546.4998040348291,
+        "p99": 1629.55355675891
+      },
+      "mean_latency_ms": 1472.957634337945,
+      "response_bytes": 5276087,
+      "peak_sampled_device_mib": 4113,
+      "memory_samples": 50
+    },
+    {
+      "round": "formal",
+      "mode": "colbert",
+      "length": 1024,
+      "requests": 64,
+      "concurrency": 8,
+      "texts_per_request": 1,
+      "duration_s": 34.52695736847818,
+      "success": 64,
+      "failures": 0,
+      "docs_per_s": 1.8536240919516878,
+      "effective_input_tokens_per_s": 1898.1110701585283,
+      "qps": 1.8536240919516878,
+      "latency_ms": {
+        "p50": 4121.110728941858,
+        "p95": 5660.753730032592,
+        "p99": 5891.875344924627
+      },
+      "mean_latency_ms": 4138.205153605668,
+      "response_bytes": 1417911253,
+      "peak_sampled_device_mib": 3725,
+      "memory_samples": 138
+    },
+    {
+      "round": "formal",
+      "mode": "colbert",
+      "length": 4096,
+      "requests": 64,
+      "concurrency": 8,
+      "texts_per_request": 1,
+      "duration_s": 150.17249599471688,
+      "success": 64,
+      "failures": 0,
+      "docs_per_s": 0.42617657498515266,
+      "effective_input_tokens_per_s": 1745.6192511391853,
+      "qps": 0.42617657498515266,
+      "latency_ms": {
+        "p50": 17800.910943187773,
+        "p95": 30638.335480727244,
+        "p99": 31357.23931852728
+      },
+      "mean_latency_ms": 18099.434237286914,
+      "response_bytes": 5672319448,
+      "peak_sampled_device_mib": 3853,
+      "memory_samples": 600
+    }
+  ]
+}

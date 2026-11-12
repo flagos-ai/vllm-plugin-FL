@@ -94,3 +94,7 @@ def register_builtins(registry) -> None:
     ]
 
     registry.register_many(impls)
+
+    from .impl.bge_m3 import register_bge_m3_operators
+
+    register_bge_m3_operators(registry, is_platform_available=is_avail)
