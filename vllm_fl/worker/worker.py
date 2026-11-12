@@ -14,6 +14,7 @@ from datetime import timedelta
 from types import NoneType
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import regex as re
 import torch
 import torch.nn as nn
@@ -97,7 +98,7 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import request_memory
+from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -157,12 +158,19 @@ def _is_hybrid_kv_model(vllm_config: VllmConfig) -> bool:
 
 
 def _apply_worker_vendor_patches() -> None:
-    if getattr(current_platform, "vendor_name", "") == "iluvatar":
+    """Apply patches that must execute inside every worker process."""
+    if getattr(current_platform, "vendor_name", "") != "iluvatar":
+        return
+    try:
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
-            apply_worker_patches,
+            patch_sampler_compile_for_iluvatar,
+            patch_torch_inductor_for_iluvatar,
         )
 
-        apply_worker_patches()
+        patch_torch_inductor_for_iluvatar()
+        patch_sampler_compile_for_iluvatar()
+    except Exception as exc:
+        logger.warning("Iluvatar worker patch failed: %s", exc)
 
 
 class AsyncIntermediateTensors(IntermediateTensors):
@@ -299,20 +307,6 @@ class WorkerFL(WorkerBase):
         torch.accelerator.synchronize()
         free_bytes_before_sleep = torch.accelerator.get_memory_info()[0]
 
-        # FL: vendor scale aliases need not be registered buffers. Preserve
-        # calibrated values across both sleep levels alongside upstream buffers.
-        from vllm.v1.kv_cache_interface import is_quantized_kv_cache
-
-        if is_quantized_kv_cache(self.cache_config.cache_dtype):
-            self._sleep_saved_kv_scales = []
-            seen = set()
-            for layer in self.compilation_config.static_forward_context.values():
-                for attr in ("_k_scale", "k_scale", "_v_scale", "v_scale"):
-                    scale = getattr(layer, attr, None)
-                    if isinstance(scale, torch.Tensor) and id(scale) not in seen:
-                        seen.add(id(scale))
-                        self._sleep_saved_kv_scales.append((scale, scale.cpu().clone()))
-
         # Save the buffers before level 2 sleep
         if level == 2:
             model = self.model_runner.model
@@ -364,25 +358,8 @@ class WorkerFL(WorkerBase):
                         buffer.data.copy_(self._sleep_saved_draft_buffers[name].data)
             self._sleep_saved_draft_buffers = {}
 
-        if wake_weights:
-            for scale, saved in getattr(self, "_sleep_saved_kv_scales", ()):
-                scale.data.copy_(saved)
-            self._sleep_saved_kv_scales = []
-
         if tags is None or "kv_cache" in tags:
-            from vllm.v1.kv_cache_interface import is_quantized_kv_cache
-
-            if is_quantized_kv_cache(self.cache_config.cache_dtype):
-                # FL: newly allocated FP8 KV memory must be initialized. Model
-                # scales are buffers restored above, not reset to 1.0 here.
-                for entry in self.model_runner.kv_caches:
-                    if entry is None:
-                        continue
-                    tensors = entry if isinstance(entry, (list, tuple)) else (entry,)
-                    for tensor in tensors:
-                        tensor.zero_()
-
-        torch.accelerator.synchronize()
+            self.model_runner.post_kv_cache_wake_up()
 
     def checkpoint_prepare(self) -> None:
         checkpoint_prepare_distributed_state()
@@ -576,6 +553,11 @@ class WorkerFL(WorkerBase):
                 GPUModelRunner as GPUModelRunnerV2,
             )
 
+            if getattr(current_platform, "vendor_name", None) == "iluvatar":
+                from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
+                    IluvatarGPUModelRunnerV2 as GPUModelRunnerV2,
+                )
+
             # HACK(woosuk): This is a temporary fix to avoid type errors.
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
                 self.vllm_config, self.device
@@ -613,22 +595,7 @@ class WorkerFL(WorkerBase):
             )
 
     def update_config(self, overrides: dict[str, Any]) -> None:
-        """Apply overrides to the worker, runner and shared VllmConfig."""
-        from vllm.config import update_config
-
-        allowed_config_names = {"load_config", "model_config"}
-        for config_name, config_overrides in overrides.items():
-            if config_name not in allowed_config_names:
-                allowed = ", ".join(sorted(allowed_config_names))
-                raise ValueError(
-                    f"Config override '{config_name}' is not supported. "
-                    f"Supported configs: {allowed}"
-                )
-            config = getattr(self.vllm_config, config_name)
-            new_config = update_config(config, config_overrides)
-            setattr(self.vllm_config, config_name, new_config)
-            setattr(self.model_runner, config_name, new_config)
-            setattr(self, config_name, new_config)
+        self.model_runner.update_config(overrides)
 
     def reload_weights(self, *args, **kwargs) -> None:
         with set_current_vllm_config(self.vllm_config):
@@ -912,6 +879,9 @@ class WorkerFL(WorkerBase):
 
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
+
+        if self.model_config.enable_return_routed_experts:
+            self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
@@ -1313,10 +1283,45 @@ class WorkerFL(WorkerBase):
 
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
+        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+        all_gather_tensors = {}
+        compilation_config = self.vllm_config.compilation_config
+        parallel_config = self.vllm_config.parallel_config
+
+        if (
+            parallel_config.pipeline_parallel_size > 1
+            and compilation_config.pass_config.enable_sp
+            and forward_pass
+        ):
+            # currently only supported by V1 GPUModelRunner
+            assert not self.use_v2_model_runner
+            num_scheduled_tokens_np = np.array(
+                list(scheduler_output.num_scheduled_tokens.values()),
+                dtype=np.int32,
+            )
+            # TODO(lucas): This is pretty gross; ideally we should only ever call
+            # `_determine_batch_execution_and_padding` once (will get called again
+            # in `execute_model`) but this requires a larger refactor of PP.
+            _, batch_desc, _, _, _ = (
+                self.model_runner._determine_batch_execution_and_padding(
+                    num_tokens=num_scheduled_tokens,
+                    num_reqs=len(num_scheduled_tokens_np),
+                    num_scheduled_tokens_np=num_scheduled_tokens_np,
+                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
+                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
+                )
+            )
+            all_gather_tensors = {
+                "residual": not is_residual_scattered_for_sp(
+                    self.vllm_config, batch_desc.num_tokens
+                )
+            }
+
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (
                 get_pp_group().irecv_tensor_dict(
                     all_gather_group=get_tp_group(),
+                    all_gather_tensors=all_gather_tensors,
                 )
             )
             assert tensor_dict is not None
@@ -1349,12 +1354,11 @@ class WorkerFL(WorkerBase):
         )
 
         # launch non-blocking send of intermediate tensors
-        handles = get_pp_group().isend_tensor_dict(
+        self._pp_send_work = get_pp_group().isend_tensor_dict(
             output.tensors,
             all_gather_group=get_tp_group(),
+            all_gather_tensors=all_gather_tensors,
         )
-        # Metadata is reaped by GroupCoordinator; only wait on device sends.
-        self._pp_send_work = handles[1:]
 
         return None
 
@@ -1621,7 +1625,7 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.determinism.batch_invariant import init_batch_invariance
+    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
     init_batch_invariance()
     override_envs_for_eplb(
@@ -1651,13 +1655,6 @@ def init_worker_distributed_environment(
         parallel_config.prefill_context_parallel_size,
         parallel_config.decode_context_parallel_size,
     )
-
-    if getattr(current_platform, "vendor_name", "") == "iluvatar":
-        from vllm_fl.dispatch.backends.vendor.iluvatar.pipeline import (
-            install_pipeline_transport,
-        )
-
-        install_pipeline_transport(get_pp_group())
 
     # Init ec connector here before KV caches init
     # NOTE: We do not init KV caches for Encoder-only instance in EPD disagg mode

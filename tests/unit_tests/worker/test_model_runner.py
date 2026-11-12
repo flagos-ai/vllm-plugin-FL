@@ -54,7 +54,9 @@ def test_device_graph_capture_uses_accelerator_stream(monkeypatch, reuse_context
         current_stream=MagicMock(return_value=current_stream),
         stream=MagicMock(return_value=nullcontext()),
     )
-    monkeypatch.setattr(model_runner, "device_module", device_api)
+    monkeypatch.setattr(
+        model_runner, "current_platform", SimpleNamespace(torch_device_fn=device_api)
+    )
     supplied_context = SimpleNamespace(stream=capture_stream) if reuse_context else None
 
     with model_runner._device_graph_capture(
@@ -191,7 +193,7 @@ class TestExecuteModelState:
         )
 
         # Simulate downstream unpacking
-        scheduler, logits, *rest = state
+        scheduler, logits, *_rest = state
         assert scheduler is mock_scheduler
         assert torch.equal(logits, mock_logits)
 
@@ -292,7 +294,11 @@ def test_padding_uses_dispatcher_descriptor(num_tokens, padded_tokens):
         uniform_decode_query_len=1,
         model_config=SimpleNamespace(is_encoder_decoder=False),
         input_batch=SimpleNamespace(lora_id_to_lora_request={}),
+        _pad_for_sequence_parallelism=lambda tokens: tokens,
         cudagraph_dispatcher=dispatcher,
+        compilation_config=SimpleNamespace(
+            pass_config=SimpleNamespace(enable_sp=False)
+        ),
         parallel_config=parallel,
         vllm_config=SimpleNamespace(
             parallel_config=parallel,
@@ -305,6 +311,7 @@ def test_padding_uses_dispatcher_descriptor(num_tokens, padded_tokens):
         num_reqs=1,
         num_scheduled_tokens_np=np.array([num_tokens]),
         max_num_scheduled_tokens=num_tokens,
+        use_cascade_attn=False,
     )
     assert result[1].num_tokens == padded_tokens
     assert dispatcher.dispatch.call_args.kwargs["num_tokens"] == num_tokens
@@ -333,6 +340,7 @@ class TestGetPositions:
         mock_runner.mrope_positions.gpu = torch.arange(300).reshape(3, 100)
 
         mock_runner.uses_mrope = False
+        mock_runner.uses_xdrope_dim = 0
 
         mock_runner._get_positions = ModelRunnerFL._get_positions.__get__(
             mock_runner, ModelRunnerFL

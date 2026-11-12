@@ -2,6 +2,9 @@
 
 """Contract tests for the FL adaptation of vLLM v0.28.0 GPUWorker."""
 
+import importlib
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -197,3 +200,148 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     PlatformFL.check_and_update_config(vllm_config)
 
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+
+def test_v2_initializes_uva_before_upstream_buffers(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.iluvatar import iluvatar
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker import model_runner_v2
+
+    events = []
+    monkeypatch.setattr(iluvatar, "patch_v2_uva", lambda: events.append("uva"))
+    monkeypatch.setattr(
+        model_runner_v2.GPUModelRunner,
+        "__init__",
+        lambda self, config, device: events.append((config, device)),
+    )
+    model_runner_v2.IluvatarGPUModelRunnerV2("config", "device")
+    assert events == ["uva", ("config", "device")]
+
+
+def test_compat_does_not_hide_transitive_import_error(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.iluvatar.patches import worker_compat
+
+    monkeypatch.setattr(worker_compat, "apply_worker_symbols_032", lambda: None)
+
+    def broken(name):
+        raise ModuleNotFoundError("missing dependency", name="unrelated_dependency")
+
+    monkeypatch.setattr(importlib, "import_module", broken)
+    with pytest.raises(ModuleNotFoundError, match="missing dependency"):
+        worker_compat.apply_import_compat()
+
+
+def test_compat_preserves_existing_old_module(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.iluvatar.patches import worker_compat
+
+    calls = []
+    monkeypatch.setattr(worker_compat, "apply_worker_symbols_032", lambda: None)
+    monkeypatch.setattr(importlib, "import_module", lambda name: calls.append(name))
+    worker_compat.apply_import_compat()
+    assert calls == ["vllm.model_executor.layers.batch_invariant"]
+
+
+def test_vendor_update_config_synchronizes_worker_and_runner(monkeypatch):
+    import vllm.config
+
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker import IluvatarWorkerFL
+
+    new_config = object()
+    monkeypatch.setattr(vllm.config, "update_config", lambda old, values: new_config)
+    worker = object.__new__(IluvatarWorkerFL)
+    worker.vllm_config = SimpleNamespace(model_config=object())
+    worker.model_runner = SimpleNamespace()
+    worker.update_config({"model_config": {"dtype": "auto"}})
+    assert worker.model_config is new_config
+    assert worker.model_runner.model_config is new_config
+    assert worker.vllm_config.model_config is new_config
+    with pytest.raises(ValueError, match="not supported"):
+        worker.update_config({"unsupported": {}})
+
+
+def test_compat_aliases_missing_module_and_is_idempotent(monkeypatch):
+    import sys
+
+    from vllm_fl.dispatch.backends.vendor.iluvatar.patches import worker_compat
+
+    old = "vllm.model_executor.layers.batch_invariant"
+    new = "vllm.model_executor.determinism.batch_invariant"
+    replacement = SimpleNamespace(init_batch_invariance=object())
+    calls = []
+    monkeypatch.delitem(sys.modules, old, raising=False)
+    # Ensure pytest restores the real module after this test mutates the alias.
+    monkeypatch.setitem(sys.modules, old, None)
+    monkeypatch.setattr(worker_compat, "apply_worker_symbols_032", lambda: None)
+
+    def load(name):
+        calls.append(name)
+        if name == old:
+            module = sys.modules.get(old)
+            if module is None:
+                raise ModuleNotFoundError(name, name=old)
+            return module
+        assert name == new
+        return replacement
+
+    monkeypatch.setattr(importlib, "import_module", load)
+    worker_compat.apply_import_compat()
+    worker_compat.apply_import_compat()
+    assert sys.modules[old] is replacement
+    assert calls == [old, new, old]
+
+
+def test_worker_installs_pipeline_after_base_initialization(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.iluvatar import iluvatar, pipeline
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker import worker
+
+    events = []
+    group = object()
+    monkeypatch.setattr(
+        iluvatar, "apply_worker_patches", lambda: events.append("patch")
+    )
+    monkeypatch.setattr(
+        worker.BaseWorkerFL, "init_device", lambda self: events.append("base")
+    )
+    monkeypatch.setattr(worker, "get_pp_group", lambda: group)
+    monkeypatch.setattr(
+        pipeline, "install_pipeline_transport", lambda value: events.append(value)
+    )
+    object.__new__(worker.IluvatarWorkerFL).init_device()
+    assert events == ["patch", "base", group]
+
+
+@pytest.mark.parametrize("vendor", [None, "nvidia", "ascend", "iluvatar"])
+def test_shared_v2_route_preserves_upstream_for_other_platforms(vendor):
+    import ast
+    import inspect
+
+    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
+        IluvatarGPUModelRunnerV2,
+    )
+    from vllm_fl.worker import worker
+
+    # Execute the production routing block without allocating GPU worker state.
+    tree = ast.parse(inspect.getsource(worker))
+    routes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(child, ast.ImportFrom)
+            and child.module
+            == "vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2"
+            for child in node.body
+        )
+    ]
+    assert len(routes) == 1
+    platform = (
+        SimpleNamespace() if vendor is None else SimpleNamespace(vendor_name=vendor)
+    )
+    namespace = {"current_platform": platform, "GPUModelRunnerV2": GPUModelRunner}
+    exec(  # noqa: S102 - execute only the production runner selection block
+        compile(ast.Module(body=routes, type_ignores=[]), worker.__file__, "exec"),
+        namespace,
+    )
+    expected = IluvatarGPUModelRunnerV2 if vendor == "iluvatar" else GPUModelRunner
+    assert namespace["GPUModelRunnerV2"] is expected

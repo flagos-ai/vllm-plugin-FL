@@ -534,7 +534,11 @@ class PlatformFL(Platform):
                 # Revalidate after changing MLA/KV-head semantics so DCP and TP
                 # constraints are checked against the dense architecture.
                 model_config.verify_with_parallel_config(parallel_config)
-        parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+        parallel_config.worker_cls = (
+            "vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker.IluvatarWorkerFL"
+            if cls.vendor_name == "iluvatar"
+            else "vllm_fl.worker.worker.WorkerFL"
+        )
 
         scheduler_config = vllm_config.scheduler_config
         if (

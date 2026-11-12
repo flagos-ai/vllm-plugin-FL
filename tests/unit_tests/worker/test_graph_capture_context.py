@@ -12,6 +12,7 @@ import ast
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -98,10 +99,10 @@ def helper_and_backend():
         "contextmanager": contextmanager,
         "nullcontext": nullcontext,
         "GraphCaptureContext": backend.context_factory,
-        "device_module": backend,
+        "current_platform": SimpleNamespace(torch_device_fn=backend),
     }
     function_module = ast.Module(body=functions, type_ignores=[])
-    exec(
+    exec(  # noqa: S102 - execute the repository function against CPU stream doubles
         compile(
             function_module,
             str(source),
