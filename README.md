@@ -30,6 +30,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
 | GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
+| GLM-5.3 Flash | Supported | [implementation](./vllm_fl/models/glm5/model.py) |
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
@@ -90,6 +91,13 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     The optimized MetaX composition has additional fixed requirements listed in
     the [MetaX guide](docs/models/qwen3_8_flash_next.md).
     Follow the shared [FlagGems-vllm installation instructions](docs/flaggems-vllm.md).
+
+    On devices without native FP8 support, run standard vLLM FP8 checkpoints
+    with `--dtype bfloat16`. Qwen3.8-Flash-Next / Qwen4 converts supported
+    per-tensor and block-scaled FP8 weights to BF16 when loading. ModelOpt,
+    MXFP8, and compressed-tensors FP8 formats are not covered by this fallback.
+    BF16 weights need about twice the device memory of FP8 weights; an FP8 KV
+    cache request is likewise served as BF16 and may need twice the memory.
 
     For CUDA-like devices, including CUDA and HIP/ROCm environments that use
     PyTorch's CUDA dispatch key, build the plugin native extension by setting

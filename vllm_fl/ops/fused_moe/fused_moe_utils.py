@@ -30,7 +30,7 @@ from vllm.triton_utils import tl
 import vllm_fl.envs as fl_envs
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
-from vllm_fl.utils import use_flaggems
+from vllm_fl.utils import has_native_triton_moe, use_flaggems
 
 _moe_align_block_size = CachedOp("moe_align_block_size")
 _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
@@ -41,7 +41,7 @@ logger = init_logger(__name__)
 
 
 def _get_current_platform():
-    """Resolve PlatformFL after the OOT platform plugin has activated."""
+    """Resolve the platform after OOT plugin activation, not at import time."""
     from vllm.platforms import current_platform
 
     return current_platform
@@ -60,15 +60,15 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
     ) -> None:
         backends.append(backends.pop(backends.index(backend)))
 
-    current_platform = _get_current_platform()
+    runtime_platform = _get_current_platform()
 
-    if current_platform.is_rocm():
+    if runtime_platform.is_rocm():
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.AITER,
             UnquantizedMoeBackend.TRITON,
             UnquantizedMoeBackend.BATCHED_TRITON,
         ]
-    elif current_platform.is_cuda():
+    elif runtime_platform.is_cuda():
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.FLASHINFER_TRTLLM,
             UnquantizedMoeBackend.FLASHINFER_CUTLASS,
@@ -82,9 +82,9 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         if moe_config.moe_parallel_config.dp_size > 1:
             _move_to_back(_AVAILABLE_BACKENDS, UnquantizedMoeBackend.FLASHINFER_CUTLASS)
 
-    elif current_platform.is_xpu():
+    elif runtime_platform.is_xpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.XPU]
-    elif current_platform.is_cpu():
+    elif runtime_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
     else:
         # PlatformFL is intentionally OOT.  Unknown CUDA-alike vendors (for
@@ -117,16 +117,16 @@ def select_unquantized_moe_backend_oot(
     # This module can be imported while vLLM is still resolving the OOT
     # platform plugin.  Resolve the platform again at selection time instead
     # of relying on the module-level object captured during plugin import.
-    current_platform = _get_current_platform()
+    runtime_platform = _get_current_platform()
 
-    if current_platform.is_cpu():
+    if runtime_platform.is_cpu():
         # TODO: migrate to MK structure.
         return UnquantizedMoeBackend.CPU, None
 
-    if current_platform.is_tpu():
+    if runtime_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
 
-    if getattr(current_platform, "device_type", None) == "npu":
+    if getattr(runtime_platform, "device_type", None) == "npu":
         parallel = moe_config.moe_parallel_config
         if (
             moe_config.is_lora_enabled
@@ -159,7 +159,7 @@ def select_unquantized_moe_backend_oot(
                     "Ascend native EP does not support compiler SP"
                 )
             if (
-                current_platform.dist_backend != "hccl"
+                runtime_platform.dist_backend != "hccl"
                 or config.expert_placement_strategy != "linear"
                 or moe_config.num_experts % parallel.ep_size != 0
                 or (
@@ -180,7 +180,7 @@ def select_unquantized_moe_backend_oot(
     # requested Triton backend.  Other explicit choices remain authoritative;
     # in particular, do not make AITER/FlashInfer unreachable on AMD/NVIDIA.
     rocm_aiter_requested = (
-        current_platform.is_rocm()
+        runtime_platform.is_rocm()
         and (
             envs.is_set("VLLM_ROCM_USE_AITER") or envs.is_set("VLLM_ROCM_USE_AITER_MOE")
         )
@@ -189,7 +189,7 @@ def select_unquantized_moe_backend_oot(
     )
     if (
         prefer_flaggems_experts
-        and current_platform.is_out_of_tree()
+        and runtime_platform.is_out_of_tree()
         and use_flaggems()
         and (
             moe_config.moe_backend == "triton"
@@ -430,10 +430,39 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
-        # Resolve after platform activation for every vendor branch. This module
-        # can be imported while the OOT platform is still being selected.
-        current_platform = _get_current_platform()
-        if getattr(current_platform, "device_type", None) == "npu":
+        # FlagGems' fused_experts_impl only accepts the activation enum/string
+        # and therefore drops FusedMoEQuantConfig's gemm1_clamp_limit.  The
+        # decision is made from the MoE semantics (the clamp requirement) and
+        # the bound implementation's capability, not from any model or provider
+        # identity: a clamped model must never take a path that ignores the
+        # clamp, while an ordinary unclamped MoE keeps the fused fast path.
+        # vLLM's native Triton experts preserve the clamp, so bounded MoE stays
+        # on them when that ABI is available; other runtimes use the per-step
+        # FlagGems GEMMs plus the exact clamped activation below.
+        runtime_platform = _get_current_platform()
+        if (
+            self.quant_config.gemm1_clamp_limit is not None
+            and runtime_platform.is_cuda()
+            and has_native_triton_moe()
+        ):
+            return super().apply(
+                output,
+                hidden_states,
+                w1,
+                w2,
+                topk_weights,
+                topk_ids,
+                activation,
+                global_num_experts,
+                expert_map,
+                a1q_scale,
+                a2_scale,
+                workspace13,
+                workspace2,
+                expert_tokens_meta,
+                apply_router_weight_on_input,
+            )
+        if getattr(runtime_platform, "device_type", None) == "npu":
             if self._lora_context is not None or self.gemm1_clamp_limit is not None:
                 raise NotImplementedError(
                     "Ascend grouped MoE requires ordinary unquantized experts"
@@ -470,7 +499,8 @@ class TritonExpertsFL(TritonExperts):
         # plugin instead of entering the generic Triton two-GEMM pipeline.
         if (
             self._lora_context is None
-            and getattr(current_platform, "vendor_name", None) == "kunlunxin"
+            and self.quant_config.gemm1_clamp_limit is None
+            and getattr(runtime_platform, "vendor_name", None) == "kunlunxin"
         ):
             from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_moe.fused_moe import (
                 fused_experts_impl as klx_fused_experts_impl,
@@ -505,14 +535,11 @@ class TritonExpertsFL(TritonExperts):
             return
 
         # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
-        # FlagGems currently only supports the standard SiLU gated activation.
-        # Models such as MiniMax-M3 use SWIGLUOAI and must fall back to the
-        # generic Triton pipeline below, whose activation dispatch supports it.
         if (
             self._lora_context is None
-            and current_platform.is_cuda()
+            and runtime_platform.is_cuda()
             and activation == MoEActivation.SILU
-            and self.gemm1_clamp_limit is None
+            and self.quant_config.gemm1_clamp_limit is None
         ):
             if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
                 import flaggems_vllm as fused_ops
@@ -588,7 +615,7 @@ class TritonExpertsFL(TritonExperts):
         config_gemm1, config_gemm2 = config, config
         closed_moe_eligible = False
         if (
-            getattr(current_platform, "vendor_name", None) == "metax"
+            getattr(runtime_platform, "vendor_name", None) == "metax"
             and hidden_states.device.type == "cuda"
         ):
             from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.moe_launch import (
@@ -606,7 +633,7 @@ class TritonExpertsFL(TritonExperts):
                     if w1.dtype == w2.dtype == hidden_states.dtype
                     else None
                 ),
-                vendor=current_platform.vendor_name,
+                vendor=runtime_platform.vendor_name,
                 device_name=_metax_moe_device_name(hidden_states.device.index),
                 activation=activation.value,
                 quantized=(
@@ -763,7 +790,7 @@ class TritonExpertsFL(TritonExperts):
             activation,
             intermediate_cache2,
             intermediate_cache1.view(-1, N),
-            clamp_limit=self.gemm1_clamp_limit,
+            clamp_limit=self.quant_config.gemm1_clamp_limit,
             alpha=self.gemm1_alpha,
             beta=self.gemm1_beta,
             silu_out=(

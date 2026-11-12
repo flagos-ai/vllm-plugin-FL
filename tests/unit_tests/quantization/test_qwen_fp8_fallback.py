@@ -53,7 +53,7 @@ def test_native_fp8_requires_capability(monkeypatch, capability, expected):
 
 
 @pytest.mark.parametrize(
-    "vendor", ["hygon", "mthreads", "metax", "iluvatar", "kunlunxin", "ascend"]
+    "vendor", ["hygon", "metax", "iluvatar", "kunlunxin", "ascend"]
 )
 def test_cuda_compatibility_is_not_fp8_support(monkeypatch, vendor):
     from vllm_fl.platform import PlatformFL

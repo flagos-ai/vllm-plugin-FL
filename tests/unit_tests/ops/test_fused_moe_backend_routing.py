@@ -75,6 +75,7 @@ def test_experts_apply_resolves_platform_before_vendor_dispatch(
         _lora_context=None,
         gemm1_clamp_limit=None,
         quant_config=SimpleNamespace(
+            gemm1_clamp_limit=None,
             use_fp8_w8a8=False,
             use_int8_w8a8=False,
             use_int8_w8a16=False,

@@ -494,6 +494,11 @@ class PlatformFL(Platform):
         if cls.vendor_name in ("gcu", "enflame"):
             parallel_config.disable_custom_all_reduce = True
 
+        # GLM guards run after vLLM resolves its final configuration.
+        from vllm_fl.models.glm5.runtime import validate_glm5_config
+
+        validate_glm5_config(vllm_config)
+
     @classmethod
     def get_attn_backend_cls(
         cls,
@@ -506,6 +511,18 @@ class PlatformFL(Platform):
 
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
+
+        # A model activation plan may override the attention backend (for
+        # example GLM5's portable MLA path).  Only a plan activated for the
+        # model being loaded is consulted, so a process-level GLM provider
+        # variable no longer rewrites the generic path of other MLA models.
+        from vllm_fl.activation import get_active_plan
+
+        plan = get_active_plan()
+        if use_mla and plan is not None and plan.attention_backend is not None:
+            override = plan.attention_backend(use_mla=use_mla, use_sparse=use_sparse)
+            if override:
+                return override
 
         backend_path = call_op(
             "attention_backend", use_mla=use_mla, use_sparse=use_sparse
@@ -582,6 +599,8 @@ class PlatformFL(Platform):
         if cls.dist_backend == "flagcx":
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
+        elif cls.vendor_name == "thead":
+            return "vllm_fl.distributed.nccl_communicator.NcclCommunicatorFL"
         elif cls.vendor_name == "ascend":
             return "vllm_fl.distributed.device_communicators.npu_communicator.NPUCommunicator"
         else:
@@ -683,14 +702,24 @@ class PlatformFL(Platform):
 
     @classmethod
     def supports_fp8(cls) -> bool:
-        if cls.vendor_name == "nvidia":
-            return cls.has_device_capability(89)
+        """Report native FP8 support for the current device architecture."""
         if cls.vendor_name == "amd":
             from vllm.platforms.rocm import RocmPlatform
 
             return RocmPlatform.supports_fp8()
-        # CUDA-compatible runtimes do not imply native FP8 arithmetic.
-        return False
+        minimum = {
+            "nvidia": DeviceCapability(8, 9),
+            "mthreads": DeviceCapability(3, 1),
+            "gcu": DeviceCapability(4, 0),
+            "enflame": DeviceCapability(4, 0),
+        }.get(cls.vendor_name)
+        if minimum is None:
+            return False
+        try:
+            capability = cls.get_device_capability()
+        except (AttributeError, RuntimeError, NotImplementedError):
+            return False
+        return capability is not None and capability >= minimum
 
     @classmethod
     def is_fp8_fnuz(cls) -> bool:
@@ -768,6 +797,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
+        if cls.vendor_name == "nvidia":
+            # Capability probes run during activation, including after fork.
+            # Reuse vLLM's NVML query without initializing a CUDA context.
+            from vllm.platforms.cuda import NvmlCudaPlatform
+
+            return NvmlCudaPlatform.get_device_capability(device_id)
         # TODO(yxa): For NPU/Ascend devices, return None (no capability version like CUDA)
         if cls.device_type == "npu":
             return None

@@ -73,7 +73,6 @@ from vllm.v1.worker.workspace import init_workspace_manager
 
 import vllm_fl.envs as fl_envs
 from vllm_fl.dispatch.io_common import managed_inference_mode
-from vllm_fl.ops.custom_ops import register_oot_ops
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
@@ -258,6 +257,15 @@ class WorkerFL(WorkerBase):
 
         patch_mm_encoder_attention()
         patch_oot_apply_rotary_emb()
+
+        # GLM patches must precede CustomOp construction, including the VLM
+        # vision tower. Other models keep the common startup path below.
+        from vllm_fl.models.glm5.worker import initialize_glm5_worker
+
+        if initialize_glm5_worker(self.vllm_config, rank=rank):
+            return
+
+        from vllm_fl.ops.custom_ops import register_oot_ops
 
         register_oot_ops()
 
@@ -821,10 +829,12 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        if (
-            current_platform.device_type == "txda"
-            or getattr(current_platform, "vendor_name", None) == "kunlunxin"
-        ):
+        if current_platform.device_type == "txda" or getattr(
+            current_platform, "vendor_name", None
+        ) in ("kunlunxin", "thead"):
+            # vLLM 0.24 imports MiniMax's NVIDIA implementation even for
+            # unrelated models, initializing unsupported FlashInfer CUDA APIs.
+            # The actual model dummy runs and graph capture remain below.
             logger.warning(
                 "Detected %s device, skipping generic kernel_warmup",
                 getattr(

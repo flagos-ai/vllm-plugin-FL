@@ -91,9 +91,12 @@ class OpManager:
     - Dispatch caching with invalidation
     """
 
-    def __init__(self, registry: OpRegistry | None = None) -> None:
+    def __init__(
+        self, registry: OpRegistry | None = None, *, register_builtins: bool = True
+    ) -> None:
         self._lock = threading.RLock()
         self._registry = registry or OpRegistry()
+        self._register_builtins = register_builtins
         self._state = _OpManagerState()
         # Cache for resolve(): (op_name, policy, epoch) -> chosen impl.
         self._dispatch_cache: dict[tuple[str, SelectionPolicy, int], OpImpl] = {}
@@ -203,7 +206,8 @@ class OpManager:
 
             # Register built-in operators
             from . import builtin_ops
-            builtin_ops.register_builtins(self._registry)
+            if self._register_builtins:
+                builtin_ops.register_builtins(self._registry)
 
             # Invalidate cache
             self._state.policy_epoch += 1

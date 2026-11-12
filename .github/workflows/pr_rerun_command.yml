@@ -71,9 +71,7 @@ jobs:
           head_sha=$(gh api "$PR_URL" --jq '.head.sha')
           # Find the latest failed/cancelled workflow runs for the PR head
           # commit (e.g. the main CI run and CodeQL), capped to avoid runaway
-          # loops. A cancelled workflow can contain both failed and cancelled
-          # jobs, so select the jobs below rather than rerunning the whole run.
-          # (Ported from rerun-failed-ci.yml #559 when this file replaced it.)
+          # loops.
           run_ids=$(gh run list --repo "${{ github.repository }}" \
             --commit "$head_sha" --limit 30 \
             --json databaseId,conclusion,createdAt \
@@ -85,34 +83,35 @@ jobs:
           fi
 
           rerun_count=0
-          dependent_skipped=0
           for id in $run_ids; do
+            # Prefer the run-level re-run: it re-triggers every failed/
+            # cancelled job in the run in one call, including jobs the
+            # job-level API refuses (observed: e2e matrix jobs from reusable
+            # workflows are rejected with "cannot be rerun"). ci-gate is
+            # never targeted here or below; as a dependent job it re-evaluates
+            # automatically once its dependencies finish.
+            if gh run rerun "$id" --repo "${{ github.repository }}" --failed; then
+              rerun_count=$((rerun_count + 1))
+              continue
+            fi
+            # Fall back to per-job re-runs: the run-level call can itself be
+            # refused, e.g. when a previous re-run already re-queued part of
+            # the run (run not completed anymore).
             job_ids=$(gh run view "$id" --repo "${{ github.repository }}" \
               --json jobs \
-              --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .databaseId')
+              --jq '.jobs[] | select((.conclusion == "failure" or .conclusion == "cancelled") and .name != "ci-gate") | .databaseId')
             for job_id in $job_ids; do
               echo "Re-running failed/cancelled job $job_id from run $id"
-              # Jobs with needs dependencies (aggregators like ci-gate)
-              # cannot be re-run individually - the API rejects them. That
-              # is expected: they re-evaluate once their dependencies rerun.
-              # Count them separately instead of failing the whole command
-              # after the actionable reruns already went through.
               if gh run rerun --job "$job_id" --repo "${{ github.repository }}"; then
                 rerun_count=$((rerun_count + 1))
               else
-                dependent_skipped=$((dependent_skipped + 1))
-                echo "::warning::job $job_id cannot be re-run individually (depends on other jobs); it re-evaluates when its dependencies finish."
+                echo "::warning::job $job_id cannot be re-run individually; it re-evaluates when its dependencies finish."
               fi
             done
           done
           echo "rerun_count=$rerun_count" >> "$GITHUB_ENV"
-          echo "dependent_skipped=$dependent_skipped" >> "$GITHUB_ENV"
-          if [ "$rerun_count" -eq 0 ] && [ "$dependent_skipped" -eq 0 ]; then
-            echo "::error::No failed or cancelled job found in runs for head SHA $head_sha."
-            exit 1
-          fi
           if [ "$rerun_count" -eq 0 ]; then
-            echo "::error::Every failed/cancelled job is dependency-gated (e.g. ci-gate); re-run its dependencies (the platform jobs) or the whole run instead."
+            echo "::error::No failed or cancelled job could be re-triggered for head SHA $head_sha."
             exit 1
           fi
 
@@ -126,10 +125,7 @@ jobs:
           if [ "${{ steps.auth.outputs.denied }}" = "true" ]; then
             body="⛔ @$COMMENTER is not authorized (PR author or collaborators with write access only)."
           elif [ "${{ job.status }}" = "success" ]; then
-            body="🚀 Re-triggered ${rerun_count:-0} failed/cancelled job(s) for this PR (requested by @$COMMENTER)."
-            if [ "${dependent_skipped:-0}" -gt 0 ]; then
-              body="$body Skipped ${dependent_skipped} dependency-gated job(s) (e.g. ci-gate) - they re-evaluate with their dependencies."
-            fi
+            body="🚀 Re-triggered failed/cancelled CI for this PR — ${rerun_count:-0} run(s)/job(s) (requested by @$COMMENTER). ci-gate re-evaluates with its dependencies."
           else
             body="❌ Failed to re-run CI (requested by @$COMMENTER). See [workflow log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
           fi

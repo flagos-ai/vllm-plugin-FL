@@ -327,4 +327,3 @@ def capture_guard_context():
         torch.txda.device = orig_device
         if orig_exchange is not None:
             torch.txda._exchange_device = orig_exchange
-
