@@ -75,9 +75,9 @@ from vllm.distributed.parallel_state import (
 
 try:
     from vllm.distributed.weight_transfer.sparse_nccl_engine import (
-        SparseWeightPatch,
+        SparseWeightPatch,  # noqa: F401
     )
-except ImportError:  # older vLLM
+except ImportError:  # older vLLM  # noqa: SIM105
     pass
 from vllm.forward_context import (
     BatchDescriptor,
