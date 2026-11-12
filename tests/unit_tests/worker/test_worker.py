@@ -118,7 +118,7 @@ def test_mapped_host_buffers_probe_the_cuda_view_op(monkeypatch):
     import vllm.utils.platform_utils as platform_utils
     import vllm.utils.torch_utils as torch_utils
 
-    from vllm_fl.worker import worker as worker_module
+    from vllm_fl.dispatch.backends.vendor.thead.patches import v2_runner_compat
 
     probed = []
 
@@ -134,11 +134,11 @@ def test_mapped_host_buffers_probe_the_cuda_view_op(monkeypatch):
     )
 
     monkeypatch.setattr(platform_utils, "is_uva_available", lambda: False)
-    assert worker_module._mapped_host_buffers_available() is False
+    assert v2_runner_compat.mapped_host_buffers_available() is False
     assert probed == []
 
     monkeypatch.setattr(platform_utils, "is_uva_available", lambda: True)
-    assert worker_module._mapped_host_buffers_available() is False
+    assert v2_runner_compat.mapped_host_buffers_available() is False
     assert len(probed) == 1
 
 
