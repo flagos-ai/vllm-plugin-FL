@@ -31,9 +31,16 @@ class TestResult:
     model: str = ""
     case: str = ""
     stdout: str = ""
+    # A case skipped by the runner itself (e.g. it needs more devices than this
+    # runner exposes) is neither a pass nor a failure. ``passed`` stays True so
+    # it never counts toward ``failed``; ``skipped`` only changes the reported
+    # status/XML element.
+    skipped: bool = False
 
     @property
     def status(self) -> str:
+        if self.skipped:
+            return "skipped"
         return "passed" if self.passed else "failed"
 
 
@@ -58,6 +65,10 @@ class TestReport:
     @property
     def failed(self) -> int:
         return sum(1 for r in self.results if not r.passed)
+
+    @property
+    def skipped(self) -> int:
+        return sum(1 for r in self.results if r.skipped)
 
     @property
     def duration(self) -> float:
@@ -94,7 +105,10 @@ class TestReport:
                 classname=f"{r.task}.{r.model}" if r.task else r.name,
                 time=f"{r.duration:.2f}",
             )
-            if not r.passed:
+            if r.skipped:
+                skip = ET.SubElement(tc, "skipped", message=r.message)
+                skip.text = r.message
+            elif not r.passed:
                 failure = ET.SubElement(tc, "failure", message=r.message)
                 failure.text = r.stdout[-4000:] if r.stdout else r.message
             if r.stdout:
@@ -149,6 +163,8 @@ class TestReport:
         print(f"Test Report: {self.platform}/{self.device}")
         print(f"{'=' * 60}")
         print(f"Total: {self.total}  Passed: {self.passed}  Failed: {self.failed}")
+        if self.skipped:
+            print(f"Skipped: {self.skipped}")
         print(f"Duration: {self.duration:.1f}s")
 
         # Per-case timing table for cases that took long enough to be worth showing.
