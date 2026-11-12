@@ -237,9 +237,7 @@ def test_ascend_adapter_only_changes_layer_binding_views(ascend):
             return SimpleNamespace(adapt_layer_kv_caches=adapt)
         return builtins.__import__(name, *args, **kwargs)
 
-    def bind(
-        caches, context, runner_caches, count
-    ):
+    def bind(caches, context, runner_caches, count):
         assert caches["layer.0"] is manager
         runner_caches.append(caches["layer.0"])
         events.append("bind")
