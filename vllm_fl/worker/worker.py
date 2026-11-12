@@ -98,7 +98,7 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -240,10 +240,11 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # Provisional default; the real value comes from vllm_config below.
-        # The warmup paths read this flag to select the matching block-table
-        # and KV-cache kernels, so it must be set before they run.
-        self.use_v2_model_runner = False
+        # Follow the upstream selection (V2 unless the config or the platform
+        # rules it out). Vendors that only ship the V1 ModelRunnerFL reject V2
+        # in PlatformFL.check_and_update_config, so the value seen here is
+        # already the runner this process is going to build.
+        self.use_v2_model_runner = vllm_config.use_v2_model_runner
 
         # Hybrid models (mamba/linear attention + full attention) keep the
         # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
@@ -286,7 +287,6 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        self.use_v2_model_runner = vllm_config.use_v2_model_runner
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 
@@ -550,6 +550,14 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
+            if getattr(current_platform, "vendor_name", "") == "thead":
+                # Platform-side adaptations for the upstream V2 runner; see
+                # vllm_fl/dispatch/backends/vendor/thead/patches/.
+                from vllm_fl.dispatch.backends.vendor.thead.patches import (
+                    v2_runner_compat,
+                )
+
+                v2_runner_compat.install_v2_runner_compat()
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
@@ -896,7 +904,7 @@ class WorkerFL(WorkerBase):
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
         # allocator and are not discarded during sleep/wake cycles.
-        if kv_cache_config.needs_kv_cache_zeroing and hasattr(
+        if getattr(kv_cache_config, "needs_kv_cache_zeroing", False) and hasattr(
             self.model_runner, "_init_kv_zero_meta"
         ):
             self.model_runner._init_kv_zero_meta()
@@ -1300,7 +1308,7 @@ class WorkerFL(WorkerBase):
 
         if (
             parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
+            and getattr(compilation_config.pass_config, "enable_sp", False)
             and forward_pass
         ):
             # currently only supported by V1 GPUModelRunner
@@ -1321,11 +1329,9 @@ class WorkerFL(WorkerBase):
                     use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
                 )
             )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
-                )
-            }
+            # vLLM >= 0.32 removed sequence parallelism, so the residual
+            # tensor is never sharded across TP ranks.
+            all_gather_tensors = {"residual": True}
 
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (
@@ -1635,14 +1641,11 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    try:
-        from vllm.model_executor.determinism.batch_invariant import (
-            init_batch_invariance,
-        )
-    except ImportError:  # vLLM <= 0.28 kept it under layers/
-        from vllm.model_executor.layers.batch_invariant import (
-            init_batch_invariance,
-        )
+    # vLLM 0.32 keeps the module under ``determinism``; the 0.28 location
+    # (``layers.batch_invariant``) no longer exists.
+    from vllm.model_executor.determinism.batch_invariant import (
+        init_batch_invariance,
+    )
 
     init_batch_invariance()
     override_envs_for_eplb(
