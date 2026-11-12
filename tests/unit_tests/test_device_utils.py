@@ -372,6 +372,8 @@ def test_nvidia_only_selection_rejects_gcu_alias(device_utils, gcu):
         ("iluvatar", "tianshu"),
         ("ILUVATAR", "tianshu"),
         ("tianshu", "tianshu"),
+        ("thead", "thead"),
+        ("THEAD", "thead"),
     ],
 )
 def test_vendor_keeps_cuda_api_as_a_distinct_backend(device_utils, vendor, expected):
@@ -396,7 +398,7 @@ def test_hygon_vendor_does_not_override_native_gcu(device_utils):
     torch.cuda.is_available.assert_not_called()
 
 
-@pytest.mark.parametrize("vendor", ["hygon", "iluvatar", "tianshu"])
+@pytest.mark.parametrize("vendor", ["hygon", "iluvatar", "tianshu", "thead"])
 def test_vendor_requires_available_hardware(device_utils, vendor):
     utils, _ = device_utils(vendor=vendor)
     assert utils.get_backend() == "cpu"

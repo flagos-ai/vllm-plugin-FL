@@ -340,7 +340,6 @@ class TestGetPositions:
         mock_runner.mrope_positions.gpu = torch.arange(300).reshape(3, 100)
 
         mock_runner.uses_mrope = False
-        mock_runner.uses_xdrope_dim = 0
 
         mock_runner._get_positions = ModelRunnerFL._get_positions.__get__(
             mock_runner, ModelRunnerFL

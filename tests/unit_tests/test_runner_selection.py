@@ -464,11 +464,18 @@ def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
 
 
 @pytest.mark.parametrize("vendor", ["iluvatar", "nvidia"])
-def test_ir_defaults_do_not_require_cuda_provider_on_iluvatar(monkeypatch, vendor):
+@pytest.mark.parametrize("cuda_kernels_available", [False, True])
+def test_ir_defaults_follow_kernel_availability(
+    monkeypatch, vendor, cuda_kernels_available
+):
     from vllm.config.compilation import CompilationMode
 
+    import vllm_fl.platform as platform_module
     from vllm_fl.platform import PlatformFL
 
+    monkeypatch.setattr(
+        platform_module, "_vllm_c_available", lambda: cuda_kernels_available
+    )
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
     config = SimpleNamespace(
         compilation_config=SimpleNamespace(
@@ -476,7 +483,7 @@ def test_ir_defaults_do_not_require_cuda_provider_on_iluvatar(monkeypatch, vendo
         )
     )
     priorities = PlatformFL.get_default_ir_op_priority(config)
-    expected = ["native"] if vendor == "iluvatar" else ["vllm_c", "native"]
+    expected = ["vllm_c", "native"] if cuda_kernels_available else ["native"]
     assert priorities.rms_norm == expected
     assert priorities.fused_add_rms_norm == expected
 

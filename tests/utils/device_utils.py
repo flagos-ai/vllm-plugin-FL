@@ -98,11 +98,14 @@ def get_backend() -> str:
     if runtime is not None and runtime.is_available():
         return "enflame"
     if torch.cuda.is_available():
-        # Hygon HIP uses Torch CUDA APIs, but remains a distinct test backend.
+        # CUDA API aliases remain distinct hardware test backends.
         vendor = os.environ.get("GEMS_VENDOR", "").lower()
-        return {"hygon": "hygon", "iluvatar": "tianshu", "tianshu": "tianshu"}.get(
-            vendor, "nvidia"
-        )
+        return {
+            "hygon": "hygon",
+            "iluvatar": "tianshu",
+            "tianshu": "tianshu",
+            "thead": "thead",
+        }.get(vendor, "nvidia")
     try:
         import torch_npu  # noqa: F401
 
@@ -134,7 +137,7 @@ def is_accelerator_available() -> bool:
 def get_device(index: int = 0) -> torch.device:
     """Get torch device for current backend."""
     backend = get_backend()
-    if backend in ("nvidia", "hygon", "tianshu", "metax"):
+    if backend in ("nvidia", "hygon", "tianshu", "metax", "thead"):
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
@@ -163,7 +166,7 @@ def get_device_count() -> int:
         return 0
 
     backend = get_backend()
-    if backend in ("nvidia", "hygon", "tianshu", "metax"):
+    if backend in ("nvidia", "hygon", "tianshu", "metax", "thead"):
         return torch.cuda.device_count()
     elif backend == "tsingmicro":
         txda = _txda_runtime()
