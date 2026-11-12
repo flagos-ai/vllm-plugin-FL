@@ -21,7 +21,7 @@ from torch._inductor.compile_fx import _CompileFxKwargs
 
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch._inductor.standalone_compile import CompiledArtifact, config, log
+from torch._inductor.standalone_compile import CompiledArtifact, CacheCompiledArtifact, config, log
 from typing import Literal, Sequence, Any
 from torch._inductor.utils import InputType
 
@@ -44,22 +44,6 @@ def autograd_cache_key(
     key = "a" + pickler.get_hash(details)
     debug_lines = pickler.debug_lines(details)
     return key, debug_lines
-
-
-class _MetaxCompiledArtifact(CompiledArtifact):
-    """Concrete subclass of CompiledArtifact for metax backend.
-
-    torch 2.8+ made CompiledArtifact an ABC with __call__ and save as
-    abstract methods. This subclass provides required implementations.
-    """
-
-    def __call__(self, *args):
-        return self._compiled_fn(*args)
-
-    def save(self, *, path: str, format="binary") -> None:
-        raise NotImplementedError(
-            "MetaxCompiledArtifact.save is not supported on metax backend"
-        )
 
 
 def standalone_compile_impl(
@@ -140,7 +124,7 @@ def standalone_compile_impl(
                 "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
             )
 
-    return _MetaxCompiledArtifact(compiled_fn, artifacts)
+    return CacheCompiledArtifact(compiled_fn, artifacts)
 
 
 def standalone_compile(
