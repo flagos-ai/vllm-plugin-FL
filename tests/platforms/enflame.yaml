@@ -80,10 +80,10 @@ s60:
         concurrent: 120
     functional:
       include: "*"
-      ignored_tests: []
+      exclude: []
     unit:
       include: "*"
-      ignored_tests: []
+      exclude: []
     benchmark:
       pr:
         enabled: true

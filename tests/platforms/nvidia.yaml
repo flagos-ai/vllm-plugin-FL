@@ -20,10 +20,9 @@
 # - functional: Add/remove test case names in the support lists
 #   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items
 #
-# - unit/functional: Add paths in include/ignored_tests lists
+# - unit: Add/remove paths in include and exclude lists
 #   Example: include: "*" or ["test_basic.py", "runner/*"]
-#            ignored_tests: [] or ["tests/unit_tests/dispatch/test_x.py",
-#                                "tests/unit_tests/dispatch/test_x.py::test_y"]
+#            exclude: [] or ["test_spiky_loss_detector.py"]
 #
 # - tolerance: Adjust numerical comparison tolerance for result validation
 #
@@ -123,13 +122,10 @@ a100:
             - next_tp8
     functional:
       include: "*"
-      # Tests skipped on this device. Entries are repo-rooted paths (or
-      # file::node ids); every entry requires a reason comment and a
-      # restore condition. See tests/README.md.
-      ignored_tests: []
+      exclude: []
     unit:
       include: "*"
-      ignored_tests: []
+      exclude: []
     benchmark:
       pr:
         enabled: true

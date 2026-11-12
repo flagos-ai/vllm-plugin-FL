@@ -51,11 +51,6 @@ on:
         required: false
         type: string
         default: ""
-      ci_stage:
-        description: "CI stage: pr / nightly / weekly (controls supplementary flagcicd_cov collection)"
-        required: false
-        type: string
-        default: "nightly"
       timeout:
         description: "Timeout for the job in minutes"
         required: false
@@ -105,26 +100,13 @@ jobs:
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
-            --scope unit \
-            --stage ${{ inputs.ci_stage }}
+            --scope unit
 
       - name: Run functional tests
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
-            --scope functional \
-            --stage ${{ inputs.ci_stage }}
-
-      - name: Compute platform-effective coverage
-        if: ${{ !cancelled() && hashFiles(format('coverage-{0}.json', inputs.platform)) != '' }}
-        run: |
-          python3 .github/scripts/coverage_scope.py \
-            --platform ${{ inputs.platform }} \
-            --scope unit,functional \
-            --input coverage-${{ inputs.platform }}.json \
-            --full-output coverage-${{ inputs.platform }}-full.json \
-            --effective-output coverage-${{ inputs.platform }}.json \
-            --metadata-output coverage-${{ inputs.platform }}-scope.json
+            --scope functional
 
       - name: Upload test results
         if: always()
@@ -137,8 +119,6 @@ jobs:
             test-results-${{ inputs.platform }}.json
             pytest-diagnostics/${{ inputs.platform }}/
             coverage-${{ inputs.platform }}.json
-            coverage-${{ inputs.platform }}-full.json
-            coverage-${{ inputs.platform }}-scope.json
 
       - name: Check FlagCICD authentication
         id: flagcicd
@@ -161,6 +141,3 @@ jobs:
           backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
           api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
           report_path: 'coverage-${{ inputs.platform }}.json'
-          file_type: coverage
-          # Default github.job is shared by every platform.
-          job_name: coverage-${{ inputs.platform }}

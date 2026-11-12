@@ -114,24 +114,12 @@ p800:
         concurrent: 180
     functional:
       include: "*"
-      # Tests skipped on this platform. Entries are repo-rooted paths (or
-      # file::node ids); every entry requires a reason comment and a
-      # restore condition. See tests/README.md.
-      ignored_tests:
-        # Compilation
-        # CUDA Graph capture fails on p800; introduced in #415. Restore when
-        # the kunlunxin graph capture path passes on p800.
-        - tests/functional_tests/compilation/test_graph_capture.py
+      exclude:
+        - compilation/test_graph_capture.py
     unit:
       include: "*"
-      # Tests skipped on this platform. Entries are repo-rooted paths (or
-      # file::node ids); every entry requires a reason comment and a
-      # restore condition. See tests/README.md.
-      ignored_tests:
-        # Dispatch
-        # flaggems quantization dispatch is unsupported on p800; introduced
-        # in #561. Restore when the kunlunxin dispatch supports it.
-        - tests/unit_tests/dispatch/test_flaggems_quantization.py
+      exclude:
+        - dispatch/test_flaggems_quantization.py
     benchmark:
       pr:
         enabled: true

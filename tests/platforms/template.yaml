@@ -26,7 +26,7 @@
 #
 # Users can modify:
 # - functional tests: Add/remove model cases in the support lists
-# - unit tests: Add/remove paths in include and ignored_tests lists
+# - unit tests: Add/remove paths in include and exclude lists
 # - tolerance: Adjust numerical comparison tolerance for result validation
 # - unsupported_features: Exclude test cases matching specific feature tags
 
@@ -89,13 +89,12 @@ my_device:
     functional:
       # Component tests (ops/compilation/distributed) — run all by default
       include: "*"
-      ignored_tests: []
+      exclude: []
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
-      # Tests skipped on this device: repo-rooted paths or file::node ids.
-      # Every entry requires a reason comment and restore condition.
-      ignored_tests: []
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []
     benchmark:
       pr:
         enabled: false

@@ -37,6 +37,18 @@ cann = "cann"
 CANN = "CANN"
 HSA = "HSA"
 
+[default.extend-identifiers]
+# APIs and FP8 scale format used by supplementary tests
+arange = "arange"
+arange_np = "arange_np"
+_get_cumsum_and_arange = "_get_cumsum_and_arange"
+image_grid_thw = "image_grid_thw"
+video_grid_thw = "video_grid_thw"
+UE8M0 = "UE8M0"
+ue8m0 = "ue8m0"
+use_ue8m0 = "use_ue8m0"
+_reference_ue8m0_quant = "_reference_ue8m0_quant"
+
 [files]
 extend-exclude = [
     # Auto-generated or third-party

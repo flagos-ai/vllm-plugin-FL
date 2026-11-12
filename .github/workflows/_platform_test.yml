@@ -120,7 +120,6 @@ jobs:
     with:
       platform: ${{ inputs.platform }}
       branch: ${{ inputs.branch }}
-      ci_stage: ${{ inputs.ci_stage }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}

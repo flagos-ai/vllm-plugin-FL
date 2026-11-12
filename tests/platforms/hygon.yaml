@@ -86,10 +86,10 @@ bw1000:
             - 35b_a3b_tp4_graph
     functional:
       include: "*"
-      ignored_tests: []
+      exclude: []
     unit:
       include: "*"
-      ignored_tests: []
+      exclude: []
     benchmark:
       pr:
         enabled: true

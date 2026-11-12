@@ -86,10 +86,10 @@ s5000:
         concurrent: 180
     functional:
       include: "*"
-      ignored_tests: []
+      exclude: []
     unit:
       include: "*"
-      ignored_tests: []
+      exclude: []
     benchmark:
       pr:
         enabled: true

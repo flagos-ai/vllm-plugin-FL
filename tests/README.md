@@ -37,21 +37,7 @@ Platform-agnostic test suite for the vllm-plugin-FL project. All tests are desig
 Unit and functional tests keep their existing commands and output paths.
 pytest-cov measures `vllm_fl`; `--cov-append` adds functional coverage to the
 unit-test data and writes the combined `coverage-<platform>.json` in the checkout.
-After the test commands finish, `.github/scripts/coverage_scope.py` preserves
-that native full-package report as `coverage-<platform>-full.json` and rewrites
-`coverage-<platform>.json` as the platform-effective report. The effective
-denominator contains shared `vllm_fl` code plus the backend selected by
-`.github/configs/coverage_scope.yml`; vendor directories for other platforms
-are excluded. `coverage-<platform>-scope.json` records the mapping, excluded
-directories, source SHA, scope, and the single authoritative effective total.
-The full-package baseline has its own totals in the separate `-full.json`
-artifact and is retained for audit only.
-
-Hygon remains a first-class platform in this manifest. Its current runtime
-resolver registers `vendor/cuda`, but that backend only reports available for
-the NVIDIA device name. Hygon therefore uses the shared-only denominator until
-a Hygon backend is added; Hygon-specific branches in shared modules remain in
-the denominator. There is no JSON concatenation or ZIP packaging.
+No JSON concatenation, ZIP packaging, or additional coverage-combine step is used.
 
 After successful testing, CI uploads that coverage file once through
 `flagos-ai/FlagOps/actions/post-pytest-report@v2`, setting only the endpoint,
@@ -154,10 +140,6 @@ python tests/run.py --platform cuda --device a100 --scope unit
 
 # Run only functional tests (ops, compilation, distributed)
 python tests/run.py --platform cuda --device a100 --scope functional
-
-# Stage selection: supplementary flagcicd_cov tests run in nightly only
-python tests/run.py --platform cuda --device a100 --scope unit --stage pr
-python tests/run.py --platform cuda --device a100 --scope unit --stage nightly
 
 # Run only E2E tests (inference + serving)
 python tests/run.py --platform cuda --device a100 --scope e2e
@@ -338,44 +320,11 @@ a100:
         minicpm: ["o45_tp4"]
     functional:
       include: "*"
-      ignored_tests: []
+      exclude: []
     unit:
       include: "*"
-      ignored_tests: []
+      exclude: []
 ```
-
-#### `ignored_tests`: skipping tests on a platform
-
-`ignored_tests` replaces the old `exclude` key. Entries are **repo-rooted**
-path strings; an entry containing `::` is a pytest node ID and is turned into
-`--deselect`, any other entry is a file or directory and is turned into
-`--ignore`. Loading fails fast when an entry is not a string, does not start
-with the matching `tests/<scope>_tests/` prefix, or points to a path that
-does not exist — so a renamed test file cannot silently restore a skip.
-
-Every entry requires a reason comment above it, with the issue/PR that
-introduced it and the condition under which it will be restored:
-
-```yaml
-p800:
-  tests:
-    unit:
-      include: "*"
-      ignored_tests:
-        # Dispatch
-        # flaggems quantization dispatch is unsupported on p800; introduced
-        # in #561. Restore when the kunlunxin dispatch supports it.
-        - tests/unit_tests/dispatch/test_flaggems_quantization.py
-
-        # Supplementary coverage
-        # Image lacks <pkg>; restore when ci_image >= <tag>.
-        - tests/unit_tests/flagcicd_cov/ops/test_cov_fused_moe.py::TestRouting::test_topk_fp8
-```
-
-Supplementary coverage tests under `tests/unit_tests/flagcicd_cov/` and
-`tests/functional_tests/flagcicd_cov/` are collected **only in the nightly
-stage** (`tests/run.py --stage nightly`); PR and weekly runs pass
-`--ignore` for both directories automatically.
 
 ## Writing New Tests
 

@@ -69,7 +69,7 @@ def _vendor_name(path: str, vendor_root: str) -> str | None:
 
 def _sum_totals(files: dict[str, Any]) -> dict[str, Any]:
     # Statement coverage only: pyproject.toml does not enable branch coverage,
-    # and main() rejects branch reports instead of mis-summing them.
+    # and main() rejects branch reports to avoid summing incompatible metrics.
     totals = {
         key: sum(int(f["summary"].get(key, 0)) for f in files.values())
         for key in (
