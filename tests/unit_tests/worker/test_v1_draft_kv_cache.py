@@ -49,7 +49,10 @@ def test_draft_attention_groups_are_only_added_on_last_pp_rank(is_last_rank):
         speculative_config=object(),
         use_ascend_attention=False,
         device="cpu",
-        cache_config=SimpleNamespace(get_resolved_kv_cache_layout=lambda: "LBNHC"),
+        cache_config=SimpleNamespace(
+            get_resolved_kv_cache_layout=lambda: "LBNHC",
+            cache_dtype="auto",
+        ),
         shared_kv_cache_layers={},
         model_config=SimpleNamespace(hf_config=SimpleNamespace(model_type="test")),
         compilation_config=SimpleNamespace(static_forward_context={}),
