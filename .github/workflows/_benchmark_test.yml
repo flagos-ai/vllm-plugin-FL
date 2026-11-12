@@ -115,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: benchmark-${{ inputs.platform }}-${{ inputs.device }}
+          name: benchmark-${{ inputs.platform }}${{ inputs.device && format('-{0}', inputs.device) || '' }}
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
