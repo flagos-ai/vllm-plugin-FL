@@ -17,6 +17,30 @@ def _fake_vllm_platforms(cpu_platform="vllm.platforms.cpu.CpuPlatform"):
 
 
 class TestArmCpuRegistration(unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        # Model registration is covered independently. CPU routing tests must
+        # not import GPU kernels under their intentionally minimal platform.
+        hooks = (
+            ("vllm_fl.models.glm5.runtime", "register_glm5_next_support"),
+            ("vllm_fl.patches.qwen3_8_flash_next", "apply_qwen3_8_flash_next_patches"),
+        )
+        missing = object()
+        previous = {name: sys.modules.get(name, missing) for name, _ in hooks}
+        for name, entry in hooks:
+            module = ModuleType(name)
+            setattr(module, entry, Mock())
+            sys.modules[name] = module
+
+        def restore_modules():
+            for name, original in previous.items():
+                if original is missing:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+
+        self.addCleanup(restore_modules)
+
     def test_arm_host_uses_vllm_cpu_platform(self):
         platforms = _fake_vllm_platforms()
         with (

@@ -7,18 +7,21 @@ registration and RMS normalization continue to use FlagGems. Existing attention
 backend selection is preserved: the default service paths use upstream Triton
 or DeepSeek sparse attention unless FlagGems attention is explicitly selected.
 
-Install the pinned upstream source along with the plugin:
+Install the pinned public source along with the plugin:
 
 ```bash
 python3 -m pip install --no-deps --force-reinstall \
-  'flaggems-vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@80a8e9716abed1bac3fc0ba5fd4e9f650ae3f989'
+  'flaggems-vllm @ git+https://github.com/ZenithJoyH/FlagGems-vllm.git@9d4b358d944d28269eeb6ebfa4dd6165ecd2ddb9'
 python3 -m pip install --no-build-isolation -e .
 ```
 
-CI installs commit `80a8e9716abed1bac3fc0ba5fd4e9f650ae3f989`
-(package version `0.3.0-dev1`) from
-[FlagGems-vllm #941](https://github.com/flagos-ai/FlagGems-vllm/pull/941), including
-library main and the merged
+CI installs commit `9d4b358d944d28269eeb6ebfa4dd6165ecd2ddb9`
+from [FlagGems-vllm #1134](https://github.com/flagos-ai/FlagGems-vllm/pull/1134).
+The public fixed source adds PPU non-TLE import isolation, optional mHC compiler
+setting restoration, and graph-padded MLA cache row validation. It also carries
+required PPU compatibility regressions and platform-neutral NVIDIA import tests.
+It retains the APIs introduced by
+[FlagGems-vllm #941](https://github.com/flagos-ai/FlagGems-vllm/pull/941) and the merged
 [math shim fix #955](https://github.com/flagos-ai/FlagGems-vllm/pull/955). It includes
 the merged public `concat_mla_q` and graph-safe paged MQA logits APIs required
 by HY4, which are absent from v0.2.0, plus the portable math shim fix needed

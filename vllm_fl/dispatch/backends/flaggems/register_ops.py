@@ -39,6 +39,7 @@ def register_builtins(registry) -> None:
         registry: Registry to register into
     """
     from .flaggems import FlagGemsBackend
+    from .impl.mla_prefill import is_available as mla_prefill_is_available
 
     if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
         import flaggems_vllm
@@ -53,6 +54,16 @@ def register_builtins(registry) -> None:
     is_avail = backend.is_available
 
     impls = [
+        OpImpl(
+            op_name="mla_prefill",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                backend.mla_prefill,
+                lambda: is_avail() and mla_prefill_is_available(),
+            ),
+            priority=BackendPriority.DEFAULT,
+        ),
         # Quantization
         OpImpl(
             op_name="dynamic_per_token_quant_int8",

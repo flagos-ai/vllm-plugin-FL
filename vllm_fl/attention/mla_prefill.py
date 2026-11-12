@@ -3,7 +3,14 @@
 
 import torch
 
+from vllm.platforms import current_platform
 from vllm.v1.attention.backends.mla.prefill.base import MLAPrefillBackend
+from vllm.v1.attention.backends.mla.prefill.registry import (
+    MLAPrefillBackendEnum,
+    register_mla_prefill_backend,
+)
+
+from vllm_fl.dispatch import resolve_op
 
 
 class FlagGemsMLAPrefillBackend(MLAPrefillBackend):
@@ -173,3 +180,56 @@ def make_flaggems_mla_prefill_backend(implementation):
         _operator_factory = staticmethod(lambda: implementation)
 
     return BoundFlagGemsMLAPrefillBackend
+
+
+_GLM_PREFILL_PATH = "vllm_fl.attention.mla_prefill.MLAPrefillBackendFL"
+_DEFAULT_PREFILL_PATH = "vllm_fl.attention.mla_prefill.FlagGemsMLAPrefillBackend"
+
+
+def configure_mla_prefill(vllm_config):
+    """Select the PPU GLM backend without replacing external CUSTOM choices."""
+    model_config = vllm_config.model_config
+    text_config = getattr(model_config, "hf_text_config", None)
+    if (
+        getattr(current_platform, "vendor_name", None) != "thead"
+        or getattr(text_config, "model_type", None) != "glm5_next_text"
+    ):
+        return False
+
+    attention_config = vllm_config.attention_config
+    backend = MLAPrefillBackendEnum.CUSTOM
+    if attention_config.mla_prefill_backend not in (None, backend):
+        return False
+    if backend.is_overridden() and backend.get_path() not in (
+        _DEFAULT_PREFILL_PATH,
+        _GLM_PREFILL_PATH,
+    ):
+        return False
+    try:
+        resolve_op("mla_prefill")
+    except (RuntimeError, KeyError, ImportError):
+        return False
+    # CUSTOM is serialized to workers without the process-local registration.
+    register_mla_prefill_backend(backend, _GLM_PREFILL_PATH)
+    attention_config.mla_prefill_backend = backend
+    return True
+
+
+class MLAPrefillBackendFL(FlagGemsMLAPrefillBackend):
+    """Reuse the dense prefill contract with the PPU public operator provider."""
+
+    @staticmethod
+    def get_name():
+        return "MLA_PREFILL_FL"
+
+    @staticmethod
+    def _operator_factory():
+        return resolve_op("mla_prefill")
+
+    @classmethod
+    def is_available(cls):
+        try:
+            resolve_op("mla_prefill")
+        except (RuntimeError, KeyError, ImportError):
+            return False
+        return True

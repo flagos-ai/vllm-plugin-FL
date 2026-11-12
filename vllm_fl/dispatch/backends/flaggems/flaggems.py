@@ -43,6 +43,11 @@ class FlagGemsBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def mla_prefill(self, **kwargs):
+        from .impl.mla_prefill import mla_prefill_flaggems
+
+        return mla_prefill_flaggems(**kwargs)
+
     def dynamic_per_token_quant_int8(
         self,
         x: torch.Tensor,
