@@ -73,11 +73,11 @@ from vllm.distributed.parallel_state import (
     is_global_first_rank,
 )
 
-try:
+try:  # noqa: SIM105
     from vllm.distributed.weight_transfer.sparse_nccl_engine import (
         SparseWeightPatch,  # noqa: F401
     )
-except ImportError:  # older vLLM  # noqa: SIM105
+except ImportError:  # older vLLM
     pass
 from vllm.forward_context import (
     BatchDescriptor,
