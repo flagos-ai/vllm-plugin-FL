@@ -24,4 +24,7 @@ def find_mccl_library() -> str:
     return so_file
 
 
-vllm.utils.nccl.find_nccl_library = find_mccl_library
+from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+if not uses_open_metax_runtime():
+    vllm.utils.nccl.find_nccl_library = find_mccl_library

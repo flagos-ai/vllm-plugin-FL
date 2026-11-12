@@ -1,0 +1,109 @@
+"""Early profile selection and operator policy contracts, without GPU arithmetic."""
+
+import json
+from pathlib import Path
+
+import pytest
+import yaml
+
+from vllm_fl.kimi_k3_config import is_kimi_k3_profile
+from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def clear_profile_cache():
+    is_kimi_k3_profile.cache_clear()
+    uses_open_metax_runtime.cache_clear()
+    yield
+    is_kimi_k3_profile.cache_clear()
+    uses_open_metax_runtime.cache_clear()
+
+
+def test_no_profile_preserves_default_backend(monkeypatch):
+    monkeypatch.delenv("VLLM_FL_CONFIG", raising=False)
+    assert not is_kimi_k3_profile()
+
+
+def test_existing_config_selects_only_k3_profile(tmp_path, monkeypatch):
+    config = tmp_path / "dispatch.yaml"
+    config.write_text("model_profile: kimi_k3_metax\nprefer: flagos\n")
+    monkeypatch.setenv("VLLM_FL_CONFIG", str(config))
+    assert is_kimi_k3_profile()
+
+
+def test_other_model_config_does_not_enable_k3(tmp_path, monkeypatch):
+    config = tmp_path / "dispatch.yaml"
+    config.write_text("model_profile: another_model\n")
+    monkeypatch.setenv("VLLM_FL_CONFIG", str(config))
+    assert not is_kimi_k3_profile()
+
+
+def test_invalid_config_fails_instead_of_silent_fallback(tmp_path, monkeypatch):
+    config = tmp_path / "dispatch.yaml"
+    config.write_text("- not-a-policy\n")
+    monkeypatch.setenv("VLLM_FL_CONFIG", str(config))
+    with pytest.raises(ValueError, match="mapping"):
+        is_kimi_k3_profile()
+
+
+def test_generic_ops_remain_library_only_and_local_ops_use_vendor():
+    cfg = yaml.safe_load((ROOT / "examples/kimi_k3_metax/dispatch.yaml").read_text())
+    assert cfg["strict"] is True and cfg["prefer"] == "flagos"
+    for name in ("grouped_topk", "rms_norm", "silu_and_mul", "rotary_embedding"):
+        assert cfg["op_backends"][name] == ["flagos"]
+    local = {k: v for k, v in cfg["op_backends"].items() if k.startswith("kimi_k3_")}
+    assert len(local) >= 16
+    assert all(v == ["vendor:metax"] for v in local.values())
+    assert cfg["op_backends"]["attention_backend"] == ["vendor:metax"]
+
+
+def test_example_has_no_source_patch_or_install_hook():
+    example = ROOT / "examples/kimi_k3_metax"
+    assert not list(example.rglob("*.patch"))
+    assert not (example / "prepare.py").exists()
+    lock = json.loads((ROOT / "vllm_fl/configs/kimi_k3_dependencies.json").read_text())
+    assert (
+        lock["dependencies"]["vllm"]["commit"]
+        == "1240e6740799454e2d384bde4b117bfd3fab85b3"
+    )
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        None,
+        "vllm._C",
+        "vllm._C_stable_libtorch",
+        "vllm._moe_C_stable_libtorch",
+        "vllm._qutlass_C",
+        "mcoplib",
+    ],
+)
+def test_runtime_route_is_derived_without_loading_providers(monkeypatch, provider):
+    import sys
+
+    from vllm_fl.patches import metax_open
+
+    names = (
+        "vllm._C",
+        "vllm._C_stable_libtorch",
+        "vllm._moe_C_stable_libtorch",
+        "vllm._qutlass_C",
+        "mcoplib",
+    )
+    before = {name: sys.modules.get(name) for name in names}
+    monkeypatch.setattr(
+        metax_open, "find_spec", lambda name: object() if name == provider else None
+    )
+    assert uses_open_metax_runtime() is (provider is None)
+    assert before == {name: sys.modules.get(name) for name in names}
+
+
+def test_existing_flagcx_transport_keeps_the_legacy_sdk_route(monkeypatch):
+    from vllm_fl.patches import metax_open
+
+    monkeypatch.setenv("FLAGCX_PATH", "/existing/transport")
+    monkeypatch.setattr(metax_open, "find_spec", lambda _: None)
+    assert not uses_open_metax_runtime()

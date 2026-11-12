@@ -56,6 +56,10 @@ class TestArmCpuRegistration(unittest.TestCase):
     def test_arm64_gpu_build_preserves_existing_platform_registration(self):
         platforms = _fake_vllm_platforms(cpu_platform=None)
         with (
+            patch(
+                "vllm_fl.patches.metax_open.uses_open_metax_runtime",
+                return_value=False,
+            ),
             patch("platform.machine", return_value="aarch64"),
             patch.dict(sys.modules, {platforms.__name__: platforms}),
             patch.object(vllm_fl, "_patch_custom_ops") as custom_ops,

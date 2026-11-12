@@ -9,7 +9,7 @@ Each patch is imported on its own and failures are recorded in
 import importlib
 import logging
 
-import vllm.utils.import_utils as iu
+from vllm_fl.patches.metax_open import uses_open_metax_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,15 @@ _PATCH_MODULES = (
 # load, so replacing it as early as possible keeps more of them on the fallback
 # path.
 # TODO: remove when MetaX Triton support is available.
-iu.has_triton_kernels = lambda: False
+if not uses_open_metax_runtime():
+    import vllm.utils.import_utils as iu
+
+    iu.has_triton_kernels = lambda: False
 
 
 def _import_patches() -> dict[str, Exception]:
+    if uses_open_metax_runtime():
+        return {}
     errors: dict[str, Exception] = {}
     for name in _PATCH_MODULES:
         try:
@@ -66,6 +71,8 @@ def ensure_patches() -> dict[str, Exception]:
     succeeds. ``PlatformFL.apply_config_platform_defaults()`` calls this before
     any model layer is built.
     """
+    if uses_open_metax_runtime():
+        return {}
     for name in list(PATCH_ERRORS):
         try:
             importlib.import_module(f"{__name__}.{name}")

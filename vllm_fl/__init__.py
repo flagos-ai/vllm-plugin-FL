@@ -5,6 +5,15 @@ import logging
 import os
 import sys
 
+from .kimi_k3_config import (
+    initialize_process_cache,
+    is_kimi_k3_profile,
+    verify_dependencies,
+)
+
+if is_kimi_k3_profile():
+    initialize_process_cache()
+
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.
@@ -191,27 +200,49 @@ def _is_metax_backend() -> bool:
 
 
 def _patch_custom_ops():
-    """Register fallback schemas when neither vLLM extension ABI is present."""
-    # On MetaX the maca mcoplib._C already registered every _C operator.
-    # Importing vLLM's own vllm._C .so on top of it raises a
-    # duplicate-registration c10::Error, so skip the probe entirely.
+    """Use the accepted open MetaX runtime; preserve other platform behavior."""
+    import torch
+    from vllm_fl.utils import DeviceInfo
+
+    open_runtime = False
+    if DeviceInfo().vendor_name == "metax":
+        from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+        open_runtime = uses_open_metax_runtime()
+    if open_runtime:
+        if os.environ.get("FLAGCX_PATH"):
+            raise RuntimeError("K3 MetaX uses MCCL and does not enable FlagCX")
+        import vllm_fl._C
+        op_name = "_C::weak_ref_tensor"
+        expected_schema = "_C::weak_ref_tensor(Tensor input) -> Tensor"
+        actual_schema = str(
+            torch._C._dispatch_find_schema_or_throw(op_name, "").schema()
+        )
+        if actual_schema != expected_schema:
+            raise RuntimeError(f"FL weak_ref_tensor schema mismatch: {actual_schema}")
+        if not torch._C._dispatch_has_kernel_for_dispatch_key(op_name, "CUDA"):
+            raise RuntimeError("FL weak_ref_tensor has no CUDA dispatch implementation")
+        logger.info("FL open weak_ref_tensor provider: %s", vllm_fl._C.__file__)
+        from vllm_fl.patches.metax_open import register_op_schemas
+        register_op_schemas()
+        return True
+
     if _is_metax_backend():
         logger.debug(
             "[vllm_fl] MetaX backend owns torch.ops._C; skipping vllm._C import"
         )
         return
+
     for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
         try:
             importlib.import_module(module_name)
             return
         except (ImportError, OSError):
             continue
-
     try:
         import vllm_fl._C  # noqa: F401
     except (ImportError, OSError) as e:
         logger.debug("Failed to import vllm_fl._C: %s", e)
-
     from vllm_fl.ops._C_ops_registry import register_op_schemas
     register_op_schemas()
 
@@ -348,6 +379,10 @@ def _install_metax_compat():
         from vllm_fl.dispatch.backends.vendor.metax.shims import install, metax_active
 
         if metax_active():
+            from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+            if uses_open_metax_runtime():
+                return
             install()
     except Exception as exc:  # pragma: no cover - never block registration
         logger.warning("[vllm_fl] MetaX compatibility shims not installed: %s", exc)
@@ -369,6 +404,18 @@ def register():
     reason.  The one required step -- the vendor allocator bridge -- still
     surfaces, because an unusable allocator cannot be papered over here.
     """
+    k3_profile = is_kimi_k3_profile()
+    if k3_profile:
+        verify_dependencies()
+        if os.environ.get("FLAGCX_PATH"):
+            raise RuntimeError("K3 uses MCCL; unset FLAGCX_PATH")
+        from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+        if not uses_open_metax_runtime():
+            raise RuntimeError(
+                "K3 requires the validated empty build without native/vendor providers"
+            )
+
     global _register_in_progress
     if _register_in_progress:
         # Re-entrant call while the outer register() is still installing
@@ -376,7 +423,7 @@ def register():
         # and register() itself can trigger a nested platform resolution).
         return _PLATFORM_QUALNAME
     _register_in_progress = True
-    required_failure = False
+    required_failure = k3_profile
     try:
         # The MUSA allocator bridge is a hard precondition: when the vendor
         # patch cannot rebind torch.accelerator, the engine fails later with an
@@ -389,6 +436,8 @@ def register():
                 "initialize MUSA accelerator allocator APIs" in str(_vendor_exc)
             ):
                 required_failure = True
+                raise
+            if k3_profile:
                 raise
             logger.warning("[vllm_fl] vendor device hooks failed: %s", _vendor_exc)
 
@@ -403,7 +452,21 @@ def register():
             logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
             return arm_cpu_platform
 
-        _run_best_effort(_patch_custom_ops, _patch_flash_attn_import)
+        from vllm_fl.utils import DeviceInfo
+
+        vendor_name = DeviceInfo().vendor_name
+        open_runtime = False
+        if vendor_name == "metax":
+            from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+            open_runtime = uses_open_metax_runtime()
+        if open_runtime:
+            # The open ABI is required, including for non-K3 model profiles.
+            # A missing provider must fail before model allocation.
+            required_failure = True
+            _patch_custom_ops()
+        else:
+            _run_best_effort(_patch_custom_ops, _patch_flash_attn_import)
 
         # Note: FlagCX connector registration is deferred to register_model()
         # to avoid circular imports during VllmConfig.__post_init__ in spawned
@@ -413,10 +476,6 @@ def register():
         if multiproc_method is None:
             os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
         _run_best_effort(_get_op_config)
-
-        from vllm_fl.utils import DeviceInfo
-
-        vendor_name = DeviceInfo().vendor_name
 
         # Kunlunxin-only compatibility hooks. The XPU guard has to be in place
         # before anything imports the FLA ops package (its module body calls
@@ -532,13 +591,19 @@ def register_model():
         install_arm_cpu_packed_w4a8()
         return
 
-    _register_flagcx_connector()
+    k3_metax = (
+        getattr(current_platform, "vendor_name", None) == "metax"
+        and is_kimi_k3_profile()
+    )
+    if not k3_metax:
+        _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
     register_quant_linear()
     register_router()
 
-    _register_gdn_packed_decode_patch()
+    if not k3_metax:
+        _register_gdn_packed_decode_patch()
 
     from vllm_fl.utils import DeviceInfo
 
@@ -560,14 +625,15 @@ def register_model():
             "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM",
         )
 
-    # Register GLM-5 (GlmMoeDsa) — config not yet upstream
-    try:
-        from vllm.transformers_utils.config import _CONFIG_REGISTRY
+    if not k3_metax:
+        # Register GLM-5 (GlmMoeDsa) — config not yet upstream
+        try:
+            from vllm.transformers_utils.config import _CONFIG_REGISTRY
 
-        from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
-        _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
+            from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
+            _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
 
-        #from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
-        #glm5_model()
-    except Exception as e:
-        logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+            #from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
+            #glm5_model()
+        except Exception as e:
+            logger.error(f"Register GlmMoeDsa model error: {str(e)}")
