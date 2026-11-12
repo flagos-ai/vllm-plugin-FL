@@ -25,13 +25,12 @@ module-level collaborators are inputs replaced with recorders; nothing
 on WorkerFL itself is patched to select a branch.
 """
 
-from . import _imports  # noqa: F401  (installs local import shims first)
-
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from types import SimpleNamespace
 
-import torch
-
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
+from . import _imports  # noqa: F401  (installs local import shims first)
 import vllm_fl.worker.worker as worker_module
 from vllm_fl.worker.worker import WorkerFL
 

@@ -30,8 +30,7 @@ import types
 import msgspec
 import pytest
 
-from . import _flagcx_env
-from . import _flagcx_helpers as helpers
+from . import _flagcx_env, _flagcx_helpers as helpers
 
 _flagcx_env.ensure_importable_env()
 

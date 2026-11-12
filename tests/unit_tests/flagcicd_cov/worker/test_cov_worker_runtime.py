@@ -24,12 +24,14 @@ groups, and module-level collaborators are inputs replaced with
 recorders; nothing on WorkerFL itself is patched to select a branch.
 """
 
-from . import _imports  # noqa: F401  (installs local import shims first)
-
 from contextlib import nullcontext
 from types import SimpleNamespace
 
 import torch
+
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
+from . import _imports  # noqa: F401  (installs local import shims first)
 from vllm.sequence import IntermediateTensors
 from vllm.v1.outputs import ModelRunnerOutput
 

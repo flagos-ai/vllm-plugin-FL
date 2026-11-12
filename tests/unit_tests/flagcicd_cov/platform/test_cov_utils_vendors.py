@@ -26,8 +26,9 @@ from types import SimpleNamespace as NS
 
 import pytest
 
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
 from . import _import_shim  # noqa: F401  (inert placeholders on hosts without triton)
-
 import vllm_fl.utils as fl_utils
 
 _VENDOR_ENV_VARS = (

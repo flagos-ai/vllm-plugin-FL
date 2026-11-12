@@ -24,11 +24,11 @@ from __future__ import annotations
 
 import pytest
 import torch
+
 from vllm.platforms.interface import DeviceCapability
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 from . import _import_shim  # noqa: F401  (inert placeholders on hosts without triton)
-
 from vllm_fl.platform import PlatformFL
 
 

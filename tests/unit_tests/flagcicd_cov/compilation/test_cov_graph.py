@@ -38,14 +38,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
-
 from vllm.platforms import current_platform
+
+from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
 
 # The Graph class body reads current_platform.device_type at import time.
 _orig_device_type = current_platform.device_type
 current_platform.device_type = "cuda"
 import vllm_fl.compilation.graph as graph_module  # noqa: E402
+
 current_platform.device_type = _orig_device_type
 # Drop the instance-attribute shadow the pre-patch created (on hosts where
 # device_type lives on the class, e.g. PlatformFL on the CI image).
@@ -257,9 +258,11 @@ def test_wrapper_creates_entry_and_rejects_capture_outside_window():
     )
     descriptor = BatchDescriptor(num_tokens=8)
     set_cudagraph_capturing_enabled(False)
-    with override_forward_context(_forward_context(CUDAGraphMode.PIECEWISE, descriptor)):
-        with pytest.raises(RuntimeError, match="inappropriate") as excinfo:
-            wrapper(torch.zeros(4))
+    with (
+        override_forward_context(_forward_context(CUDAGraphMode.PIECEWISE, descriptor)),
+        pytest.raises(RuntimeError, match="inappropriate") as excinfo,
+    ):
+        wrapper(torch.zeros(4))
     assert "CUDA graph capturing detected at an inappropriate time" in str(
         excinfo.value
     )
@@ -348,7 +351,7 @@ def test_wrapper_getattr_delegates_to_runnable():
     assert wrapper.shared_attr == "delegated"
     assert wrapper.shared_fn() == "fn"
     with pytest.raises(AttributeError):
-        wrapper.absent_attribute
+        wrapper.absent_attribute  # noqa: B018 — access is the trigger
 
 
 def test_wrapper_unwrap_and_cudagraph_wrapper_identity():

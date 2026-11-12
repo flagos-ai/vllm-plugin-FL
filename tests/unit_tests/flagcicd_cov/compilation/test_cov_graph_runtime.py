@@ -28,8 +28,9 @@ from types import SimpleNamespace
 
 import pytest
 
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
 from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
-
 from vllm.platforms import current_platform
 
 import vllm_fl.compilation.graph_params as gp
@@ -109,9 +110,8 @@ def test_capture_scope_previews_and_releases_shape_state():
         assert probe.capturing is True
         assert 16 in gp.get_graph_params().attn_params
         # A nested scope is rejected by the active assert.
-        with pytest.raises(AssertionError) as excinfo:
-            with controller.capture_scope(probe):
-                pass
+        with pytest.raises(AssertionError) as excinfo, controller.capture_scope(probe):
+            pass
         assert "assert not self._active" in str(excinfo.value) or excinfo.value
     assert controller._active is False
     assert probe.capturing is False
@@ -120,9 +120,10 @@ def test_capture_scope_previews_and_releases_shape_state():
 def test_capture_scope_rejects_invalid_token_counts():
     """A non-integer token count fails the scope before any state is touched."""
     controller = gr.GraphRuntimeController(vllm_config="cfg")
-    with pytest.raises(RuntimeError, match="require integer") as excinfo:
-        with controller.capture_scope(_context(True)):
-            pass
+    with pytest.raises(RuntimeError, match="require integer") as excinfo, controller.capture_scope(
+        _context(True)
+    ):
+        pass
     assert "integer BatchDescriptor.num_tokens" in str(excinfo.value)
     assert controller._active is False
 
@@ -130,9 +131,10 @@ def test_capture_scope_rejects_invalid_token_counts():
 def test_replay_scope_requires_bound_backends():
     """A replay without bound attention backends raises at update time."""
     controller = gr.GraphRuntimeController(vllm_config="cfg")
-    with pytest.raises(RuntimeError, match="must be bound before FULL replay") as excinfo:
-        with controller.replay_scope(_context(4)):
-            pass
+    with pytest.raises(RuntimeError, match="must be bound before FULL replay") as excinfo, controller.replay_scope(
+        _context(4)
+    ):
+        pass
     assert "must be bound before FULL replay" in str(excinfo.value)
     assert controller._active is False
 

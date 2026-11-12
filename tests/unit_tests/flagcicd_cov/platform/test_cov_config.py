@@ -32,6 +32,9 @@ from types import SimpleNamespace as NS
 
 import pytest
 
+# The shim must be imported BEFORE vllm_fl.* on hosts without triton: it
+# installs the inert flag_gems placeholder that vllm_fl.utils needs to
+# import at all. (Import order is load-bearing here; do not alphabetize.)
 from . import _import_shim  # noqa: F401  (inert placeholders on hosts without triton)
 
 import vllm_fl.platform as fl_platform

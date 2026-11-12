@@ -21,10 +21,10 @@ runs on CPU without a model download or a GPU.
 
 from __future__ import annotations
 
-import asyncio
 import threading
 
 import torch
+
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.v1.attention.backend import AttentionBackend
 from vllm.v1.kv_cache_interface import (
@@ -100,7 +100,7 @@ class _VllmConfig:
         self.__dict__.update(parts)
 
     def __repr__(self):
-        return "FakeVllmConfig(parts=%r)" % sorted(self.__dict__)
+        return f"FakeVllmConfig(parts={sorted(self.__dict__)!r})"
 
 
 def vllm_config(

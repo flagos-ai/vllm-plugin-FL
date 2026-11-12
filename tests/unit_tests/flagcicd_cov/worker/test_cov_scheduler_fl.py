@@ -28,13 +28,15 @@ vllm engine object and is replaced by a recorder (the same module-symbol
 boundary the dev tests patch).
 """
 
-from . import _imports  # noqa: F401  (installs local import shims first)
-
 from types import SimpleNamespace
 
 import numpy
+import pytest
 import torch
 
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
+from . import _imports  # noqa: F401  (installs local import shims first)
 import vllm_fl.worker.scheduler_fl as scheduler_module
 from vllm_fl.worker.scheduler_fl import AsyncSchedulerFL, _MTPStructuredOutputManager
 
@@ -143,12 +145,8 @@ def test_proxy_forwards_attribute_access_to_base_manager():
 def test_proxy_raises_for_attributes_missing_on_base():
     """__getattr__ lets missing attributes raise AttributeError."""
     manager = _make_manager(SimpleNamespace())
-    raised = False
-    try:
-        manager.no_such_attribute
-    except AttributeError:
-        raised = True
-    assert raised, "proxy did not raise AttributeError for a missing name"
+    with pytest.raises(AttributeError):
+        manager.no_such_attribute  # noqa: B018 — access is the trigger
 
 
 def test_grammar_bitmask_delegates_when_num_speculative_tokens_not_one():

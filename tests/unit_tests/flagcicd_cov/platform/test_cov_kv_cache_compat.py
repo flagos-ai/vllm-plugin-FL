@@ -34,7 +34,6 @@ import pytest
 import torch
 
 from . import _import_shim  # noqa: F401  (inert placeholders on hosts without triton)
-
 from vllm_fl.compat import kv_cache as compat_kv_cache
 
 

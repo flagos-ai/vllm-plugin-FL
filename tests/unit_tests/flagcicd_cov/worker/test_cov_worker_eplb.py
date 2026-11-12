@@ -28,17 +28,20 @@ and the request's rank fields. The unbound-method-on-SimpleNamespace
 pattern follows the dev tests in tests/unit_tests/worker/.
 """
 
-from . import _imports  # noqa: F401  (installs local import shims first)
-
 import inspect
-import torch
-import torch.nn as nn
 from types import SimpleNamespace
 
+import torch
+import torch.nn as nn
+
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
+from . import _imports  # noqa: F401  (installs local import shims first)
 import vllm.distributed.parallel_state as parallel_state
+from vllm.v1.engine import ReconfigureDistributedRequest, ReconfigureRankType
+
 import vllm_fl.worker.worker as worker_module
 from vllm_fl.worker.worker import WorkerFL
-from vllm.v1.engine import ReconfigureDistributedRequest, ReconfigureRankType
 
 
 class _Patch:
@@ -324,7 +327,6 @@ def test_reconfigure_moe_scale_up_doubles_experts_and_broadcasts():
 def test_reconfigure_moe_scale_down_derives_redundant_from_eplb_state():
     """Scale-down skips the broadcast and derives redundancy from maps."""
     model = _MoEModel()
-    eplb = _RecordingEplb(result=None)
     parallel_config = SimpleNamespace(
         enable_expert_parallel=True,
         all2all_backend="none",

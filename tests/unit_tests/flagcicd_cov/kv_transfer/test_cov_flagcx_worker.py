@@ -28,22 +28,21 @@ import time
 
 import pytest
 
-from . import _flagcx_env
-from . import _flagcx_helpers as helpers
+from . import _flagcx_env, _flagcx_helpers as helpers
 
 _flagcx_env.ensure_importable_env()
 _flagcx_env.ensure_vllm_api_compat()
 
+import torch.distributed as dist  # noqa: E402
+
+import vllm.distributed.parallel_state as ps  # noqa: E402
 from vllm.distributed import (  # noqa: E402  (after env setup)
     destroy_model_parallel,
     init_distributed_environment,
 )
-import vllm.distributed.parallel_state as ps  # noqa: E402
 from vllm.distributed.parallel_state import (  # noqa: E402
     init_model_parallel_group,
 )
-import torch.distributed as dist  # noqa: E402
-
 
 _PORT = {"n": 0}
 
@@ -325,7 +324,7 @@ def test_shutdown_destroys_engine_and_threads(worker_env):
     build, conn, recorder = worker_env
 
     w = build("kv_consumer")
-    engine = w.engine
+    assert w.engine is not None
     loop = w.receiver_loop
     w.shutdown()
     assert w.engine is None

@@ -28,8 +28,9 @@ import os
 import pytest
 import torch
 
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
 from . import _import_shim  # noqa: F401  (inert placeholders on hosts without triton)
-
 import vllm_fl
 import vllm_fl.envs as fl_envs
 
@@ -290,5 +291,5 @@ class TestEnvsModule:
     def test_getattr_rejects_unknown_names(self):
         """Attribute access on an unknown name raises AttributeError."""
         with pytest.raises(AttributeError, match="NO_SUCH_VAR"):
-            fl_envs.NO_SUCH_VAR
+            fl_envs.NO_SUCH_VAR  # noqa: B018 — access is the trigger
         assert not hasattr(fl_envs, "NO_SUCH_VAR")

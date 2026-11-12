@@ -24,17 +24,19 @@ by the EP world sizes and the request's rank fields. The unbound-method
 pattern follows the dev tests in tests/unit_tests/worker/.
 """
 
-from . import _imports  # noqa: F401  (installs local import shims first)
-
 import inspect
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
+from . import _imports  # noqa: F401  (installs local import shims first)
+import vllm.config as vllm_config_module
 import vllm.distributed.parallel_state as parallel_state
+from vllm.v1.engine import ReconfigureDistributedRequest, ReconfigureRankType
+
 import vllm_fl.worker.worker as worker_module
 from vllm_fl.worker.worker import WorkerFL
-from vllm.v1.engine import ReconfigureDistributedRequest, ReconfigureRankType
-import vllm.config as vllm_config_module
 
 
 class _Patch:

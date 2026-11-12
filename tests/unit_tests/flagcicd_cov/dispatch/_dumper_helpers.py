@@ -19,20 +19,19 @@ providing the same isolation: every dumper/env reset happens around each
 test, and pairing stacks are recreated thread-locally.
 """
 
-from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
-
 import json
 import logging
 
 import pytest
 
+from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
 from vllm_fl.dispatch import io_common, io_dumper
-from vllm_fl.dispatch.io_dumper import disable_io_dump
 from vllm_fl.dispatch.io_common import (
     reset_exec_order,
     reset_rank,
     reset_step,
 )
+from vllm_fl.dispatch.io_dumper import disable_io_dump
 
 DUMP_ENV_VARS = (
     "VLLM_FL_IO_DUMP", "VLLM_FL_IO_DUMP_OPS", "VLLM_FL_IO_DUMP_MODULES",

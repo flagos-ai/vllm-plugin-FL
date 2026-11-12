@@ -26,8 +26,9 @@ from __future__ import annotations
 import pytest
 import torch
 
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
 from . import _import_shim  # noqa: F401  (inert placeholders on hosts without triton)
-
 import vllm_fl.platform as fl_platform
 from vllm_fl.platform import PlatformFL
 

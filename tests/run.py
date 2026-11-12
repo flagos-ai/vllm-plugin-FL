@@ -356,11 +356,13 @@ class TestRunner:
     def _stage_ignore_args(self) -> list[str]:
         """Return pytest --ignore args excluding supplementary tests.
 
-        Supplementary coverage tests (``flagcicd_cov/``) run only in the
-        nightly stage. On any other stage both scopes exclude the directory
-        so PR and weekly runs stay unchanged in duration and selection.
+        Supplementary coverage tests (``flagcicd_cov/``) run only on the
+        NVIDIA nightly stage for now: every other stage, platform, or
+        nightly of another platform excludes the directory so PR, weekly,
+        and non-NVIDIA nightly runs stay unchanged in selection and
+        duration. Widening to more platforms is a one-line change here.
         """
-        if self.stage == "nightly":
+        if self.stage == "nightly" and self.config.platform == "nvidia":
             return []
         return [
             "--ignore=tests/unit_tests/flagcicd_cov",

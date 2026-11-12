@@ -25,14 +25,13 @@ which needs triton (no Windows wheel). ``_flaggems_shim`` installs an
 inert placeholder only when the real package cannot import.
 """
 
-from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
-from ._dumper_helpers import restore_io_common_globals  # noqa: F401
-
 import threading
 
 import pytest
 import torch
 
+from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
+from ._dumper_helpers import restore_io_common_globals  # noqa: F401
 from vllm_fl.dispatch import io_common
 from vllm_fl.dispatch.io_common import (
     ModeManager,

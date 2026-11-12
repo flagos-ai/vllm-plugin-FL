@@ -23,10 +23,9 @@ Pilot P1 of the supplementary coverage suite (flagcicd_cov). Runs in the
 functional scope: each xdist worker owns exactly one GPU.
 """
 
+import pytest
 import torch
 import torch.nn.functional as F
-
-import pytest
 
 from vllm_fl.dispatch import call_op, resolve_op
 

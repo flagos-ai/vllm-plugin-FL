@@ -24,19 +24,23 @@ which needs triton (no Windows wheel). ``_flaggems_shim`` installs an
 inert placeholder only when the real package cannot import.
 """
 
+import json
+import os
+
+import torch
+
 from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
 from ._dumper_helpers import (  # noqa: F401  (autouse state isolation)
     DUMP_ENV_VARS,
     clean_dumper_state,
     read_jsonl,
 )
-
-import json
-import os
-
-import torch
-
 from vllm_fl.dispatch import io_dumper
+from vllm_fl.dispatch.io_common import (
+    dispatch_mode_mgr,
+    get_step,
+    reset_step,
+)
 from vllm_fl.dispatch.io_dumper import (
     advance_io_step,
     disable_io_dump,
@@ -44,15 +48,8 @@ from vllm_fl.dispatch.io_dumper import (
     dump_before,
     enable_io_dump,
     init_io_dump_from_env,
-    is_dump_enabled,
     io_dump_step,
-)
-from vllm_fl.dispatch.io_common import (
-    dispatch_mode_mgr,
-    get_exec_order,
-    get_step,
-    reset_rank,
-    reset_step,
+    is_dump_enabled,
 )
 
 
@@ -194,12 +191,13 @@ class TestEnvInit:
         env_dir = str(tmp_path / "env")
         yaml_dir = str(tmp_path / "yaml")
         cfg = tmp_path / "cfg.yaml"
+        yaml_dir_posix = yaml_dir.replace("\\", "/")
         cfg.write_text(
             "io_dump:\n"
-            "  dir: %s\n"
+            f"  dir: {yaml_dir_posix}\n"
             "  ops: [aten.mm]\n"
             "  max_calls: 3\n"
-            "  step_range: \"0-4\"\n" % yaml_dir.replace("\\", "/"),
+            '  step_range: "0-4"\n',
             encoding="utf-8",
         )
         monkeypatch.setenv("VLLM_FL_IO_DUMP", env_dir)

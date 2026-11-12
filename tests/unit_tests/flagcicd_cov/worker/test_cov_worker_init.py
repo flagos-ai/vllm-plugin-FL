@@ -30,19 +30,19 @@ and ``kv_cache_memory_bytes`` branches of
 are likewise driven by platform/parallel-config inputs.
 """
 
-from . import _imports  # noqa: F401  (installs local import shims first)
-
 import os
-from contextlib import nullcontext
 from types import SimpleNamespace
 
 import torch
 
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
+from . import _imports  # noqa: F401  (installs local import shims first)
 import vllm_fl.worker.worker as worker_module
 from vllm_fl.worker.worker import (
+    MemorySnapshot,
     WorkerFL,
     memory_profiling_fl,
-    MemorySnapshot,
 )
 
 

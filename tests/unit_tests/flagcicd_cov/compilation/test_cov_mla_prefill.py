@@ -32,11 +32,12 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+# The shim import is load-bearing: it must precede vllm_fl/vllm
+# imports on hosts without triton. Do not alphabetize.
 from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
+from vllm.v1.attention.backends.mla.prefill.base import MLADimensions
 
 import vllm_fl.attention.mla_prefill as mp
-
-from vllm.v1.attention.backends.mla.prefill.base import MLADimensions
 
 
 class _RecordingOp:

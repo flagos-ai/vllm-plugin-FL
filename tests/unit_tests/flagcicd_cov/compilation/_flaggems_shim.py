@@ -90,6 +90,8 @@ def _install_placeholder_flag_gems() -> None:
         def __init__(self, *args, **kwargs):
             self.vendor_name = "nvidia"
             self.device_type = "cuda"
+            self.name = "cuda"  # vllm_fl DeviceInfo.device_type reads .name
+            self.dispatch_key = "CUDA"  # vllm_fl DeviceInfo.dispatch_key
 
     device.DeviceDetector = DeviceDetector
 
@@ -103,4 +105,107 @@ def _install_placeholder_flag_gems() -> None:
     sys.modules["flag_gems.runtime.backend.device"] = device
 
 
+def _install_placeholder_xgrammar() -> None:
+    """Stub xgrammar (Linux-only) for hosts without a wheel.
+
+    vllm.parser imports Grammar/StructuralTag at module import; the
+    sparse-indexer chain pulls vllm.parser on Windows hosts.
+    """
+    try:
+        __import__("xgrammar")
+        return
+    except ImportError:
+        pass
+    xg = types.ModuleType("xgrammar")
+    xg.__path__ = []  # a package so submodule imports resolve
+
+    class Grammar:
+        pass
+
+    class StructuralTag:
+        pass
+
+    class GrammarMatcher:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def fill_next_token_bitmask(self, *args, **kwargs):
+            return None
+
+    xg.Grammar = Grammar
+    xg.StructuralTag = StructuralTag
+    xg.GrammarMatcher = GrammarMatcher
+    xg.BatchingGrammarMatcher = GrammarMatcher
+    xg.normalize_tool_choice = lambda *args, **kwargs: None
+    xg.get_model_structural_tag = lambda *args, **kwargs: None
+    st = types.ModuleType("xgrammar.structural_tag")
+
+    class _TagFormatBase:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class Element:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class StructuralTagInfo:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    st.Element = Element
+    st.StructuralTagInfo = StructuralTagInfo
+    # Every *Format name any vllm parser revision imports; inert and
+    # constructor-shaped so class checks fail loudly rather than silently.
+    for _fmt in (
+        "AnyTextFormat", "ConstStringFormat", "Format", "GrammarFormat",
+        "JSONSchemaFormat", "OptionalFormat", "OrFormat", "PlusFormat",
+        "RegexFormat", "SequenceFormat", "StarFormat", "TagFormat",
+        "TagsWithSeparatorFormat", "TokenTriggeredTagsFormat",
+        "TriggeredTagsFormat",
+    ):
+        setattr(st, _fmt, type(_fmt, (_TagFormatBase,), {}))
+    xg.structural_tag = st
+    ots = types.ModuleType("xgrammar.openai_tool_call_schema")
+
+    class FunctionToolParam:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    ots.FunctionToolParam = FunctionToolParam
+
+    class BuiltinToolParam:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    ots.BuiltinToolParam = BuiltinToolParam
+    xg.openai_tool_call_schema = ots
+    sys.modules["xgrammar"] = xg
+    sys.modules["xgrammar.structural_tag"] = st
+    sys.modules["xgrammar.openai_tool_call_schema"] = ots
+
+
+def _install_placeholder_uvloop() -> None:
+    """Stub uvloop (Linux-only) for hosts without a wheel.
+
+    vllm.v1.utils imports uvloop at module import; the compilation test
+    files pull vllm.v1 worker modules on Windows hosts. Real installs
+    keep the real package.
+    """
+    try:
+        __import__("uvloop")
+        return
+    except ImportError:
+        pass
+    uvloop = types.ModuleType("uvloop")
+
+    class Loop:
+        pass
+
+    uvloop.Loop = Loop
+    uvloop.install = lambda: None
+    sys.modules["uvloop"] = uvloop
+
+
+_install_placeholder_uvloop()
+_install_placeholder_xgrammar()
 _install_placeholder_flag_gems()

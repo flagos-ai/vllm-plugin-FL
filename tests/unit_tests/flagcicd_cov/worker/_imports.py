@@ -109,6 +109,8 @@ def _install_placeholder_flag_gems() -> None:
         def __init__(self, *args, **kwargs):
             self.vendor_name = "nvidia"
             self.device_type = "cuda"
+            self.name = "cuda"  # vllm_fl DeviceInfo.device_type reads .name
+            self.dispatch_key = "CUDA"  # vllm_fl DeviceInfo.dispatch_key
 
     device.DeviceDetector = DeviceDetector
     flag_gems.runtime = runtime
@@ -484,6 +486,7 @@ def _install_model_runner_platform() -> None:
     tests use for their own import.
     """
     import torch
+
     import vllm.platforms as platforms
 
     if "vllm_fl.worker.worker" in sys.modules:
@@ -528,9 +531,9 @@ def _install_model_runner_platform() -> None:
     platforms.current_platform = _CudaLike()
     try:
         import vllm_fl.worker.model_runner  # noqa: F401  (import side effects)
-        import vllm_fl.worker.worker  # noqa: F401  (target under test)
-        import vllm_fl.worker.scheduler_fl  # noqa: F401  (target under test)
         import vllm_fl.worker.model_state  # noqa: F401  (target under test)
+        import vllm_fl.worker.scheduler_fl  # noqa: F401  (target under test)
+        import vllm_fl.worker.worker  # noqa: F401  (target under test)
     finally:
         platforms.current_platform = _real_platform
         # Modules imported inside the window did

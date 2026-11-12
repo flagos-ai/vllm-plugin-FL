@@ -90,6 +90,8 @@ def _install_placeholder_flag_gems() -> None:
         def __init__(self, *args, **kwargs):
             self.vendor_name = "nvidia"
             self.device_type = "cuda"
+            self.name = "cuda"  # vllm_fl DeviceInfo.device_type reads .name
+            self.dispatch_key = "CUDA"  # vllm_fl DeviceInfo.dispatch_key
 
     device.DeviceDetector = DeviceDetector
 

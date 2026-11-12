@@ -24,15 +24,11 @@ which needs triton (no Windows wheel). ``_flaggems_shim`` installs an
 inert placeholder only when the real package cannot import.
 """
 
-from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
-
 import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-import yaml
-
+from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
 from vllm_fl.dispatch.config.utils import (
     get_config_path,
     get_effective_config,

@@ -21,14 +21,13 @@ local (D-side remote-prefill queueing).
 
 from __future__ import annotations
 
-from . import _flagcx_env
-from . import _flagcx_helpers as helpers
+from . import _flagcx_env, _flagcx_helpers as helpers
 
 _flagcx_env.ensure_importable_env()
 
-from vllm.v1.request import RequestStatus  # noqa: E402  (after env setup)
-
 import pytest
+
+from vllm.v1.request import RequestStatus  # noqa: E402  (after env setup)
 
 
 @pytest.fixture()

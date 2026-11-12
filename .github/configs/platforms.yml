@@ -80,10 +80,18 @@ platforms:
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
       - tests/platforms/nvidia.yaml
+      # Supplementary coverage suite: collected only by the NVIDIA nightly
+      # (tests/run.py stage/platform gating), so PRs touching it route to
+      # the nvidia platform only, not to every platform via the global
+      # tests/unit_tests/ and tests/functional_tests/ prefixes.
+      - tests/unit_tests/flagcicd_cov/
+      - tests/functional_tests/flagcicd_cov/
     exempt_from_global:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
+      - tests/unit_tests/flagcicd_cov/
+      - tests/functional_tests/flagcicd_cov/
   ascend:
     enabled: false
     trigger_paths:

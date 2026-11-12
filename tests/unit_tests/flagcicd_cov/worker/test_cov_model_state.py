@@ -20,7 +20,6 @@ calls with an empty mapping. Each test pins one of those behaviors.
 """
 
 from . import _imports  # noqa: F401  (installs local import shims first)
-
 from vllm_fl.worker.model_state import ModelRunnerState
 
 

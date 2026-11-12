@@ -32,11 +32,10 @@ C1 tranche of the supplementary coverage suite (flagcicd_cov).
 from __future__ import annotations
 
 import pytest
-
-from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
-
 import torch
 import torch._inductor.runtime.triton_heuristics as _th
+
+from . import _flaggems_shim  # noqa: F401  (must run before vllm_fl import)
 
 
 class _StubGPUTarget:
@@ -168,7 +167,6 @@ def test_device_interface_device_exchange_semantics(ptpu_stub):
 def test_device_interface_capability_flags(ptpu_stub, monkeypatch):
     """Capability probes report the fixed sunrise contract, with "S2" fallback."""
     import sys
-    import types
 
     import vllm_fl.compilation.inductor_backend as ib
 
@@ -245,8 +243,8 @@ def test_patch_gpu_target_remaps_only_ptpu_backend(monkeypatch):
 
 def test_registration_installs_all_four_registries(ptpu_stub):
     """register_ptpu_inductor_backend wires Dynamo, Inductor and Triton registries."""
-    from torch._dynamo.device_interface import get_registered_device_interfaces
     import torch._inductor.codegen.common as codegen_common
+    from torch._dynamo.device_interface import get_registered_device_interfaces
 
     import vllm_fl.compilation.inductor_backend as ib
 

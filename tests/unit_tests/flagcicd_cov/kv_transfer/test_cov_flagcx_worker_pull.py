@@ -31,8 +31,7 @@ import time
 import msgspec
 import pytest
 
-from . import _flagcx_env
-from . import _flagcx_helpers as helpers
+from . import _flagcx_env, _flagcx_helpers as helpers
 
 # zmq.asyncio needs a selector-based loop; on Windows the default is
 # Proactor, which zmq cannot multiplex. Linux (the CI image) already
@@ -43,16 +42,16 @@ if sys.platform == "win32":  # pragma: no cover - platform guard
 _flagcx_env.ensure_importable_env()
 _flagcx_env.ensure_vllm_api_compat()
 
+import torch.distributed as dist  # noqa: E402
+
+import vllm.distributed.parallel_state as ps  # noqa: E402
 from vllm.distributed import (  # noqa: E402  (after env setup)
     destroy_model_parallel,
     init_distributed_environment,
 )
-import vllm.distributed.parallel_state as ps  # noqa: E402
 from vllm.distributed.parallel_state import (  # noqa: E402
     init_model_parallel_group,
 )
-import torch.distributed as dist  # noqa: E402
-
 
 _PORT = {"n": 0}
 
