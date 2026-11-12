@@ -13,6 +13,16 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 STACK = json.loads((HERE / "stack.json").read_text())
+VERSIONS = {
+    **STACK["runtime_versions"],
+    "flagtree": STACK["flagtree"]["version"],
+    "flag-gems": STACK["flaggems"]["version"],
+}
+
+
+def public_version(version):
+    # VCS-built wheels report the +local suffix in metadata only.
+    return version.split("+", 1)[0]
 
 
 def file_fact(path):
@@ -24,8 +34,14 @@ def vendor_snapshot():
     # This finite protection is not a whole SDK or vendor payload audit.
     import torch
 
-    if torch.__version__.split("+")[0] != "2.10.0":
-        raise RuntimeError("This PPU stack requires the vendor Torch 2.10.0")
+    if torch.__version__ != public_version(VERSIONS["torch"]):
+        raise RuntimeError(
+            "This PPU stack requires the vendor Torch " + VERSIONS["torch"]
+        )
+    if metadata.version("torch") != VERSIONS["torch"]:
+        raise RuntimeError(
+            "This PPU stack requires the vendor Torch " + VERSIONS["torch"]
+        )
     return {
         "torch_version": torch.__version__,
         "torch_init": {"path": torch.__file__, **file_fact(torch.__file__)},
@@ -49,13 +65,17 @@ def validate_vllm_provider(
         and Path(module_origin).resolve() == Path(distribution_module_origin).resolve()
     )
     if (
-        module_version != "0.28.0"
-        or distribution_version != "0.28.0+empty"
+        module_version != public_version(VERSIONS["vllm"])
+        or distribution_version != VERSIONS["vllm"]
         or not same_origin
     ):
         raise RuntimeError(
-            "CI requires vLLM module 0.28.0 from distribution 0.28.0+empty "
-            "at the same origin; actual: " + repr(actual)
+            "CI requires vLLM module "
+            + public_version(VERSIONS["vllm"])
+            + " from distribution "
+            + VERSIONS["vllm"]
+            + " at the same origin; actual: "
+            + repr(actual)
         )
     return actual
 
@@ -63,15 +83,15 @@ def validate_vllm_provider(
 def check_stack():
     # Preserve the ordinary import order used for the verified vendor stack.
     torch = importlib.import_module("torch")
-    vllm = importlib.import_module("vllm")
-    triton_utils = importlib.import_module("vllm.triton_utils")
     vllm_fl = importlib.import_module("vllm_fl")
-    WorkerFL = importlib.import_module("vllm_fl.worker.worker").WorkerFL
+    vllm = importlib.import_module("vllm")
     current_platform = importlib.import_module("vllm.platforms").current_platform
+    triton_utils = importlib.import_module("vllm.triton_utils")
+    WorkerFL = importlib.import_module("vllm_fl.worker.worker").WorkerFL
     flag_gems = importlib.import_module("flag_gems")
     triton = importlib.import_module("triton")
 
-    if metadata.version("flagtree") != STACK["flagtree"]["version"]:
+    if metadata.version("flagtree") != VERSIONS["flagtree"]:
         raise RuntimeError("CI image must provide the reviewed PPU FlagTree wheel")
     expected_triton = metadata.distribution("flagtree").locate_file(
         "triton/__init__.py"
@@ -79,16 +99,20 @@ def check_stack():
     if Path(triton.__file__).resolve() != Path(expected_triton).resolve():
         raise RuntimeError("Active Triton must be supplied by the reviewed FlagTree")
     gems_distribution = metadata.distribution("flag-gems")
-    if gems_distribution.version != STACK["flaggems"]["version"]:
+    if gems_distribution.version != VERSIONS["flag-gems"]:
         raise RuntimeError(
-            "FlagGems wheel version does not match the pinned upstream commit: "
+            "FlagGems wheel version does not match the pinned Runtime: "
             + gems_distribution.version
         )
     expected_gems = gems_distribution.locate_file("flag_gems/__init__.py")
     if Path(flag_gems.__file__).resolve() != Path(expected_gems).resolve():
         raise RuntimeError("Active FlagGems must come from the installed wheel")
-    if triton.__version__ != "3.6.0":
-        raise RuntimeError("Active Triton module must come from PPU FlagTree 3.6")
+    if triton.__version__ != VERSIONS["triton"]:
+        raise RuntimeError(
+            "Active Triton module must be "
+            + VERSIONS["triton"]
+            + " from the pinned FlagTree"
+        )
     vllm_distribution = metadata.distribution("vllm")
     vllm_provider = validate_vllm_provider(
         vllm.__version__,
@@ -98,6 +122,9 @@ def check_stack():
     )
     if getattr(current_platform, "vendor_name", None) != "thead":
         raise RuntimeError("Normal FL registration did not activate the THead platform")
+    for name in ("torchvision", "numpy"):
+        if metadata.version(name) != VERSIONS[name]:
+            raise RuntimeError("CI stack requires " + name + " " + VERSIONS[name])
     if not torch.cuda.is_available() or torch.cuda.device_count() != 4:
         raise RuntimeError("Exactly four reserved PPU devices must be visible")
     if (
@@ -112,7 +139,7 @@ def check_stack():
         "triton_origin": triton.__file__,
         "flaggems_version": gems_distribution.version,
         "flaggems_origin": flag_gems.__file__,
-        "flaggems_commit": STACK["flaggems"]["commit"],
+        "flaggems_source": STACK["flaggems"].get("source", "unrecorded"),
         "vllm_triton_utils_origin": triton_utils.__file__,
         "vllm_version": vllm.__version__,
         **vllm_provider,
@@ -123,7 +150,6 @@ def check_stack():
         "normal_import_only": True,
         "python_prefix": sys.prefix,
         "plugin_install": "ordinary wheel in isolated CI venv",
-        "upstream_declared_torch_2_13_requirement_satisfied": False,
     }
 
 

@@ -119,6 +119,8 @@ jobs:
         run: pip install pyyaml
       - name: Check NVIDIA native CUDA stack validation
         run: python -I -B .github/scripts/nvidia/test_stack.py
+      - name: Check T-Head PPU stack validation
+        run: python -I -B .github/scripts/thead/test_stack.py
       - name: Get changed files
         id: changed
         run: |

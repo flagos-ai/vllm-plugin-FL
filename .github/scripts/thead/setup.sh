@@ -1,7 +1,6 @@
 #!/bin/bash
 # Copyright 2026 FlagOS Contributors
-# The managed image supplies the fixed SDK/Torch/empty-vLLM/Gems/Tree stack
-# and runtime/test/build dependencies. Never resolve upstream Torch 2.13.
+# The managed image supplies the fixed PPU runtime and build dependencies.
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd -- "$HERE/../../.." && pwd)"
@@ -23,7 +22,8 @@ export TORCH_DEVICE_BACKEND_AUTOLOAD=1
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_VENDOR="" VLLM_TARGET_DEVICE=empty
 export VLLM_PLUGINS=fl GEMS_VENDOR=thead USE_FLAGGEMS=1
-unset FL_BACKEND PYTHONPATH PYTHONHOME
+# The Runtime sets PYTHONPATH to its active FlagTree compiler.
+unset FL_BACKEND PYTHONHOME
 export HOME="$WORK/home" XDG_CACHE_HOME="$WORK/cache"
 export FLAGGEMS_CACHE_DIR="$WORK/cache/flaggems" TRITON_CACHE_DIR="$WORK/cache/triton"
 export HF_HOME="$WORK/cache/huggingface"
@@ -65,6 +65,17 @@ if site.resolve() == base:
 (site / "00_thead_image_site.pth").write_text(str(base) + "\n")
 PY
 
+# The image's vLLM console script uses the base interpreter. Serving tests
+# must resolve the same plugin wheel as the Python API in the child venv.
+cat > "$VIRTUAL_ENV/bin/vllm" <<EOF
+#!$PY
+from vllm.entrypoints.cli.main import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+EOF
+chmod +x "$VIRTUAL_ENV/bin/vllm"
+
 # Build and install an ordinary wheel of this checkout in the fresh venv only.
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir wheel \
   --no-index --no-deps --no-build-isolation --wheel-dir "$WORK/wheels" "$REPO"
@@ -78,12 +89,38 @@ print(wheels[0])
 PY
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
   --ignore-installed --no-index --no-deps --no-compile "$(cat "$WORK/plugin-wheel.txt")"
+# Bind the installed plugin to the wheel that was just built: a dist-info without
+# WHEEL/RECORD or with another version means the payload drifted from the artifact.
+"$PY" -I -B - "$(cat "$WORK/plugin-wheel.txt")" <<'PY'
+import importlib.metadata as metadata
+import json
+import sys
+from pathlib import Path
+
+wheel = Path(sys.argv[1])
+expected = wheel.name.split("-")[1]
+distribution = metadata.distribution("vllm-plugin-fl")
+root = Path(distribution._path)
+for name in ("WHEEL", "RECORD"):
+    if not (root / name).is_file():
+        raise RuntimeError(f"Installed plugin must ship its {name} file")
+if distribution.version != expected:
+    raise RuntimeError(
+        f"Installed plugin {distribution.version} does not match wheel {expected}"
+    )
+direct = root / "direct_url.json"
+if direct.is_file():
+    info = json.loads(direct.read_text())
+    if info.get("dir_info", {}).get("editable"):
+        raise RuntimeError("Editable plugin install is not allowed in CI")
+print(f"plugin payload verified: {expected} from {wheel.name}")
+PY
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
   "pytest-xdist>=3.0.0" \
   "pytest-cov>=7.0.0" \
   "pytest-json-report>=1.5.0"
 "$PY" -I -B "$HERE/../install_flaggems_vllm.py"
-"$PY" -I -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
+"$PY" -P -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   for name in THEAD_CI_WORK_DIR THEAD_CI_PYTHON VIRTUAL_ENV PATH HOME XDG_CACHE_HOME \
     FLAGGEMS_CACHE_DIR TRITON_CACHE_DIR HF_HOME TMPDIR PIP_CONFIG_FILE \
@@ -91,5 +128,9 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     VLLM_VENDOR VLLM_TARGET_DEVICE VLLM_WORKER_MULTIPROC_METHOD; do
     printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
   done
+  # Subsequent Actions steps use sh and do not load the Runtime's BASH_ENV.
+  if [[ -n "${PYTHONPATH:-}" ]]; then
+    printf 'PYTHONPATH=%s\n' "$PYTHONPATH" >> "$GITHUB_ENV"
+  fi
 fi
 echo "THead CI Python: $PY"
