@@ -896,7 +896,9 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        # vLLM 0.32 moved the flag into ``aux_output_config``.
+        aux_output_config = getattr(self.vllm_config, "aux_output_config", None)
+        if getattr(aux_output_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -1641,7 +1643,14 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    try:
+        from vllm.model_executor.layers.batch_invariant import (
+            init_batch_invariance,
+        )
+    except ImportError:  # vLLM >= 0.32 moved it under determinism
+        from vllm.model_executor.determinism.batch_invariant import (
+            init_batch_invariance,
+        )
 
     init_batch_invariance()
     override_envs_for_eplb(

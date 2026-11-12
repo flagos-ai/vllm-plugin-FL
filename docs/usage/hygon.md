@@ -33,8 +33,11 @@ Keep the image's vendor Torch, FlagTree/Triton, and
 [Hygon dispatch policy](../../vllm_fl/dispatch/config/hygon.yaml) together.
 The empty vLLM wheel omits `vllm._C` and `vllm._C_stable_libtorch`; do not copy
 extensions from an older installation. The image enables `USE_FLAGGEMS=1`,
-`GEMS_VENDOR=hygon`, and `VLLM_PLUGINS=fl`. It selects ModelRunnerFL because
-the upstream V2 runner requires a UVA interface unavailable on this backend.
+`GEMS_VENDOR=hygon`, and `VLLM_PLUGINS=fl`, and does not pin
+`VLLM_USE_V2_MODEL_RUNNER`: 0.32 defaults to the V2 runner and the plugin keeps
+that default. The empty build has no `_C::get_cuda_view_from_cpu_tensor`, so the
+plugin reports UVA as unavailable and V2 takes upstream's own `NonUvaBuffer`
+fallback instead of selecting `ModelRunnerFL`.
 
 ## 1. Check the host and select two idle DCUs
 
@@ -318,8 +321,14 @@ TP1 eager, TP2 eager, TP1 graph (`PIECEWISE` 5 + `FULL` decode 4 graphs), and
 `vllm serve` with `/v1/models`, `/v1/completions`, and
 `/v1/chat/completions`. The unit suite reports 1912 passed / 194 skipped.
 
-Not yet ported: the V2 model runner, Ascend dense hybrid KV cache, routed-expert
-return, and XD-RoPE. Graph-mode performance has not been tuned on this stack.
+The V2 runner runs vLLM's own `GPUModelRunner`; the plugin adds no V2 runner of
+its own. A 27B TP2 serve on two BW1100 DCUs captured `PIECEWISE` 11/11 and
+`FULL` 11/11 graphs (1.31 GiB of graph memory) and passed the text, image and
+mixed request checks.
+
+Not exercised on this stack: Ascend dense hybrid KV cache (Ascend-only),
+`enable_return_routed_experts`, XD-RoPE models, and GDN / mamba hybrid models on
+the V2 runner. Graph-mode performance has not been tuned on this stack.
 
 Not supported / not verified on this stack:
 
