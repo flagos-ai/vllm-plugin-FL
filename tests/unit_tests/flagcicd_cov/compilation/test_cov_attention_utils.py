@@ -76,8 +76,24 @@ def mm_stub(monkeypatch):
     for parent in _MM_PARENTS:
         if parent not in sys.modules:
             monkeypatch.setitem(sys.modules, parent, types.ModuleType(parent))
+    # ``import a.b as m`` binds through getattr(parent, "b") first (bpo-30024),
+    # so a sys.modules setitem alone leaves a previously-imported real leaf
+    # unreachable-only-by-luck: whenever another test module imports the
+    # vllm_fl.worker chain first, the real leaf lands in sys.modules and the
+    # parent attribute shadows the stub. Rebinding the parent package attribute
+    # keeps the stub the copy this fixture's assertions observe; monkeypatch
+    # restores the previous value (or removes the stub) afterwards.
+    monkeypatch.setattr(
+        sys.modules["vllm.model_executor.layers.attention"],
+        "mm_encoder_attention",
+        fake_mm,
+        raising=False,
+    )
     monkeypatch.setitem(sys.modules, _MM_PATH, fake_mm)
     monkeypatch.setitem(sys.modules, "vllm.vllm_flash_attn", fake_fa)
+    monkeypatch.setattr(
+        fake_fa, "flash_attn_varlen_func", flash_attn_varlen_func, raising=False
+    )
     yield fake_mm
 
 
