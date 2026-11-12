@@ -85,7 +85,9 @@ def test_gdn_binds_raw_pages_as_dense_states():
 def test_dense_allocator_preserves_pool_offsets_and_aliases(num_blocks, layer_count):
     from vllm.v1.kv_cache_interface import KVCacheTensor
 
-    from vllm_fl.kv_cache.ascend.hybrid import allocate_dense_hybrid_cache
+    from vllm_fl.worker.model_runner import (
+        _allocate_dense_hybrid_cache as allocate_dense_hybrid_cache,
+    )
 
     page_bytes = 140
     pool_bytes = num_blocks * page_bytes

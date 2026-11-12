@@ -37,7 +37,6 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
 
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]
-    # Device-specific compilation adapters belong to vendor backends.
     return gems_silu_and_mul(x1, x2)
 
 

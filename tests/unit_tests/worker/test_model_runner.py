@@ -386,8 +386,6 @@ def test_cache_initialization_preserves_native_and_dense_binding(
     from contextlib import nullcontext
 
     module = import_module("vllm_fl.worker.model_runner")
-    hybrid = import_module("vllm_fl.kv_cache.ascend.hybrid")
-    config = object()
     caches = {"layer": torch.zeros(1), "mamba": torch.zeros(1)}
     mapped = {"layer": torch.ones(1)}
     native_allocator = MagicMock(return_value=dict(caches))
@@ -395,7 +393,7 @@ def test_cache_initialization_preserves_native_and_dense_binding(
     mapper = MagicMock(return_value=mapped)
     binder = MagicMock()
     monkeypatch.setattr(module, "allocate_kv_cache", native_allocator)
-    monkeypatch.setattr(hybrid, "allocate_dense_hybrid_cache", dense_allocator)
+    monkeypatch.setattr(module, "_allocate_dense_hybrid_cache", dense_allocator)
     monkeypatch.setattr(module, "map_kv_caches_to_kernel_blocks", mapper)
     monkeypatch.setattr(module, "bind_kv_cache", binder)
     runner = SimpleNamespace(

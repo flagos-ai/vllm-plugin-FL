@@ -690,10 +690,14 @@ class WorkerFL(WorkerBase):
         """Construct the platform's model runner; subclasses override this."""
         if self.use_v2_model_runner:
             if current_platform.device_type == "gcu":
-                from vllm_fl.patches.gcu_v2_buffers import install_gcu_v2_buffers
+                from vllm_fl.dispatch.backends.vendor.gcu.v2_buffers import (
+                    install_gcu_v2_buffers,
+                )
 
                 install_gcu_v2_buffers()
-                from vllm_fl.patches.gcu_v2_runtime import install_gcu_v2_runtime
+                from vllm_fl.dispatch.backends.vendor.gcu.v2_runtime import (
+                    install_gcu_v2_runtime,
+                )
 
                 install_gcu_v2_runtime()
             if self.vllm_config.is_mm_encoder_only:
