@@ -177,7 +177,7 @@ if VLLM_VENDOR == "metax":
     ext_modules.append(
         CppExtension(
             name="vllm_fl._metax_host_memory",
-            sources=[str(ROOT_DIR / "csrc/metax/host_memory.cpp")],
+            sources=["csrc/metax/host_memory.cpp"],
             include_dirs=[str(maca_root / "include")],
             library_dirs=[str(maca_root / "lib")],
             libraries=["mcruntime"],
