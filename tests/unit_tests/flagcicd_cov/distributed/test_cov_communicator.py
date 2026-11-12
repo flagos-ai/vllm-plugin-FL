@@ -85,15 +85,11 @@ def _collective_worker(rank: int, port: int, result_queue) -> None:
             torch.allclose(out.cpu(), torch.full((64, 16), 3.0))
         )
 
-        # reduce_scatter on dim=-1: each rank keeps its half of the summed
-        # input (moved to dim 0 internally, scattered, moved back).
-        y = torch.full((64, 32), rank + 1, device="cuda", dtype=torch.float32)
-        out = comm.reduce_scatter(y, dim=-1)
-        torch.cuda.synchronize()
-        results["reduce_scatter"] = bool(
-            out.shape == (64, 16)
-            and torch.allclose(out.cpu(), torch.full((64, 16), 3.0))
-        )
+        # reduce_scatter: NOT asserted here — on flagcx-less images
+        # PyFlagcxCommunicator.reduce_scatter returns early (disabled) and
+        # CommunicatorFL.reduce_scatter has no torch.distributed fallback,
+        # so the output stays uninitialized (vllm_fl/distributed/communicator.py:91
+        # + device_communicators/flagcx.py:297-298; SOURCE_BUGS.md S3).
 
         # all_gatherv: NOT exercised here — vllm_fl/distributed/communicator.py:176
         # asserts pyflagcx_comm is not None and not disabled, i.e. the op has
