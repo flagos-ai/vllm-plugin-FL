@@ -22,6 +22,7 @@ surface the developer tests use for the prefill selector.
 
 import torch
 
+from vllm.config import AttentionConfig
 from vllm.config.vllm import set_current_vllm_config
 
 from vllm_fl.attention.sparse_indexer import _LAYER_OPERATIONS
@@ -62,6 +63,7 @@ class FakeCompilationConfig:
         self.custom_ops = ["none"]
         self.disabled_custom_ops = set()
         self.mode = "EAGER"
+        self.backend = "eager"
 
 
 def vllm_namespace(hf_config, max_model_len=64):
@@ -75,13 +77,7 @@ def vllm_namespace(hf_config, max_model_len=64):
             dtype=torch.bfloat16,
             rswa_window=None,
         ),
-        attention_config=SimpleNamespace(
-            sparse_mla_prefill_workspace_factor=2,
-            mla_prefill_backend=None,
-            use_non_causal=False,
-            backend=None,
-            backend_per_kind=None,
-        ),
+        attention_config=AttentionConfig(),
         compilation_config=FakeCompilationConfig(),
         parallel_config=SimpleNamespace(
             prefill_context_parallel_size=1,

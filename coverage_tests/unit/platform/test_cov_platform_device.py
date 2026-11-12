@@ -74,14 +74,11 @@ class TestCapabilityAndUuid:
     ):
         """supports_fp8 enforces each vendor's minimum DeviceCapability."""
         PlatformFL.vendor_name = vendor_name
-        if capability is None:
-            PlatformFL.get_device_capability = classmethod(
-                lambda cls, device_id=0: None
-            )
-        else:
-            PlatformFL.get_device_capability = classmethod(
-                lambda cls, device_id=0, cap=capability: cap
-            )
+        restore_identity.setattr(
+            PlatformFL,
+            "get_device_capability",
+            classmethod(lambda cls, device_id=0: capability),
+        )
         assert PlatformFL.supports_fp8() is expected
 
     def test_fp8_dtype_is_e4m3fn_for_nvidia(self, restore_identity):

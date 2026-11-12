@@ -225,7 +225,7 @@ class TestDenseAttentionConstruction:
         assert attn.scaling == (QK_NOPE + QK_ROPE) ** -0.5
         # Gated MLA (elementwise default) builds the per-head gate GEMM.
         assert attn.gated_mla is True
-        assert list(attn.linear_gate.output_sizes) == [N_HEADS * V_HEAD]
+        assert attn.linear_gate.output_size == N_HEADS * V_HEAD
         # MLA core projections exist.
         assert attn.q_a_proj is not None
         assert attn.kv_a_proj_with_mqa is not None
@@ -255,7 +255,7 @@ class TestDenseAttentionConstruction:
         with set_current_vllm_config(cfg):
             attn = self._build(cfg, hf)
         assert attn.gate_projection_size_per_head == 1
-        assert list(attn.linear_gate.output_sizes) == [N_HEADS]
+        assert attn.linear_gate.output_size == N_HEADS
 
     def test_unknown_gating_type_is_rejected(
         self, single_rank_tp, restored_layer_registries
