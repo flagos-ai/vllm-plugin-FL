@@ -539,3 +539,55 @@ def test_gcu_linker_adapter_preserves_unrelated_failures(device, variant):
     with pytest.raises(type(failure)) as caught:
         heuristics.CachingAutotuner(device)._precompile_config(failure)
     assert caught.value is failure
+
+
+@pytest.mark.parametrize("shape", [(2, 16), (3, 2, 24)])
+def test_gcu_silu_fullgraph_keeps_provider_outside_dynamo(monkeypatch, shape):
+    import torch
+    import torch.nn.functional as functional
+
+    from vllm_fl.dispatch.backends.vendor.gcu.impl import activation
+
+    calls = []
+
+    def provider(gate, up):
+        assert not torch.compiler.is_compiling()
+        calls.append(tuple(gate.shape))
+        return functional.silu(gate) * up
+
+    monkeypatch.setattr(activation, "_compiled_silu", provider)
+    compiled = torch.compile(
+        lambda inputs: activation.silu_and_mul_gcu(None, inputs),
+        backend="eager",
+        fullgraph=True,
+        dynamic=True,
+    )
+    inputs = torch.randn(shape)
+    with torch.inference_mode():
+        actual = compiled(inputs)
+    gate, up = inputs.chunk(2, dim=-1)
+    torch.testing.assert_close(actual, functional.silu(gate) * up)
+    assert calls == [tuple(gate.shape)]
+
+
+@pytest.mark.parametrize("limits", [(65536, 65536, 65536), (32, 1, 1)])
+def test_gcu_silu_grid_config_is_private_and_preserves_smaller_limits(limits):
+    from dataclasses import make_dataclass
+
+    from vllm_fl.dispatch.backends.vendor.gcu.impl import activation
+
+    config_type = make_dataclass("Config", ["max_grid_size", "max_tile_size"])
+
+    class Kernel:
+        def __init__(self, fx, scalar_fn, config):
+            self.fx, self._scalar_fn, self.config = fx, scalar_fn, config
+
+    original = Kernel(object(), object(), config_type(limits, 512))
+    adapted = activation._gcu_pointwise_kernel(original)
+    assert adapted is not original
+    assert adapted.config is not original.config
+    assert original.config.max_grid_size == limits
+    assert adapted.config.max_grid_size == tuple(min(x, 65535) for x in limits)
+    assert adapted.config.max_tile_size == 512
+    assert adapted.fx is original.fx
+    assert adapted._scalar_fn is original._scalar_fn

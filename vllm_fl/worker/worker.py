@@ -729,6 +729,10 @@ class WorkerFL(WorkerBase):
             self._scoped_allocator_max_split(max_split_size_mb=20),
         ):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
+            if self.use_v2_model_runner:
+                from vllm_fl.dispatch import warmup_cached_ops
+
+                warmup_cached_ops()
 
         if has_ec_transfer():
             get_ec_transfer().start_worker_services()

@@ -196,3 +196,40 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     PlatformFL.check_and_update_config(vllm_config)
 
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_load_model_warms_v2_dispatch_after_model_imports(monkeypatch, use_v2):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    import vllm_fl.dispatch as dispatch
+    from vllm_fl.worker import worker as worker_module
+
+    events = []
+    monkeypatch.setattr(
+        dispatch, "warmup_cached_ops", lambda: events.append("dispatch_warmup")
+    )
+    monkeypatch.setattr(worker_module, "has_ec_transfer", lambda: False)
+    monkeypatch.setattr(
+        worker_module, "set_current_vllm_config", lambda config: nullcontext()
+    )
+    monkeypatch.setattr(
+        worker_module, "set_torch_threads_for_runtime", lambda: events.append("runtime")
+    )
+    worker = SimpleNamespace(
+        use_v2_model_runner=use_v2,
+        vllm_config=SimpleNamespace(weight_transfer_config=None),
+        _maybe_get_memory_pool_context=lambda **kw: nullcontext(),
+        _scoped_allocator_max_split=lambda **kw: nullcontext(),
+        model_runner=SimpleNamespace(
+            load_model=lambda **kw: events.append("model_loaded")
+        ),
+    )
+
+    worker_module.WorkerFL.load_model(worker)
+
+    expected = ["model_loaded"]
+    if use_v2:
+        expected.append("dispatch_warmup")
+    assert events == expected + ["runtime"]

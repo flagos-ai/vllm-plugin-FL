@@ -217,6 +217,12 @@ def test_enflame_ci_does_not_mask_known_failures_or_expand_defaults():
     assert "TORCHINDUCTOR_EMULATE_PRECISION_CASTS" not in config.env_defaults
     overrides = config.get_device_case_overrides("qwen3_6", "35b_a3b_tp2_graph")
     assert overrides["llm"]["gpu_memory_utilization"] == 0.90
+    cfg = ModelConfig.load(
+        "qwen3_6", "35b_a3b_tp2_graph", platform="enflame", device="s60"
+    )
+    assert cfg.engine_kwargs()["max_num_seqs"] == 64
+    args = cfg.serve_args()
+    assert args[args.index("--max-num-seqs") + 1] == "64"
     assert "serve" not in overrides
     for phase in ("pr", "nightly"):
         tasks = config.device_tests["s60"]["tests"]["e2e"][phase]
