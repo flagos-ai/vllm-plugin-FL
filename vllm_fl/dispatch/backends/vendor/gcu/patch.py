@@ -5,6 +5,7 @@ import logging
 from .impl.bilinear_pos_embed import apply_bilinear_pos_embed_gcu_patch
 from .impl.causal_conv1d import apply_causal_conv1d_gcu_patch
 from .impl.chunk_delta_h import apply_chunk_delta_h_gcu_patch
+from .impl.fla_autotune import apply_fla_autotune_gcu_patch
 from .impl.fla_grid import apply_fla_grid_gcu_patch
 from .impl.fused_recurrent_packed_decode import (
     apply_fused_recurrent_packed_decode_gcu_patch,
@@ -37,6 +38,7 @@ def apply_gcu_patches() -> None:
     apply_bilinear_pos_embed_gcu_patch()
     apply_causal_conv1d_gcu_patch()
     apply_chunk_delta_h_gcu_patch()
+    apply_fla_autotune_gcu_patch()
     apply_fla_grid_gcu_patch()
     apply_sampler_cpu_detour()
     apply_penalties_gcu_patch()

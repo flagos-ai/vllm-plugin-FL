@@ -43,7 +43,9 @@ NUM_WARPS = [2, 4] if is_nvidia_hopper else [2, 4, 8]
     ],
     key=["H", "K", "V", "BT"],
 )
-@triton.jit(do_not_specialize=["T"])
+# Grid extents only decode flattened program IDs. Keeping them dynamic avoids
+# recompiling identical math for every CUDA Graph batch size during warmup.
+@triton.jit(do_not_specialize=["T", "GCU_NT", "GCU_BH"])
 def chunk_fwd_kernel_o(
     q,
     k,
@@ -62,8 +64,8 @@ def chunk_fwd_kernel_o(
     BT: tl.constexpr,
     BK: tl.constexpr,
     BV: tl.constexpr,
-    GCU_NT: tl.constexpr,
-    GCU_BH: tl.constexpr,
+    GCU_NT,
+    GCU_BH,
     USE_G: tl.constexpr,
     IS_VARLEN: tl.constexpr,
 ):

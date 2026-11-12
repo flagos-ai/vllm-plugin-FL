@@ -44,6 +44,7 @@ device_overrides:
       # Do not extend this policy to other models without validation.
       compilation_config:
         custom_ops: ["none", "+SiluAndMul"]
+        cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32]
 
 env_defaults:
   VLLM_PLUGINS: "fl"

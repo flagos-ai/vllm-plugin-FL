@@ -149,7 +149,10 @@ def test_enflame_s60_compilation_config_reaches_engine_and_cli(case, monkeypatch
     monkeypatch.delenv("FL_TEST_PLATFORM", raising=False)
     monkeypatch.delenv("FL_TEST_DEVICE", raising=False)
     cfg = ModelConfig.load("qwen3_6", case, platform="enflame", device="s60")
-    expected = {"custom_ops": ["none", "+SiluAndMul"]}
+    expected = {
+        "custom_ops": ["none", "+SiluAndMul"],
+        "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32],
+    }
     assert cfg.engine_kwargs()["compilation_config"] == expected
     args = cfg.serve_args()
     assert json.loads(args[args.index("--compilation-config") + 1]) == expected
@@ -168,7 +171,8 @@ def test_enflame_s60_compilation_config_inherits_runner_environment(case, monkey
     explicit = ModelConfig.load("qwen3_6", case, platform="enflame", device="s60")
     assert inherited.engine_kwargs() == explicit.engine_kwargs()
     assert inherited.engine_kwargs()["compilation_config"] == {
-        "custom_ops": ["none", "+SiluAndMul"]
+        "custom_ops": ["none", "+SiluAndMul"],
+        "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32],
     }
     assert inherited.serve_args() == explicit.serve_args()
 
