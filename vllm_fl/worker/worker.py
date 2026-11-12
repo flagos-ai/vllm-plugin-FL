@@ -61,8 +61,11 @@ try:  # pragma: no cover - vLLM version compat
         prepare_communication_buffer_for_model as _prepare_comm_buffer,
     )
 except ImportError:  # vLLM >= 0.28 dropped the symbol
+
     def _prepare_comm_buffer(*args, **kwargs):
         return None
+
+
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
@@ -192,6 +195,29 @@ if TYPE_CHECKING:
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 
+def _is_hybrid_kv_model(vllm_config: VllmConfig) -> bool:
+    """Whether the model mixes linear-attention layers with full attention.
+
+    Kunlunxin stores the attention KV cache of such models (Qwen3-Next /
+    Qwen3.5 / Qwen3.6) in the fused ``[2, blocks, ...]`` layout that only the
+    fused paged write path fills correctly.
+    """
+    cache_config = getattr(vllm_config, "cache_config", None)
+    if getattr(cache_config, "mamba_cache_mode", "none") in ("align", "all"):
+        return True
+    model_config = getattr(vllm_config, "model_config", None)
+    try:
+        if getattr(model_config, "is_hybrid", False):
+            return True
+    except Exception:
+        # Some model configs cannot resolve is_hybrid before initialization.
+        # Fall back to inspecting the Hugging Face layer types below.
+        pass
+    hf_config = getattr(model_config, "hf_text_config", None)
+    layer_types = getattr(hf_config, "layer_types", None) or ()
+    return any(layer_type != "full_attention" for layer_type in layer_types)
+
+
 def _apply_worker_vendor_patches() -> None:
     """Apply patches that must execute inside every worker process."""
     if getattr(current_platform, "vendor_name", "") != "iluvatar":
@@ -280,6 +306,19 @@ class WorkerFL(WorkerBase):
         # in PlatformFL.check_and_update_config, so the value seen here is
         # already the runner this process is going to build.
         self.use_v2_model_runner = vllm_config.use_v2_model_runner
+
+        # Hybrid models (mamba/linear attention + full attention) keep the
+        # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
+        # Writing it through the split reshape_and_cache path drops each token
+        # into the *previous* block, so the first decode step reads a block that
+        # was never written: the logits come out entirely NaN and sampling
+        # degenerates to token id 0 ("!" in the Qwen tokenizer) right after one
+        # correct token.  The fused paged write path already exists behind
+        # USE_RESHAPE_AND_CACHE_FLASH; default it on for such models.
+        if getattr(
+            current_platform, "vendor_name", ""
+        ) == "kunlunxin" and _is_hybrid_kv_model(vllm_config):
+            os.environ.setdefault("USE_RESHAPE_AND_CACHE_FLASH", "1")
 
         _initialize_fl_runtime(self.rank)
 
@@ -458,8 +497,17 @@ class WorkerFL(WorkerBase):
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
             parallel_config = self.parallel_config
+            # vLLM slices physical IDs for non-CUDA-like platforms per DP rank.
+            # A local rank already indexes into this slice. A full device list
+            # (e.g. CUDA --device-ids) still requires the DP offset.
+            assigned_ids = parallel_config.assigned_physical_gpu_ids
+            local_world_size = parallel_config.local_world_size
+            rank_slice_assigned = (
+                assigned_ids is not None and len(assigned_ids) == local_world_size
+            )
             if (
-                parallel_config.distributed_executor_backend
+                not rank_slice_assigned
+                and parallel_config.distributed_executor_backend
                 not in ("ray", "external_launcher")
                 and parallel_config.data_parallel_backend != "ray"
                 and parallel_config.nnodes_within_dp == 1
@@ -469,24 +517,17 @@ class WorkerFL(WorkerBase):
                 if dp_local_rank is None:
                     dp_local_rank = self.parallel_config.data_parallel_index
 
-                tp_pp_world_size = (
-                    self.parallel_config.pipeline_parallel_size
-                    * self.parallel_config.tensor_parallel_size
-                )
-
-                # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
-                self.local_rank += dp_local_rank * tp_pp_world_size
+                self.local_rank += dp_local_rank * local_world_size
 
             # Publish the logical-to-physical mapping for topology queries
             # such as NIC affinity and P2P checks.
-            assigned_physical_gpu_ids = parallel_config.assigned_physical_gpu_ids
-            if assigned_physical_gpu_ids is not None:
+            if assigned_ids is not None:
                 from vllm.platforms.interface import set_assigned_physical_gpu_ids
 
-                set_assigned_physical_gpu_ids(assigned_physical_gpu_ids)
-                assert self.local_rank < len(assigned_physical_gpu_ids), (
+                set_assigned_physical_gpu_ids(assigned_ids)
+                assert self.local_rank < len(assigned_ids), (
                     f"local_rank {self.local_rank} is out of bounds for "
-                    f"assigned_physical_gpu_ids {assigned_physical_gpu_ids}"
+                    f"assigned_physical_gpu_ids {assigned_ids}"
                 )
                 # NOTE(patch pr45026): local_world_size is derived from
                 # parallel_config.nnodes, which is only set for the "mp"
@@ -500,12 +541,10 @@ class WorkerFL(WorkerBase):
                     "ray",
                     "external_launcher",
                 ):
-                    assert self.parallel_config.local_world_size <= len(
-                        assigned_physical_gpu_ids
-                    ), (
-                        f"local_world_size ({self.parallel_config.local_world_size})"
+                    assert local_world_size <= len(assigned_ids), (
+                        f"local_world_size ({local_world_size})"
                         " exceeds assigned_physical_gpu_ids count "
-                        f"({len(assigned_physical_gpu_ids)})"
+                        f"({len(assigned_ids)})"
                     )
             else:
                 assert self.local_rank < torch.accelerator.device_count(), (
