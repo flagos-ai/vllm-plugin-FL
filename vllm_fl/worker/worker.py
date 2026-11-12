@@ -166,6 +166,8 @@ def _install_v2_runner_compat() -> None:
         if torch.cuda.is_available():
             return
     except Exception:
+        # torch_musa raises instead of returning False on some builds; a
+        # raising stub means CUDA is unusable, so fall through to MUSA.
         pass
 
     for cuda_name, musa_name in _CUDA_TO_MUSA_FOR_V2.items():
@@ -180,9 +182,6 @@ def _install_v2_runner_compat() -> None:
     _install_v2_dispatch_warmup()
 
 
-_V2_DISPATCH_WARMUP_INSTALLED = False
-
-
 def _install_v2_dispatch_warmup() -> None:
     """Resolve every dispatch op before the first compiled V2 forward.
 
@@ -194,12 +193,10 @@ def _install_v2_dispatch_warmup() -> None:
 
     Remove this together with ``_install_v2_runner_compat``.
     """
-    global _V2_DISPATCH_WARMUP_INSTALLED
-    if _V2_DISPATCH_WARMUP_INSTALLED:
-        return
-    _V2_DISPATCH_WARMUP_INSTALLED = True
-
     from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+
+    if getattr(GPUModelRunner._dummy_run, "_fl_dispatch_warmup", False):
+        return
 
     orig_dummy_run = GPUModelRunner._dummy_run
     warmed = False
@@ -213,6 +210,7 @@ def _install_v2_dispatch_warmup() -> None:
             warmup_cached_ops()
         return orig_dummy_run(self, *args, **kwargs)
 
+    _dummy_run_with_dispatch_warmup._fl_dispatch_warmup = True
     GPUModelRunner._dummy_run = _dummy_run_with_dispatch_warmup
 
 
