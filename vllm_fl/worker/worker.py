@@ -667,7 +667,7 @@ class WorkerFL(WorkerBase):
         # so we must warmup here to ensure self._impl is populated before
         # Dynamo starts tracing. Without this, DispatchOp.__call__ hits the
         # is_compiling() guard with self._impl == None.
-        if current_platform.vendor_name == "amd":
+        if getattr(current_platform, "vendor_name", None) == "amd":
             from vllm_fl.dispatch import warmup_cached_ops
 
             warmup_cached_ops()

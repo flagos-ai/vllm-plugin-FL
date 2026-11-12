@@ -23,11 +23,11 @@ from __future__ import annotations
 import pytest
 
 # ---------------------------------------------------------------------------
-# Module-level skip when flag_gems is absent (CI without FlagGems installed).
+# Module-level skip when flag_gems.ops.clone is absent (CI without PR #8893).
 # ---------------------------------------------------------------------------
-flag_gems = pytest.importorskip(
-    "flag_gems",
-    reason="flag_gems not installed; install >= commit 9a51bed to run",
+pytest.importorskip(
+    "flag_gems.ops.clone",
+    reason="flag_gems.ops.clone not found; install >= commit 9a51bed to run",
 )
 
 
