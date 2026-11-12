@@ -83,6 +83,42 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
 
 
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+def test_hygon_preserves_upstream_runner_selection(monkeypatch, requested):
+    """Hygon follows upstream's default (V2) and never pins the env var.
+
+    Unlike the vendors above, Hygon runs the upstream V2 runner, so
+    ``register()`` must leave ``VLLM_USE_V2_MODEL_RUNNER`` untouched: unset
+    stays unset (upstream picks V2), and explicit requests are honoured.
+    """
+    import os
+    from types import SimpleNamespace
+
+    import vllm_fl
+    import vllm_fl.utils
+
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    # Stub out the real vendor hooks: applying the Hygon patches would rebind
+    # process-global vLLM helpers and leak state into other tests.
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
+    monkeypatch.setattr(
+        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="hygon")
+    )
+
+    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    if requested is None:
+        assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
+    else:
+        assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == requested
+
+
 @pytest.mark.parametrize(
     "device_type,vendor,error_pattern",
     [

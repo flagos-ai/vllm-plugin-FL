@@ -13,10 +13,19 @@ def apply_hygon_patches():
     """Apply Hygon patches that must run before model construction.
 
     Cached so the patches run once per process. ``lru_cache`` does not cache
-    exceptions, so a failed call can be retried.
+    exceptions, so a failed call can be retried: every patch is attempted
+    (a failing patch does not block the others) and any failure raises.
     """
-    patch_accelerator_missing_attrs()
-    patch_uva_unavailable()
+    results = {
+        "torch.accelerator attrs": patch_accelerator_missing_attrs(),
+        "UVA unavailable": patch_uva_unavailable(),
+    }
+    failed = [name for name, ok in results.items() if not ok]
+    if failed:
+        raise RuntimeError(
+            "Hygon patches failed and will be retried on the next call: "
+            + ", ".join(failed)
+        )
 
 
 def patch_uva_unavailable() -> bool:

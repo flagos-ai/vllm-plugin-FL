@@ -170,3 +170,84 @@ def test_bias_router_preserves_v032_image_routing_through_upstream(monkeypatch):
     assert captured["bias_vl"].data_ptr() == image_bias.data_ptr()
     torch.testing.assert_close(weights, torch.full((2, 1), 0.5))
     torch.testing.assert_close(ids, torch.full((2, 1), 2, dtype=torch.int32))
+
+
+def _padding_inputs():
+    hidden_states = torch.zeros((4, 16))
+    gating_output = torch.zeros((4, 8))
+    padding_mask = torch.tensor([False, False, True, True])
+    return hidden_states, gating_output, padding_mask
+
+
+def test_fused_topk_padded_delegates_when_native_op_exists(monkeypatch):
+    """Vendors with the native padded kernel keep the upstream path."""
+    import vllm_fl.ops.fused_moe.router as router_mod
+
+    hidden_states, gating_output, padding_mask = _padding_inputs()
+    sentinel = (
+        torch.full((4, 2), 0.25),
+        torch.full((4, 2), 3, dtype=torch.int32),
+        torch.zeros((4, 2), dtype=torch.int32),
+    )
+    calls = {"upstream": 0, "kernel": 0}
+
+    def fake_upstream(**kwargs):
+        calls["upstream"] += 1
+        return sentinel
+
+    def fail_kernel(*args, **kwargs):
+        calls["kernel"] += 1
+        raise AssertionError("FL kernel must not run when delegating upstream")
+
+    monkeypatch.setattr(
+        router_mod, "_get_padding_mask", lambda num_tokens: padding_mask
+    )
+    monkeypatch.setattr(router_mod, "upstream_fused_topk", fake_upstream)
+    monkeypatch.setattr(router_mod, "_topk_softmax", fail_kernel)
+    monkeypatch.setattr(
+        torch.ops, "_moe_C", SimpleNamespace(topk_softmax=object())
+    )
+
+    result = router_mod.fused_topk(
+        hidden_states=hidden_states,
+        gating_output=gating_output,
+        topk=2,
+        renormalize=True,
+    )
+
+    assert calls == {"upstream": 1, "kernel": 0}
+    assert all(torch.equal(actual, expected) for actual, expected in zip(result, sentinel))
+
+
+def test_fused_topk_padded_zeroes_weights_without_native_op(monkeypatch):
+    """Empty builds zero the padding rows after running the FL kernel."""
+    import vllm_fl.ops.fused_moe.router as router_mod
+
+    hidden_states, gating_output, padding_mask = _padding_inputs()
+
+    def fake_upstream(**kwargs):
+        raise AssertionError("upstream path requires the missing native operator")
+
+    def fake_kernel(weights, ids, token_expert_indices, gating_output, renormalize):
+        weights.fill_(1.0)
+        ids.fill_(2)
+        return weights, ids
+
+    monkeypatch.setattr(
+        router_mod, "_get_padding_mask", lambda num_tokens: padding_mask
+    )
+    monkeypatch.setattr(router_mod, "upstream_fused_topk", fake_upstream)
+    monkeypatch.setattr(router_mod, "_topk_softmax", fake_kernel)
+    # No topk_softmax on the namespace -> hasattr() is False on every vendor.
+    monkeypatch.setattr(torch.ops, "_moe_C", SimpleNamespace())
+
+    weights, ids, token_expert_indices = router_mod.fused_topk(
+        hidden_states=hidden_states,
+        gating_output=gating_output,
+        topk=2,
+        renormalize=True,
+    )
+
+    torch.testing.assert_close(weights[:2], torch.ones((2, 2)))
+    torch.testing.assert_close(weights[2:], torch.zeros((2, 2)))
+    torch.testing.assert_close(ids, torch.full((4, 2), 2, dtype=torch.int32))
