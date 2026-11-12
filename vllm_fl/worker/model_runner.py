@@ -4,17 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-# Defer annotation evaluation so expressions like
-# ``current_platform.torch_device_fn.Stream`` in function signatures are not
-# evaluated at import time (when the platform may not be initialised yet).
 from __future__ import annotations
-
-# Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
-# module that uses them is imported.  The shim is idempotent and a no-op when
-# the installed vLLM already ships the symbols.
-from vllm_fl.patches.worker_symbols_032 import apply_worker_symbols_032
-
-apply_worker_symbols_032()
 
 import functools
 import gc
@@ -58,9 +48,12 @@ from vllm.config.model import PROCESSED_LOGPROBS_MODES
 try:  # FL: vLLM >= 0.28 slot mapping mode enum
     from vllm.v1.worker.block_table import SlotMappingMode
 except ImportError:  # pragma: no cover - older vLLM
+
     class SlotMappingMode:  # type: ignore[no-redef]
         TOKEN_TO_KV_SLOT = 0
         NONE = 1
+
+
 from vllm.distributed.ec_transfer import get_ec_transfer, has_ec_transfer
 from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.distributed.kv_transfer import get_kv_transfer_group, has_kv_transfer_group
@@ -72,13 +65,6 @@ from vllm.distributed.parallel_state import (
     get_tp_group,
     is_global_first_rank,
 )
-
-try:  # noqa: SIM105
-    from vllm.distributed.weight_transfer.sparse_nccl_engine import (
-        SparseWeightPatch,  # noqa: F401
-    )
-except ImportError:  # older vLLM
-    pass
 from vllm.forward_context import (
     BatchDescriptor,
     set_forward_context,
@@ -91,8 +77,11 @@ try:  # pragma: no cover - vLLM version compat
         prepare_communication_buffer_for_model as _prepare_comm_buffer,
     )
 except ImportError:  # vLLM >= 0.28 dropped the symbol
+
     def _prepare_comm_buffer(*args, **kwargs):
         return None
+
+
 from vllm.lora.layers import BaseLayerWithLoRA, LoRAMapping, LoRAMappingType
 from vllm.model_executor.layers.attention import Attention, MLAAttention
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
@@ -137,6 +126,7 @@ from vllm.model_executor.offloader import (
     get_offloader,
     set_offloader,
 )
+from vllm.model_executor.warmup.jit_warmup import JitWarmupRegistry
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.encoder_budget import MultiModalBudget
 from vllm.multimodal.inputs import (
@@ -183,6 +173,9 @@ from vllm.v1.attention.backends.linear_attn import (
     BailingLinearAttentionMetadataBuilder,
 )
 from vllm.v1.attention.backends.mamba2_attn import Mamba2AttentionMetadataBuilder
+from vllm.v1.attention.backends.short_conv_attn import (
+    ShortConvAttentionMetadataBuilder,
+)
 from vllm.v1.attention.backends.utils import (
     NULL_BLOCK_ID,
     create_fast_prefill_custom_backend,
@@ -201,8 +194,6 @@ from vllm.v1.kv_cache_interface import (
     KVCacheGroupSpec,
     KVCacheSpec,
     KVCacheSpecKind,
-    KVQuantMode,
-    MambaSpec,
     SlidingWindowSpec,
     UniformTypeKVCacheSpecs,
     get_kv_cache_spec_kind,
@@ -255,10 +246,6 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
-
-# NOTE: cp_utils.get_total_cp_world_size (0.28) / get_kv_cache_shard_count
-# (intermediate rename) are both absent from vLLM 0.32; nothing in this
-# module calls them, so the import is dropped rather than guarded.
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 
@@ -286,7 +273,9 @@ from vllm.v1.worker.utils import (
     allocate_kv_cache,
     bind_kv_cache,
     copy_kv_cache_blocks_inplace,
+    customize_attention_spec,
     is_residual_scattered_for_sp,
+    map_kv_caches_to_kernel_blocks,
     prepare_kernel_block_sizes,
     raise_if_nan_logits,
     sanity_check_mm_encoder_outputs,
@@ -596,6 +585,7 @@ class ExecuteModelState(NamedTuple):
 class ModelRunnerFL(
     LoRAModelRunnerMixin, KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin
 ):
+    @JitWarmupRegistry.capture
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -621,11 +611,6 @@ class ModelRunnerFL(
         self.use_ascend_attention = (
             getattr(current_platform, "vendor_name", None) == "ascend"
         )
-        self.use_ascend_hybrid_cache = False
-        if self.use_ascend_attention:
-            from vllm_fl.kv_cache.ascend.hybrid import uses_dense_hybrid_cache
-
-            self.use_ascend_hybrid_cache = uses_dense_hybrid_cache(model_config)
         self._ascend_attn_state = None
         self.graph_runtime = None
         if self.use_ascend_attention:
@@ -684,16 +669,17 @@ class ModelRunnerFL(
         # Only relevant for models using ALiBi (e.g, MPT)
         self.use_alibi = model_config.uses_alibi
 
-        self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
+        self.cascade_attn_enabled = False  # removed upstream in vLLM 0.32
         self.is_mm_prefix_lm = self.model_config.is_mm_prefix_lm
 
         # Multi-modal data support
         self.mm_registry = MULTIMODAL_REGISTRY
         self.uses_mrope = model_config.uses_mrope
-        self.uses_xdrope_dim = model_config.uses_xdrope_dim
-        self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
-            model_config
-        )
+        self.mrope_num_dims = model_config.mrope_num_dims
+        # vLLM 0.32 unifies MRoPE/XDRoPE dimensions in ModelConfig. Keep the
+        # existing FL buffer branches while using the upstream dimension probe.
+        self.uses_xdrope_dim = 0 if self.uses_mrope else self.mrope_num_dims
+        self.supports_mm_inputs = model_config.supports_multimodal_inputs
 
         if self.model_config.is_encoder_decoder:
             # Maximum length of the encoder input, only for encoder-decoder
@@ -869,6 +855,9 @@ class ModelRunnerFL(
         # FL: vLLM >= 0.28 requires these on InputBatch
         self._init_max_num_blocks = [placeholder_max_num_blocks]
         self._init_slot_mapping_modes = [SlotMappingMode.TOKEN_TO_KV_SLOT]
+        self.cp_kv_cache_interleave_size = (
+            self.parallel_config.cp_kv_cache_interleave_size
+        )
         self.input_batch = InputBatch(
             max_num_reqs=self.max_num_reqs,
             # We need to use the encoder length for encoder-decoder
@@ -878,7 +867,6 @@ class ModelRunnerFL(
             device=self.device,
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[placeholder_block_size],
-            kernel_block_sizes=[placeholder_block_size],
             max_num_blocks_per_req=[placeholder_max_num_blocks],
             num_spec_tokens=self.num_spec_tokens,
             logitsprocs=build_logitsprocs(
@@ -937,6 +925,9 @@ class ModelRunnerFL(
         self.positions = torch.zeros(
             self.max_num_tokens, dtype=torch.int64, device=self.device
         )
+        self.is_padding = torch.zeros(
+            self.max_num_tokens, dtype=torch.bool, device=self.device
+        )
         self.query_start_loc = self._make_buffer(
             self.max_num_reqs + 1, dtype=torch.int32
         )
@@ -994,7 +985,7 @@ class ModelRunnerFL(
             # 1D-RoPE.
             # See page 5 of https://arxiv.org/abs/2409.12191
             self.mrope_positions = self._make_buffer(
-                (3, self.max_num_tokens + 1), dtype=torch.int64
+                (self.mrope_num_dims, self.max_num_tokens + 1), dtype=torch.int64
             )
 
         # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
@@ -1129,6 +1120,7 @@ class ModelRunnerFL(
         self.kv_connector_output: KVConnectorOutput | None = None
         self.mamba_state_idx: dict[str, int] = {}
         self._mamba_bufs: mamba_utils.MambaBuffers | None = None
+        self._mamba_state_copy_funcs = None
         self.mamba_prev_last_scheduled_idx: CpuGpuBuffer | None = None
         if self.cache_config.mamba_cache_mode == "all" and self.num_spec_tokens > 0:
             self.mamba_prev_last_scheduled_idx = self._make_buffer(
@@ -1239,6 +1231,15 @@ class ModelRunnerFL(
             with_numpy=numpy,
         )
 
+    def _get_mamba_state_copy_funcs(self):
+        if self._mamba_state_copy_funcs is None:
+            mamba_groups = mamba_utils.get_mamba_groups(self.kv_cache_config)
+            mamba_types = {spec.mamba_type for spec in mamba_groups}
+            copy_funcs = self.model.get_mamba_state_copy_funcs(mamba_types)
+            mamba_utils.validate_mamba_state_copy_funcs(mamba_groups, copy_funcs)
+            self._mamba_state_copy_funcs = copy_funcs
+        return self._mamba_state_copy_funcs
+
     def _get_mamba_bufs(self) -> mamba_utils.MambaBuffers:
         # Only reachable on the ``mamba_cache_mode == "align"`` path.
         # The postprocess sub-object is additionally gated on spec
@@ -1248,7 +1249,7 @@ class ModelRunnerFL(
             self._mamba_bufs = mamba_utils.MambaBuffers.create(
                 max_num_reqs=self.max_num_reqs,
                 kv_cache_config=self.kv_cache_config,
-                copy_funcs=self.model.get_mamba_state_copy_func(),
+                copy_funcs=self._get_mamba_state_copy_funcs(),
                 make_buffer=self._make_buffer,
                 device=self.device,
                 with_postprocess_align=(
@@ -1323,23 +1324,6 @@ class ModelRunnerFL(
                 decode_threshold=self.reorder_batch_threshold,
             )
 
-    def _get_mamba_state_copy_funcs(self):
-        if self._mamba_state_copy_funcs is None:
-            mamba_groups = mamba_utils.get_mamba_groups(self.kv_cache_config)
-            mamba_types = {spec.mamba_type for spec in mamba_groups}
-            copy_funcs = self.model.get_mamba_state_copy_funcs(mamba_types)
-            mamba_utils.validate_mamba_state_copy_funcs(mamba_groups, copy_funcs)
-            self._mamba_state_copy_funcs = copy_funcs
-        return self._mamba_state_copy_funcs
-
-    def _prepare_padding_mask(
-        self, num_tokens_unpadded: int, num_tokens_padded: int
-    ) -> torch.Tensor:
-        padding_mask = self.is_padding[:num_tokens_padded]
-        padding_mask[:num_tokens_unpadded].fill_(False)
-        padding_mask[num_tokens_unpadded:].fill_(True)
-        return padding_mask
-
     def _init_kv_zero_meta(self) -> None:
         """One-time precomputation for _zero_block_ids.
 
@@ -1349,9 +1333,9 @@ class ModelRunnerFL(
             self.device,
             attn_groups_iter=self._kv_cache_spec_attn_group_iterator(),
             kernel_block_sizes=self._kernel_block_sizes,
-            cache_dtype=self.cache_config.cache_dtype,
             runner_only_attn_layers=self.runner_only_attn_layers,
             static_forward_context=self.compilation_config.static_forward_context,
+            num_blocks=self.kv_cache_config.num_blocks,
         )
 
     def _zero_block_ids(self, block_ids: list[int]) -> None:
@@ -1808,7 +1792,7 @@ class ModelRunnerFL(
                 input_batch=self.input_batch,
                 kv_cache_config=self.kv_cache_config,
                 forward_context=self.compilation_config.static_forward_context,
-                mamba_state_copy_funcs=self.model.get_mamba_state_copy_func(),
+                mamba_state_copy_funcs=self._get_mamba_state_copy_funcs(),
             )
 
             assert self.num_accepted_tokens_event is not None
@@ -2487,7 +2471,7 @@ class ModelRunnerFL(
             target = self.mrope_positions if self.uses_mrope else self.xdrope_positions
             target.gpu[:, :total_num_scheduled_tokens] += drift
 
-        use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
+        use_spec_decode = self.speculative_config is not None
         if not use_spec_decode:
             # NOTE(woosuk): Due to chunked prefills, the batch may contain
             # partial requests. While we should not sample any token
@@ -2514,6 +2498,15 @@ class ModelRunnerFL(
                 num_draft_tokens[req_idx] = draft_len
                 if num_scheduled_tokens[req_idx] == draft_len + 1:
                     num_decode_draft_tokens[req_idx] = draft_len
+            # Recurrent backends still need the accepted-state offset when a
+            # decode row receives no drafts. Prompt chunks must remain excluded.
+            zero_draft_decode_mask = (
+                self.input_batch.num_computed_tokens_cpu[:num_reqs]
+                >= self.input_batch.num_prompt_tokens[:num_reqs]
+            ) & (num_scheduled_tokens[:num_reqs] == 1)
+            num_decode_draft_tokens[
+                (num_decode_draft_tokens < 0) & zero_draft_decode_mask
+            ] = 0
             spec_decode_metadata = self._calc_spec_decode_metadata(
                 num_draft_tokens, cu_num_tokens
             )
@@ -2690,8 +2683,6 @@ class ModelRunnerFL(
             query_start_loc=self.query_start_loc.gpu[: num_reqs_padded + 1],
             query_start_loc_cpu=self.query_start_loc.cpu[: num_reqs_padded + 1],
             seq_lens=self.seq_lens[:num_reqs_padded],
-            _seq_lens_cpu=seq_lens_cpu,
-            _num_computed_tokens_cpu=num_computed_tokens_cpu,
             seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             replayssm_decode_base_cpu=replayssm_decode_base_cpu,
             num_reqs=num_reqs_padded,
@@ -2729,7 +2720,7 @@ class ModelRunnerFL(
             self.dcp_local_seq_lens.copy_to_gpu(num_reqs_padded)
 
             cm_base.dcp_local_seq_lens = self.dcp_local_seq_lens.gpu[:num_reqs_padded]
-            cm_base.dcp_local_seq_lens_cpu = self.dcp_local_seq_lens.cpu[
+            cm_base.dcp_local_seq_lens_cpu_upper_bound = self.dcp_local_seq_lens.cpu[
                 :num_reqs_padded
             ]
 
@@ -2775,6 +2766,7 @@ class ModelRunnerFL(
                     Mamba2AttentionMetadataBuilder,
                     GDNAttentionMetadataBuilder,
                     BailingLinearAttentionMetadataBuilder,
+                    ShortConvAttentionMetadataBuilder,
                 ),
             ):
                 assert ubid is None, (
@@ -2795,8 +2787,8 @@ class ModelRunnerFL(
                     )
 
             if for_cudagraph_capture:
-                attn_metadata_i = builder.build_for_cudagraph_capture(
-                    common_attn_metadata
+                attn_metadata_i = attn_group.build_metadata_for_cudagraph_capture(
+                    common_attn_metadata, ubid or 0
                 )
             elif (
                 cache_key in cached_attn_metadata
@@ -2804,13 +2796,16 @@ class ModelRunnerFL(
             ):
                 attn_metadata_i = builder.update_block_table(
                     cached_attn_metadata[cache_key],
-                    common_attn_metadata.block_table_tensor,
+                    attn_group.map_to_kernel_block_table(
+                        common_attn_metadata.block_table_tensor, ubid or 0
+                    ),
                     common_attn_metadata.slot_mapping,
                 )
             else:
-                attn_metadata_i = builder.build(
+                attn_metadata_i = attn_group.build_metadata(
+                    common_attn_metadata,
+                    ubid or 0,
                     common_prefix_len=cascade_attn_prefix_len,
-                    common_attn_metadata=common_attn_metadata,
                     **extra_attn_metadata_args,
                 )
                 if builder.supports_update_block_table:
@@ -3811,9 +3806,20 @@ class ModelRunnerFL(
         # Pad tokens to multiple of tensor_parallel_size when
         # enabled collective fusion for SP
         tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-        if self.compilation_config.pass_config.enable_sp and tp_size > 1:
+        if (
+            getattr(self.compilation_config.pass_config, "enable_sp", False)
+            and tp_size > 1
+        ):
             return round_up(num_scheduled_tokens, tp_size)
         return num_scheduled_tokens
+
+    def _prepare_padding_mask(
+        self, num_tokens_unpadded: int, num_tokens_padded: int
+    ) -> torch.Tensor:
+        padding_mask = self.is_padding[:num_tokens_padded]
+        padding_mask[:num_tokens_unpadded].fill_(False)
+        padding_mask[num_tokens_unpadded:].fill_(True)
+        return padding_mask
 
     def _pad_query_start_loc_for_fia(
         self,
@@ -4368,7 +4374,7 @@ class ModelRunnerFL(
 
         cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded)
         num_tokens_padded = batch_descriptor.num_tokens
-        if self.compilation_config.pass_config.enable_sp:
+        if getattr(self.compilation_config.pass_config, "enable_sp", False):
             assert (
                 batch_descriptor.num_tokens
                 % self.vllm_config.parallel_config.tensor_parallel_size
@@ -4725,7 +4731,7 @@ class ModelRunnerFL(
                     self.input_batch,
                     self.requests,
                     self.compilation_config.static_forward_context,
-                    self.model.get_mamba_state_copy_func(),
+                    self._get_mamba_state_copy_funcs(),
                     mamba_bufs.preprocess,
                     align_ctx=mamba_bufs.postprocess_align,
                 )
@@ -4753,7 +4759,7 @@ class ModelRunnerFL(
                         self.mamba_state_idx,
                     )
 
-            use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
+            use_spec_decode = self.speculative_config is not None
             ubatch_slices_attn = ubatch_slices_padded if pad_attn else ubatch_slices
 
             if self.use_ascend_attention and cudagraph_mode == CUDAGraphMode.FULL:
@@ -4821,6 +4827,7 @@ class ModelRunnerFL(
                 num_tokens_unpadded,
                 ubatch_slices_padded,
             )
+        is_padding = self._prepare_padding_mask(num_tokens_unpadded, num_tokens_padded)
         with (
             set_forward_context(
                 attn_metadata,
@@ -4832,6 +4839,7 @@ class ModelRunnerFL(
                 ubatch_slices=ubatch_slices_padded,
                 slot_mapping=slot_mappings,
                 skip_compiled=has_encoder_input,
+                is_padding=is_padding,
             ),
             record_function_or_nullcontext("gpu_model_runner: forward"),
             self.maybe_get_kv_connector_output(
@@ -5169,7 +5177,6 @@ class ModelRunnerFL(
                 else None,
                 num_nans_in_logits=num_nans_in_logits,
                 cudagraph_stats=cudagraph_stats,
-                routed_experts=None,
             )
 
         # One IO-dump step covers the full forward + sampling cycle.
@@ -5715,9 +5722,10 @@ class ModelRunnerFL(
                 if load_dummy_weights:
                     self.load_config.load_format = "dummy"
                 model_loader = get_model_loader(self.load_config)
-                self.model = model_loader.load_model(
-                    vllm_config=self.vllm_config, model_config=self.model_config
-                )
+                with self.jit_warmup_registry.activate():
+                    self.model = model_loader.load_model(
+                        vllm_config=self.vllm_config, model_config=self.model_config
+                    )
                 if self.lora_config:
                     self.model = self.load_lora_model(
                         self.model, self.vllm_config, self.device
@@ -5834,8 +5842,8 @@ class ModelRunnerFL(
 
         if (
             current_platform.device_type in ("npu", "musa")
-            and self.compilation_config.mode != CompilationMode.NONE
-        ):
+            or getattr(current_platform, "vendor_name", "") == "metax"
+        ) and self.compilation_config.mode != CompilationMode.NONE:
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
             # because fullgraph compilation cannot enter that context manager.
@@ -6142,7 +6150,7 @@ class ModelRunnerFL(
                 scores = logits.to(torch.float32)
             else:
                 scores = self.sampler.compute_logprobs(logits)
-            token_ids, logprobs, ranks, _ = self.sampler.gather_logprobs(
+            token_ids, logprobs, ranks, *_ = self.sampler.gather_logprobs(
                 scores, num_prompt_logprobs, tgt_token_ids
             )
 
@@ -6244,22 +6252,15 @@ class ModelRunnerFL(
         """Dummy data for profiling and precompiling multimodal models."""
         assert self.mm_budget is not None
 
-        # Don't use `max_items_per_batch` here to avoid redundant computation
-        dummy_mm_inputs = self.mm_registry.get_dummy_mm_inputs(
-            self.model_config,
-            mm_counts={modality: 1},
-            cache=self.mm_budget.cache,
+        dummy_mm_inputs = self.mm_budget.get_dummy_encoder_profile_inputs(
+            modality,
+            max_items_per_batch,
         )
-        dummy_mm_item = dummy_mm_inputs["mm_kwargs"][modality][0]
-
-        # We use the cache so that the item is saved to the cache,
-        # but not read from the cache
-        assert dummy_mm_item is not None, "Item should not already be cached"
 
         return next(
             mm_kwargs_batch
             for _, _, mm_kwargs_batch in group_and_batch_mm_kwargs(
-                [(modality, dummy_mm_item)] * max_items_per_batch,
+                dummy_mm_inputs,
                 device=self.device,
                 pin_memory=PIN_MEMORY,
             )
@@ -6606,6 +6607,11 @@ class ModelRunnerFL(
                     num_tokens_padded, None, False
                 )
 
+            num_tokens_unpadded = num_tokens_padded if is_profile else 0
+            is_padding = self._prepare_padding_mask(
+                num_tokens_unpadded, num_tokens_padded
+            )
+
             if ubatch_slices_padded is not None:
                 # Adjust values to reflect a single ubatch.
                 # TODO(sage,lucas): this is cruft that should be addressed in
@@ -6627,6 +6633,7 @@ class ModelRunnerFL(
                     batch_descriptor=batch_desc,
                     ubatch_slices=ubatch_slices_padded,
                     slot_mapping=slot_mappings,
+                    is_padding=is_padding,
                 ),
             ):
                 outputs = self.model(
@@ -7271,7 +7278,13 @@ class ModelRunnerFL(
             set_cudagraph_capturing_enabled(True)
             with (
                 self._freeze_gc(),
-                graph_capture(device=self.device, graph_capture_context=cap_ctx),
+                (
+                    graph_capture(device=self.device)
+                    if cap_ctx is None
+                    else _device_graph_capture(
+                        device=self.device, graph_capture_context=cap_ctx
+                    )
+                ),
             ):
                 torch.accelerator.synchronize()
                 torch.accelerator.empty_cache()
@@ -7289,9 +7302,7 @@ class ModelRunnerFL(
                     # segments. Capture every descriptor and add its full cost.
                     profile_descs = descs if (private_pools or is_musa) else descs[:2]
                     kl_guard = (
-                        private_pools
-                        and kl_guard_supported
-                        and self._kl_guard_on()
+                        private_pools and kl_guard_supported and self._kl_guard_on()
                     )
                     if kl_guard:
                         profile_descs = self._kl_filter_descs(profile_descs)
@@ -7520,7 +7531,13 @@ class ModelRunnerFL(
 
         with (
             self._freeze_gc(),
-            graph_capture(device=self.device, graph_capture_context=cap_ctx),
+            (
+                graph_capture(device=self.device)
+                if cap_ctx is None
+                else _device_graph_capture(
+                    device=self.device, graph_capture_context=cap_ctx
+                )
+            ),
         ):
             torch.accelerator.synchronize()
             torch.accelerator.empty_cache()
@@ -7586,7 +7603,9 @@ class ModelRunnerFL(
             logger.warning(
                 "Kunlunxin: private-graph-pool budget %.2f GiB "
                 "(free %.2f GiB, total %.2f GiB)",
-                self._kl_budget / (1 << 30), free / (1 << 30), total / (1 << 30),
+                self._kl_budget / (1 << 30),
+                free / (1 << 30),
+                total / (1 << 30),
             )
         if self._kl_stop or self._kl_used >= self._kl_budget:
             self._kl_stop = True
@@ -7625,7 +7644,10 @@ class ModelRunnerFL(
         logger.warning(
             "Kunlunxin: reduced CUDA graph capture sizes %d -> %d "
             "(largest=%d, used=%.2f GiB) for per-descriptor private pools",
-            len(sizes), len(kept), kept[-1], self._kl_used / (1 << 30),
+            len(sizes),
+            len(kept),
+            kept[-1],
+            self._kl_used / (1 << 30),
         )
 
     def _warmup_and_capture(
@@ -7901,7 +7923,6 @@ class ModelRunnerFL(
             min_cg_attn_backend,
             self.uniform_decode_query_len,
             use_v2_model_runner=False,
-            tensor_parallel_size=self.parallel_config.tensor_parallel_size,
             kv_cache_config=self.kv_cache_config,
             max_num_reqs=self.max_num_reqs,
             is_profiling=is_profiling,
@@ -7992,24 +8013,24 @@ class ModelRunnerFL(
             self._init_kernel_block_sizes = kernel_block_sizes
             self._init_max_num_blocks = max_num_blocks
             self._init_slot_mapping_modes = slot_mapping_modes
-            self.input_batch = InputBatch(
-                max_num_reqs=self.max_num_reqs,
-                max_model_len=max_model_len,
-                max_num_batched_tokens=self.max_num_tokens,
-                device=self.device,
-                vocab_size=self.model_config.get_vocab_size(),
-                block_sizes=block_sizes,
-                kernel_block_sizes=kernel_block_sizes,
-                max_num_blocks_per_req=max_num_blocks,
-                num_spec_tokens=self.num_spec_tokens,
-                logitsprocs=self.input_batch.logitsprocs,
-                logitsprocs_need_output_token_ids=self.input_batch.logitsprocs_need_output_token_ids,
-                is_pooling_model=self.is_pooling_model,
-                cp_kv_cache_interleave_size=self.parallel_config.cp_kv_cache_interleave_size,
-                reasoning_config=self.vllm_config.reasoning_config,
-                use_replayssm=self.cache_config.use_replayssm,
-                slot_mapping_modes=slot_mapping_modes,
-            )
+            with self.jit_warmup_registry.activate():
+                self.input_batch = InputBatch(
+                    max_num_reqs=self.max_num_reqs,
+                    max_model_len=max_model_len,
+                    max_num_batched_tokens=self.max_num_tokens,
+                    device=self.device,
+                    vocab_size=self.model_config.get_vocab_size(),
+                    block_sizes=block_sizes,
+                    max_num_blocks_per_req=max_num_blocks,
+                    num_spec_tokens=self.num_spec_tokens,
+                    logitsprocs=self.input_batch.logitsprocs,
+                    logitsprocs_need_output_token_ids=self.input_batch.logitsprocs_need_output_token_ids,
+                    is_pooling_model=self.is_pooling_model,
+                    cp_kv_cache_interleave_size=self.parallel_config.cp_kv_cache_interleave_size,
+                    reasoning_config=self.vllm_config.reasoning_config,
+                    use_replayssm=self.cache_config.use_replayssm,
+                    slot_mapping_modes=slot_mapping_modes,
+                )
 
         assert self._init_block_sizes == block_sizes, (
             f"InputBatch block_sizes {self._init_block_sizes} != "
@@ -8020,53 +8041,6 @@ class ModelRunnerFL(
             f"!= kv_cache kernel_block_sizes {kernel_block_sizes}"
         )
 
-    def _allocate_kv_cache_tensors(
-        self, kv_cache_config: KVCacheConfig
-    ) -> dict[str, torch.Tensor]:
-        """
-        Initializes the KV cache buffer with the correct size. The buffer needs
-        to be reshaped to the desired shape before being used by the models.
-
-        Args:
-            kv_cache_config: The KV cache config
-        Returns:
-            dict[str, torch.Tensor]: A map between layer names to their
-            corresponding memory buffer for KV cache.
-        """
-        kv_cache_raw_tensors: dict[str, torch.Tensor] = {}
-        packed_backing: torch.Tensor | None = None
-        for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
-            if self.use_ascend_hybrid_cache and kv_cache_tensor.block_stride > 0:
-                raise NotImplementedError(
-                    "Ascend dense hybrid cache does not support packed pools"
-                )
-            if kv_cache_tensor.block_stride > 0:
-                # Allocate once; all packed tensors alias the same backing.
-                if packed_backing is None:
-                    packed_backing = torch.zeros(
-                        kv_cache_tensor.size,
-                        dtype=torch.int8,
-                        device=self.device,
-                    )
-                tensor = packed_backing
-            else:
-                tensor = torch.zeros(
-                    kv_cache_tensor.size, dtype=torch.int8, device=self.device
-                )
-            for layer_name in kv_cache_tensor.shared_by:
-                kv_cache_raw_tensors[layer_name] = tensor
-
-        layer_names = set()
-        for group in kv_cache_config.kv_cache_groups:
-            for layer_name in group.layer_names:
-                if layer_name in self.runner_only_attn_layers:
-                    continue
-                layer_names.add(layer_name)
-        assert layer_names == set(kv_cache_raw_tensors.keys()), (
-            "Some layers are not correctly initialized"
-        )
-        return kv_cache_raw_tensors
-
     def _attn_group_iterator(self) -> Iterator[AttentionGroup]:
         return itertools.chain.from_iterable(self.attn_groups)
 
@@ -8076,250 +8050,42 @@ class ModelRunnerFL(
         for attn_groups in self.attn_groups:
             yield from attn_groups
 
-    def _reshape_kv_cache_tensors(
-        self,
-        kv_cache_raw_tensors: dict[str, torch.Tensor],
-        kernel_block_sizes: list[int],
-    ) -> dict[str, torch.Tensor]:
-        """
-        Reshape the KV cache tensors to the desired shape and dtype.
-
-        Args:
-            kv_cache_raw_tensors: The KV cache buffer of each layer, with
-                correct size but uninitialized shape.
-            kernel_block_sizes: The kernel block sizes for each KV cache group.
-        Returns:
-            Dict[str, torch.Tensor]: A map between layer names to their
-            corresponding memory buffer for KV cache.
-        """
-        kv_caches: dict[str, torch.Tensor] = {}
-        has_attn, has_mamba = False, False
-
-        # Map layer names to (offset, block_stride) within the packed
-        # backing tensor so we can create strided views per layer.
-        layer_packing: dict[str, tuple[int, int]] = {}
-        for kv_tensor in self.kv_cache_config.kv_cache_tensors:
-            if kv_tensor.block_stride > 0:
-                for ln in kv_tensor.shared_by:
-                    layer_packing[ln] = (kv_tensor.offset, kv_tensor.block_stride)
-        for group in self._kv_cache_spec_attn_group_iterator():
-            kv_cache_spec = group.kv_cache_spec
-            attn_backend = group.backend
-            if group.kv_cache_group_id == len(kernel_block_sizes):
-                # There may be a last group for layers without kv cache.
-                continue
-            kernel_block_size = kernel_block_sizes[group.kv_cache_group_id]
-            for layer_name in group.layer_names:
-                if layer_name in self.runner_only_attn_layers:
-                    continue
-                raw_tensor = kv_cache_raw_tensors[layer_name]
-                packing = layer_packing.get(layer_name)
-                if packing is not None:
-                    _, blk_stride = packing
-                    num_blocks = raw_tensor.numel() // blk_stride
-                else:
-                    assert raw_tensor.numel() % kv_cache_spec.page_size_bytes == 0
-                    num_blocks = raw_tensor.numel() // kv_cache_spec.page_size_bytes
-                if isinstance(kv_cache_spec, AttentionSpec):
-                    has_attn = True
-                    num_blocks_per_kv_block = (
-                        kv_cache_spec.block_size // kernel_block_size
-                    )
-                    kernel_num_blocks = num_blocks * num_blocks_per_kv_block
-
-                    # For MLA with compression, storage_block_size != block_size
-                    if kv_cache_spec.storage_block_size != kv_cache_spec.block_size:
-                        shape_block_size = kv_cache_spec.storage_block_size
-                    else:
-                        shape_block_size = kernel_block_size
-
-                    # Skipped layers (--kv-cache-dtype-skip-layers) need
-                    # the unquantized shape.
-                    layer_cache_dtype_str = (
-                        "auto"
-                        if kv_cache_spec.kv_quant_mode == KVQuantMode.NONE
-                        else getattr(
-                            kv_cache_spec,
-                            "cache_dtype_str",
-                            None,
-                        )
-                        or self.cache_config.cache_dtype
-                    )
-                    kv_cache_shape = attn_backend.get_kv_cache_shape(
-                        kernel_num_blocks,
-                        shape_block_size,
-                        kv_cache_spec.num_kv_heads,
-                        kv_cache_spec.head_size,
-                        cache_dtype_str=layer_cache_dtype_str,
-                    )
-                    if self.use_ascend_hybrid_cache:
-                        from vllm_fl.kv_cache.ascend.hybrid import dense_attention_view
-
-                        kv_caches[layer_name] = dense_attention_view(
-                            raw_tensor, kv_cache_spec, kv_cache_shape
-                        )
-                        continue
-                    # This path is unreachable: _reshape_kv_cache_tensors is
-                    # only called when use_ascend_hybrid_cache=True; the
-                    # standard (non-Ascend) path uses allocate_kv_cache.
-                    raise AssertionError(
-                        "_reshape_kv_cache_tensors reached non-Ascend attention "
-                        "branch; use initialize_kv_cache_tensors instead."
-                    )
-
-                elif isinstance(kv_cache_spec, MambaSpec):
-                    has_mamba = True
-                    raw_tensor = kv_cache_raw_tensors[layer_name]
-                    page_size_bytes = kv_cache_spec.page_size_bytes
-                    # Hold a single contiguous [num_blocks, 1, 1, page_size_bytes]
-                    # int8 page view per layer; the layer's bind_kv_cache unpacks
-                    # each block's bytes into its conv/ssm state views. Keeping
-                    # one tensor per layer lets the KV connector register it
-                    # without special-casing Mamba.
-                    # vLLM 0.28 MambaBase.bind_kv_cache expects exactly this single
-                    # view: it squeezes dims (1,2) then unpacks the layer conv/ssm
-                    # states. The old 0.27 fork returned a list of state tensors ->
-                    # AttributeError: list object has no attribute squeeze at
-                    # mamba/abstract.py:35. Mirror native 0.28.
-                    kv_caches[layer_name] = raw_tensor[
-                        : num_blocks * page_size_bytes
-                    ].view(num_blocks, 1, 1, page_size_bytes)
-                else:
-                    raise NotImplementedError
-
-        # Reconcile divergent KV layouts to blocks-first. Triggered by hybrid
-        # attention/mamba models, and by encoder-decoder models whose shared
-        # decoder/cross-attention allocation mixes K/V-first and blocks-first
-        # backends (see _has_mixed_attention_kv_layout).
-        if (
-            has_attn
-            and not self.use_ascend_hybrid_cache
-            and (has_mamba or self._has_mixed_attention_kv_layout(kernel_block_sizes))
-        ):
-            self._update_hybrid_attention_mamba_layout(kv_caches, kernel_block_sizes)
-
-        return kv_caches
-
-    def _has_mixed_attention_kv_layout(self, kernel_block_sizes: list[int]) -> bool:
-        """Whether attention groups disagree on the physical KV cache layout.
-
-        Encoder-decoder models (e.g. Whisper) share one raw KV allocation
-        between a decoder self-attention layer (K/V-first ROCM_ATTN, block dim
-        1) and a cross-attention layer (blocks-first, block dim 0). Mixed block
-        dims mean a block ID maps to different bytes per layer, so the shared
-        buffer must be normalized to a single (blocks-first) layout.
-        """
-        block_dims: set[int] = set()
-        for group in self._kv_cache_spec_attn_group_iterator():
-            kv_cache_spec = group.kv_cache_spec
-            if not isinstance(kv_cache_spec, AttentionSpec):
-                continue
-            if group.kv_cache_group_id == len(kernel_block_sizes):
-                continue
-            block_dims.add(
-                group.backend.get_kv_cache_block_dim(
-                    kernel_block_sizes[group.kv_cache_group_id],
-                    kv_cache_spec.num_kv_heads,
-                    kv_cache_spec.head_size,
-                    cache_dtype_str=self.cache_config.cache_dtype,
-                )
-            )
-        return len(block_dims) > 1
-
-    def _update_hybrid_attention_mamba_layout(
-        self, kv_caches: dict[str, torch.Tensor], kernel_block_sizes: list[int]
-    ) -> None:
-        """
-        Update the layout of attention layers from (2, num_blocks, ...) to
-        (num_blocks, 2, ...).
-
-        Args:
-            kv_caches: The KV cache buffer of each layer.
-            kernel_block_sizes: The kernel block sizes for each KV cache group.
-        """
-
-        for group in self._kv_cache_spec_attn_group_iterator():
-            kv_cache_spec = group.kv_cache_spec
-            if not isinstance(kv_cache_spec, AttentionSpec):
-                continue
-            block_dim = group.backend.get_kv_cache_block_dim(
-                kernel_block_sizes[group.kv_cache_group_id],
-                kv_cache_spec.num_kv_heads,
-                kv_cache_spec.head_size,
-                cache_dtype_str=self.cache_config.cache_dtype,
-            )
-            # block_dim: 0 means (num_blocks, 2, ...); 1 means (2, num_blocks, ...).
-            if block_dim == 0:
-                continue
-            assert block_dim == 1
-            for layer_name in group.layer_names:
-                kv_cache = kv_caches[layer_name]
-                hidden_size = kv_cache.shape[2:].numel()
-                kv_cache.as_strided_(
-                    size=kv_cache.shape,
-                    stride=(hidden_size, 2 * hidden_size, *kv_cache.stride()[2:]),
-                )
-
     def initialize_kv_cache_tensors(
-        self, kv_cache_config: KVCacheConfig, kernel_block_sizes: list[int]
+        self,
+        kv_cache_config: KVCacheConfig,
+        kernel_block_sizes: list[int],
+        kv_cache_allocation_context: AbstractContextManager | None = None,
     ) -> dict[str, torch.Tensor]:
-        """
-        Initialize the memory buffer for KV cache.
-
-        Args:
-            kv_cache_config: The KV cache config
-            kernel_block_sizes: The kernel block sizes for each KV cache group.
-
-        Returns:
-            Dict[str, torch.Tensor]: A map between layer names to their
-            corresponding memory buffer for KV cache.
-        """
-
-        # Try creating KV caches optimized for kv-connector transfers
-        cache_dtype = self.cache_config.cache_dtype
-        if self.use_uniform_kv_cache(self.attn_groups):
-            kv_caches, cross_layers_kv_cache, attn_backend = (
-                self.allocate_uniform_kv_caches(
-                    kv_cache_config,
-                    self.attn_groups,
-                    cache_dtype,
-                    self.device,
-                    kernel_block_sizes,
-                )
-            )
-            self.cross_layers_kv_cache = cross_layers_kv_cache
-            self.cross_layers_attn_backend = attn_backend
-        elif self.use_ascend_hybrid_cache:
-            # Ascend dense-hybrid layout requires fine-grained per-layer
-            # control that the unified allocate_kv_cache flow does not expose;
-            # keep the custom raw-allocate + reshape path for this backend.
-            kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
-            kv_caches = self._reshape_kv_cache_tensors(
-                kv_cache_raw_tensors, kernel_block_sizes
-            )
-        else:
-            # Standard path (vLLM 0.32.0+): allocate_kv_cache handles all
-            # layout, packing, and dtype-reinterpretation in one step.
+        """Allocate vLLM 0.32 manager views and bind each backend's kernel views."""
+        allocation_context = kv_cache_allocation_context or nullcontext()
+        with allocation_context:
             kv_caches = allocate_kv_cache(
                 kv_cache_config,
                 self.device,
                 self.cache_config.get_resolved_kv_cache_layout(),
                 kernel_block_sizes,
             )
-
-        # Set up cross-layer KV cache sharing
         for layer_name, target_layer_name in self.shared_kv_cache_layers.items():
             logger.debug("%s reuses KV cache of %s", layer_name, target_layer_name)
             kv_caches[layer_name] = kv_caches[target_layer_name]
-
         num_attn_module = (
             2 if self.model_config.hf_config.model_type == "longcat_flash" else 1
         )
+        attn_groups = [group for groups in self.attn_groups for group in groups]
+        if self.speculative_config:
+            attn_groups += getattr(self.drafter, "draft_attn_groups", [])
+        kernel_kv_caches = map_kv_caches_to_kernel_blocks(kv_caches, attn_groups)
+        if self.use_ascend_attention:
+            from vllm_fl.kv_cache.ascend.native_032 import adapt_layer_kv_caches
+
+            kernel_kv_caches = adapt_layer_kv_caches(kernel_kv_caches, attn_groups)
         bind_kv_cache(
             kv_caches,
             self.compilation_config.static_forward_context,
             self.kv_caches,
             num_attn_module,
+            kv_cache_groups=kv_cache_config.kv_cache_groups,
+            layer_kv_caches=kernel_kv_caches,
         )
         return kv_caches
 
@@ -8355,6 +8121,7 @@ class ModelRunnerFL(
         self,
         kv_cache_config: KVCacheConfig,
         is_profiling: bool = False,
+        kv_cache_allocation_context: AbstractContextManager | None = None,
     ) -> None:
         """
         Initialize KV cache based on `kv_cache_config`.
@@ -8365,11 +8132,14 @@ class ModelRunnerFL(
         kv_cache_config = deepcopy(kv_cache_config)
         self.kv_cache_config = kv_cache_config
         self._mamba_bufs = None
+        self._mamba_state_copy_funcs = None
         self.may_add_encoder_only_layers_to_kv_cache_config()
         self.maybe_add_kv_sharing_layers_to_kv_cache_groups(kv_cache_config)
         self.initialize_attn_backend(kv_cache_config, is_profiling=is_profiling)
         initialize_mamba_ssu_backend(
-            self.vllm_config.mamba_config, self.kv_cache_config
+            self.vllm_config.mamba_config,
+            self.kv_cache_config,
+            use_replayssm=self.cache_config.use_replayssm,
         )
         # The kernel block size for all KV cache groups. For example, if
         # kv_cache_manager uses block_size 256 for a given group, but the attention
@@ -8388,9 +8158,12 @@ class ModelRunnerFL(
 
         # Reinitialize need to after initialize_attn_backend
         self.may_reinitialize_input_batch(kv_cache_config, kernel_block_sizes)
-        kv_caches = self.initialize_kv_cache_tensors(
-            kv_cache_config, kernel_block_sizes
-        )
+        with self.jit_warmup_registry.activate():
+            kv_caches = self.initialize_kv_cache_tensors(
+                kv_cache_config,
+                kernel_block_sizes,
+                kv_cache_allocation_context=kv_cache_allocation_context,
+            )
 
         if (
             self.speculative_config
@@ -8428,12 +8201,11 @@ class ModelRunnerFL(
     def init_routed_experts_capturer(self):
         logger.info(
             "Initializing routed experts capturer, enable_return_routed_experts: %s",
-            self.model_config.enable_return_routed_experts,
+            getattr(self.model_config, "enable_return_routed_experts", False),
         )
         self.routed_experts_capturer = RoutedExpertsCapturer(
             max_num_batched_tokens=self.scheduler_config.max_num_batched_tokens,
             vllm_config=self.vllm_config,
-            kv_cache_config=self.kv_cache_config,
         )
         bind_routed_experts_capturer(self.model, self.routed_experts_capturer)
 
@@ -8522,21 +8294,11 @@ class ModelRunnerFL(
             # Skip modules that don't need KV cache (eg encoder-only attention)
             if spec := attn_module.get_kv_cache_spec(self.vllm_config):
                 if isinstance(spec, AttentionSpec):
-                    backend = attn_module.get_attn_backend()
-                    # indexes_kv_by_block_stride() -> get_kv_cache_stride_order()
-                    # -> get_kv_cache_layout() needs the current vLLM config.
-                    with set_current_vllm_config(self.vllm_config):
-                        indexes = backend.indexes_kv_by_block_stride()
-                    spec = replace(spec, indexes_kv_by_block_stride=indexes)
-                    spec = backend.customize_spec(spec)
+                    spec = customize_attention_spec(
+                        attn_module.get_attn_backend(), spec
+                    )
                 kv_cache_spec[layer_name] = spec
 
-        if self.use_ascend_hybrid_cache:
-            from vllm_fl.kv_cache.ascend.hybrid import pad_attention_specs
-
-            kv_cache_spec = pad_attention_specs(
-                kv_cache_spec, self.cache_config.mamba_page_size_padded
-            )
         return kv_cache_spec
 
     def _to_list(self, sampled_token_ids: torch.Tensor) -> list[list[int]]:

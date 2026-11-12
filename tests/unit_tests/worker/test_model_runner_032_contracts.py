@@ -5,7 +5,7 @@
 import __future__
 
 import ast
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from copy import copy
 from pathlib import Path
 from types import SimpleNamespace
@@ -51,27 +51,45 @@ def _runner_class(methods, **namespace):
 def test_allocator_binds_kernel_views_and_preserves_shared_manager_views():
     backing = torch.arange(16, dtype=torch.float32).view(4, 1, 2, 2)
     allocation = {"model.layers.0.attn": backing}
+    events = []
+
+    @contextmanager
+    def allocation_context():
+        events.append("enter")
+        yield
+        events.append("exit")
 
     def allocate(config, device, layout, kernel_sizes):
+        assert events == ["enter"]
         assert device == torch.device("cpu")
         assert layout == "LBNHC" and kernel_sizes == [1]
         return allocation.copy()
 
     main_group, draft_group = object(), object()
 
-    bind_mock = Mock()
+    def map_kernel_views(caches, groups):
+        assert groups == [main_group, draft_group]
+        return {name: value.view(8, 1, 1, 2) for name, value in caches.items()}
+
+    bound = {}
+
+    def bind(
+        caches, context, runner_caches, num_modules, *, kv_cache_groups, layer_kv_caches
+    ):
+        assert events == ["enter", "exit"]
+        assert num_modules == 1 and kv_cache_groups == ["cache-group"]
+        bound.update(layer_kv_caches)
+        runner_caches.extend(caches.values())
 
     runner = _runner_class(
         {"initialize_kv_cache_tensors"},
         allocate_kv_cache=allocate,
-        bind_kv_cache=bind_mock,
+        map_kv_caches_to_kernel_blocks=map_kernel_views,
+        bind_kv_cache=bind,
         logger=Mock(),
     )()
     runner.device = torch.device("cpu")
-    runner.cache_config = SimpleNamespace(
-        get_resolved_kv_cache_layout=lambda: "LBNHC",
-        cache_dtype="auto",
-    )
+    runner.cache_config = SimpleNamespace(get_resolved_kv_cache_layout=lambda: "LBNHC")
     runner.shared_kv_cache_layers = {"model.layers.1.attn": "model.layers.0.attn"}
     runner.model_config = SimpleNamespace(
         hf_config=SimpleNamespace(model_type="qwen3_5")
@@ -81,11 +99,12 @@ def test_allocator_binds_kernel_views_and_preserves_shared_manager_views():
     runner.drafter = SimpleNamespace(draft_attn_groups=[draft_group])
     runner.compilation_config = SimpleNamespace(static_forward_context={})
     runner.kv_caches = []
-    runner.use_uniform_kv_cache = lambda groups: False
     config = SimpleNamespace(kv_cache_groups=["cache-group"])
-    caches = runner.initialize_kv_cache_tensors(config, [1])
+    caches = runner.initialize_kv_cache_tensors(config, [1], allocation_context())
     assert caches["model.layers.0.attn"] is caches["model.layers.1.attn"]
-    bind_mock.assert_called_once()
+    assert bound["model.layers.0.attn"].shape == (8, 1, 1, 2)
+    bound["model.layers.1.attn"][0, 0, 0, 0] = -5
+    assert backing[0, 0, 0, 0].item() == -5
 
     # Like allocation, model construction registers JIT providers. Keep the
     # native 0.32 registry active around the actual loader call: registrations

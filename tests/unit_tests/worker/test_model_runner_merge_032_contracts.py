@@ -237,8 +237,12 @@ def test_ascend_adapter_only_changes_layer_binding_views(ascend):
             return SimpleNamespace(adapt_layer_kv_caches=adapt)
         return builtins.__import__(name, *args, **kwargs)
 
-    def bind(caches, context, runner_caches, count):
+    def bind(
+        caches, context, runner_caches, count, *, kv_cache_groups, layer_kv_caches
+    ):
         assert caches["layer.0"] is manager
+        expected = states if ascend else kernel
+        assert layer_kv_caches["layer.0"] is expected
         runner_caches.append(caches["layer.0"])
         events.append("bind")
 
@@ -246,15 +250,12 @@ def test_ascend_adapter_only_changes_layer_binding_views(ascend):
         {"initialize_kv_cache_tensors"},
         __builtins__={**vars(builtins), "__import__": selected_import},
         allocate_kv_cache=lambda *args: {"layer.0": manager},
+        map_kv_caches_to_kernel_blocks=lambda caches, groups: {"layer.0": kernel},
         bind_kv_cache=bind,
     )()
     runner.use_ascend_attention = ascend
-    runner.use_uniform_kv_cache = lambda groups: False
     runner.device = torch.device("cpu")
-    runner.cache_config = SimpleNamespace(
-        get_resolved_kv_cache_layout=lambda: "LBNHC",
-        cache_dtype="auto",
-    )
+    runner.cache_config = SimpleNamespace(get_resolved_kv_cache_layout=lambda: "LBNHC")
     runner.shared_kv_cache_layers = {}
     runner.model_config = SimpleNamespace(
         hf_config=SimpleNamespace(model_type="qwen3_5")
