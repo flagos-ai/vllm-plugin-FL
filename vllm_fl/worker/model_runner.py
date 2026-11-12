@@ -4,6 +4,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+# Defer annotation evaluation so expressions like
+# ``current_platform.torch_device_fn.Stream`` in function signatures are not
+# evaluated at import time (when the platform may not be initialised yet).
+from __future__ import annotations
+
+# Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
+# module that uses them is imported.  The shim is idempotent and a no-op when
+# the installed vLLM already ships the symbols.
+from vllm_fl.patches.worker_symbols_032 import apply_worker_symbols_032
+
+apply_worker_symbols_032()
+
 import functools
 import gc
 import itertools
@@ -42,6 +54,7 @@ from vllm.config import (
 from vllm.config.cache import CacheConfig
 from vllm.config.ec_manager_config import EncoderCacheManagerMetadata
 from vllm.config.model import PROCESSED_LOGPROBS_MODES
+
 try:  # FL: vLLM >= 0.28 slot mapping mode enum
     from vllm.v1.worker.block_table import SlotMappingMode
 except ImportError:  # pragma: no cover - older vLLM
@@ -59,6 +72,7 @@ from vllm.distributed.parallel_state import (
     get_tp_group,
     is_global_first_rank,
 )
+
 try:
     from vllm.distributed.weight_transfer.sparse_nccl_engine import (
         SparseWeightPatch,
@@ -70,6 +84,7 @@ from vllm.forward_context import (
     set_forward_context,
 )
 from vllm.logger import init_logger
+
 # FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
 try:  # pragma: no cover - vLLM version compat
     from vllm.distributed.parallel_state import (
@@ -240,8 +255,13 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
+
+# NOTE: cp_utils.get_total_cp_world_size (0.28) / get_kv_cache_shard_count
+# (intermediate rename) are both absent from vLLM 0.32; nothing in this
+# module calls them, so the import is dropped rather than guarded.
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
+
 try:
     from vllm.v1.worker.gpu.pool.late_interaction_runner import (
         LateInteractionRunner,
@@ -580,7 +600,7 @@ class ExecuteModelState(NamedTuple):
     """Ephemeral cached state transferred between execute_model() and
     sample_tokens(), after execute_model() returns None."""
 
-    scheduler_output: "SchedulerOutput"
+    scheduler_output: SchedulerOutput
     logits: torch.Tensor
     spec_decode_metadata: SpecDecodeMetadata | None
     spec_decode_common_attn_metadata: CommonAttentionMetadata | None
@@ -1327,7 +1347,7 @@ class ModelRunnerFL(
         )
         return model_kwargs
 
-    def _may_reorder_batch(self, scheduler_output: "SchedulerOutput") -> None:
+    def _may_reorder_batch(self, scheduler_output: SchedulerOutput) -> None:
         """
         Update the order of requests in the batch based on the attention
         backend's needs. For example, some attention backends (namely MLA) may
@@ -1404,13 +1424,13 @@ class ModelRunnerFL(
 
     def _process_encoder_cache_scheduler_output(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
     ) -> None:
         """Apply scheduler-side encoder cache lifecycle updates."""
         for mm_hash in scheduler_output.free_encoder_mm_hashes:
             self.encoder_cache.pop(mm_hash, None)
 
-    def _update_states(self, scheduler_output: "SchedulerOutput") -> Callable | None:
+    def _update_states(self, scheduler_output: SchedulerOutput) -> Callable | None:
         """Update the cached states and the persistent batch with the scheduler
         output.
 
@@ -1790,7 +1810,7 @@ class ModelRunnerFL(
             return None
 
     def _update_states_after_model_execute(
-        self, output_token_ids: torch.Tensor, scheduler_output: "SchedulerOutput"
+        self, output_token_ids: torch.Tensor, scheduler_output: SchedulerOutput
     ) -> None:
         """Update the cached states after model execution.
 
@@ -1929,7 +1949,7 @@ class ModelRunnerFL(
 
     def _extract_mm_kwargs(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
     ) -> BatchedTensorInputs:
         if not scheduler_output or not self.is_multimodal_raw_input_only_model:
             return {}
@@ -2007,7 +2027,7 @@ class ModelRunnerFL(
 
     def _prepare_input_ids(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
         num_reqs: int,
         total_num_scheduled_tokens: int,
         cu_num_tokens: np.ndarray,
@@ -2188,7 +2208,7 @@ class ModelRunnerFL(
 
     def _prepare_inputs(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
         num_scheduled_tokens: np.ndarray,
     ) -> tuple[
         torch.Tensor,
@@ -3041,7 +3061,7 @@ class ModelRunnerFL(
         )
         return common_prefix_len if use_cascade else 0
 
-    def _calc_mrope_positions(self, scheduler_output: "SchedulerOutput"):
+    def _calc_mrope_positions(self, scheduler_output: SchedulerOutput):
         mrope_pos_ptr = 0
         for index, req_id in enumerate(self.input_batch.req_ids):
             req = self.requests[req_id]
@@ -3090,7 +3110,7 @@ class ModelRunnerFL(
 
                 mrope_pos_ptr += completion_part_len
 
-    def _calc_xdrope_positions(self, scheduler_output: "SchedulerOutput"):
+    def _calc_xdrope_positions(self, scheduler_output: SchedulerOutput):
         xdrope_pos_ptr = 0
         for index, req_id in enumerate(self.input_batch.req_ids):
             req = self.requests[req_id]
@@ -3238,7 +3258,7 @@ class ModelRunnerFL(
 
     def _batch_mm_inputs_from_scheduler(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
     ) -> tuple[
         list[str],
         list[tuple[str, MultiModalKwargsItem]],
@@ -3283,7 +3303,7 @@ class ModelRunnerFL(
         self,
         mm_hash: str,
         output: torch.Tensor,
-        ec_manager_metadata: "EncoderCacheManagerMetadata | None",
+        ec_manager_metadata: EncoderCacheManagerMetadata | None,
         free_encoder_mm_hashes: list[str],
     ) -> None:
         """Store an encoder output for later multimodal embedding gather."""
@@ -3292,7 +3312,7 @@ class ModelRunnerFL(
         self.maybe_save_ec_to_connector(self.encoder_cache, mm_hash)
 
     def _execute_mm_encoder(
-        self, scheduler_output: "SchedulerOutput"
+        self, scheduler_output: SchedulerOutput
     ) -> list[torch.Tensor]:
         mm_hashes, mm_kwargs, mm_lora_refs = self._batch_mm_inputs_from_scheduler(
             scheduler_output
@@ -3516,7 +3536,7 @@ class ModelRunnerFL(
 
     def _gather_mm_embeddings(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
         shift_computed_tokens: int = 0,
     ) -> tuple[list[torch.Tensor], torch.Tensor]:
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
@@ -3879,7 +3899,7 @@ class ModelRunnerFL(
 
     def _preprocess(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
         num_input_tokens: int,  # Padded
         intermediate_tensors: IntermediateTensors | None = None,
     ) -> tuple[
@@ -4065,7 +4085,7 @@ class ModelRunnerFL(
 
     def _bookkeeping_sync(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
         sampler_output: SamplerOutput,
         logits: torch.Tensor | None,
         hidden_states: torch.Tensor,
@@ -4486,7 +4506,7 @@ class ModelRunnerFL(
         num_tokens_padded: int,
         num_reqs_padded: int,
         num_tokens_unpadded: int,
-        ubatch_slices: "UBatchSlices | None" = None,
+        ubatch_slices: UBatchSlices | None = None,
     ) -> tuple[
         dict[int, torch.Tensor] | None,
         dict[str, torch.Tensor] | list[dict[str, torch.Tensor]] | None,
@@ -4567,7 +4587,7 @@ class ModelRunnerFL(
     @managed_inference_mode()
     def execute_model(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
         intermediate_tensors: IntermediateTensors | None = None,
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput | IntermediateTensors | None:
         if self.execute_model_state is not None:
@@ -4969,7 +4989,7 @@ class ModelRunnerFL(
 
     @managed_inference_mode()
     def sample_tokens(
-        self, grammar_output: "GrammarOutput | None"
+        self, grammar_output: GrammarOutput | None
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput | IntermediateTensors:
         if self.execute_model_state is None:
             kv_connector_output = self.kv_connector_output
@@ -5309,7 +5329,7 @@ class ModelRunnerFL(
         return DraftTokenIds(req_ids, draft_token_ids)
 
     def _copy_draft_token_ids_to_cpu(
-        self, scheduler_output: "SchedulerOutput", zeros_only: bool = False
+        self, scheduler_output: SchedulerOutput, zeros_only: bool = False
     ) -> None:
         if torch.is_tensor(self._draft_token_ids):
             assert isinstance(self._draft_token_ids, torch.Tensor)
@@ -5427,7 +5447,7 @@ class ModelRunnerFL(
 
     def propose_draft_token_ids(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: SchedulerOutput,
         sampled_token_ids: torch.Tensor | list[list[int]],
         sampling_metadata: SamplingMetadata,
         hidden_states: torch.Tensor,
@@ -7157,7 +7177,7 @@ class ModelRunnerFL(
         logger.debug("Cleaned up profiling KV cache and CUDA graphs")
 
     @managed_inference_mode()
-    def _create_encoder_cudagraph_manager(self) -> "EncoderCudaGraphManager | None":
+    def _create_encoder_cudagraph_manager(self) -> EncoderCudaGraphManager | None:
         if not (
             self.compilation_config.cudagraph_mm_encoder and self.supports_mm_inputs
         ):
@@ -8338,25 +8358,29 @@ class ModelRunnerFL(
             )
             self.cross_layers_kv_cache = cross_layers_kv_cache
             self.cross_layers_attn_backend = attn_backend
+        elif self.use_ascend_hybrid_cache:
+            # Ascend dense-hybrid layout requires fine-grained per-layer
+            # control that the unified allocate_kv_cache flow does not expose;
+            # keep the custom raw-allocate + reshape path for this backend.
+            kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
+            kv_caches = self._reshape_kv_cache_tensors(
+                kv_cache_raw_tensors, kernel_block_sizes
+            )
+        elif HAS_KV_CACHE_ALLOCATOR:
+            # vLLM 0.32 allocates the final KV-cache layout directly; the
+            # per-backend shape/stride helpers FL used are gone.
+            kv_caches = allocate_kv_cache_032(
+                kv_cache_config,
+                self.device,
+                self.cache_config.get_resolved_kv_cache_layout(),
+                kernel_block_sizes,
+            )
         else:
-            # Fallback to the general case
-            if HAS_KV_CACHE_ALLOCATOR:
-                # vLLM 0.32 allocates the final KV-cache layout directly; the
-                # per-backend shape/stride helpers FL used are gone.
-                kv_caches = allocate_kv_cache_032(
-                    kv_cache_config,
-                    self.device,
-                    self.cache_config.get_resolved_kv_cache_layout(),
-                    kernel_block_sizes,
-                )
-            else:
-                # Initialize the memory buffer for KV cache
-                kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
-
-                # Change the memory buffer to the desired shape
-                kv_caches = self._reshape_kv_cache_tensors(
-                    kv_cache_raw_tensors, kernel_block_sizes
-                )
+            # vLLM < 0.32: allocate raw bytes, then build the typed views.
+            kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
+            kv_caches = self._reshape_kv_cache_tensors(
+                kv_cache_raw_tensors, kernel_block_sizes
+            )
 
         # Set up cross-layer KV cache sharing
         for layer_name, target_layer_name in self.shared_kv_cache_layers.items():
