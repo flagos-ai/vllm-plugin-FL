@@ -279,10 +279,7 @@ def test_apply_penalties_compat_idempotent():
         apply_penalties_compat,
     )
 
-    try:
-        from vllm.v1.worker.gpu.sample import penalties
-    except ImportError:
-        pytest.skip("vllm.v1.worker.gpu.sample.penalties not installed")
+    penalties = pytest.importorskip("vllm.v1.worker.gpu.sample.penalties")
     apply_penalties_compat()
     apply_penalties_compat()
     assert penalties.bincount is _bincount
