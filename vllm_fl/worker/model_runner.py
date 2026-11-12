@@ -1319,6 +1319,23 @@ class ModelRunnerFL(
                 decode_threshold=self.reorder_batch_threshold,
             )
 
+    def _get_mamba_state_copy_funcs(self):
+        if self._mamba_state_copy_funcs is None:
+            mamba_groups = mamba_utils.get_mamba_groups(self.kv_cache_config)
+            mamba_types = {spec.mamba_type for spec in mamba_groups}
+            copy_funcs = self.model.get_mamba_state_copy_funcs(mamba_types)
+            mamba_utils.validate_mamba_state_copy_funcs(mamba_groups, copy_funcs)
+            self._mamba_state_copy_funcs = copy_funcs
+        return self._mamba_state_copy_funcs
+
+    def _prepare_padding_mask(
+        self, num_tokens_unpadded: int, num_tokens_padded: int
+    ) -> torch.Tensor:
+        padding_mask = self.is_padding[:num_tokens_padded]
+        padding_mask[:num_tokens_unpadded].fill_(False)
+        padding_mask[num_tokens_unpadded:].fill_(True)
+        return padding_mask
+
     def _init_kv_zero_meta(self) -> None:
         """One-time precomputation for _zero_block_ids.
 

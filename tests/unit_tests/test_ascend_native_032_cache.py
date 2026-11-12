@@ -8,6 +8,7 @@ No NPU operations, native accelerator libraries, or model construction are used.
 
 import ast
 import importlib.util
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from enum import IntEnum
 from pathlib import Path
@@ -189,6 +190,7 @@ def test_runner_keeps_native_attention_spec_dense_despite_mamba_page_padding():
             "attention": SimpleNamespace(get_kv_cache_spec=lambda _: spec)
         },
         customize_attention_spec=lambda backend, candidate: candidate,
+        set_current_vllm_config=nullcontext,
     )
     scope["get_layers_from_vllm_config"] = lambda *_: {
         "attention": SimpleNamespace(
