@@ -204,9 +204,7 @@ def test_fused_topk_padded_delegates_when_native_op_exists(monkeypatch):
     )
     monkeypatch.setattr(router_mod, "upstream_fused_topk", fake_upstream)
     monkeypatch.setattr(router_mod, "_topk_softmax", fail_kernel)
-    monkeypatch.setattr(
-        torch.ops, "_moe_C", SimpleNamespace(topk_softmax=object())
-    )
+    monkeypatch.setattr(torch.ops, "_moe_C", SimpleNamespace(topk_softmax=object()))
 
     result = router_mod.fused_topk(
         hidden_states=hidden_states,
@@ -216,7 +214,9 @@ def test_fused_topk_padded_delegates_when_native_op_exists(monkeypatch):
     )
 
     assert calls == {"upstream": 1, "kernel": 0}
-    assert all(torch.equal(actual, expected) for actual, expected in zip(result, sentinel))
+    assert all(
+        torch.equal(actual, expected) for actual, expected in zip(result, sentinel)
+    )
 
 
 def test_fused_topk_padded_zeroes_weights_without_native_op(monkeypatch):
