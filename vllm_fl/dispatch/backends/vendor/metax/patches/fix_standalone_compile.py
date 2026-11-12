@@ -46,6 +46,22 @@ def autograd_cache_key(
     return key, debug_lines
 
 
+class _MetaxCompiledArtifact(CompiledArtifact):
+    """Concrete subclass of CompiledArtifact for metax backend.
+
+    torch 2.8+ made CompiledArtifact an ABC with __call__ and save as
+    abstract methods. This subclass provides required implementations.
+    """
+
+    def __call__(self, *args):
+        return self._compiled_fn(*args)
+
+    def save(self, *, path: str, format="binary") -> None:
+        raise NotImplementedError(
+            "MetaxCompiledArtifact.save is not supported on metax backend"
+        )
+
+
 def standalone_compile_impl(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[InputType],
@@ -124,7 +140,7 @@ def standalone_compile_impl(
                 "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
             )
 
-    return CompiledArtifact(compiled_fn, artifacts)
+    return _MetaxCompiledArtifact(compiled_fn, artifacts)
 
 
 def standalone_compile(
