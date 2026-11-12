@@ -36,7 +36,9 @@ can change near-tied TopK choices; whole-model accuracy/performance equivalence
 has not been established. Composite execution may be slower than fused FP8.
 
 CI and the GLM extra use the same FlagGems-vllm portability pin
-`80a8e9716abed1bac3fc0ba5fd4e9f650ae3f989`, from operator PR #941. It includes the common main
+`1a4cf13613cc3feff4f21b7048aa248c405d4b37`, from [operator PR #1134](https://github.com/flagos-ai/FlagGems-vllm/pull/1134).
+The revision adds PPU non-TLE import, optional mHC compiler-setting and padded MLA
+cache compatibility while retaining the earlier #941 APIs. It includes the common main
 math shim, optional constexpr/optimizer-hint compatibility, software FP8 cache
 writes for HY4 on A100, and synchronized wall-clock tuning when Kunlunxin event
 timing returns zero. Kunlunxin reuses the public FlagGems Hadamard transform
