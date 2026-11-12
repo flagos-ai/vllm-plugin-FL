@@ -71,8 +71,8 @@ class TestIsFakeOrMeta:
 
     def test_fake_tensor_true(self):
         import torch
-        from torch._subclasses.fake_tensor import FakeTensorMode
         from flag_gems.ops.clone import _is_fake_or_meta
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():
             t = torch.empty(4, 4, device="cpu")
@@ -119,8 +119,8 @@ class TestCloneImplMetaSafety:
 
     def test_fake_tensor_no_raise(self):
         import torch
-        from torch._subclasses.fake_tensor import FakeTensorMode
         from flag_gems.ops.clone import _clone_impl
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():
             t = torch.empty(4, 4, device="cpu")
@@ -147,8 +147,8 @@ class TestTorchCompileClone:
     """
 
     def test_compile_clone_default(self):
-        import torch
         import flag_gems  # noqa: F401 — register ops before compile
+        import torch
 
         class M(torch.nn.Module):
             def forward(self, x):
@@ -161,8 +161,8 @@ class TestTorchCompileClone:
         assert torch.allclose(out, x)
 
     def test_compile_clone_contiguous(self):
-        import torch
         import flag_gems  # noqa: F401
+        import torch
 
         class M(torch.nn.Module):
             def forward(self, x):
@@ -175,8 +175,8 @@ class TestTorchCompileClone:
         assert out.shape == x.shape
 
     def test_compile_clone_preserve_format(self):
-        import torch
         import flag_gems  # noqa: F401
+        import torch
 
         class M(torch.nn.Module):
             def forward(self, x):
@@ -189,8 +189,8 @@ class TestTorchCompileClone:
 
     def test_compile_clone_inside_larger_graph(self):
         """Clone inside a multi-op graph — matches a typical vLLM forward."""
-        import torch
         import flag_gems  # noqa: F401
+        import torch
 
         class M(torch.nn.Module):
             def forward(self, x, w):
