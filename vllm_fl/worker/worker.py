@@ -1,9 +1,18 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_worker.py
+
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """A GPU worker class adapted for the FL out-of-tree platform."""
+
+# Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
+# module that uses them is imported. The V2 path loads this module directly,
+# so the shim installed by model_runner.py is not guaranteed to be in place.
+# The shim is idempotent and a no-op when the installed vLLM ships the names.
+from vllm_fl.patches.worker_symbols_032 import apply_worker_symbols_032
+
+apply_worker_symbols_032()
 
 import gc
 import os
