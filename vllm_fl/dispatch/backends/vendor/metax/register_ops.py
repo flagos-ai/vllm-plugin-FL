@@ -31,6 +31,7 @@ def register_builtins(registry) -> None:
     Args:
         registry: Registry to register into
     """
+    from . import patches  # noqa: F401 — apply MetaX kernel patches at backend load
     from .metax import MacaBackend
 
     backend = MacaBackend()

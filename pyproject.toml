@@ -31,6 +31,7 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml",
+    "modelscope==1.35.3",
 ]
 
 [project.entry-points."vllm.platform_plugins"]
@@ -53,7 +54,6 @@ test = [
     "openai",
     "decorator",
     "vllm[audio]==0.28.0",
-    "modelscope>=1.18.1",
 ]
 
 [tool.setuptools_scm]
@@ -106,6 +106,7 @@ python_functions = ["test_*"]
 markers = [
     "gpu: marks tests as requiring single GPU (deselect with '-m \"not gpu\"')",
     "multi_gpu: marks tests as requiring multiple GPUs",
+    "serial: marks tests that must not run under pytest-xdist",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "e2e: marks tests as end-to-end tests",

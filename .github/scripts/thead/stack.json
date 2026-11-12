@@ -1,0 +1,13 @@
+{
+  "flaggems": {
+    "commit": "317b763204391d530d6024b52b6235de150443d8",
+    "version": "5.5.0.dev0+g317b76320"
+  },
+  "flagtree": {
+    "version": "0.7.0+ppu3.6",
+    "filename": "flagtree-0.7.0+ppu3.6-cp312-cp312-linux_x86_64.whl",
+    "url": "https://resource.flagos.net/repository/flagos-pypi-hosted/packages/flagtree/0.7.0+ppu3.6/flagtree-0.7.0+ppu3.6-cp312-cp312-linux_x86_64.whl",
+    "bytes": 363127160,
+    "sha256": "98fa0c4488e06c904adfb55a8059ef64f2c1bddf5938f6faa7edfc8650dead09"
+  }
+}

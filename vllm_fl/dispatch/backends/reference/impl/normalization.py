@@ -6,16 +6,14 @@ Reference normalization operator implementations using PyTorch.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 
 def rms_norm_torch(
     obj,
     x: torch.Tensor,
-    residual: Optional[torch.Tensor] = None,
-) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+    residual: torch.Tensor | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     RMS normalization using PyTorch.
 
@@ -27,17 +25,24 @@ def rms_norm_torch(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    # Get weight and epsilon from obj
-    weight = obj.weight
-    epsilon = obj.variance_epsilon
-
+    # Match the vLLM layer contract: accumulate residuals and variance in
+    # float32, then return both tensors in the input dtype.
+    input_dtype = x.dtype
+    x_float = x.float()
     if residual is not None:
-        x = x + residual
-        residual = x
+        x_float = x_float + residual.float()
+        residual = x_float.to(input_dtype)
 
-    variance = x.pow(2).mean(-1, keepdim=True)
-    x = x * torch.rsqrt(variance + epsilon)
-    output = weight * x
+    variance_size = getattr(obj, "variance_size_override", None)
+    variance_input = x_float if variance_size is None else x_float[..., :variance_size]
+    variance = variance_input.square().mean(dim=-1, keepdim=True)
+    output = x_float * torch.rsqrt(variance + obj.variance_epsilon)
+    pass_weight = getattr(
+        obj, "pass_weight_add" if residual is not None else "pass_weight", True
+    )
+    if pass_weight:
+        output = output.to(obj.weight.dtype) * obj.weight
+    output = output.to(input_dtype)
 
     if residual is not None:
         return output, residual

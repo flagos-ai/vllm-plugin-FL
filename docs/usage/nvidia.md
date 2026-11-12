@@ -175,6 +175,10 @@ The validated NVIDIA policy intentionally keeps vLLM's native CUDA attention
 backend. Do not set `VLLM_FL_USE_FLAGGEMS_ATTN=1` unless that path has been
 validated separately for the target model.
 
+Compatible explicit operator calls use FlagGems-vllm directly. Follow the
+[installation guide](../flaggems-vllm.md); no provider-selection environment
+variable is required. The installer preserves the validated image stack.
+
 ## 6. Verify inference
 
 Follow startup logs in one terminal:

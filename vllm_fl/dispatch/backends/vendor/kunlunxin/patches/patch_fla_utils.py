@@ -37,6 +37,37 @@ import sys
 
 _FLA_UTILS_MOD = "vllm.model_executor.layers.fla.ops.utils"
 _patched = False
+_wrapper_installed = False
+
+
+def _install_xpu_get_device_wrapper() -> bool:
+    """Wrap torch.xpu.get_device_name so it can never raise.  Idempotent.
+
+    Must run BEFORE anything imports the 0.28 FLA ops package, whose module
+    level torch.xpu.get_device_name(0) call aborts on Kunlunxin with
+    "Torch not compiled with XPU enabled".  Deliberately imports neither FLA
+    nor any vLLM model module, so it is safe to call from vllm_fl.register()
+    before the old-to-new module alias exists.
+    """
+    global _wrapper_installed
+    if _wrapper_installed:
+        return True
+
+    import torch
+
+    if hasattr(torch, "xpu") and hasattr(torch.xpu, "get_device_name"):
+        _orig = torch.xpu.get_device_name
+
+        def _safe_get_device_name(idx=0):
+            try:
+                return _orig(idx)
+            except Exception:
+                return ""
+
+        torch.xpu.get_device_name = _safe_get_device_name
+
+    _wrapper_installed = True
+    return True
 
 
 def _fix_platform_vars() -> None:
@@ -63,19 +94,8 @@ def ensure_fla_compat() -> None:
         return
     _patched = True
 
-    import torch
-
     # Step 1: wrap torch.xpu.get_device_name so it never crashes
-    if hasattr(torch, "xpu") and hasattr(torch.xpu, "get_device_name"):
-        _orig = torch.xpu.get_device_name
-
-        def _safe_get_device_name(idx=0):
-            try:
-                return _orig(idx)
-            except Exception:
-                return ""
-
-        torch.xpu.get_device_name = _safe_get_device_name
+    _install_xpu_get_device_wrapper()
 
     # Step 2: force-import utils.py NOW (it loads safely with the wrapper)
     try:

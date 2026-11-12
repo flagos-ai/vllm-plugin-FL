@@ -17,6 +17,25 @@ def _load_source_module(name, relative_path):
     spec = importlib.util.spec_from_file_location(name, _REPO_ROOT / relative_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    if name == "_test_flaggems_rotary":
+        # This source contract exercises the Ascend/Gems route without importing
+        # the plugin or initializing native MUSA registrations during collection.
+        platform = SimpleNamespace(device_type="npu")
+
+        def source_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "vllm.platforms" and level == 0:
+                assert tuple(fromlist) == ("current_platform",)
+                return SimpleNamespace(current_platform=platform)
+            if name == "musa_ops" and level == 1:
+                raise AssertionError("Ascend source contract must not import MUSA ops")
+            if name == "torch_musa":
+                raise AssertionError("Ascend source contract must not initialize MUSA")
+            return builtins.__import__(name, globals, locals, fromlist, level)
+
+        module.__dict__["__builtins__"] = {
+            **vars(builtins),
+            "__import__": source_import,
+        }
     spec.loader.exec_module(module)
     return module
 
@@ -87,18 +106,13 @@ def _install_fake_flaggems(
 
     config = ModuleType("flag_gems.config")
     config.use_c_extension = use_c_extension
-    modules = ModuleType("flag_gems.modules")
-    modules.__path__ = []
-    rotary = ModuleType("flag_gems.modules.rotary_embedding")
-    rotary.gems_rope_forward = common_rotary
+    fused = ModuleType("flaggems_vllm")
+    fused.apply_rotary_pos_emb = common_rotary
 
     flag_gems.config = config
-    flag_gems.modules = modules
-    modules.rotary_embedding = rotary
     monkeypatch.setitem(sys.modules, "flag_gems", flag_gems)
     monkeypatch.setitem(sys.modules, "flag_gems.config", config)
-    monkeypatch.setitem(sys.modules, "flag_gems.modules", modules)
-    monkeypatch.setitem(sys.modules, "flag_gems.modules.rotary_embedding", rotary)
+    monkeypatch.setitem(sys.modules, "flaggems_vllm", fused)
 
 
 def test_reference_interleaved_rotary_repeats_adjacent_cache_values():
@@ -565,3 +579,21 @@ def test_flaggems_ascend_common_wrapper_preserves_requested_inplace(
     assert len(calls) == 1
     assert calls[0]["position_ids"] is positions
     assert calls[0]["inplace"] is inplace
+
+
+def test_flaggems_source_loader_keeps_platform_interface_local(monkeypatch):
+    before = sys.modules.get("vllm.platforms")
+    original_import = builtins.__import__
+
+    def reject_native(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "torch_musa" or (name == "musa_ops" and level == 1):
+            raise AssertionError("CPU source contract attempted a native MUSA import")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", reject_native)
+    loaded = _load_source_module(
+        "_test_flaggems_rotary", "vllm_fl/dispatch/backends/flaggems/impl/rotary.py"
+    )
+    assert loaded.current_platform.device_type == "npu"
+    assert sys.modules.get("vllm.platforms") is before
+    assert not hasattr(loaded, "musa_rotary_embedding")

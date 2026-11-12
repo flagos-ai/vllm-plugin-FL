@@ -9,36 +9,27 @@
 # At module load time we:
 #   1. Import flash_attn_3._C to register FA3 custom ops.
 #   2. Provide a custom flash_attn_varlen_func that calls the wheel's fwd
-#      with the correct arg signature (35 args), bridging differences between
-#      v0.20.2's FA3 branch (which passes cp_* extras and skips attention_chunk)
-#      and the wheel's expected signature.
+#      with the wheel's 35-argument schema, including vLLM 0.28 mask arguments.
 #   3. Inject the needed functions into the flash_attn module namespace so that
 #      the inherited FlashAttentionImpl.forward() can resolve them.
-#   4. Provide a pure-PyTorch reshape_and_cache_flash for PPU (no _C.abi3.so).
+#   4. Use masked Triton cache writes that preserve padding slots during graphs.
 #   5. Handle PPU-specific requirements:
 #      - When cu_seqlens_k is None (paged attention), max_seqlen_k must be 1.
 #      - FA3 kernel uses max_seqlen_k to select tile size (Aone#75639039).
 
 from __future__ import annotations
 
-from typing import ClassVar
-
-import torch
-
 # ---------------------------------------------------------------------------
 # Step 1 — load the flash_attn_3 wheel
 # ---------------------------------------------------------------------------
 import flash_attn_3._C  # noqa: F401 — registers torch.ops.flash_attn_3
-
+import torch
 
 # ---------------------------------------------------------------------------
 # Step 2 — provide a custom flash_attn_varlen_func for PPU
 # ---------------------------------------------------------------------------
-# v0.20.2's FA3 branch calls torch.ops._vllm_fa3_C.fwd() with 37 args:
-#   ... softcap, True(=rotary_interleaved), scheduler_metadata, num_splits,
-#       None(=pack_gqa), 0(=sm_margin), s_aux,
-#       cp_world_size, cp_rank, cp_tot_seqused_k     <-- extras
-# BUT the flash_attn_3 wheel expects 35 args:
+# The vLLM wrapper accepts context parallel and FA4 mask arguments; the PPU
+# flash_attn_3 wheel exposes the following 35-argument FA3 schema:
 #   ... window_size_right, attention_chunk, softcap, is_rotary_interleaved,
 #       scheduler_metadata, num_splits, pack_gqa, sm_margin, s_aux
 #
@@ -72,12 +63,15 @@ def _thead_flash_attn_varlen_func(
     k_descale=None,
     v_descale=None,
     num_splits: int = 0,
-    # Version selector (ignored — we always use FA3)
+    # Version selector (the PPU wheel always uses FA3)
     fa_version: int = 3,
     s_aux=None,
     cp_world_size=1,
     cp_rank=0,
     cp_tot_seqused_k=None,
+    dynamic_causal=None,
+    mask_mod=None,
+    aux_tensors=None,
 ):
     """Custom flash_attn_varlen_func for PPU using the flash_attn_3 wheel.
 
@@ -85,7 +79,11 @@ def _thead_flash_attn_varlen_func(
     the extra cp_* args), but calls torch.ops.flash_attn_3.fwd with the
     correct 35-argument signature.
     """
-    del fa_version, cp_world_size, cp_rank, cp_tot_seqused_k  # unused
+    del fa_version
+    if cp_world_size != 1 or cp_rank != 0 or cp_tot_seqused_k is not None:
+        raise NotImplementedError("PPU FA3 does not support context parallel attention")
+    if dynamic_causal is not None or mask_mod is not None or aux_tensors is not None:
+        raise NotImplementedError("PPU FA3 does not support FA4 dynamic masks")
     del dropout_p, deterministic, return_attn_probs  # unused in FA3
 
     assert alibi_slopes is None, "Alibi is not supported in FA3"
@@ -106,10 +104,12 @@ def _thead_flash_attn_varlen_func(
     if cu_seqlens_k is None:
         max_seqlen_k = 1
 
-
     out, softmax_lse, _, _ = torch.ops.flash_attn_3.fwd(
-        q, k, v,
-        None, None,  # k_new, v_new
+        q,
+        k,
+        v,
+        None,
+        None,  # k_new, v_new
         q_v,
         out,
         cu_seqlens_q,
@@ -122,7 +122,9 @@ def _thead_flash_attn_varlen_func(
         block_table,
         None,  # kv_batch_idx
         None,  # leftpad_k
-        None, None, None,  # rotary_cos, rotary_sin, seqlens_rotary
+        None,
+        None,
+        None,  # rotary_cos, rotary_sin, seqlens_rotary
         q_descale,
         k_descale,
         v_descale,
@@ -130,13 +132,13 @@ def _thead_flash_attn_varlen_func(
         causal,
         real_window_size[0],
         real_window_size[1],
-        0,      # attention_chunk
+        0,  # attention_chunk
         softcap,
-        True,   # is_rotary_interleaved
+        True,  # is_rotary_interleaved
         scheduler_metadata,
         num_splits,
-        None,   # pack_gqa
-        0,      # sm_margin
+        None,  # pack_gqa
+        0,  # sm_margin
         s_aux,
     )
 
@@ -147,67 +149,70 @@ def _thead_flash_attn_varlen_func(
 # Step 2b — inject into flash_attn module namespace
 # ---------------------------------------------------------------------------
 import vllm.v1.attention.backends.flash_attn as _flash_attn_mod
-from vllm import vllm_flash_attn as _vfa
 
 _flash_attn_mod.flash_attn_varlen_func = _thead_flash_attn_varlen_func
-_flash_attn_mod.get_scheduler_metadata = _vfa.get_scheduler_metadata
+
+
+def _thead_get_scheduler_metadata(
+    batch_size,
+    max_seqlen_q,
+    max_seqlen_k,
+    num_heads_q,
+    num_heads_kv,
+    headdim,
+    cache_seqlens,
+    qkv_dtype,
+    headdim_v=None,
+    cu_seqlens_q=None,
+    cu_seqlens_k_new=None,
+    cache_leftpad=None,
+    page_size=None,
+    max_seqlen_k_new=0,
+    causal=False,
+    window_size=(-1, -1),
+    softcap=False,
+    num_splits=0,
+    pack_gqa=None,
+    sm_margin=0,
+):
+    """Bridge vLLM 0.28 metadata to the installed PPU FA3 operator schema."""
+    return torch.ops.flash_attn_3.get_scheduler_metadata(
+        batch_size,
+        max_seqlen_q,
+        max_seqlen_k,
+        num_heads_q,
+        num_heads_kv,
+        headdim,
+        headdim if headdim_v is None else headdim_v,
+        qkv_dtype,
+        cache_seqlens,
+        cu_seqlens_q,
+        None,
+        cu_seqlens_k_new,
+        None,
+        cache_leftpad,
+        page_size,
+        max_seqlen_k_new,
+        causal,
+        window_size[0],
+        window_size[1],
+        0,
+        bool(softcap),
+        num_splits,
+        pack_gqa,
+        sm_margin,
+    )
+
+
+_flash_attn_mod.get_scheduler_metadata = _thead_get_scheduler_metadata
+# The upstream CC8.0 selector chooses FA2. Select the PPU wheel
+# flash_attn_3 API with FA version 3.
+_flash_attn_mod.get_flash_attn_version = lambda **kwargs: 3
 
 # ---------------------------------------------------------------------------
-# Step 2c — pure-PyTorch reshape_and_cache_flash for PPU
+# Step 2c — masked, stride-aware cache writes preserve graph padding slots.
 # ---------------------------------------------------------------------------
-# The original is a CUDA custom op from _C.abi3.so which is not available
-# on the remote.  We provide a pure-PyTorch indexed-copy version.
-
-
-def reshape_and_cache_flash_thead(
-    key: torch.Tensor,
-    value: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    slot_mapping: torch.Tensor,
-    kv_cache_dtype: str,
-    k_scale: torch.Tensor,
-    v_scale: torch.Tensor,
-) -> None:
-    """GPU-only KV cache write for PPU, compatible with CUDA graph capture.
-
-    The original CUDA custom op (``_C_cache_ops.reshape_and_cache_flash``)
-    is not available on the remote.  This pure-PyTorch equivalent avoids
-    *any* CPU-GPU synchronisation or data-dependent shape changes so that
-    it can run inside a CUDA graph capture region.
-
-    Padding tokens (``slot_mapping == -1``) are handled by zeroing their
-    key/value before writing to a safe slot, rather than skipping them with
-    a conditional — the latter would require a CPU sync (``.any()``) and
-    produce a data-dependent tensor shape.
-    """
-    del kv_cache_dtype, k_scale, v_scale  # unused in pure-torch path
-
-    num_kv_heads = key.shape[1]
-    head_size = key.shape[2]
-
-    # Zero out key/value for padding slots (slot_mapping == -1), then map
-    # -1 to slot 0 so that every token writes somewhere.  Writing zeros to
-    # slot 0 for padding tokens is harmless.
-    valid_mask_gpu = (slot_mapping >= 0).to(key.dtype).view(-1, 1, 1)
-    masked_key = key * valid_mask_gpu
-    masked_value = value * valid_mask_gpu
-
-    safe_slots = slot_mapping.clamp(min=0)  # -1 -> 0
-
-    # Convert flat slot indices to (block, token_within_block) coordinates.
-    # key_cache shape: [num_blocks, block_size, num_kv_heads, head_size]
-    block_size = key_cache.shape[1]
-    block_indices = safe_slots // block_size
-    token_in_block = safe_slots % block_size
-
-    # Write each kv_head separately — this avoids flattening the entire
-    # cache into a 2D tensor, which would create a ~2.5 GiB temporary
-    # copy on non-contiguous cache layouts (e.g. HND stride order).
-    for h in range(num_kv_heads):
-        key_cache[block_indices, token_in_block, h, :] = masked_key[:, h, :]
-        value_cache[block_indices, token_in_block, h, :] = masked_value[:, h, :]
-
+from .cache import reshape_and_cache_flash_thead
 
 _flash_attn_mod.reshape_and_cache_flash = reshape_and_cache_flash_thead
 
@@ -215,25 +220,20 @@ _flash_attn_mod.reshape_and_cache_flash = reshape_and_cache_flash_thead
 # Step 3 — custom backend & impl
 # ---------------------------------------------------------------------------
 
-from vllm.platforms import current_platform
 from vllm.platforms.interface import DeviceCapability
 from vllm.v1.attention.backend import (
-    AttentionBackend,
-    AttentionImpl,
+    AttentionCGSupport,
     AttentionType,
-    MultipleOf,
 )
 from vllm.v1.attention.backends.flash_attn import (
     FlashAttentionBackend,
     FlashAttentionImpl,
     FlashAttentionMetadataBuilder,
 )
-from vllm.v1.attention.backends.fa_utils import (
-    flash_attn_supports_fp8,
-    flash_attn_supports_sinks,
-    get_flash_attn_version,
-    is_flash_attn_varlen_func_available,
-)
+
+
+class TheadFlashAttentionMetadataBuilder(FlashAttentionMetadataBuilder):
+    _cudagraph_support = AttentionCGSupport.ALWAYS
 
 
 class TheadFlashAttentionImpl(FlashAttentionImpl):
@@ -288,12 +288,14 @@ class TheadFlashAttentionBackend(FlashAttentionBackend):
 
     @staticmethod
     def get_builder_cls() -> type[FlashAttentionMetadataBuilder]:
-        return FlashAttentionMetadataBuilder
+        return TheadFlashAttentionMetadataBuilder
 
     @classmethod
     def supports_compute_capability(cls, capability: DeviceCapability) -> bool:
         # PPU CC = 8.0
-        return capability >= DeviceCapability(8, 0) and capability < DeviceCapability(9, 0)
+        return capability >= DeviceCapability(8, 0) and capability < DeviceCapability(
+            9, 0
+        )
 
     @classmethod
     def supports_combination(
@@ -305,10 +307,17 @@ class TheadFlashAttentionBackend(FlashAttentionBackend):
         use_mla: bool,
         has_sink: bool,
         use_sparse: bool,
+        use_mm_prefix: bool,
         device_capability: DeviceCapability,
     ) -> str | None:
         if has_sink:
             return "sink not supported on PPU (CC < 9.0)"
         if use_mla:
             return "MLA not supported in thead flash attention backend"
+        if use_sparse:
+            return "sparse attention not supported in thead flash attention backend"
+        if use_mm_prefix:
+            return "multimodal prefix masks require FA4, unavailable on PPU FA3"
+        if kv_cache_dtype not in (None, "auto", "float16", "bfloat16"):
+            return "quantized KV cache not supported by the PPU cache writer"
         return None

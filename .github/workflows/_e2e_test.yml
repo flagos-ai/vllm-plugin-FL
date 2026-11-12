@@ -25,9 +25,14 @@ on:
   workflow_call:
     inputs:
       platform:
-        description: "Platform name (e.g., cuda, ascend)"
+        description: "Platform name (e.g., nvidia, ascend)"
         required: true
         type: string
+      branch:
+        description: "Branch/ref under test (empty = caller ref)"
+        required: false
+        type: string
+        default: ""
       task:
         description: "Test task category (e.g., inference, serving)"
         required: true
@@ -80,22 +85,44 @@ jobs:
       - name: Checkout (attempt 1)
         id: checkout1
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 2)
         id: checkout2
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
-      # This H20 runner fails NVLS multicast binding with CUDA error 401.
+      # Kunlunxin: E2E failures on this backend surface as bare HTTP 500 or
+      # native "illegal memory access" with no Python traceback in the CI log.
+      # Raise diagnostic verbosity only — no test case, assertion or mark is
+      # altered, so pass/fail semantics stay identical.
+      - name: Enable verbose diagnostics on Kunlunxin
+        if: inputs.platform == 'kunlunxin'
+        run: |
+          {
+            echo 'VLLM_LOGGING_LEVEL=DEBUG'
+            echo 'TORCH_SHOW_CPP_STACKTRACES=1'
+            # faulthandler dumps the Python traceback on SIGSEGV/SIGABRT,
+            # which is what an async device "illegal memory access" looks like.
+            echo 'PYTHONFAULTHANDLER=1'
+          } >> "$GITHUB_ENV"
+
+      # This H20 runner fails NVLS multicast binding with CUDA error 401 (#598
+      # on this line; carried over from the pre-sync _e2e_test.yml).
       - name: Disable NVLS on H20
-        if: inputs.platform == 'cuda' && inputs.device == 'h20'
+        if: inputs.platform == 'nvidia' && inputs.device == 'h20'
         run: echo 'NCCL_NVLS_ENABLE=0' >> "$GITHUB_ENV"
 
       - name: Install project
@@ -118,6 +145,9 @@ jobs:
             --task ${{ inputs.task }} \
             --cases '${{ inputs.cases }}'
 
+      # test-results/logs/ holds the vLLM server stdout/stderr written by
+      # VllmServer and preserved on failure. Without it the server-side
+      # traceback behind a bare HTTP 500 dies with the runner.
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

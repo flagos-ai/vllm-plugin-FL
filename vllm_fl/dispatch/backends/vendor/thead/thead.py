@@ -10,8 +10,6 @@ on CC 8.0 devices.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -21,19 +19,18 @@ class TheadBackend(Backend):
     """
     Thead (PPU) backend for operator implementations.
 
-    This backend uses the PPU FA3 kernel (flash_attn_3 wheel) for attention,
-    and vLLM native CUDA implementations for other ops (silu_and_mul, rms_norm,
-    rotary_embedding).
+    This backend provides the PPU FA3 attention bridge. Shared operators use
+    the FlagGems and PyTorch reference paths selected by the dispatch policy.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
         return "thead"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "thead"
 
     def is_available(self) -> bool:
@@ -57,6 +54,7 @@ class TheadBackend(Backend):
                 else:
                     # Fallback: check PPU_SDK env var
                     import os
+
                     TheadBackend._available = "PPU_SDK" in os.environ
             except Exception:
                 TheadBackend._available = False
@@ -64,41 +62,7 @@ class TheadBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
-    def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
-        """SiLU activation followed by element-wise multiplication."""
-        from vllm.model_executor.layers.activations import silu_and_mul
-        return silu_and_mul(x)
-
-    def rms_norm(self, obj, x: torch.Tensor, residual: Optional[torch.Tensor] = None):
-        """RMS normalization."""
-        if residual is not None:
-            from vllm.model_executor.layers.layernorm import rms_norm
-            return rms_norm(x, obj.weight, residual)
-        return torch.nn.functional.rms_norm(x, (x.shape[-1],), weight=obj.weight)
-
-    def rotary_embedding(
-        self,
-        obj,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        cos: torch.Tensor,
-        sin: torch.Tensor,
-        position_ids: torch.Tensor,
-        rotary_interleaved: bool = False,
-        inplace: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Apply rotary position embedding."""
-        from vllm.model_executor.layers.rotary_embedding import apply_rotary_emb
-        return apply_rotary_emb(
-            query, key, cos, sin,
-            position_ids=position_ids,
-            rotary_interleaved=rotary_interleaved,
-            inplace=inplace,
-        )
-
-    def attention_backend(
-        self, use_mla: bool = False, use_sparse: bool = False
-    ) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for PPU.
 
@@ -114,6 +78,7 @@ class TheadBackend(Backend):
         if use_mla or use_sparse:
             # Fall back to standard FLASH_ATTN for MLA/sparse
             from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
             return AttentionBackendEnum.FLASH_ATTN.get_path()
 
         return (

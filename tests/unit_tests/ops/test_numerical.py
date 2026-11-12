@@ -368,6 +368,74 @@ class TestRMSNormNumerical:
         assert result.shape == x.shape
         torch.testing.assert_close(result, expected)
 
+    @pytest.mark.parametrize(
+        "input_dtype,weight_dtype",
+        [
+            (torch.float16, torch.float32),
+            (torch.bfloat16, torch.float32),
+            (torch.float32, torch.bfloat16),
+        ],
+    )
+    def test_mixed_precision_accumulation(self, input_dtype, weight_dtype, device):
+        from vllm_fl.dispatch.backends.reference.impl.normalization import (
+            rms_norm_torch,
+        )
+
+        x = torch.tensor([[400, -300, 200, -100]], dtype=input_dtype, device=device)
+        weight = torch.tensor([0.3, -0.7, 1.2, 0.6], dtype=weight_dtype, device=device)
+        obj = _FakeNorm(weight, epsilon=0.0)
+        addition = torch.tensor([[0.17, -0.31, 0.11, 0.23]], device=device)
+        saved_x, saved_addition = x.clone(), addition.clone()
+        for residual in (None, addition):
+            summed = x.float() if residual is None else x.float() + residual
+            normalized = F.rms_norm(summed, (x.shape[-1],), eps=0.0)
+            expected = (normalized.to(weight_dtype) * weight).to(input_dtype)
+            result = rms_norm_torch(obj, x, residual)
+            if residual is not None:
+                result, updated = result
+                torch.testing.assert_close(updated, summed.to(input_dtype))
+            assert result.dtype == input_dtype
+            assert torch.isfinite(result).all()
+            torch.testing.assert_close(result, expected)
+        torch.testing.assert_close(x, saved_x)
+        torch.testing.assert_close(addition, saved_addition)
+
+    @pytest.mark.parametrize(
+        "pass_weight,pass_weight_add",
+        [(True, True), (True, False), (False, True), (False, False)],
+    )
+    def test_independent_weight_flags(self, pass_weight, pass_weight_add, device):
+        from vllm_fl.dispatch.backends.reference.impl.normalization import (
+            rms_norm_torch,
+        )
+
+        x = torch.tensor([[3.0, 4.0]], device=device)
+        weight = torch.tensor([2.0, 3.0], device=device)
+        obj = _FakeNorm(weight, epsilon=0.0)
+        obj.pass_weight, obj.pass_weight_add = pass_weight, pass_weight_add
+        normalized = x / (12.5**0.5)
+        actual = rms_norm_torch(obj, x)
+        torch.testing.assert_close(
+            actual, normalized * weight if pass_weight else normalized
+        )
+        actual, residual = rms_norm_torch(obj, x, torch.zeros_like(x))
+        torch.testing.assert_close(
+            actual, normalized * weight if pass_weight_add else normalized
+        )
+        torch.testing.assert_close(residual, x)
+
+    def test_variance_size_override(self, device):
+        from vllm_fl.dispatch.backends.reference.impl.normalization import (
+            rms_norm_torch,
+        )
+
+        x = torch.tensor([[3.0, 4.0, 20.0, -10.0]], device=device)
+        weight = torch.tensor([2.0, 3.0, 4.0, 5.0], device=device)
+        obj = _FakeNorm(weight, epsilon=0.0)
+        obj.variance_size_override = 2
+        # Only the prefix [3, 4] contributes to the mean square (12.5).
+        torch.testing.assert_close(rms_norm_torch(obj, x), x / (12.5**0.5) * weight)
+
 
 # =============================================================================
 # Rotary Embedding Tests
@@ -376,6 +444,34 @@ class TestRMSNormNumerical:
 
 class TestRotaryEmbeddingNumerical:
     """Numerical correctness tests for rotary position embedding."""
+
+    @pytest.mark.parametrize("interleaved", [False, True])
+    def test_shared_positions_4d(self, interleaved, device):
+        from vllm_fl.dispatch.backends.reference.impl.rotary import (
+            rotary_embedding_torch,
+        )
+
+        query = torch.randn(2, 3, 4, 8, device=device)
+        key = torch.randn(2, 2, 4, 8, device=device)
+        saved_query, saved_key = query.clone(), key.clone()
+        positions = torch.tensor([0, 5, 1, 3], device=device)
+        angles = torch.arange(24, device=device).reshape(6, 4).float() / 10
+        cos, sin = angles.cos(), angles.sin()
+        actual = rotary_embedding_torch(
+            None, query, key, cos, sin, positions, rotary_interleaved=interleaved
+        )
+        expected = rotary_embedding_torch(
+            None,
+            query,
+            key,
+            cos,
+            sin,
+            positions.expand(2, -1),
+            rotary_interleaved=interleaved,
+        )
+        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(query, saved_query)
+        torch.testing.assert_close(key, saved_key)
 
     def test_basic_correctness_4d(self, device):
         """Test basic numerical correctness with 4D tensors."""

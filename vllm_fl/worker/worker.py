@@ -59,6 +59,15 @@ from vllm.distributed.weight_transfer import (
     WeightTransferEngineFactory,
 )
 from vllm.logger import init_logger
+
+# FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
+try:  # pragma: no cover - vLLM version compat
+    from vllm.distributed.parallel_state import (
+        prepare_communication_buffer_for_model as _prepare_comm_buffer,
+    )
+except ImportError:  # vLLM >= 0.28 dropped the symbol
+    def _prepare_comm_buffer(*args, **kwargs):
+        return None
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
@@ -131,6 +140,27 @@ if TYPE_CHECKING:
     from vllm.device_allocator.sleep_mode_backend import SleepModeBackend
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
+
+def _is_hybrid_kv_model(vllm_config: VllmConfig) -> bool:
+    """Whether the model mixes linear-attention layers with full attention.
+
+    Kunlunxin stores the attention KV cache of such models (Qwen3-Next /
+    Qwen3.5 / Qwen3.6) in the fused ``[2, blocks, ...]`` layout that only the
+    fused paged write path fills correctly.
+    """
+    cache_config = getattr(vllm_config, "cache_config", None)
+    if getattr(cache_config, "mamba_cache_mode", "none") in ("align", "all"):
+        return True
+    model_config = getattr(vllm_config, "model_config", None)
+    try:
+        if getattr(model_config, "is_hybrid", False):
+            return True
+    except Exception:
+        pass
+    hf_config = getattr(model_config, "hf_text_config", None)
+    layer_types = getattr(hf_config, "layer_types", None) or ()
+    return any(layer_type != "full_attention" for layer_type in layer_types)
 
 
 def _initialize_fl_runtime(rank: int, config=None) -> None:
@@ -323,6 +353,23 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
+        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
+        # this flag to select the matching block-table and KV-cache kernels.
+        self.use_v2_model_runner = False
+
+        # Hybrid models (mamba/linear attention + full attention) keep the
+        # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
+        # Writing it through the split reshape_and_cache path drops each token
+        # into the *previous* block, so the first decode step reads a block that
+        # was never written: the logits come out entirely NaN and sampling
+        # degenerates to token id 0 ("!" in the Qwen tokenizer) right after one
+        # correct token.  The fused paged write path already exists behind
+        # USE_RESHAPE_AND_CACHE_FLASH; default it on for such models.
+        if (
+            not execution_config(vllm_config).enabled
+            and _is_hybrid_kv_model(vllm_config)
+        ):
+            os.environ.setdefault("USE_RESHAPE_AND_CACHE_FLASH", "1")
 
         _initialize_fl_runtime(self.rank, self.vllm_config)
         self.k3_execution = execution_config(self.vllm_config)
@@ -459,13 +506,13 @@ class WorkerFL(WorkerBase):
         if current_platform.is_cpu():
             return nullcontext()
 
-        # CoreX/Iluvatar (and any other out-of-tree vendor whose platform reports
-        # is_cuda_alike()==False) supports neither the CuMem nor the XPU sleep-mode
-        # allocator. vLLM 0.28 raises RuntimeError from get_mem_allocator_instance()
-        # for such platforms, so gate on the same capability predicate the upstream
-        # interface exposes. On NVIDIA this stays True and behaviour is unchanged.
-        # TODO(corex): drop once the plugin's sleep-mode path is vendor-neutral.
-        if not current_platform.is_sleep_mode_available():
+        # Backends without sleep-mode support use ordinary allocations when
+        # sleep is disabled. Keep explicit sleep requests on the allocator
+        # path so unsupported backends still report an error.
+        if (
+            not current_platform.is_sleep_mode_available()
+            and not self.vllm_config.model_config.enable_sleep_mode
+        ):
             return nullcontext()
 
         allocator = get_mem_allocator_instance()
@@ -506,8 +553,26 @@ class WorkerFL(WorkerBase):
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
             parallel_config = self.parallel_config
+            # When vLLM already handed this DP rank its own physical device
+            # list (assigned_physical_gpu_ids, set for platforms that cannot
+            # rely on set_device_index(), e.g. NPU), that list is already
+            # sliced per rank and local_rank indexes into it. Adding the DP
+            # offset on top double-counts: DP rank 1 gets local_rank 2 while
+            # only [2, 3] are assigned, which trips the bounds check below /
+            # raises IndexError from logical_device_id_to_visible_device_id().
+            # A full (un-sliced) list -- CUDA with --device-ids -- is longer
+            # than one TP x PP group and still needs the offset.
+            assigned_ids = parallel_config.assigned_physical_gpu_ids
+            tp_pp_world_size = (
+                parallel_config.pipeline_parallel_size
+                * parallel_config.tensor_parallel_size
+            )
+            rank_slice_assigned = (
+                assigned_ids is not None and len(assigned_ids) <= tp_pp_world_size
+            )
             if (
-                parallel_config.distributed_executor_backend
+                not rank_slice_assigned
+                and parallel_config.distributed_executor_backend
                 not in ("ray", "external_launcher")
                 and parallel_config.data_parallel_backend != "ray"
                 and parallel_config.nnodes_within_dp == 1
@@ -516,11 +581,6 @@ class WorkerFL(WorkerBase):
                 dp_local_rank = self.parallel_config.data_parallel_rank_local
                 if dp_local_rank is None:
                     dp_local_rank = self.parallel_config.data_parallel_index
-
-                tp_pp_world_size = (
-                    self.parallel_config.pipeline_parallel_size
-                    * self.parallel_config.tensor_parallel_size
-                )
 
                 # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
                 self.local_rank += dp_local_rank * tp_pp_world_size
@@ -693,16 +753,29 @@ class WorkerFL(WorkerBase):
             by adjusting the `gpu_memory_utilization` parameter.
         """
         if current_platform.device_type == "txda":
-            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
-            # e.g., 20 GiB or similar default cache memory size.
-            fallback_val = int(
-                os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024)
-            )
+            # TXDA cannot profile the peak allocation safely. Honor the vLLM
+            # byte budget first, retaining the legacy override/default when
+            # no explicit budget was supplied.
+            kv_cache_memory_bytes = self.cache_config.kv_cache_memory_bytes
+            if kv_cache_memory_bytes is None:
+                try:
+                    kv_cache_memory_bytes = int(
+                        os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * GiB_bytes)
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        "VLLM_TXDA_KV_CACHE_SIZE must be a positive integer in bytes."
+                    ) from exc
+            if kv_cache_memory_bytes <= 0:
+                raise ValueError(
+                    "TXDA KV cache memory must be positive; check "
+                    "kv_cache_memory_bytes or VLLM_TXDA_KV_CACHE_SIZE."
+                )
             logger.info(
-                "txda platform detected. Skipping memory profiling to avoid OOM. "
-                f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB."
+                "TXDA: skipping memory profiling; using %.2f GiB for KV cache.",
+                kv_cache_memory_bytes / GiB_bytes,
             )
-            return fallback_val
+            return kv_cache_memory_bytes
 
         maybe_apply_startup_plan(self)
 
@@ -786,6 +859,51 @@ class WorkerFL(WorkerBase):
             self, profile_result, cudagraph_memory_estimate,
             cudagraph_memory_estimate_applied,
         )
+        if current_platform.device_type == "musa":
+            native_free_after_graph_profile = int(
+                current_platform.torch_device_fn.mem_get_info(self.device)[0]
+            )
+            init_logger("vllm.musa_graph_profile").info(
+                "MUSA KV budget before MM IPC reserve on %s (bytes): "
+                "requested=%d, non_kv=%d, total_consumed=%d, transient_peak=%d, "
+                "graph_estimate=%d, graph_applied=%d, available_kv=%d, "
+                "initial_free=%d, profile_free=%d, native_free_after_graph_profile=%d, "
+                "total=%d",
+                self.device,
+                self.requested_memory,
+                profile_result.non_kv_cache_memory,
+                profile_result.total_consumed,
+                profile_result.transient_peak_headroom,
+                cudagraph_memory_estimate,
+                cudagraph_memory_estimate_applied,
+                self.available_kv_cache_memory_bytes,
+                self.init_snapshot.free_memory,
+                free_gpu_memory,
+                native_free_after_graph_profile,
+                self.init_snapshot.total_memory,
+            )
+
+        if (
+            current_platform.device_type == "musa"
+            and self.available_kv_cache_memory_bytes <= 0
+        ):
+            logger.error(
+                "MUSA KV cache memory budget exhausted on %s (bytes): "
+                "requested=%d, non_kv=%d, total_consumed=%d, transient_peak=%d, "
+                "graph_estimate=%d, graph_applied=%d, available_kv=%d, "
+                "initial_free=%d, profile_free=%d, total=%d",
+                self.device,
+                self.requested_memory,
+                profile_result.non_kv_cache_memory,
+                profile_result.total_consumed,
+                profile_result.transient_peak_headroom,
+                cudagraph_memory_estimate,
+                cudagraph_memory_estimate_applied,
+                self.available_kv_cache_memory_bytes,
+                self.init_snapshot.free_memory,
+                free_gpu_memory,
+                self.init_snapshot.total_memory,
+            )
 
         unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
         logger.debug(

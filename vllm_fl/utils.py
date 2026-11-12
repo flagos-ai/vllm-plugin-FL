@@ -3,17 +3,19 @@
 import json
 import os
 
-import flag_gems
-
-try:
-    # FlagGems<=5.0.2: DeviceDetector lives in device.
-    from flag_gems.runtime.backend.device import DeviceDetector
-except (ImportError, FileNotFoundError):
-    # FlagGems>5.0.2: DeviceDetector lives in device_finder.
-    from flag_gems.runtime.backend.device_finder import DeviceDetector
-from flag_gems.runtime import backend
-
 _OP_CONFIG: dict[str, str] | None = None
+
+
+def _env_vendor_name() -> str:
+    """Vendor explicitly requested through ``GEMS_VENDOR`` (FlagGems override).
+
+    Deployments set it exactly where the runtime probe cannot identify the
+    accelerator (for example the Kunlunxin CI container). Honouring it keeps
+    the plugin bound to the right vendor backend instead of collapsing to
+    UnspecifiedPlatform.
+    """
+    return os.environ.get("GEMS_VENDOR", "").strip().lower()
+
 
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
@@ -48,8 +50,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
-    # Registered backend: vendor/thead (tsingmicro)
-    "tsingmicro": {"device_type": "tsingmicro", "device_name": "txda"},
+    # Registered backend: vendor/txda (Tsingmicro)
+    "tsingmicro": {"device_type": "txda", "device_name": "txda"},
     # Registered backend: vendor/gcu (Enflame GCU / torch_gcu).
     # FlagGems >= 5.4 reports vendor_name "enflame"; older images report
     # "gcu" — keep both aliases.
@@ -65,6 +67,9 @@ _DEVICE_CONTROL_ENV_VAR_PLACEHOLDER = "VLLM_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER"
 _VALIDATED_DEVICE_CONTROL_ENV_VARS = {
     "nvidia": "CUDA_VISIBLE_DEVICES",
     "kunlunxin": "CUDA_VISIBLE_DEVICES",
+    "tsingmicro": "TXDA_VISIBLE_DEVICES",
+    "enflame": "TOPS_VISIBLE_DEVICES",
+    "gcu": "TOPS_VISIBLE_DEVICES",
 }
 
 
@@ -102,9 +107,9 @@ def get_device_name(vendor_name: str) -> str:
 def get_device_control_env_var(vendor_name: str) -> str:
     """Return the validated vLLM device-control variable for a vendor.
 
-    Only NVIDIA is enabled by default because this mapping path was validated
-    on NVIDIA H20. Other vendors retain the vLLM base-class no-op unless an
-    operator explicitly sets ``FLAGOS_DEVICE_CONTROL_ENV_VAR``.
+    Defaults are provided only for validated vendor mappings. Other vendors
+    retain the vLLM base-class no-op unless an operator explicitly sets
+    ``FLAGOS_DEVICE_CONTROL_ENV_VAR``.
     """
     override = os.environ.get("FLAGOS_DEVICE_CONTROL_ENV_VAR", "").strip()
     if override:
@@ -275,7 +280,10 @@ _load_op_config_from_env()
 
 class DeviceInfo:
     def __init__(self):
-        self.device = DeviceDetector()
+        from flag_gems.runtime import backend, device
+
+        self._backend = backend
+        self.device = device
         self.supported_device = [
             "nvidia",
             "ascend",
@@ -287,7 +295,7 @@ class DeviceInfo:
             "enflame",
             "kunlunxin",
         ]
-        backend.set_torch_backend_device_fn(self.device.vendor_name)
+        self._backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property
     def dispatch_key(self):
@@ -304,12 +312,12 @@ class DeviceInfo:
     @property
     def torch_device_fn(self):
         # torch_device_fn is like 'torch.cuda' object
-        return backend.gen_torch_device_object()
+        return self._backend.gen_torch_device_object()
 
     @property
     def torch_backend_device(self):
         # torch_backend_device is like 'torch.backend.cuda' object
-        return backend.get_torch_backend_device_fn()
+        return self._backend.get_torch_backend_device_fn()
 
     def get_supported_device(self):
         if self.vendor_name not in self.supported_device:
@@ -321,6 +329,8 @@ def get_flaggems_all_ops() -> list[str]:
     """
     Get all FlagGems operator names from flag_gems._FULL_CONFIG.
     """
+    import flag_gems
+
     try:
         # _FULL_CONFIG is a tuple of (op_name, function, ...) tuples
         # Some entries have 2 elements, some have 3

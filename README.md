@@ -40,18 +40,25 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 |-------------|--------|-----------|
 | NVIDIA | Supported | [deployment guide](./docs/usage/nvidia.md) |
 | Ascend | Supported | [deployment guide](./docs/usage/ascend.md) |
-| MetaX | Supported | - |
-| T-Head | Supported | - |
+| MetaX | Supported | [deployment guide](./docs/usage/metax.md) |
+| T-Head | Supported | [deployment guide](./docs/usage/thead.md) |
 | Iluvatar | Supported | [deployment guide](./docs/usage/iluvatar.md) |
-| Tsingmicro | Supported | - |
-| Moore Threads | Supported | - |
-| Hygon | Supported | - |
+| Enflame | Supported | [deployment guide](./docs/usage/enflame.md) |
+| Tsingmicro | Supported (eager) | [deployment guide](./docs/usage/tsingmicro.md) |
+| Moore Threads | Supported | [deployment guide](./docs/usage/musa.md) |
+| Hygon | Supported | [deployment guide](./docs/usage/hygon.md) |
 | Sunrise | Supported | - |
 | ARM64 CPU | Supported | - |
 
 ## Quick Start
 
 ### Setup
+
+For hardware-specific deployment and validation, see the
+[NVIDIA guide](./docs/usage/nvidia.md),
+[T-Head PPU guide](./docs/usage/thead.md),
+[Enflame S60 guide](./docs/usage/enflame.md), and
+[Tsingmicro TXDA guide](./docs/usage/tsingmicro.md).
 
 1. Install vLLM
 
@@ -143,6 +150,9 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     (`5.3.5+g34c6d2ce4`). Re-run the blacklist and model tests when moving to a
     newer FlagGems master revision.
 
+For optional explicit fused operators, see the [FlagGems-vllm guide](./docs/flaggems-vllm.md).
+The provider defaults to off; general ATen registration remains with FlagGems.
+
 ### Runtime compatibility hooks
 
 The plugin installs runtime compatibility hooks through vLLM's plugin entry
@@ -152,6 +162,11 @@ that are native in vLLM 0.28.0 and Transformers 5 are not duplicated here.
 Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
+
+### Operator profiling
+
+See the [operator profiling tools](./tools/operator_profile/README.md) for a
+reproducible native-vLLM and plugin comparison workflow on vLLM 0.28.0.
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
@@ -186,6 +201,9 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
+For native decode graph execution with vLLM 0.28, see the
+[Ascend graph guide](./docs/ascend-vllm028-graph.md).
+
 1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
    and FlagGems revisions
 
@@ -206,9 +224,12 @@ If there are multiple plugins in the current environment, you can specify use vl
     [Ascend image guide](./docker/ascend/README.md) for the complete CANN,
     PyTorch, vLLM empty-package, and dependency constraints.
 
-2. Enable eager execution
+2. Select eager or full-decode graph execution
 
-    Eager execution is the recommended setting for Ascend. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line. Graph mode is still experimental; see the tested cases in the [Ascend image guide](./docker/ascend/README.md).
+    For eager execution, add `enforce_eager=True` to the `LLM` constructor or
+    pass `--enforce-eager` on the command line. For native NPU graph capture and
+    replay, use `FULL_DECODE_ONLY` with `USE_FLAGGEMS=0` and the component versions
+    and serving arguments in the [Ascend graph guide](./docs/ascend-vllm028-graph.md).
 
 
 ### Run a Task

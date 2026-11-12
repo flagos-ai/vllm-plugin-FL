@@ -29,9 +29,9 @@ from vllm.model_executor.layers.fused_moe.fused_moe import (
 
 def _flaggems_fused_experts_impl(**kwargs) -> torch.Tensor:
     """Resolve FlagGems lazily after the platform runtime is initialized."""
-    import flag_gems
+    from flaggems_vllm import fused_experts_impl
 
-    return flag_gems.fused_experts_impl(**kwargs)
+    return fused_experts_impl(**kwargs)
 
 
 def _dynamic_int8_qdq(value: torch.Tensor) -> torch.Tensor:

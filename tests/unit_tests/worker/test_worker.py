@@ -7,6 +7,67 @@ import pytest
 from tests.utils.device_utils import skip_if_not_nvidia
 
 
+@pytest.fixture(autouse=True)
+def native_cuda_platform_imports_on_empty_wheels(request, monkeypatch):
+    """Load the real CUDA platform for metadata contracts on empty wheels.
+
+    These six tests patch CUDA operations themselves. The optional extension's
+    import only registers native ops, which empty backend wheels do not ship.
+    Keep import failures from an installed extension visible, and restore every
+    module/package attribute introduced by this temporary import environment.
+    """
+    if not request.node.name.startswith("test_nvidia_platform_"):
+        yield
+        return
+
+    import importlib.util
+    import sys
+    from types import ModuleType
+
+    import torch
+
+    import vllm
+    import vllm.platforms
+
+    import vllm_fl
+
+    extension = "vllm._C_stable_libtorch"
+    if extension in sys.modules or importlib.util.find_spec(extension) is not None:
+        yield
+        return
+
+    imported_modules = ("vllm.platforms.cuda", "vllm_fl.nvidia_platform")
+    previous_modules = {
+        name: sys.modules[name] for name in imported_modules if name in sys.modules
+    }
+    missing = object()
+    package_attributes = (
+        (vllm, "_C_stable_libtorch"),
+        (vllm.platforms, "cuda"),
+        (vllm_fl, "nvidia_platform"),
+    )
+    previous_attributes = [
+        (package, name, getattr(package, name, missing))
+        for package, name in package_attributes
+    ]
+    cudnn_sdp = torch.backends.cuda.cudnn_sdp_enabled()
+    with monkeypatch.context() as imports:
+        imports.setitem(sys.modules, extension, ModuleType(extension))
+        try:
+            yield
+        finally:
+            for name in imported_modules:
+                if name not in previous_modules:
+                    sys.modules.pop(name, None)
+            for package, name, value in previous_attributes:
+                if value is missing:
+                    if hasattr(package, name):
+                        delattr(package, name)
+                else:
+                    setattr(package, name, value)
+            torch.backends.cuda.enable_cudnn_sdp(cudnn_sdp)
+
+
 def has_vllm_worker() -> bool:
     try:
         from vllm_fl.worker.worker import WorkerFL  # noqa: F401
@@ -93,6 +154,15 @@ def test_sunrise_process_group_mapping_is_ptpu_only(
     assert worker_module._normalize_process_group_backend(backend) == expected
 
 
+@pytest.fixture
+def native_nvidia_platform_contract():
+    """Native CUDA-platform contracts apply only to the NVIDIA backend."""
+    from vllm.platforms import current_platform
+
+    if not current_platform.is_cuda():
+        pytest.skip("Native NVIDIA platform contract requires the NVIDIA CUDA backend")
+
+
 def test_worker_keeps_target_lifecycle_contract():
     from vllm_fl.worker.worker import WorkerFL
 
@@ -137,6 +207,7 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
         worker_cls=None,
         all2all_backend=None,
         data_parallel_size=1,
+        tensor_parallel_size=1,
     )
     vllm_config = SimpleNamespace(
         parallel_config=parallel_config,
@@ -156,6 +227,7 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_keeps_native_cuda_semantics():
@@ -172,6 +244,7 @@ def test_nvidia_platform_keeps_native_cuda_semantics():
     assert not platform.is_out_of_tree()
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
@@ -187,7 +260,10 @@ def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
         worker_cls=None,
         disable_custom_all_reduce=True,
     )
-    vllm_config = SimpleNamespace(parallel_config=parallel_config)
+    vllm_config = SimpleNamespace(
+        parallel_config=parallel_config,
+        compilation_config=SimpleNamespace(custom_ops=["none"]),
+    )
 
     with monkeypatch.context() as state:
         state.setattr(NvidiaPlatformFL, "dist_backend", NvidiaPlatformFL.dist_backend)
@@ -199,9 +275,11 @@ def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
 
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.NvidiaWorkerFL"
     assert parallel_config.disable_custom_all_reduce is True
+    assert vllm_config.compilation_config.custom_ops == ["none"]
     native_update.assert_called_once_with(vllm_config)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
@@ -238,6 +316,7 @@ def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
     native_custom_allreduce.assert_called_once_with()
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
@@ -274,6 +353,7 @@ def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
     native_update.assert_called_once_with(vllm_config)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
@@ -299,6 +379,7 @@ def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
     native_select.assert_called_once_with(None, selector, 32)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_honors_explicit_flaggems_attention(monkeypatch):

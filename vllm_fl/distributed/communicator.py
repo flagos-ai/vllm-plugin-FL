@@ -282,6 +282,8 @@ class CommunicatorFL(DeviceCommunicatorBase):
 
     def destroy(self):
         if self.pyflagcx_comm is not None:
+            if getattr(getattr(self, "device", None), "type", None) == "txda":
+                self.pyflagcx_comm.destroy()
             self.pyflagcx_comm = None
         if self.all2all_manager is not None:
             self.all2all_manager.destroy()

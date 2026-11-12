@@ -1,0 +1,34 @@
+# vLLM-FL Dispatch Configuration for TSINGMICRO (TX8110 / TSM Runtime)
+# Ported from the vLLM 0.24 TXDA enablement (537284eb, #460) for vLLM 0.28.
+prefer: flagos
+strict: false
+
+op_backends:
+  # TX8110 FlagGems attention produces incorrect values without raising.
+  # Select SDPA directly; exception fallback cannot detect incorrect numerics.
+  attention_backend:
+    - vendor
+  # FlagGems normalization and rotary also produce incorrect values on TX8110.
+  rms_norm:
+    - reference
+  rotary_embedding:
+    - reference
+  silu_and_mul:
+    - reference
+
+# The reference runtime has failed multi-request inference with broad ATen
+# replacement. Limit generic registration to the audited add/mul kernels.
+# Copies, reductions, GEMM and CPU-generator exponential_ stay native.
+# The additional names enable required plugin MoE dispatch implementations;
+# they do not add generic ATen registrations in the reference FlagGems build.
+flagos_whitelist:
+  - add
+  - mul
+  - topk_softmax
+  - moe_align_block_size
+  - invoke_fused_moe_triton_kernel
+  - moe_sum
+
+oot_blacklist:
+  - masked_fill
+  - masked_fill_

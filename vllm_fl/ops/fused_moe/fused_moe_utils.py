@@ -22,8 +22,36 @@ from vllm.model_executor.layers.fused_moe.utils import (
     _resize_cache,
     moe_kernel_quantize_input,
 )
+import os
+try:
+    from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
+        FlashinferMoeBackend,
+    )
+except ImportError:
+    # vLLM 0.28 API compatibility (NOT MetaX-specific): >= 0.28 removed this
+    # enum (backend enums moved into fused_moe/oracle/* per quantisation
+    # type); the import is a plain version shim that keeps the module
+    # importable on any backend.  The shim class is only reached when a user
+    # explicitly sets VLLM_FLASHINFER_MOE_BACKEND, a path that is never taken
+    # on non-NVIDIA platforms.
+    class FlashinferMoeBackend:  # type: ignore[no-redef]
+        CUTLASS = "cutlass"
+        TENSORRT_LLM = "trtllm"
+
+        def __init__(self, value):
+            self.value = str(value).strip().lower()
+
+        def __eq__(self, other):
+            o = str(getattr(other, "value", other)).strip().lower()
+            return self.value == o or o in self.value
+
+        def __hash__(self):
+            return hash(self.value)
+
+        def __str__(self):
+            return self.value
 from vllm.platforms import current_platform
-from vllm.triton_utils import tl
+from vllm.triton_utils import tl, triton
 
 from vllm_fl.dispatch import CachedOp, call_op
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
@@ -115,6 +143,21 @@ def select_unquantized_moe_backend_oot(
 
     if current_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
+
+    if current_platform.device_type == "npu":
+        parallel = moe_config.moe_parallel_config
+        if (
+            moe_config.is_lora_enabled
+            or parallel.use_ep
+            or parallel.dp_size != 1
+            or parallel.use_batched_activation_format
+        ):
+            raise NotImplementedError(
+                "Ascend grouped MoE currently requires non-EP, DP1 without LoRA"
+            )
+        if moe_config.moe_backend not in ("auto", "triton"):
+            raise NotImplementedError("Unsupported explicit Ascend MoE backend")
+        return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
     # Accelerator OOT platforms use the FL Triton experts when FlagGems is
     # enabled. CPU must continue into the v0.28 architecture-aware oracle.
@@ -276,6 +319,35 @@ def _prepare_expert_assignment(
 
 
 class TritonExpertsFL(TritonExperts):
+    def workspace_shapes(
+        self,
+        M,
+        N,
+        K,
+        topk,
+        global_num_experts,
+        local_num_experts,
+        expert_tokens_meta,
+        activation,
+    ):
+        workspace13, workspace2, output = super().workspace_shapes(
+            M,
+            N,
+            K,
+            topk,
+            global_num_experts,
+            local_num_experts,
+            expert_tokens_meta,
+            activation,
+        )
+        if current_platform.device_type == "npu":
+            # Reserve prefill capacity before capture fixes workspace
+            # addresses and locks the shared workspace against growth.
+            max_tokens = max(M, self.moe_config.max_num_tokens)
+            workspace13 = (max_tokens, *workspace13[1:])
+            workspace2 = (max_tokens, *workspace2[1:])
+        return workspace13, workspace2, output
+
     def apply(
         self,
         output: torch.Tensor,
@@ -361,10 +433,10 @@ class TritonExpertsFL(TritonExperts):
 
         # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
         if self._lora_context is None and current_platform.is_cuda():
-            import flag_gems
+            from flaggems_vllm import fused_experts_impl
 
             output.copy_(
-                flag_gems.fused_experts_impl(
+                fused_experts_impl(
                     hidden_states,
                     w1,
                     w2,
