@@ -32,7 +32,10 @@ runner_labels:
 # Device-specific runner labels override the platform defaults for E2E jobs.
 device_runner_labels:
   h20:
-    - vllm-plugin-ci-h20
+    - self-hosted
+    - Linux
+    - X64
+    - flagcicd-h20
 
 # Runner labels for this hardware (Platform hosted)
 # runner_labels:
