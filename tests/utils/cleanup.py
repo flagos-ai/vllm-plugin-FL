@@ -88,38 +88,81 @@ _VISIBLE_DEVICE_VARS = [
     "MTHREADS_VISIBLE_DEVICES",  # musa
 ]
 
+# Per-invocation id that tests/run.py exports and every test subprocess (and
+# the vllm workers they spawn) inherits. Several runners can share one host
+# (e.g. two 4-GPU runners on an 8-GPU box) and their workers carry identical
+# 0-based VISIBLE_DEVICES values, so slot overlap alone cannot tell them
+# apart; when this id is set, cleanup only touches processes carrying it.
+RUN_ID_ENV = "FL_RUN_ID"
+
+
+def _read_pid_env(pid: str) -> dict[str, str] | None:
+    """Return the original environment of *pid*, or None if unreadable.
+
+    Reads ``/proc/{pid}/environ`` (Linux-only); None when the process is
+    already gone or permission is denied.
+    """
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            env_raw = f.read()
+    except OSError:
+        return None
+    return dict(
+        e.split("=", 1)
+        for e in env_raw.decode(errors="replace").split("\0")
+        if "=" in e
+    )
+
+
+def _pid_in_scope(pid: str, slots: list[int] | None) -> bool:
+    """Return True if this run may kill *pid*.
+
+    When ``FL_RUN_ID`` is set, the process must carry the same id — so a
+    runner never kills workers started by another runner on the same host.
+    When *slots* is given, the process must additionally be pinned to an
+    overlapping slot (see :func:`_pid_owns_slots`). Without a run id and
+    without slots every matching process is in scope (original behaviour).
+    """
+    run_id = os.environ.get(RUN_ID_ENV)
+    if run_id is None and slots is None:
+        return True
+    env = _read_pid_env(pid)
+    if env is None:
+        # Unreadable — treat as "do not kill" to avoid accidental kills.
+        return False
+    if run_id is not None and env.get(RUN_ID_ENV) != run_id:
+        return False
+    return slots is None or _env_owns_slots(env, slots)
+
 
 def _pid_owns_slots(pid: str, slots: list[int]) -> bool:
     """Return True if process *pid* was started with VISIBLE_DEVICES that
     overlaps *slots*.
 
-    Reads ``/proc/{pid}/environ`` (Linux-only) to inspect the process's
-    original environment.  Returns False if the file is unreadable (process
-    already gone or permission denied) — caller treats unreadable as
-    "do not kill" to avoid accidental kills.
+    Returns False if ``/proc/{pid}/environ`` is unreadable (process already
+    gone or permission denied) — caller treats unreadable as "do not kill"
+    to avoid accidental kills.
     """
-    try:
-        with open(f"/proc/{pid}/environ", "rb") as f:
-            env_raw = f.read()
-        env = dict(
-            e.split("=", 1)
-            for e in env_raw.decode(errors="replace").split("\0")
-            if "=" in e
-        )
-        slot_set = set(slots)
-        for var in _VISIBLE_DEVICE_VARS:
-            val = env.get(var, "")
-            if not val:
-                continue
+    env = _read_pid_env(pid)
+    return env is not None and _env_owns_slots(env, slots)
+
+
+def _env_owns_slots(env: dict[str, str], slots: list[int]) -> bool:
+    """Return True if a VISIBLE_DEVICES var in *env* overlaps *slots*."""
+    slot_set = set(slots)
+    for var in _VISIBLE_DEVICE_VARS:
+        val = env.get(var, "")
+        if not val:
+            continue
+        try:
             pid_slots = {
                 int(x) for x in val.split(",") if x.strip().lstrip("-").isdigit()
             }
-            if pid_slots & slot_set:
-                return True
-    except (OSError, ValueError):
-        # Unreadable /proc/<pid>/environ (process gone, permission denied)
-        # or malformed entries — treat as "do not kill" (see docstring).
-        pass
+        except ValueError:
+            # Malformed entry — treat as "do not kill" (see _pid_owns_slots).
+            continue
+        if pid_slots & slot_set:
+            return True
     return False
 
 
@@ -129,7 +172,8 @@ def _kill_stale_processes(slots: list[int] | None = None) -> None:
     Args:
         slots: When provided, only kill processes whose VISIBLE_DEVICES env
             overlaps *slots*.  ``None`` kills all matching processes (serial
-            path — original behaviour).
+            path — original behaviour).  Either way, when ``FL_RUN_ID`` is
+            set only processes from this run are killed.
     """
     for pattern in _STALE_PATTERNS:
         try:
@@ -140,9 +184,7 @@ def _kill_stale_processes(slots: list[int] | None = None) -> None:
             )
             pids = result.stdout.strip().split("\n")
             pids = [p for p in pids if p and p != str(os.getpid())]
-
-            if slots is not None:
-                pids = [p for p in pids if _pid_owns_slots(p, slots)]
+            pids = [p for p in pids if _pid_in_scope(p, slots)]
 
             if pids:
                 print(f"[cleanup] Killing stale processes matching '{pattern}': {pids}")
@@ -187,8 +229,7 @@ def _kill_stale_ppu_processes(slots: list[int] | None = None) -> None:
             # fuser not available — fall back to pattern-based kill only
             return
 
-    if slots is not None:
-        pids = {p for p in pids if _pid_owns_slots(p, slots)}
+    pids = {p for p in pids if _pid_in_scope(p, slots)}
 
     if pids:
         print(f"[cleanup] Killing stale PPU processes (fuser): {sorted(pids)}")
@@ -203,14 +244,23 @@ def _kill_stale_ppu_processes(slots: list[int] | None = None) -> None:
 
 
 def _log_memory_cuda() -> None:
-    """Log NVIDIA GPU memory state via nvidia-smi."""
+    """Log NVIDIA GPU memory state via nvidia-smi.
+
+    nvidia-smi ignores CUDA_VISIBLE_DEVICES and lists every card on the host,
+    so a runner pinned to a subset passes its mask via ``--id`` and only
+    logs its own cards.
+    """
+    cmd = [
+        "nvidia-smi",
+        "--query-gpu=index,memory.used,memory.free,memory.total",
+        "--format=csv,noheader,nounits",
+    ]
+    mask = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if mask and mask.lower() != "all":
+        cmd.append(f"--id={mask}")
     try:
         result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=index,memory.used,memory.free,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
+            cmd,
             capture_output=True,
             text=True,
             timeout=10,
@@ -438,6 +488,7 @@ def wait_for_memory(
     timeout: int = 1800,
     interval: int = 30,
     device_indices: list[int] | None = None,
+    kill_slots: list[int] | None = None,
 ) -> tuple[bool, str]:
     """Wait until devices have enough free memory for the given utilization.
 
@@ -450,13 +501,18 @@ def wait_for_memory(
             indices.  Used in parallel e2e runs so each case only inspects
             its own allocated slots and does not interfere with other cases.
             ``None`` checks all devices (serial path).
+        kill_slots: Device ids, as written into the case's VISIBLE_DEVICES,
+            used to match stale processes. Defaults to *device_indices*; they
+            differ when the runner inherits a mask such as ``4,5,6,7``
+            (indices 0-3 here, ids 4-7 in the children's env).
 
     Returns:
         ``(True, info)`` if memory is available, ``(False, info)`` on timeout.
     """
     mem_fn = _PLATFORM_MEMORY_INFO.get(platform, _mem_info_noop)
     cache_fn = _PLATFORM_CACHE_CLEAR.get(platform, _cache_clear_noop)
-    kill_slots = device_indices  # same list used for both kill and mem filter
+    if kill_slots is None:
+        kill_slots = device_indices
 
     deadline = time.time() + timeout
     attempt = 0

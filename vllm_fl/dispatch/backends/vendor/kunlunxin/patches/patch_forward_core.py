@@ -35,11 +35,11 @@ def _kunlunxin_write_ssm_cache(ssm_state, last_recurrent_state, indices):
 
 
 def apply_ssm_patch():
-    import vllm.model_executor.layers.mamba.gdn_linear_attn as gdn_mod
+    import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as gdn_mod
     from vllm.forward_context import get_forward_context
     from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadata
 
-    cls = gdn_mod.GatedDeltaNetAttention
+    cls = gdn_mod.QwenGatedDeltaNetAttention
     is_conv_state_dim_first = gdn_mod.is_conv_state_dim_first
     causal_conv1d_fn = gdn_mod.causal_conv1d_fn
     causal_conv1d_update = gdn_mod.causal_conv1d_update

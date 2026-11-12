@@ -25,9 +25,7 @@ runner_labels:
   - self-hosted
   - Linux
   - X64
-  - nvidia
-  - gpu-8
-  - cuda130
+  - flagcicd-a100
 
 # Exercise native CUDA and FlagGems paths on Hopper via the new
 # flagcicd-h20 runner; the default-runner unit pass already runs inside
@@ -66,6 +64,7 @@ container_options: >-
   --shm-size 64g
   --hostname vllm-plugin-fl
   --user root
+  --env CUDA_VISIBLE_DEVICES
   --env VLLM_PLUGINS=fl
   --env USE_FLAGGEMS=1
   --env GEMS_VENDOR=nvidia

@@ -282,6 +282,7 @@ def parent_registration(monkeypatch, musa_patch, vendor_modules):
         "_patch_custom_ops": Mock(),
         "_patch_flash_attn_import": Mock(),
         "_get_op_config": Mock(),
+        "_install_kunlunxin_fla_alias": Mock(),
     }
     exec(
         compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"),
