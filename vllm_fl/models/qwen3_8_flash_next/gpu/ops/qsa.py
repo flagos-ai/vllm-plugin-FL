@@ -11,13 +11,10 @@ from flaggems_vllm import (
     qsa_store_kv_cache_rows,
     qsa_compress_groups_with_ratio,
     qsa_compress_norm_mrope_store_groups,
+    qsa_sparse_paged_attention_unpacked as _qsa_sparse_paged_attention,
 )
-# The root operator now consumes packed indices; this caller owns the
-# preserved unpacked-index/split-workspace contract.
-from flaggems_vllm.ops.qwen4.qsa_attention import (
-    qsa_sparse_paged_attention as _qsa_sparse_paged_attention,
-    qsa_sparse_split_count,
-)
+# Keep the unpacked ABI and the library's existing vendor dispatch.
+from flaggems_vllm.ops.qwen4.qsa_attention import qsa_sparse_split_count
 from vllm.triton_utils import HAS_TRITON, tl, triton
 
 _LOGITS_WORKSPACE_BYTES = 128 * 1024 * 1024

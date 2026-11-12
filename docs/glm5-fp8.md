@@ -36,7 +36,7 @@ can change near-tied TopK choices; whole-model accuracy/performance equivalence
 has not been established. Composite execution may be slower than fused FP8.
 
 CI and the GLM extra use the same FlagGems-vllm portability pin
-`1a4cf13613cc3feff4f21b7048aa248c405d4b37`, from [operator PR #1134](https://github.com/flagos-ai/FlagGems-vllm/pull/1134).
+`9d4b358d944d28269eeb6ebfa4dd6165ecd2ddb9`, from [operator PR #1134](https://github.com/flagos-ai/FlagGems-vllm/pull/1134).
 The revision adds PPU non-TLE import, optional mHC compiler-setting and padded MLA
 cache compatibility while retaining the earlier #941 APIs. It includes the common main
 math shim, optional constexpr/optimizer-hint compatibility, software FP8 cache

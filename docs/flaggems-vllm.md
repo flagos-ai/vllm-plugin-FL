@@ -11,11 +11,11 @@ Install the pinned public source along with the plugin:
 
 ```bash
 python3 -m pip install --no-deps --force-reinstall \
-  'flaggems-vllm @ git+https://github.com/ZenithJoyH/FlagGems-vllm.git@1a4cf13613cc3feff4f21b7048aa248c405d4b37'
+  'flaggems-vllm @ git+https://github.com/ZenithJoyH/FlagGems-vllm.git@9d4b358d944d28269eeb6ebfa4dd6165ecd2ddb9'
 python3 -m pip install --no-build-isolation -e .
 ```
 
-CI installs commit `1a4cf13613cc3feff4f21b7048aa248c405d4b37`
+CI installs commit `9d4b358d944d28269eeb6ebfa4dd6165ecd2ddb9`
 from [FlagGems-vllm #1134](https://github.com/flagos-ai/FlagGems-vllm/pull/1134).
 The public fixed source adds PPU non-TLE import isolation, optional mHC compiler
 setting restoration, and graph-padded MLA cache row validation. It also carries
