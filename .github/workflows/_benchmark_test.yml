@@ -106,6 +106,7 @@ jobs:
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
+            --device ${{ inputs.device }} \
             --scope benchmark \
             --stage ${{ inputs.ci_stage }}
 

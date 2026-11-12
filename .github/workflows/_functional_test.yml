@@ -98,6 +98,18 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      - name: Verify Hopper runner
+        if: inputs.platform == 'nvidia' && inputs.device == 'h20'
+        run: |
+          python - <<'PY'
+          import torch
+
+          capability = torch.cuda.get_device_capability()
+          if capability[0] != 9:
+              raise RuntimeError(f"Hopper functional job requires SM90, found {capability}")
+          print(f"Hopper functional coverage: {torch.cuda.get_device_name()} SM{capability[0]}{capability[1]}")
+          PY
+
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
@@ -105,12 +117,14 @@ jobs:
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
+            --device ${{ inputs.device }} \
             --scope unit
 
       - name: Run functional tests
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
+            --device ${{ inputs.device }} \
             --scope functional
 
       - name: Upload test results

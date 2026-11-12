@@ -80,9 +80,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       config: ${{ steps.load.outputs.config }}
-      e2e_matrix: ${{ steps.matrix.outputs.e2e }}
-      functional_matrix: ${{ steps.matrix.outputs.functional }}
-      benchmark_matrix: ${{ steps.matrix.outputs.benchmark }}
+      e2e_matrix: ${{ steps.matrix.outputs.e2e || '[]' }}
+      functional_matrix: ${{ steps.matrix.outputs.functional || '[]' }}
+      benchmark_matrix: ${{ steps.matrix.outputs.benchmark || '[]' }}
     steps:
       - name: Checkout (attempt 1)
         id: checkout1
