@@ -62,7 +62,7 @@ on:
 
 jobs:
   functional-test:
-    name: "Functional (${{ inputs.platform }})"
+    name: "Functional (${{ inputs.platform }}/${{ inputs.device }})"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
     container:
