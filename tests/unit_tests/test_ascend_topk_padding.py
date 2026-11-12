@@ -98,6 +98,7 @@ def test_other_platform_keeps_upstream_padded_dispatch(router_functions):
     mask = torch.tensor([True])
     router_functions["_get_padding_mask"] = lambda size: mask
     router_functions["_is_ascend_npu_tensor"] = lambda value: False
+    router_functions["_has_native_moe_topk"] = lambda: True
     outputs = (object(), object(), object())
     calls = []
 

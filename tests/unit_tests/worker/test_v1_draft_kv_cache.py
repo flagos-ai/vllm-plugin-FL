@@ -4,16 +4,18 @@
 from __future__ import annotations
 
 import ast
-from contextlib import nullcontext
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 
 @pytest.mark.parametrize("is_last_rank", [False, True], ids=["non-last", "last"])
-def test_draft_attention_groups_are_only_added_on_last_pp_rank(is_last_rank):
+def test_draft_attention_groups_are_only_added_on_last_pp_rank(
+    monkeypatch, is_last_rank
+):
     # Load the method without importing accelerator-specific runner dependencies.
     source = Path(__file__).resolve().parents[3] / "vllm_fl/worker/model_runner.py"
     tree = ast.parse(source.read_text(encoding="utf-8"))
@@ -26,16 +28,21 @@ def test_draft_attention_groups_are_only_added_on_last_pp_rank(is_last_rank):
         node
         for node in runner_class.body
         if isinstance(node, ast.FunctionDef)
-        and node.name == "initialize_kv_cache_tensors"
+        and node.name == "_initialize_kv_cache_tensors_v032"
     )
 
     caches = {}
     bind_kv = Mock()
+    map_cache = Mock(return_value={})
+    gpu_runner = ModuleType("vllm.v1.worker.gpu_model_runner")
+    gpu_runner.bind_kv_cache = bind_kv
+    gpu_runner.map_kv_caches_to_kernel_blocks = map_cache
+    worker_utils = ModuleType("vllm.v1.worker.utils")
+    worker_utils.allocate_kv_cache = Mock(return_value=caches)
+    monkeypatch.setitem(sys.modules, gpu_runner.__name__, gpu_runner)
+    monkeypatch.setitem(sys.modules, worker_utils.__name__, worker_utils)
     namespace = {
-        "nullcontext": nullcontext,
         "get_pp_group": lambda: SimpleNamespace(is_last_rank=is_last_rank),
-        "allocate_kv_cache": Mock(return_value=caches),
-        "bind_kv_cache": bind_kv,
     }
     exec(
         compile(ast.Module(body=[method], type_ignores=[]), str(source), "exec"),
@@ -46,9 +53,6 @@ def test_draft_attention_groups_are_only_added_on_last_pp_rank(is_last_rank):
     runner = SimpleNamespace(
         attn_groups=[[model_group]],
         speculative_config=object(),
-        use_ascend_attention=False,
-        use_ascend_hybrid_cache=False,
-        use_uniform_kv_cache=lambda groups: False,
         device="cpu",
         cache_config=SimpleNamespace(
             get_resolved_kv_cache_layout=lambda: "LBNHC",
@@ -62,7 +66,9 @@ def test_draft_attention_groups_are_only_added_on_last_pp_rank(is_last_rank):
     if is_last_rank:
         runner.drafter = SimpleNamespace(draft_attn_groups=[draft_group])
 
-    initialize = namespace["initialize_kv_cache_tensors"]
+    initialize = namespace["_initialize_kv_cache_tensors_v032"]
     result = initialize(runner, SimpleNamespace(kv_cache_groups=[]), [128])
     assert result is caches
+    expected_groups = [model_group, draft_group] if is_last_rank else [model_group]
+    map_cache.assert_called_once_with(caches, expected_groups)
     bind_kv.assert_called_once()

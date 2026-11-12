@@ -472,6 +472,7 @@ def test_initializer_graph_mode_changes_are_preserved(options, expected):
     assert vconfig.compilation_config.splitting_ops == []
     vconfig.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
     assert vconfig.compilation_config.cudagraph_mode is expected
+    assert vconfig.compilation_config.splitting_ops == []
 
 
 @pytest.mark.parametrize(

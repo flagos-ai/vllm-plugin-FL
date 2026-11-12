@@ -48,6 +48,14 @@ from vllm_fl.utils import (
 logger = init_logger(__name__)
 
 
+def _vllm_c_available() -> bool:
+    """True when this build ships upstream's CUDA IR kernels (``vllm._C``)."""
+    try:
+        return importlib.util.find_spec("vllm._C") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -64,6 +72,7 @@ def _safe_device_type(device_info, vendor: str) -> str:
     except ValueError:
         logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
         return ""
+
 
 dist_backend_dict = {
     "npu": "hccl",
@@ -307,7 +316,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -369,10 +386,7 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        if (
-            cls.device_type in {"musa", "txda"}
-            and vllm_config.use_v2_model_runner
-        ):
+        if cls.device_type in {"musa", "txda"} and vllm_config.use_v2_model_runner:
             platform_name = {
                 "musa": "MUSA",
                 "txda": "Tsingmicro TXDA",
@@ -976,14 +990,14 @@ class PlatformFL(Platform):
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = (
-            ["native"]
-            if using_inductor or cls.device_type == "npu"
-            else ["vllm_c", "native"]
-        )
-        # vLLM 0.32 registers vllm_c IR implementations only on CUDA-like
-        # and XPU platforms. Empty NPU wheels must use the native providers,
-        # including newly added IR ops such as sparse GELU.
+        default = ["native"]
+        if not using_inductor and cls.device_type != "npu" and _vllm_c_available():
+            # ``vllm_c`` is only a valid provider when the build actually ships
+            # upstream's CUDA IR kernels. VLLM_TARGET_DEVICE=empty builds have no
+            # vllm._C, and keeping it in the priority list makes
+            # KernelConfig.set_default fail with "All providers in priority must
+            # be registered implementations".
+            default = ["vllm_c", "native"]
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,
