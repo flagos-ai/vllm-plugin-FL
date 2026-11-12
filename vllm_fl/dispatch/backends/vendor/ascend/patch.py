@@ -79,7 +79,6 @@ def patch_gdn():
         name="QwenGatedDeltaNetAttention",
     )
 
-
 def patch_causal_conv1d():
     """Patch causal_conv1d ops with Ascend implementations."""
     try:
@@ -99,12 +98,10 @@ def patch_causal_conv1d():
     except Exception as e:
         logger.warning("Failed to patch causal_conv1d ops: %s", e)
 
-
 def patch_fused_moe():
     """Patch fused MoE ops with Ascend implementations."""
     # TODO ops' triton implementation is not ready yet
     from .impl.fused_moe import fused_experts_impl
-
     try:
         import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
 
@@ -113,7 +110,6 @@ def patch_fused_moe():
         logger.info("Patched fused_moe for Ascend")
     except Exception as e:
         logger.warning("Failed to patch fused_moe ops: %s", e)
-
 
 def patch_fla_ops():
     """Patch FLA ops and fused_gdn_gating with Ascend implementations."""
@@ -124,7 +120,6 @@ def patch_fla_ops():
         import vllm.model_executor.layers.fla.ops.fused_recurrent as _fla_recurrent_lib
         import vllm.model_executor.layers.fla.ops.layernorm_guard as _fla_layernorm_lib
         import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
-
         from flag_gems.runtime.backend._ascend.fla import (
             chunk_gated_delta_rule_fwd,
             fused_recurrent_gated_delta_rule_fwd,
@@ -139,15 +134,12 @@ def patch_fla_ops():
         _fla_ops_lib.chunk_gated_delta_rule_fwd = chunk_gated_delta_rule_fwd
         _fla_chunk_lib.chunk_gated_delta_rule_fwd = chunk_gated_delta_rule_fwd
         _fla_chunk_lib.chunk_gated_delta_rule = chunk_gated_delta_rule_npu
-        _fla_recurrent_lib.fused_recurrent_gated_delta_rule_fwd = (
-            fused_recurrent_gated_delta_rule_fwd
-        )
+        _fla_recurrent_lib.fused_recurrent_gated_delta_rule_fwd = fused_recurrent_gated_delta_rule_fwd
         _fla_layernorm_lib.LayerNormFn = ascend_LayerNormFn
         _qwen3_next_lib.chunk_gated_delta_rule = chunk_gated_delta_rule_npu
         logger.info("Patched FLA ops for Ascend")
     except Exception as e:
         logger.warning("Failed to patch FLA ops: %s", e)
-
 
 def patch_op_cls():
     """Patch MMEncoderAttention to use manual matmul attention on NPU.
@@ -163,7 +155,6 @@ def patch_op_cls():
 
         from .impl.mm_encoder_attention import AscendMMEncoderAttention
         from .impl.vocab_parallel_embedding import AscendVocabParallelEmbedding
-
         REGISTERED_ASCEND_OPS = {
             "VocabParallelEmbedding": AscendVocabParallelEmbedding,
             "MMEncoderAttention": AscendMMEncoderAttention,
@@ -174,8 +165,7 @@ def patch_op_cls():
     except Exception as e:
         logger.warning("Failed to patch MMEncoderAttention: %s", e)
 
-
-def refresh_block_size(vllm_config, block_size=128):
+def refresh_block_size(vllm_config, block_size = 128):
     """
     Refresh the block size in cache config.
     """

@@ -136,6 +136,7 @@ def test_changed_input_graph_replay(dtype):
     for _ in range(2):
         x.copy_(torch.randn_like(x))
         expected = native.w8a8_experts(x, *w, probs, ids, **kwargs)
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output, expected)
@@ -350,6 +351,7 @@ def test_loader_modular_eager_and_graph(
         for _ in range(2):
             x.copy_(torch.randn_like(x))
             expected = apply()
+            output.fill_(float("nan"))
             graph.replay()
             torch.npu.synchronize()
             torch.testing.assert_close(output, expected)

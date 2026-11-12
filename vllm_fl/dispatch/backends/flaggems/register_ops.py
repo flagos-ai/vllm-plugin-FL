@@ -38,6 +38,10 @@ def register_builtins(registry) -> None:
     Args:
         registry: Registry to register into
     """
+    from .impl.deepseek_v4 import register_deepseek_v4_operators
+
+    register_deepseek_v4_operators(registry)
+
     from .flaggems import FlagGemsBackend
 
     if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:

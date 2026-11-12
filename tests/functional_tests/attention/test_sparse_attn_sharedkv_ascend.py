@@ -117,12 +117,12 @@ def _call(args):
 
     policy = SelectionPolicy.from_dict(
         strict=True,
-        per_op_order={"deepseek_v4_sparse_attention": ["vendor:ascend"]},
+        per_op_order={"deepseek_v4_sparse_attention": ["flagos"]},
     )
     with policy_context(policy):
         assert (
             get_default_manager().get_selected_impl_id("deepseek_v4_sparse_attention")
-            == "vendor.ascend"
+            == "default.flaggems_vllm"
         )
         return call_op("deepseek_v4_sparse_attention", *args)
 
@@ -170,6 +170,7 @@ def test_sparse_attention_graph_reloads_metadata(ratio):
         cpu[9][:, 0] = 0
         device[9].copy_(cpu[9])
     for _ in range(3):
+        output.fill_(float("nan"))
         graph.replay()
     torch.npu.synchronize()
     torch.testing.assert_close(
@@ -200,13 +201,13 @@ def test_sparse_attention_empty_and_all_masked():
         assert torch.count_nonzero(result) == 0
 
 
-def test_sparse_attention_default_vendor_selection():
+def test_sparse_attention_default_library_selection():
     from vllm_fl.dispatch import SelectionPolicy, get_default_manager, policy_context
 
     with policy_context(SelectionPolicy(strict=True)):
         assert (
             get_default_manager().get_selected_impl_id("deepseek_v4_sparse_attention")
-            == "vendor.ascend"
+            == "default.flaggems_vllm"
         )
 
 
@@ -383,6 +384,7 @@ def test_sparse_attention_prefill_graph_workspace_reuse(ratio, dtype):
             for index in (4, 8, 9):
                 device[index].copy_(cpu[index])
         expected = _oracle(cpu)
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         rtol, atol = (2e-3, 2e-5) if dtype == torch.float16 else (8e-3, 2e-4)

@@ -13,6 +13,8 @@
 """Route vLLM 0.24 W8A8 INT8 MoE by hardware backend."""
 
 from importlib import import_module
+from inspect import signature
+from threading import RLock
 
 import torch
 
@@ -34,9 +36,64 @@ _SCHEME_MODULE = (
 # blacklists/whitelists keep governing the whole FL MoE pipeline.
 FLAGGEMS_W8A8_MOE_OP = "fused_moe"
 logger = init_logger(__name__)
+_INSTALL_LOCK = RLock()
 
 
 def install_fl_w8a8_moe_selector() -> bool:
+    """Install dependent MoE hooks atomically, retaining existing wrappers."""
+    with _INSTALL_LOCK:
+        oracle = import_module(_ORACLE_MODULE)
+        scheme = import_module(_SCHEME_MODULE)
+        from vllm.platforms import current_platform
+
+        targets = [
+            (scheme, "make_int8_moe_quant_config"),
+            (oracle, "select_int8_moe_backend"),
+            (scheme, "select_int8_moe_backend"),
+        ]
+        token = object()
+        signature(scheme.make_int8_moe_quant_config).bind(
+            w1_scale=token,
+            w2_scale=token,
+            a1_scale=None,
+            a2_scale=None,
+            w1_bias=None,
+            w2_bias=None,
+            per_act_token_quant=True,
+        )
+        for owner in (oracle, scheme):
+            signature(owner.select_int8_moe_backend).bind(
+                token, weight_key=None, activation_key=None
+            )
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+        ):
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import (
+                CompressedTensorsMoEMethod,
+            )
+
+            signature(CompressedTensorsMoEMethod.get_moe_method).bind(
+                token, token, token
+            )
+            targets.append((CompressedTensorsMoEMethod, "get_moe_method"))
+        missing = object()
+        originals = [
+            (owner, name, vars(owner).get(name, missing)) for owner, name in targets
+        ]
+        try:
+            return _install_fl_w8a8_moe_selector()
+        except Exception:
+            for owner, name, original in reversed(originals):
+                if original is missing:
+                    if name in vars(owner):
+                        delattr(owner, name)
+                else:
+                    setattr(owner, name, original)
+            raise
+
+
+def _install_fl_w8a8_moe_selector() -> bool:
     """Prefer FlagGems W8A8 MoE and retain the native NVIDIA fallback."""
     oracle_module = import_module(_ORACLE_MODULE)
     scheme_module = import_module(_SCHEME_MODULE)

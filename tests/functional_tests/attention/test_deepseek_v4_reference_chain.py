@@ -21,9 +21,14 @@ def strict_dispatch():
             "deepseek_v4_compressor",
             "deepseek_v4_sparse_attention",
             "deepseek_v4_indexer",
-            "paged_cache_write",
         ):
-            assert get_default_manager().get_selected_impl_id(name) == "vendor.ascend"
+            assert (
+                get_default_manager().get_selected_impl_id(name)
+                == "default.flaggems_vllm"
+            )
+        assert get_default_manager().get_selected_impl_id("paged_cache_write") == (
+            "default.flaggems_vllm"
+        )
         yield
 
 
@@ -258,6 +263,9 @@ def test_full_compressor_attention_pipeline_changed_inputs_graph():
             )
             logits = q[req].float() @ matrix.t() / 2
             oracle_output[req] = (logits.softmax(-1) @ matrix).to(q.dtype)
+        output.fill_(-123.0)
+        compressed_output.fill_(-123.0)
+        selected.fill_(-777)
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output, expected[0], rtol=0.01, atol=0.01)
@@ -466,6 +474,7 @@ def test_full_compressor_mutating_metadata_graph():
         for actual, value in zip(args, changed):
             if isinstance(actual, torch.Tensor):
                 actual.copy_(value)
+        output.fill_(-123.0)
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(
@@ -718,6 +727,7 @@ def test_full_compressor_single_token_mutating_graph(ratio, dim):
         for actual, value in zip(args, changed):
             if isinstance(actual, torch.Tensor):
                 actual.copy_(value)
+        output.fill_(-123.0)
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(

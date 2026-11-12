@@ -212,7 +212,13 @@ class VLLMFLBackendBase(ABC):
         slots: torch.Tensor,
         cache: torch.Tensor,
     ) -> None:
-        """Mutate paged [P,B,D] cache at unique valid slots; negative slots skip."""
+        """Write unique slots in-place; skip negative/out-of-range slots.
+
+        Cache is [P,B,D], values [T,D], slots INT32/INT64 [T]. Support
+        same-dtype BF16/FP16/FP32/INT8 and FP32 values to BF16/FP16 cache.
+        Unsupported layouts/dtypes fail before writing; execution errors
+        propagate without retry. Cache allocation/lifetime belongs to FL.
+        """
         raise NotImplementedError
 
     def deepseek_v4_indexer(

@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import torch
 
 from vllm.model_executor.kernels.linear import (
@@ -408,8 +410,27 @@ def install_ascend_w8a8_linear_adapter():
     if not _is_ascend_npu():
         return
     marker = "_fl_ascend_w8a8_linear"
+    # Resolve and validate every dependency before changing upstream objects.
     current_method = CompressedTensorsConfig.get_quant_method
-    if not getattr(CompressedTensorsConfig, marker + "_method_installed", False):
+    current_parts = CompressedTensorsConfig._get_scheme_from_parts
+    token = object()
+    inspect.signature(current_method).bind(token, token, token)
+    inspect.signature(CompressedTensorsConfig.get_scheme_dict).bind(token, token, token)
+    inspect.signature(current_parts).bind(
+        token,
+        weight_quant=token,
+        input_quant=token,
+        output_quant=None,
+        format=None,
+        layer_name=None,
+    )
+    method_installed = getattr(current_method, marker, False)
+    parts_installed = getattr(current_parts, marker, False)
+    if method_installed and parts_installed:
+        return
+
+    updates = {}
+    if not method_installed:
 
         def get_quant_method(config, layer, prefix):
             if _is_ascend_npu() and isinstance(layer, (LinearBase, ParallelLMHead)):
@@ -442,11 +463,9 @@ def install_ascend_w8a8_linear_adapter():
             return current_method(config, layer, prefix)
 
         setattr(get_quant_method, marker, True)
-        CompressedTensorsConfig.get_quant_method = get_quant_method
-        setattr(CompressedTensorsConfig, marker + "_method_installed", True)
+        updates["get_quant_method"] = get_quant_method
 
-    current_parts = CompressedTensorsConfig._get_scheme_from_parts
-    if not getattr(CompressedTensorsConfig, marker + "_parts_installed", False):
+    if not parts_installed:
 
         def get_scheme_from_parts(
             config,
@@ -482,8 +501,24 @@ def install_ascend_w8a8_linear_adapter():
             )
 
         setattr(get_scheme_from_parts, marker, True)
-        CompressedTensorsConfig._get_scheme_from_parts = get_scheme_from_parts
-        setattr(CompressedTensorsConfig, marker + "_parts_installed", True)
+        updates["_get_scheme_from_parts"] = get_scheme_from_parts
+
+    missing = object()
+    originals = {
+        name: CompressedTensorsConfig.__dict__.get(name, missing) for name in updates
+    }
+    try:
+        for name, value in updates.items():
+            setattr(CompressedTensorsConfig, name, value)
+    except Exception:
+        # Restore descriptors and existing wrappers exactly, including markers.
+        for name, original in reversed(tuple(originals.items())):
+            if original is missing:
+                if name in CompressedTensorsConfig.__dict__:
+                    delattr(CompressedTensorsConfig, name)
+            else:
+                setattr(CompressedTensorsConfig, name, original)
+        raise
 
 
 def register_fl_w8a8_linear_kernel(registry: dict) -> bool:

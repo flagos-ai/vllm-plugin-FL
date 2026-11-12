@@ -45,31 +45,10 @@ class AscendBackend(Backend):
         return AscendBackend._available
 
     # ==================== Operator Implementations ====================
-    def deepseek_v4_compressor(self, *args, **kwargs):
-        from .impl.compressor import deepseek_v4_compressor
-
-        return deepseek_v4_compressor(*args, **kwargs)
-
-    def deepseek_v4_sparse_attention(self, *args, **kwargs):
-        from .impl.sparse_attn_sharedkv import deepseek_v4_sparse_attention
-
-        return deepseek_v4_sparse_attention(*args, **kwargs)
-
-    def deepseek_v4_indexer(self, *args, **kwargs):
-        from .impl.quant_lightning_indexer import deepseek_v4_indexer
-
-        return deepseek_v4_indexer(*args, **kwargs)
-
     def deepseek_v4_index_quant(self, *args, **kwargs):
         from .impl.quantization import deepseek_v4_index_quant
 
         return deepseek_v4_index_quant(*args, **kwargs)
-
-    def paged_cache_write(self, *args, **kwargs):
-        """Write token rows into a paged cache using Triton."""
-        from .impl.scatter_nd_update_v2 import scatter_nd_update_v2
-
-        return scatter_nd_update_v2(*args, **kwargs)
 
     def w8a8_prepare_experts(self, *args, **kwargs):
         from .impl.w8a8_moe import w8a8_prepare_experts
@@ -108,11 +87,7 @@ class AscendBackend(Backend):
         return fused_experts_impl(*args, **kwargs)
 
     def topk_softmax(
-        self,
-        topk_weights,
-        topk_ids,
-        token_expert_indices,
-        gating_output,
+        self, topk_weights, topk_ids, token_expert_indices, gating_output,
         renormalize: bool,
     ):
         from .impl.fused_moe import topk_softmax
@@ -217,8 +192,6 @@ class AscendBackend(Backend):
         """
         if use_mla:
             if use_sparse:
-                raise NotImplementedError(
-                    "MLA with sparse attention is not implemented for Ascend yet."
-                )
+                raise NotImplementedError("MLA with sparse attention is not implemented for Ascend yet.")
             return "vllm_fl.dispatch.backends.vendor.ascend.impl.attention.AscendMLABackend"
         return "vllm_fl.dispatch.backends.vendor.ascend.impl.attention.AscendAttentionBackend"

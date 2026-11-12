@@ -40,7 +40,7 @@ def inference_and_dispatch(runtime_context):
     with torch.inference_mode(), with_strict_mode():
         assert (
             get_default_manager().get_selected_impl_id("deepseek_v4_compressor")
-            == "vendor.ascend"
+            == "default.flaggems_vllm"
         )
         for name in ("hc_pre", "hc_post", "hc_head"):
             assert (
@@ -231,11 +231,12 @@ def test_full_compressor_fake_has_no_kernel_launch(monkeypatch):
     from torch._subclasses.fake_tensor import FakeTensorMode
     from triton.runtime.jit import JITFunction
 
-    from vllm_fl.dispatch.backends.vendor.ascend.impl.compressor import (
-        _compressor_op,
+    from vllm_fl.dispatch.backends.flaggems.impl.deepseek_v4 import (
         deepseek_v4_compressor,
+        initialize_deepseek_v4_api,
     )
 
+    initialize_deepseek_v4_api("deepseek_v4_compressor")
     module = _compressor(4)
     x = _data((2, 8), dtype=torch.bfloat16)
     state = torch.empty(2, 4, 16, dtype=torch.float32, device="npu")
@@ -274,7 +275,7 @@ def test_full_compressor_fake_has_no_kernel_launch(monkeypatch):
 
     # Mutation must be present in the dispatcher schema, where functionalization
     # and graph dead-code elimination can see it, rather than only in a comment.
-    schema = _compressor_op._opoverload._schema
+    schema = torch.ops.flaggems_vllm.compressor_paged.default._schema
     mutated = {
         argument.name
         for argument in schema.arguments
@@ -284,10 +285,12 @@ def test_full_compressor_fake_has_no_kernel_launch(monkeypatch):
 
 
 def test_full_compressor_write_only_compile_preserves_state():
-    from vllm_fl.dispatch.backends.vendor.ascend.impl.compressor import (
+    from vllm_fl.dispatch.backends.flaggems.impl.deepseek_v4 import (
         deepseek_v4_compressor,
+        initialize_deepseek_v4_api,
     )
 
+    initialize_deepseek_v4_api("deepseek_v4_compressor")
     module = _compressor(4)
     x = _data((3, 8), 0.04, torch.bfloat16)
     state = torch.full((2, 4, 16), -9.0, device="npu", dtype=torch.float32)

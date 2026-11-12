@@ -283,6 +283,7 @@ def test_fresh_input_graph_replay(native, dtype):
     for _ in range(2):
         x.copy_(torch.randn_like(x))
         expected = method.apply(layer, x)
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output, expected)

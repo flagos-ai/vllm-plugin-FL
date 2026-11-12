@@ -852,6 +852,7 @@ def test_complete_model_changed_tokens_graph(model_env):
     for _ in range(2):
         tokens.add_(7)
         expected = run().clone()
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         assert torch.isfinite(output).all()

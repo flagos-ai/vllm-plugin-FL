@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from copy import copy
 from functools import update_wrapper
+from inspect import Parameter, signature
+from threading import RLock
 from typing import TYPE_CHECKING
 
 import regex as re
@@ -19,6 +21,7 @@ if TYPE_CHECKING:
 
 _CONTRACT_ATTRIBUTE = "_fl_checkpoint_contract"
 _WRAPPER_MARKER = "_fl_checkpoint_contract_wrapper"
+_INSTALL_LOCK = RLock()
 
 
 class _CheckpointContract:
@@ -130,14 +133,53 @@ def _uniform_scheme(schemes, prefix):
 
 def _install_checkpoint_contract_wrappers():
     """Extend only explicitly bound configs; preserve other callers exactly."""
-    config_cls = CompressedTensorsConfig
-    current_mapper = config_cls.apply_vllm_mapper
-    if getattr(current_mapper, _WRAPPER_MARKER, False):
-        return
-    current_lookup = config_cls.get_scheme_dict
-    current_method = config_cls.get_quant_method
+    with _INSTALL_LOCK:
+        _install_checkpoint_contract_wrappers_locked()
 
-    def apply_vllm_mapper(self, mapper):
+
+def _install_checkpoint_contract_wrappers_locked():
+    config_cls = CompressedTensorsConfig
+    names = ("apply_vllm_mapper", "get_scheme_dict", "get_quant_method")
+    originals = tuple(getattr(config_cls, name) for name in names)
+    installed = tuple(getattr(method, _WRAPPER_MARKER, False) for method in originals)
+    if all(installed):
+        return
+    if any(installed):
+        raise RuntimeError("Incomplete checkpoint contract wrapper installation")
+
+    # Wrappers forward positional arguments and preserve the upstream optional
+    # layer_name default. Validate all APIs before changing the class.
+    for name, method, count in zip(names, originals, (2, 3, 3)):
+        try:
+            sig = signature(method)
+            sig.bind(*([object()] * count))
+            params = tuple(sig.parameters.values())
+            if len(params) != count or any(
+                param.kind != Parameter.POSITIONAL_OR_KEYWORD for param in params
+            ):
+                raise TypeError("incompatible parameters")
+            if any(param.default is not Parameter.empty for param in params[:2]):
+                raise TypeError("incompatible required parameters")
+            if name == "apply_vllm_mapper" and params[1].name != "hf_to_vllm_mapper":
+                raise TypeError("incompatible mapper parameter")
+            if name == "get_scheme_dict" and (
+                params[1].name != "layer"
+                or params[2].name != "layer_name"
+                or params[2].default is not None
+            ):
+                raise TypeError("incompatible layer_name parameter")
+            if name == "get_quant_method" and (
+                params[1].name != "layer"
+                or params[2].name != "prefix"
+                or params[2].default is not Parameter.empty
+            ):
+                raise TypeError("incompatible quant method parameters")
+        except (TypeError, ValueError) as exc:
+            raise TypeError(f"Incompatible {name} signature") from exc
+    current_mapper, current_lookup, current_method = originals
+
+    def apply_vllm_mapper(self, hf_to_vllm_mapper):
+        mapper = hf_to_vllm_mapper
         contract = getattr(self, _CONTRACT_ATTRIBUTE, None)
         if contract is None:
             return current_mapper(self, mapper)
@@ -214,9 +256,24 @@ def _install_checkpoint_contract_wrappers():
     ):
         update_wrapper(wrapper, original)
         setattr(wrapper, _WRAPPER_MARKER, True)
-    config_cls.apply_vllm_mapper = apply_vllm_mapper
-    config_cls.get_scheme_dict = get_scheme_dict
-    config_cls.get_quant_method = get_quant_method
+    # Restore the actual class dictionary, including inherited attributes.
+    missing = object()
+    previous = {name: vars(config_cls).get(name, missing) for name in names}
+    installed_names = []
+    try:
+        for name, wrapper in zip(
+            names, (apply_vllm_mapper, get_scheme_dict, get_quant_method)
+        ):
+            installed_names.append(name)
+            setattr(config_cls, name, wrapper)
+    except Exception:
+        for name in reversed(installed_names):
+            if previous[name] is missing:
+                if name in vars(config_cls):
+                    delattr(config_cls, name)
+            else:
+                setattr(config_cls, name, previous[name])
+        raise
 
 
 def bind_compressed_tensors_model(

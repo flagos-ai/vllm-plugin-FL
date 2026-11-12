@@ -305,3 +305,113 @@ def test_w8a8_moe_selector_nvidia_noncanonical_falls_back_without_flaggems(
 
     assert result == "nvidia-native"
     assert len(upstream_calls) == 1
+
+
+@pytest.mark.parametrize("api", ["builder", "selector", "factory"])
+def test_moe_install_validates_all_signatures_before_writing(monkeypatch, api):
+    def compatible(*args, **kwargs):
+        return None
+
+    oracle, scheme = _install_with_fake_modules(monkeypatch, compatible, compatible)
+    platforms = import_module("vllm.platforms")
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(vendor_name="ascend", device_type="npu"),
+    )
+    module = import_module(
+        "vllm.model_executor.layers.quantization.compressed_tensors."
+        "compressed_tensors_moe"
+    )
+
+    class Factory:
+        get_moe_method = staticmethod(compatible)
+
+    monkeypatch.setattr(module, "CompressedTensorsMoEMethod", Factory)
+    if api == "builder":
+        scheme.make_int8_moe_quant_config = lambda: None
+    elif api == "selector":
+        oracle.select_int8_moe_backend = lambda: None
+    else:
+        Factory.get_moe_method = staticmethod(lambda: None)
+    snapshots = [dict(vars(owner)) for owner in (oracle, scheme, Factory)]
+    with pytest.raises(TypeError):
+        moe_adapter.install_fl_w8a8_moe_selector()
+    assert [dict(vars(owner)) for owner in (oracle, scheme, Factory)] == snapshots
+
+
+@pytest.mark.parametrize("failure_target", ["factory", "oracle", "scheme"])
+@pytest.mark.parametrize("preinstalled", [False, True])
+def test_moe_install_rolls_back_descriptors_and_wrappers(
+    monkeypatch, failure_target, preinstalled
+):
+    def compatible(*args, **kwargs):
+        return None
+
+    def builder(*args, **kwargs):
+        return "existing-wrapper"
+
+    if preinstalled:
+        setattr(builder, moe_adapter._CONFIG_BUILDER_MARKER, True)
+
+    class FailOnceNamespace(SimpleNamespace):
+        def __setattr__(self, name, value):
+            if name == "select_int8_moe_backend" and self.fail:
+                super().__setattr__("fail", False)
+                raise RuntimeError("injected MoE installation failure")
+            super().__setattr__(name, value)
+
+    oracle = FailOnceNamespace(
+        fail=failure_target == "oracle", select_int8_moe_backend=compatible
+    )
+    scheme = FailOnceNamespace(
+        fail=failure_target == "scheme",
+        select_int8_moe_backend=compatible,
+        make_int8_moe_quant_config=builder,
+    )
+    modules = {moe_adapter._ORACLE_MODULE: oracle, moe_adapter._SCHEME_MODULE: scheme}
+    monkeypatch.setattr(moe_adapter, "import_module", lambda name: modules[name])
+    monkeypatch.setattr(
+        import_module("vllm.platforms"),
+        "current_platform",
+        SimpleNamespace(vendor_name="ascend", device_type="npu"),
+    )
+
+    class FailOnceMeta(type):
+        def __setattr__(cls, name, value):
+            if name == "get_moe_method" and cls.fail:
+                type.__setattr__(cls, "fail", False)
+                raise RuntimeError("injected MoE installation failure")
+            super().__setattr__(name, value)
+
+    class BaseFactory:
+        get_moe_method = staticmethod(compatible)
+
+    class Factory(BaseFactory, metaclass=FailOnceMeta):
+        fail = failure_target == "factory"
+
+    module = import_module(
+        "vllm.model_executor.layers.quantization.compressed_tensors."
+        "compressed_tensors_moe"
+    )
+    monkeypatch.setattr(module, "CompressedTensorsMoEMethod", Factory)
+
+    def snapshot():
+        return [
+            {name: value for name, value in vars(owner).items() if name != "fail"}
+            for owner in (oracle, scheme, Factory)
+        ]
+
+    originals = snapshot()
+    descriptor = vars(BaseFactory)["get_moe_method"]
+    with pytest.raises(RuntimeError, match="injected MoE installation failure"):
+        moe_adapter.install_fl_w8a8_moe_selector()
+    assert snapshot() == originals
+    assert vars(BaseFactory)["get_moe_method"] is descriptor
+    assert "get_moe_method" not in vars(Factory)
+    assert scheme.make_int8_moe_quant_config is builder
+    assert moe_adapter.install_fl_w8a8_moe_selector()
+    installed = snapshot()
+    assert isinstance(vars(Factory)["get_moe_method"], staticmethod)
+    assert moe_adapter.install_fl_w8a8_moe_selector()
+    assert snapshot() == installed

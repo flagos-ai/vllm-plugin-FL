@@ -634,6 +634,7 @@ def test_attention_changed_input_graph(make_attention):
     for _ in range(2):
         history.add_(0.03125)
         expected = _oracle(env, history, list(range(8)))
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output, expected, rtol=0.02, atol=0.01)

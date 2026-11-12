@@ -591,7 +591,7 @@ def test_cache_write_typed_padding_and_null_page(pools, dtype):
 
     assert (
         get_default_manager().get_selected_impl_id("paged_cache_write")
-        == "vendor.ascend"
+        == "default.flaggems_vllm"
     )
     cache = torch.zeros(3, 4, 4, device="npu", dtype=dtype)
     values = torch.arange(12, device="npu").reshape(3, 4).to(dtype)
@@ -604,10 +604,15 @@ def test_cache_write_typed_padding_and_null_page(pools, dtype):
 
 
 @pytest.mark.parametrize(
-    "dtype", [torch.bfloat16, torch.float16, torch.float32, torch.int8]
+    "dtype,values_dtype",
+    [
+        (dtype, dtype)
+        for dtype in (torch.bfloat16, torch.float16, torch.float32, torch.int8)
+    ]
+    + [(torch.bfloat16, torch.float32), (torch.float16, torch.float32)],
 )
 @pytest.mark.parametrize("strided", [False, True])
-def test_cache_write_padding_and_strides_graph_replay(dtype, strided):
+def test_cache_write_padding_and_strides_graph_replay(dtype, values_dtype, strided):
     from vllm_fl.dispatch import CachedOp
 
     cache_write = CachedOp("paged_cache_write")
@@ -616,7 +621,9 @@ def test_cache_write_padding_and_strides_graph_replay(dtype, strided):
     backing = torch.arange(prod(shape), device="npu").to(dtype).reshape(shape)
     cache = backing[1:4, :, ::2] if strided else backing
     original = backing.cpu()
-    values = torch.arange(16, device="npu").reshape(4, 4).to(dtype)
+    values = torch.arange(16, device="npu").reshape(4, 4).to(values_dtype)
+    if values_dtype != dtype:
+        values.div_(7)
     slots = torch.tensor([0, -1, 9, 99], device="npu")
     cache_write(values, slots, cache)
     torch.npu.synchronize()
@@ -626,7 +633,9 @@ def test_cache_write_padding_and_strides_graph_replay(dtype, strided):
     for raw_slots in ([0, -1, 9, 99], [-1, 4, 11, -1], [-1, -1, -1, -1]):
         backing.copy_(original)
         slots.copy_(torch.tensor(raw_slots, device="npu"))
-        values.copy_(torch.arange(16, device="npu").reshape(4, 4).to(dtype) + 20)
+        values.copy_(torch.arange(16, device="npu").reshape(4, 4).to(values_dtype) + 20)
+        if values_dtype != dtype:
+            values.div_(7)
         if dtype.is_floating_point:
             for index, slot in enumerate(raw_slots):
                 if not 0 <= slot < 12:
@@ -836,10 +845,18 @@ def test_stable_plans_rebuild_and_changed_input_graph(pools):
                 + step * 0.05
             ).bfloat16()
         )
+        caches = (state_leaf.kv_cache, compact_leaf.kv_cache)
+        before = tuple(cache.clone() for cache in caches)
         expected = run().clone()
+        expected_caches = tuple(cache.clone() for cache in caches)
+        for cache, initial in zip(caches, before):
+            cache.copy_(initial)
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output, expected, rtol=0.01, atol=0.01)
+        for cache, expected_cache in zip(caches, expected_caches):
+            torch.testing.assert_close(cache, expected_cache, rtol=0.01, atol=0.01)
         assert torch.count_nonzero(compact_leaf.kv_cache[0]) == 0
 
 
@@ -851,43 +868,77 @@ def test_paged_cache_write_large_rows_and_slots(width, slot_dtype):
     with with_strict_mode():
         assert (
             get_default_manager().get_selected_impl_id("paged_cache_write")
-            == "vendor.ascend"
+            == "default.flaggems_vllm"
         )
         backing = torch.zeros(5, 4, width + 3, device="npu")
         cache = backing[1:4, :, :width]
-        values = torch.arange(4 * width, device="npu").reshape(4, width).float()
-        slots = torch.tensor([0, -1, 11, 2**30], dtype=slot_dtype, device="npu")
+        raw_slots = [0, -1, 11, 2**30]
+        if slot_dtype == torch.int64:
+            raw_slots += [-(2**63), 2**63 - 1]
+        values = (
+            torch.arange(len(raw_slots) * width, device="npu")
+            .reshape(len(raw_slots), width)
+            .float()
+        )
+        slots = torch.tensor(raw_slots, dtype=slot_dtype, device="npu")
         CachedOp("paged_cache_write")(values, slots, cache)
         torch.npu.synchronize()
-        torch.testing.assert_close(cache[0, 0], values[0], rtol=0, atol=0)
-        torch.testing.assert_close(cache[2, 3], values[2], rtol=0, atol=0)
-        assert torch.count_nonzero(backing[..., width:]) == 0
-        assert torch.count_nonzero(backing[0]) == 0
-        assert torch.count_nonzero(backing[4]) == 0
+        expected = torch.zeros_like(backing, device="cpu")
+        expected[1, 0, :width] = values[0].cpu()
+        expected[3, 3, :width] = values[2].cpu()
+        torch.testing.assert_close(backing.cpu(), expected, rtol=0, atol=0)
 
 
 def test_paged_cache_write_propagates_launch_failure(monkeypatch):
-    from vllm_fl.dispatch import call_op, with_strict_mode
-    from vllm_fl.dispatch.backends.vendor.ascend.impl import (
-        scatter_nd_update_v2 as impl,
-    )
+    from vllm_fl.dispatch import call_op, get_default_manager
+    from vllm_fl.dispatch.backends.flaggems.impl import deepseek_v4 as adapter
 
-    def fail(_plan):
+    assert (
+        get_default_manager().get_selected_impl_id("paged_cache_write")
+        == "default.flaggems_vllm"
+    )
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append((args, kwargs))
         raise RuntimeError("cache write launch failure")
 
-    monkeypatch.setattr(impl, "_launch", fail)
+    monkeypatch.setitem(adapter._RESOLVED_APIS, "paged_cache_write", fail)
     cache = torch.zeros(2, 4, 8, device="npu")
-    with (
-        with_strict_mode(),
-        pytest.raises(RuntimeError, match="cache write launch failure"),
-    ):
+    with pytest.raises(RuntimeError, match="cache write launch failure"):
         call_op(
             "paged_cache_write",
             torch.ones(1, 8, device="npu"),
             torch.tensor([0], device="npu"),
             cache,
         )
+    assert len(calls) == 1
     assert torch.count_nonzero(cache) == 0
+
+
+@pytest.mark.parametrize(
+    "cache_dtype,values_dtype",
+    [
+        (torch.float32, torch.float16),
+        (torch.int8, torch.float32),
+    ],
+)
+def test_paged_cache_write_rejects_unsupported_dtype_without_mutation(
+    cache_dtype, values_dtype
+):
+    from vllm_fl.dispatch import call_op, with_strict_mode
+
+    backing = torch.arange(5 * 4 * 8, device="npu").to(cache_dtype).reshape(5, 4, 8)
+    cache = backing[1:4, :, ::2]
+    before = backing.clone()
+    with with_strict_mode(), pytest.raises(NotImplementedError):
+        call_op(
+            "paged_cache_write",
+            torch.ones(1, 4, dtype=values_dtype, device="npu"),
+            torch.tensor([0], device="npu"),
+            cache,
+        )
+    torch.testing.assert_close(backing, before, rtol=0, atol=0)
 
 
 def test_paged_cache_write_large_storage_uses_int64_offsets():
@@ -903,3 +954,17 @@ def test_paged_cache_write_large_storage_uses_int64_offsets():
         torch.npu.synchronize()
     torch.testing.assert_close(backing[:8], values[0], rtol=0, atol=0)
     torch.testing.assert_close(backing[offset : offset + 8], values[1], rtol=0, atol=0)
+
+
+def test_paged_cache_write_empty_input_is_noop():
+    from vllm_fl.dispatch import CachedOp
+
+    backing = torch.arange(32, device="npu", dtype=torch.float32).reshape(2, 4, 4)
+    before = backing.clone()
+    result = CachedOp("paged_cache_write")(
+        torch.empty(0, 4, device="npu"),
+        torch.empty(0, dtype=torch.int64, device="npu"),
+        backing,
+    )
+    assert result is None
+    torch.testing.assert_close(backing, before, rtol=0, atol=0)

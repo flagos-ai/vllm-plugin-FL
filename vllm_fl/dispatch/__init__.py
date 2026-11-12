@@ -237,6 +237,9 @@ class CachedOp:
         try:
             return impl.fn(*args, **kwargs)
         except Exception as exc:
+            # Stateful providers must preserve the original execution failure.
+            if not impl.allow_execution_fallback:
+                raise
             # The fallback below is silent by design for production traffic,
             # but an invisible impl failure makes dispatch regressions
             # indistinguishable from a legitimate policy switch (observed:
