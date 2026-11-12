@@ -1,0 +1,20 @@
+# Preserve the supplied FlagOS Runtime 2.3.0 core and existing build helpers.
+torch==2.13.0+cu130
+torchvision==0.28.0+cu130
+torchaudio==2.11.0+cu130
+numpy==1.26.4
+flag-gems==5.4.0
+flagtree==0.7.0
+flagcx==0.14.1+cuda13.3
+pybind11==3.0.3
+setuptools-scm==9.2.2
+ninja==1.13.0
+packaging==26.3
+PyYAML==6.0.1
+SQLAlchemy==2.0.57
+
+nvidia-nccl-cu13==2.29.7
+# FlashInfer JIT must match Torch's CUDA 13.0 runtime headers.
+nvidia-cuda-nvcc==13.0.88
+nvidia-cuda-crt==13.0.88
+nvidia-nvvm==13.0.88

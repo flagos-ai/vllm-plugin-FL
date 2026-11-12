@@ -8,23 +8,21 @@ import importlib
 import importlib.machinery
 import importlib.metadata as metadata
 import json
-import os
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
-FL_SOURCES = {
-    "flagtree": {
-        "version": "0.7.0+git317a0249",
-        "commit": "317a0249ec25c6756e0aee3a87e8e3c92f154335",
-        "archive_sha256": "075eb5b382dc438e9a54b87d9de6895b5e22dd1c674c04379802cff6973501fb",
-    },
-    "flag-gems": {
-        "version": "5.4.0+g6fe7709e7717",
-        "commit": "6fe7709e7717e49cf12bb00346719a0885f505fa",
-        "archive_sha256": "1925bcf08657f011cc0aa1193ecf96742a7c18fa66121fb1ab36c8142d8107b7",
-    },
-}
+# Inventory only. Build-time constraints belong in docker/cuda/constraints.txt.
+RUNTIME_PACKAGES = (
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "flag-gems",
+    "flagtree",
+    "flagcx",
+    "numpy",
+    "nvidia-nccl-cu13",
+)
 
 
 FLAGGEMS_VLLM_SOURCE = {
@@ -33,7 +31,7 @@ FLAGGEMS_VLLM_SOURCE = {
     "repository": "https://github.com/flagos-ai/FlagGems-vllm.git",
 }
 
-# Required payloads in the pinned official v0.32.0-cu129 image. Upstream now
+# Required payloads in the non-empty v0.32.0+flagos wheel. Upstream now
 # supplies the stable libtorch modules rather than the old _C/_moe_C modules.
 NATIVE_VLLM_MODULES = (
     "_C_stable_libtorch",
@@ -43,6 +41,12 @@ NATIVE_VLLM_MODULES = (
     "vllm_flash_attn._vllm_fa2_C",
     "vllm_flash_attn._vllm_fa3_C",
     "cumem_allocator",
+    "_deepselect_C",
+    "_flashkda_C",
+    "_qutlass_C",
+    "fs_io_C",
+    "spinloop",
+    "third_party.deep_gemm._C_extension",
 )
 NATIVE_VLLM_LIBRARIES = {
     module: module.replace(".", "/") + ".abi3.so" for module in NATIVE_VLLM_MODULES
@@ -67,22 +71,25 @@ def validate_flaggems_vllm_provenance(version, source):
     return {**expected, "version": version, "direct_url": source}
 
 
-def validate_fl_provenance(provenance, installed):
-    """Bind installed ordinary wheels to the checksummed source build record."""
-    for name, expected in FL_SOURCES.items():
-        recorded = provenance.get(name, {})
-        actual = installed[name]
-        if any(recorded.get(key) != value for key, value in expected.items()):
-            raise RuntimeError(f"{name} source provenance does not match the CI pin")
-        wheel_hash = recorded.get("wheel_sha256", "")
-        if (
-            actual["version"] != expected["version"]
-            or len(wheel_hash) != 64
-            or actual.get("wheel_sha256") != wheel_hash
-            or actual.get("editable", False)
-        ):
-            raise RuntimeError(f"{name} is not the wheel recorded by the source build")
-    return provenance
+def runtime_versions(installed):
+    """Record the actual Runtime packages without duplicating resolver pins."""
+    return {name: installed[name] for name in RUNTIME_PACKAGES}
+
+
+def validate_compiler(version, origin, expected_origin):
+    """Require FlagTree's compiler by origin, without pinning its Triton version."""
+    if Path(origin).resolve() != Path(expected_origin).resolve():
+        raise RuntimeError("Active Triton must be supplied by Runtime FlagTree")
+    return {"version": version, "origin": str(Path(origin).resolve())}
+
+
+def validate_wheel_installation(distribution):
+    """Apply the same wheel-only checks during build and GPU validation."""
+    direct = json.loads(distribution.read_text("direct_url.json") or "{}")
+    if distribution.read_text("WHEEL") is None:
+        raise RuntimeError("vLLM must be installed as a wheel")
+    if direct.get("dir_info", {}).get("editable", False):
+        raise RuntimeError("Editable vLLM cannot provide the required CUDA wheel")
 
 
 def validate_vllm_provider(
@@ -107,13 +114,13 @@ def validate_vllm_provider(
     )
     if (
         module_version != "0.32.0"
-        or distribution_version != "0.32.0+cu129"
+        or distribution_version != "0.32.0+flagos"
         or not same_origin
         or editable
         or not set(NATIVE_VLLM_LIBRARIES.values()).issubset(native_libraries)
     ):
         raise RuntimeError(
-            "NVIDIA CI requires the ordinary official vLLM 0.32.0+cu129 wheel "
+            "NVIDIA CI requires the non-empty vLLM 0.32.0+flagos wheel "
             "with its native CUDA extensions and without source-tree shadowing; "
             f"actual: {facts}, editable={editable}, "
             f"native_libraries={list(native_libraries)}"
@@ -170,6 +177,14 @@ def validate_native_import(module_name, module, expected_origin):
         raise RuntimeError(f"{module_name} must load its genuine native extension")
 
 
+def validate_nccl_version(version, distribution_version):
+    expected = tuple(int(part) for part in distribution_version.split(".")[:3])
+    if tuple(version) != expected:
+        raise RuntimeError(
+            f"Loaded NCCL {version} differs from cu13 distribution {distribution_version}"
+        )
+
+
 def check_stack(*, runtime_only=False):
     import torch
     import torchcodec
@@ -180,8 +195,7 @@ def check_stack(*, runtime_only=False):
 
     dist = metadata.distribution("vllm")
     direct = json.loads(dist.read_text("direct_url.json") or "{}")
-    if dist.read_text("WHEEL") is None:
-        raise RuntimeError("vLLM must be installed as a wheel")
+    validate_wheel_installation(dist)
     facts = validate_vllm_provider(
         vllm.__version__,
         dist.version,
@@ -197,49 +211,27 @@ def check_stack(*, runtime_only=False):
         fused_dist.version,
         json.loads(fused_dist.read_text("direct_url.json") or "{}"),
     )
-    expected_versions = {
-        "torch": "2.13.0+cu129",
-        **{name: source["version"] for name, source in FL_SOURCES.items()},
-        "xgboost": "3.3.0",
-        "humming-kernels": "0.1.17",
-        "torchcodec": "0.16.0+cu129",
-    }
-    for name, expected in expected_versions.items():
-        actual = metadata.version(name)
-        if actual != expected:
-            raise RuntimeError(f"Expected {name}=={expected}, found {actual}")
-        facts[name] = actual
-    installed = {}
-    for name in FL_SOURCES:
-        source_dist = metadata.distribution(name)
-        source_url = json.loads(source_dist.read_text("direct_url.json") or "{}")
-        installed[name] = {
-            "version": source_dist.version,
-            "wheel_sha256": source_url.get("archive_info", {})
-            .get("hashes", {})
-            .get("sha256"),
-            "editable": source_url.get("dir_info", {}).get("editable", False),
-        }
-    provenance_path = Path(
-        os.environ.get("FL_STACK_PROVENANCE", "/opt/fl-ci/provenance.json")
+    facts["runtime"] = runtime_versions(
+        {name: metadata.version(name) for name in RUNTIME_PACKAGES}
     )
-    facts["fl_source_provenance"] = validate_fl_provenance(
-        json.loads(provenance_path.read_text()), installed
-    )
-    if torch.version.cuda != "12.9" or triton.__version__ != "3.6.0":
-        raise RuntimeError(
-            f"Expected CUDA 12.9 and Triton 3.6.0, found "
-            f"{torch.version.cuda} and {triton.__version__}"
-        )
+    for name in (
+        "xgboost",
+        "humming-kernels",
+        "torchcodec",
+        "nvidia-cuda-nvcc",
+        "nvidia-cuda-crt",
+        "nvidia-nvvm",
+    ):
+        facts[name] = metadata.version(name)
     try:
         standalone = metadata.version("triton")
     except metadata.PackageNotFoundError:
         standalone = None
-    if standalone is not None:
-        raise RuntimeError(f"Standalone Triton conflicts with FlagTree: {standalone}")
+    facts["standalone_triton"] = standalone
     triton_origin = metadata.distribution("flagtree").locate_file("triton/__init__.py")
-    if Path(triton.__file__).resolve() != Path(triton_origin).resolve():
-        raise RuntimeError("Active Triton must be supplied by the pinned FlagTree")
+    facts["active_compiler"] = validate_compiler(
+        triton.__version__, triton.__file__, triton_origin
+    )
     transformers = metadata.version("transformers")
     if transformers not in SpecifierSet(">=5.16.1,<5.20.0"):
         raise RuntimeError(f"Transformers does not satisfy vLLM 0.32: {transformers}")
@@ -264,8 +256,23 @@ def check_stack(*, runtime_only=False):
             raise RuntimeError("Normal FL registration did not activate NVIDIA")
         if not torch.cuda.is_available():
             raise RuntimeError("NVIDIA CI requires a visible CUDA device")
+        nccl_version = torch.cuda.nccl.version()
+        validate_nccl_version(nccl_version, metadata.version("nvidia-nccl-cu13"))
+        facts["nccl_loaded_version"] = nccl_version
         for name, origin in native_origins.items():
-            validate_native_import(name, importlib.import_module(name), origin)
+            # Some payloads are operator libraries without Python initializers.
+            # Validate their real ELF/RECORD above and load every native library.
+            torch.ops.load_library(origin)
+            if name in {
+                "vllm._C_stable_libtorch",
+                "vllm._moe_C_stable_libtorch",
+                "vllm._flashmla_C",
+                "vllm._flashmla_extension_C",
+                "vllm.vllm_flash_attn._vllm_fa2_C",
+                "vllm.vllm_flash_attn._vllm_fa3_C",
+                "vllm.cumem_allocator",
+            }:
+                validate_native_import(name, importlib.import_module(name), origin)
         facts.update(
             platform=type(current_platform).__qualname__,
             llm_class=f"{LLM.__module__}.{LLM.__qualname__}",
@@ -277,12 +284,33 @@ def check_stack(*, runtime_only=False):
     return facts
 
 
+def check_build_payload():
+    """Inspect installed artifacts without loading driver-linked CUDA libraries."""
+    dist = metadata.distribution("vllm")
+    validate_wheel_installation(dist)
+    if dist.version != "0.32.0+flagos":
+        raise RuntimeError(f"Unexpected vLLM distribution: {dist.version}")
+    return {
+        "runtime": runtime_versions(
+            {name: metadata.version(name) for name in RUNTIME_PACKAGES}
+        ),
+        "native_payloads": validate_native_payload(dist, dist.locate_file("vllm")),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-only", action="store_true")
+    parser.add_argument(
+        "--build-only", action="store_true", help="No GPU driver imports"
+    )
     args = parser.parse_args()
     with redirect_stdout(sys.stderr):
-        facts = check_stack(runtime_only=args.runtime_only)
+        facts = (
+            check_build_payload()
+            if args.build_only
+            else check_stack(runtime_only=args.runtime_only)
+        )
     print(json.dumps(facts, indent=2))
 
 

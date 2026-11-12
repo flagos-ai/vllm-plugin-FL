@@ -1,16 +1,17 @@
 # Copyright 2026 FlagOS Contributors
-"""CPU regressions for preserving the official native vLLM CUDA installation."""
+"""CPU regressions for the native FlagOS vLLM CUDA installation."""
 
 import base64
-import copy
 import hashlib
 import importlib.machinery
 import importlib.metadata
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("cuda_ci_stack", HERE / "stack.py")
@@ -25,7 +26,7 @@ class NativeProviderTests(unittest.TestCase):
     def validate(self, **overrides):
         args = {
             "module_version": "0.32.0",
-            "distribution_version": "0.32.0+cu129",
+            "distribution_version": "0.32.0+flagos",
             "module_origin": self.origin,
             "distribution_origin": self.origin,
             "native_libraries": tuple(stack.NATIVE_VLLM_LIBRARIES.values()),
@@ -33,12 +34,12 @@ class NativeProviderTests(unittest.TestCase):
         args.update(overrides)
         return stack.validate_vllm_provider(**args)
 
-    def test_official_cuda_release_pair_is_accepted(self):
+    def test_flagos_native_release_pair_is_accepted(self):
         result = self.validate()
-        self.assertEqual(result["vllm_distribution_version"], "0.32.0+cu129")
+        self.assertEqual(result["vllm_distribution_version"], "0.32.0+flagos")
 
     def test_empty_or_other_cuda_distribution_is_rejected(self):
-        for version in ("0.32.0+empty", "0.32.0", "0.32.0+cu130"):
+        for version in ("0.32.0+empty", "0.32.0", "0.32.0+cu129"):
             with self.subTest(version=version), self.assertRaises(RuntimeError):
                 self.validate(distribution_version=version)
 
@@ -69,6 +70,17 @@ class NativeProviderTests(unittest.TestCase):
                         if path != omitted
                     ]
                 )
+
+    def test_required_payload_contract_includes_flagos_additions(self):
+        extra = (
+            "_deepselect_C.abi3.so",
+            "_flashkda_C.abi3.so",
+            "_qutlass_C.abi3.so",
+            "fs_io_C.abi3.so",
+            "spinloop.abi3.so",
+            "third_party/deep_gemm/_C_extension.abi3.so",
+        )
+        self.assertTrue(set(extra).issubset(stack.NATIVE_VLLM_LIBRARIES.values()))
 
     def test_resolved_same_origin_is_accepted(self):
         self.validate(distribution_origin=self.origin.parent / "../vllm/__init__.py")
@@ -172,39 +184,58 @@ class NativeImportTests(unittest.TestCase):
             stack.validate_native_import(self.name, self.module, self.origin)
 
 
-class SourceProvenanceTests(unittest.TestCase):
-    def setUp(self):
-        self.provenance = {
-            name: {**source, "wheel_sha256": "a" * 64}
-            for name, source in stack.FL_SOURCES.items()
+class RuntimeVersionTests(unittest.TestCase):
+    def test_nccl_loaded_library_must_match_installed_cu13_metadata(self):
+        stack.validate_nccl_version((2, 29, 7), "2.29.7")
+        stack.validate_nccl_version((2, 30, 1), "2.30.1")
+        with self.assertRaisesRegex(RuntimeError, "NCCL"):
+            stack.validate_nccl_version((2, 27, 5), "2.29.7")
+
+    def test_runtime_versions_report_updates_without_rejecting_them(self):
+        versions = dict.fromkeys(stack.RUNTIME_PACKAGES, "a-new-version")
+        self.assertEqual(stack.runtime_versions(versions), versions)
+
+    def test_missing_runtime_package_is_not_silently_ignored(self):
+        with self.assertRaises(KeyError):
+            stack.runtime_versions({})
+
+    def test_flagtree_compiler_updates_are_accepted_at_the_correct_origin(self):
+        origin = Path("/opt/flagtree/triton/__init__.py")
+        for version in ("3.6.0", "3.7.1"):
+            stack.validate_compiler(version, origin, origin)
+        with self.assertRaises(RuntimeError):
+            stack.validate_compiler("3.7.1", Path("/other/triton/__init__.py"), origin)
+
+
+class WheelInstallationTests(unittest.TestCase):
+    def distribution(self, wheel="Wheel-Version: 1.0", editable=False):
+        texts = {
+            "WHEEL": wheel,
+            "direct_url.json": '{"dir_info": {"editable": true}}' if editable else None,
         }
-        self.installed = {
-            name: {"version": source["version"], "wheel_sha256": "a" * 64}
-            for name, source in stack.FL_SOURCES.items()
-        }
+        return SimpleNamespace(read_text=texts.get)
 
-    def test_pinned_source_and_installed_wheel_are_accepted(self):
-        stack.validate_fl_provenance(self.provenance, self.installed)
+    def test_normal_wheel_is_accepted(self):
+        stack.validate_wheel_installation(self.distribution())
 
-    def test_same_version_from_different_source_is_rejected(self):
-        self.provenance["flagtree"]["commit"] = "b" * 40
-        with self.assertRaisesRegex(RuntimeError, "source provenance"):
-            stack.validate_fl_provenance(self.provenance, self.installed)
+    def test_missing_wheel_metadata_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "wheel"):
+            stack.validate_wheel_installation(self.distribution(wheel=None))
 
-    def test_replaced_or_editable_installation_is_rejected(self):
-        for replacement in ({"wheel_sha256": "b" * 64}, {"editable": True}):
-            installed = copy.deepcopy(self.installed)
-            installed["flag-gems"].update(replacement)
+    def test_editable_installation_is_rejected_even_with_wheel_metadata(self):
+        with self.assertRaisesRegex(RuntimeError, "Editable"):
+            stack.validate_wheel_installation(self.distribution(editable=True))
+
+    def test_build_check_rejects_source_and_editable_before_scanning_payload(self):
+        for dist in (self.distribution(wheel=None), self.distribution(editable=True)):
             with (
-                self.subTest(replacement=replacement),
-                self.assertRaisesRegex(RuntimeError, "not the wheel"),
+                self.subTest(dist=dist),
+                patch.object(stack.metadata, "distribution", return_value=dist),
+                patch.object(stack, "validate_native_payload") as scan,
             ):
-                stack.validate_fl_provenance(self.provenance, installed)
-
-    def test_release_wheel_cannot_impersonate_fixed_development_commit(self):
-        self.installed["flagtree"]["version"] = "0.7.0"
-        with self.assertRaisesRegex(RuntimeError, "not the wheel"):
-            stack.validate_fl_provenance(self.provenance, self.installed)
+                with self.assertRaises(RuntimeError):
+                    stack.check_build_payload()
+                scan.assert_not_called()
 
 
 class FlagGemsVllmProvenanceTests(unittest.TestCase):
@@ -263,6 +294,44 @@ class FlagGemsVllmProvenanceTests(unittest.TestCase):
                 "repository": installer.REPOSITORY,
             },
         )
+
+
+class FunctionalShutdownTests(unittest.TestCase):
+    def run_shutdown(self, backend, status):
+        spec = importlib.util.spec_from_file_location(
+            "functional_shutdown",
+            HERE.parents[2] / "tests/functional_tests/conftest.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        pytest_stub = SimpleNamespace(
+            hookimpl=lambda **kwargs: lambda function: function
+        )
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "pytest": pytest_stub,
+                    "tests.utils.device_utils": SimpleNamespace(
+                        get_backend=lambda: backend
+                    ),
+                    "torch._inductor.compile_worker": SimpleNamespace(
+                        subproc_pool=None
+                    ),
+                },
+            ),
+            patch("os._exit") as force_exit,
+        ):
+            spec.loader.exec_module(module)
+            module.pytest_sessionfinish(None, status)
+            return force_exit.call_args_list
+
+    def test_nvidia_keeps_normal_pytest_worker_shutdown(self):
+        self.assertEqual(self.run_shutdown("nvidia", 0), [])
+
+    def test_ascend_workaround_preserves_failure_exit_code(self):
+        from unittest.mock import call
+
+        self.assertEqual(self.run_shutdown("ascend", 1), [call(1)])
 
 
 if __name__ == "__main__":

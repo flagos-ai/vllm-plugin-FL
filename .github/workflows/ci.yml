@@ -96,6 +96,7 @@ jobs:
           sparse-checkout: |
             .github/configs
             .github/scripts
+            tests/functional_tests
         continue-on-error: true
       - name: Checkout (attempt 2)
         id: checkout2
@@ -106,6 +107,7 @@ jobs:
           sparse-checkout: |
             .github/configs
             .github/scripts
+            tests/functional_tests
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
@@ -115,6 +117,7 @@ jobs:
           sparse-checkout: |
             .github/configs
             .github/scripts
+            tests/functional_tests
       - name: Install PyYAML
         run: pip install pyyaml
       - name: Check NVIDIA native CUDA stack validation

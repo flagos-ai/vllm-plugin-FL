@@ -1,29 +1,28 @@
 # Copyright 2026 FlagOS Contributors
-# Build and test tools for the NVIDIA 0.32 CUDA image. The official base
-# supplies vLLM's CUDA/runtime dependency closure, including humming-kernels.
+# vLLM 0.32 CI/development additions; core Runtime pins are in constraints.txt.
 uv==0.13.4
 setuptools==80.10.2
-setuptools-scm==10.2.1
-setuptools-rust==1.13.0
+setuptools-scm==9.2.2
 wheel==0.48.0
 build==1.6.1
-ninja==1.13.0
-cmake==3.31.10
+# pyproject.toml build-system requires the Python CMake distribution too.
+cmake>=3.26
 scikit-build-core==0.11.0
-pybind11==3.1.0
+# Satisfy Torch's distribution dependency; Runtime PYTHONPATH keeps FlagTree
+# as the active compiler. stack.py verifies the actual module origin.
+triton==3.7.1
 pytest==9.1.1
+pytest-xdist==3.8.0
 pytest-cov==7.1.0
 pytest-timeout==2.4.0
 pytest-json-report==1.5.0
+decorator==5.2.1
+# Match the plugin's declared runtime dependency.
+modelscope==1.35.3
+# CI setup exercises audio/video decoding and the FlagTree tuning interfaces.
+torchcodec==0.17.0
 av==18.1.0
 soundfile==0.14.0
 soxr==1.1.0
-modelscope==1.37.1
 xgboost==3.3.0
 scikit-learn==1.9.1
-# FlagGems master 6fe7709e7717 direct dependencies; keep the base image's NumPy.
-# FlagTree main 317a0249 still uses Triton 3.6 and XGBoost 3.3 above.
-# Both ordinary wheels are built from checksummed sources in Dockerfile.ci.
-packaging==26.3
-PyYAML==6.0.1
-SQLAlchemy==2.0.48

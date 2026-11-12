@@ -152,3 +152,12 @@ h20:
     functional:
       include: "*"
       exclude: []
+
+    # Exercise the existing benchmark smoke cases on the H20 CI image too.
+    benchmark:
+      pr:
+        enabled: true
+        types: ["throughput", "latency", "serve"]
+      nightly:
+        enabled: true
+        types: ["throughput", "latency", "serve"]

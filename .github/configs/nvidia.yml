@@ -18,7 +18,7 @@
 platform: nvidia
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci@sha256:02b65e788e4ce2352ff1f41099744c33e196707b36a2e68461f78bfbe799a884
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-cuda-ci@sha256:3ebf9f27e6936fe67500b277ff17b954736050b63ccfdae05dd971e5ad7a14dc
 
 # Runner labels for this hardware (self-hosted)
 runner_labels:
@@ -49,6 +49,8 @@ container_volumes:
   - /data:/data
 
 # Container options (hardware-specific settings)
+# The image exports FlagTree PYTHONPATH for sh and direct Python steps.
+# Inherit the runner GPU mask for shared-host GPU allocation.
 # FlagTune has no H20 candidates for some Qwen3.6 matmul shapes yet. Keep
 # FlagGems enabled and fall back to its default Triton configs.
 # --shm-size: the dsw-hosted h20 runner does not honor --ipc=host (the
@@ -65,7 +67,9 @@ container_options: >-
   --hostname vllm-plugin-fl
   --user root
   --env CUDA_VISIBLE_DEVICES
+  --env OMP_NUM_THREADS=1
   --env VLLM_PLUGINS=fl
+  --env VLLM_USE_V2_MODEL_RUNNER=1
   --env USE_FLAGGEMS=1
   --env GEMS_VENDOR=nvidia
   --env USE_FLAGTUNE=0
