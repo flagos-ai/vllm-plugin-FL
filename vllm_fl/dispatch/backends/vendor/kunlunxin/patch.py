@@ -218,6 +218,7 @@ def patch_graph_adaptations():
         replacements = []
         for prepare in (
             patch_cudagraph_dispatcher,
+            patch_v2_graph_capture,
             patch_breakable_cudagraph_mode,
             patch_breakable_private_pools,
             patch_breakable_full_only,
@@ -242,6 +243,20 @@ def patch_graph_adaptations():
             elif name in vars(owner):
                 delattr(owner, name)
         raise RuntimeError("Kunlunxin graph adaptation installation failed") from exc
+
+
+def patch_v2_graph_capture(replacements=None):
+    """Use FL's stream context for the graph capture imported by GPUModelRunner V2."""
+    from importlib import import_module
+
+    from vllm_fl.worker.model_runner import _device_graph_capture
+
+    cudagraph_utils = import_module("vllm.v1.worker.gpu.cudagraph_utils")
+    # The upstream coordinator only accepts its own CUDA and XPU
+    # communicators. Replace the V2 caller's local alias for CommunicatorFL.
+    _install_graph_patch(
+        cudagraph_utils, "graph_capture", _device_graph_capture, replacements
+    )
 
 
 def patch_native_piecewise_boundaries(replacements=None):
