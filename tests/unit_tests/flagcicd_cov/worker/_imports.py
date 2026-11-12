@@ -123,8 +123,85 @@ def _install_placeholder_flag_gems() -> None:
         sys.modules[name] = module
 
 
-def _install_placeholder_xgrammar() -> None:
-    """Install an inert xgrammar with the name set vllm's parser reads."""
+class _CompatBatchGrammarMatcher:
+    """Recorder-shaped stand-in; tests replace instance state anyway."""
+
+    def __init__(self, max_threads: int = 1):
+        self.max_threads = max_threads
+
+    def batch_fill_next_token_bitmask(self, matchers, bitmask, indices):
+        return None
+
+
+def _xgrammar_extra_symbols(sub_name: str = "") -> dict:
+    """Symbols this area's chain needs beyond a foreign stub's surface.
+
+    ``vllm_fl.worker.scheduler_fl`` instantiates
+    ``xgrammar.BatchGrammarMatcher``; a narrower placeholder from another
+    area (e.g. the platform shim) does not define it. ``vllm`` 0.33's
+    parser modules read the rest of the names below from the top-level
+    package and its ``structural_tag`` / ``openai_tool_call_schema``
+    submodules; on the CI image the real xgrammar provides them.
+    """
+    if sub_name == "structural_tag":
+        return {
+            name: object
+            for name in (
+                "AnyTextFormat",
+                "ConstStringFormat",
+                "Format",
+                "GrammarFormat",
+                "JSONSchemaFormat",
+                "OptionalFormat",
+                "OrFormat",
+                "PlusFormat",
+                "RegexFormat",
+                "SequenceFormat",
+                "StarFormat",
+                "StructuralTagItems",
+                "TagFormat",
+                "TagsWithSeparatorFormat",
+                "TokenTriggeredTagsFormat",
+                "TriggeredTagsFormat",
+                "TriggerSpaces",
+                "buildStructuralTag",
+            )
+        }
+    if sub_name == "openai_tool_call_schema":
+        return {"BuiltinToolParam": object, "FunctionToolParam": object}
+    return {
+        "Grammar": object,
+        "StructuralTag": object,
+        "normalize_tool_choice": lambda *a, **k: None,
+        "get_model_structural_tag": lambda *a, **k: None,
+        "BatchGrammarMatcher": _CompatBatchGrammarMatcher,
+    }
+
+
+def _install_xgrammar_compat() -> None:
+    """Install an inert xgrammar with the name set vllm's parser reads.
+
+    A previous suite may already have put an xgrammar placeholder into
+    sys.modules (e.g. the platform-area shim), and its symbol set can be
+    narrower than what vllm_fl.worker.scheduler_fl reads. A real install
+    (has a ``__file__``) is never touched; a foreign placeholder gets the
+    missing symbols merged in so both areas' tests run in one process.
+    """
+    if "xgrammar" in sys.modules:
+        existing = sys.modules["xgrammar"]
+        if getattr(existing, "__file__", None) is not None:
+            return  # real package: nothing to add
+        for name, value in _xgrammar_extra_symbols().items():
+            if not hasattr(existing, name):
+                setattr(existing, name, value)
+        for sub_name in ("structural_tag", "openai_tool_call_schema"):
+            sub = getattr(existing, sub_name, None)
+            if sub is None:
+                continue
+            for name, value in _xgrammar_extra_symbols(sub_name).items():
+                if not hasattr(sub, name):
+                    setattr(sub, name, value)
+        return
     if _importable("xgrammar"):
         return
     xgrammar = types.ModuleType("xgrammar")
@@ -133,18 +210,11 @@ def _install_placeholder_xgrammar() -> None:
     xgrammar.normalize_tool_choice = lambda *a, **k: None
     xgrammar.get_model_structural_tag = lambda *a, **k: None
     xgrammar.__path__ = []
-
-    class _BatchGrammarMatcher:
-        """Recorder-shaped stand-in; tests replace instance state anyway."""
-
-        def __init__(self, max_threads: int = 1):
-            self.max_threads = max_threads
-
-        def batch_fill_next_token_bitmask(self, matchers, bitmask, indices):
-            return None
-
-    xgrammar.BatchGrammarMatcher = _BatchGrammarMatcher
+    xgrammar.BatchGrammarMatcher = _CompatBatchGrammarMatcher
     sys.modules["xgrammar"] = xgrammar
+    for name, value in _xgrammar_extra_symbols().items():
+        if not hasattr(xgrammar, name):
+            setattr(xgrammar, name, value)
 
     structural_tag = types.ModuleType("xgrammar.structural_tag")
     for attr in (
@@ -169,11 +239,15 @@ def _install_placeholder_xgrammar() -> None:
     ):
         setattr(structural_tag, attr, object)
     sys.modules["xgrammar.structural_tag"] = structural_tag
+    for name, value in _xgrammar_extra_symbols("structural_tag").items():
+        if not hasattr(structural_tag, name):
+            setattr(structural_tag, name, value)
 
     tool_call_schema = types.ModuleType("xgrammar.openai_tool_call_schema")
     tool_call_schema.BuiltinToolParam = object
     tool_call_schema.FunctionToolParam = object
     sys.modules["xgrammar.openai_tool_call_schema"] = tool_call_schema
+    xgrammar.openai_tool_call_schema = tool_call_schema
 
 
 def _install_vllm_symbol_backfills() -> None:
@@ -369,19 +443,51 @@ def _install_fused_moe_make_compat() -> None:
         fused_moe_layer.FusedMoEParallelConfig = moe_config.FusedMoEParallelConfig
 
 
+def _rebind_vllm_fl_platform_references(real_platform) -> None:
+    """Repoint ``vllm_fl`` from-import bindings of current_platform.
+
+    Modules that did ``from vllm.platforms import current_platform``
+    while the stand-in was installed keep a direct reference to the
+    stand-in object even after ``vllm.platforms.current_platform`` is
+    restored. Sibling suites (e.g. the compilation-area graph tests)
+    monkeypatch attributes on the platform object those modules hold, so
+    leaving the stand-in bound in any of them poisons those tests. Every
+    already-imported ``vllm_fl`` module gets the real platform back; on
+    the CI image the swap never happens, so this loop rebinds nothing
+    (every reference already is the real platform).
+    """
+    for name in list(sys.modules):
+        if not name.startswith("vllm_fl"):
+            continue
+        module = sys.modules.get(name)
+        if module is None or getattr(module, "current_platform", None) is None:
+            continue
+        if module.current_platform is real_platform:
+            continue
+        module.current_platform = real_platform
+
+
 def _install_model_runner_platform() -> None:
-    """Point vllm.platforms.current_platform at a CUDA-like platform.
+    """Import the worker chain under a CUDA-like platform, then restore.
 
     ``vllm_fl.compilation.graph`` selects its Graph class at import time
     from ``current_platform.device_type`` and raises NotImplementedError
-    for "cpu". The real platform object is a module attribute of
-    ``vllm.platforms`` — an input the tests replace via monkeypatch
-    elsewhere; for the import window we set a CUDA-like stand-in the same
-    way the dev tests set ``worker_module.current_platform``. Tests
-    restore the real platform afterwards.
+    for anything CUDA-less, and ``vllm_fl.worker.model_runner`` binds
+    several module attributes the same way. The real platform object is
+    a module attribute of ``vllm.platforms`` (em-dash) an input other
+    suites (platform-area tests) also read through
+    ``vllm.config.device.DeviceConfig.__post_init__``; leaving the
+    stand-in installed would poison them. So the swap below covers only
+    the import window: the chain is imported here (sys.modules caches it
+    for the test files own imports) and the real platform is restored
+    immediately afterwards, exactly the pattern the compilation-area
+    tests use for their own import.
     """
     import torch
     import vllm.platforms as platforms
+
+    if "vllm_fl.worker.worker" in sys.modules:
+        return  # already imported by an earlier load; nothing to do
 
     class _CudaLike:
         device_type = "cuda"
@@ -418,17 +524,36 @@ def _install_model_runner_platform() -> None:
         def has_device_capability(capability):
             return False
 
+    _real_platform = platforms.current_platform
     platforms.current_platform = _CudaLike()
+    try:
+        import vllm_fl.worker.model_runner  # noqa: F401  (import side effects)
+        import vllm_fl.worker.worker  # noqa: F401  (target under test)
+        import vllm_fl.worker.scheduler_fl  # noqa: F401  (target under test)
+        import vllm_fl.worker.model_state  # noqa: F401  (target under test)
+    finally:
+        platforms.current_platform = _real_platform
+        # Modules imported inside the window did
+        # ``from vllm.platforms import current_platform`` and hold a direct
+        # reference to the stand-in object; repoint them at the real
+        # platform now that it is restored. The Graph class body has
+        # already read device_type once (its only import-time platform
+        # read), so rebinding does not affect it.
+        _rebind_vllm_fl_platform_references(_real_platform)
 
 
 def ensure_importable_env() -> None:
     """Install every placeholder/backfill needed for vllm_fl.worker imports.
 
-    Idempotent; on the A100 CI image each step is a no-op.
+    Idempotent; on the A100 CI image each step is a no-op. The platform
+    step imports the ``vllm_fl.worker`` chain under a CUDA-like platform
+    and restores the real platform afterwards (see
+    ``_install_model_runner_platform``), so nothing this shim changes
+    outlives the import window except module caches.
     """
     _install_placeholder_uvloop()
     _install_placeholder_flag_gems()
-    _install_placeholder_xgrammar()
+    _install_xgrammar_compat()
     _install_vllm_symbol_backfills()
     _install_fused_moe_make_compat()
     _install_model_runner_platform()
