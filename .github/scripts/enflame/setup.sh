@@ -27,7 +27,7 @@ python .github/scripts/enflame/verify_stack.py
 
 # Preserve the installed runtime when installing the PR checkout.
 python -m pip install --no-build-isolation --no-deps -e .
-python -m pip install --extra-index-url https://pypi.org/simple "pytest-xdist>=3.0.0"
+python -m pip install --index-url "${PYPI_INDEX_URL:-https://pypi.org/simple}" "pytest-xdist>=3.0.0"
 
 python .github/scripts/install_flaggems_vllm.py
 

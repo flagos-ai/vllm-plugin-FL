@@ -30,6 +30,7 @@ ARG VLLM_SOURCE_URL
 ARG VLLM_SOURCE_COMMIT=5df63a7203cdb9328d824a27b682e77c7b9928be
 ARG DRIVER_VERSION=1.10.6
 ARG FLAGOS_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-enflame/simple
+ARG PYPI_INDEX_URL=https://pypi.org/simple
 ARG FLAGGEMS_VERSION=5.4.0
 ARG FLAGTREE_VERSION=0.7.0+enflame3.6
 ARG TRITON_GCU_VERSION=3.6.0+1.0.20260722
@@ -76,7 +77,7 @@ RUN apt-get update \
 # upgraded because the bundle ships 1.6.0, which cannot pickle Python 3.12
 # code objects (no qualname field) and breaks vLLM's model-registry
 # subprocess.
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         "setuptools>=77.0.3,<81.0.0" \
         wheel \
         "setuptools-scm>=8" \
@@ -131,12 +132,12 @@ RUN (python -m pip uninstall -y vllm || true) \
         "flagtree==${FLAGTREE_VERSION}" \
         "flag-gems==${FLAGGEMS_VERSION}" \
         > /tmp/enflame-vendor-constraints.txt \
-    && python -m pip install --no-cache-dir -r requirements/common.txt \
+    && python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" -r requirements/common.txt \
         -c /tmp/enflame-vendor-constraints.txt \
-    && python -m pip install --no-cache-dir --upgrade \
+    && python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" --upgrade \
         "openai==${OPENAI_VERSION}" "pandas==${PANDAS_VERSION}" \
         -c /tmp/enflame-vendor-constraints.txt \
-    && VLLM_TARGET_DEVICE=empty python -m pip install --no-cache-dir \
+    && VLLM_TARGET_DEVICE=empty python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         --no-build-isolation --no-deps . \
     && cd / \
     && rm -rf /tmp/vllm /tmp/enflame-vendor-constraints.txt
@@ -214,7 +215,7 @@ WORKDIR /workspace
 # ---------- dev stage ----------
 FROM base AS dev
 
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         pytest==8.4.1 \
         pytest-cov \
         pytest-json-report \
@@ -226,7 +227,7 @@ WORKDIR /workspace
 # ---------- ci stage ----------
 FROM dev AS ci
 
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         pytest-timeout \
         pytest-metadata \
         requests \
