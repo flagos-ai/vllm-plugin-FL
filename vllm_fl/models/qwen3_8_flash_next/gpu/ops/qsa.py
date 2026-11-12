@@ -11,6 +11,10 @@ from flaggems_vllm import (
     qsa_store_kv_cache_rows,
     qsa_compress_groups_with_ratio,
     qsa_compress_norm_mrope_store_groups,
+)
+# The root operator now consumes packed indices; this caller owns the
+# preserved unpacked-index/split-workspace contract.
+from flaggems_vllm.ops.qwen4.qsa_attention import (
     qsa_sparse_paged_attention as _qsa_sparse_paged_attention,
     qsa_sparse_split_count,
 )
