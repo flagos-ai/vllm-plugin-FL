@@ -36,6 +36,7 @@ def patch_flagcx_comm_lifecycle() -> None:
     from vllm_fl.distributed.device_communicators.flagcx import (
         FLAGCXLibrary,
         PyFlagcxCommunicator,
+        _flagcx_module,
         flagcxUniqueId,
     )
 
@@ -45,6 +46,12 @@ def patch_flagcx_comm_lifecycle() -> None:
 
     if getattr(PyFlagcxCommunicator, "_sunrise_comm_lifecycle_patched", False):
         return
+
+    # Remember which facade we came from: flagcx.api carries the wheel's own
+    # library ladder; the source-tree wrapper needs an explicit .so path.
+    _flagcx_is_wheel = _flagcx_module is not None and (
+        _flagcx_module.__name__ == "flagcx.api"
+    )
 
     assert torch_ptpu is not None, "torch.ptpu required for PTPU comm lifecycle patch"
 
@@ -73,12 +80,17 @@ def patch_flagcx_comm_lifecycle() -> None:
             return
 
         try:
-            if library_path is None:
+            # FLAGCXLibrary resolves the .so itself for the installed wheel
+            # (flagcx.api); the source-tree wrapper needs an explicit path and
+            # supports both $FLAGCX_PATH/lib/ and build/lib/ layouts.
+            if library_path is None and not _flagcx_is_wheel:
                 flagcx_path = os.getenv("FLAGCX_PATH")
-                library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
-                self.flagcx = FLAGCXLibrary(library_path)
-            else:
-                self.flagcx = FLAGCXLibrary(library_path)
+                for rel in ("lib/libflagcx.so", "build/lib/libflagcx.so"):
+                    candidate = os.path.join(flagcx_path, rel) if flagcx_path else ""
+                    if candidate and os.path.isfile(candidate):
+                        library_path = candidate
+                        break
+            self.flagcx = FLAGCXLibrary(library_path)
         except Exception:
             self.available = False
             self.disabled = True

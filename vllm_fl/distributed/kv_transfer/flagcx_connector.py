@@ -69,19 +69,35 @@ if TYPE_CHECKING:
     from vllm.v1.kv_cache_interface import KVCacheConfig
     from vllm.v1.request import Request
 
-_flagcx_path = os.getenv("FLAGCX_PATH")
-if _flagcx_path and os.path.isdir(_flagcx_path) and _flagcx_path not in sys.path:
-    sys.path.append(_flagcx_path)
-
+# The ctypes facade ships inside the installed package as flagcx.api; the
+# source tree only carries it as plugin.interservice.flagcx_wrapper. Capture
+# which facade won so FLAGCXLibrary is handed an explicit .so path only for
+# the source-tree wrapper (the wheel resolves the .so itself).
+_flagcx_module = None
 try:
-    from plugin.interservice.flagcx_wrapper import (
-        FLAGCXLibrary,
-    )
-except ImportError as e:
+    from flagcx import api as _flagcx_module
+except (ImportError, ModuleNotFoundError):
+    # FLAGCX_PATH stays supported for a source tree, where the wrapper is only
+    # importable as plugin.interservice.flagcx_wrapper.
+    _flagcx_path = os.getenv("FLAGCX_PATH")
+    if _flagcx_path and os.path.isdir(_flagcx_path) and _flagcx_path not in sys.path:
+        sys.path.append(_flagcx_path)
+    try:
+        from plugin.interservice import flagcx_wrapper as _flagcx_module
+    except ImportError as e:
+        raise ImportError(
+            "Cannot import the FlagCX library. Install the flagcx package, or "
+            "set FLAGCX_PATH to a FlagCX source tree."
+        ) from e
+
+if _flagcx_module is None:  # pragma: no cover - inner except already raises
     raise ImportError(
-        "Cannot import FlagCX wrapper. Set FLAGCX_PATH to the FlagCX repo "
-        "root (containing plugin/interservice/flagcx_wrapper.py)."
-    ) from e
+        "Cannot import the FlagCX library. Install the flagcx package, or "
+        "set FLAGCX_PATH to a FlagCX source tree."
+    )
+
+FLAGCXLibrary = _flagcx_module.FLAGCXLibrary
+_flagcx_is_wheel = _flagcx_module.__name__ == "flagcx.api"
 
 EngineId = str
 ReqId = str
@@ -585,10 +601,19 @@ class FlagCXConnectorWorker:
         self.hostname = get_ip()
 
         # ---- FlagCX library ----
-        library_path = os.getenv("FLAGCX_LIB_PATH")
-        if library_path is None:
-            flagcx_path = os.getenv("FLAGCX_PATH", "")
-            library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
+        # The installed wheel's FLAGCXLibrary resolves the .so itself, so pass
+        # None through. The source-tree wrapper checks only
+        # $FLAGCX_PATH/lib/libflagcx.so when that variable is set, while the
+        # default Makefile output is build/lib/libflagcx.so — resolve an
+        # explicit path for it.
+        library_path = None
+        if not _flagcx_is_wheel:
+            flagcx_path = os.getenv("FLAGCX_PATH")
+            for rel in ("lib/libflagcx.so", "build/lib/libflagcx.so"):
+                candidate = os.path.join(flagcx_path, rel) if flagcx_path else ""
+                if candidate and os.path.isfile(candidate):
+                    library_path = candidate
+                    break
         self.flagcx = FLAGCXLibrary(library_path)
         self.kv_cache_device: torch.device | None = None
 

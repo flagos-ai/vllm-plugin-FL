@@ -36,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           COMMENTER: ${{ github.event.client_payload.github.actor }}
-          PR_URL: ${{ github.event.client_payload.pull_request.html_url }}
+          PR_URL: ${{ github.event.client_payload.pull_request.url }}
         run: |
           set -euo pipefail
           pr_author=$(gh api "$PR_URL" --jq '.user.login')
@@ -50,6 +50,7 @@ jobs:
             exit 0
           fi
           echo "::error::$COMMENTER is not authorized (need PR author or write+)"
+          echo "denied=true" >> "$GITHUB_OUTPUT"
           exit 1
 
       - name: React to comment (ack)
@@ -64,7 +65,7 @@ jobs:
       - name: Cancel running workflow runs
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.client_payload.pull_request.html_url }}
+          PR_URL: ${{ github.event.client_payload.pull_request.url }}
         run: |
           set -euo pipefail
           head_sha=$(gh api "$PR_URL" --jq '.head.sha')
@@ -87,7 +88,7 @@ jobs:
           PR_NUMBER: ${{ github.event.client_payload.github.payload.issue.number }}
           COMMENTER: ${{ github.event.client_payload.github.actor }}
         run: |
-          if [ "${{ steps.auth.outcome }}" = "failure" ]; then
+          if [ "${{ steps.auth.outputs.denied }}" = "true" ]; then
             body="⛔ @$COMMENTER is not authorized (PR author or collaborators with write access only)."
           elif [ "${{ job.status }}" = "success" ]; then
             body="🛑 CI runs for this PR have been cancelled (requested by @$COMMENTER)."

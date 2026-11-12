@@ -32,6 +32,22 @@ Platform-agnostic test suite for the vllm-plugin-FL project. All tests are desig
 - **Process isolation**: Each E2E test case runs in its own subprocess via `run.py`, with device cleanup between cases.
 - **Backend-agnostic fixtures**: The `device` fixture returns the correct device (`cuda:0` or `npu:0`) based on detected hardware.
 
+## CI coverage uploads
+
+Unit and functional tests keep their existing commands and output paths.
+pytest-cov measures `vllm_fl`; `--cov-append` adds functional coverage to the
+unit-test data and writes the combined `coverage-<platform>.json` in the checkout.
+No JSON concatenation, ZIP packaging, or additional coverage-combine step is used.
+
+After successful testing, CI uploads that coverage file once through
+`flagos-ai/FlagOps/actions/post-pytest-report@v2`, setting only the endpoint,
+token, and report path. Optional Action inputs retain their defaults as requested
+by upstream. The file is coverage.py JSON, not a pytest case-outcome report.
+If `FLAGCICD_API_TOKEN` is unavailable, upload is explicitly skipped. Existing
+runner summaries and coverage remain GitHub artifacts, including after failure;
+upload errors do not change test results. Actual parsing and dashboard ingestion
+must be verified through a trusted Nightly run after merging.
+
 ## Directory Structure
 
 ```

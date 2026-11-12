@@ -9,8 +9,10 @@ import torch
 
 @pytest.fixture
 def registered_clamp(monkeypatch):
+    import vllm.model_executor.custom_op as upstream_custom_op
     import vllm.platforms
     from vllm.model_executor.custom_op import op_registry_oot
+    from vllm.model_executor.layers import activation as upstream_activation
 
     from vllm_fl.dispatch import reset_default_manager, reset_global_policy
     from vllm_fl.ops import custom_ops
@@ -23,15 +25,32 @@ def registered_clamp(monkeypatch):
     monkeypatch.delenv("VLLM_FL_PER_OP", raising=False)
     monkeypatch.delitem(op_registry_oot, "SiluAndMulWithClamp", raising=False)
     monkeypatch.setattr(SiluAndMulWithClampFL, "name", SiluAndMulWithClampFL.name)
-    monkeypatch.setattr(custom_ops, "_patch_unquantized_moe_oracle", lambda: None)
+    monkeypatch.setattr(
+        custom_ops,
+        "_patch_unquantized_moe_oracle",
+        lambda *, prefer_flaggems_experts=False: None,
+    )
     monkeypatch.setattr(custom_ops, "_patch_fused_moe_factory", lambda: None)
+    # These controls exercise the NVIDIA OOT path with CPU tensors. Both
+    # upstream modules bind current_platform at import time; pin them too so
+    # ROCm/Hygon's constructor guard cannot replace forward_oot with native.
+    oot_platform = SimpleNamespace(
+        is_rocm=lambda: False,
+        is_cpu=lambda: False,
+        is_tpu=lambda: False,
+        is_xpu=lambda: False,
+        is_out_of_tree=lambda: True,
+        is_cuda_alike=lambda: True,
+    )
+    monkeypatch.setattr(upstream_custom_op, "current_platform", oot_platform)
+    monkeypatch.setattr(upstream_activation, "current_platform", oot_platform)
     # The dispatch world (policy, vendor autodiscovery, OpManager) is rebuilt
     # lazily long after the registration context below exits. Pin the
     # vllm_fl-side platform identity for the WHOLE test so the rebuild cannot
     # pick up the real host platform (vendor backends + platform yaml), which
     # varies per CI host and per xdist worker process history. vllm.platforms
-    # itself stays real outside registration: VllmConfig() and
-    # CustomOp.dispatch_forward call real methods on it.
+    # itself stays real outside registration so VllmConfig() retains the host
+    # configuration methods; activation dispatch is isolated above.
     monkeypatch.setattr(
         "vllm_fl.dispatch.config.utils.get_platform_name", lambda: "cuda"
     )

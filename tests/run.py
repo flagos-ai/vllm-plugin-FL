@@ -37,11 +37,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -357,10 +360,11 @@ class TestRunner:
 
         # Use explicit CPU count so the log shows the exact parallelism level.
         # os.cpu_count() can return None on exotic systems; fallback to 1.
-        # Cap at 16: unit tests are short and pure-CPU; beyond 16 workers the
+        # Cap at 16: beyond 16 workers the
         # per-process import overhead (torch, vllm_fl) outweighs the parallelism
         # benefit and can cause memory pressure on large CI machines.
         cpu_workers = min(os.cpu_count() or 1, 16)
+        isolate_gpu = self.config.platform == "metax"
 
         extra_args = [
             "--tb=short",
@@ -373,7 +377,7 @@ class TestRunner:
             # vendor device layer (kunlunxin: "CUDA error: invalid device
             # ordinal").  They run serially in a second pass below instead.
             "-m",
-            "not multi_gpu",
+            "not gpu and not multi_gpu" if isolate_gpu else "not multi_gpu",
             "--cov=vllm_fl",
             "--cov-report=term-missing",
             f"--cov-report=json:coverage-{self.config.platform}.json",
@@ -408,24 +412,56 @@ class TestRunner:
             serial_args.extend(["-k", " or ".join(unit_filter.include)])
 
         print(
-            f"[run] Unit tests parallel: {cpu_workers} workers (CPU-only, no device pinning); "
+            f"[run] Unit tests parallel: {cpu_workers} workers (no device pinning); "
             "multi_gpu spawn tests run serially afterwards"
         )
 
-        return [
+        cases = [
             TestCase(
                 name=f"unit ({self.config.platform})",
                 pytest_path=test_path,
                 task="unit",
+                case="cpu" if isolate_gpu else "",
                 extra_args=extra_args,
             ),
             TestCase(
                 name=f"unit-multi-gpu ({self.config.platform})",
                 pytest_path=test_path,
                 task="unit",
+                case="multi-gpu" if isolate_gpu else "",
                 extra_args=serial_args,
             ),
         ]
+        if isolate_gpu:
+            gpu_workers = max(1, min(get_device_count(), 8))
+            gpu_args = extra_args.copy()
+            gpu_args[gpu_args.index("-n") + 1] = str(gpu_workers)
+            gpu_args[gpu_args.index("-m") + 1] = "gpu and not multi_gpu"
+            gpu_args[
+                gpu_args.index(f"--json-report-file=report-{self.config.platform}.json")
+            ] = f"--json-report-file=report-{self.config.platform}-gpu.json"
+            gpu_args.extend(
+                [
+                    "--cov-append",
+                    "-p",
+                    "tests.utils.xdist_devices",
+                    f"--test-device-env={get_visible_device_env_var()}",
+                ]
+            )
+            cases.insert(
+                1,
+                TestCase(
+                    name=f"unit-gpu ({self.config.platform})",
+                    pytest_path=test_path,
+                    task="unit",
+                    case="gpu",
+                    extra_args=gpu_args,
+                ),
+            )
+            print(
+                f"[run] GPU unit tests: {gpu_workers} workers, one visible device each"
+            )
+        return cases
 
     def _discover_from_yaml(
         self,
@@ -791,17 +827,47 @@ class TestRunner:
         if extra_env_override:
             env.update(extra_env_override)
 
+        case_log_dir = None
+        if (
+            tc.task == "serving"
+            and tc.model
+            and tc.case
+            and not any(
+                arg == "--basetemp" or arg.startswith("--basetemp=") for arg in cmd
+            )
+        ):
+            log_root = (
+                self.output_dir / f"test-results-{self.config.platform}-logs"
+            ).resolve()
+            log_root.mkdir(parents=True, exist_ok=True)
+            case_log_dir = Path(tempfile.mkdtemp(prefix="serving-", dir=log_root))
+            cmd.extend(["--basetemp", str(case_log_dir)])
+
         start = time.time()
-        proc = subprocess.run(
-            cmd,
-            capture_output=_quiet,
-            text=_quiet,
-            cwd=str(_REPO_ROOT),
-            env=env,
-        )
+        with ExitStack() as cleanup:
+            if self.config.platform == "hygon" and tc.task in ("inference", "serving"):
+                # TP workers tune concurrently. Each Python process gets its
+                # own FlagGems SQLite database before importing the provider.
+                # Kernel compilation caches and autotuning remain enabled.
+                env["FLAGGEMS_CACHE_DIR"] = cleanup.enter_context(
+                    tempfile.TemporaryDirectory(prefix="fl-hygon-cache-")
+                )
+                startup = str(_REPO_ROOT / "tests/utils/isolated_cache")
+                env["PYTHONPATH"] = os.pathsep.join(
+                    path for path in (startup, env.get("PYTHONPATH")) if path
+                )
+            proc = subprocess.run(
+                cmd,
+                capture_output=_quiet,
+                text=_quiet,
+                cwd=str(_REPO_ROOT),
+                env=env,
+            )
         duration = time.time() - start
 
         passed = proc.returncode == 0
+        if passed and case_log_dir is not None:
+            shutil.rmtree(case_log_dir)
         message = "" if passed else f"pytest exited with code {proc.returncode}"
 
         return TestResult(
@@ -845,6 +911,15 @@ class TestRunner:
             cmd.append("--save-gold")
 
         cmd.extend(tc.extra_args)
+        if self.config.platform == "metax" and tc.task in ("unit", "functional"):
+            cmd.extend(
+                [
+                    "-vv",
+                    "-p",
+                    "tests.utils.pytest_diagnostics",
+                    f"--test-diagnostics-dir=pytest-diagnostics/metax/{tc.task}-{tc.case or 'all'}",
+                ]
+            )
         cmd.extend(self.extra_pytest_args)
 
         return cmd

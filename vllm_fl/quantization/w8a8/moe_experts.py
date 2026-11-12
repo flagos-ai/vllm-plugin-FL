@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import torch
 
 import vllm.model_executor.layers.fused_moe.modular_kernel as mk
@@ -106,13 +108,29 @@ def _validate_w8a8_contract(
 
 
 class VllmFunctionalW8A8Experts(TritonExperts):
-    """Run NVIDIA W8A8 MoE through vLLM's native functional operators.
+    """Run native MoE with floating-point inputs and preserved activations.
 
-    The bridge changes only the modular input contract: prepare leaves the
-    first activation in floating point, then vLLM ``fused_experts`` performs
-    both dynamic per-token quantization steps and the Triton expert kernels.
-    It never imports or dispatches through FlagGems.
+    Ordinary SiLU uses vLLM's functional API. Configurable activations use
+    TritonExperts.apply directly because the functional API drops their
+    clamp, alpha, and beta parameters. Both paths quantize inputs internally.
     """
+
+    def __init__(self, moe_config, quant_config):
+        # The compressed-tensors INT8 builder does not carry these fields.
+        # Copy rather than mutate the quant config shared with other layers.
+        activation_params = {
+            quant_name: getattr(moe_config, config_name)
+            for quant_name, config_name in (
+                ("gemm1_clamp_limit", "swiglu_limit"),
+                ("gemm1_alpha", "swiglu_alpha"),
+                ("gemm1_beta", "swiglu_beta"),
+            )
+            if getattr(moe_config, config_name, None) is not None
+        }
+        self._use_modular = bool(activation_params)
+        if activation_params:
+            quant_config = replace(quant_config, **activation_params)
+        super().__init__(moe_config, quant_config)
 
     @property
     def expects_unquantized_inputs(self) -> bool:
@@ -136,6 +154,25 @@ class VllmFunctionalW8A8Experts(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ) -> None:
+        if activation is not MoEActivation.SILU or self._use_modular:
+            return super().apply(
+                output=output,
+                hidden_states=hidden_states,
+                w1=w1,
+                w2=w2,
+                topk_weights=topk_weights,
+                topk_ids=topk_ids,
+                activation=activation,
+                global_num_experts=global_num_experts,
+                expert_map=expert_map,
+                a1q_scale=a1q_scale,
+                a2_scale=a2_scale,
+                workspace13=workspace13,
+                workspace2=workspace2,
+                expert_tokens_meta=expert_tokens_meta,
+                apply_router_weight_on_input=apply_router_weight_on_input,
+            )
+
         del workspace13, workspace2, expert_tokens_meta
 
         quant_config = self.quant_config

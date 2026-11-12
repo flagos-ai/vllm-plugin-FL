@@ -27,6 +27,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 import requests
@@ -55,6 +56,9 @@ class VllmServer:
     served_model_name: str = ""
     max_retries: int = 60
     poll_interval: int = 10
+    # The test runner owns this directory and removes it only after the whole
+    # pytest case passes, including endpoint assertions after server startup.
+    log_dir: Path | None = None
 
     # Set after start
     port: int = 0
@@ -102,6 +106,7 @@ class VllmServer:
             prefix=f"vllm_{model_short}_",
             suffix=".log",
             delete=False,
+            dir=self.log_dir,
         )
         self._process = subprocess.Popen(
             cmd,
@@ -127,7 +132,7 @@ class VllmServer:
         finally:
             if self._log_file:
                 self._log_file.close()
-                if getattr(self, "_keep_log", False):
+                if self.log_dir is not None or getattr(self, "_keep_log", False):
                     print(f"[Teardown] Log preserved: {self._log_file.name}")
                 else:
                     os.unlink(self._log_file.name)

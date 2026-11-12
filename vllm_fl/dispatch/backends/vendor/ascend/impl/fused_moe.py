@@ -34,7 +34,7 @@ def _torch_fused_experts_impl(
     global_num_experts: int = -1,
     expert_map: torch.Tensor|None = None,
 ) -> torch.Tensor:
-    """Unquantized, non-EP routing and GMM using packaged torch_npu ops.
+    """Unquantized local-expert routing and GMM using packaged torch_npu ops.
 
     Mirrors current vLLM-Ascend AllGather dispatch/MLP/combine semantics.
     Routing produces fixed-size expanded tensors; no host reads or dynamic
@@ -42,8 +42,23 @@ def _torch_fused_experts_impl(
     """
     num_tokens = hidden_states.size(0)
     num_experts = w1.size(0)
-    if expert_map is not None or global_num_experts not in (-1, num_experts):
-        raise NotImplementedError("Ascend grouped MoE requires all experts locally")
+    first_expert = 0
+    if expert_map is not None:
+        from vllm.distributed import get_ep_group
+
+        group = get_ep_group()
+        total_experts = expert_map.numel()
+        if (global_num_experts not in (-1, total_experts)
+                or total_experts != num_experts * group.world_size):
+            raise NotImplementedError("Ascend EP requires evenly partitioned experts")
+        first_expert = group.rank_in_group * num_experts
+        global_num_experts = total_experts
+        # Keep global IDs for routing; each rank contributes only its experts.
+        topk_weights = topk_weights * (expert_map[topk_ids.long()] != -1)
+    elif global_num_experts not in (-1, num_experts):
+        raise NotImplementedError("Sharded Ascend experts require an expert map")
+    else:
+        global_num_experts = num_experts
     if apply_router_weight_on_input:
         raise NotImplementedError("Ascend grouped MoE requires output router weights")
     if activation not in ("silu", "gelu", "gelu_tanh", "silu_no_mul", "gelu_no_mul"):
@@ -53,15 +68,15 @@ def _torch_fused_experts_impl(
 
     # The current rc1 dispatcher uses count-mode expert tokens and pairs its
     # init-routing interface with token_unpermute (not finalize_routing).
-    # BF16 needs no custom quantization/routing extension.
+    # Use global IDs with a contiguous local range, including nonzero offsets.
     routed, row_indices, expert_tokens, _ = torch_npu.npu_moe_init_routing_v2(
         hidden_states,
         topk_ids.to(torch.int32),
         active_num=num_tokens * topk_ids.size(1),
-        expert_num=num_experts,
+        expert_num=global_num_experts,
         expert_tokens_num_type=1,
         expert_tokens_num_flag=True,
-        active_expert_range=[0, num_experts],
+        active_expert_range=[first_expert, first_expert + num_experts],
         quant_mode=-1,
     )
     group_list = expert_tokens.to(torch.int64)
@@ -86,9 +101,21 @@ def _torch_fused_experts_impl(
         x=[activated], weight=[w2.transpose(1, 2)], split_item=2,
         group_list_type=1, group_type=0, group_list=group_list,
     )[0]
+    if expert_map is not None:
+        # Only the compact local-route prefix is defined by GMM. Unpermute
+        # must not expose stale/NaN tail storage even with a zero probability.
+        valid_rows = torch.arange(
+            expert_output.size(0), device=expert_output.device
+        ) < group_list.sum()
+        expert_output = torch.where(valid_rows[:, None], expert_output, 0)
+        # Native v2 marks remote routes as -1. abs(-1) would read row 1,
+        # which is out of bounds when N * topk == 1; use a safe masked row.
+        sorted_indices = row_indices.clamp_min(0)
+    else:
+        sorted_indices = torch.abs(row_indices)
     result = torch_npu.npu_moe_token_unpermute(
         permuted_tokens=expert_output,
-        sorted_indices=torch.abs(row_indices),
+        sorted_indices=sorted_indices,
         probs=topk_weights,
     )
     if inplace:

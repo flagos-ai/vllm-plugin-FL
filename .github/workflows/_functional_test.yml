@@ -56,6 +56,9 @@ on:
         required: false
         type: number
         default: 30
+    secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
 
 jobs:
   functional-test:
@@ -114,3 +117,27 @@ jobs:
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
+            pytest-diagnostics/${{ inputs.platform }}/
+            coverage-${{ inputs.platform }}.json
+
+      - name: Check FlagCICD authentication
+        id: flagcicd
+        if: ${{ !cancelled() && hashFiles(format('coverage-{0}.json', inputs.platform)) != '' }}
+        env:
+          FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
+        run: |
+          if [ -n "${FLAGCICD_API_TOKEN:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::FlagCICD upload skipped: FLAGCICD_API_TOKEN is unavailable (for example, on fork PRs). Reports remain in the artifact."
+            echo "FlagCICD: upload skipped because credentials are unavailable; reports were retained as artifacts." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload combined coverage report to FlagCICD
+        if: steps.flagcicd.outputs.configured == 'true'
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        continue-on-error: true
+        with:
+          backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
+          report_path: 'coverage-${{ inputs.platform }}.json'

@@ -18,28 +18,76 @@ from vllm.utils.torch_utils import current_stream
 import os
 import sys
 
-_flagcx_path = os.getenv('FLAGCX_PATH')
-if _flagcx_path and os.path.isdir(_flagcx_path):
-    sys.path.append(_flagcx_path)
+# The ctypes facade is importable two ways:
+#   - installed wheel:  ``flagcx.api`` (the package ships the .so in its own lib/)
+#   - source tree:      ``plugin.interservice.flagcx_wrapper`` (FLAGCX_PATH on
+#     sys.path), carrying FLAGCXLibrary as well
+# Resolve the module first so both shapes yield the same set of names, then
+# validate that the selected module actually provides them. ``flagcx`` alone
+# (the wheel's compiled-bindings root) re-exports none of these names, and a
+# pre-API package installed without FLAGCX_PATH must not enable the backend.
+_FLAGCX_NAMES = (
+    "FLAGCXLibrary",
+    "buffer_type",
+    "flagcxDataTypeEnum",
+    "flagcxUniqueId",
+    "flagcxRedOpTypeEnum",
+)
 
+_flagcx_module = None
 try:
-    from plugin.interservice.flagcx_wrapper import (
-        FLAGCXLibrary,
-        buffer_type,
-        flagcxComm_t,
-        flagcxDataTypeEnum,
-        flagcxUniqueId,
-        flagcxRedOpTypeEnum,
-    )
-    _flagcx_available = True
+    from flagcx import api as _flagcx_module  # noqa: F401
 except (ImportError, ModuleNotFoundError):
+    _flagcx_path = os.getenv("FLAGCX_PATH")
+    if _flagcx_path and os.path.isdir(_flagcx_path):
+        sys.path.append(_flagcx_path)
+    try:
+        from plugin.interservice import flagcx_wrapper as _flagcx_module  # noqa: F401
+    except (ImportError, ModuleNotFoundError):
+        _flagcx_module = None
+
+if _flagcx_module is not None and all(
+    hasattr(_flagcx_module, name) for name in _FLAGCX_NAMES
+):
+    _flagcx_available = True
+    FLAGCXLibrary = _flagcx_module.FLAGCXLibrary
+    buffer_type = _flagcx_module.buffer_type
+    flagcxDataTypeEnum = _flagcx_module.flagcxDataTypeEnum
+    flagcxUniqueId = _flagcx_module.flagcxUniqueId
+    flagcxRedOpTypeEnum = _flagcx_module.flagcxRedOpTypeEnum
+else:
+    # Missing, partial, or pre-API package: treat the communicator as
+    # unavailable so callers disable it instead of running a half-bound
+    # ctypes facade that returns uninitialized results.
     _flagcx_available = False
     FLAGCXLibrary = None
     buffer_type = None
-    flagcxComm_t = None
     flagcxDataTypeEnum = None
     flagcxUniqueId = None
     flagcxRedOpTypeEnum = None
+
+
+def _resolve_flagcx_library_path(library_path: Optional[str]) -> Optional[str]:
+    """Return the .so path to hand to ``FLAGCXLibrary``.
+
+    The wheel's ``flagcx.api.FLAGCXLibrary`` carries its own search ladder
+    (FLAGCX_PATH → installed ``lib/`` → source build tree → ldconfig), so pass
+    ``None`` through untouched. The source-tree wrapper only knows
+    ``$FLAGCX_PATH/lib/libflagcx.so`` when that variable is set and, when it is
+    not, ``<wrapper>/../../build/lib/libflagcx.so`` — it has no ladder for the
+    documented ``build/lib/`` layout alongside a set ``FLAGCX_PATH``. Resolve an
+    explicit path for it, covering both source-build layouts.
+    """
+    if library_path is not None:
+        return library_path
+    if _flagcx_module is not None and _flagcx_module.__name__ != "flagcx.api":
+        flagcx_path = os.getenv("FLAGCX_PATH")
+        if flagcx_path:
+            for rel in ("lib/libflagcx.so", "build/lib/libflagcx.so"):
+                candidate = os.path.join(flagcx_path, rel)
+                if os.path.isfile(candidate):
+                    return candidate
+    return None
 
 class PyFlagcxCommunicator:
     def __init__(
@@ -79,13 +127,10 @@ class PyFlagcxCommunicator:
             self.disabled = True
             return
         try:
-            ### TODO(lms): simplify it
-            if library_path is None:
-                flagcx_path = os.getenv('FLAGCX_PATH')
-                library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
-                self.flagcx = FLAGCXLibrary(library_path)
-            else:
-                self.flagcx = FLAGCXLibrary(library_path)
+            # FLAGCXLibrary resolves the .so itself for the installed wheel;
+            # the source-tree wrapper needs an explicit path for its
+            # build/lib/ layout (see _resolve_flagcx_library_path).
+            self.flagcx = FLAGCXLibrary(_resolve_flagcx_library_path(library_path))
         except Exception:
             # disable because of missing NCCL library
             # e.g. in a non-GPU environment

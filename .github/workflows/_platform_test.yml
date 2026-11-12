@@ -65,6 +65,8 @@ on:
         type: boolean
         default: true
     secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
       FEISHU_APP_ID:
         required: false
       FEISHU_APP_SECRET:
@@ -114,6 +116,7 @@ jobs:
   functional:
     needs: setup
     uses: ./.github/workflows/_functional_test.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       branch: ${{ inputs.branch }}
@@ -133,6 +136,7 @@ jobs:
       matrix:
         test: ${{ fromJson(needs.setup.outputs.e2e_matrix) }}
     uses: ./.github/workflows/_e2e_test.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       branch: ${{ inputs.branch }}
@@ -152,6 +156,7 @@ jobs:
     needs: [setup, functional, e2e]
     if: always() && inputs.run_benchmark && needs.functional.result == 'success' && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
     uses: ./.github/workflows/_benchmark_test.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       branch: ${{ inputs.branch }}

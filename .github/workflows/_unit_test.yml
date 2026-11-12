@@ -99,7 +99,7 @@ jobs:
         uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
         continue-on-error: true
         with:
-          backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
+          backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
           api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
           report_path: 'coverage-${{ inputs.platform }}.json'
           fail_on_error: 'false'

@@ -21,6 +21,7 @@ from tests.utils.device_utils import get_backend, get_visible_device_env_var
 # ---------------------------------------------------------------------------
 
 
+@pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node):
     """Assign a physical device index to each xdist worker.
 
@@ -57,7 +58,7 @@ def pytest_configure(config):
 # ---------------------------------------------------------------------------
 
 
-@pytest.hookimpl(trylast=True)
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_sessionfinish(session, exitstatus):
     """Force clean exit after all plugins finish to avoid NPU GC destructor crash.
 
@@ -65,9 +66,8 @@ def pytest_sessionfinish(session, exitstatus):
     during interpreter shutdown, causing a segfault at a random GC location
     (e.g. _pytest/mark/structures.py) even after all tests have passed.
 
-    trylast=True ensures this hook runs after all other plugins (json-report,
-    coverage, etc.) have flushed their output files. os._exit() then bypasses
-    Python GC entirely, preventing the NPU destructor crash.
+    The outer hook wrapper lets terminal summaries and report plugins finish
+    before bypassing Python GC on Ascend only.
 
     Secondary fix: also drains any residual inductor SubprocPool whose
     _read_thread would segfault when the subprocess pipe breaks on NPU teardown.
@@ -77,10 +77,13 @@ def pytest_sessionfinish(session, exitstatus):
     because xdist workers communicate results via a socket before sessionfinish,
     so all data has already been sent to the controller by this point.
     """
+    yield
+
     if get_backend() != "ascend":
         return
 
     import contextlib
+    import sys
     import threading
 
     # --- drain residual inductor subprocess pool (if any) ---
@@ -133,4 +136,6 @@ def pytest_sessionfinish(session, exitstatus):
         _is_xdist = False
 
     if not _is_xdist:
+        sys.stdout.flush()
+        sys.stderr.flush()
         os._exit(int(exitstatus))

@@ -52,7 +52,7 @@ class Graph:
     elif current_platform.device_type == "ptpu":
         graph = torch.ptpu.PTPUGraph
     elif current_platform.device_type == "txda":
-        graph = None
+        graph = torch.txda.TXDAGraph
     else:
         raise NotImplementedError("not support graph")
 
@@ -221,6 +221,13 @@ class GraphWrapper:
             # validate that cudagraph capturing is legal at this point.
             validate_cudagraph_capturing_enabled()
 
+            # FL-specific: TXDA needs one eager warmup iteration before
+            # capture so flaggems/triton kernels are compiled and their
+            # runtime modules are loaded outside the capture stream;
+            # a first launch during capture is rejected by the runtime.
+            if current_platform.device_type == "txda":
+                self.runnable(*args, **kwargs)
+
             input_tensors = [x for x in args if isinstance(x, torch.Tensor)]
             entry.input_addresses = [x.data_ptr() for x in input_tensors]
             if self._copy_inputs:
@@ -251,13 +258,32 @@ class GraphWrapper:
                     # Offloader hooks are optional across FL runtime builds.
                     pass
 
+                # FL-specific (txda only): torch_txda's ExchangeDevice ->
+                # txSetDevice resets the current stream to the device
+                # default stream, and flaggems wraps every triton kernel
+                # launch in a device guard — without neutralizing it during
+                # capture, kernels are diverted to the default stream and
+                # the capture is corrupted. The default "global"
+                # capture_error_mode also makes the tsingmicro triton
+                # launcher reject kernel launches (txLaunchKernel
+                # err=0x47000003); "relaxed" captures and replays correctly.
+                # Other platforms take the exact previous capture path.
+                capture_ctx = nullcontext()
+                capture_kwargs: dict[str, Any] = {}
+                if current_platform.device_type == "txda":
+                    from vllm_fl.dispatch.backends.vendor.txda.patch import (
+                        capture_guard_context,
+                    )
+                    capture_ctx = capture_guard_context()
+                    capture_kwargs["capture_error_mode"] = "relaxed"
+
                 # FL-specific: use platform-agnostic graph capture
                 capture_scope = (
                     self.graph_runtime.capture_scope(forward_context)
                     if self.graph_runtime is not None else nullcontext()
                 )
-                with capture_scope, current_platform.torch_device_fn.graph(
-                    graph, pool=self.graph_pool
+                with capture_scope, capture_ctx, current_platform.torch_device_fn.graph(
+                    graph, pool=self.graph_pool, **capture_kwargs
                 ):
                     # `output` is managed by pytorch's cudagraph pool
                     output = self.runnable(*args, **kwargs)

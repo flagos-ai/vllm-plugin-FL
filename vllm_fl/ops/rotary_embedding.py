@@ -1,7 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-from typing import Optional
-
 import torch
 
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
@@ -31,8 +29,7 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         dtype: torch.dtype,
     ) -> None:
         super().__init__(
-            head_size, rotary_dim, max_position_embeddings, base,
-            is_neox_style, dtype
+            head_size, rotary_dim, max_position_embeddings, base, is_neox_style, dtype
         )
         if current_platform.device_type == "npu":
             from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
@@ -45,8 +42,8 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
-        key: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        key: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         cos_sin_cache = self.cos_sin_cache.to(positions.device)
         # Follow upstream's compile-safe buffer handling, retaining FL's
         # device-only conversion and the existing cache dtype.
@@ -63,8 +60,8 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         query_rot = query[..., : self.rotary_dim]
         key_rot = key[..., : self.rotary_dim]
         if self.rotary_dim < self.head_size:
-            query_pass = query[..., self.rotary_dim:]
-            key_pass = key[..., self.rotary_dim:]
+            query_pass = query[..., self.rotary_dim :]
+            key_pass = key[..., self.rotary_dim :]
 
         cos, sin = cos_sin_cache.chunk(2, dim=-1)
 
@@ -87,6 +84,18 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             key = k_embed.reshape(key_shape)
 
         return query, key
+
+    def forward_hip(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        # vLLM selects HIP before OOT on ROCm platforms.
+        if key is None:
+            # The FL Q/K provider requires a key; retain native HIP/AITER here.
+            return super().forward_hip(positions, query, key)
+        return self.forward_oot(positions, query, key)
 
 
 __all__ = ["RotaryEmbeddingFL"]

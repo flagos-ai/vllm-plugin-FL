@@ -49,6 +49,10 @@ Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"
 pooling = [
     "orjson>=3.11.4,<4",
 ]
+glm5 = [
+    "flaggems_vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@80a8e9716abed1bac3fc0ba5fd4e9f650ae3f989",
+    "tilelang==0.1.9",
+]
 test = [
     "pytest",
     "pytest-cov",
