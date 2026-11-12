@@ -4,6 +4,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+# Defer annotation evaluation so expressions like
+# ``current_platform.torch_device_fn.Stream`` in function signatures are not
+# evaluated at import time (when the platform may not be initialised yet).
+from __future__ import annotations
+
+# Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
+# module that uses them is imported.  The shim is idempotent and a no-op when
+# the installed vLLM already ships the symbols.
+from vllm_fl.patches.worker_symbols_032 import apply_worker_symbols_032
+
+apply_worker_symbols_032()
+
 import functools
 import gc
 import itertools
@@ -237,6 +249,9 @@ from vllm.v1.worker.cp_utils import (
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
+# NOTE: cp_utils.get_total_cp_world_size (0.28) / get_kv_cache_shard_count
+# (intermediate rename) are both absent from vLLM 0.32; nothing in this
+# module calls them, so the import is dropped rather than guarded.
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 try:
