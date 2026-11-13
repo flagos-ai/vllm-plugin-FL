@@ -244,6 +244,12 @@ if __name__ == "__main__":
 This single-prompt example uses vLLM's default `max_num_seqs`. Set it based on
 the expected request concurrency and available device memory for your deployment.
 
+> **Non-NVIDIA backends:** this example needs your backend's runtime environment
+> (plugin activation, vendor selection, cache dirs — see the backend deployment
+> guide) before it will run. Also note `enforce_eager=current_platform.device_type
+> == "npu"` is `False` on CUDA-alike backends whose `device_type` is `cuda` (e.g.
+> T-Head PPU); set `enforce_eager=True` explicitly when you want eager execution.
+
 ## Advanced use
 
 For dispatch environment variable usage, see [environment variables usage](./vllm_fl/dispatch/README.md#environment-variables).
