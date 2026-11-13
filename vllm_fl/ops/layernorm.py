@@ -1,8 +1,12 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 from typing import Optional, Union
+
 import torch
+
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.platforms import current_platform
+
 from vllm_fl.dispatch import CachedOp
 
 _rms_norm = CachedOp("rms_norm")
@@ -18,16 +22,20 @@ class RMSNormFL(RMSNorm):
         dtype: Optional[torch.dtype] = None,
     ) -> None:
         super().__init__(hidden_size, eps, var_hidden_size, has_weight, dtype)
+        self._use_amd_graph_ops = (
+            getattr(current_platform, "vendor_name", None) == "amd"
+        )
 
     def forward_oot(
         self,
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-        if torch.compiler.is_compiling():
+        if self._use_amd_graph_ops and torch.compiler.is_compiling():
             from vllm_fl.dispatch.backends.vendor.amd.graph_ops import (
                 rms_norm_custom_op,
             )
+
             # rms_norm_custom_op always returns (output, residual_or_None).
             # Caller expects a tuple when residual is passed, bare tensor otherwise.
             out, out_residual = rms_norm_custom_op(

@@ -27,9 +27,7 @@ import torch.library
 # ---------------------------------------------------------------------------
 
 _rms_norm_lib = torch.library.Library("vllm_fl_amd", "DEF")
-_rms_norm_lib.define(
-    "rms_norm_nr(Tensor x, Tensor weight, float epsilon) -> Tensor"
-)
+_rms_norm_lib.define("rms_norm_nr(Tensor x, Tensor weight, float epsilon) -> Tensor")
 _rms_norm_lib.define(
     "rms_norm_wr(Tensor x, Tensor residual, Tensor weight, float epsilon)"
     " -> (Tensor, Tensor)"
@@ -147,7 +145,7 @@ _rot_lib = torch.library.Library("vllm_fl_amd_rot", "DEF")
 _rot_lib.define(
     "rotary_embedding("
     "Tensor query, Tensor key, Tensor cos, Tensor sin, Tensor position_ids,"
-    " bool rotary_interleaved, bool inplace) -> (Tensor, Tensor)"
+    " bool rotary_interleaved) -> (Tensor, Tensor)"
 )
 
 
@@ -159,19 +157,18 @@ def _rot_cuda(
     sin: torch.Tensor,
     position_ids: torch.Tensor,
     rotary_interleaved: bool,
-    inplace: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     from vllm_fl.dispatch.backends.flaggems.impl.rotary import rotary_embedding_flaggems
 
     return rotary_embedding_flaggems(
         None,
-        query,
-        key,
+        query.clone(memory_format=torch.contiguous_format),
+        key.clone(memory_format=torch.contiguous_format),
         cos,
         sin,
         position_ids,
         rotary_interleaved=rotary_interleaved,
-        inplace=inplace,
+        inplace=True,
     )
 
 
@@ -183,9 +180,11 @@ def _rot_fake(
     sin: torch.Tensor,
     position_ids: torch.Tensor,
     rotary_interleaved: bool,
-    inplace: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    return query.clone(), key.clone()
+    return (
+        torch.empty_like(query, memory_format=torch.contiguous_format),
+        torch.empty_like(key, memory_format=torch.contiguous_format),
+    )
 
 
 def rotary_embedding_custom_op(
@@ -195,9 +194,8 @@ def rotary_embedding_custom_op(
     sin: torch.Tensor,
     position_ids: torch.Tensor,
     rotary_interleaved: bool = False,
-    inplace: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compile-safe rotary_embedding call site."""
+    """Return fresh rotary outputs from the opaque AMD kernel."""
     return torch.ops.vllm_fl_amd_rot.rotary_embedding(
-        query, key, cos, sin, position_ids, rotary_interleaved, inplace
+        query, key, cos, sin, position_ids, rotary_interleaved
     )

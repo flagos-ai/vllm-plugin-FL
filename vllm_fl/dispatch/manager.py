@@ -190,14 +190,6 @@ class OpManager:
         1. PID check (multi-process safety)
         2. Register built-in operator implementations
         """
-        # Fast-path: skip the lock entirely when already initialised in this
-        # process.  torch.compile/Dynamo cannot trace through RLock.__enter__,
-        # so any call site inside a compiled region (e.g. _resolve_impl called
-        # from an FL dispatch __call__) must never reach the lock after warmup.
-        # A bare attribute read is safe under the GIL; the double-checked
-        # acquire below keeps the write path serialised.
-        if self._state.initialized:
-            return
         with self._lock:
             pid = os.getpid()
 

@@ -284,7 +284,8 @@ vllm serve /models/Qwen3.6-27B \
   --enforce-eager
 ```
 
-`--enforce-eager` is required; see [Validation scope](#validation-scope).
+This Qwen3.6 TP8 example uses the validated eager configuration. See
+[Validation scope](#validation-scope) for the Qwen3-4B graph run.
 
 Confirm all three components are active in the service log:
 
@@ -327,14 +328,14 @@ platform resolves the communicator to `CommunicatorFL`, and the check in
 section 5 shows `libflagcx.so` mapped into the process with a correct
 `all_reduce`.
 
-**Not supported in this release — graph mode.** Graph capture fails for two
-reasons: FlagGems GDN kernels are traced into by Dynamo and need an opaque
-custom-op registration ([FlagGems #8095](https://github.com/flagos-ai/FlagGems/issues/8095)),
-and a lazily-resolved dispatch lock is entered during tracing. Always pass
-`--enforce-eager`.
+**Graph mode** passed on Qwen3-4B at TP1 on one W7900D, with both PIECEWISE
+and FULL capture in the recorded [PR #659](https://github.com/flagos-ai/vllm-plugin-FL/pull/659)
+hardware run. For Qwen3.6 GDN models, use the validated eager configuration
+while [FlagGems #8095](https://github.com/flagos-ai/FlagGems/issues/8095)
+tracks the graph compatibility work.
 
-**Not covered**: TP sizes other than 8, FP8/quantised paths, performance
-characterisation, and CI (AMD is intentionally not in automatic CI). Results
+**Not covered**: FP8/quantised paths, performance characterisation, and
+automatic AMD CI. Results
 apply to the recorded artifacts and do not establish complete operator or
 collective ABI coverage.
 

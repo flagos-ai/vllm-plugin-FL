@@ -39,8 +39,8 @@ ARG FLAGCX_COMMIT=591cfbf
 ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
 
-# GEMS_VENDOR/USE_FLAGGEMS mirror the other FlagOS backends. Graph mode is not
-# supported on this backend yet, so the service runs eager; see docs/usage/amd.md.
+# GEMS_VENDOR/USE_FLAGGEMS mirror the other FlagOS backends. See
+# docs/usage/amd.md for the validated eager and graph configurations.
 ENV DEBIAN_FRONTEND=noninteractive \
     VLLM_PLUGINS=fl \
     USE_FLAGGEMS=1 \

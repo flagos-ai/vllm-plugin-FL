@@ -195,8 +195,6 @@ class PlatformFL(Platform):
         if (device_type == "cuda" and vendor_name not in ("iluvatar", "hygon", "amd"))
         else device_type
     )
-    # Keep small torch.compile helpers on the native NPU execution path.
-    simple_compile_backend = "eager" if device_type == "npu" else "inductor"
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
@@ -213,7 +211,7 @@ class PlatformFL(Platform):
     # backend there: the traced graph is kept and only Inductor codegen is
     # dropped.
     simple_compile_backend: str = (
-        "eager" if device_info.vendor_name == "amd" else "inductor"
+        "eager" if device_type == "npu" or vendor_name == "amd" else "inductor"
     )
     device_control_env_var: str = (
         "ASCEND_RT_VISIBLE_DEVICES"
@@ -949,25 +947,6 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name == "amd":
-            # Graph mode is not supported in this release; `--enforce-eager` is
-            # required.  Two blockers remain after FlagGems#8893 (clone
-            # FakeTensor fix, included from FlagGems commit 9a51bed):
-            #   1. FlagGems GDN kernels traced into by Dynamo — needs opaque
-            #      custom-op registration (flagos-ai/FlagGems#8095).
-            #   2. A lazily-resolved dispatch lock entered during graph tracing.
-            # The capability is real (graph capture initialises on gfx1100 and
-            # warmup passes), so we return True rather than skip capture
-            # entirely — but warn so users who omit --enforce-eager get a clear
-            # message instead of a cryptic tracing error.
-            logger.warning_once(
-                "[vllm_fl] AMD backend is eager-only in this release. "
-                "Pass --enforce-eager to suppress this warning. "
-                "Remaining graph-mode blockers: FlagGems GDN kernel tracing "
-                "(https://github.com/flagos-ai/FlagGems/issues/8095) and a "
-                "lazily-resolved dispatch lock during torch.compile tracing. "
-                "Overall tracking: https://github.com/flagos-ai/FlagGems/issues/8460"
-            )
         return cls.vendor_name in [
             "nvidia",
             "ascend",
@@ -1197,10 +1176,15 @@ class PlatformFL(Platform):
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        if using_inductor or not cls._vllm_c_is_registered_provider():
-            default = ["native"]
-        else:
-            default = ["vllm_c", "native"]
+        default = ["native"]
+        if not using_inductor:
+            has_vllm_c = (
+                cls._vllm_c_is_registered_provider()
+                if cls.vendor_name == "amd"
+                else _vllm_c_available()
+            )
+            if has_vllm_c:
+                default = ["vllm_c", "native"]
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,
