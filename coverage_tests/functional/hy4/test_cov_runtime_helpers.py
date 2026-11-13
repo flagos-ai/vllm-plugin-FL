@@ -49,8 +49,13 @@ def clean_dispatch_env(monkeypatch):
 
     The platform config blacklist (priority 3) is host state; tests that
     care about the default path set an explicit harmless blacklist so the
-    result never depends on the runner image.
+    result never depends on the runner image. Other hy4 suites register
+    implementations on the default manager, so rebuild the manager and
+    policy around every test that relies on the built-in registry.
     """
+    from vllm_fl.dispatch.manager import reset_default_manager
+    from vllm_fl.dispatch.policy import reset_global_policy
+
     for var in (
         "VLLM_FL_FLAGOS_WHITELIST",
         "VLLM_FL_FLAGOS_BLACKLIST",
@@ -61,6 +66,11 @@ def clean_dispatch_env(monkeypatch):
         "VLLM_FL_OP_CONFIG",
     ):
         monkeypatch.delenv(var, raising=False)
+    reset_default_manager()
+    reset_global_policy()
+    yield
+    reset_default_manager()
+    reset_global_policy()
 
 
 class TestFlaggemsOperatorAllowed:
@@ -177,14 +187,17 @@ class TestSelectHy4PrefillBackend:
 class TestPrefillIsAvailable:
     """Availability probes used by the selection above."""
 
-    def test_flash_attn_backend_without_varlen_callable_is_unavailable(self):
+    def test_flash_attn_backend_without_varlen_callable_is_unavailable(
+        self, monkeypatch
+    ):
         # FLASH_ATTN is validated further than is_available(): the captured
         # ``prefill.flash_attn`` module must expose a callable
-        # flash_attn_varlen_func. The module is swapped for a stand-in via
-        # sys.modules (the same name ``from ... import flash_attn`` reads).
+        # flash_attn_varlen_func. The source resolves it as an attribute of
+        # the parent package, so patch that attribute rather than sys.modules.
         """Flash attn backend without variable-length callable is unavailable."""
-        import sys
         import types
+
+        from vllm.v1.attention.backends.mla import prefill as prefill_pkg
 
         class FlashAttnLike:
             @classmethod
@@ -195,45 +208,39 @@ class TestPrefillIsAvailable:
             def get_name(cls):
                 return "FLASH_ATTN"
 
-        module_name = "vllm.v1.attention.backends.mla.prefill.flash_attn"
-        original = sys.modules.get(module_name)
-        sys.modules[module_name] = types.SimpleNamespace(flash_attn_varlen_func=None)
-        try:
-            assert _prefill_is_available(FlashAttnLike) is False
-        finally:
-            if original is None:
-                sys.modules.pop(module_name, None)
-            else:
-                sys.modules[module_name] = original
-
-    def test_flash_attn_backend_with_callable_varlen_passes(self):
-        # The same FLASH_ATTN-named backend with a callable varlen entry
-        # point is accepted (line 111's True return).
-        """Flash attn backend with callable variable-length passes."""
-        import sys
-        import types
-
-        class FlashAttnLike:
-            @classmethod
-            def is_available(cls):
-                return True
-
-            @classmethod
-            def get_name(cls):
-                return "FLASH_ATTN"
-
-        module_name = "vllm.v1.attention.backends.mla.prefill.flash_attn"
-        original = sys.modules.get(module_name)
-        sys.modules[module_name] = types.SimpleNamespace(
-            flash_attn_varlen_func=lambda *a, **k: None
+        monkeypatch.setattr(
+            prefill_pkg,
+            "flash_attn",
+            types.SimpleNamespace(flash_attn_varlen_func=None),
+            raising=False,
         )
-        try:
-            assert _prefill_is_available(FlashAttnLike) is True
-        finally:
-            if original is None:
-                sys.modules.pop(module_name, None)
-            else:
-                sys.modules[module_name] = original
+        assert _prefill_is_available(FlashAttnLike) is False
+
+    def test_flash_attn_backend_with_callable_varlen_passes(self, monkeypatch):
+        # The same FLASH_ATTN-named backend with a callable varlen entry
+        # point is accepted (line 111's True return). Patch the attribute the
+        # source imports so the test is order-independent.
+        """Flash attn backend with callable variable-length passes."""
+        import types
+
+        from vllm.v1.attention.backends.mla import prefill as prefill_pkg
+
+        class FlashAttnLike:
+            @classmethod
+            def is_available(cls):
+                return True
+
+            @classmethod
+            def get_name(cls):
+                return "FLASH_ATTN"
+
+        monkeypatch.setattr(
+            prefill_pkg,
+            "flash_attn",
+            types.SimpleNamespace(flash_attn_varlen_func=lambda *a, **k: None),
+            raising=False,
+        )
+        assert _prefill_is_available(FlashAttnLike) is True
 
     def test_available_non_flash_attn_backend_passes(self):
         """Available non-Flash attn backend passes."""
