@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-import logging
 import sys
 import types
+from unittest.mock import Mock
 
 import pytest
 
@@ -95,16 +95,20 @@ def test_idempotent():
     assert mod.triton_pos_embed_interpolate("x") == "native"
 
 
-def test_missing_native_fn_no_crash(caplog):
-    """If pos_embed_interpolate_native is absent, logs a warning."""
+def test_missing_native_fn_no_crash(monkeypatch):
+    """A missing native fallback emits a warning without installing the patch."""
     vc = _get_vc()
-    _setup_fake_qwen3_vl(triton_present=True, native_present=False)
-    # Ensure the vc logger propagates to root so caplog can catch it
-    vc_logger = logging.getLogger(vc.__name__)
-    vc_logger.propagate = True
-    with caplog.at_level(logging.WARNING, logger=vc.__name__):
-        vc.apply_vl_compat()
-    assert any("pos_embed_interpolate_native not found" in m for m in caplog.messages)
+    mod = _setup_fake_qwen3_vl(triton_present=True, native_present=False)
+    original = mod.triton_pos_embed_interpolate
+    warning = Mock()
+    monkeypatch.setattr(vc.logger, "warning", warning)
+
+    vc.apply_vl_compat()
+
+    warning.assert_called_once()
+    assert "pos_embed_interpolate_native not found" in warning.call_args.args[0]
+    assert mod.triton_pos_embed_interpolate is original
+    assert not hasattr(mod, vc._PATCH_FLAG)
 
 
 def test_module_not_installed_no_crash():
