@@ -2907,7 +2907,7 @@
       },
       {
         "path": "runtime/backend/_metax/ops/index_put.py",
-        "sha256": "56ec63b69230f5d436e63bd97b4912835f420c31134175e545bfc60f2e0a45d4"
+        "sha256": "ecc6ea5e524047291aacbb683ce2eea20e4eab0bdc5fa0e50eb68c3e17f24757"
       }
     ],
     "flaggems_vllm": [
@@ -2941,31 +2941,31 @@
       },
       {
         "path": "runtime/backend/_metax/ops/top_k_top_p.py",
-        "sha256": "4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4"
+        "sha256": "c1a3acb18928100968cdf545c8fd7ae919b904648b80c0b3d57383acbd4b7b56"
       },
       {
         "path": "ops/top_k_top_p.py",
-        "sha256": "275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84"
+        "sha256": "2e6aef4e5d241f814838d93c08b316ef5c743bf466273a798188b09ffdf4bcd6"
       },
       {
         "path": "ops/__init__.py",
-        "sha256": "80de99b5416f586ffc4131046876cbe2bf2028a745f078194033ef112226ec5d"
+        "sha256": "c5a0017071f6a49478e36abe1f90130bf4f6ef089af898fc1a83aee7ffeb351c"
       },
       {
         "path": "runtime/backend/_metax/ops/sampling_top20.py",
-        "sha256": "c1cea3fd6db8dd25306f80b36aab2b9fe9f387b7980b854f92d00dd99f819186"
+        "sha256": "3106ae6c1a0db7075434b25bac5c8f276c4ab9afcca174794726346af7fffee9"
       },
       {
         "path": "runtime/backend/_metax/ops/sampling_race.py",
-        "sha256": "ade13cc1ef45c6d66cdc58f20cf2e2e644119bc388b29f975ad2341e6ee82156"
+        "sha256": "dfee1951de6e41ee79dacf2da6f1b8f06201688cd3a82fbd57961547167191c1"
       },
       {
         "path": "runtime/backend/_metax/ops/qsa_packed.py",
-        "sha256": "3edb369a293d0d7281d9c0c0cafbb5ffe0ffd4f34c22cacab4202df70f37cf9f"
+        "sha256": "493729a0a561dc23f2028c1c8444e23b05e94baa1ec355f3cbc058e4a3ceb485"
       },
       {
         "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
-        "sha256": "7cb58947d6f399c7812eb05cd5c129f2896fe0f72c8b620ee43aa2705c8442a0"
+        "sha256": "e7727daf540fc53ace18f505cebb7eb94c259dabadd504c7df6e29f49266ca3b"
       },
       {
         "path": "runtime/backend/_metax/ops/hyperconnection_bf16.py",
@@ -2989,7 +2989,7 @@
       },
       {
         "path": "runtime/backend/_metax/ops/qsa_paged_native.py",
-        "sha256": "97b33e9196d13e16969c9dd9ca2ecea3b6f224b1153364a54db4d0b03601c71b"
+        "sha256": "7a675faa22a2c0fae5980f6f0552443e6610bbab47c86fbe089f030f7ad3072d"
       },
       {
         "path": "ops/qwen4/qsa_indexer_fast.py",
@@ -3007,7 +3007,7 @@
       },
       {
         "path": "model_executor/layers/fused_moe/modular_kernel.py",
-        "sha256": "b50933dd1f2c525eedb485f68cd032e6bfaaaba03a9c672b49c984b4d8155b58"
+        "sha256": "3db16e130197b3f6aa153f5d77e0e336d8f5d0e9c05c3ab4e3910aeec8489abc"
       }
     ]
   },

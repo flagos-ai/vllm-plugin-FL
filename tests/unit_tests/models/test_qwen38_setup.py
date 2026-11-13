@@ -334,7 +334,7 @@ def serving_launch(tmp_path, mode="off", extra=(), missing=None):
     spy = tmp_path / "native vllm"
     spy.write_text(r"""#!/bin/sh
 printf '%s\0' "$@" > "$ARG_LOG"
-printf '%s\n' "$USE_FLAGGEMS|$VLLM_FL_USE_FLAGGEMS_VLLM|$TRITON_CACHE_DIR|$PYTHONPATH|$OMP_NUM_THREADS" > "$ENV_LOG"
+printf '%s\n' "$USE_FLAGGEMS|$VLLM_FL_USE_FLAGGEMS_VLLM|$TRITON_CACHE_DIR|$PYTHONPATH|$OMP_NUM_THREADS|$FLAGGEMS_DB_URL" > "$ENV_LOG"
 """)
     spy.chmod(0o755)
     env = dict(
@@ -347,6 +347,7 @@ printf '%s\n' "$USE_FLAGGEMS|$VLLM_FL_USE_FLAGGEMS_VLLM|$TRITON_CACHE_DIR|$PYTHO
         ENV_LOG=str(tmp_path / "env"),
         PYTHONPATH="/existing packages",
         OMP_NUM_THREADS="7",
+        FLAGGEMS_DB_URL="sqlite:///:memory:",
         FLAGCX_PATH="/unused",
     )
     if missing:
@@ -426,8 +427,9 @@ def test_direct_native_entry_preserves_mode_contract(tmp_path, mode, k):
     fields = env_file.read_text().strip().split("|")
     assert fields[:2] == ["1", "1"]
     assert fields[2].endswith(mode + "/triton")
-    assert fields[3] == str(ROOT) + ":/existing packages"
+    assert fields[3] == "/existing packages"
     assert fields[4] == "7"
+    assert fields[5] == "sqlite:///:memory:"
 
 
 @pytest.mark.parametrize("mode", ["off", "k1", "k2", "k3"])

@@ -1,22 +1,67 @@
 # Qwen3.8 Flash Next on MetaX
 
-The supported development composition serves BF16 text on a single MetaX C550
+The fixed composition serves BF16 text on a single MetaX C550
 host with TP8/PP1, FP32 recurrent state and vLLM 0.24.0. Multimodal serving is not
 accepted by this MetaX profile.
 
 ## Installation requirements
 
-Use matching MetaX Torch/MACA and FlagTree 0.6.1+metax3.6, the vLLM base
-ee0da84ab9e04ac7610e28580af62c365e898389, and the
-[operator requirements](../../examples/qwen3_8_flash_next/metax_tuning/operator_dependencies.json).
-Some optimized FG/FGV APIs and the native modular-expert output alias remain
-unpublished. The base revisions alone do not form a public optimized installation.
-Publish those APIs/tests and pin accessible revisions before public delivery.
+Use the [fixed dependency manifest](../../examples/qwen3_8_flash_next/metax_tuning/operator_dependencies.json)
+and [requirements](../../examples/qwen3_8_flash_next/metax_tuning/requirements.txt).
+All three source revisions are publicly accessible; upstream PRs need not be
+merged before using these fixed commits.
 
-UVA additionally requires the plugin host-memory extension built with
-VLLM_VENDOR=metax and the matching Torch/MACA ABI. Source guards reject
-incompatible numerical sources. Required optimized APIs must still be provided by the validated development composition. Source guards
-are compatibility checks, not package installation instructions.
+The matching MetaX Torch/MACA, vendor libraries and FlagTree 0.6.1+metax3.6 are
+available in this runtime image (Harbor project pull access is required):
+
+```text
+harbor.baai.ac.cn/flagos-inner-models-release/qwen3.8-flash-next-metax@sha256:f8a61974b673afe85a87bda27c1df777c2bfe6ef63f421d7dc335b4f0be53218
+```
+
+From the plugin checkout, replace the image's Python packages with the fixed
+source revisions and build the plugin's native host-memory extension:
+
+```sh
+SETUPTOOLS_SCM_PRETEND_VERSION_FOR_FLAG_GEMS=5.3.5 \
+VLLM_TARGET_DEVICE=empty VLLM_VERSION_OVERRIDE=0.24.0+empty \
+/work/.venv/bin/python -m pip install --force-reinstall --no-deps --no-build-isolation \
+    -r examples/qwen3_8_flash_next/metax_tuning/requirements.txt
+VLLM_VENDOR=metax /work/.venv/bin/python -m pip install --force-reinstall \
+    --no-deps --no-build-isolation .
+```
+
+Use the runtime's Python environment (`/work/.venv/bin/python` in that image).
+`VLLM_TARGET_DEVICE=empty` selects the Python-only vLLM build used with MetaX;
+the installed plugin selects the real device at runtime. Do not replace the
+matching Torch/FlagTree packages with generic CUDA dependencies.
+
+On a host without GitHub access, download the same commit archives on a connected
+host and transfer them. Build wheels with the same environment settings above,
+then install those wheels using `python -m pip install --force-reinstall
+--no-deps --no-index /path/to/wheels/*.whl`. This changes transport only; the
+source revisions and vendor runtime must remain identical.
+
+UVA requires the extension built with VLLM_VENDOR=metax and matching Torch/MACA
+ABI. The serving entry uses the installed plugin and preserves the caller's
+PYTHONPATH. Source guards remain enabled and validate the fixed numerical
+implementation before applying the measured launch profile.
+
+## Reproduce the measured launch choices
+
+The manifest also links the C550 launch-selection archive for the fixed runtime.
+It contains the tuning database and Triton selection records, without compiled
+kernels. To reuse these choices before the first MTP-off service start:
+
+```sh
+export QWEN38_CACHE_ROOT=/path/to/service-cache
+curl -fL 'https://github.com/cshujie131-bot/vllm-plugin-FL/releases/download/qwen38-metax-vllm024-20261113/qwen38-c550-selected-tuning.tar.gz' -o /tmp/qwen38-c550-selected-tuning.tar.gz
+printf '%s\n' 'dc80777db93657cef0c6c7e76295b478dea650c8c85d53f15d4fe4b15c4ec6b6  /tmp/qwen38-c550-selected-tuning.tar.gz' | sha256sum -c -
+mkdir -p "$QWEN38_CACHE_ROOT/off"
+tar -xzf /tmp/qwen38-c550-selected-tuning.tar.gz -C "$QWEN38_CACHE_ROOT/off"
+```
+
+Use these choices with the stated C550/compiler/source combination. The normal
+launcher can populate its own cache when the archive is not used.
 
 ## Start serving
 

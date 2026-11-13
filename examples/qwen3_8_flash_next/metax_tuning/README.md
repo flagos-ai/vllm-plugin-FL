@@ -9,6 +9,9 @@ Shape limits, source guards and launch parameters have one runtime source:
 The launcher passes [moe-configs](moe-configs/) to VLLM_TUNED_CONFIG_FOLDER.
 
 Use the [model guide](../../../docs/models/qwen3_8_flash_next.md) for installation,
-commands, supported contracts and the remaining
-[dependency gaps](operator_dependencies.json). Independent services need
+commands and supported contracts. [Fixed source revisions](operator_dependencies.json)
+and [requirements](requirements.txt) provide the installable dependency lock. Independent services need
 independent writable cache directories.
+
+The native FLAGGEMS_DB_URL setting may select an existing tuning database;
+otherwise the launcher uses the service-specific cache directory.
