@@ -71,6 +71,9 @@ op_backends:
     - vendor
     - reference
 
+  fused_experts:
+    - vendor:kunlunxin
+
   # Fused GDN gating: vendor (Kunlunxin) implementation
   fused_gdn_gating:
     - vendor

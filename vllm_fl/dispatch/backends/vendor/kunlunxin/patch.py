@@ -82,7 +82,6 @@ def _apply_legacy_kunlunxin_patches():
     patch_block_table_slot_mapping()
     patch_attention_backend_registry()
     patch_topk_topp_sampler()
-    patch_fused_moe()
 
     # Existing patches
     patch_causal_conv1d()
@@ -853,21 +852,6 @@ def patch_topk_topp_sampler():
         )
     except Exception as e:
         logger.warning("Failed to patch top-k/top-p sampler for Kunlunxin: %s", e)
-
-
-# ── RESTORED: fused_moe ──
-def patch_fused_moe():
-    """Replace fused_experts_impl with Kunlunxin implementation."""
-    try:
-        import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_moe.fused_moe import (
-            fused_experts_impl as klx_fused_experts_impl,
-        )
-
-        fused_moe_lib.fused_experts_impl = klx_fused_experts_impl
-        logger.info("Patched fused_moe for Kunlunxin")
-    except Exception as e:
-        logger.warning("Failed to patch fused_moe ops: %s", e)
 
 
 # ── sampler RNG (TP-consistent unseeded sampling) ──

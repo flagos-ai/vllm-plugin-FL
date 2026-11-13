@@ -179,6 +179,12 @@ class KunlunxinBackend(Backend):
 
         return fused_gdn_gating_kunlunxin(*args, **kwargs)
 
+    def fused_experts(self, *args, **kwargs):
+        """Execute the routed experts with Kunlunxin's fused kernels."""
+        from .impl.fused_moe.fused_moe import fused_experts_impl
+
+        return fused_experts_impl(*args, **kwargs)
+
     def topk_softmax(
         self,
         topk_weights: 'torch.Tensor',

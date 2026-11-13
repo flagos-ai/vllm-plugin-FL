@@ -3,13 +3,7 @@
 #
 # 2026 - Modified by Kunlunxin, Inc. All Rights Reserved.
 
-"""
-Kunlunxin fused MoE kernel implementations.
-
-In vllm 0.20+, SharedFusedMoE is removed. Instead, this module provides
-`fused_experts_impl` which is patched into `vllm_fl.ops.fused_moe.fused_moe`
-via the Kunlunxin patch system.
-"""
+"""Kunlunxin implementation of the fused_experts dispatch operator."""
 
 from __future__ import annotations
 
@@ -161,8 +155,7 @@ def fused_experts_impl(
     """
     Kunlunxin fused experts implementation.
 
-    This function matches the signature of vllm_fl.ops.fused_moe.fused_moe.fused_experts_impl
-    and is patched in by the Kunlunxin patch system.
+    Accepts the FL fused-experts operator's argument contract.
 
     Args:
         activation: Activation function. Supported: "silu", "gelu", "relu", "gelu_no_mul", "silu_no_mul"
