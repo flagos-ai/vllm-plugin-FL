@@ -38,9 +38,8 @@ THEAD_WHEELS_DIR=/path/to/thead_wheels ./build.sh --platform thead --target ci
 ```
 
 Without `THEAD_WHEELS_DIR`, FlagTree and FlagGems are resolved from
-`--index-url`, and vLLM is built from the `v0.32.0` tag in empty mode
-(`VLLM_TARGET_DEVICE=empty`). That path needs network access to GitHub and a
-Rust toolchain (`setuptools-rust` is installed into the venv).
+`--index-url`, but the `vllm-0.32.0+empty` wheel is still required: the build
+stops with an error instead of falling back to a source build.
 
 The build fails early if any of these do not hold, so a broken stack never
 reaches CI:
