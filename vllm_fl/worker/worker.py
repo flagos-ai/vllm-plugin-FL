@@ -5,6 +5,14 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """A GPU worker class adapted for the FL out-of-tree platform."""
 
+# Re-publish vLLM v0.28 helpers that were removed in v0.32 before any vllm
+# module that uses them is imported. The V2 path loads this module directly,
+# so the shim installed by model_runner.py is not guaranteed to be in place.
+# The shim is idempotent and a no-op when the installed vLLM ships the names.
+from vllm_fl.patches.worker_symbols_032 import apply_worker_symbols_032
+
+apply_worker_symbols_032()
+
 import gc
 import os
 import time
@@ -689,12 +697,22 @@ class WorkerFL(WorkerBase):
         ):
             cudagraph_memory_estimate = self.model_runner.profile_cudagraph_memory()
 
+        # Platforms that the upstream estimator cannot cover reserve their own
+        # headroom; everything else keeps the original budget.
+        vendor_cudagraph_headroom = 0
+        if getattr(current_platform, "vendor_name", "") == "hygon":
+            from vllm_fl.dispatch.backends.vendor.hygon.worker import (
+                cudagraph_memory_headroom,
+            )
+
+            vendor_cudagraph_headroom = cudagraph_memory_headroom(self.vllm_config)
+
         # Respect the opt-in flag as originally designed.
         cudagraph_memory_estimate_applied = (
             cudagraph_memory_estimate
             if envs.VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS
             else 0
-        )
+        ) + vendor_cudagraph_headroom
 
         self.total_consumed = profile_result.total_consumed
         self.peak_activation_memory = (
@@ -883,7 +901,9 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if getattr(self.model_config, "enable_return_routed_experts", False):
+        # vLLM 0.32 moved the flag into ``aux_output_config``.
+        aux_output_config = getattr(self.vllm_config, "aux_output_config", None)
+        if getattr(aux_output_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping

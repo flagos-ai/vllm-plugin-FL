@@ -469,6 +469,38 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
+        if cls.vendor_name == "hygon":
+            # vLLM 0.32 fills a wide capture table (51 entries, up to 512 tokens)
+            # while the compilation config is built, i.e. before this hook runs,
+            # and capturing every entry costs DCU memory on top of the KV cache.
+            # Cap the table at the largest decode batch this backend needs;
+            # larger batches fall back to eager execution.
+            #
+            # The 64 default is the upper bound of the decode buckets that fit
+            # the reserved graph headroom on a 144 GiB DCU (11 PIECEWISE + 11
+            # FULL captures measured); the budget itself is device-dependent, so
+            # the cap stays overridable for other card sizes.
+            capture_cap = int(
+                os.environ.get("VLLM_FL_HYGON_CUDAGRAPH_CAPTURE_CAP", "64")
+            )
+            compilation_config = getattr(vllm_config, "compilation_config", None)
+            if compilation_config is not None:
+                from vllm.config.compilation import CompilationMode
+
+                sizes = getattr(compilation_config, "cudagraph_capture_sizes", None)
+                mode = getattr(compilation_config, "mode", CompilationMode.NONE)
+                if mode != CompilationMode.NONE and sizes and max(sizes) > capture_cap:
+                    capped = [size for size in sizes if size <= capture_cap] or [
+                        capture_cap
+                    ]
+                    compilation_config.cudagraph_capture_sizes = capped
+                    compilation_config.max_cudagraph_capture_size = max(capped)
+                    logger.info(
+                        "Hygon: cudagraph capture sizes capped at %s to stay "
+                        "within the DCU memory budget.",
+                        capped,
+                    )
+
         if (
             cls.device_type in {"npu", "musa", "txda"}
             and vllm_config.use_v2_model_runner

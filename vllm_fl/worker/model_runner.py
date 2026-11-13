@@ -336,7 +336,17 @@ if current_platform.dist_backend == "flagcx" or current_platform.device_type in 
     graph_capture = _device_graph_capture
 
 else:
-    from vllm.distributed.parallel_state import graph_capture
+    from vllm.distributed.parallel_state import graph_capture as _vllm_graph_capture
+
+    @contextmanager
+    def graph_capture(device=None, graph_capture_context=None):
+        """vLLM 0.32 dropped the ``graph_capture_context`` argument.
+
+        Keep accepting it so vendor-specific call sites stay unchanged; the
+        upstream capture always uses its own side stream on this backend.
+        """
+        with _vllm_graph_capture(device=device):
+            yield graph_capture_context
 
 
 def _get_parameter_for_reload(model: nn.Module, name: str) -> nn.Parameter:
@@ -1204,6 +1214,23 @@ class ModelRunnerFL(
             if self.uses_mrope:
                 return self.mrope_positions.gpu[:, num_tokens]
             return self.positions[num_tokens]
+
+    def _get_mamba_state_copy_funcs(self) -> dict:
+        """Per-Mamba-type state copy funcs (vLLM 0.32 contract).
+
+        ``MambaBuffers.create`` and the runner's mamba bookkeeping expect a
+        mapping keyed by ``MambaAttentionBackendEnum``; the 0.28 singular
+        ``get_mamba_state_copy_func()`` returns a bare tuple that would be
+        indexed with an enum key downstream.
+        """
+        funcs = getattr(self, "_mamba_state_copy_funcs", None)
+        if funcs is None:
+            mamba_groups = mamba_utils.get_mamba_groups(self.kv_cache_config)
+            mamba_types = {spec.mamba_type for spec in mamba_groups}
+            funcs = self.model.get_mamba_state_copy_funcs(mamba_types)
+            mamba_utils.validate_mamba_state_copy_funcs(mamba_groups, funcs)
+            self._mamba_state_copy_funcs = funcs
+        return funcs
 
     def _make_buffer(
         self, *size: int | torch.SymInt, dtype: torch.dtype, numpy: bool = True
@@ -2695,7 +2722,9 @@ class ModelRunnerFL(
             self.dcp_local_seq_lens.copy_to_gpu(num_reqs_padded)
 
             cm_base.dcp_local_seq_lens = self.dcp_local_seq_lens.gpu[:num_reqs_padded]
-            cm_base.dcp_local_seq_lens_cpu = self.dcp_local_seq_lens.cpu[
+            # vLLM 0.32 renamed the host-side DCP lengths; assigning the
+            # old name would silently add an attribute that no consumer reads.
+            cm_base.dcp_local_seq_lens_cpu_upper_bound = self.dcp_local_seq_lens.cpu[
                 :num_reqs_padded
             ]
 
@@ -8252,3 +8281,30 @@ class ModelRunnerFL(
                     stats = self.encoder_timing_registry[req_id]
                     stats.encoder_forward_secs += per_request_time
                     stats.num_encoder_calls += 1
+
+_jit_warmup_capture_installed = False
+
+
+def _install_jit_warmup_capture() -> None:
+    """Collect JIT-warmup registrations made while the FL runner is built.
+
+    vLLM 0.32's ``kernel_warmup`` calls ``runner.jit_warmup_registry.warmup()``
+    and expects the registry to have been filled during ``__init__``. Upstream
+    fills it by decorating the v1 runner's ``__init__`` with
+    ``JitWarmupRegistry.capture``, whose wrapper activates the registry through
+    a ``ContextVar`` for the duration of the call; ``register_warmup()`` is a
+    no-op when no registry is active. ModelRunnerFL cannot use the decorator
+    directly (it would have to re-indent the whole body), so wrap it here.
+    """
+    global _jit_warmup_capture_installed
+    if _jit_warmup_capture_installed:
+        return
+    try:
+        from vllm.model_executor.warmup.jit_warmup import JitWarmupRegistry
+    except ImportError:  # vLLM without the V2 runner / JIT warmup registry
+        return
+    ModelRunnerFL.__init__ = JitWarmupRegistry.capture(ModelRunnerFL.__init__)
+    _jit_warmup_capture_installed = True
+
+
+_install_jit_warmup_capture()

@@ -4,6 +4,10 @@ Run an OpenAI-compatible service with the pinned image below. The image contains
 ordinary installed vLLM, FlagGems, and plugin packages; no source checkout or
 editable installation is required. The recipe uses two Hygon BW1000 64 GiB DCUs.
 
+> The current CI image is `v0.32.0-hygon-ci` on the FlagOS 2.2 base; see
+> [vLLM 0.32 experimental path](#vllm-032-experimental-path). The 0.28 recipe
+> below remains valid for the previously published image.
+
 ## Deployment stack
 
 | Component | Version or configuration |
@@ -17,7 +21,7 @@ editable installation is required. The recipe uses two Hygon BW1000 64 GiB DCUs.
 | FlagTree distribution | `0.6.0+hcu3.6` |
 | FlagTree wheel SHA256 | `0fd81f0e691486dfaf85f6a196f9f09d66118b7d2064b4f8c70b6c8bfdb4d52c` |
 | Triton distribution | `3.6.0+gitc73250c4.staging`, coexists with FlagTree |
-| Model runner | `ModelRunnerFL`, `VLLM_USE_V2_MODEL_RUNNER=0` |
+| Model runner | `ModelRunnerFL` (v1); selected by the plugin at startup, see below |
 | Communication | Vendor HIP/RCCL, TP2; `FLAGCX_PATH` unset |
 
 The FlagGems commit identifies matching installed source content (1,944 files,
@@ -29,8 +33,11 @@ Keep the image's vendor Torch, FlagTree/Triton, and
 [Hygon dispatch policy](../../vllm_fl/dispatch/config/hygon.yaml) together.
 The empty vLLM wheel omits `vllm._C` and `vllm._C_stable_libtorch`; do not copy
 extensions from an older installation. The image enables `USE_FLAGGEMS=1`,
-`GEMS_VENDOR=hygon`, and `VLLM_PLUGINS=fl`. It selects ModelRunnerFL because
-the upstream V2 runner requires a UVA interface unavailable on this backend.
+`GEMS_VENDOR=hygon`, and `VLLM_PLUGINS=fl`, and does not pin
+`VLLM_USE_V2_MODEL_RUNNER`: 0.32 defaults to the V2 runner and the plugin keeps
+that default. The empty build has no `_C::get_cuda_view_from_cpu_tensor`, so the
+plugin reports UVA as unavailable and V2 takes upstream's own `NonUvaBuffer`
+fallback instead of selecting `ModelRunnerFL`.
 
 ## 1. Check the host and select two idle DCUs
 
@@ -199,17 +206,19 @@ docker buildx version
 git diff --exit-code HEAD -- vllm_fl pyproject.toml setup.py README.md LICENSE
 bash docker/build.sh --platform hygon --target ci \
   --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl \
-  --image-tag v0.28.0-hygon-ci
+  --image-tag v0.32.0-hygon-ci
 ```
 
-The Hygon Dockerfile retains the vendor DTK/PyTorch base and its noneditable
-FlagGems/FlagTree installation, then builds and installs ordinary wheels for
-the empty vLLM and this plugin.
+The Hygon Dockerfile starts from the FlagOS 2.2 release image
+(`HYGON_BASE_IMAGE`, DTK 26.04 / Python 3.10 / Torch 2.9), keeps its noneditable
+FlagGems/FlagTree installation, adapts the upstream vLLM source to Python 3.10
+(`.github/scripts/hygon/patch_vllm_py310.py`), then builds and installs ordinary
+wheels for the empty vLLM (`0.32.0+empty`) and this plugin.
 Current source builds and CI also install **FlagGems-vllm v0.2.0**, commit
 [`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19),
 through the shared installer, alongside the vendor FlagGems package. Its
 package metadata still reports `0.1.0`; the commit identifies the release.
-The pinned image and the [historical validation in PR #576](https://github.com/flagos-ai/vllm-plugin-FL/pull/576)
+The pinned 0.28 image and the [historical validation in PR #576](https://github.com/flagos-ai/vllm-plugin-FL/pull/576)
 predate this integration.
 Builds use `--no-deps --no-build-isolation` to preserve the vendor runtime.
 Do not apply the upstream CUDA PyTorch requirements to this Hygon image.
@@ -217,15 +226,121 @@ If Git needs a proxy, set `HYGON_GIT_CONFIG` to a local Git configuration file.
 The builder mounts it as a BuildKit secret for Git only; it does not store the
 proxy in image layers. Keep HTTP proxy variables unset for pip and curl.
 For an offline upstream install, set `HYGON_VLLM_WHEEL_DIR` to a directory
-containing exactly one previously built `vllm-0.28.0+empty-*.whl`, and set
+containing exactly one previously built `vllm-0.32.0+empty-*.whl`, and set
 `HYGON_VLLM_WHEEL_SHA256` to its verified SHA256. The build checks that digest
 and installs the wheel normally; it does not copy old native vLLM extensions.
 Use a wheel built from upstream vLLM commit
-[`2cf0a6915ce544dc493a0990f2ea38d81601128a`](https://github.com/vllm-project/vllm/commit/2cf0a6915ce544dc493a0990f2ea38d81601128a).
+[`5df63a7203cdb9328d824a27b682e77c7b9928be`](https://github.com/vllm-project/vllm/commit/5df63a7203cdb9328d824a27b682e77c7b9928be).
 Leave these variables unset to build vLLM from the official Git source.
 
 The existing Hygon CI runner label is `hg-cicd-vllm-plugin-0240`; its name is
 an infrastructure label and does not specify the vLLM version inside the image.
+
+## vLLM 0.32 experimental path
+
+The 0.32 line moves upstream to Python `>=3.11` and a newer Torch, while the
+FlagOS 2.2 Hygon release image ships Python 3.10 / Torch 2.9 / DTK 26.04. The
+plugin is ported to 0.32 on top of that image; the validated stack is:
+
+| Component | Version |
+|---|---|
+| Base image (FlagOS 2.2) | `harbor.baai.ac.cn/flagos-app/vllm0.24.0-hygon-dtk26.04:2.2.0-0.3.0` |
+| Python | 3.10.20 |
+| Torch | 2.9.0+das (DTK 26.04) |
+| vLLM | `0.32.0+empty` (built from the upstream `v0.32.0` source) |
+| FlagGems / FlagTree | `5.4.0` / `0.7.0+hcu3.6` |
+| FlashAttention | `2.8.3+das.opt1.dtk2604.torch290` |
+| FlagGems-vllm | `0.2.0` (`v0.2.0` tag; metadata reports `0.1.0`) |
+
+Steps that differ from the 0.28 recipe:
+
+1. **Make vLLM 0.32 importable on Python 3.10.** The image build runs
+   `.github/scripts/hygon/patch_vllm_py310.py`, which rewrites the 3.11-only
+   typing imports (`Self`, `Never`, `override`, `assert_never`,
+   `LiteralString`, `NotRequired`, `Required`, `TypeVarTuple`, `Unpack`,
+   `CapsuleType`, `TypeAliasType`, `TypeIs`, `deprecated`, `reveal_type`,
+   `ReadOnly`) to `typing_extensions` (37 files), backports `datetime.UTC`
+   (2 files), and relaxes `requires-python` to `>=3.10,<3.15`. The empty wheel
+   is then built with `VLLM_TARGET_DEVICE=empty VLLM_VERSION_OVERRIDE=0.32.0+empty`,
+   `VLLM_USE_PRECOMPILED=0`, `VLLM_USE_PRECOMPILED_RUST=0`,
+   `CARGO_NET_OFFLINE=true`, and `pip wheel --no-deps --no-build-isolation`.
+   Monkeypatching `typing` globally does not work: `typing_extensions` detects
+   PEP 695 via `hasattr(typing, "TypeAliasType")` and then calls
+   `typing.ParamSpec(..., infer_variance=...)`, which Python 3.10 rejects.
+2. **Install FlagGems-vllm** (`v0.2.0`). Without `flaggems_vllm` the FlagGems
+   backend cannot register and dispatch falls back to `reference.torch`.
+3. **Model runner selection follows upstream.** 0.32 defaults to the V2 model
+   runner and Hygon keeps that default, matching the NVIDIA path. The plugin
+   ships no V2 runner of its own, so the default runs vLLM's own V2 runner.
+   `VLLM_USE_V2_MODEL_RUNNER=0` selects the plugin's `ModelRunnerFL` (a fork of
+   the v1 runner) and goes through upstream's v1 feature validation. Do not pin
+   the variable in images or launch scripts.
+4. **Blacklist `zeros` / `zero_` in the Hygon dispatch policy.** FlagGems'
+   Triton zero kernels pass the element count as int32, so zeroing the multi-GB
+   KV-cache backing buffer (`> 2**31` int8 elements) fails with
+   `Triton Error [HIP]: invalid argument`. The native ATen memset is used
+   instead (`torch.zeros` lowers to `empty` + `zero_`).
+5. **Shim the Torch 2.9 accelerator attribute.** 0.32 queries
+   `torch.accelerator.get_memory_info` on the worker startup path
+   (`MemorySnapshot`) and for the KV-cache memory budget; the Hygon patch
+   module binds it to `torch.cuda.mem_get_info`. The other accelerator entry
+   points 0.32 uses (`current_device_index` / `set_device_index`) already ship
+   with DTK Torch 2.9, and 0.32 guards its only `empty_host_cache` call with
+   `try/except AttributeError`, so no other shim is installed.
+6. **Filter IR-op providers per operator.** 0.32 asserts that every provider in
+   the priority list is registered for that op. The DCU wheel ships no
+   `vllm._C`, so `vllm_c` is only kept when the op actually registered it and
+   the rest fall back to `native`; CUDA behaviour is unchanged because it
+   registers both.
+7. **Bound graph-capture memory.** 0.32 pre-fills a 51-entry capture table
+   (up to 512 tokens) before the platform hook runs, and Hygon DCUs report
+   `is_cuda_alike() == False`, so the upstream graph-memory estimator never
+   runs and the KV cache takes the whole budget. The plugin caps the table
+   (`VLLM_FL_HYGON_CUDAGRAPH_CAPTURE_CAP`, default 64, larger batches run
+   eager) and reserves graph headroom
+   (`VLLM_FL_HYGON_GRAPH_HEADROOM_GB`, default 4), clamped to 30% of the DCU
+   budget so a smaller card is never starved.
+
+Runtime removals that the plugin had to drop (0.32 has no replacement):
+
+- XD-RoPE (`XDRotaryEmbedding`, `supports_xdrope`, `uses_xdrope_dim`).
+- Legacy routed-experts capture (`RoutedExpertsLists` / `RoutedExpertsTensors`);
+  0.32 reports routed experts through `AuxOutputConfig`, and
+  `enable_return_routed_experts` is currently a warning no-op in the FL runner.
+- Sequence-parallel collective fusion (`PassConfig.enable_sp`) and the
+  residual-scattered-for-SP padding.
+- kv-connector uniform KV cache (`use_uniform_kv_cache` /
+  `allocate_uniform_kv_caches`); KV cache allocation now delegates to 0.32's
+  `allocate_kv_cache` (single backing buffer plus per-layer views).
+- `get_total_cp_world_size`, `InputBatch(kernel_block_sizes)`,
+  `MultiModalRegistry.get_dummy_mm_inputs` / `supports_multimodal_inputs`,
+  `_reshape_kv_cache_tensors`, `_seq_lens_cpu` on `CommonAttentionMetadata`.
+
+Validated on two BW1000 64 GiB DCUs with `Qwen3.6-27B` (hybrid GDN attention):
+TP1 eager, TP2 eager, TP1 graph (`PIECEWISE` 5 + `FULL` decode 4 graphs), and
+`vllm serve` with `/v1/models`, `/v1/completions`, and
+`/v1/chat/completions`. The unit suite reports 1912 passed / 194 skipped.
+
+The V2 runner runs vLLM's own `GPUModelRunner`; the plugin adds no V2 runner of
+its own. A 27B TP2 serve on two BW1100 DCUs captured `PIECEWISE` 11/11 and
+`FULL` 11/11 graphs (1.31 GiB of graph memory) and passed the text, image and
+mixed request checks.
+
+Not exercised on this stack: Ascend dense hybrid KV cache (Ascend-only),
+`enable_return_routed_experts`, XD-RoPE models, and GDN / mamba hybrid models on
+the V2 runner. Graph-mode performance has not been tuned on this stack.
+
+Not supported / not verified on this stack:
+
+- `USE_FLAGGEMS=0` (or `VLLM_FL_PREFER=vendor`) for MoE models. The DCU
+  wheel has no native unquantized MoE backend, so selection ends in
+  `NotImplementedError: No Unquantized MoE backend supports the deployment
+  configuration.` The dispatch fallback only makes the failure explicit; it does
+  not provide a working non-FlagGems path.
+- Collectives inside piecewise graphs. `enable_sp` is gone upstream and the
+  plugin runs with SP disabled; no experiment has checked whether any collective
+  gets captured into a piecewise graph on this stack.
+- Multi-node TP/EP and inter-node collectives.
 
 ## Validation scope
 

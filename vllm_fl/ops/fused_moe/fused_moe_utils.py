@@ -121,10 +121,12 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.XPU]
     elif current_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
-    elif getattr(current_platform, "vendor_name", "") == "iluvatar":
+    elif getattr(current_platform, "vendor_name", "") in ("iluvatar", "hygon"):
         # TODO(corex): remove when PlatformFL is_cuda()/is_cuda_alike() is
         # true. CoreX reports device_type=cuda but is_cuda()=False, so
         # VLLM_FL_PREFER=vendor / USE_FLAGGEMS=0 hit UnboundLocalError here.
+        # Hygon DCUs report is_cuda()=False as well, so they hit the same
+        # UnboundLocalError whenever FlagGems is disabled.
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.TRITON,
             UnquantizedMoeBackend.BATCHED_TRITON,
