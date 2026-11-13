@@ -80,7 +80,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       config: ${{ steps.load.outputs.config }}
-      e2e_matrix: ${{ steps.matrix.outputs.e2e }}
+      e2e_matrix: ${{ steps.matrix.outputs.e2e || '[]' }}
+      functional_matrix: ${{ steps.matrix.outputs.functional || '[]' }}
+      benchmark_matrix: ${{ steps.matrix.outputs.benchmark || '[]' }}
     steps:
       - name: Checkout (attempt 1)
         id: checkout1
@@ -111,39 +113,28 @@ jobs:
             --platform ${{ inputs.platform }} \
             --ci-stage ${{ inputs.ci_stage }}
 
-  # Unit + functional tests in one job (GPU runner required).
+  # Unit + functional tests in one job per device (GPU runner required).
   # Unit tests (pure-logic) run first, then component-level GPU tests.
+  # Fans out over functional_matrix so each device uses its own runner and
+  # container config; for platforms without devices: the matrix has one entry
+  # using the platform-level defaults.
   functional:
     needs: setup
+    if: needs.setup.outputs.functional_matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJson(needs.setup.outputs.functional_matrix) }}
     uses: ./.github/workflows/_functional_test.yml
     secrets: inherit
     with:
       platform: ${{ inputs.platform }}
+      device: ${{ matrix.test.device }}
       branch: ${{ inputs.branch }}
-      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
+      ci_image: ${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: ${{ toJson(matrix.test.runner_labels || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
-      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-
-  # Unit coverage on additional devices (e.g. Hopper for the native CUDA
-  # runtime). The default-runner unit pass already runs inside the
-  # functional job; each entry in the config's unit_devices adds one unit
-  # job on that device's runner (device_runner_labels override).
-  unit:
-    needs: setup
-    strategy:
-      fail-fast: false
-      matrix:
-        device: ${{ fromJson(needs.setup.outputs.config).unit_devices || fromJson('[]') }}
-    uses: ./.github/workflows/_unit_test.yml
-    secrets: inherit
-    with:
-      platform: ${{ inputs.platform }}
-      device: ${{ matrix.device }}
-      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
-      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
-      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+      container_options: ${{ matrix.test.container_options || fromJson(needs.setup.outputs.config).container_options }}
 
   # End-to-end model tests.
   # pr stage: pr subset cases (text + multimodal, one device).
@@ -164,26 +155,31 @@ jobs:
       device: ${{ matrix.test.device }}
       cases: ${{ matrix.test.cases }}
       ci_image: ${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
+      runner_labels: ${{ toJson(matrix.test.runner_labels || fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
-      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+      container_options: ${{ matrix.test.container_options || fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
-  # Benchmark validation — actual test selection is controlled by the
-  # platform YAML (benchmark.pr / benchmark.nightly); on PRs it runs only
-  # with the ci-full label.
+  # Benchmark validation — fans out over benchmark_matrix so each device
+  # uses its own runner and container config. Only devices with a benchmark
+  # block in the platform YAML and the right CI stage produce an entry.
   benchmark:
     needs: [setup, functional, e2e]
-    if: always() && inputs.run_benchmark && needs.functional.result == 'success' && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
+    if: always() && inputs.run_benchmark && needs.setup.outputs.benchmark_matrix != '[]' && needs.functional.result == 'success' && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJson(needs.setup.outputs.benchmark_matrix) }}
     uses: ./.github/workflows/_benchmark_test.yml
     secrets: inherit
     with:
       platform: ${{ inputs.platform }}
+      device: ${{ matrix.test.device }}
       branch: ${{ inputs.branch }}
-      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
+      ci_image: ${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: ${{ toJson(matrix.test.runner_labels || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
-      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+      container_options: ${{ matrix.test.container_options || fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
       ci_stage: ${{ inputs.ci_stage }}
 
