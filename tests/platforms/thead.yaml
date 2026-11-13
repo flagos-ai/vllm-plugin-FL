@@ -37,17 +37,17 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.85
       trust_remote_code: true
-      # Upstream's default table captures 51 sizes. This six-size table keeps
-      # graph capture within the e2e job time budget while covering the tested
-      # batch sizes (same approach as hygon's bw1000 overrides).
+      # Preserve the base THead capture configuration. A smaller table changes
+      # graph capture and replay behavior and needs device correctness validation.
       compilation_config:
-        cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32]
+        cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+        max_cudagraph_capture_size: 256
     serve:
       startup_retries: 300
       # The shared CLI adapter stringifies structured engine options, so the
       # serving path needs the JSON form.
       extra_engine:
-        compilation_config: '{"cudagraph_capture_sizes":[1,2,4,8,16,32]}'
+        compilation_config: '{"cudagraph_capture_sizes":[1,2,4,8,16,32,64,128,256],"max_cudagraph_capture_size":256}'
 
 # Features not supported on this platform.
 # Test cases whose model name contains any of these strings will be skipped.

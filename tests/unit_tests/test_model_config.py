@@ -197,10 +197,15 @@ def test_thead_graph_capture_sizes_reach_engine_and_cli(
         cfg = ModelConfig.load("qwen3_6", case)
     else:
         cfg = ModelConfig.load("qwen3_6", case, platform="thead", device="zw810e")
-    expected = {"cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32]}
+    expected = {
+        "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32, 64, 128, 256],
+        "max_cudagraph_capture_size": 256,
+    }
     assert cfg.engine_kwargs()["compilation_config"] == expected
+    assert cfg.engine_kwargs()["enforce_eager"] == case.endswith("eager")
     args = cfg.serve_args()
     assert json.loads(args[args.index("--compilation-config") + 1]) == expected
+    assert ("--enforce-eager" in args) == case.endswith("eager")
 
 
 def test_serve_args_serializes_nested_json(tmp_path):
