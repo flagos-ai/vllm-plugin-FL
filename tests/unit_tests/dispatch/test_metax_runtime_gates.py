@@ -104,7 +104,14 @@ def test_boot_installer_only_imports_fixes_for_affected_runtime(
 
 
 @pytest.mark.parametrize("legacy_torch", [True, False])
-def test_patch_loader_leaves_modern_torch_private_apis_alone(monkeypatch, legacy_torch):
+@pytest.mark.parametrize("external_fla", [None, "0", "1"])
+def test_patch_loader_only_imports_enabled_compatibility_modules(
+    monkeypatch, legacy_torch, external_fla
+):
+    if external_fla is None:
+        monkeypatch.delenv("MACA_VLLM_USE_EXTERNAL_FLA", raising=False)
+    else:
+        monkeypatch.setenv("MACA_VLLM_USE_EXTERNAL_FLA", external_fla)
     parent = _runtime(
         monkeypatch,
         "2.8.0+metax" if legacy_torch else "2.10.0+metax",
@@ -130,6 +137,7 @@ def test_patch_loader_leaves_modern_torch_private_apis_alone(monkeypatch, legacy
         monkeypatch, parent + ".patches", _METAX / "patches/__init__.py", package=True
     )
     assert patches.PATCH_ERRORS == {}
+    assert ("gdn_linear_attn" in imported) is (external_fla == "1")
     for name in ("fix_standalone_compile", "functorch_config_patch"):
         assert (name in imported) is legacy_torch
     # The upstream MetaX 0.32 platform still disables third-party triton_kernels

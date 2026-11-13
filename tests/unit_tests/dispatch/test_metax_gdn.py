@@ -40,7 +40,6 @@ def patched(monkeypatch):
     upstream = ModuleType("vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn")
     upstream.ChunkGatedDeltaRule = ChunkGatedDeltaRule
     monkeypatch.setitem(sys.modules, upstream.__name__, upstream)
-    monkeypatch.delenv("MACA_VLLM_USE_EXTERNAL_FLA", raising=False)
     spec = importlib.util.spec_from_file_location("metax_gdn_test_patch", PATCH)
     patch = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(patch)
@@ -65,17 +64,6 @@ def inputs():
         "core_attn_out": torch.full((7, 2, 4), -123.0),
         "aiter_prefill_metadata": object(),
     }
-
-
-def test_032_chunk_registration_keeps_native_dispatch_and_all_metadata(patched):
-    cls = patched.registered["ChunkGatedDeltaRule"]
-    assert cls is patched.patch.MacaChunkGatedDeltaRule
-    assert list(patched.registered) == ["ChunkGatedDeltaRule"]
-    args = inputs()
-    assert cls()(**args) == ("native-output", "native-state")
-    assert patched.calls[0].keys() == args.keys()
-    for name, value in args.items():
-        assert patched.calls[0][name] is value
 
 
 @pytest.mark.parametrize("layout", ["old", "state_v_first", "transpose_state_layout"])
@@ -133,9 +121,10 @@ def test_external_fla_preserves_state_layout_and_writes_only_live_output(
         "transpose_state_layout": transpose_state_layout,
     }[layout]
     monkeypatch.setitem(sys.modules, external.__name__, external)
-    monkeypatch.setenv("MACA_VLLM_USE_EXTERNAL_FLA", "1")
-    op = patched.patch.MacaChunkGatedDeltaRule()
-    output, state = op(**args)
+    cls = patched.registered["ChunkGatedDeltaRule"]
+    assert cls is patched.patch.MacaChunkGatedDeltaRule
+    assert list(patched.registered) == ["ChunkGatedDeltaRule"]
+    output, state = cls()(**args)
     assert len(calls) == 1
     assert patched.calls == []
     torch.testing.assert_close(output, expected_output)
@@ -158,7 +147,6 @@ def test_external_fla_accepts_absent_state_and_output_buffer(patched, monkeypatc
 
     external.chunk_gated_delta_rule = chunk
     monkeypatch.setitem(sys.modules, external.__name__, external)
-    monkeypatch.setenv("MACA_VLLM_USE_EXTERNAL_FLA", "1")
     args = inputs()
     args.update(initial_state=None, core_attn_out=None, output_final_state=False)
     op = patched.patch.MacaChunkGatedDeltaRule()

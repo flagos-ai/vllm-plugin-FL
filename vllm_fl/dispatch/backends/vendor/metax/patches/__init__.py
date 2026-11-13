@@ -8,6 +8,7 @@ Each patch is imported on its own and failures are recorded in
 
 import importlib
 import logging
+import os
 
 import vllm.utils.import_utils as iu
 
@@ -46,7 +47,15 @@ iu.has_triton_kernels = lambda: False
 def _import_patches() -> dict[str, Exception]:
     errors: dict[str, Exception] = {}
     for name in _PATCH_MODULES:
-        if name in ("fix_standalone_compile", "functorch_config_patch") and not legacy_torch_runtime():
+        if (
+            name == "gdn_linear_attn"
+            and os.environ.get("MACA_VLLM_USE_EXTERNAL_FLA") != "1"
+        ):
+            continue
+        if (
+            name in ("fix_standalone_compile", "functorch_config_patch")
+            and not legacy_torch_runtime()
+        ):
             # These replace private torch 2.8 APIs and the matmul class's
             # __setattr__; importing them on torch 2.10 would undo native fixes.
             continue

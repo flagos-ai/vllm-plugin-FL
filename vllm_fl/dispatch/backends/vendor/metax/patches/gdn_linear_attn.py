@@ -10,7 +10,6 @@ Only the chunk op needs a bridge for the optional external FLA implementation.
 """
 
 import inspect
-import os
 
 import torch
 
@@ -40,23 +39,6 @@ class MacaChunkGatedDeltaRule(ChunkGatedDeltaRule):
         core_attn_out: torch.Tensor | None = None,
         aiter_prefill_metadata: object | None = None,
     ):
-        if os.getenv("MACA_VLLM_USE_EXTERNAL_FLA", "0") != "1":
-            return super().forward_native(
-                q=q,
-                k=k,
-                v=v,
-                g=g,
-                beta=beta,
-                initial_state=initial_state,
-                output_final_state=output_final_state,
-                cu_seqlens=cu_seqlens,
-                chunk_indices=chunk_indices,
-                chunk_offsets=chunk_offsets,
-                use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
-                core_attn_out=core_attn_out,
-                aiter_prefill_metadata=aiter_prefill_metadata,
-            )
-
         from fla.ops.gated_delta_rule import chunk_gated_delta_rule
 
         parameters = inspect.signature(chunk_gated_delta_rule).parameters
