@@ -80,9 +80,9 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
-    if vendor == "ascend" and requested is None:
-        expected = "1"
-    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+    if vendor == "ascend":
+        expected = requested
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == expected
 
 
 @pytest.mark.parametrize(

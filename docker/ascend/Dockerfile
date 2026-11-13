@@ -29,7 +29,6 @@ ARG EXTRA_INDEX_URL
 ENV DEBIAN_FRONTEND=noninteractive \
     VLLM_PLUGINS=fl \
     VLLM_FL_PLATFORM=ascend \
-    VLLM_USE_V2_MODEL_RUNNER=1 \
     USE_C_EXTENSION=0 \
     HF_ENDPOINT=https://hf-mirror.com \
     FL_MODEL_BASE_PATH=/data/models \

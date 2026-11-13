@@ -2,10 +2,11 @@
 
 This recipe targets the `0.5.0-dev` plugin branch and installs upstream
 `v0.32.0` as a non-editable `0.32.0+empty` wheel. Ascend selects the upstream
-V2 model runner by default; the primary 0.32 checks use
-`VLLM_USE_V2_MODEL_RUNNER=1`. An explicit value of `0` retains the legacy FL
-runner for compatibility. The recipe reuses the Ascend runtime
-from the latest 910C application image listed on the
+V2 model runner for configurations supported by upstream vLLM. The primary
+0.32 checks explicitly set `VLLM_USE_V2_MODEL_RUNNER=1`. With the variable
+unset, vLLM can select V1 for features such as suffix speculative decoding.
+An explicit value of `0` retains the legacy FL runner. The recipe reuses the
+Ascend runtime from the 910C application image listed on the
 [FlagOS release page](https://flagos-ai.github.io/release-info/application/):
 
 ```text

@@ -3,9 +3,25 @@
 ## vLLM 0.32.0 on `0.5.0-dev`
 
 Prepare the pinned 910C image and install the matching FL wheel using the
-[Ascend image recipe](../../docker/ascend/README.md#build). The image and CI
-set `VLLM_USE_V2_MODEL_RUNNER=1`. The [serving examples](../../docker/ascend/README.md#inference-smoke-tests)
+[Ascend image recipe](../../docker/ascend/README.md#build). With the runner
+variable unset, vLLM 0.32 selects V2 for supported configurations and can
+select V1 for features such as suffix speculative decoding. The pinned CI
+image and its setup explicitly use `VLLM_USE_V2_MODEL_RUNNER=1`.
+The [serving examples](../../docker/ascend/README.md#inference-smoke-tests)
 cover eager execution and `FULL_DECODE_ONLY` with native HCCL.
+
+| Component | vLLM 0.32 test environment |
+| --- | --- |
+| Hardware and driver | Ascend 910C 64 GiB, AArch64, with host driver `25.5.0` on the validation host. The [base image release](https://flagos-ai.github.io/release-info/application/vllm0.24.0-ascend-cann9.0.0-910c/) lists `26.0.rc1` as its host prerequisite. |
+| SDK and native collectives | CANN `9.0.0`, including HCCL |
+| Base image | `harbor.baai.ac.cn/flagos-app/vllm0.24.0-ascend-cann9.0.0-910c:2.2.0-0.3.0@sha256:fc83d07a4fbecd090dc471e9caa5d978dc34715fcfcca537b7bbf720a298dd51` |
+| CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-ci-20261104-v2-0b420101@sha256:eadc6f0fa34d2b8291db76c2ff24f4dddfadfb449b9f5c282147ef7c229a5ad5` |
+| Python and vLLM | Python `3.11.15`, vLLM `0.32.0+empty` from [`5df63a7`](https://github.com/vllm-project/vllm/commit/5df63a7203cdb9328d824a27b682e77c7b9928be) |
+| PyTorch and torch-npu | PyTorch `2.10.0+cpu`, torch-npu `2.10.0` |
+| FlagTree and Triton | FlagTree `0.7.0+ascend3.5`, active Triton `3.5.1` |
+| FlagGems | `5.4.0` at [`6ed2f39`](https://github.com/flagos-ai/FlagGems/commit/6ed2f39071ef85db26b7e64f0652a162f434959c) |
+| FlagGems-vllm | Source tag `v0.2.0` at [`b5c2c22`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19) |
+| Optional FlagCX | `0.14.1+cann9.0.0.910c` for the C API path below |
 
 ### Optional FlagCX device collectives on vLLM 0.32.0
 

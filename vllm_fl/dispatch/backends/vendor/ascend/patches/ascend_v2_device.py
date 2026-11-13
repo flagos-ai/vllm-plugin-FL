@@ -57,14 +57,28 @@ def install_ascend_v2_device_shims() -> bool:
     if current_platform.device_type != "npu":
         return False
 
-    facade = _TorchFacade(current_platform.torch_device_fn)
+    bindings = []
     for name in _DEVICE_MODULES:
         module = importlib.import_module(name)
-        if module.torch is torch or isinstance(module.torch, _TorchFacade):
-            module.torch = facade
-        else:
+        previous = module.torch
+        if previous is not torch and not isinstance(previous, _TorchFacade):
             raise RuntimeError(f"V2 module {name} already owns a custom torch binding")
+        bindings.append((module, previous))
 
     buffers = importlib.import_module("vllm.v1.worker.gpu.buffer_utils")
-    buffers.is_uva_available = _no_uva
+    previous_uva = buffers.is_uva_available
+    facade = _TorchFacade(current_platform.torch_device_fn)
+    applied = []
+    try:
+        for module, previous in bindings:
+            applied.append((module, previous))
+            module.torch = facade
+        buffers.is_uva_available = _no_uva
+    except Exception:
+        if buffers.is_uva_available is not previous_uva:
+            buffers.is_uva_available = previous_uva
+        for module, previous in reversed(applied):
+            if module.torch is not previous:
+                module.torch = previous
+        raise
     return True
