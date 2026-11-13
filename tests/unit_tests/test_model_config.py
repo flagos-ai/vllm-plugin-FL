@@ -181,6 +181,28 @@ def test_enflame_s60_compilation_config_inherits_runner_environment(case, monkey
     assert inherited.serve_args() == explicit.serve_args()
 
 
+@pytest.mark.parametrize(
+    "case",
+    ["27b_tp4_eager", "27b_tp4_graph", "35b_a3b_tp4_eager", "35b_a3b_tp4_graph"],
+)
+@pytest.mark.parametrize("inherit_environment", [False, True])
+def test_thead_graph_capture_sizes_reach_engine_and_cli(
+    case, inherit_environment, monkeypatch
+):
+    monkeypatch.delenv("FL_TEST_PLATFORM", raising=False)
+    monkeypatch.delenv("FL_TEST_DEVICE", raising=False)
+    if inherit_environment:
+        monkeypatch.setenv("FL_TEST_PLATFORM", "thead")
+        monkeypatch.setenv("FL_TEST_DEVICE", "zw810e")
+        cfg = ModelConfig.load("qwen3_6", case)
+    else:
+        cfg = ModelConfig.load("qwen3_6", case, platform="thead", device="zw810e")
+    expected = {"cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32]}
+    assert cfg.engine_kwargs()["compilation_config"] == expected
+    args = cfg.serve_args()
+    assert json.loads(args[args.index("--compilation-config") + 1]) == expected
+
+
 def test_serve_args_serializes_nested_json(tmp_path):
     _write(
         tmp_path / "nested.yaml",
