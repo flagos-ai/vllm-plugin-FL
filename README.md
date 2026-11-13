@@ -51,7 +51,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Tsingmicro | Supported (eager) | [deployment guide](./docs/usage/tsingmicro.md) |
 | Moore Threads | Supported | [deployment guide](./docs/usage/musa.md) |
 | Hygon | Supported | [deployment guide](./docs/usage/hygon.md) |
-| Sunrise | Supported | [vLLM 0.32 empty / Runner V2](./docker/sunrise/README.md) |
+| Sunrise | Supported | [deployment guide](./docs/usage/sunrise.md) |
 | ARM64 CPU | Supported | - |
 
 ## Quick Start
