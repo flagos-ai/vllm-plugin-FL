@@ -5,6 +5,7 @@
 import functools
 import importlib.util
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
@@ -64,6 +65,17 @@ def runner_v2(monkeypatch):
         def get_draft_model(self):
             return None
 
+    class NativeGraphManager:
+        def _capture_stream(self, desc):
+            return self.capture_stream
+
+        def run_fullgraph(self, desc):
+            events.append(("replay", desc))
+            return desc
+
+        def release_graphs(self):
+            events.append("release")
+
     runtime = SimpleNamespace(
         Stream=Mock(),
         PTPUGraph=type("PTPUGraph", (), {}),
@@ -74,7 +86,10 @@ def runner_v2(monkeypatch):
     platform = SimpleNamespace(device_type="ptpu", torch_device_fn=runtime)
     install("vllm.platforms", current_platform=platform)
     upstream = install(
-        "vllm.v1.worker.gpu.model_runner", GPUModelRunner=NativeV2, torch=torch
+        "vllm.v1.worker.gpu.model_runner",
+        GPUModelRunner=NativeV2,
+        ModelCudaGraphManager=NativeGraphManager,
+        torch=torch,
     )
     helpers = [
         install("vllm.v1.worker.gpu." + name, torch=torch)
@@ -108,9 +123,13 @@ def runner_v2(monkeypatch):
     )
 
 
-def make_runner(state):
+def make_runner(state, tp=1):
     return state.module.SunriseV2ModelRunner(
-        SimpleNamespace(model_config=SimpleNamespace(enforce_eager=True)), "ptpu:1"
+        SimpleNamespace(
+            model_config=SimpleNamespace(enforce_eager=True),
+            parallel_config=SimpleNamespace(tensor_parallel_size=tp),
+        ),
+        "ptpu:1",
     )
 
 
@@ -164,3 +183,40 @@ def test_v2_installs_adapters_for_late_loaded_helpers(runner_v2):
         state.io.register_io_module_hooks.assert_called_once_with(runner.model)
     finally:
         sys.modules.pop(late_helper.__name__)
+
+
+def test_sunrise_tp_replay_drains_capture_stream(runner_v2):
+    state = runner_v2
+    native_manager = state.upstream.ModelCudaGraphManager
+    make_runner(state)
+    assert state.upstream.ModelCudaGraphManager is native_manager
+    make_runner(state, tp=2)
+    manager = state.upstream.ModelCudaGraphManager()
+    manager.capture_stream = SimpleNamespace(
+        wait_stream=lambda stream: state.events.append(("capture_wait", stream))
+    )
+    caller = SimpleNamespace(
+        wait_stream=lambda stream: state.events.append(("caller_wait", stream))
+    )
+
+    @contextmanager
+    def use_stream(stream):
+        state.events.append(("enter", stream))
+        yield
+        state.events.append(("exit", stream))
+
+    state.runtime.current_stream = lambda: caller
+    state.runtime.stream = use_stream
+    state.runtime.synchronize.side_effect = lambda: state.events.append("sync")
+    assert manager._capture_stream("decode") is manager.capture_stream
+    assert manager.run_fullgraph("decode") == "decode"
+    assert state.events == [
+        ("capture_wait", caller),
+        ("enter", manager.capture_stream),
+        ("replay", "decode"),
+        "sync",
+        ("exit", manager.capture_stream),
+        ("caller_wait", manager.capture_stream),
+    ]
+    manager.release_graphs()
+    assert not manager._capture_streams

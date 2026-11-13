@@ -71,11 +71,46 @@ def install_sunrise_v2_runtime():
             namespace["torch"] = _TorchRuntime()
 
 
+class _SunriseTPGraphManager(upstream.ModelCudaGraphManager):
+    """Finish a PTPU replay before the next eager TP collective."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._capture_streams = {}
+
+    def _capture_stream(self, desc):
+        stream = super()._capture_stream(desc)
+        self._capture_streams[desc] = stream
+        return stream
+
+    def release_graphs(self):
+        super().release_graphs()
+        self._capture_streams.clear()
+
+    def run_fullgraph(self, desc):
+        runtime = current_platform.torch_device_fn
+        capture_stream = self._capture_streams[desc]
+        caller_stream = runtime.current_stream()
+        if capture_stream != caller_stream:
+            capture_stream.wait_stream(caller_stream)
+        with runtime.stream(capture_stream):
+            result = super().run_fullgraph(desc)
+            # Captured PCCL work must finish before eager FlagCX consumes
+            # the replay output. A stream wait alone did not suffice.
+            runtime.synchronize()
+        if capture_stream != caller_stream:
+            caller_stream.wait_stream(capture_stream)
+        return result
+
+
 class SunriseV2ModelRunner(upstream.GPUModelRunner):
     """Native Runner V2 using Sunrise streams, graphs and FL operator dispatch."""
 
     def __init__(self, vllm_config, device):
         install_sunrise_v2_runtime()
+        if vllm_config.parallel_config.tensor_parallel_size > 1:
+            # The upstream runner creates this manager during KV initialization.
+            upstream.ModelCudaGraphManager = _SunriseTPGraphManager
         super().__init__(vllm_config, device)
 
     def load_model(self, *args, **kwargs):
