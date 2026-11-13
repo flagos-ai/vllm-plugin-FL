@@ -616,9 +616,9 @@ class WorkerFL(WorkerBase):
                 self.model_runner.get_model(),
             )
 
-        # Keep profile, compilation and serving under the same Dynamo global
-        # thread guard, as in vLLM 0.32's worker.
-        set_torch_threads_for_runtime()
+        if getattr(current_platform, "vendor_name", "") == "metax":
+            # Keep the Dynamo thread guard stable from graph warmup to serving.
+            set_torch_threads_for_runtime()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
@@ -906,9 +906,6 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        # vLLM 0.32 dropped ModelConfig.enable_return_routed_experts when the
-        # routed-experts plumbing moved to the aux-output connector; treat an
-        # absent field as the feature being off.
         if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
@@ -1099,7 +1096,10 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        if self.vllm_config.kernel_config.enable_jit_warmup:
+        if (
+            getattr(current_platform, "vendor_name", "") != "metax"
+            or self.vllm_config.kernel_config.enable_jit_warmup
+        ):
             activate_jit_monitor(
                 mode=self.observability_config.jit_monitor_mode,
                 verbose=self.observability_config.jit_monitor_verbose,
@@ -1113,6 +1113,9 @@ class WorkerFL(WorkerBase):
         # Warmup / first-compile is done — activate the `VLLM_GPU_SYNC_CHECK`
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
+
+        if getattr(current_platform, "vendor_name", "") != "metax":
+            set_torch_threads_for_runtime()
 
         return CompilationTimes(
             language_model=self.compilation_config.compilation_time,
@@ -1619,14 +1622,11 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    try:
-        from vllm.model_executor.determinism.batch_invariant import (
-            init_batch_invariance,
-        )
-    except ImportError:  # vLLM <= 0.28 kept it under layers/
-        from vllm.model_executor.layers.batch_invariant import (
-            init_batch_invariance,
-        )
+    # vLLM 0.32 keeps the module under ``determinism``; the 0.28 location
+    # (``layers.batch_invariant``) no longer exists.
+    from vllm.model_executor.determinism.batch_invariant import (
+        init_batch_invariance,
+    )
 
     init_batch_invariance()
     override_envs_for_eplb(

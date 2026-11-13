@@ -67,13 +67,6 @@ class _Ids:
 
 def _providers(monkeypatch, fail=None):
     calls = []
-    marker = (object(), object(), object())
-
-    def safe(*args):
-        calls.append(("safe", args))
-        if fail == "safe":
-            raise RuntimeError("safe provider failed")
-        return marker
 
     def provider(name):
         def old(*args):
@@ -87,56 +80,51 @@ def _providers(monkeypatch, fail=None):
 
         return old
 
-    _module(monkeypatch, SAFE_MODULE, moe_align_block_size=safe)
     _module(monkeypatch, "flag_gems", moe_align_block_size_triton=provider("gems"))
     _module(
         monkeypatch, "flaggems_vllm", moe_align_block_size_triton=provider("bridge")
     )
-    return calls, marker
+    return calls
 
 
 @pytest.mark.parametrize(
     "device,vendor,selected",
     [
-        ("cuda", "metax", "safe"),
+        ("cuda", "metax", "bridge"),
         ("cuda", "nvidia", "bridge"),
         ("gcu", "metax", "gems"),
         ("cpu", "metax", "bridge"),
     ],
 )
-def test_safe_align_requires_both_cuda_device_and_metax_vendor(
+def test_flaggems_align_keeps_generic_provider_selection(
     monkeypatch, adapter, device, vendor, selected
 ):
     module, platform = adapter
     platform.vendor_name = vendor
     ids = _Ids(device)
-    calls, marker = _providers(monkeypatch)
+    calls = _providers(monkeypatch)
     result = module.moe_align_block_size_flaggems(
         ids, 4, 7, pad_sorted_ids=True, ignore_invalid_experts=True
     )
     assert len(calls) == 1
     name, args = calls[0]
     assert name == selected and args[0] is ids
-    if selected == "safe":
-        assert args[1:] == (4, 7, None, True, True)
-        assert result is marker
-    else:
-        assert args[1:3] == (7, 4)
-        assert len(args) == 6
-        assert all(actual is passed for actual, passed in zip(result, args[3:]))
-        assert result[2].item() == 0
+    assert args[1:3] == (7, 4)
+    assert len(args) == 6
+    assert all(actual is passed for actual, passed in zip(result, args[3:]))
+    assert result[2].item() == 0
 
 
 @pytest.mark.parametrize(
     "device,vendor,selected",
-    [("cuda", "metax", "safe"), ("cuda", "nvidia", "bridge"), ("gcu", "gcu", "gems")],
+    [("cuda", "metax", "bridge"), ("cuda", "nvidia", "bridge"), ("gcu", "gcu", "gems")],
 )
 def test_alignment_provider_failures_propagate_without_fallback(
     monkeypatch, adapter, device, vendor, selected
 ):
     module, platform = adapter
     platform.vendor_name = vendor
-    calls, _ = _providers(monkeypatch, fail=selected)
+    calls = _providers(monkeypatch, fail=selected)
     with pytest.raises(RuntimeError, match=f"{selected} provider failed"):
         module.moe_align_block_size_flaggems(_Ids(device), 4, 7)
     assert len(calls) == 1 and calls[0][0] == selected

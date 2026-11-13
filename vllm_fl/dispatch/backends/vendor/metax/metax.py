@@ -71,6 +71,26 @@ class MacaBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map: torch.Tensor | None = None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        from .impl.moe_align_block_size import moe_align_block_size
+
+        return moe_align_block_size(
+            topk_ids,
+            block_size,
+            num_experts,
+            expert_map,
+            pad_sorted_ids,
+            ignore_invalid_experts,
+        )
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.

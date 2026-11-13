@@ -3120,7 +3120,6 @@ class ModelRunnerFL(
             if completion_part_len > 0:
                 # compute completion's xdrope_positions on-the-fly
                 dst_start = xdrope_pos_ptr
-                dst_end = xdrope_pos_ptr + completion_part_len
 
                 XDRotaryEmbedding.get_next_input_positions_tensor(
                     out=self.xdrope_positions.np,
@@ -3525,7 +3524,6 @@ class ModelRunnerFL(
 
         req_start_idx = 0
         should_sync_mrope_positions = False
-        should_sync_xdrope_positions = False
 
         for req_id in self.input_batch.req_ids:
             mm_embeds_req: list[torch.Tensor] = []
@@ -3617,10 +3615,6 @@ class ModelRunnerFL(
         if should_sync_mrope_positions:
             self._calc_mrope_positions(scheduler_output)
             self.mrope_positions.copy_to_gpu(total_num_scheduled_tokens)
-
-        if should_sync_xdrope_positions:
-            self._calc_xdrope_positions(scheduler_output)
-            self.xdrope_positions.copy_to_gpu(total_num_scheduled_tokens)
 
         return mm_embeds, is_mm_embed
 

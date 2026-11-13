@@ -409,8 +409,8 @@ def test_worker_warms_cached_dispatch_after_model_load_only_when_needed(
         load_model=lambda **kwargs: events.append("load")
     )
     worker.load_model()
-    assert events == (
-        ["load", "warmup", "threads"] if expected else ["load", "threads"]
+    assert events == ["load"] + (["warmup"] if expected else []) + (
+        ["threads"] if vendor == "metax" else []
     )
 
 

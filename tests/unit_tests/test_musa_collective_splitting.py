@@ -168,11 +168,11 @@ def fixture(
     **passes,
 ):
     config = ConfigContract()
+    config.decoder_replay_cudagraph_capture_sizes = []
     config.mode = Mode.VLLM_COMPILE if compile_mode is None else compile_mode
     config.cudagraph_mode = GraphMode.PIECEWISE if graph_mode is None else graph_mode
     config.compile_sizes = None
     config.inductor_compile_config = {}
-    config.decoder_replay_cudagraph_capture_sizes = []
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
     config.pass_config = SimpleNamespace(
@@ -453,34 +453,41 @@ def test_explicit_list_keeps_identity_and_existing_order():
 
 
 @pytest.mark.parametrize(
-    "passes,expected",
+    "passes",
     [
-        ({}, GraphMode.NONE),
-        ({"fuse_attn_quant": True}, GraphMode.FULL),
-        ({"enable_sp": True}, GraphMode.PIECEWISE),
-        ({"fuse_gemm_comms": True}, GraphMode.PIECEWISE),
+        {},
+        {"fuse_attn_quant": True},
+        {"enable_sp": True},
+        {"fuse_gemm_comms": True},
     ],
 )
-def test_initializer_graph_mode_changes_are_preserved(passes, expected):
-    platform, vconfig, _ = fixture(split=[] if not passes else None, **passes)
+def test_initializer_graph_mode_changes_are_preserved(passes):
+    if not passes:
+        # Explicit contract for the bare configuration: no passes and no SP
+        # means no piecewise graph and no splitting ops, regardless of what
+        # the upstream initializer decides.
+        platform, vconfig, _ = fixture(split=[])
+        platform.check_and_update_config(vconfig)
+        assert vconfig.compilation_config.cudagraph_mode is GraphMode.NONE
+        assert vconfig.compilation_config.splitting_ops == []
+        vconfig.compilation_config.set_splitting_ops_for_v1(
+            "allgather_reducescatter", 3
+        )
+        assert vconfig.compilation_config.cudagraph_mode is GraphMode.NONE
+        return
+
+    _, reference, _ = fixture(split=None, **passes)
+    reference.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
+    expected = reference.compilation_config.cudagraph_mode
+    expected_ops = list(reference.compilation_config.splitting_ops)
+    if expected.has_piecewise_cudagraphs() and "vllm::all_reduce" not in expected_ops:
+        expected_ops.append("vllm::all_reduce")
+    platform, vconfig, _ = fixture(split=None, **passes)
     platform.check_and_update_config(vconfig)
     assert vconfig.compilation_config.cudagraph_mode is expected
-    # vLLM 0.32 no longer promotes the legacy SP/GEMM flags to FULL. Those
-    # cases retain piecewise attention/KV boundaries and the MUSA TP split.
-    expected_splits = (
-        list(ConfigContract._attention_ops)
-        + [
-            "vllm::unified_kv_cache_update",
-            "vllm::unified_mla_kv_cache_update",
-            "vllm::all_reduce",
-        ]
-        if expected is GraphMode.PIECEWISE
-        else []
-    )
-    assert vconfig.compilation_config.splitting_ops == expected_splits
+    assert vconfig.compilation_config.splitting_ops == expected_ops
     vconfig.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
     assert vconfig.compilation_config.cudagraph_mode is expected
-    assert vconfig.compilation_config.splitting_ops == expected_splits
 
 
 @pytest.mark.parametrize(

@@ -44,6 +44,9 @@ def registration(monkeypatch):
             silu_and_mul
         )
 
+        def moe_align_block_size(self, *args):
+            return args
+
         def attention_backend(self, **kwargs):
             return "MacaFlashAttentionBackend"
 
@@ -77,10 +80,14 @@ def test_schema_only_image_retains_attention_without_advertising_native_ops(
     _no_mcoplib(monkeypatch)
     assert impls["attention_backend"].is_available()
     assert impls["attention_backend"].fn() == "MacaFlashAttentionBackend"
+    align = impls["moe_align_block_size"]
+    assert align.impl_id == "vendor.metax"
+    assert align.is_available()
+    assert align.fn("ids", 4, 7, None, True, True) == ("ids", 4, 7, None, True, True)
     assert not any(
         impl.is_available()
         for name, impl in impls.items()
-        if name != "attention_backend"
+        if name not in {"attention_backend", "moe_align_block_size"}
     )
 
 
