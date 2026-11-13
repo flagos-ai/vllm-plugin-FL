@@ -3,7 +3,45 @@
 # Setup script for Ascend NPU CI environment.
 set -euo pipefail
 
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 git config --global --add safe.directory "$(pwd)"
+
+VLLM_DIST_VERSION="$(python -c 'from importlib.metadata import version; print(version("vllm"))' 2>/dev/null || true)"
+
+if [[ "${VLLM_DIST_VERSION}" == "0.32.0+flagos" ]]; then
+    # FlagOS Runtime 2.3.0 (CANN 9.2.1) + vLLM 0.32.0+flagos stack
+    python "$HERE/../install_flaggems_vllm.py"
+
+    # Preserve Runtime PYTHONPATH=/opt/flagtree compiler selection (do not pass -I).
+    python -B "$HERE/stack.py" --runtime-only
+
+    if [[ ! -e .git && -z "${SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL:-}" ]]; then
+        SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="$(python -c 'from importlib.metadata import PackageNotFoundError, version
+try:
+    print(version("vllm-plugin-fl"))
+except PackageNotFoundError:
+    print("0.5.0.dev0")')"
+        export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL
+    fi
+
+    env -u VLLM_VENDOR uv pip install \
+        --python "$(python -c 'import sys; print(sys.executable)')" \
+        --break-system-packages \
+        --no-build-isolation \
+        --no-deps \
+        -e .
+
+    python - <<'PY'
+from importlib.metadata import version
+
+for package in ("pytest", "pytest-xdist", "pytest-cov", "pytest-json-report", "pytest-timeout"):
+    print(f"CI tool: {package}=={version(package)}")
+PY
+
+    python -B "$HERE/stack.py"
+    exit 0
+fi
 
 pip install \
     --no-build-isolation \

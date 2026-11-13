@@ -42,7 +42,7 @@ MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
-ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.28.0}"
+ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.32.0}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3b406c36212744b98b9720bf6d0a5387c09fe96b}"
 ASCEND_FLAGTREE_VERSION="${ASCEND_FLAGTREE_VERSION:-0.6.2a1+ascend3.5}"
@@ -246,14 +246,21 @@ if [[ "${TARGET}" != "dev" && "${TARGET}" != "ci" && "${TARGET}" != "release" ]]
     err "Invalid target '${TARGET}'. Must be 'dev', 'ci', or 'release'."
 fi
 
-if ! command -v docker &>/dev/null; then
-    err "docker is not installed or not in PATH."
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
+if ! command -v "${CONTAINER_ENGINE}" &>/dev/null; then
+    err "${CONTAINER_ENGINE} is not installed or not in PATH."
 fi
 
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
     DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.ci"
+elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.18.0" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.18.0"
+elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" == "0.13.0" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.13.0"
+elif [[ "${PLATFORM}" == "ascend" && "${ASCEND_VLLM_VERSION}" != "0.32.0" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/ascend/Dockerfile.v0.28.0"
 fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
@@ -295,6 +302,34 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="cuda${CUDA_VERSION}-ubuntu${UBUNTU_VERSION}-py${PYTHON_VERSION}-${TARGET}"
+    fi
+elif [[ "${PLATFORM}" == "ascend" && "${TARGET}" == "ci" && "${ASCEND_VLLM_VERSION}" == "0.32.0" ]]; then
+    VLLM_VERSION="0.32.0"
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    # The vLLM 0.32 adapter is pinned as a separate source commit; build from
+    # that commit's tree and overlay the CI packaging files.
+    PLUGIN_SOURCE_SHA="$(tr -d '[:space:]' < "${SCRIPT_DIR}/ascend/plugin-source.ref")"
+    [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || err "docker/ascend/plugin-source.ref must hold a full Git revision."
+    if ! git -C "${BUILD_CONTEXT}" cat-file -e "${PLUGIN_SOURCE_SHA}^{commit}" 2>/dev/null; then
+        git -C "${BUILD_CONTEXT}" fetch --no-tags https://github.com/BrianPei/vllm-plugin-FL.git "${PLUGIN_SOURCE_SHA}" \
+            || err "Cannot fetch plugin source ${PLUGIN_SOURCE_SHA}."
+    fi
+    ARCHIVE_SOURCE=1
+    PLUGIN_SOURCE_VERSION="${PLUGIN_SOURCE_VERSION:-0.5.0.dev0+g${PLUGIN_SOURCE_SHA:0:12}}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
+    if [[ "${ASCEND_BASE_IMAGE}" != "quay.io/ascend/vllm-ascend:v0.20.2rc1-a3" ]]; then
+        BUILD_ARGS+=(--build-arg "BASE_IMAGE=${ASCEND_BASE_IMAGE}")
+    fi
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
+    BUILD_ARGS+=(
+        --build-arg "PLUGIN_SOURCE_SHA=${PLUGIN_SOURCE_SHA}"
+        --build-arg "PLUGIN_SOURCE_VERSION=${PLUGIN_SOURCE_VERSION}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="v${VLLM_VERSION}-ascend-ci"
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
@@ -441,6 +476,8 @@ if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
     msg "  Stack:          official vLLM 0.32.0 CUDA 12.9 / native extensions / FlagTree 317a0249 / FlagGems 6fe7709e7717"
 elif [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
+elif [[ "${PLATFORM}" == "ascend" && "${TARGET}" == "ci" && "${ASCEND_VLLM_VERSION}" == "0.32.0" ]]; then
+    msg "  Stack:          FlagOS Runtime Ascend CANN 9.2.1:2.3.0 / vLLM 0.32.0+flagos / torch-npu 2.13.0"
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  Base image:     ${ASCEND_BASE_IMAGE}"
     msg "  FlagGems:       ${ASCEND_FLAGGEMS_VERSION}"
@@ -480,7 +517,12 @@ msg "  vLLM:           ${VLLM_VERSION}"
 msg ""
 
 docker_build() {
-    docker build \
+    local format_args=()
+    if [[ "$(basename "${CONTAINER_ENGINE}")" == "podman" ]]; then
+        format_args=(--format docker)
+    fi
+    "${CONTAINER_ENGINE}" build \
+        "${format_args[@]+"${format_args[@]}"}" \
         -f "${DOCKERFILE}" \
         --target "${TARGET}" \
         "${BUILD_ARGS[@]}" \
@@ -493,6 +535,16 @@ docker_build() {
 
 if [[ "${PLATFORM}" == "hygon" ]]; then
     git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | docker_build -
+elif [[ "${ARCHIVE_SOURCE:-0}" == "1" ]]; then
+    source_context="$(mktemp -d)"
+    trap 'rm -rf -- "${source_context}"' EXIT
+    git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | tar -x -C "${source_context}"
+    git -C "${BUILD_CONTEXT}" archive --format=tar HEAD docker/ascend .github/scripts/install_flaggems_vllm.py .github/scripts/ascend \
+        | tar -x -C "${source_context}"
+    # Use the selected recipe even when its rename is still in the working tree.
+    cp -- "${DOCKERFILE}" "${source_context}/docker/ascend/Dockerfile"
+    DOCKERFILE="${source_context}/docker/ascend/Dockerfile"
+    docker_build "${source_context}"
 else
     docker_build "${BUILD_CONTEXT}"
 fi

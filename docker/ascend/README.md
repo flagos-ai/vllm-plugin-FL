@@ -1,4 +1,118 @@
-# Ascend 910C: vLLM 0.28.0 empty
+# Ascend Runtime-based vLLM 0.32 CI image (`Dockerfile`)
+
+Build from the repository root using the FlagOS Runtime 2.3.0 (CANN 9.2.1) base
+image `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.2.1:2.3.0@sha256:92600f84feee2a2a738bbc77abdb02c8c7af925a6da379b23dde6ded6cba50db`.
+The recipe `docker/ascend/Dockerfile` installs
+`vllm==0.32.0+flagos` on FlagOS Runtime 2.3.0 for `0.5.0-dev`, while the historical
+910C `v0.28.0+empty` recipe is preserved in `docker/ascend/Dockerfile.v0.28.0`.
+
+```bash
+bash docker/build.sh --platform ascend --target ci
+# On Podman-only hosts (without creating a docker alias):
+CONTAINER_ENGINE=podman bash docker/build.sh --platform ascend --target ci
+```
+
+The script builds from the plugin commit pinned in `docker/ascend/plugin-source.ref`
+(the vLLM 0.32 Ascend adapter). It overlays the CI packaging files from HEAD and
+uses the selected `docker/ascend/Dockerfile` from the checkout.
+
+| Component | Version / source |
+| --- | --- |
+| Base image | `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.2.1:2.3.0@sha256:92600f84feee2a2a738bbc77abdb02c8c7af925a6da379b23dde6ded6cba50db` |
+| Python | 3.12.13 (`/flagos/bin/python`), aarch64 |
+| PyTorch / torch_npu | `2.13.0+cpu` / `2.13.0` |
+| torchvision / torchaudio | `0.28.0+cpu` / `2.11.0+cpu` |
+| vLLM | `0.32.0+flagos` (pure-Python wheel from `flagos-pypi-ascend`) |
+| FlagGems | `5.4.0` |
+| FlagGems-vllm | `v0.2.0` (`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`) |
+| FlagTree (default compiler) | `0.7.1a1+ascend3.5` (`/opt/flagtree`, supplying Triton `3.5.1`) |
+| Vendor Triton (fallback) | `triton 3.6.0` / `triton_ascend 3.6.0` (`/opt/triton`) |
+| FlagCX / cann-shmem | `0.14.1+cann9.2.1` / `1.6.0` |
+| NumPy | `1.26.4` |
+
+The vendor index (`https://resource.flagos.net/repository/flagos-pypi-ascend/simple`)
+supplies the pure-Python `vllm==0.32.0+flagos` wheel and its repacked dependencies
+(`xgrammar==0.2.8+flagos`, `opencv-python-headless==5.0.0.93+flagos`,
+`compressed-tensors==0.17.0+flagos`); missing ordinary dependencies fall back to
+`INDEX_URL` via `uv --index-strategy unsafe-first-match`. `constraints.txt`
+protects all Runtime 2.3.0 core packages (`torch`, `torch-npu`, `torchvision`,
+`torchaudio`, `numpy`, `flag-gems`, `flagtree`, `flagcx`, `cann-shmem`) from
+replacement.
+
+FlagOS Runtime 2.3.0 isolates its compilers outside `/flagos/lib/python3.12/site-packages`:
+`/opt/flagtree` is active by default via `PYTHONPATH` (`/etc/profile.d/zz-flagos.sh`),
+and `source compiler triton` switches to `/opt/triton` (`triton 3.6.0` /
+`triton_ascend 3.6.0`). Do not pass Python's `-I` flag when running
+`.github/scripts/ascend/stack.py`, as `-I` strips `PYTHONPATH`.
+
+Run and verify on an Ascend NPU host (for example on Ascend 910B with devices `0,1`):
+
+```bash
+podman run --rm -it --ipc=host --privileged \
+  -e ASCEND_RT_VISIBLE_DEVICES=0,1 \
+  -e VLLM_FL_FLAGOS_WHITELIST=zeros \
+  -v /usr/local/dcmi:/usr/local/dcmi \
+  -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
+  -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
+  -v /etc/ascend_install.info:/etc/ascend_install.info \
+  -v /path/to/Qwen3-0.6B:/data/models/Qwen3-0.6B:ro \
+  harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-ascend-ci bash
+# Inside the container:
+bash .github/scripts/ascend/check.sh
+bash .github/scripts/ascend/setup.sh
+# Explicit 910B selection; two workers avoid excessive CPU thread creation.
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  python -m pytest tests/unit_tests --platform=ascend --device=910b \
+  -n 2 -m "not multi_gpu and not serial" --timeout=120
+python -m pytest tests/unit_tests --platform=ascend --device=910b \
+  -m "multi_gpu or serial" --timeout=120
+python -m pytest tests/functional_tests --platform=ascend --device=910b
+```
+
+### Minimal inference on 910B
+
+Replace `/path/to/Qwen3-0.6B` above with your local model directory before
+starting the container. Keep `VLLM_FL_FLAGOS_WHITELIST=zeros`: the verified configuration
+limits FlagGems registration to this operator. Unrestricted registration is not
+validated by this recipe. Use a script file with a main guard so worker processes
+can import it when Python uses `spawn`:
+
+```bash
+cat > /tmp/ascend_smoke.py <<'PY'
+import argparse
+from vllm import LLM, SamplingParams
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--tp", type=int, default=1)
+    args = parser.parse_args()
+    llm = LLM(
+        model=args.model, tensor_parallel_size=args.tp,
+        dtype="bfloat16", enforce_eager=True, max_model_len=512,
+        gpu_memory_utilization=0.3, enable_prefix_caching=False,
+        enable_chunked_prefill=False,
+    )
+    outputs = llm.generate(
+        ["Hello, my name is", "The capital of France is"],
+        SamplingParams(temperature=0.0, max_tokens=16),
+    )
+    for output in outputs:
+        assert output.outputs[0].token_ids, "No tokens generated"
+        print(repr(output.prompt), "->", repr(output.outputs[0].text))
+PY
+ASCEND_RT_VISIBLE_DEVICES=0 python /tmp/ascend_smoke.py --model /data/models/Qwen3-0.6B
+ASCEND_RT_VISIBLE_DEVICES=0,1 python /tmp/ascend_smoke.py --model /data/models/Qwen3-0.6B --tp 2
+```
+
+These commands check text generation in eager mode. They do not establish graph,
+long-context, performance or Qwen3.5/3.6 hybrid-cache support. The verified host
+used driver 25.5.2; the Runtime documentation lists 26.1.1. This records the tested
+configuration rather than a general driver compatibility guarantee.
+
+---
+
+# Ascend 910C: vLLM 0.28.0 empty (`Dockerfile.v0.28.0`)
 
 The image keeps the CANN 9.0.0 and torch_npu 2.10 runtime from the earlier
 910C environment:
@@ -42,17 +156,17 @@ optional dependency conflicts.
 
 ## Build and CI
 
-Build the image from the repository root:
+Build the legacy image from the repository root:
 
 ```bash
-docker/build.sh \
+ASCEND_VLLM_VERSION=0.28.0 bash docker/build.sh \
   --platform ascend \
   --target ci \
   --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
 ```
 
-The shared CI currently uses the published
-`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` image. Build and publish a
+The legacy CI image was published as
+`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean`. Build and publish a
 replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
 changing the configuration does not publish it.
 `.github/scripts/ascend/setup.sh` checks the runtime versions and rejects an
