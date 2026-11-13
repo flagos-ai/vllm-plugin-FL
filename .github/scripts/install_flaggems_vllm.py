@@ -42,7 +42,9 @@ def pip_install(*args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", default="", help="Use Enflame-specific source pin")
+    parser.add_argument(
+        "--platform", default="", help="Use Enflame-specific source pin"
+    )
     args = parser.parse_args(argv)
     commit = ENFLAME_COMMIT if args.platform == "enflame" else COMMIT
     release = "0.3.0.dev1" if args.platform == "enflame" else RELEASE
