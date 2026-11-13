@@ -52,9 +52,7 @@ def _config(**attrs):
         "swiglu_limit": None,
         "swiglu_alpha": None,
         "swiglu_beta": None,
-        "moe_parallel_config": SimpleNamespace(
-            use_batched_activation_format=False
-        ),
+        "moe_parallel_config": SimpleNamespace(use_batched_activation_format=False),
     }
     defaults.update(attrs)
     return SimpleNamespace(**defaults)
@@ -148,9 +146,7 @@ def test_selector_rejects_batched_activation_for_flaggems_path(moe):
     module.install_fl_w8a8_moe_selector()
     selector = env.oracle_module.select_int8_moe_backend
     config = _config(
-        moe_parallel_config=SimpleNamespace(
-            use_batched_activation_format=True
-        )
+        moe_parallel_config=SimpleNamespace(use_batched_activation_format=True)
     )
     with pytest.raises(ValueError, match="standard activation format"):
         selector(config)
@@ -246,18 +242,14 @@ def test_native_fallback_keeps_non_triton_experts(moe):
         ),
         (
             _config(
-                moe_parallel_config=SimpleNamespace(
-                    use_batched_activation_format=True
-                )
+                moe_parallel_config=SimpleNamespace(use_batched_activation_format=True)
             ),
             "value",
             "functional W8A8 MoE bridge requires the standard",
         ),
     ],
 )
-def test_native_fallback_rejects_unsupported_config(
-    moe, config, exc_key, match
-):
+def test_native_fallback_rejects_unsupported_config(moe, config, exc_key, match):
     module, env = moe
     env.flaggems_default = False
     module.install_fl_w8a8_moe_selector()

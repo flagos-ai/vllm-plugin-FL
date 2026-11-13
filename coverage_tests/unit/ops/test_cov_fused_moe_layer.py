@@ -48,12 +48,8 @@ def test_fl_quant_method_selects_backend_and_calls_super(monkeypatch):
         base_init_calls.append(moe)
 
     selector = _Recorder(result=("backend", "experts-cls"))
-    monkeypatch.setattr(
-        Mod.UnquantizedFusedMoEMethod, "__init__", base_init
-    )
-    monkeypatch.setattr(
-        Mod, "select_unquantized_moe_backend_oot", selector
-    )
+    monkeypatch.setattr(Mod.UnquantizedFusedMoEMethod, "__init__", base_init)
+    monkeypatch.setattr(Mod, "select_unquantized_moe_backend_oot", selector)
     moe = SimpleNamespace(name="moe")
 
     # Avoid CustomOp.__new__, which may substitute a registered OOT class on

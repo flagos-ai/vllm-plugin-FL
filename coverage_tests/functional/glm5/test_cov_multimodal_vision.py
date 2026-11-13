@@ -186,9 +186,7 @@ class TestVisionAttention:
         expected_k = expected_k.transpose(0, 1).contiguous() + 1
         assert torch.allclose(records["query"], expected_q)
         assert torch.allclose(records["key"], expected_k)
-        assert torch.allclose(
-            records["value"], expected_v.transpose(0, 1).contiguous()
-        )
+        assert torch.allclose(records["value"], expected_v.transpose(0, 1).contiguous())
 
     def test_missing_rotary_embeddings_skip_the_rotation(self, monkeypatch):
         monkeypatch.setattr(mm, "use_nvidia_reference", lambda: False)
@@ -297,7 +295,9 @@ class TestRotaryPositions:
         assert torch.equal(pos_ids, reference_ids)
         assert cos.shape == (24, 8)
         assert torch.equal(cos, torch.arange(16).reshape(4, 4)[pos_ids].flatten(1))
-        assert torch.equal(sin, (torch.arange(16).reshape(4, 4) + 100)[pos_ids].flatten(1))
+        assert torch.equal(
+            sin, (torch.arange(16).reshape(4, 4) + 100)[pos_ids].flatten(1)
+        )
 
 
 class TestAttentionMask:
@@ -313,9 +313,7 @@ class TestAttentionMask:
     def test_max_seqlen_only_for_length_aware_backends(self, backend, expected):
         layer = object.__new__(mm.Glm5NextVisionTransformer)
         layer.attn_backend = backend
-        got = layer.compute_attn_mask_seqlen(
-            torch.tensor([0, 2, 5], dtype=torch.int32)
-        )
+        got = layer.compute_attn_mask_seqlen(torch.tensor([0, 2, 5], dtype=torch.int32))
         if expected is None:
             assert got is None
         else:
@@ -400,9 +398,7 @@ class TestPrepareEncoderMetadata:
     def test_dtype_and_device_follow_the_patch_embedding(self):
         layer = object.__new__(mm.Glm5NextVisionTransformer)
         layer.patch_embed = SimpleNamespace(
-            proj=SimpleNamespace(
-                weight=torch.zeros(1, dtype=torch.bfloat16)
-            )
+            proj=SimpleNamespace(weight=torch.zeros(1, dtype=torch.bfloat16))
         )
         assert layer.dtype is torch.bfloat16
         assert layer.device == torch.device("cpu")
@@ -410,9 +406,7 @@ class TestPrepareEncoderMetadata:
 
 class _PatchEmbedding:
     def __init__(self, dtype=torch.float32):
-        self.proj = SimpleNamespace(
-            weight=torch.zeros(1, dtype=dtype)
-        )
+        self.proj = SimpleNamespace(weight=torch.zeros(1, dtype=dtype))
         self.calls = []
 
     def __call__(self, x):
@@ -497,12 +491,8 @@ def _budget(**overrides):
 
 class _Processor:
     def __init__(self):
-        self.image_processor = SimpleNamespace(
-            patch_expand_factor=1, merge_size=2
-        )
-        self.video_processor = SimpleNamespace(
-            patch_expand_factor=1, merge_size=2
-        )
+        self.image_processor = SimpleNamespace(patch_expand_factor=1, merge_size=2)
+        self.video_processor = SimpleNamespace(patch_expand_factor=1, merge_size=2)
         self.serving_budgets = {
             "image": _budget(max_tokens=512),
             "video": _budget(max_tokens=64),
@@ -557,16 +547,12 @@ class TestProcessingInfoBudget:
         assert tokens == (1 * 8 * 8) // 4
         assert info.get_num_image_tokens(image_width=112, image_height=112) == 16
         assert (
-            info.get_num_video_tokens(
-                image_width=112, image_height=112, num_frames=2
-            )
+            info.get_num_video_tokens(image_width=112, image_height=112, num_frames=2)
             == 16
         )
 
     @pytest.mark.parametrize(("max_tokens", "expected"), [(10, 0), (20, 2)])
-    def test_video_frame_search_respects_the_token_ceiling(
-        self, max_tokens, expected
-    ):
+    def test_video_frame_search_respects_the_token_ceiling(self, max_tokens, expected):
         info, _ = _processing_info()
         assert info._get_max_video_frames(max_tokens) == expected
 
@@ -620,10 +606,9 @@ class TestProcessingInfoBudget:
         monkeypatch.setattr(
             processor_module,
             "glm_video_timestamp_seconds",
-            lambda video_processor, metadata, **kwargs: calls.append(
-                ("timestamps", metadata.frames_indices)
-            )
-            or [0, 1],
+            lambda video_processor, metadata, **kwargs: (
+                calls.append(("timestamps", metadata.frames_indices)) or [0, 1]
+            ),
         )
         info, _ = _processing_info()
         result = info._get_video_second_idx_glm46v(
@@ -668,11 +653,11 @@ class TestDummyInputs:
         builder.info = info
         image_calls = []
         video_calls = []
-        builder._get_dummy_images = (
-            lambda **kwargs: image_calls.append(kwargs) or ["image"]
+        builder._get_dummy_images = lambda **kwargs: (
+            image_calls.append(kwargs) or ["image"]
         )
-        builder._get_dummy_videos = (
-            lambda **kwargs: video_calls.append(kwargs) or ["video"]
+        builder._get_dummy_videos = lambda **kwargs: (
+            video_calls.append(kwargs) or ["video"]
         )
         data = builder.get_dummy_mm_data(32, {"image": 1, "video": 2}, {})
         assert data == {"image": ["image"], "video": ["video"]}
@@ -685,12 +670,7 @@ class TestDummyInputs:
 class TestProcessorHooks:
     def test_prompt_updates_are_owned_by_vllm(self):
         processor = object.__new__(mm.Glm5NextMultiModalProcessor)
-        assert (
-            processor._hf_processor_applies_updates(
-                "prompt", {}, {}, {}
-            )
-            is False
-        )
+        assert processor._hf_processor_applies_updates("prompt", {}, {}, {}) is False
 
     def test_empty_mm_data_delegates_to_the_base_processor(self, monkeypatch):
         processor = object.__new__(mm.Glm5NextMultiModalProcessor)
@@ -699,8 +679,7 @@ class TestProcessorHooks:
             mm.Glm4vMultiModalProcessor,
             "_call_hf_processor",
             lambda self, prompt, mm_data, mm_kwargs, tok_kwargs: (
-                calls.append((self, prompt, mm_data, mm_kwargs, tok_kwargs))
-                or "base"
+                calls.append((self, prompt, mm_data, mm_kwargs, tok_kwargs)) or "base"
             ),
         )
         assert processor._call_hf_processor("prompt", {}, {}, {}) == "base"
@@ -724,9 +703,7 @@ class TestProcessorHooks:
             def configure_serving(self, kwargs):
                 created["serving"] = kwargs
 
-        monkeypatch.setattr(
-            processor_module, "Glm5NextProcessor", FakeProcessor
-        )
+        monkeypatch.setattr(processor_module, "Glm5NextProcessor", FakeProcessor)
         info = object.__new__(mm.Glm5NextProcessingInfo)
         info.ctx = SimpleNamespace(
             model_config=SimpleNamespace(
@@ -806,9 +783,7 @@ class TestConditionalGeneration:
             created.language = kwargs
             return "language-model"
 
-        monkeypatch.setattr(
-            runtime, "validate_glm5_config", lambda cfg: None
-        )
+        monkeypatch.setattr(runtime, "validate_glm5_config", lambda cfg: None)
         monkeypatch.setattr(mm, "Glm5NextVisionTransformer", FakeVision)
         monkeypatch.setattr(mm, "init_vllm_registered_model", fake_language)
         monkeypatch.setattr(

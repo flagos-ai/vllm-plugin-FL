@@ -223,7 +223,9 @@ class TestCompositeConfig:
         ) == (11, 12, 13, 14)
 
     def test_tie_word_embeddings_is_applied_after_super_init(self):
-        config = Qwen3_8FlashNextConfig(text_config=dict(_BASE), tie_word_embeddings=True)
+        config = Qwen3_8FlashNextConfig(
+            text_config=dict(_BASE), tie_word_embeddings=True
+        )
         assert config.tie_word_embeddings is True
 
     def test_rope_parameters_fall_back_to_the_text_config(self):

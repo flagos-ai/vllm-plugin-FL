@@ -76,9 +76,7 @@ def _policy(monkeypatch, *, oot=True, whitelist=None, blacklist=None, ops=None):
     monkeypatch.setattr(fl_utils, "get_oot_whitelist", lambda: whitelist)
     monkeypatch.setattr(fl_utils, "get_oot_blacklist", lambda: blacklist)
     ops = {} if ops is None else ops
-    monkeypatch.setattr(
-        fl_utils, "use_flaggems_op", lambda op: ops.get(op, True)
-    )
+    monkeypatch.setattr(fl_utils, "use_flaggems_op", lambda op: ops.get(op, True))
 
 
 def test_register_returns_early_when_oot_disabled(monkeypatch):
@@ -178,9 +176,7 @@ def test_register_honours_explicit_whitelist_argument(monkeypatch):
     monkeypatch.setattr(Mod, "PluggableLayer", _PluggableBase)
     monkeypatch.setattr(Mod, "CustomOp", _CustomBase)
     monkeypatch.setattr(Mod, "logger", _logger())
-    monkeypatch.setattr(
-        Mod, "OOT_OPS", {"silu_and_mul": (Silu, "SiluAndMul")}
-    )
+    monkeypatch.setattr(Mod, "OOT_OPS", {"silu_and_mul": (Silu, "SiluAndMul")})
     oracle_calls = []
     monkeypatch.setattr(
         Mod, "_patch_unquantized_moe_oracle", lambda **kw: oracle_calls.append(kw)
@@ -250,9 +246,7 @@ def test_register_applies_vendor_patches_for_platform(monkeypatch):
     monkeypatch.setattr(
         vllm_platforms.current_platform, "vendor_name", "gcu", raising=False
     )
-    monkeypatch.setattr(
-        dispatch_config_utils, "get_platform_name", lambda: "kunlunxin"
-    )
+    monkeypatch.setattr(dispatch_config_utils, "get_platform_name", lambda: "kunlunxin")
 
     Mod.register_oot_ops()
 
@@ -277,15 +271,9 @@ def test_patch_unquantized_moe_oracle_wraps_both_modules(monkeypatch):
         calls.append((moe_config, prefer_flaggems_experts))
         return "backend"
 
-    monkeypatch.setattr(
-        utils_module, "select_unquantized_moe_backend_oot", select_oot
-    )
-    monkeypatch.setattr(
-        oracle_module, "select_unquantized_moe_backend", object()
-    )
-    monkeypatch.setattr(
-        method_module, "select_unquantized_moe_backend", object()
-    )
+    monkeypatch.setattr(utils_module, "select_unquantized_moe_backend_oot", select_oot)
+    monkeypatch.setattr(oracle_module, "select_unquantized_moe_backend", object())
+    monkeypatch.setattr(method_module, "select_unquantized_moe_backend", object())
 
     infos = []
     monkeypatch.setattr(

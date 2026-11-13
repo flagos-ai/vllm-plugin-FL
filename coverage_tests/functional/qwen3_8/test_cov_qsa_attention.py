@@ -41,9 +41,14 @@ class TestAttentionBackend:
         assert backend.get_builder_cls() is QSAMetadataBuilder
         assert backend.indexes_kv_by_block_stride() is False
         assert backend.get_kv_cache_stride_order() == (0, 1, 2, 3, 4)
-        assert backend.get_kv_cache_stride_order(
-            include_num_layers_dimension=True
-        ) == (0, 1, 2, 3, 4, 5)
+        assert backend.get_kv_cache_stride_order(include_num_layers_dimension=True) == (
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+        )
         assert backend.supports_kv_connector() is False
         assert backend.supported_dtypes == [torch.bfloat16]
         assert backend.supported_kv_cache_dtypes == ["auto", "bfloat16"]
@@ -66,7 +71,9 @@ class TestUnpackCache:
         assert key.shape == (2, 3, 1, 4)
         assert value.shape == (2, 3, 1, 4)
         assert key.untyped_storage().data_ptr() == storage.untyped_storage().data_ptr()
-        assert value.untyped_storage().data_ptr() == storage.untyped_storage().data_ptr()
+        assert (
+            value.untyped_storage().data_ptr() == storage.untyped_storage().data_ptr()
+        )
         assert key.stride() == (24, 4, 4, 1)
         assert value.stride() == (24, 4, 4, 1)
 
@@ -130,9 +137,7 @@ def _attention_config(**overrides):
 def _attention_vllm_config(**overrides):
     values = dict(
         cache_config=SimpleNamespace(cache_dtype="auto", block_size=16),
-        model_config=SimpleNamespace(
-            dtype=torch.bfloat16, multimodal_config=None
-        ),
+        model_config=SimpleNamespace(dtype=torch.bfloat16, multimodal_config=None),
         parallel_config=SimpleNamespace(
             prefill_context_parallel_size=1,
             decode_context_parallel_size=1,
@@ -234,7 +239,9 @@ class TestQsaAttentionConstruction:
         assert created.indexer.kwargs["prefix"] == "p.self_attn.indexer"
         assert created.indexer.kwargs["layer_id"] == 2
         assert created.indexer.kwargs["rotary_emb"] is layer.rotary_emb
-        assert layer.get_attn_backend() is qsa_module.Qwen3_8FlashNextQSAAttentionBackend
+        assert (
+            layer.get_attn_backend() is qsa_module.Qwen3_8FlashNextQSAAttentionBackend
+        )
 
     def test_layer_registers_in_the_static_forward_context(self, monkeypatch):
         vllm_config = _attention_vllm_config()
@@ -337,9 +344,7 @@ class TestQsaAttentionConstruction:
         with pytest.raises(ValueError, match="replicated QSA KV heads"):
             qsa_module.Qwen3_8FlashNextQSAAttention(
                 vllm_config=_attention_vllm_config(),
-                config=_attention_config(
-                    num_attention_heads=4, num_key_value_heads=3
-                ),
+                config=_attention_config(num_attention_heads=4, num_key_value_heads=3),
                 layer_id=0,
                 prefix="p",
             )
@@ -414,9 +419,7 @@ class _IndexerCallable:
         self.calls.append((hidden_states, positions, out))
         if self.selected is not None:
             return self.selected
-        return torch.full(
-            (out.shape[0], self.output_width), 3, dtype=torch.int32
-        )
+        return torch.full((out.shape[0], self.output_width), 3, dtype=torch.int32)
 
 
 class TestRunQsa:
@@ -573,12 +576,21 @@ class TestRunQsa:
             lambda: SimpleNamespace(attn_metadata=[metadata]),
         )
         monkeypatch.setattr(qsa_module, "has_native_cache_update", lambda: False)
-        monkeypatch.setattr(qsa_ops, "qsa_store_kv_cache_rows", lambda *a: None)
+        stored = []
+        prepared = []
+        sparse_calls = []
         monkeypatch.setattr(
-            qsa_ops, "qsa_prepare_split_workspace", lambda *a: (1, None)
+            qsa_ops, "qsa_store_kv_cache_rows", lambda *a: stored.append(a)
         )
         monkeypatch.setattr(
-            qsa_ops, "qsa_sparse_paged_attention", lambda *a, **k: None
+            qsa_ops,
+            "qsa_prepare_split_workspace",
+            lambda *a: prepared.append(a) or (1, None),
+        )
+        monkeypatch.setattr(
+            qsa_ops,
+            "qsa_sparse_paged_attention",
+            lambda *a, **k: sparse_calls.append((a, k)),
         )
         layer._run_qsa(
             torch.zeros(2, 8, dtype=torch.bfloat16),
@@ -589,6 +601,13 @@ class TestRunQsa:
             torch.zeros(2, 2, 4, dtype=torch.bfloat16),
             torch.zeros(2, 2, 4),
         )
+
+        # The list's first (and only) entry is used as the main metadata: its
+        # slot mapping drives the cache store and the sparse path still runs.
+        assert len(stored) == 1
+        assert torch.equal(stored[0][2], torch.tensor([4, 5]))
+        assert len(prepared) == 1
+        assert len(sparse_calls) == 1
 
     def test_empty_cache_is_rejected(self, monkeypatch):
         layer = self._layer(kv_cache=torch.tensor([]))
@@ -613,9 +632,7 @@ class TestRunQsa:
         monkeypatch.setattr(
             qsa_module,
             "get_forward_context",
-            lambda: SimpleNamespace(
-                attn_metadata=self._metadata(side_tokens=3)
-            ),
+            lambda: SimpleNamespace(attn_metadata=self._metadata(side_tokens=3)),
         )
         with pytest.raises(RuntimeError, match="main and side metadata"):
             layer._run_qsa(
@@ -652,9 +669,7 @@ class TestRunQsa:
         monkeypatch.setattr(
             qsa_module,
             "get_forward_context",
-            lambda: SimpleNamespace(
-                attn_metadata=self._metadata(compressed_tokens=3)
-            ),
+            lambda: SimpleNamespace(attn_metadata=self._metadata(compressed_tokens=3)),
         )
         with pytest.raises(RuntimeError, match="main and compressed"):
             layer._run_qsa(
@@ -700,9 +715,7 @@ class TestCustomOpBoundary:
             lambda: SimpleNamespace(no_compile_layers={"p.attn": layer}),
         )
         tensors = [torch.zeros(1) for _ in range(7)]
-        qsa_module.qwen3_8_flash_next_qsa_with_output(
-            *tensors, layer_name="p.attn"
-        )
+        qsa_module.qwen3_8_flash_next_qsa_with_output(*tensors, layer_name="p.attn")
         assert len(calls) == 1
         assert calls[0][0] is tensors[0]
         assert calls[0][6] is tensors[6]
@@ -767,10 +780,10 @@ class TestQsaAttentionForward:
             "current_platform",
             SimpleNamespace(opaque_attention_op=lambda: False),
         )
-        monkeypatch.setattr(qsa_module, "_encode_layer_name", lambda name: ("enc", name))
         monkeypatch.setattr(
-            qsa_module, "qwen3_8_flash_next_qsa_with_output", fake_op
+            qsa_module, "_encode_layer_name", lambda name: ("enc", name)
         )
+        monkeypatch.setattr(qsa_module, "qwen3_8_flash_next_qsa_with_output", fake_op)
         hidden = torch.zeros(2, 8)
         positions = torch.tensor([0, 1])
         assert layer.forward(positions, hidden) == "projected"

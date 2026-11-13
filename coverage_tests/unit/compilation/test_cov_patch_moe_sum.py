@@ -172,7 +172,5 @@ def test_torch_fallback_matches_explicit_sum(monkeypatch):
 
     patch_module._torch_moe_sum(input, output)
 
-    expected = torch.tensor(
-        [[5.0, 7.0, 9.0], [4.0, 6.0, 8.0]], dtype=torch.float64
-    )
+    expected = torch.tensor([[5.0, 7.0, 9.0], [4.0, 6.0, 8.0]], dtype=torch.float64)
     assert torch.allclose(output, expected)

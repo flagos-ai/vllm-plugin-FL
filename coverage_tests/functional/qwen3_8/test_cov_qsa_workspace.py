@@ -35,9 +35,7 @@ class TestTritonSupportProbe:
             ops.qsa_forward_metadata_triton_supported(torch.device("cuda"))
             is has_triton
         )
-        assert (
-            ops.qsa_forward_metadata_triton_supported(torch.device("cpu")) is False
-        )
+        assert ops.qsa_forward_metadata_triton_supported(torch.device("cpu")) is False
 
 
 class TestPrepareSplitWorkspace:
@@ -163,9 +161,7 @@ class TestChunkedSelection:
             return torch.zeros(q.shape[0], 8), torch.full((q.shape[0],), 4)
 
         def fake_topk(logits, visible, block_topk):
-            return torch.full(
-                (logits.shape[0], block_topk), 2, dtype=torch.int32
-            )
+            return torch.full((logits.shape[0], block_topk), 2, dtype=torch.int32)
 
         def fake_expand(blocks, positions, lengths, requests, ratio, topk, out):
             expands.append((blocks, positions, requests, out))

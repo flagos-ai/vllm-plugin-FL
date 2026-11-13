@@ -138,10 +138,7 @@ def test_should_use_packed_w8a8_selects_channel_weights(int8_mode):
 def test_should_use_packed_w8a8_rejects_incomplete_config(
     int8_mode, weight, activation, quant_format
 ):
-    assert (
-        int8_mode.should_use_packed_w8a8(weight, activation, quant_format)
-        is False
-    )
+    assert int8_mode.should_use_packed_w8a8(weight, activation, quant_format) is False
 
 
 def test_should_use_packed_w8a8_rejects_group_strategy_with_value_failure(int8_mode):

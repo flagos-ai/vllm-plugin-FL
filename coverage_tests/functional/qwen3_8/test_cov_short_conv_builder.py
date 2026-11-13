@@ -59,9 +59,7 @@ def _new_builder(monkeypatch, *, full_graph=False, capture_size=None, num_spec=1
         self.num_spec_tokens = vllm_config.speculative_config.num_speculative_tokens
         self.compilation_config = vllm_config.compilation_config
 
-    monkeypatch.setattr(
-        BaseMambaAttentionMetadataBuilder, "__init__", fake_base_init
-    )
+    monkeypatch.setattr(BaseMambaAttentionMetadataBuilder, "__init__", fake_base_init)
     builder = sc.PleShortConvAttentionMetadataBuilder(
         kv_cache_spec="spec",
         layer_names=["p"],
@@ -149,12 +147,8 @@ def _spec_builder(monkeypatch, **kwargs):
 class TestSpeculativeBuild:
     def test_pure_spec_batch_uses_every_token_as_spec(self, monkeypatch):
         builder = _spec_builder(monkeypatch, num_spec=1)
-        table = torch.tensor(
-            [[10, 0, 0], [20, 0, 0]], dtype=torch.int32
-        )
-        monkeypatch.setattr(
-            sc, "mamba_get_block_table_tensor", lambda *args: table
-        )
+        table = torch.tensor([[10, 0, 0], [20, 0, 0]], dtype=torch.int32)
+        monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
         common = _Common(
             query_start_loc=torch.tensor([0, 2, 4], dtype=torch.int32),
             block_table=table,
@@ -189,9 +183,7 @@ class TestSpeculativeBuild:
     def test_accepted_counts_follow_the_spec_request_order(self, monkeypatch):
         builder = _spec_builder(monkeypatch, num_spec=1)
         table = torch.tensor([[10, 0], [20, 0], [30, 0]], dtype=torch.int32)
-        monkeypatch.setattr(
-            sc, "mamba_get_block_table_tensor", lambda *args: table
-        )
+        monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
         common = _Common(
             query_start_loc=torch.tensor([0, 2, 3, 4], dtype=torch.int32),
             block_table=table,
@@ -212,16 +204,10 @@ class TestSpeculativeBuild:
         assert metadata.spec_query_start_loc.tolist() == [0, 2, 3]
         assert metadata.spec_sequence_masks.tolist() == [True, False, True]
 
-    def test_mixed_batch_groups_spec_then_decode_then_prefill(
-        self, monkeypatch
-    ):
+    def test_mixed_batch_groups_spec_then_decode_then_prefill(self, monkeypatch):
         builder = _spec_builder(monkeypatch, num_spec=1)
-        table = torch.tensor(
-            [[10, 0], [20, 0], [30, 0]], dtype=torch.int32
-        )
-        monkeypatch.setattr(
-            sc, "mamba_get_block_table_tensor", lambda *args: table
-        )
+        table = torch.tensor([[10, 0], [20, 0], [30, 0]], dtype=torch.int32)
+        monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
         common = _Common(
             query_start_loc=torch.tensor([0, 2, 3, 6], dtype=torch.int32),
             block_table=table,
@@ -258,14 +244,10 @@ class TestSpeculativeBuild:
         assert metadata.batch_ptr is None
         assert metadata.num_accepted_tokens.tolist() == [2]
 
-    def test_full_graph_spec_batch_aliases_the_persistent_buffers(
-        self, monkeypatch
-    ):
+    def test_full_graph_spec_batch_aliases_the_persistent_buffers(self, monkeypatch):
         builder = _spec_builder(monkeypatch, full_graph=True, num_spec=1)
         table = torch.tensor([[10, 0], [20, 0]], dtype=torch.int32)
-        monkeypatch.setattr(
-            sc, "mamba_get_block_table_tensor", lambda *args: table
-        )
+        monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
         common = _Common(
             query_start_loc=torch.tensor([0, 2, 4], dtype=torch.int32),
             block_table=table,
@@ -302,9 +284,7 @@ class TestSpeculativeBuild:
     def test_missing_accepted_tokens_is_rejected(self, monkeypatch):
         builder = _spec_builder(monkeypatch)
         table = torch.tensor([[10, 0]], dtype=torch.int32)
-        monkeypatch.setattr(
-            sc, "mamba_get_block_table_tensor", lambda *args: table
-        )
+        monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
         common = _Common(
             query_start_loc=torch.tensor([0, 1], dtype=torch.int32),
             block_table=table,
@@ -321,9 +301,7 @@ class TestSpeculativeBuild:
 
 
 class TestNonSpecOneDimensionalStateIndices:
-    def test_decode_only_one_dimensional_indices_are_kept(
-        self, monkeypatch
-    ):
+    def test_decode_only_one_dimensional_indices_are_kept(self, monkeypatch):
         builder = _new_builder(monkeypatch)
         builder.use_spec_decode = False
         metadata = object.__new__(sc.PleShortConvAttentionMetadata)
@@ -349,9 +327,6 @@ class TestNonSpecOneDimensionalStateIndices:
             query_start_loc_cpu=torch.tensor([0, 1, 2], dtype=torch.int32),
             compute_num_computed_tokens=lambda: torch.tensor([0, 4]),
         )
-        assert (
-            builder._build_non_spec_metadata(0, common, False, None)
-            == "metadata"
-        )
+        assert builder._build_non_spec_metadata(0, common, False, None) == "metadata"
         assert captured["state_indices_tensor"].tolist() == [7, 8]
         assert captured["has_initial_states_d"].tolist() == [False, True]

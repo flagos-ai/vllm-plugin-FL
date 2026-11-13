@@ -78,15 +78,9 @@ def _apply_args(
     a2_scale=None,
 ):
     hidden = torch.randn(3, 8) if hidden is None else hidden
-    w1 = (
-        torch.randint(-8, 8, (2, 8, 8), dtype=torch.int8) if w1 is None else w1
-    )
-    w2 = (
-        torch.randint(-8, 8, (2, 8, 4), dtype=torch.int8) if w2 is None else w2
-    )
-    topk_weights = (
-        torch.ones(3, 2) if topk_weights is None else topk_weights
-    )
+    w1 = torch.randint(-8, 8, (2, 8, 8), dtype=torch.int8) if w1 is None else w1
+    w2 = torch.randint(-8, 8, (2, 8, 4), dtype=torch.int8) if w2 is None else w2
+    topk_weights = torch.ones(3, 2) if topk_weights is None else topk_weights
     topk_ids = (
         torch.tensor([[0, 1], [1, 0], [0, 0]], dtype=torch.int64)
         if topk_ids is None
@@ -275,14 +269,10 @@ def test_vllm_functional_apply_rejects_invalid_contract(
     experts, changes, a1q, a2q, dtype, lora, exc_key, match
 ):
     module, _ = experts
-    instance = module.VllmFunctionalW8A8Experts(
-        _moe_config(), _quant_config(**changes)
-    )
+    instance = module.VllmFunctionalW8A8Experts(_moe_config(), _quant_config(**changes))
     instance._lora_context = lora
     hidden = torch.randn(3, 8).to(dtype)
-    kwargs = _apply_args(
-        module, hidden=hidden, a1q_scale=a1q, a2_scale=a2q
-    )
+    kwargs = _apply_args(module, hidden=hidden, a1q_scale=a1q, a2_scale=a2q)
     with pytest.raises(_EXC[exc_key], match=match):
         instance.apply(**kwargs)
 
@@ -386,13 +376,9 @@ def test_flag_gems_apply_rejects_invalid_contract(
     experts, changes, a1q, dtype, lora, exc_key, match
 ):
     module, _ = experts
-    instance = module.FlagGemsW8A8Experts(
-        _moe_config(), _quant_config(**changes)
-    )
+    instance = module.FlagGemsW8A8Experts(_moe_config(), _quant_config(**changes))
     instance._lora_context = lora
-    kwargs = _apply_args(
-        module, hidden=torch.randn(3, 8).to(dtype), a1q_scale=a1q
-    )
+    kwargs = _apply_args(module, hidden=torch.randn(3, 8).to(dtype), a1q_scale=a1q)
     with pytest.raises(_EXC[exc_key], match=match):
         instance.apply(**kwargs)
 
@@ -422,7 +408,13 @@ def _contract_call(module, **overrides):
 def test_validate_w8a8_contract_accepts_valid_inputs(experts):
     module, _ = experts
     _, values = _contract_call(module)
-    module._validate_w8a8_contract(**values)
+    result = module._validate_w8a8_contract(**values)
+    # The validator is a pure check: valid inputs return None and are not
+    # mutated (shapes and dtypes of the contract tensors are unchanged).
+    assert result is None
+    assert values["w1"].shape == (2, 8, 8)
+    assert values["w2"].shape == (2, 8, 4)
+    assert values["w1_scale"].shape == (2, 8, 1)
 
 
 @pytest.mark.parametrize(
@@ -454,9 +446,7 @@ def test_validate_w8a8_contract_accepts_valid_inputs(experts):
             "must be int8",
         ),
         (
-            lambda v: v.update(
-                w2=torch.zeros(3, 8, 4, dtype=torch.int8)
-            ),
+            lambda v: v.update(w2=torch.zeros(3, 8, 4, dtype=torch.int8)),
             "value",
             "weight shapes are incompatible",
         ),
@@ -504,9 +494,7 @@ def test_validate_w8a8_contract_accepts_valid_inputs(experts):
             "float32",
         ),
         (
-            lambda v: v.update(
-                w1_scale=torch.ones(2, 8, 2)[..., :1]
-            ),
+            lambda v: v.update(w1_scale=torch.ones(2, 8, 2)[..., :1]),
             "value",
             "must be contiguous",
         ),

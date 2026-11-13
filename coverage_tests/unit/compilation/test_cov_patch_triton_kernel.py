@@ -77,9 +77,7 @@ def test_subscription_merges_overrides_and_forwards_arguments():
     result = launcher(1, 2, num_warps=2, debug=True)
 
     assert kernel.grid == ("grid-a", "grid-b")
-    assert kernel.calls == [
-        ((1, 2), {"num_warps": 8, "num_stages": 3, "debug": True})
-    ]
+    assert kernel.calls == [((1, 2), {"num_warps": 8, "num_stages": 3, "debug": True})]
     assert result == (
         "LAUNCHED",
         (1, 2),
@@ -106,8 +104,7 @@ def test_patch_wraps_module_kernel_once():
     overrides = {"num_warps": 8}
 
     assert (
-        patch_module.patch_kernel_launch_meta(module, "fake_kernel", overrides)
-        is None
+        patch_module.patch_kernel_launch_meta(module, "fake_kernel", overrides) is None
     )
     proxy = module.fake_kernel
     assert isinstance(proxy, patch_module.KernelLaunchMetaProxy)
@@ -123,9 +120,7 @@ def test_second_install_with_different_overrides_raises():
     patch_module.patch_kernel_launch_meta(module, "fake_kernel", {"num_warps": 8})
 
     with pytest.raises(RuntimeError, match="already has launch overrides"):
-        patch_module.patch_kernel_launch_meta(
-            module, "fake_kernel", {"num_warps": 4}
-        )
+        patch_module.patch_kernel_launch_meta(module, "fake_kernel", {"num_warps": 4})
 
 
 def test_patch_launch_applies_overrides_after_wrapping():
@@ -139,7 +134,5 @@ def test_patch_launch_applies_overrides_after_wrapping():
     result = module.fake_kernel[(4,)]("arg", debug=False)
 
     assert kernel.grid == (4,)
-    assert kernel.calls == [
-        (("arg",), {"num_warps": 8, "num_ctas": 2, "debug": False})
-    ]
+    assert kernel.calls == [(("arg",), {"num_warps": 8, "num_ctas": 2, "debug": False})]
     assert result[0] == "LAUNCHED"

@@ -33,7 +33,9 @@ import vllm_fl.patches.exponential_compat as patch_module
 def _install_fake_aten(monkeypatch, kernel):
     """Replace torch.ops with a namespace exposing one aten kernel."""
     monkeypatch.setattr(
-        patch_module.torch, "ops", SimpleNamespace(aten=SimpleNamespace(exponential_=kernel))
+        patch_module.torch,
+        "ops",
+        SimpleNamespace(aten=SimpleNamespace(exponential_=kernel)),
     )
 
 
@@ -109,8 +111,7 @@ def test_generator_rejection_falls_back_and_warns_once(monkeypatch, caplog):
     warnings = [
         record
         for record in caplog.records
-        if record.name == patch_module.__name__
-        and record.levelno == logging.WARNING
+        if record.name == patch_module.__name__ and record.levelno == logging.WARNING
     ]
     assert len(warnings) == 1
     assert "ignores the generator" in warnings[0].getMessage()
@@ -129,8 +130,7 @@ def test_successful_generator_call_does_not_warn(monkeypatch, caplog):
     assert not [
         record
         for record in caplog.records
-        if record.name == patch_module.__name__
-        and record.levelno == logging.WARNING
+        if record.name == patch_module.__name__ and record.levelno == logging.WARNING
     ]
 
 

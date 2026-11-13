@@ -164,9 +164,7 @@ class TestStackedAutoLoader:
     def test_packed_weight_calls_the_parameter_loader(self):
         loader = self._loader()
         calls = []
-        param = SimpleNamespace(
-            weight_loader=lambda *args: calls.append(args)
-        )
+        param = SimpleNamespace(weight_loader=lambda *args: calls.append(args))
         weight = torch.ones(1)
         weight.shard_id = "q"
         assert list(loader._load_param("p", param, [("", weight)])) == ["p"]
@@ -192,16 +190,10 @@ class TestStackedAutoLoader:
         weight.shard_id = "q"
         monkeypatch.setattr(loader, "_can_ignore_unexpected", lambda qual: True)
         assert (
-            list(
-                loader._load_param("p", SimpleNamespace(), [("child", weight)])
-            )
-            == []
+            list(loader._load_param("p", SimpleNamespace(), [("child", weight)])) == []
         )
         monkeypatch.setattr(loader, "_can_skip", lambda qual: True)
-        assert (
-            list(loader._load_param("p", SimpleNamespace(), [("", weight)]))
-            == []
-        )
+        assert list(loader._load_param("p", SimpleNamespace(), [("", weight)])) == []
 
     def test_unpacked_weights_delegate_to_the_base_loader(self, monkeypatch):
         loader = self._loader()
@@ -299,9 +291,7 @@ class TestModelLoadWeights:
         assert name == "layers.0.qkv_proj.weight"
         assert mapped.shard_id == "q"
 
-    def test_legacy_expert_adapter_absorbs_fused_and_single_weights(
-        self, monkeypatch
-    ):
+    def test_legacy_expert_adapter_absorbs_fused_and_single_weights(self, monkeypatch):
         packs = self._install(monkeypatch)
         monkeypatch.setattr(qwen_model, "_HAS_NATIVE_STACKED_WEIGHTS_MAPPER", False)
         monkeypatch.setattr(
@@ -313,18 +303,14 @@ class TestModelLoadWeights:
             qwen_model,
             "_load_fused_expert_weight",
             lambda name, *args: (
-                (True, {"fused-name"})
-                if "fused" in name
-                else (False, set())
+                (True, {"fused-name"}) if "fused" in name else (False, set())
             ),
         )
         monkeypatch.setattr(
             qwen_model,
             "_load_single_expert_weight",
             lambda name, *args: (
-                (True, {"single-name"})
-                if "single" in name
-                else (False, set())
+                (True, {"single-name"}) if "single" in name else (False, set())
             ),
         )
         model = self._model()

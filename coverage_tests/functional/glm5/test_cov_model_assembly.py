@@ -72,9 +72,7 @@ def _indexer_double():
         max_total_seq_len=128,
         topk_indices_buffer=torch.zeros(1, dtype=torch.int32),
         prefix="model.layers.1.self_attn.indexer",
-        k_cache=SimpleNamespace(
-            prefix="model.layers.1.self_attn.indexer.k_cache"
-        ),
+        k_cache=SimpleNamespace(prefix="model.layers.1.self_attn.indexer.k_cache"),
     )
     indexer.forward = lambda *args, **kwargs: "stock-forward"
     return indexer
@@ -95,9 +93,7 @@ def _install_mla_doubles(monkeypatch, indexer, current_platform=None):
             static_ctx = vllm_config.compilation_config.static_forward_context
             static_ctx[self.indexer.k_cache.prefix] = self.indexer.k_cache
 
-    monkeypatch.setattr(
-        glm5_model.DeepseekV2MLAAttention, "__init__", fake_base_init
-    )
+    monkeypatch.setattr(glm5_model.DeepseekV2MLAAttention, "__init__", fake_base_init)
     if current_platform is None:
         current_platform = SimpleNamespace(
             is_cuda=lambda: False, supports_fp8=lambda: False
@@ -168,9 +164,7 @@ class TestGlm5NextMLAAttentionConstruction:
         tail = indexer.tail_cache
         assert tail.kwargs["head_dim"] == 128
         assert tail.kwargs["dtype"] is torch.bfloat16
-        assert tail.kwargs["prefix"] == (
-            "model.layers.1.self_attn.indexer.tail_cache"
-        )
+        assert tail.kwargs["prefix"] == ("model.layers.1.self_attn.indexer.tail_cache")
 
         op = indexer.indexer_op
         assert op.args[0] is cache
@@ -180,9 +174,7 @@ class TestGlm5NextMLAAttentionConstruction:
 
     def test_fp8_cache_widens_rows_with_scale_bytes(self, monkeypatch):
         """A fp8-capable platform allocates uint8 rows scaled by 4 bytes."""
-        platform = SimpleNamespace(
-            is_cuda=lambda: False, supports_fp8=lambda: True
-        )
+        platform = SimpleNamespace(is_cuda=lambda: False, supports_fp8=lambda: True)
         attn, _, _ = _build_mla(monkeypatch, current_platform=platform)
         cache = attn.indexer.k_cache
         # 128 fp8 values + one fp32 scale per 128-value block.
@@ -252,16 +244,12 @@ class TestGlm5NextMLAAttentionConstruction:
         monkeypatch.setattr(
             glm5_model,
             "current_platform",
-            SimpleNamespace(
-                is_cuda=lambda: True, supports_fp8=lambda: False
-            ),
+            SimpleNamespace(is_cuda=lambda: True, supports_fp8=lambda: False),
         )
         monkeypatch.setattr(glm5_model, "use_nvidia_reference", lambda: False)
         monkeypatch.setattr(glm5_model, "Glm5NextIndexerCache", _RecordingModule)
         monkeypatch.setattr(glm5_model, "Glm5NextTailCache", _RecordingModule)
-        monkeypatch.setattr(
-            glm5_model, "SparseAttnIndexerKpool", _RecordingModule
-        )
+        monkeypatch.setattr(glm5_model, "SparseAttnIndexerKpool", _RecordingModule)
         vllm_config = SimpleNamespace(
             compilation_config=SimpleNamespace(static_forward_context={})
         )
@@ -340,10 +328,7 @@ def _install_model_doubles(monkeypatch, pp, world_size=2):
     def fake_make_layers(num_hidden_layers, layer_fn, prefix):
         made["args"] = (num_hidden_layers, prefix)
         layers = nn.ModuleList(
-            [
-                layer_fn(prefix=f"{prefix}.{idx}")
-                for idx in range(num_hidden_layers)
-            ]
+            [layer_fn(prefix=f"{prefix}.{idx}") for idx in range(num_hidden_layers)]
         )
         return 0, num_hidden_layers, layers
 
@@ -463,9 +448,7 @@ class TestGlm5NextModelForward:
         )
         input_ids = torch.tensor([1, 2, 3])
         positions = torch.arange(3)
-        out = glm5_model.Glm5NextModel.forward(
-            model, input_ids, positions, None
-        )
+        out = glm5_model.Glm5NextModel.forward(model, input_ids, positions, None)
         embedded = input_ids.float().unsqueeze(-1) + 1
         # Two layers add 1 and 10, then the final norm adds 100.
         expected = embedded + 11 + 100
@@ -502,9 +485,7 @@ class TestGlm5NextModelForward:
             {"hidden_states": hidden, "residual": residual}
         )
         positions = torch.arange(3)
-        out = glm5_model.Glm5NextModel.forward(
-            model, None, positions, intermediate
-        )
+        out = glm5_model.Glm5NextModel.forward(model, None, positions, intermediate)
         assert model.embed_tokens.calls == []
         assert isinstance(out, glm5_model.IntermediateTensors)
         assert torch.equal(out["hidden_states"], hidden + 11)
@@ -519,9 +500,7 @@ class TestGlm5NextModelForward:
             lambda: SimpleNamespace(is_first_rank=False, is_last_rank=False),
         )
         with pytest.raises(AssertionError):
-            glm5_model.Glm5NextModel.forward(
-                model, None, torch.arange(3), None
-            )
+            glm5_model.Glm5NextModel.forward(model, None, torch.arange(3), None)
 
 
 class TestFinalizeMhcBroadcastWeights:
@@ -529,16 +508,14 @@ class TestFinalizeMhcBroadcastWeights:
 
     @staticmethod
     def _model(hidden_size=2, streams=3):
-        layer = glm5_model.Glm5NextDecoderLayer.__new__(
-            glm5_model.Glm5NextDecoderLayer
-        )
+        layer = glm5_model.Glm5NextDecoderLayer.__new__(glm5_model.Glm5NextDecoderLayer)
         nn.Module.__init__(layer)
         layer.layer_idx = 0
         layer.n = streams
         mix_hc = (2 + streams) * streams
-        weight = torch.arange(
-            mix_hc * streams * hidden_size, dtype=torch.float32
-        ).view(mix_hc, streams * hidden_size)
+        weight = torch.arange(mix_hc * streams * hidden_size, dtype=torch.float32).view(
+            mix_hc, streams * hidden_size
+        )
         layer.hc_attn_fn = nn.Parameter(weight.clone())
         layer.hc_attn_fn_broadcast = None
         model = glm5_model.Glm5NextModel.__new__(glm5_model.Glm5NextModel)
@@ -558,9 +535,7 @@ class TestFinalizeMhcBroadcastWeights:
             "get_pp_group",
             lambda: SimpleNamespace(is_first_rank=first_rank),
         )
-        monkeypatch.setattr(
-            glm5_model, "use_nvidia_reference", lambda: nvidia
-        )
+        monkeypatch.setattr(glm5_model, "use_nvidia_reference", lambda: nvidia)
         from vllm.utils import deep_gemm as deep_gemm_module
 
         monkeypatch.setattr(
@@ -585,9 +560,7 @@ class TestFinalizeMhcBroadcastWeights:
         assert broadcast.is_contiguous()
         assert broadcast.requires_grad is False
 
-    def test_missing_tilelang_still_builds_the_materialized_weight(
-        self, monkeypatch
-    ):
+    def test_missing_tilelang_still_builds_the_materialized_weight(self, monkeypatch):
         """Without TileLang the weight is prepared but no preflight runs."""
         model, layer, weight = self._model()
         self._patch_probes(monkeypatch)
@@ -596,15 +569,11 @@ class TestFinalizeMhcBroadcastWeights:
         expected = weight.view(-1, 3, 2).sum(dim=1)
         assert torch.equal(layer.hc_attn_fn_broadcast, expected)
 
-    def test_tilelang_preflight_runs_before_exposing_the_weight(
-        self, monkeypatch
-    ):
+    def test_tilelang_preflight_runs_before_exposing_the_weight(self, monkeypatch):
         """A present TileLang kernel is preflighted once."""
         model, layer, weight = self._model()
         self._patch_probes(monkeypatch)
-        monkeypatch.setattr(
-            glm5_model, "mhc_pre_broadcast_tilelang", object()
-        )
+        monkeypatch.setattr(glm5_model, "mhc_pre_broadcast_tilelang", object())
         calls = []
         fake_module = types.ModuleType(
             "vllm_fl.dispatch.backends.tilelang.mhc_broadcast"
@@ -687,9 +656,7 @@ class TestGlm5NextForCausalLMConstruction:
         monkeypatch.setattr(glm5_model, "Glm5NextModel", _RecordingModule)
         monkeypatch.setattr(glm5_model, "ParallelLMHead", _RecordingModule)
         monkeypatch.setattr(glm5_model, "LogitsProcessor", _RecordingModule)
-        model = glm5_model.Glm5NextForCausalLM(
-            vllm_config=ns, prefix="base"
-        )
+        model = glm5_model.Glm5NextForCausalLM(vllm_config=ns, prefix="base")
         return model, ns, config, validated, preflight, prefix_calls
 
     def test_last_rank_builds_model_head_and_logits_processor(self, monkeypatch):
@@ -722,9 +689,7 @@ class TestGlm5NextForCausalLMConstruction:
 
     def test_non_last_rank_uses_pipeline_placeholder_head(self, monkeypatch):
         """A non-last rank has no LM head but still runs validation."""
-        model, _, _, validated, preflight, _ = self._build(
-            monkeypatch, last_rank=False
-        )
+        model, _, _, validated, preflight, _ = self._build(monkeypatch, last_rank=False)
         assert len(validated) == 1
         assert preflight == ["preflight"]
         assert isinstance(model.lm_head, PPMissingLayer)

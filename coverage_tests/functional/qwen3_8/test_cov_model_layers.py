@@ -179,9 +179,7 @@ def _install_decoder_doubles(
             created.ple = self
 
     def fake_hyper(config, *, layer_idx=None, role="", **kwargs):
-        module = _HyperConnection(
-            config, layer_idx=layer_idx, role=role, **kwargs
-        )
+        module = _HyperConnection(config, layer_idx=layer_idx, role=role, **kwargs)
         created.hyper.append(module)
         return module
 
@@ -201,9 +199,7 @@ def _install_decoder_doubles(
 
 
 class TestDecoderLayerConstruction:
-    def test_linear_attention_passes_reduce_results_when_supported(
-        self, monkeypatch
-    ):
+    def test_linear_attention_passes_reduce_results_when_supported(self, monkeypatch):
         created = _install_decoder_doubles(monkeypatch)
         config = _text_config()
         layer = qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -246,9 +242,7 @@ class TestDecoderLayerConstruction:
         assert kwargs["cache_config"] is not None
         assert kwargs["quant_config"] is None
 
-    def test_full_attention_with_an_indexer_builds_the_qsa_owner(
-        self, monkeypatch
-    ):
+    def test_full_attention_with_an_indexer_builds_the_qsa_owner(self, monkeypatch):
         created = _install_decoder_doubles(monkeypatch)
         config = _text_config(indexer_n_heads=4)
         layer = qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -477,11 +471,15 @@ class TestDecoderLayerForward:
         assert layer.attn_hyper_connection.mix_calls[0][2] is None
 
     def test_linear_attention_writes_into_the_caller_buffer(self, monkeypatch):
-        monkeypatch.setattr(qwen_model, "get_tensor_model_parallel_world_size", lambda: 1)
+        monkeypatch.setattr(
+            qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
+        )
         layer = _forward_layer(layer_type="linear_attention", gdn_buffer=True)
         result, block, _ = layer(torch.zeros(2, 16), positions=torch.zeros(2))
         assert len(layer.linear_attn.buffers) == 1
-        assert layer.linear_attn.buffers[0].tolist() == torch.full((2, 16), 4.0).tolist()
+        assert (
+            layer.linear_attn.buffers[0].tolist() == torch.full((2, 16), 4.0).tolist()
+        )
         # The HC boundary consumes the filled buffer as its block output.
         assert (
             layer.mlp_hyper_connection.mix_calls[0][1].tolist()
@@ -493,7 +491,9 @@ class TestDecoderLayerForward:
     def test_linear_attention_without_a_buffer_returns_the_projection(
         self, monkeypatch
     ):
-        monkeypatch.setattr(qwen_model, "get_tensor_model_parallel_world_size", lambda: 1)
+        monkeypatch.setattr(
+            qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
+        )
         layer = _forward_layer(layer_type="linear_attention", gdn_buffer=False)
         layer(torch.zeros(2, 16), positions=torch.zeros(2))
         args, kwargs = layer.linear_attn.calls[0]
@@ -501,7 +501,9 @@ class TestDecoderLayerForward:
         assert kwargs["hidden_states"].tolist() == torch.full((2, 16), 10.0).tolist()
 
     def test_full_attention_receives_positions(self, monkeypatch):
-        monkeypatch.setattr(qwen_model, "get_tensor_model_parallel_world_size", lambda: 1)
+        monkeypatch.setattr(
+            qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
+        )
         layer = _forward_layer()
         positions = torch.tensor([3, 4])
         layer(torch.zeros(2, 16), positions=positions)
@@ -514,7 +516,9 @@ class TestDecoderLayerForward:
         )
 
     def test_unknown_layer_type_fails_at_forward(self, monkeypatch):
-        monkeypatch.setattr(qwen_model, "get_tensor_model_parallel_world_size", lambda: 1)
+        monkeypatch.setattr(
+            qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
+        )
         layer = _forward_layer(layer_type="unknown")
         with pytest.raises(ValueError, match="Invalid layer_type"):
             layer(torch.zeros(2, 16), positions=torch.zeros(2))
@@ -526,8 +530,12 @@ class TestDecoderLayerForward:
             reduced.append(tensor.clone())
             return tensor * 2
 
-        monkeypatch.setattr(qwen_model, "get_tensor_model_parallel_world_size", lambda: 2)
-        monkeypatch.setattr(qwen_model, "tensor_model_parallel_all_reduce", fake_all_reduce)
+        monkeypatch.setattr(
+            qwen_model, "get_tensor_model_parallel_world_size", lambda: 2
+        )
+        monkeypatch.setattr(
+            qwen_model, "tensor_model_parallel_all_reduce", fake_all_reduce
+        )
         layer = _forward_layer()
         result, block, _ = layer(torch.zeros(2, 16), positions=torch.zeros(2))
         assert len(reduced) == 2
@@ -541,8 +549,12 @@ class TestDecoderLayerForward:
             reduced.append(tensor.clone())
             return tensor * 2
 
-        monkeypatch.setattr(qwen_model, "get_tensor_model_parallel_world_size", lambda: 2)
-        monkeypatch.setattr(qwen_model, "tensor_model_parallel_all_reduce", fake_all_reduce)
+        monkeypatch.setattr(
+            qwen_model, "get_tensor_model_parallel_world_size", lambda: 2
+        )
+        monkeypatch.setattr(
+            qwen_model, "tensor_model_parallel_all_reduce", fake_all_reduce
+        )
         layer = _forward_layer(mlp_requires_reduce=False)
         _, block, _ = layer(torch.zeros(2, 16), positions=torch.zeros(2))
         assert len(reduced) == 1
@@ -602,9 +614,7 @@ class TestModelConstruction:
             lambda: SimpleNamespace(is_last_rank=pp_last, is_first_rank=True),
         )
         vllm_config = SimpleNamespace(
-            model_config=SimpleNamespace(
-                hf_text_config=config, dtype=torch.bfloat16
-            ),
+            model_config=SimpleNamespace(hf_text_config=config, dtype=torch.bfloat16),
             parallel_config=SimpleNamespace(
                 eplb_config=SimpleNamespace(num_redundant_experts=3)
             ),
@@ -739,9 +749,7 @@ class TestModelForward:
         self._patch_pp(monkeypatch)
         layer = _BackboneLayer(0)
         model = _backbone(layers=[layer])
-        out = model.forward(
-            torch.tensor([1, 2, 3]), torch.tensor([0, 1, 2])
-        )
+        out = model.forward(torch.tensor([1, 2, 3]), torch.tensor([0, 1, 2]))
         hidden = layer.calls[0]["hidden_states"]
         assert hidden.shape == (3, 8)
         assert hidden.tolist() == torch.full((3, 8), 7.0).tolist()
@@ -754,9 +762,7 @@ class TestModelForward:
         model = _backbone(layers=[layer])
         embeds = torch.arange(16, dtype=torch.float32).view(2, 8)
         model.forward(None, torch.zeros(2), inputs_embeds=embeds)
-        assert torch.equal(
-            layer.calls[0]["hidden_states"], embeds.repeat(1, 2)
-        )
+        assert torch.equal(layer.calls[0]["hidden_states"], embeds.repeat(1, 2))
 
     def test_missing_inputs_raises_on_the_first_rank(self, monkeypatch):
         self._patch_pp(monkeypatch)
@@ -764,9 +770,7 @@ class TestModelForward:
         with pytest.raises(ValueError, match="input_ids or inputs_embeds"):
             model.forward(None, torch.zeros(1))
 
-    def test_non_first_rank_requires_and_reads_intermediate_tensors(
-        self, monkeypatch
-    ):
+    def test_non_first_rank_requires_and_reads_intermediate_tensors(self, monkeypatch):
         from vllm.sequence import IntermediateTensors
 
         self._patch_pp(monkeypatch, first=False)
@@ -776,9 +780,9 @@ class TestModelForward:
             model.forward(None, torch.zeros(2))
         hidden = torch.full((2, 8), 3.0)
         model.forward(
-            None, torch.zeros(2), intermediate_tensors=IntermediateTensors(
-                {"hidden_states": hidden}
-            )
+            None,
+            torch.zeros(2),
+            intermediate_tensors=IntermediateTensors({"hidden_states": hidden}),
         )
         assert torch.equal(layer.calls[0]["hidden_states"], hidden)
 

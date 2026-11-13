@@ -73,6 +73,15 @@ class TestPrefillSelect:
                 k,
             )
 
+        # Independent torch.topk spot check on row 0: indices are relative to
+        # the row start and the buffer is int32 with the requested shape.
+        assert out.shape == (rows, k)
+        assert out.dtype == torch.int32
+        start0, end0 = int(starts[0]), int(ends[0])
+        valid0 = logits[0, start0:end0]
+        top0 = torch.topk(valid0, k=min(k, valid0.numel())).indices + start0
+        assert sorted(out[0][out[0] >= 0].tolist()) == sorted(top0.tolist())
+
     def test_writes_only_the_used_submatrix_of_the_buffer(self, device):
         """Rows/cols past num_rows x top_k stay untouched."""
         torch.manual_seed(11)
@@ -174,6 +183,12 @@ class TestDecodeSelect:
             seq_len = int(lengths.flatten()[row // next_n])
             end = seq_len - next_n + row % next_n + 1
             _check_row(out[row].cpu(), values[row].tolist(), 0, end, k)
+
+        # Row 0 belongs to the zero-length first request, so its window is
+        # empty and the whole row is -1 padding for either MTP offset.
+        assert out.shape == (rows, k)
+        assert out.dtype == torch.int32
+        assert out[0].tolist() == [-1] * k
 
     def test_decode_respects_max_seq_len_argument_position(self, device):
         """max_seq_len is accepted (and ignored) as a keyword argument."""

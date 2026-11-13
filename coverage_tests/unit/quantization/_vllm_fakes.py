@@ -305,9 +305,7 @@ def _build_modules(env: SimpleNamespace) -> dict[str, types.ModuleType]:
     compressed_tensors.compressed_tensors = config_module
     compressed_tensors.schemes = schemes
     quantization.compressed_tensors = compressed_tensors
-    quantization_utils = _module(
-        "vllm.model_executor.layers.quantization.utils"
-    )
+    quantization_utils = _module("vllm.model_executor.layers.quantization.utils")
     quantization_utils.replace_parameter = env.replace_parameter
     quantization.utils = quantization_utils
     layers.quantization = quantization

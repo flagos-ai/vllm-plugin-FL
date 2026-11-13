@@ -85,9 +85,7 @@ def _rms_norm_reference(x, weight, eps):
 
 def _head_reference(head, streams):
     flat = streams.flatten(1).float()
-    norm = torch.rsqrt(
-        flat.square().mean(dim=-1, keepdim=True) + head.normalize_eps
-    )
+    norm = torch.rsqrt(flat.square().mean(dim=-1, keepdim=True) + head.normalize_eps)
     read = (
         torch.sigmoid(
             F.linear(flat, head.hc_head_fn) * norm * head.hc_head_scale
@@ -212,8 +210,7 @@ class TestHyv4ModelForward:
 
         input_ids = torch.tensor([3, 1, 4, 1, 5])
         positions = torch.arange(5)
-        out = model(input_ids=input_ids, positions=positions,
-                    intermediate_tensors=None)
+        out = model(input_ids=input_ids, positions=positions, intermediate_tensors=None)
 
         streams = _expected_streams(
             model.embed_tokens.weight.detach(), input_ids, config
@@ -249,6 +246,10 @@ class TestHyv4ModelForward:
         torch.testing.assert_close(
             out, model.embed_tokens.weight.detach()[ids], rtol=0, atol=0
         )
+        # Explicit table-lookup identity: each row is exactly the embedding row
+        # for its id, and the embedding was called once.
+        assert out.tolist() == model.embed_tokens.weight.detach()[ids].tolist()
+        assert model.embed_tokens.forward_calls == 1
 
     def test_inputs_embeds_skips_embedding_lookup(self, monkeypatch):
         """A provided inputs_embeds tensor bypasses embed_input_ids."""
@@ -306,9 +307,7 @@ class TestHyv4ModelForward:
 
     def test_non_first_rank_requires_intermediate_tensors(self, monkeypatch):
         """A later PP stage without intermediates fails explicitly."""
-        model = _Installation(monkeypatch, first=False, last=True).build(
-            _tiny_config()
-        )
+        model = _Installation(monkeypatch, first=False, last=True).build(_tiny_config())
         with pytest.raises(ValueError, match="pipeline rank requires"):
             model(
                 input_ids=None,
@@ -331,9 +330,7 @@ class TestHyv4ModelForward:
         expected = _expected_streams(
             model.embed_tokens.weight.detach(), input_ids, config
         ).flatten(1)
-        torch.testing.assert_close(
-            out["streams"], expected, rtol=RTOL, atol=ATOL
-        )
+        torch.testing.assert_close(out["streams"], expected, rtol=RTOL, atol=ATOL)
         assert isinstance(model.hc_head, hy_model.PPMissingLayer)
         assert isinstance(model.norm, hy_model.PPMissingLayer)
 

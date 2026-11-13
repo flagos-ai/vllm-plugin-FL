@@ -73,6 +73,4 @@ def test_constructor_forwards_to_upstream_rms_norm(monkeypatch):
         lambda self, *args, **kwargs: init_calls.append((args, kwargs)),
     )
     Mod.RMSNormFL(16, eps=1e-5, var_hidden_size=8, has_weight=False)
-    assert init_calls == [
-        ((16, 1e-5, 8, False, None), {})
-    ]
+    assert init_calls == [((16, 1e-5, 8, False, None), {})]

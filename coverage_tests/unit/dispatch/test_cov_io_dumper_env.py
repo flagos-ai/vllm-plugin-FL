@@ -111,9 +111,7 @@ class TestEnableEnvMatrix:
         monkeypatch.setenv("VLLM_FL_CONFIG", str(cfg))
         enable_io_dump()
         try:
-            assert os.path.normpath(io_dumper._dump_dir) == os.path.normpath(
-                yaml_dir
-            )
+            assert os.path.normpath(io_dumper._dump_dir) == os.path.normpath(yaml_dir)
             assert io_dumper._op_filter == {"mm"}
             assert io_dumper._module_filter == {"Linear"}
             assert io_dumper._layer_filter == {"model.layers.0"}
@@ -310,9 +308,7 @@ class TestInitFromEnvMatrix:
         io_dumper._init_from_env()
         try:
             assert io_dumper._enabled is True
-            assert os.path.normpath(io_dumper._dump_dir) == os.path.normpath(
-                yaml_dir
-            )
+            assert os.path.normpath(io_dumper._dump_dir) == os.path.normpath(yaml_dir)
             assert io_dumper._op_filter == {"mm"}
             assert io_dumper._module_filter == {"Linear"}
             assert io_dumper._layer_filter == {"model.layers.0"}
@@ -336,9 +332,7 @@ class TestInitFromEnvMatrix:
         assert io_dumper._enabled is False
         assert io_dumper._dump_dir == ""
 
-    def test_dir_creation_failure_with_print_keeps_console(
-        self, tmp_path, monkeypatch
-    ):
+    def test_dir_creation_failure_with_print_keeps_console(self, tmp_path, monkeypatch):
         """With print enabled, a dir failure degrades to print-only mode."""
         blocker = tmp_path / "blocker"
         blocker.write_text("x", encoding="utf-8")

@@ -192,6 +192,8 @@ def test_prepare_inputs_uploads_mrope_positions_to_device_buffer():
         # Prompt-only step: the request positions are copied verbatim into
         # the first three device columns.
         torch.testing.assert_close(runner.mrope_positions.gpu[:, :3], rows)
+        assert runner.mrope_positions.gpu.dtype == torch.int64
+        assert runner.mrope_positions.gpu[:, :3].tolist() == rows.tolist()
     finally:
         patches.__exit__(None, None, None)
 
@@ -221,6 +223,8 @@ def test_prepare_inputs_uploads_xdrope_positions_to_device_buffer():
         runner._prepare_inputs(out, np.array([2], dtype=np.int32))
 
         torch.testing.assert_close(runner.xdrope_positions.gpu[:, :2], rows)
+        assert runner.xdrope_positions.gpu.dtype == torch.int64
+        assert runner.xdrope_positions.gpu[:, :2].tolist() == rows.tolist()
     finally:
         patches.__exit__(None, None, None)
 

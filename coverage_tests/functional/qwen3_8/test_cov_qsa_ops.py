@@ -80,13 +80,42 @@ class TestBuildForwardMetadata:
     @pytest.mark.parametrize(
         ("mutate", "message"),
         [
-            (lambda t: t.update(token_to_req=torch.zeros(2, dtype=torch.int32).view(2, 1)), "incompatible shapes"),
-            (lambda t: t.update(common_slot_mapping=torch.zeros(1, dtype=torch.int64)), "incompatible shapes"),
-            (lambda t: t.update(query_start_loc=torch.tensor([0, 1], dtype=torch.int32)), "terminal offset"),
-            (lambda t: t.update(logical_positions=torch.zeros(2, dtype=torch.int32)), "must use int64"),
-            (lambda t: t.update(qsa_slot_mapping=torch.zeros(2, dtype=torch.int32)), "must use int64"),
-            (lambda t: t.update(token_to_req=torch.zeros(2, dtype=torch.int64)), "must use int32"),
-            (lambda t: t.update(seq_lens=torch.zeros(2, dtype=torch.int64, device="meta")), "same device"),
+            (
+                lambda t: t.update(
+                    token_to_req=torch.zeros(2, dtype=torch.int32).view(2, 1)
+                ),
+                "incompatible shapes",
+            ),
+            (
+                lambda t: t.update(
+                    common_slot_mapping=torch.zeros(1, dtype=torch.int64)
+                ),
+                "incompatible shapes",
+            ),
+            (
+                lambda t: t.update(
+                    query_start_loc=torch.tensor([0, 1], dtype=torch.int32)
+                ),
+                "terminal offset",
+            ),
+            (
+                lambda t: t.update(logical_positions=torch.zeros(2, dtype=torch.int32)),
+                "must use int64",
+            ),
+            (
+                lambda t: t.update(qsa_slot_mapping=torch.zeros(2, dtype=torch.int32)),
+                "must use int64",
+            ),
+            (
+                lambda t: t.update(token_to_req=torch.zeros(2, dtype=torch.int64)),
+                "must use int32",
+            ),
+            (
+                lambda t: t.update(
+                    seq_lens=torch.zeros(2, dtype=torch.int64, device="meta")
+                ),
+                "same device",
+            ),
         ],
     )
     def test_rejects_incompatible_metadata(self, force_triton, mutate, message):

@@ -188,10 +188,9 @@ def test_forward_hip_without_key_uses_base_implementation(monkeypatch):
     monkeypatch.setattr(
         Mod.RotaryEmbedding,
         "forward_hip",
-        lambda self, positions, query, key=None: base_calls.append(
-            (positions, query, key)
-        )
-        or "base-hip",
+        lambda self, positions, query, key=None: (
+            base_calls.append((positions, query, key)) or "base-hip"
+        ),
         raising=False,
     )
     instance = _bare(
@@ -211,10 +210,9 @@ def test_forward_hip_with_key_delegates_to_oot(monkeypatch):
     monkeypatch.setattr(
         Mod.RotaryEmbeddingFL,
         "forward_oot",
-        lambda self, positions, query, key=None: calls.append(
-            (positions, query, key)
-        )
-        or "oot",
+        lambda self, positions, query, key=None: (
+            calls.append((positions, query, key)) or "oot"
+        ),
     )
     instance = _bare(
         cos_sin_cache=_cache(4, 4),
@@ -235,9 +233,7 @@ def test_init_forwards_geometry_and_initializes_ascend_on_npu(monkeypatch):
     fake_module = types.ModuleType(
         "vllm_fl.dispatch.backends.vendor.ascend.impl.rotary"
     )
-    fake_module.initialize_rotary_embedding_ascend = lambda: ascend_calls.append(
-        True
-    )
+    fake_module.initialize_rotary_embedding_ascend = lambda: ascend_calls.append(True)
     monkeypatch.setitem(
         sys.modules,
         "vllm_fl.dispatch.backends.vendor.ascend.impl.rotary",
@@ -252,9 +248,7 @@ def test_init_forwards_geometry_and_initializes_ascend_on_npu(monkeypatch):
 
     Mod.RotaryEmbeddingFL(8, 4, 16, 10000.0, True, torch.float32)
 
-    assert init_calls == [
-        ((8, 4, 16, 10000.0, True, torch.float32), {})
-    ]
+    assert init_calls == [((8, 4, 16, 10000.0, True, torch.float32), {})]
     assert ascend_calls == [True]
 
 

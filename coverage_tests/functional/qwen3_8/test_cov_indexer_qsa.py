@@ -136,9 +136,7 @@ class TestQsaIndexerConstruction:
         assert created.raw.kwargs["prefix"] == "p.indexer.raw_key_cache"
         assert created.raw.kwargs["cache_rope_positions"] is True
         assert created.raw.kwargs["head_size"] == 4
-        assert created.compressed.kwargs["prefix"] == (
-            "p.indexer.compressed_key_cache"
-        )
+        assert created.compressed.kwargs["prefix"] == ("p.indexer.compressed_key_cache")
         assert created.compressed.kwargs["compress_ratio"] == 2
 
     def test_unprefixed_projection_name(self, monkeypatch):
@@ -265,9 +263,7 @@ class TestProjectQk:
         indexer = _indexer()
         raw = torch.ones(2, 12)
         indexer.index_qk_proj = _Linear(raw)
-        monkeypatch.setattr(
-            indexer_qsa, "fast_gemma_rmsnorm", lambda norm, x: x * 5
-        )
+        monkeypatch.setattr(indexer_qsa, "fast_gemma_rmsnorm", lambda norm, x: x * 5)
         monkeypatch.setattr(
             indexer_qsa, "apply_qsa_rope", lambda rotary, positions, tensor: tensor
         )
@@ -502,7 +498,9 @@ class TestForwardDispatch:
 
         monkeypatch.setattr(indexer, "_update_and_compress", update)
         monkeypatch.setattr(
-            indexer, "_select", lambda q, meta, out: calls.append(("select", q, out)) or "out"
+            indexer,
+            "_select",
+            lambda q, meta, out: calls.append(("select", q, out)) or "out",
         )
         hidden = torch.arange(30, dtype=torch.float32).view(10, 3)
         positions = torch.arange(10)
@@ -583,9 +581,7 @@ class TestSelectAndCompressionUpdates:
         assert torch.equal(stores[1][1], torch.tensor([3, 4]))
         assert stores[1][2] == ("normalized", "pooled", "first-positions")
 
-    def test_rope_position_cache_is_stored_with_canonical_positions(
-        self, monkeypatch
-    ):
+    def test_rope_position_cache_is_stored_with_canonical_positions(self, monkeypatch):
         indexer = _indexer(rotary=SimpleNamespace(rotary_dim=4, mrope_section=None))
         position_cache = torch.zeros(8)
         indexer.raw_key_cache = SimpleNamespace(

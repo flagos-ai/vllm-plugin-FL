@@ -39,9 +39,7 @@ INT8_MODE = "vllm_fl.quantization.w8a8.int8_mode"
 @pytest.fixture
 def packed():
     env = build_ct_environment()
-    with import_under_fakes(
-        MODULE, env.modules, purge=(MODULE, INT8_MODE)
-    ) as module:
+    with import_under_fakes(MODULE, env.modules, purge=(MODULE, INT8_MODE)) as module:
         yield module, env
 
 
@@ -162,9 +160,7 @@ def test_install_wrapper_selects_packed_scheme_for_channel_weights(packed):
 
     config = env.CompressedTensorsConfig()
     weight = QuantizationArgs()
-    activation = QuantizationArgs(
-        strategy=QuantizationStrategy.TOKEN, dynamic=True
-    )
+    activation = QuantizationArgs(strategy=QuantizationStrategy.TOKEN, dynamic=True)
     scheme = config._get_scheme_from_parts(
         weight, activation, format="pack-quantized", layer_name="wrapped"
     )
@@ -178,9 +174,7 @@ def test_install_wrapper_delegates_non_packed_metadata(packed):
     assert module.install_packed_w8a8_scheme() is True
     config = env.CompressedTensorsConfig()
     weight = QuantizationArgs(num_bits=4)
-    activation = QuantizationArgs(
-        strategy=QuantizationStrategy.TOKEN, dynamic=True
-    )
+    activation = QuantizationArgs(strategy=QuantizationStrategy.TOKEN, dynamic=True)
     result = config._get_scheme_from_parts(
         weight,
         activation,

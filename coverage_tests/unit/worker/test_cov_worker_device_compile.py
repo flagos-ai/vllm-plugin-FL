@@ -636,7 +636,10 @@ def test_compile_or_warm_up_swallows_warmup_import_failure(monkeypatch):
     )
     worker = _warmup_worker(runner, compilation)
 
+    attempted = []
+
     def failing(worker_arg):
+        attempted.append(worker_arg)
         raise ImportError("torchvision missing")
 
     monkeypatch.setattr(worker_module, "kernel_warmup", failing)
@@ -647,7 +650,15 @@ def test_compile_or_warm_up_swallows_warmup_import_failure(monkeypatch):
         worker_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=False)
     )
     monkeypatch.setattr(worker_module, "set_random_seed", lambda s: None)
-    WorkerFL.compile_or_warm_up_model(worker)
+    times = WorkerFL.compile_or_warm_up_model(worker)
+
+    # The ImportError was swallowed after one attempt and the rest of the
+    # warm-up path completed normally.
+    assert attempted == [worker]
+    assert runner.lora_removals == ["LORA"]
+    assert runner.dummy_calls == []
+    assert runner.capture_calls == 0
+    assert (times.language_model, times.encoder) == (0.0, 0.0)
 
 
 def test_compile_or_warm_up_sampler_run_uses_last_hidden_states(monkeypatch):

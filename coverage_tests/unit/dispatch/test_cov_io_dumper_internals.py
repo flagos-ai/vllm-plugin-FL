@@ -80,12 +80,13 @@ class TestRecordDeviceEvent:
         """A device module with no Event attribute falls through to None."""
         fake = types.ModuleType("cov_no_event")
         monkeypatch.setattr(torch, "cov_no_event", fake, raising=False)
-        assert io_dumper._record_device_event(
-            {"t": _FakeTensor("cov_no_event")}
-        ) is None
+        assert (
+            io_dumper._record_device_event({"t": _FakeTensor("cov_no_event")}) is None
+        )
 
     def test_event_creation_error_returns_none(self, monkeypatch):
         """An Event constructor that raises is swallowed."""
+
         class Event:
             def __init__(self):
                 raise RuntimeError("events unsupported")
@@ -93,9 +94,9 @@ class TestRecordDeviceEvent:
         fake = types.ModuleType("cov_bad_event")
         fake.Event = Event
         monkeypatch.setattr(torch, "cov_bad_event", fake, raising=False)
-        assert io_dumper._record_device_event(
-            {"t": _FakeTensor("cov_bad_event")}
-        ) is None
+        assert (
+            io_dumper._record_device_event({"t": _FakeTensor("cov_bad_event")}) is None
+        )
 
 
 class TestBackgroundWriter:
@@ -146,6 +147,7 @@ class TestBackgroundWriter:
 
     def test_close_open_files_swallows_oserror(self):
         """flush()/close() OSErrors do not escape handle cleanup."""
+
         class BadFh:
             def flush(self):
                 raise OSError("flush failed")
@@ -203,9 +205,7 @@ class TestDumpQueueErrors:
             io_dumper.logger.removeHandler(cap)
             disable_io_dump()
         assert "No pairing info for dump output 'no_pair'" in cap.text()
-        assert not os.path.isdir(
-            os.path.join(dump_dir, "rank_0000", "step_0000")
-        )
+        assert not os.path.isdir(os.path.join(dump_dir, "rank_0000", "step_0000"))
 
     def test_malformed_pairing_reports_not_raises(self, tmp_path):
         """A wrong-shaped pairing is caught and logged, not propagated."""
@@ -247,9 +247,7 @@ class TestDumpQueueErrors:
             dump_after("mm", (), torch.zeros(1))
         finally:
             disable_io_dump()
-        assert not os.path.isdir(
-            os.path.join(dump_dir, "rank_0000", "step_0000")
-        )
+        assert not os.path.isdir(os.path.join(dump_dir, "rank_0000", "step_0000"))
 
     def test_guard_active_short_circuits_before_and_after(self, tmp_path):
         """dump_before/dump_after return immediately when the guard is set."""
@@ -264,9 +262,7 @@ class TestDumpQueueErrors:
                 io_dumper.set_guard(False)
         finally:
             disable_io_dump()
-        assert not os.path.isdir(
-            os.path.join(dump_dir, "rank_0000", "step_0000")
-        )
+        assert not os.path.isdir(os.path.join(dump_dir, "rank_0000", "step_0000"))
 
 
 class TestFlaggemsClassifier:

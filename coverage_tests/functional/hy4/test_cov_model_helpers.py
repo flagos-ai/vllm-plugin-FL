@@ -145,6 +145,12 @@ class TestHyperConnection:
             + (module.magnitude * torch.sigmoid(torch.zeros(())) + module.hc_eps).item()
         )
         torch.testing.assert_close(out.float(), expected_out, rtol=RTOL, atol=ATOL)
+        # Closed-form shapes/dtypes: one collapsed lane per token, one write
+        # gate per stream, and the stream dtype is preserved.
+        assert collapsed.shape == (3, 8)
+        assert write.shape == (3, 4)
+        assert out.shape == streams.shape
+        assert out.dtype == streams.dtype
 
 
 class TestHyperHead:
@@ -403,6 +409,9 @@ class TestExpertSlicing:
         torch.testing.assert_close(
             out, torch.cat([data[0:3], data[4:6]]), rtol=0, atol=0
         )
+        # Runs [0..3) and [4..6) concatenate in expert order: five rows.
+        assert out.shape == (5, 3)
+        assert out.tolist() == torch.cat([data[0:3], data[4:6]]).tolist()
 
     def test_read_local_experts_single_run_avoids_concat(self, device):
         """Read local experts single run avoids concat."""

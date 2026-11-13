@@ -8,13 +8,17 @@ from pathlib import Path
 
 from tests.run import TestCase, TestRunner
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 # Environment drift in the CI image, isolated at this entry point rather than
 # inside the tests: vllm_fl/models/qwen3_8_flash_next/gpu/mtp.py imports
 # vllm.model_executor.models.utils.maybe_fuse_shared_experts, which only
 # exists in vllm >= 0.33, so the module (168 statements) cannot be imported
 # on the vllm 0.24 image. Restore when the image ships vllm >= 0.33.
+# An ignore is applied only while its file still exists; if the test is
+# renamed or removed, the entry is skipped instead of failing collection.
 ENV_DRIFT_IGNORES = [
-    "--ignore=coverage_tests/functional/qwen3_8/test_cov_mtp.py",
+    "coverage_tests/functional/qwen3_8/test_cov_mtp.py",
 ]
 
 
@@ -47,7 +51,14 @@ class CoverageRunner(TestRunner):
                 ]
             )
             if scope == "functional":
-                args.extend(ENV_DRIFT_IGNORES)
+                for ignore_path in ENV_DRIFT_IGNORES:
+                    if (_REPO_ROOT / ignore_path).exists():
+                        args.append(f"--ignore={ignore_path}")
+                    else:
+                        print(
+                            "[cov] skipping stale env-drift ignore "
+                            f"(file not found): {ignore_path}"
+                        )
             cases.append(
                 replace(case, pytest_path=f"coverage_tests/{scope}/", extra_args=args)
             )

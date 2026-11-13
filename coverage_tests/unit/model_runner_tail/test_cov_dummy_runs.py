@@ -356,6 +356,10 @@ def test_dummy_sampler_run_mm_encoder_only_skips():
     output = ModelRunnerFL._dummy_sampler_run(runner, torch.rand(2, 2))
 
     torch.testing.assert_close(output, torch.tensor([]))
+    # Encoder-only short-circuit: an empty float tensor, no sampler output.
+    assert torch.is_tensor(output)
+    assert output.numel() == 0
+    assert output.dtype == torch.float32
 
 
 def test_dummy_pooler_run_task_builds_metadata_and_calls_pooler():

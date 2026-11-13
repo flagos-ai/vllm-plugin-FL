@@ -99,7 +99,7 @@ class TestIdentityAttributes:
             torch.float32,
         ]
 
-    def test_support_static_graph_mode_vendors(self):
+    def test_support_static_graph_mode_vendors(self, monkeypatch):
         """Every validated vendor opts into the static-graph path."""
         for vendor in (
             "nvidia",
@@ -116,7 +116,7 @@ class TestIdentityAttributes:
             "biren",
             "sunrise",
         ):
-            PlatformFL.vendor_name = vendor
+            monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
             assert PlatformFL.support_static_graph_mode() is True, vendor
 
     def test_is_pin_memory_available_matrix(self):

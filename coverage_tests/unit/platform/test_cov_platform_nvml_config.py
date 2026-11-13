@@ -724,6 +724,11 @@ def test_check_and_update_config_without_model_or_cache(monkeypatch):
     _patch_config_collaborators(monkeypatch)
     config = _config(model=None, cache=False)
     PlatformFL.check_and_update_config(config)
+    # The mandatory update still ran; the missing model/cache only skipped the
+    # model- and cache-dependent branches.
+    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+    assert config.model_config is None
+    assert config.cache_config is None
 
 
 class _Entry:

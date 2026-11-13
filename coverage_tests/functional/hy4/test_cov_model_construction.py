@@ -116,20 +116,18 @@ def _hyper_read_reference(module, streams):
     norm = torch.rsqrt(flat.square().mean(dim=-1, keepdim=True) + module.normalize_eps)
     gates = F.linear(flat, module.hc_fn) * norm
     read, write = gates.split(module.num_streams, dim=-1)
-    read = torch.sigmoid(read * module.hc_scale[0] + module.hc_base[: module.num_streams])
+    read = torch.sigmoid(
+        read * module.hc_scale[0] + module.hc_base[: module.num_streams]
+    )
     write = module.magnitude * torch.sigmoid(
         write * module.hc_scale[1] + module.hc_base[module.num_streams :]
     )
-    collapsed = (
-        (read + module.hc_eps).unsqueeze(-1) * streams.float()
-    ).sum(dim=1)
+    collapsed = ((read + module.hc_eps).unsqueeze(-1) * streams.float()).sum(dim=1)
     return collapsed, write + module.hc_eps
 
 
 def _hyper_write_reference(streams, delta, write):
-    return (
-        streams.float() + write.float().unsqueeze(-1) * delta.float().unsqueeze(1)
-    )
+    return streams.float() + write.float().unsqueeze(-1) * delta.float().unsqueeze(1)
 
 
 class _AttentionStub:
@@ -288,9 +286,7 @@ class TestDecoderLayerForward:
         layer.self_attn = _AttentionStub()
         layer.mlp = _MlpStub()
         with set_current_vllm_config(_runtime_config()):
-            layer.input_layernorm = hy_model.RMSNorm(
-                8, eps=config.rms_norm_eps
-            )
+            layer.input_layernorm = hy_model.RMSNorm(8, eps=config.rms_norm_eps)
             layer.post_attention_layernorm = hy_model.RMSNorm(
                 8, eps=config.rms_norm_eps
             )
@@ -541,9 +537,7 @@ class TestLogitsProcessorGetLogits:
     def test_none_gather_returns_none(self):
         """A TP rank that gathered nothing propagates None."""
         apply = _ApplyRecorder(torch.zeros(2, 4))
-        lm_head = type(
-            "H", (), {"weight": torch.zeros(4, 4), "quant_method": apply}
-        )()
+        lm_head = type("H", (), {"weight": torch.zeros(4, 4), "quant_method": apply})()
         processor = self._processor(lambda value: None)
         assert processor._get_logits(torch.zeros(2, 4), lm_head, None) is None
 
@@ -561,8 +555,9 @@ class _FakeModel(nn.Module):
 
 
 class _FakeLMHead:
-    def __init__(self, num_embeddings, embedding_dim, *, params_dtype, quant_config,
-                 prefix):
+    def __init__(
+        self, num_embeddings, embedding_dim, *, params_dtype, quant_config, prefix
+    ):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.params_dtype = params_dtype
@@ -580,9 +575,7 @@ def _lm_config(config, dtype=torch.bfloat16):
         "VC",
         (),
         {
-            "model_config": type(
-                "MC", (), {"hf_config": config, "dtype": dtype}
-            )(),
+            "model_config": type("MC", (), {"hf_config": config, "dtype": dtype})(),
             "quant_config": None,
         },
     )()
@@ -626,16 +619,12 @@ class TestForCausalLMWiring:
         # are ignored.
         assert model.num_moe_layers == 1
         assert len(model.moe_mlp_layers) == 1
-        assert model.moe_layers == [
-            model.moe_mlp_layers[0].experts.routed_experts
-        ]
+        assert model.moe_layers == [model.moe_mlp_layers[0].experts.routed_experts]
 
     def test_bf16_lm_head_follows_model_dtype(self, monkeypatch):
         """Without the FP32 flag the head uses the configured model dtype."""
         config = _tiny_config(enable_lm_head_fp32=False)
-        _, captured = self._build(
-            monkeypatch, config, _RankGroup(), prefix=""
-        )
+        _, captured = self._build(monkeypatch, config, _RankGroup(), prefix="")
         assert captured["lm_head"].params_dtype == torch.bfloat16
         assert captured["lm_head"].prefix == "lm_head"
         assert captured["model"].captured[1] == "model"
@@ -669,15 +658,11 @@ class TestExpertParamsMapping:
             observed.append(kwargs)
             return [("p", "w", 0, "w1")]
 
-        monkeypatch.setattr(
-            hy_model, "fused_moe_make_expert_params_mapping", _helper
-        )
+        monkeypatch.setattr(hy_model, "fused_moe_make_expert_params_mapping", _helper)
         model = SimpleNamespace(
             config=SimpleNamespace(n_routed_experts=4), n_redundant_experts=2
         )
-        assert hy_model._make_hyv4_expert_params_mapping(model) == [
-            ("p", "w", 0, "w1")
-        ]
+        assert hy_model._make_hyv4_expert_params_mapping(model) == [("p", "w", 0, "w1")]
         assert observed == [
             {
                 "ckpt_gate_proj_name": "gate_proj",
@@ -690,9 +675,7 @@ class TestExpertParamsMapping:
 
     def test_legacy_fallback_builds_three_rows_per_expert(self, monkeypatch):
         """Without the helper each expert maps gate/up to w13 and down to w2."""
-        monkeypatch.setattr(
-            hy_model, "fused_moe_make_expert_params_mapping", None
-        )
+        monkeypatch.setattr(hy_model, "fused_moe_make_expert_params_mapping", None)
         model = SimpleNamespace(config=SimpleNamespace(n_routed_experts=2))
         expected = []
         for expert in range(2):
@@ -722,9 +705,7 @@ class TestExpertParamsMapping:
 
     def test_legacy_fallback_rejects_eplb(self, monkeypatch):
         """Redundant experts require the canonical vLLM helper."""
-        monkeypatch.setattr(
-            hy_model, "fused_moe_make_expert_params_mapping", None
-        )
+        monkeypatch.setattr(hy_model, "fused_moe_make_expert_params_mapping", None)
         model = SimpleNamespace(
             config=SimpleNamespace(n_routed_experts=2), n_redundant_experts=1
         )
@@ -742,14 +723,10 @@ class TestAttentionWrapper:
         def _fake_init(self, **kwargs):
             captured.update(kwargs)
 
-        monkeypatch.setattr(
-            hy_model.HYV4MLAAttention, "__init__", _fake_init
-        )
+        monkeypatch.setattr(hy_model.HYV4MLAAttention, "__init__", _fake_init)
         config = _tiny_config()
         cache_config = SimpleNamespace(cache_dtype="auto")
-        vllm_config = SimpleNamespace(
-            cache_config=cache_config, quant_config=None
-        )
+        vllm_config = SimpleNamespace(cache_config=cache_config, quant_config=None)
         plan = object()
         buffer = torch.zeros(1, dtype=torch.int32)
 

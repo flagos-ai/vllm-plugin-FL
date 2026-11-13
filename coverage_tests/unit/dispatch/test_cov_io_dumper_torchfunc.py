@@ -157,13 +157,9 @@ class TestTorchFuncModeBypassBranches:
             with_metas=True,
         )
         try:
-            monkeypatch.setattr(
-                torch.compiler, "is_compiling", lambda: True
-            )
+            monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
             mode = io_dumper._DumpTorchFuncMode()
-            assert mode.__torch_function__(
-                _matmul(), (), (1, 2)
-            ) == 3
+            assert mode.__torch_function__(_matmul(), (), (1, 2)) == 3
         finally:
             disable_io_dump()
         assert not os.path.isdir(
@@ -181,9 +177,7 @@ class TestTorchFuncModeBypassBranches:
             io_dumper.set_guard(True)
             try:
                 mode = io_dumper._DumpTorchFuncMode()
-                assert mode.__torch_function__(
-                    _matmul(), (), (2, 3)
-                ) == 5
+                assert mode.__torch_function__(_matmul(), (), (2, 3)) == 5
             finally:
                 io_dumper.set_guard(False)
         finally:
@@ -201,9 +195,7 @@ class TestTorchFuncModeBypassBranches:
             monkeypatch.setenv("RANK", "0")
             reset_rank()
             mode = io_dumper._DumpTorchFuncMode()
-            assert mode.__torch_function__(
-                _matmul(), (), (4, 5)
-            ) == 9
+            assert mode.__torch_function__(_matmul(), (), (4, 5)) == 9
         finally:
             disable_io_dump()
 
@@ -216,9 +208,7 @@ class TestTorchFuncModeBypassBranches:
         )
         try:
             mode = io_dumper._DumpTorchFuncMode()
-            assert mode.__torch_function__(
-                _matmul(), (), (1, 1)
-            ) == 2
+            assert mode.__torch_function__(_matmul(), (), (1, 1)) == 2
             assert "torch.matmul" in io_common._seen_ops
         finally:
             disable_io_dump()
@@ -232,9 +222,7 @@ class TestTorchFuncModeBypassBranches:
         )
         try:
             mode = io_dumper._DumpTorchFuncMode()
-            assert mode.__torch_function__(
-                _matmul(), (), (2, 2)
-            ) == 4
+            assert mode.__torch_function__(_matmul(), (), (2, 2)) == 4
         finally:
             disable_io_dump()
         assert not os.path.isdir(
@@ -252,9 +240,7 @@ class TestTorchFuncModeBypassBranches:
         try:
             io_dumper._call_counters["torch.matmul"] = 1
             mode = io_dumper._DumpTorchFuncMode()
-            assert mode.__torch_function__(
-                _matmul(), (), (3, 3)
-            ) == 6
+            assert mode.__torch_function__(_matmul(), (), (3, 3)) == 6
         finally:
             disable_io_dump()
         assert not os.path.isdir(
@@ -293,9 +279,7 @@ class TestTorchFuncModeBypassBranches:
         try:
             mode = io_dumper._DumpTorchFuncMode()
             with pytest.raises(RuntimeError, match="boom"):
-                mode.__torch_function__(
-                    _matmul(raises=True), (), (1, 1)
-                )
+                mode.__torch_function__(_matmul(raises=True), (), (1, 1))
             assert io_dumper._dump_pairing.stack.get("torch.matmul", []) == []
             # Tag depth is back at zero: the next acquisition allocates.
             reset_exec_order()

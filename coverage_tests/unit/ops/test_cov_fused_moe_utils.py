@@ -756,9 +756,7 @@ def test_prepare_expert_assignment_aligned_path(
         "expert_map": None,
     }
     params.update(kwargs)
-    result = Mod._prepare_expert_assignment(
-        topk_ids, {"BLOCK_SIZE_M": 8}, **params
-    )
+    result = Mod._prepare_expert_assignment(topk_ids, {"BLOCK_SIZE_M": 8}, **params)
     assert result[0] is not None
     assert len(calls) == 1
     _, block_size, global_experts, expert_map, align_kwargs = calls[0]
@@ -866,9 +864,7 @@ def _call_apply(
         else topk_ids
     )
     topk_weights = (
-        torch.ones(4, 2, dtype=torch.float32)
-        if topk_weights is None
-        else topk_weights
+        torch.ones(4, 2, dtype=torch.float32) if topk_weights is None else topk_weights
     )
     activation = Activation.GELU if activation is None else activation
     output = torch.zeros(4, 8, dtype=torch.float16) if output is None else output
@@ -912,7 +908,9 @@ def _install_generic_apply_helpers(monkeypatch):
         return torch.empty(shape, dtype=cache.dtype, device=cache.device)
 
     def get_config(w1_shape, w2_shape, top_k, config_name, num_tokens, **kwargs):
-        state.configs.append((w1_shape, w2_shape, top_k, config_name, num_tokens, kwargs))
+        state.configs.append(
+            (w1_shape, w2_shape, top_k, config_name, num_tokens, kwargs)
+        )
         return {"BLOCK_SIZE_M": 16}
 
     def align(topk_ids, block_size, global_experts, expert_map, **kwargs):
@@ -1167,9 +1165,7 @@ def test_apply_generic_pipeline_argument_mapping(monkeypatch):
 
     # global_num_experts == -1 is replaced by the local expert count (2).
     assert state.align == [(16, 2, None, {"ignore_invalid_experts": False})]
-    assert state.configs == [
-        (w1.size(), w2.size(), 2, "cfg", 4, {"block_shape": None})
-    ]
+    assert state.configs == [(w1.size(), w2.size(), 2, "cfg", 4, {"block_shape": None})]
 
     first_args, first_kwargs = state.kernels[0]
     assert first_args[0] is hidden
@@ -1347,9 +1343,7 @@ def test_apply_requires_unit_stride_on_weights(monkeypatch):
 
 def test_moe_sum_delegates_to_cached_op(monkeypatch):
     recorded = []
-    monkeypatch.setattr(
-        Mod, "_moe_sum", lambda inp, out: recorded.append((inp, out))
-    )
+    monkeypatch.setattr(Mod, "_moe_sum", lambda inp, out: recorded.append((inp, out)))
     experts = object.__new__(Mod.TritonExpertsFL)
     inp = torch.randn(4, 2, 8)
     out = torch.zeros(4, 8)

@@ -51,9 +51,7 @@ class _Recorder:
 
 
 def _compile_flags(monkeypatch, *, env=True, oot=True):
-    monkeypatch.setitem(
-        fl_envs.__dict__, "VLLM_FL_USE_FLAGGEMS_VLLM", env
-    )
+    monkeypatch.setitem(fl_envs.__dict__, "VLLM_FL_USE_FLAGGEMS_VLLM", env)
     monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: oot)
 
 
@@ -61,9 +59,7 @@ def _policy(monkeypatch, *, whitelist=None, blacklist=None, enabled=None):
     monkeypatch.setattr(fl_utils, "get_oot_whitelist", lambda: whitelist)
     monkeypatch.setattr(fl_utils, "get_oot_blacklist", lambda: blacklist)
     enabled = {} if enabled is None else enabled
-    monkeypatch.setattr(
-        fl_utils, "use_flaggems_op", lambda op: enabled.get(op, True)
-    )
+    monkeypatch.setattr(fl_utils, "use_flaggems_op", lambda op: enabled.get(op, True))
 
 
 def test_enable_returns_when_flaggems_vllm_disabled(monkeypatch):
@@ -219,9 +215,7 @@ def test_silu_forward_hip_delegates_to_oot(monkeypatch):
 
 def test_silu_and_mul_constructor_calls_upstream(monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        Mod.SiluAndMul, "__init__", lambda self: calls.append(self)
-    )
+    monkeypatch.setattr(Mod.SiluAndMul, "__init__", lambda self: calls.append(self))
     instance = Mod.SiluAndMulFL()
     assert calls == [instance]
 
@@ -327,9 +321,7 @@ def test_clamp_forward_oot_uses_native_for_non_default_params(monkeypatch, attrs
 def test_clamp_forward_oot_uses_fused_kernel(monkeypatch):
     kernel = _Recorder("fused")
     monkeypatch.setattr(Mod, "_silu_and_mul_with_clamp", kernel)
-    instance = _bare(
-        Mod.SiluAndMulWithClampFL, swiglu_limit=7.0, alpha=1.0, beta=0.0
-    )
+    instance = _bare(Mod.SiluAndMulWithClampFL, swiglu_limit=7.0, alpha=1.0, beta=0.0)
     x = torch.zeros(2, 8)
     assert instance.forward_oot(x) == "fused"
     args, _ = kernel.calls[0]
@@ -342,9 +334,7 @@ def test_clamp_forward_oot_uses_graph_when_compiling(monkeypatch):
     kernel = _Recorder(expected)
     monkeypatch.setattr(Mod, "_silu_and_mul_with_clamp", kernel)
     monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
-    instance = _bare(
-        Mod.SiluAndMulWithClampFL, swiglu_limit=6.5, alpha=1.0, beta=0.0
-    )
+    instance = _bare(Mod.SiluAndMulWithClampFL, swiglu_limit=6.5, alpha=1.0, beta=0.0)
     x = torch.zeros(2, 8)
     assert torch.equal(instance.forward_oot(x), expected)
     ctx, seen = kernel.calls[0][0]

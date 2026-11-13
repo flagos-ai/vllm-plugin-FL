@@ -18,8 +18,9 @@ The Triton kernels, the accelerator graph class, the platform probe, and the
 ``BlockTable``-shaped input are the external boundaries.  Kernel launches are
 recorded with their grid/arguments so the builder metadata assembly (pointer
 tables, group sizes, padding boundaries, and context-parallel layout) is
-asserted against explicit expectations.  Real accelerator capture is a GPU
-path and is marked accordingly at the end of the file.
+asserted against explicit expectations.  The real accelerator path is a
+single-GPU test and lives in the functional tree
+(``coverage_tests/functional/worker/test_cov_common_attention_metadata_gpu.py``).
 """
 
 from __future__ import annotations
@@ -134,14 +135,10 @@ def _make_runner(monkeypatch, *, supported):
 def test_enabled_defaults_to_platform_cuda_probe(monkeypatch):
     """With no override the platform's CUDA probe decides."""
     monkeypatch.delenv("VLLM_FL_COMMON_ATTENTION_METADATA", raising=False)
-    monkeypatch.setattr(
-        cam, "current_platform", SimpleNamespace(is_cuda=lambda: True)
-    )
+    monkeypatch.setattr(cam, "current_platform", SimpleNamespace(is_cuda=lambda: True))
     assert cam.common_attention_metadata_enabled() is True
 
-    monkeypatch.setattr(
-        cam, "current_platform", SimpleNamespace(is_cuda=lambda: False)
-    )
+    monkeypatch.setattr(cam, "current_platform", SimpleNamespace(is_cuda=lambda: False))
     assert cam.common_attention_metadata_enabled() is False
 
 
@@ -159,9 +156,7 @@ def test_enabled_defaults_to_platform_cuda_probe(monkeypatch):
 def test_enabled_env_override(monkeypatch, value, cuda, expected):
     """The environment override is exact (only ``1`` opts in)."""
     monkeypatch.setenv("VLLM_FL_COMMON_ATTENTION_METADATA", value)
-    monkeypatch.setattr(
-        cam, "current_platform", SimpleNamespace(is_cuda=lambda: cuda)
-    )
+    monkeypatch.setattr(cam, "current_platform", SimpleNamespace(is_cuda=lambda: cuda))
     assert cam.common_attention_metadata_enabled() is expected
 
 
@@ -275,9 +270,7 @@ def test_create_layout_rejects_mixed_devices():
     second.block_table.gpu = SimpleNamespace(device=SimpleNamespace(type="cuda"))
 
     with pytest.raises(ValueError, match="same device"):
-        cam._create_common_attention_metadata_layout(
-            _FakeBlockTable([first, second])
-        )
+        cam._create_common_attention_metadata_layout(_FakeBlockTable([first, second]))
 
 
 def test_create_layout_rejects_mismatched_max_tokens():
@@ -286,9 +279,7 @@ def test_create_layout_rejects_mismatched_max_tokens():
     second = _FakeTable(max_tokens=48)
 
     with pytest.raises(ValueError, match="same max_num_batched_tokens"):
-        cam._create_common_attention_metadata_layout(
-            _FakeBlockTable([first, second])
-        )
+        cam._create_common_attention_metadata_layout(_FakeBlockTable([first, second]))
 
 
 @pytest.mark.parametrize(
@@ -307,9 +298,7 @@ def test_create_layout_rejects_mismatched_context_parallel(override):
     second = _FakeTable(**override)
 
     with pytest.raises(ValueError, match="context-parallel layout"):
-        cam._create_common_attention_metadata_layout(
-            _FakeBlockTable([first, second])
-        )
+        cam._create_common_attention_metadata_layout(_FakeBlockTable([first, second]))
 
 
 def test_layout_is_cached_on_the_block_table():
@@ -413,9 +402,7 @@ def test_compute_reuses_layout_across_calls(monkeypatch):
     """Two eager calls observe the same pointer tensors."""
     slot_kernel = _KernelRecorder()
     monkeypatch.setattr(cam, "_compute_slot_mapping_graph_kernel", slot_kernel)
-    monkeypatch.setattr(
-        cam, "_compute_num_computed_tokens_kernel", _KernelRecorder()
-    )
+    monkeypatch.setattr(cam, "_compute_num_computed_tokens_kernel", _KernelRecorder())
     block_table = _FakeBlockTable([_FakeTable()])
     query_start_loc = torch.tensor([0, 1], dtype=torch.int32)
 
@@ -633,61 +620,3 @@ def test_runner_materializes_layout_before_capture(monkeypatch):
     assert len(slot_kernel.calls) == 2
     assert len(computed_kernel.calls) == 2
     assert graph.replays == 1
-
-
-# ---------------------------------------------------------------------------
-# GPU-only accelerator capture (the tests above use fake graphs)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.gpu
-def test_layout_pointer_tables_are_built_on_cuda():
-    """Pointer/stride/size tables live on the device of the cache groups."""
-    table = _FakeTable(slot_len=8, device="cuda")
-    layout = cam._create_common_attention_metadata_layout(
-        _FakeBlockTable([table])
-    )
-
-    assert layout.block_table_ptrs.device.type == "cuda"
-    assert layout.block_table_strides.device.type == "cuda"
-    assert layout.block_sizes.device.type == "cuda"
-    assert layout.slot_mapping_ptrs.device.type == "cuda"
-    assert layout.block_table_ptrs.tolist() == [table.block_table.gpu.data_ptr()]
-    assert layout.block_table_strides.tolist() == [table.block_table.gpu.stride(0)]
-
-
-@pytest.mark.gpu
-def test_compute_real_kernels_match_reference_on_cuda():
-    """The real Triton kernels produce the reference slot/computed mapping."""
-    table = _FakeTable(
-        rows=2,
-        cols=4,
-        block_size=4,
-        max_tokens=8,
-        slot_len=8,
-        device="cuda",
-    )
-    table.block_table.gpu.copy_(
-        torch.tensor(
-            [[10, 20, 0, 0], [30, 40, 0, 0]], dtype=torch.int32, device="cuda"
-        )
-    )
-    block_table = _FakeBlockTable([table])
-    query_start_loc = torch.tensor([0, 2, 5], dtype=torch.int32, device="cuda")
-    positions = torch.tensor([0, 1, 2, 3, 4, 0, 0, 0], dtype=torch.int64, device="cuda")
-    seq_lens = torch.tensor([5, 7], dtype=torch.int32, device="cuda")
-    num_computed = torch.full((2,), -1, dtype=torch.int32, device="cuda")
-
-    cam.compute_common_attention_metadata(
-        block_table, 2, query_start_loc, positions, seq_lens, num_computed
-    )
-
-    # block_size=4, world/rank=1: slot = block_number * 4 + position % 4.
-    expected_slots = torch.tensor(
-        [40, 41, 122, 123, 160, PAD_SLOT_ID, PAD_SLOT_ID, PAD_SLOT_ID],
-        dtype=torch.int64,
-        device="cuda",
-    )
-    assert torch.equal(table.slot_mapping.gpu, expected_slots)
-    # num_computed = seq_len - scheduled tokens: [5-2, 7-3].
-    assert num_computed.tolist() == [3, 4]

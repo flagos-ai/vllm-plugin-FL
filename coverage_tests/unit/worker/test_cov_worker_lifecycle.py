@@ -341,14 +341,13 @@ def test_save_sharded_state_forwards_path_pattern_and_max_size():
 @contextmanager
 def _kv_shutdown_recorder():
     """Record ensure_kv_transfer_shutdown calls and restore afterwards."""
-    from vllm.distributed.kv_transfer import ensure_kv_transfer_shutdown
-
+    original = worker_module.ensure_kv_transfer_shutdown
     order = []
     worker_module.ensure_kv_transfer_shutdown = lambda: order.append("kv")
     try:
         yield order
     finally:
-        worker_module.ensure_kv_transfer_shutdown = ensure_kv_transfer_shutdown
+        worker_module.ensure_kv_transfer_shutdown = original
 
 
 def test_shutdown_runs_kv_profiler_and_runner_in_order():

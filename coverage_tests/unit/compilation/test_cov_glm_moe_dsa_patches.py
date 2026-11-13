@@ -110,7 +110,10 @@ def test_tokenizer_compat_swallows_broken_transformers(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", failing)
-    patches.patch_tokenizer_compat()
+    # Both guarded installs swallow the ImportError and report success (None),
+    # leaving the patched import hook in place rather than propagating.
+    assert patches.patch_tokenizer_compat() is None
+    assert builtins.__import__ is failing
 
 
 def test_platform_patches_only_install_tokenizer_compat(monkeypatch):

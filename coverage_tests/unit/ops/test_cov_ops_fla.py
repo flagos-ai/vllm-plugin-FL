@@ -263,9 +263,7 @@ def _chunk_op(monkeypatch, **kwargs):
 
 def test_chunk_op_constructor_reads_environment(monkeypatch):
     monkeypatch.setenv("GDN_RECOMPUTE_SUPPRESS_LEVEL", "5")
-    op = _chunk_op(
-        monkeypatch, output_final_state=True, use_qk_l2norm_in_kernel=True
-    )
+    op = _chunk_op(monkeypatch, output_final_state=True, use_qk_l2norm_in_kernel=True)
     assert op.output_final_state is True
     assert op.use_qk_l2norm_in_kernel is True
     assert op.suppress_level == 5
@@ -276,13 +274,22 @@ def _check_dtype_and_beta(op):
     with pytest.raises(AssertionError):
         op.forward_native(q, q.float(), q, torch.zeros(1, 2, 2), torch.ones(1, 2, 2))
     with pytest.raises(AssertionError, match="does not support float32"):
-        op.forward_native(q.float(), q.float(), q.float(), torch.zeros(1, 2, 2), torch.ones(1, 2, 2))
+        op.forward_native(
+            q.float(), q.float(), q.float(), torch.zeros(1, 2, 2), torch.ones(1, 2, 2)
+        )
     with pytest.raises(AssertionError, match="beta must be"):
         op.forward_native(q, q, q, torch.zeros(1, 2, 2), torch.ones(1, 2))
 
 
 def test_chunk_op_forward_validates_dtype_and_beta(monkeypatch):
-    _check_dtype_and_beta(_chunk_op(monkeypatch))
+    op = _chunk_op(monkeypatch)
+    _check_dtype_and_beta(op)
+    # Independently drive one contract violation from the test body: a beta
+    # with the wrong top-k width must be rejected with the documented message.
+    q = torch.zeros(1, 2, 2, 4, dtype=torch.float16)
+    beta = torch.ones(1, 2)
+    with pytest.raises(AssertionError, match="beta must be"):
+        op.forward_native(q, q, q, torch.zeros(1, 2, 2), beta)
 
 
 def test_chunk_op_warns_on_head_first_shapes(monkeypatch):
@@ -300,15 +307,15 @@ def test_chunk_op_warns_on_head_first_shapes(monkeypatch):
 def test_chunk_op_scales_and_forwards_options(monkeypatch):
     apply = _Recorder(result=(torch.zeros(1, 2, 2, 4), "state"))
     monkeypatch.setattr(chunk_mod.ChunkGatedDeltaRuleFunction, "apply", apply)
-    op = _chunk_op(
-        monkeypatch, output_final_state=True, use_qk_l2norm_in_kernel=True
-    )
+    op = _chunk_op(monkeypatch, output_final_state=True, use_qk_l2norm_in_kernel=True)
     q = torch.zeros(1, 2, 2, 4, dtype=torch.float16)
     beta = torch.zeros(1, 2, 2)
     initial_state = torch.zeros(2, 2, 4, 4)
     cu_seqlens = torch.tensor([0, 2, 4])
 
-    op.forward_native(q, q, q, beta, beta, initial_state=initial_state, cu_seqlens=cu_seqlens)
+    op.forward_native(
+        q, q, q, beta, beta, initial_state=initial_state, cu_seqlens=cu_seqlens
+    )
 
     args = apply.calls[0][0]
     assert args[5] == 0.5  # 1 / sqrt(4)
@@ -360,9 +367,7 @@ def test_chunk_op_uses_explicit_scale(monkeypatch):
 
 def test_recurrent_function_marshals_contiguous_inputs(monkeypatch):
     kernel = _Recorder(result=("o", "state"))
-    monkeypatch.setattr(
-        recurrent_mod, "fused_recurrent_gated_delta_rule_fwd", kernel
-    )
+    monkeypatch.setattr(recurrent_mod, "fused_recurrent_gated_delta_rule_fwd", kernel)
     q = torch.zeros(1, 2, 2, 4)
     base = torch.arange(8.0).reshape(2, 2, 2)
     g = base.transpose(0, 1)  # non-contiguous [B, T, HV] view

@@ -167,8 +167,10 @@ def test_apply_weights_quantizes_and_calls_scaled_mm(linear):
     x_scale = torch.rand(6, 1)
     env.cached_op.result = (x_q, x_scale)
     expected = (
-        x_q.to(torch.float32) @ layer.weight.to(torch.float32)
-    ) * x_scale * layer.weight_scale.reshape(1, -1)
+        (x_q.to(torch.float32) @ layer.weight.to(torch.float32))
+        * x_scale
+        * layer.weight_scale.reshape(1, -1)
+    )
     env.scaled_mm_result = expected.to(torch.float16)
     bias = torch.randn(4, dtype=torch.float16)
 
@@ -205,6 +207,4 @@ def test_register_prepends_kernel_and_keeps_duplicates_out(linear):
     ]
 
     module.register_fl_w8a8_linear_kernel(registry)
-    assert registry[env.PlatformEnum.OOT].count(
-        module.FLW8A8DynamicLinearKernel
-    ) == 1
+    assert registry[env.PlatformEnum.OOT].count(module.FLW8A8DynamicLinearKernel) == 1

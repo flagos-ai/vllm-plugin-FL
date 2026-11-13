@@ -371,9 +371,7 @@ class TestDecodeSelection:
             )
         }
 
-    def test_uniform_decode_scores_selects_and_writes_the_buffer(
-        self, monkeypatch
-    ):
+    def test_uniform_decode_scores_selects_and_writes_the_buffer(self, monkeypatch):
         _install_backend(monkeypatch)
         decode = SimpleNamespace(
             decode_lens=torch.tensor([2]),
@@ -480,9 +478,7 @@ class TestDecodeSelection:
         assert expand[2] == 2
         assert out[:1, :6].tolist() == torch.full((1, 6), 5).tolist()
 
-    def test_non_uniform_pool_decode_scatters_and_updates_the_tail(
-        self, monkeypatch
-    ):
+    def test_non_uniform_pool_decode_scatters_and_updates_the_tail(self, monkeypatch):
         _install_backend(monkeypatch)
         decode = SimpleNamespace(
             decode_lens=torch.tensor([1, 0, 1]),
@@ -518,9 +514,7 @@ class TestDecodeSelection:
             tail_prefix="tail",
         )
         backend = si.INDEXER_BACKEND
-        update = next(
-            call for call in backend.calls if call[0] == "decode_update"
-        )
+        update = next(call for call in backend.calls if call[0] == "decode_update")
         tail_slots, dec_k, dec_gate, dec_slots, dec_pos = (
             update[1][2],
             update[1][3],
@@ -595,8 +589,9 @@ class TestFakeAndClassEntryPoints:
         backend.is_nvidia = True
         backend.has_nvidia_deep_gemm = False
         monkeypatch.setattr(si, "INDEXER_BACKEND", backend)
-        with set_current_vllm_config(_custop_config()), pytest.raises(
-            RuntimeError, match="requires DeepGEMM"
+        with (
+            set_current_vllm_config(_custop_config()),
+            pytest.raises(RuntimeError, match="requires DeepGEMM"),
         ):
             si.SparseAttnIndexerKpool(
                 SimpleNamespace(prefix="k", kv_cache=torch.zeros(1)),
@@ -693,9 +688,7 @@ class TestFakeAndClassEntryPoints:
     def test_hip_forward_guards_and_dispatches(self, monkeypatch):
         layer, _ = self._op_layer(monkeypatch, use_fp4=True)
         with pytest.raises(AssertionError, match="doesn't support fp4"):
-            layer.forward_hip(
-                "hidden", torch.zeros(1), "k", "weights"
-            )
+            layer.forward_hip("hidden", torch.zeros(1), "k", "weights")
         layer.use_fp4_cache = False
         monkeypatch.setattr(
             si, "rocm_aiter_ops", SimpleNamespace(is_enabled=lambda: False)
@@ -713,9 +706,7 @@ class TestFakeAndClassEntryPoints:
             lambda *args, **kwargs: recorded.append((args, kwargs)) or "hip",
             raising=False,
         )
-        assert (
-            layer.forward_hip("hidden", torch.zeros(1), "k", "weights") == "hip"
-        )
+        assert layer.forward_hip("hidden", torch.zeros(1), "k", "weights") == "hip"
         assert recorded[0][0][0] == "hidden"
         assert recorded[0][1]["skip_k_cache_insert"] is False
 

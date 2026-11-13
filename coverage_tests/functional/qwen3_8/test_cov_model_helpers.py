@@ -93,10 +93,7 @@ class TestExpertWeightLoader:
 
         param = SimpleNamespace(weight_loader=loader)
         value = torch.zeros(1)
-        assert (
-            qwen_model._call_expert_weight_loader(param, value, "p", "w1", 3)
-            is True
-        )
+        assert qwen_model._call_expert_weight_loader(param, value, "p", "w1", 3) is True
         assert calls == [(param, value, "p", "w1", 3, True)]
 
     def test_false_result_is_propagated(self):
@@ -104,9 +101,7 @@ class TestExpertWeightLoader:
             weight_loader=lambda *args, **kwargs: False,
         )
         assert (
-            qwen_model._call_expert_weight_loader(
-                param, torch.zeros(1), "p", "w1", 0
-            )
+            qwen_model._call_expert_weight_loader(param, torch.zeros(1), "p", "w1", 0)
             is False
         )
 
@@ -127,9 +122,7 @@ class TestExpertWeightLoader:
 
         param = SimpleNamespace(weight_loader=loader)
         assert (
-            qwen_model._call_expert_weight_loader(
-                param, torch.zeros(1), "p", "w2", 1
-            )
+            qwen_model._call_expert_weight_loader(param, torch.zeros(1), "p", "w2", 1)
             is True
         )
         assert calls == [{"shard_id": "w2", "expert_id": 1}]
@@ -141,9 +134,7 @@ class TestExpertWeightLoader:
             )
         )
         with pytest.raises(TypeError, match="boom"):
-            qwen_model._call_expert_weight_loader(
-                param, torch.zeros(1), "p", "w1", 0
-            )
+            qwen_model._call_expert_weight_loader(param, torch.zeros(1), "p", "w1", 0)
 
     def test_single_expert_routes_through_the_named_parameter(self):
         calls = []
@@ -286,8 +277,7 @@ class TestModelClassHooks:
         conditional = qwen_model.Qwen3_8FlashNextForConditionalGeneration
         assert conditional.get_model_state_cls() is Qwen3_8FlashNextModelState
         assert (
-            conditional.get_legacy_model_state_cls()
-            is Qwen3_8FlashNextLegacyModelState
+            conditional.get_legacy_model_state_cls() is Qwen3_8FlashNextLegacyModelState
         )
 
     def test_mtp_hidden_buffer_is_returned_by_reference(self):
@@ -297,9 +287,7 @@ class TestModelClassHooks:
         assert instance.get_mtp_target_hidden_states() == "buffer"
 
     def test_conditional_generation_delegates_mtp_hidden_states(self):
-        instance = object.__new__(
-            qwen_model.Qwen3_8FlashNextForConditionalGeneration
-        )
+        instance = object.__new__(qwen_model.Qwen3_8FlashNextForConditionalGeneration)
         nn.Module.__init__(instance)
         instance.language_model = SimpleNamespace(
             get_mtp_target_hidden_states=lambda: "nested"
@@ -390,9 +378,7 @@ class TestMoeBookkeeping:
     def test_physical_expert_update_propagates_to_every_moe(self):
         sparse = _sparse_moe()
         calls = []
-        sparse.experts = SimpleNamespace(
-            update_expert_map=lambda: calls.append(1)
-        )
+        sparse.experts = SimpleNamespace(update_expert_map=lambda: calls.append(1))
         instance = object.__new__(qwen_model.Qwen3_8FlashNextMixtureOfExperts)
         instance.moe_mlp_layers = [sparse]
         instance.num_logical_experts = 8
@@ -416,7 +402,7 @@ class TestMambaGeometry:
                 intermediate_size=intermediate_size,
                 conv_kernel=conv_kernel,
             )
-            return (("state",))
+            return ("state",)
 
         monkeypatch.setattr(
             qwen_model.MambaStateShapeCalculator,
@@ -569,7 +555,9 @@ class TestMambaGeometry:
         gdn = MambaAttentionBackendEnum.GDN_ATTN
         mapping = causal.get_mamba_state_copy_funcs({short, gdn})
         assert set(mapping) == {short, gdn}
-        assert mapping[short] == MambaStateCopyFuncCalculator.short_conv_state_copy_func()
+        assert (
+            mapping[short] == MambaStateCopyFuncCalculator.short_conv_state_copy_func()
+        )
         assert (
             mapping[gdn]
             == MambaStateCopyFuncCalculator.gated_delta_net_state_copy_func()

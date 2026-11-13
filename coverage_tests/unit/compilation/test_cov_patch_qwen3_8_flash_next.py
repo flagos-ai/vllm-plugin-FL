@@ -217,9 +217,7 @@ def test_verify_rejects_non_hybrid_hc_count(base_verify):
         {"enable_dbo": False, "ubatch_size": 2, "pipeline_parallel_size": 1},
     ],
 )
-def test_verify_rejects_ple_with_dual_batch_or_microbatching(
-    base_verify, parallel
-):
+def test_verify_rejects_ple_with_dual_batch_or_microbatching(base_verify, parallel):
     """PLE with DBO or microbatching is rejected."""
     vllm_config = _make_config()
     vllm_config.model_config.hf_text_config.ple_layer_ids = [2]
@@ -465,9 +463,7 @@ def _install_ple_bridge(monkeypatch):
     )
     monkeypatch.setattr(mamba_hybrid, "MambaHybridAttnMetadata", fake_mamba)
 
-    plugin_name = (
-        "vllm_fl.models.qwen3_8_flash_next.common.short_conv_attn"
-    )
+    plugin_name = "vllm_fl.models.qwen3_8_flash_next.common.short_conv_attn"
     fake_short = types.ModuleType(plugin_name)
     fake_short.PleShortConvAttentionMetadataBuilder = _PleBuilder
     monkeypatch.setitem(sys.modules, plugin_name, fake_short)
@@ -495,9 +491,7 @@ def test_ple_bridge_slices_spec_fields_for_ple_builder(monkeypatch):
     assert kwargs["num_accepted_tokens"].tolist() == [3, 4]
     assert kwargs["num_decode_draft_tokens_cpu"].tolist() == [0, 1]
 
-    empty = SimpleNamespace(
-        num_accepted_tokens=None, num_decode_draft_tokens_cpu=None
-    )
+    empty = SimpleNamespace(num_accepted_tokens=None, num_decode_draft_tokens_cpu=None)
     kwargs = patched(empty, _PleBuilder(), 1)
     assert kwargs == {
         "num_accepted_tokens": None,
@@ -558,7 +552,12 @@ def test_compilation_boundaries_preserve_existing_ops(monkeypatch):
     fake = type(
         "CompilationConfig",
         (),
-        {"_attention_ops": ["vllm::existing", "vllm::qwen3_8_flash_next_qsa_with_output"]},
+        {
+            "_attention_ops": [
+                "vllm::existing",
+                "vllm::qwen3_8_flash_next_qsa_with_output",
+            ]
+        },
     )
     monkeypatch.setattr(compilation, "CompilationConfig", fake)
 
@@ -614,9 +613,7 @@ def _install_registry_fakes(monkeypatch):
         raising=False,
     )
 
-    fake_config_module = types.ModuleType(
-        "vllm_fl.models.qwen3_8_flash_next.config"
-    )
+    fake_config_module = types.ModuleType("vllm_fl.models.qwen3_8_flash_next.config")
     fake_config_module.Qwen3_8FlashNextConfig = _ConfigSentinel
     fake_config_module.Qwen3_8FlashNextTextConfig = _ConfigSentinel
     monkeypatch.setitem(
@@ -624,9 +621,7 @@ def _install_registry_fakes(monkeypatch):
     )
     import vllm_fl.models.qwen3_8_flash_next as plugin_pkg
 
-    monkeypatch.setattr(
-        plugin_pkg, "config", fake_config_module, raising=False
-    )
+    monkeypatch.setattr(plugin_pkg, "config", fake_config_module, raising=False)
     return state
 
 
@@ -664,9 +659,11 @@ def test_apply_registers_configs_models_and_helpers(monkeypatch):
     expected_multimodal = {}
     expected_vllm = {}
     expected_calls = []
-    for architecture, (class_name, verifier, family) in (
-        patch_module._ARCHITECTURES.items()
-    ):
+    for architecture, (
+        class_name,
+        verifier,
+        family,
+    ) in patch_module._ARCHITECTURES.items():
         expected_map[architecture] = verifier
         module = "vllm_fl.models.qwen3_8_flash_next"
         if family == "multimodal":
@@ -674,9 +671,7 @@ def test_apply_registers_configs_models_and_helpers(monkeypatch):
         else:
             expected_text[architecture] = (module, class_name)
         expected_vllm[architecture] = (module, class_name)
-        expected_calls.append(
-            (architecture, f"{module}:{class_name}")
-        )
+        expected_calls.append((architecture, f"{module}:{class_name}"))
 
     assert state.models_config_map == expected_map
     assert state.text_models == expected_text
@@ -693,21 +688,21 @@ def test_apply_repeats_lazy_registration_and_keeps_setdefaults(monkeypatch):
         patch_module, "_patch_common_attention_token_to_req_cache", lambda: None
     )
     monkeypatch.setattr(patch_module, "_patch_ple_metadata_bridge", lambda: None)
-    monkeypatch.setattr(
-        patch_module, "_register_compilation_boundaries", lambda: None
-    )
+    monkeypatch.setattr(patch_module, "_register_compilation_boundaries", lambda: None)
     state.config_registry["qwen4_exp"] = "PRESEEDED"
     state.text_models["Qwen3_8FlashNextForCausalLM"] = ("other", "Other")
-    state.multimodal_models[
-        "Qwen3_8FlashNextForConditionalGeneration"
-    ] = ("other", "Other")
+    state.multimodal_models["Qwen3_8FlashNextForConditionalGeneration"] = (
+        "other",
+        "Other",
+    )
 
     assert patch_module.apply_qwen3_8_flash_next_patches() is True
     assert patch_module.apply_qwen3_8_flash_next_patches() is True
 
     assert state.config_registry["qwen4_exp"] == "PRESEEDED"
     assert state.text_models["Qwen3_8FlashNextForCausalLM"] == ("other", "Other")
-    assert state.multimodal_models[
-        "Qwen3_8FlashNextForConditionalGeneration"
-    ] == ("other", "Other")
+    assert state.multimodal_models["Qwen3_8FlashNextForConditionalGeneration"] == (
+        "other",
+        "Other",
+    )
     assert len(state.register_calls) == 2 * len(patch_module._ARCHITECTURES)

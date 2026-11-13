@@ -240,12 +240,9 @@ def build_ct_environment() -> SimpleNamespace:
     executor = _package("vllm.model_executor")
     layers = _package("vllm.model_executor.layers")
     layers_quant = _package("vllm.model_executor.layers.quantization")
-    ct_pkg = _package(
-        "vllm.model_executor.layers.quantization.compressed_tensors"
-    )
+    ct_pkg = _package("vllm.model_executor.layers.quantization.compressed_tensors")
     ct_config = _module(
-        "vllm.model_executor.layers.quantization.compressed_tensors."
-        "compressed_tensors"
+        "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors"
     )
     ct_config.CompressedTensorsConfig = FakeCompressedTensorsConfig
     ct_schemes = _package(
@@ -345,16 +342,12 @@ def build_moe_experts_environment() -> SimpleNamespace:
     executor = _package("vllm.model_executor")
     layers = _package("vllm.model_executor.layers")
     fused_moe = _package("vllm.model_executor.layers.fused_moe")
-    modular_kernel = _module(
-        "vllm.model_executor.layers.fused_moe.modular_kernel"
-    )
+    modular_kernel = _module("vllm.model_executor.layers.fused_moe.modular_kernel")
     modular_kernel.ExpertTokensMetadata = ExpertTokensMetadata
     activation = _module("vllm.model_executor.layers.fused_moe.activation")
     activation.MoEActivation = MoEActivation
     experts = _package("vllm.model_executor.layers.fused_moe.experts")
-    triton_moe = _module(
-        "vllm.model_executor.layers.fused_moe.experts.triton_moe"
-    )
+    triton_moe = _module("vllm.model_executor.layers.fused_moe.experts.triton_moe")
     triton_moe.TritonExperts = TritonExperts
     fused_moe_fn = _module("vllm.model_executor.layers.fused_moe.fused_moe")
     fused_moe_fn.fused_experts = fused_experts
@@ -505,12 +498,8 @@ def build_moe_selector_environment() -> SimpleNamespace:
     executor = _package("vllm.model_executor")
     layers = _package("vllm.model_executor.layers")
     fused_moe = _package("vllm.model_executor.layers.fused_moe")
-    oracle = _package(
-        "vllm.model_executor.layers.fused_moe.oracle"
-    )
-    oracle_int8 = _module(
-        "vllm.model_executor.layers.fused_moe.oracle.int8"
-    )
+    oracle = _package("vllm.model_executor.layers.fused_moe.oracle")
+    oracle_int8 = _module("vllm.model_executor.layers.fused_moe.oracle.int8")
     oracle_int8.Int8MoeBackend = Int8MoeBackend
     oracle_int8.select_int8_moe_backend = oracle_selector
     moe_config_mod = _module("vllm.model_executor.layers.fused_moe.config")
@@ -518,9 +507,7 @@ def build_moe_selector_environment() -> SimpleNamespace:
     activation = _module("vllm.model_executor.layers.fused_moe.activation")
     activation.MoEActivation = MoEActivation
     experts = _package("vllm.model_executor.layers.fused_moe.experts")
-    triton_moe = _module(
-        "vllm.model_executor.layers.fused_moe.experts.triton_moe"
-    )
+    triton_moe = _module("vllm.model_executor.layers.fused_moe.experts.triton_moe")
     triton_moe.TritonExperts = TritonExperts
     _link(oracle, "int8", oracle_int8)
     _link(experts, "triton_moe", triton_moe)
@@ -530,14 +517,10 @@ def build_moe_selector_environment() -> SimpleNamespace:
     _link(fused_moe, "experts", experts)
     _link(layers, "fused_moe", fused_moe)
     layers_quant = _package("vllm.model_executor.layers.quantization")
-    quant_utils = _module(
-        "vllm.model_executor.layers.quantization.utils.quant_utils"
-    )
+    quant_utils = _module("vllm.model_executor.layers.quantization.utils.quant_utils")
     quant_utils.kInt8DynamicTokenSym = kInt8DynamicTokenSym
     quant_utils.kInt8StaticChannelSym = kInt8StaticChannelSym
-    quant_utils_pkg = _package(
-        "vllm.model_executor.layers.quantization.utils"
-    )
+    quant_utils_pkg = _package("vllm.model_executor.layers.quantization.utils")
     _link(quant_utils_pkg, "quant_utils", quant_utils)
     ct_moe = _package(
         "vllm.model_executor.layers.quantization.compressed_tensors."
@@ -564,9 +547,7 @@ def build_moe_selector_environment() -> SimpleNamespace:
 
     fl_utils = _module("vllm_fl.utils")
     fl_utils.is_oot_enabled = lambda: env.oot_enabled
-    fl_utils.use_flaggems_op = lambda op: env.flaggems_ops.get(
-        op, env.flaggems_default
-    )
+    fl_utils.use_flaggems_op = lambda op: env.flaggems_ops.get(op, env.flaggems_default)
 
     fl_moe_experts = _module("vllm_fl.quantization.w8a8.moe_experts")
     fl_moe_experts.FlagGemsW8A8Experts = FlagGemsW8A8Experts
@@ -709,9 +690,7 @@ def build_linear_environment() -> SimpleNamespace:
 
     fl_utils = _module("vllm_fl.utils")
     fl_utils.is_oot_enabled = lambda: env.oot_enabled
-    fl_utils.use_flaggems_op = lambda op: env.flaggems_ops.get(
-        op, env.flaggems_default
-    )
+    fl_utils.use_flaggems_op = lambda op: env.flaggems_ops.get(op, env.flaggems_default)
 
     _register(
         modules,

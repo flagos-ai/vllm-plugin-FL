@@ -172,5 +172,3 @@ def test_install_returns_true_only_once(monkeypatch):
     assert patch_module.apply_arm_cpu_gdn_state_indices_patch(builder_cls) is True
     assert patch_module.apply_arm_cpu_gdn_state_indices_patch(builder_cls) is False
     assert patch_module.apply_arm_cpu_gdn_state_indices_patch(builder_cls) is False
-
-

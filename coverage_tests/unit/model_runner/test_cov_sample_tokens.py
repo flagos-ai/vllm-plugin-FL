@@ -456,9 +456,7 @@ def test_sample_tokens_ngram_gpu_updates_counts_when_batch_too_long():
     drafter = _FakeNgramDrafter()
     runner = _runner(
         state=state,
-        speculative_config=_spec(
-            method="ngram_gpu", use_ngram_gpu=lambda: True
-        ),
+        speculative_config=_spec(method="ngram_gpu", use_ngram_gpu=lambda: True),
         drafter=drafter,
         valid_sampled_token_count_event=object(),
     )
@@ -490,7 +488,10 @@ def test_sample_tokens_defers_draft_proposal_after_bookkeeping():
     runner = _runner(state=state, speculative_config=_spec())
     runner._input_fits_in_drafter = _Recorder(result=True)
     runner._bookkeeping_sync = _Recorder(
-        result_factory=lambda *a, **k: (order.append("bookkeep"), _default_bookkeeping())[1]
+        result_factory=lambda *a, **k: (
+            order.append("bookkeep"),
+            _default_bookkeeping(),
+        )[1]
     )
     runner.propose_draft_token_ids = _Recorder(
         result_factory=lambda *a, **k: order.append("draft") or [[8], [9]]
@@ -523,7 +524,10 @@ def test_sample_tokens_gpu_proposer_runs_before_bookkeeping():
     )
     runner._input_fits_in_drafter = _Recorder(result=True)
     runner._bookkeeping_sync = _Recorder(
-        result_factory=lambda *a, **k: (order.append("bookkeep"), _default_bookkeeping())[1]
+        result_factory=lambda *a, **k: (
+            order.append("bookkeep"),
+            _default_bookkeeping(),
+        )[1]
     )
     runner.propose_draft_token_ids = _Recorder(
         result_factory=lambda *a, **k: order.append("draft") or [[8], [9]]
@@ -644,9 +648,7 @@ def test_propose_draft_token_ids_ngram_gpu_copies_valid_counts():
         _num_valid_draft_tokens_event="event",
     )
     copy_valid = _Recorder()
-    sched = SimpleNamespace(
-        total_num_scheduled_tokens=2, num_spec_tokens_to_schedule=1
-    )
+    sched = SimpleNamespace(total_num_scheduled_tokens=2, num_spec_tokens_to_schedule=1)
     sampled = torch.tensor([[3], [4]], dtype=torch.int32)
     with (
         _Patch(mr_module, "NgramProposerGPU", _FakeNgramDrafter),
@@ -671,12 +673,8 @@ def test_propose_draft_token_ids_ngram_gpu_copies_valid_counts():
     assert update_args[0] is sampled
     propose_args = drafter.calls[0][0]
     assert propose_args[0] == 1
-    torch.testing.assert_close(
-        propose_args[1], runner.num_tokens_no_spec_gpu[:2]
-    )
-    torch.testing.assert_close(
-        propose_args[2], runner.token_ids_gpu_tensor[:2]
-    )
+    torch.testing.assert_close(propose_args[1], runner.num_tokens_no_spec_gpu[:2])
+    torch.testing.assert_close(propose_args[2], runner.token_ids_gpu_tensor[:2])
     assert runner._num_valid_draft_tokens.tolist() == [1]
     copied = copy_valid.calls[0][0]
     assert copied[0] is runner._num_valid_draft_tokens_cpu

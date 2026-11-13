@@ -271,9 +271,7 @@ class TestModelStateConstruction:
 
     def test_pipeline_parallel_is_rejected(self, base_state):
         with pytest.raises(RuntimeError, match="pipeline_parallel_size=1"):
-            base_state.Qwen3_8FlashNextModelState(
-                _vllm_config(pp=2), None, None, CPU
-            )
+            base_state.Qwen3_8FlashNextModelState(_vllm_config(pp=2), None, None, CPU)
 
     def test_ngram_size_one_has_no_left_context(self, base_state):
         with pytest.raises(ValueError, match="context length >= 1"):
@@ -291,9 +289,7 @@ def _req_states(token_store, computed):
 
 class TestPrepareNgramContext:
     def test_gathers_left_context_and_eos_fills_invalid_positions(self, base_state):
-        state = base_state.Qwen3_8FlashNextModelState(
-            _vllm_config(), None, None, CPU
-        )
+        state = base_state.Qwen3_8FlashNextModelState(_vllm_config(), None, None, CPU)
         token_store = torch.tensor(
             [[10, 11, 12, 13, 14], [20, 21, 22, 23, 24]], dtype=torch.int32
         )
@@ -310,9 +306,7 @@ class TestPrepareNgramContext:
         assert context.tolist() == [[2, 20], [10, 11], [2, 2]]
 
     def test_empty_batch_returns_eos_filled_padding(self, base_state):
-        state = base_state.Qwen3_8FlashNextModelState(
-            _vllm_config(), None, None, CPU
-        )
+        state = base_state.Qwen3_8FlashNextModelState(_vllm_config(), None, None, CPU)
         input_batch = SimpleNamespace(
             num_reqs=0,
             num_reqs_after_padding=2,

@@ -113,16 +113,23 @@ class _RegistryGuard:
 
 def _build_worker(**overrides):
     """Construct a WorkerFL with USE_FLAGGEMS off and registry isolated."""
+    saved_use_flaggems = os.environ.get("USE_FLAGGEMS")
     os.environ["USE_FLAGGEMS"] = "0"
-    config = _make_vllm_config(**overrides)
-    with _RegistryGuard():
-        worker = WorkerFL(
-            vllm_config=config,
-            local_rank=0,
-            rank=0,
-            distributed_init_method="env://",
-            is_driver_worker=True,
-        )
+    try:
+        config = _make_vllm_config(**overrides)
+        with _RegistryGuard():
+            worker = WorkerFL(
+                vllm_config=config,
+                local_rank=0,
+                rank=0,
+                distributed_init_method="env://",
+                is_driver_worker=True,
+            )
+    finally:
+        if saved_use_flaggems is None:
+            os.environ.pop("USE_FLAGGEMS", None)
+        else:
+            os.environ["USE_FLAGGEMS"] = saved_use_flaggems
     return worker, config
 
 
@@ -156,6 +163,14 @@ def _patched_platform(worker_module, fake):
     original = worker_module.current_platform
     worker_module.current_platform = fake
     return original
+
+
+def _restore_env(name, saved):
+    """Restore an env var to its pre-test presence/value (None = absent)."""
+    if saved is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = saved
 
 
 def test_snapshot_measures_all_counters_from_platform():
@@ -248,36 +263,38 @@ def test_memory_profiling_fl_populates_result_fields():
 
 def test_init_sets_gcu_triton_cache_dir_per_rank():
     """GCU workers get a per-rank TRITON_CACHE_DIR when none is set."""
-    os.environ.pop("TRITON_CACHE_DIR", None)
+    saved_cache = os.environ.pop("TRITON_CACHE_DIR", None)
     original = _patched_platform(worker_module, SimpleNamespace(device_type="gcu"))
     try:
         _, _ = _build_worker()
         assert os.environ["TRITON_CACHE_DIR"] == "/tmp/triton-cache-fl-rank-0"
     finally:
-        os.environ.pop("TRITON_CACHE_DIR", None)
+        _restore_env("TRITON_CACHE_DIR", saved_cache)
         worker_module.current_platform = original
 
 
 def test_init_keeps_preset_triton_cache_dir_on_gcu():
     """An operator-provided TRITON_CACHE_DIR is never overwritten."""
+    saved_cache = os.environ.get("TRITON_CACHE_DIR")
     os.environ["TRITON_CACHE_DIR"] = "/custom-cache"
     original = _patched_platform(worker_module, SimpleNamespace(device_type="gcu"))
     try:
         _build_worker()
         assert os.environ["TRITON_CACHE_DIR"] == "/custom-cache"
     finally:
-        os.environ.pop("TRITON_CACHE_DIR", None)
+        _restore_env("TRITON_CACHE_DIR", saved_cache)
         worker_module.current_platform = original
 
 
 def test_init_does_not_set_triton_cache_dir_on_cuda():
     """Non-GCU platforms leave the TRITON_CACHE_DIR env untouched."""
+    saved_cache = os.environ.pop("TRITON_CACHE_DIR", None)
     original = _patched_platform(worker_module, SimpleNamespace(device_type="cuda"))
     try:
         _build_worker()
         assert "TRITON_CACHE_DIR" not in os.environ
     finally:
-        os.environ.pop("TRITON_CACHE_DIR", None)
+        _restore_env("TRITON_CACHE_DIR", saved_cache)
         worker_module.current_platform = original
 
 
@@ -343,24 +360,26 @@ def test_update_max_model_len_updates_model_and_runner():
 
 def test_determine_available_memory_txda_env_override():
     """txda reads VLLM_TXDA_KV_CACHE_SIZE when the env var is set."""
+    saved_cache_size = os.environ.get("VLLM_TXDA_KV_CACHE_SIZE")
     os.environ["VLLM_TXDA_KV_CACHE_SIZE"] = str(5 * 1024**3)
     original = _patched_platform(worker_module, SimpleNamespace(device_type="txda"))
     try:
         worker = SimpleNamespace()
         assert WorkerFL.determine_available_memory(worker) == 5368709120
     finally:
-        os.environ.pop("VLLM_TXDA_KV_CACHE_SIZE", None)
+        _restore_env("VLLM_TXDA_KV_CACHE_SIZE", saved_cache_size)
         worker_module.current_platform = original
 
 
 def test_determine_available_memory_txda_default():
     """txda without the env var returns the 20 GiB fallback."""
-    os.environ.pop("VLLM_TXDA_KV_CACHE_SIZE", None)
+    saved_cache_size = os.environ.pop("VLLM_TXDA_KV_CACHE_SIZE", None)
     original = _patched_platform(worker_module, SimpleNamespace(device_type="txda"))
     try:
         worker = SimpleNamespace()
         assert WorkerFL.determine_available_memory(worker) == 20 * 1024**3
     finally:
+        _restore_env("VLLM_TXDA_KV_CACHE_SIZE", saved_cache_size)
         worker_module.current_platform = original
 
 

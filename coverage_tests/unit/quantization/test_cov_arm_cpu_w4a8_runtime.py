@@ -168,9 +168,7 @@ class TestProcessWeightsPacked:
         assert kernel._vllm_fl_arm_w4a8_shape == (N, K)
 
     def test_non_packed_int8_checkpoint_still_repacks(self, fake_env):
-        weight = torch.remainder(torch.arange(N * K).reshape(N, K), 7).to(
-            torch.int8
-        )
+        weight = torch.remainder(torch.arange(N * K).reshape(N, K), 7).to(torch.int8)
         scales = _scales()
         original_shape = torch.tensor([N, K], dtype=torch.int64)
         layer = make_layer(fake_env, weight, scales, weight_shape=original_shape)
@@ -188,9 +186,9 @@ class TestProcessWeightsPacked:
         assert kernel._vllm_fl_arm_w4a8_shape == (N, K)
 
     def test_non_contiguous_scales_are_made_contiguous(self, fake_env):
-        scales = torch.arange(N * (K // 64), dtype=torch.float32).reshape(
-            N, K // 64
-        )[:, ::2]
+        scales = torch.arange(N * (K // 64), dtype=torch.float32).reshape(N, K // 64)[
+            :, ::2
+        ]
         assert not scales.is_contiguous()
         layer = make_layer(fake_env, _payload(), scales)
         kernel = make_kernel(fake_env)
@@ -275,9 +273,7 @@ class TestProcessWeightsPacked:
 
     def test_weight_named_quantized_parameter_skips_alias_emptying(self, fake_env):
         payload = _payload()
-        layer = make_layer(
-            fake_env, payload, _scales(), weight_name="weight"
-        )
+        layer = make_layer(fake_env, payload, _scales(), weight_name="weight")
         kernel = make_kernel(fake_env, w_q_name="weight")
 
         kernel.process_weights_after_loading(layer)
@@ -294,9 +290,7 @@ class TestApplyWeights:
         layer = torch.nn.Module()
         layer.register_parameter(
             "weight_packed",
-            env.BasevLLMParameter(
-                data=torch.zeros(N, K // 8, dtype=torch.uint8)
-            ),
+            env.BasevLLMParameter(data=torch.zeros(N, K // 8, dtype=torch.uint8)),
         )
         return layer
 
@@ -339,9 +333,7 @@ class TestApplyWeights:
 
         output = kernel.apply_weights(layer, activations)
 
-        expected = converted.sum(dim=-1, keepdim=True).expand(-1, N).to(
-            torch.float32
-        )
+        expected = converted.sum(dim=-1, keepdim=True).expand(-1, N).to(torch.float32)
         assert output.dtype is torch.float32
         assert torch.equal(output, expected)
 

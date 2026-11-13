@@ -80,10 +80,13 @@ class TestAverageVariant:
         assert mixed.shape == (2, hidden)
         for row in range(2):
             for channel in range(hidden):
-                expected = sum(
-                    float(hyper_input[row, stream * hidden + channel])
-                    for stream in range(hc_count)
-                ) / hc_count
+                expected = (
+                    sum(
+                        float(hyper_input[row, stream * hidden + channel])
+                        for stream in range(hc_count)
+                    )
+                    / hc_count
+                )
                 assert abs(float(mixed[row, channel]) - expected) < 1e-6
         assert residual is hyper_input
 
@@ -92,15 +95,11 @@ class TestAverageVariant:
         for row in range(2):
             for stream in range(hc_count):
                 for channel in range(hidden):
-                    expected = (
-                        float(hyper_input[row, stream * hidden + channel])
-                        + float(block_output[row, channel])
-                    )
+                    expected = float(
+                        hyper_input[row, stream * hidden + channel]
+                    ) + float(block_output[row, channel])
                     assert (
-                        abs(
-                            float(combined[row, stream * hidden + channel])
-                            - expected
-                        )
+                        abs(float(combined[row, stream * hidden + channel]) - expected)
                         < 1e-6
                     )
 
@@ -201,7 +200,9 @@ def _combine_reference(hyper_input, block_output, injection_logits, hc_count):
     hc_dim = block_output.shape[-1]
     grouped = hyper_input.reshape(*hyper_input.shape[:-1], hc_count, hc_dim)
     injection = 2.0 * torch.sigmoid(injection_logits.float() / hc_count)
-    combined = grouped.float() + block_output.float().unsqueeze(-2) * injection.unsqueeze(-1)
+    combined = grouped.float() + block_output.float().unsqueeze(
+        -2
+    ) * injection.unsqueeze(-1)
     return combined.reshape_as(hyper_input).to(hyper_input.dtype)
 
 
@@ -246,6 +247,11 @@ class TestGatedVariantKernels:
         torch.testing.assert_close(
             combined, expected_combined, rtol=self.RTOL, atol=self.ATOL
         )
+        # Mix collapses HC lanes back to one hidden-sized lane and returns the
+        # documented (normed, injection) pair; combine restores the input layout.
+        assert mixed.shape == (2, config.hidden_size)
+        assert len(residuals) == 3
+        assert combined.shape == hyper_input.shape
 
     def test_grouped_norm_matches_gemma_reference(self, device):
         hidden, group_size = 8, 4
@@ -256,15 +262,27 @@ class TestGatedVariantKernels:
         expected = _branch_norm_reference(
             x, torch.zeros(8, device=device), 1e-6, hidden // group_size
         ).to(self.DTYPE)
-        torch.testing.assert_close(
-            norm(x), expected, rtol=self.RTOL, atol=self.ATOL
-        )
+        torch.testing.assert_close(norm(x), expected, rtol=self.RTOL, atol=self.ATOL)
+
+        # Independent group math with zero weight: group 0 is [0, 1, 2, 3],
+        # mean-square 3.5, so element 0 stays 0 and element 1 is rsqrt(3.5+eps).
+        out = norm(x)
+        assert out.shape == x.shape
+        assert out.dtype == self.DTYPE
+        rrms0 = torch.rsqrt(torch.tensor(3.5) + 1e-6)
+        assert out[0, 0].item() == 0.0
+        assert torch.allclose(out[0, 1].float(), rrms0, rtol=self.RTOL, atol=self.ATOL)
 
         with torch.no_grad():
             norm.weight.copy_(torch.linspace(0.0, 1.0, hidden, device=device))
         expected = _branch_norm_reference(
             x, norm.weight, 1e-6, hidden // group_size
         ).to(self.DTYPE)
-        torch.testing.assert_close(
-            norm(x), expected, rtol=self.RTOL, atol=self.ATOL
+        torch.testing.assert_close(norm(x), expected, rtol=self.RTOL, atol=self.ATOL)
+        weighted = norm(x)
+        assert torch.allclose(
+            weighted[0, 1].float(),
+            rrms0 * (1.0 + 1.0 / 7.0),
+            rtol=self.RTOL,
+            atol=self.ATOL,
         )

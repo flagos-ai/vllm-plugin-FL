@@ -202,6 +202,13 @@ def test_kunlunxin_sdpa_handles_single_chunk_batches():
     reference = _reference_chunked_sdpa(q, k, v, 0.3, 8, 2)
     torch.testing.assert_close(out, reference, rtol=0, atol=0)
 
+    # Independent single-head check: head 0 uses kv head 0 (GQA repeat 4) and
+    # the fake attention scale, so the output is softmax(q k^T * scale) @ v.
+    assert out.shape == (1, 64, 8, 16)
+    scores = (q[0, :, 0] @ k[0, :, 0].T) * _FakeSelf.scale
+    expected_head0 = torch.softmax(scores, dim=-1) @ v[0, :, 0]
+    assert torch.allclose(out[0, :, 0], expected_head0, atol=1e-6)
+
 
 def test_kunlunxin_sdpa_splits_varlen_sequences_on_cu_seqlens():
     """cu_seqlens splits q/k/v rows per sequence; 600-row seq crosses the chunk."""

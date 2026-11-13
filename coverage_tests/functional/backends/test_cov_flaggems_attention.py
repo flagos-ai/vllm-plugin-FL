@@ -119,9 +119,7 @@ class TestBackendMetadata:
         ]
         for name, expected in cases:
             attn_type = _attn_type(name) if name != "cross" else name
-            assert (
-                fa.AttentionFLBackend.supports_attn_type(attn_type) is expected
-            )
+            assert fa.AttentionFLBackend.supports_attn_type(attn_type) is expected
 
     def test_kv_cache_dtype_support(self):
         """Only unquantized (auto) KV cache is supported."""
@@ -161,7 +159,9 @@ class TestBackendMetadata:
             fa.AttentionFLBackend.supports_combination(has_sink=True, **kwargs)
             == "not support sink"
         )
-        assert fa.AttentionFLBackend.supports_combination(has_sink=False, **kwargs) is None
+        assert (
+            fa.AttentionFLBackend.supports_combination(has_sink=False, **kwargs) is None
+        )
 
     @pytest.mark.parametrize(
         "layout,include_layers,expected",
@@ -263,8 +263,18 @@ class TestImplInit:
 class TestCascadeHeuristic:
     """``use_cascade_attention`` thresholds against hand-computed decisions."""
 
-    def _decide(self, prefix, lens, num_q=8, num_kv=2, alibi=False,
-                sliding=False, local=False, sms=132, dcp=1):
+    def _decide(
+        self,
+        prefix,
+        lens,
+        num_q=8,
+        num_kv=2,
+        alibi=False,
+        sliding=False,
+        local=False,
+        sms=132,
+        dcp=1,
+    ):
         return fa.use_cascade_attention(
             prefix,
             np.asarray(lens),
@@ -392,9 +402,7 @@ class TestMetadataBuilderInit:
             parallel_config=SimpleNamespace(cp_kv_cache_interleave_size=2),
             cache_config=SimpleNamespace(),
             compilation_config=SimpleNamespace(
-                cudagraph_mode=SimpleNamespace(
-                    has_full_cudagraphs=lambda: False
-                ),
+                cudagraph_mode=SimpleNamespace(has_full_cudagraphs=lambda: False),
                 max_cudagraph_capture_size=0,
             ),
             scheduler_config=SimpleNamespace(max_num_seqs=8),
@@ -403,8 +411,9 @@ class TestMetadataBuilderInit:
             ),
         )
         spec = SimpleNamespace(dtype=torch.bfloat16, block_size=16)
-        return fa.AttentionFLMetadataBuilder(spec, ["layer"], config,
-                                            torch.device("cpu"))
+        return fa.AttentionFLMetadataBuilder(
+            spec, ["layer"], config, torch.device("cpu")
+        )
 
     def test_falls_back_to_single_rank_without_dcp(self, monkeypatch):
         """A missing DCP group yields world size 1 / rank 0."""
@@ -511,9 +520,10 @@ def _request_attention(q, k, v, scale, causal):
     if causal:
         kv_len = k.shape[0]
         query_len = q.shape[0]
-        mask = torch.arange(kv_len)[None, :] > torch.arange(
-            kv_len - query_len, kv_len
-        )[:, None]
+        mask = (
+            torch.arange(kv_len)[None, :]
+            > torch.arange(kv_len - query_len, kv_len)[:, None]
+        )
         scores = scores.masked_fill(mask[None], float("-inf"))
     probs = torch.softmax(scores, dim=-1)
     return torch.einsum("hqs,shd->qhd", probs, v)
@@ -521,9 +531,7 @@ def _request_attention(q, k, v, scale, causal):
 
 def _gather_cache(cache, block_table, length, block_size):
     blocks = block_table[: (length + block_size - 1) // block_size].tolist()
-    flat = cache[blocks].reshape(
-        -1, cache.shape[-2], cache.shape[-1]
-    )
+    flat = cache[blocks].reshape(-1, cache.shape[-2], cache.shape[-1])
     return flat[:length]
 
 
@@ -542,8 +550,7 @@ def _paged_reference(kwargs):
         k_b = _gather_cache(k_cache, block_table[batch], length, block_size)
         v_b = _gather_cache(v_cache, block_table[batch], length, block_size)
         pieces.append(
-            _request_attention(q_b, k_b, v_b, kwargs["softmax_scale"],
-                               kwargs["causal"])
+            _request_attention(q_b, k_b, v_b, kwargs["softmax_scale"], kwargs["causal"])
         )
     return torch.cat(pieces, dim=0)
 
@@ -553,7 +560,10 @@ def _kernel_reference(kwargs):
     if "block_table" in kwargs:
         return _paged_reference(kwargs)
     return _request_attention(
-        kwargs["q"], kwargs["k"], kwargs["v"], kwargs["softmax_scale"],
+        kwargs["q"],
+        kwargs["k"],
+        kwargs["v"],
+        kwargs["softmax_scale"],
         kwargs["causal"],
     )
 
@@ -574,8 +584,10 @@ class _FlashRecorder:
         if kwargs.get("return_softmax_lse"):
             batch = kwargs["cu_seqlens_q"].shape[0] - 1
             lse = torch.zeros(
-                result.shape[1], batch, dtype=torch.float32, device=out.device
-                if out is not None else result.device,
+                result.shape[1],
+                batch,
+                dtype=torch.float32,
+                device=out.device if out is not None else result.device,
             )
             return result, lse
         return None if out is not None else result
@@ -614,8 +626,9 @@ class TestForwardDecode:
         kv_cache = torch.stack([key_cache, value_cache], dim=0)
         block_table = torch.tensor([[0]], dtype=torch.int32, device=device)
         metadata = _attention_metadata(num_actual, num_actual, block_table)
-        output = torch.zeros(total, heads, head_dim, device=device,
-                             dtype=torch.bfloat16)
+        output = torch.zeros(
+            total, heads, head_dim, device=device, dtype=torch.bfloat16
+        )
 
         recorder = _FlashRecorder(_paged_reference)
         monkeypatch.setattr(fa, "flash_attn_varlen_func", recorder)
@@ -623,16 +636,22 @@ class TestForwardDecode:
         layer = _layer()
 
         returned = impl.forward(
-            layer, query, torch.empty(0), torch.empty(0), kv_cache,
-            metadata, output=output,
+            layer,
+            query,
+            torch.empty(0),
+            torch.empty(0),
+            kv_cache,
+            metadata,
+            output=output,
         )
 
         assert returned is output
         expected = _request_attention(
-            query[:num_actual], key_cache[0, :num_actual].reshape(
-                num_actual, kv_heads, head_dim
-            ), value_cache[0, :num_actual].reshape(num_actual, kv_heads, head_dim),
-            impl.scale, True,
+            query[:num_actual],
+            key_cache[0, :num_actual].reshape(num_actual, kv_heads, head_dim),
+            value_cache[0, :num_actual].reshape(num_actual, kv_heads, head_dim),
+            impl.scale,
+            True,
         )
         torch.testing.assert_close(
             output[:num_actual].float().cpu(), expected, rtol=RTOL, atol=ATOL
@@ -670,9 +689,7 @@ class TestForwardDecode:
         ):
             assert call[name].shape == (1, kv_heads)
             assert call[name].dtype == torch.float32
-            torch.testing.assert_close(
-                call[name], torch.full((1, kv_heads), scale)
-            )
+            torch.testing.assert_close(call[name], torch.full((1, kv_heads), scale))
 
     @pytest.mark.gpu
     def test_none_metadata_zero_fills_output(self, device):
@@ -680,8 +697,13 @@ class TestForwardDecode:
         impl = _impl()
         output = torch.ones(3, 2, 8, device=device)
         returned = impl.forward(
-            _layer(), torch.empty(0, device=device), torch.empty(0, device=device),
-            torch.empty(0, device=device), None, None, output=output,
+            _layer(),
+            torch.empty(0, device=device),
+            torch.empty(0, device=device),
+            torch.empty(0, device=device),
+            None,
+            None,
+            output=output,
         )
         assert returned is output
         assert torch.count_nonzero(output) == 0
@@ -692,9 +714,13 @@ class TestForwardDecode:
         impl = _impl()
         with pytest.raises(AssertionError, match="Output tensor"):
             impl.forward(
-                _layer(), torch.empty(0, device=device),
-                torch.empty(0, device=device), torch.empty(0, device=device),
-                None, None, output=None,
+                _layer(),
+                torch.empty(0, device=device),
+                torch.empty(0, device=device),
+                torch.empty(0, device=device),
+                None,
+                None,
+                output=None,
             )
 
     @pytest.mark.gpu
@@ -703,9 +729,13 @@ class TestForwardDecode:
         impl = _impl()
         with pytest.raises(NotImplementedError, match="fused output quantization"):
             impl.forward(
-                _layer(), torch.empty(0, device=device),
-                torch.empty(0, device=device), torch.empty(0, device=device),
-                None, None, output=torch.empty(0, device=device),
+                _layer(),
+                torch.empty(0, device=device),
+                torch.empty(0, device=device),
+                torch.empty(0, device=device),
+                None,
+                None,
+                output=torch.empty(0, device=device),
                 output_scale=torch.ones(1, device=device),
             )
 
@@ -718,10 +748,12 @@ class TestForwardEncoder:
         """Bidirectional dense attention is applied to the uncached tensors."""
         torch.manual_seed(8)
         tokens, heads, kv_heads, head_dim = 4, 2, 1, 8
-        query = torch.randn(tokens, heads, head_dim, device=device,
-                            dtype=torch.bfloat16)
-        key = torch.randn(tokens, kv_heads, head_dim, device=device,
-                          dtype=torch.bfloat16)
+        query = torch.randn(
+            tokens, heads, head_dim, device=device, dtype=torch.bfloat16
+        )
+        key = torch.randn(
+            tokens, kv_heads, head_dim, device=device, dtype=torch.bfloat16
+        )
         value = torch.randn_like(key)
         output = torch.zeros_like(query)
         metadata = SimpleNamespace(
@@ -732,14 +764,19 @@ class TestForwardEncoder:
 
         def _dense(kwargs):
             return _request_attention(
-                kwargs["q"], kwargs["k"], kwargs["v"], kwargs["softmax_scale"],
+                kwargs["q"],
+                kwargs["k"],
+                kwargs["v"],
+                kwargs["softmax_scale"],
                 False,
             )
 
         recorder = _FlashRecorder(_dense)
         monkeypatch.setattr(fa, "flash_attn_varlen_func", recorder)
         impl = _impl(
-            num_heads=heads, head_size=head_dim, num_kv_heads=kv_heads,
+            num_heads=heads,
+            head_size=head_dim,
+            num_kv_heads=kv_heads,
             attn_type=_attn_type("ENCODER_ONLY"),
         )
         returned = impl.forward(
@@ -749,9 +786,7 @@ class TestForwardEncoder:
         assert returned.data_ptr() == output.data_ptr()
         assert returned.shape == output.shape
         expected = _request_attention(query, key, value, impl.scale, False)
-        torch.testing.assert_close(
-            output.float().cpu(), expected, rtol=RTOL, atol=ATOL
-        )
+        torch.testing.assert_close(output.float().cpu(), expected, rtol=RTOL, atol=ATOL)
         call = recorder.calls[0]
         assert call["q"].data_ptr() == query.data_ptr()
         assert call["k"].data_ptr() == key.data_ptr()
@@ -770,8 +805,10 @@ class TestForwardEncoder:
         impl.kv_cache_dtype = "fp8"
         with pytest.raises(NotImplementedError, match="encoder attention"):
             impl._forward_encoder_attention(
-                torch.empty(0, device=device), torch.empty(0, device=device),
-                torch.empty(0, device=device), torch.empty(0, device=device),
+                torch.empty(0, device=device),
+                torch.empty(0, device=device),
+                torch.empty(0, device=device),
+                torch.empty(0, device=device),
                 SimpleNamespace(query_start_loc=torch.zeros(1, dtype=torch.int32)),
                 _layer(),
             )
@@ -786,16 +823,17 @@ class TestKvCacheUpdate:
         impl = _impl()
         key = torch.randn(3, 1, 8, device=device, dtype=torch.bfloat16)
         value = torch.randn_like(key)
-        kv_cache = torch.zeros(2, 4, 16, 1, 8, device=device,
-                               dtype=torch.bfloat16)
+        kv_cache = torch.zeros(2, 4, 16, 1, 8, device=device, dtype=torch.bfloat16)
         slot_mapping = torch.tensor([0, 17, 33], dtype=torch.int64, device=device)
         layer = _layer()
         calls = []
 
-        def _reshape(key, value, key_cache, value_cache, slots, dtype, k_scale,
-                     v_scale):
-            calls.append((key, value, key_cache, value_cache, slots, dtype,
-                          k_scale, v_scale))
+        def _reshape(
+            key, value, key_cache, value_cache, slots, dtype, k_scale, v_scale
+        ):
+            calls.append(
+                (key, value, key_cache, value_cache, slots, dtype, k_scale, v_scale)
+            )
 
         monkeypatch.setattr(fa, "reshape_and_cache_flash", _reshape)
         impl.do_kv_cache_update(layer, key, value, kv_cache, slot_mapping)
@@ -819,8 +857,11 @@ class TestKvCacheUpdate:
             fa, "reshape_and_cache_flash", lambda *args, **kwargs: calls.append(1)
         )
         impl.do_kv_cache_update(
-            _layer(), torch.empty(0, device=device), torch.empty(0, device=device),
-            None, None,
+            _layer(),
+            torch.empty(0, device=device),
+            torch.empty(0, device=device),
+            None,
+            None,
         )
         assert calls == []
 
@@ -833,11 +874,18 @@ class TestCascadeForward:
         """The prefix uses block 0..1 and the suffix starts at block 2."""
         block_size, kv_heads, head_dim = 16, 2, 8
         num_blocks = 4
-        key_cache = torch.randn(num_blocks, block_size, kv_heads, head_dim,
-                                device=device, dtype=torch.bfloat16)
+        key_cache = torch.randn(
+            num_blocks,
+            block_size,
+            kv_heads,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
         value_cache = torch.randn_like(key_cache)
-        block_table = torch.arange(num_blocks, dtype=torch.int32,
-                                   device=device).reshape(1, num_blocks)
+        block_table = torch.arange(
+            num_blocks, dtype=torch.int32, device=device
+        ).reshape(1, num_blocks)
         query = torch.randn(2, 2, head_dim, device=device, dtype=torch.bfloat16)
         output = torch.zeros_like(query)
         cu_query_lens = torch.tensor([0, 1, 2], dtype=torch.int32)
@@ -847,9 +895,7 @@ class TestCascadeForward:
 
         def _compute(kwargs):
             flag = 1.0 if kwargs["causal"] is False else 2.0
-            return torch.full_like(
-                kwargs["q"].float().cpu(), flag
-            )
+            return torch.full_like(kwargs["q"].float().cpu(), flag)
 
         recorder = _FlashRecorder(_compute)
         monkeypatch.setattr(fa, "flash_attn_varlen_func", recorder)
@@ -942,16 +988,20 @@ class TestDcpForward:
         uses the full Q/K/V tensors and both LSEs are merged."""
         torch.manual_seed(21)
         tokens, heads, kv_heads, head_dim, block_size = 3, 2, 1, 8, 16
-        query = torch.randn(tokens, heads, head_dim, device=device,
-                            dtype=torch.bfloat16)
-        key = torch.randn(tokens, kv_heads, head_dim, device=device,
-                          dtype=torch.bfloat16)
+        query = torch.randn(
+            tokens, heads, head_dim, device=device, dtype=torch.bfloat16
+        )
+        key = torch.randn(
+            tokens, kv_heads, head_dim, device=device, dtype=torch.bfloat16
+        )
         value = torch.randn_like(key)
-        key_cache = torch.randn(1, block_size, kv_heads, head_dim, device=device,
-                                dtype=torch.bfloat16)
+        key_cache = torch.randn(
+            1, block_size, kv_heads, head_dim, device=device, dtype=torch.bfloat16
+        )
         value_cache = torch.randn_like(key_cache)
-        output = torch.zeros(tokens, heads, head_dim, device=device,
-                             dtype=torch.bfloat16)
+        output = torch.zeros(
+            tokens, heads, head_dim, device=device, dtype=torch.bfloat16
+        )
         metadata = SimpleNamespace(
             query_start_loc=torch.tensor([0, tokens], dtype=torch.int32),
             max_query_len=tokens,
@@ -966,9 +1016,7 @@ class TestDcpForward:
         cp_calls = []
         merge_calls = []
         group = SimpleNamespace(
-            all_gather=lambda tensor, dim: (
-                gathers.append((tensor, dim)) or tensor
-            )
+            all_gather=lambda tensor, dim: gathers.append((tensor, dim)) or tensor
         )
 
         def _cp(out, lse, dcp_group, return_lse=False):
@@ -986,7 +1034,13 @@ class TestDcpForward:
         impl = _impl(num_heads=heads, head_size=head_dim, num_kv_heads=kv_heads)
 
         impl._forward_with_dcp(
-            query, key, value, key_cache, value_cache, output, metadata,
+            query,
+            key,
+            value,
+            key_cache,
+            value_cache,
+            output,
+            metadata,
             q_descale=torch.ones(1, kv_heads),
             k_descale=torch.ones(1, kv_heads),
             v_descale=torch.ones(1, kv_heads),

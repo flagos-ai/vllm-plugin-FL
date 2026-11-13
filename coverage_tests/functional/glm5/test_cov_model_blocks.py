@@ -94,9 +94,7 @@ def _install_moe_doubles(monkeypatch, ep_size=1, ep_rank=0):
     monkeypatch.setattr(glm5_model, "Glm5NextMLP", _RecordingMLP)
     monkeypatch.setattr(glm5_model.fused_moe_layers, "GateLinear", _RecordingGate)
     monkeypatch.setattr(glm5_model.fused_moe_layers, "FusedMoE", _RecordingExperts)
-    monkeypatch.setattr(
-        glm5_model, "get_tensor_model_parallel_world_size", lambda: 1
-    )
+    monkeypatch.setattr(glm5_model, "get_tensor_model_parallel_world_size", lambda: 1)
     monkeypatch.setattr(glm5_model, "get_tensor_model_parallel_rank", lambda: 0)
     ep_group = SimpleNamespace(size=lambda: ep_size)
     monkeypatch.setattr(
@@ -127,7 +125,9 @@ class TestGlm5NextMoEConstruction:
             config,
             parallel,
             prefix="model.layers.0.mlp",
-            apply_routed_scale_to_output=kwargs.get("apply_routed_scale_to_output", False),
+            apply_routed_scale_to_output=kwargs.get(
+                "apply_routed_scale_to_output", False
+            ),
         )
 
     def test_eplb_arithmetic_and_gate_bias(self, monkeypatch):
@@ -347,9 +347,7 @@ class TestGlm5NextLinearAttentionInit:
         monkeypatch.setattr(
             glm5_model.KimiGatedDeltaNetAttention, "__init__", fake_base_init
         )
-        monkeypatch.setattr(
-            glm5_model, "is_conv_state_dim_first", lambda: dim_first
-        )
+        monkeypatch.setattr(glm5_model, "is_conv_state_dim_first", lambda: dim_first)
         attn = glm5_model.Glm5NextLinearAttention(config, None, prefix="p")
         return attn, recorded
 
@@ -449,12 +447,8 @@ class TestGlm5NextDecoderLayerConstruction:
         )
 
     def _build(self, monkeypatch, config, layer_idx=0):
-        monkeypatch.setattr(
-            glm5_model, "Glm5NextLinearAttention", _RecordingModule
-        )
-        monkeypatch.setattr(
-            glm5_model, "Glm5NextMLAAttention", _RecordingModule
-        )
+        monkeypatch.setattr(glm5_model, "Glm5NextLinearAttention", _RecordingModule)
+        monkeypatch.setattr(glm5_model, "Glm5NextMLAAttention", _RecordingModule)
         monkeypatch.setattr(glm5_model, "Glm5NextMoE", _RecordingModule)
         monkeypatch.setattr(glm5_model, "Glm5NextMLP", _RecordingModule)
         monkeypatch.setattr(glm5_model, "RMSNorm", _RecordingModule)
@@ -582,9 +576,7 @@ class _MLPDouble(nn.Module):
 
 
 def _decoder_forward_layer(**overrides):
-    layer = glm5_model.Glm5NextDecoderLayer.__new__(
-        glm5_model.Glm5NextDecoderLayer
-    )
+    layer = glm5_model.Glm5NextDecoderLayer.__new__(glm5_model.Glm5NextDecoderLayer)
     nn.Module.__init__(layer)
     layer.layer_idx = overrides.get("layer_idx", 1)
     layer.num_hidden_layers = overrides.get("num_hidden_layers", 2)
@@ -683,9 +675,7 @@ class TestGlm5NextDecoderLayerForward:
 
     def test_later_layer_keeps_residual_unexpanded(self):
         """Layers after the first reuse the existing stream tensor."""
-        layer = _decoder_forward_layer(
-            layer_idx=1, num_hidden_layers=3
-        )
+        layer = _decoder_forward_layer(layer_idx=1, num_hidden_layers=3)
         streams = torch.arange(16, dtype=torch.float32).view(2, 2, 4)
         positions = torch.zeros(2, dtype=torch.long)
         out, residual, _, _ = glm5_model.Glm5NextDecoderLayer.forward(
@@ -698,12 +688,8 @@ class TestGlm5NextDecoderLayerForward:
 
     def test_broadcast_fast_path_is_selected_for_first_layer(self, monkeypatch):
         """A prepared broadcast weight routes layer 0 through the fused pre."""
-        monkeypatch.setattr(
-            glm5_model, "mhc_pre_broadcast_tilelang", object()
-        )
-        layer = _decoder_forward_layer(
-            layer_idx=0, broadcast=torch.zeros(8, 4)
-        )
+        monkeypatch.setattr(glm5_model, "mhc_pre_broadcast_tilelang", object())
+        layer = _decoder_forward_layer(layer_idx=0, broadcast=torch.zeros(8, 4))
         hidden = torch.ones(2, 4)
         positions = torch.zeros(2, dtype=torch.long)
         out, residual, _, _ = glm5_model.Glm5NextDecoderLayer.forward(
@@ -717,18 +703,14 @@ class TestGlm5NextDecoderLayerForward:
 
     def test_post_state_routes_through_fused_post_pre(self):
         """A carried post/comb pair enters the fused post-pre helper."""
-        layer = _decoder_forward_layer(
-            layer_idx=1, num_hidden_layers=3
-        )
+        layer = _decoder_forward_layer(layer_idx=1, num_hidden_layers=3)
         hidden = torch.ones(2, 2, 4)
         residual = torch.full((2, 2, 4), 2.0)
         post = "carried_post"
         comb = "carried_comb"
         positions = torch.zeros(2, dtype=torch.long)
-        out, new_residual, new_post, new_comb = (
-            glm5_model.Glm5NextDecoderLayer.forward(
-                layer, positions, hidden, residual, post, comb
-            )
+        out, new_residual, new_post, new_comb = glm5_model.Glm5NextDecoderLayer.forward(
+            layer, positions, hidden, residual, post, comb
         )
         first_fused = layer.events[0]
         assert first_fused[0] == "fused"
@@ -803,7 +785,9 @@ def _indexer_double(n_head, head_dim=128, hidden_size=16, seed=0):
         index_kpool_compress_ape=torch.zeros(4, head_dim),
         index_kpool=4,
     )
-    gate = torch.randn(head_dim, hidden_size, generator=torch.Generator().manual_seed(seed + 3))
+    gate = torch.randn(
+        head_dim, hidden_size, generator=torch.Generator().manual_seed(seed + 3)
+    )
     indexer.index_kpool_compress_gate = gate
     return indexer
 
@@ -825,7 +809,10 @@ class TestIndexerForwardNope:
         qr = torch.arange(16, dtype=torch.float32).view(2, 8)
 
         out = glm5_model._indexer_forward_nope(
-            indexer, hidden, qr, positions=torch.zeros(2, dtype=torch.long),
+            indexer,
+            hidden,
+            qr,
+            positions=torch.zeros(2, dtype=torch.long),
             rotary_emb=None,
         )
         assert out == "logits"
@@ -833,17 +820,15 @@ class TestIndexerForwardNope:
 
         q_ref = torch.nn.functional.linear(qr, indexer.wq_b.weight).view(2, 2, 128)
         assert torch.equal(captured[0], q_ref.reshape(-1, 128))
-        kw_ref = torch.nn.functional.linear(
-            hidden, indexer.wk_weights_proj.weight
-        )
+        kw_ref = torch.nn.functional.linear(hidden, indexer.wk_weights_proj.weight)
         k_ref = kw_ref[:, :128] / kw_ref[:, :128].norm(dim=-1, keepdim=True)
         assert torch.equal(call["k"], k_ref)
         # Weights use the second half of the fused projection in FP32 and the
         # unit query scale produced above.
         wp = indexer.wk_weights_proj.weight.data[128:, :].t().contiguous().float()
         weights_ref = (
-            hidden.float() @ wp
-        ) * 1.0 * indexer.softmax_scale * indexer.n_head**-0.5
+            (hidden.float() @ wp) * 1.0 * indexer.softmax_scale * indexer.n_head**-0.5
+        )
         assert torch.equal(call["weights"][:, :2], weights_ref)
         assert torch.equal(
             call["gate_score"],
@@ -923,9 +908,7 @@ class TestIndexerForwardNope:
         # the remaining factors are applied in the source's own order.
         expected = torch.nn.functional.linear(hidden, cache.t())
         expected = expected * indexer.softmax_scale * indexer.n_head**-0.5
-        assert torch.equal(
-            indexer.indexer_op.calls[-1]["weights"][:, :2], expected
-        )
+        assert torch.equal(indexer.indexer_op.calls[-1]["weights"][:, :2], expected)
 
     @pytest.mark.parametrize(
         "overrides",
@@ -935,9 +918,7 @@ class TestIndexerForwardNope:
             {"scale_fmt": "e4m3"},
         ],
     )
-    def test_layout_guards_reject_unsupported_indexers(
-        self, monkeypatch, overrides
-    ):
+    def test_layout_guards_reject_unsupported_indexers(self, monkeypatch, overrides):
         """The zero-RoPE path pins the FP8 quantizer layout it replaces."""
         monkeypatch.setattr(
             glm5_model,
@@ -995,9 +976,7 @@ def _gate_attn_state():
         setattr(
             attn,
             name,
-            SimpleNamespace(
-                weight=torch.zeros(2, 1, 3), bias=torch.zeros(2)
-            ),
+            SimpleNamespace(weight=torch.zeros(2, 1, 3), bias=torch.zeros(2)),
         )
     return attn, conv_state, recurrent_state
 
@@ -1023,7 +1002,9 @@ class TestForwardReferenceSafeGate:
 
     def _install(self, monkeypatch, meta, attn, conv_ops_calls):
         recorder = _KpoolRecorder()
-        monkeypatch.setattr(glm5_model, "GDNAttentionMetadata", _FakeGDNAttentionMetadata)
+        monkeypatch.setattr(
+            glm5_model, "GDNAttentionMetadata", _FakeGDNAttentionMetadata
+        )
         monkeypatch.setattr(
             glm5_model,
             "get_forward_context",
@@ -1055,9 +1036,7 @@ class TestForwardReferenceSafeGate:
             chunk_calls.append(kwargs)
             return torch.ones(1, 4, 2, 2), torch.full((2, 2, 2), 7.0)
 
-        monkeypatch.setattr(
-            glm5_model, "chunk_kda_with_safe_gate", fake_chunk
-        )
+        monkeypatch.setattr(glm5_model, "chunk_kda_with_safe_gate", fake_chunk)
         q = torch.arange(32, dtype=torch.float32).view(8, 4)
         k = q + 100
         v = q + 200
@@ -1174,7 +1153,12 @@ class TestForwardReferenceSafeGate:
         )
         q = torch.zeros(8, 4)
         glm5_model.Glm5NextLinearAttention._forward_reference_safe_gate(
-            attn, q, q, q, torch.zeros(1, 8, 2, 2), torch.zeros(1, 8, 2),
+            attn,
+            q,
+            q,
+            q,
+            torch.zeros(1, 8, 2, 2),
+            torch.zeros(1, 8, 2),
             torch.zeros(1, 8, 2, 2),
         )
         expected = attn.kv_cache[0].transpose(-1, -2).chunk(3, dim=-2)[0]

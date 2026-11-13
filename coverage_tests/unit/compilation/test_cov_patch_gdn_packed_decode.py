@@ -42,7 +42,9 @@ def _clean_source_kernel(*args):
 
 def test_replacement_kernel_is_marked_and_drops_dtype_rounding():
     """The shipped kernel keeps sigmoid(b) in FP32 and is self-identifying."""
-    kernel = patch_module._fused_recurrent_gated_delta_rule_packed_decode_kernel_fp32_beta
+    kernel = (
+        patch_module._fused_recurrent_gated_delta_rule_packed_decode_kernel_fp32_beta
+    )
     assert getattr(kernel, "_fl_fp32_beta", False) is True
 
     source = inspect.getsource(kernel.fn)
@@ -122,6 +124,7 @@ def test_installer_noops_when_symbol_is_missing(monkeypatch):
 
 def test_installer_noops_when_module_cannot_be_imported(monkeypatch):
     """An ImportError from the target module is a quiet no-op."""
+
     def explode(name):
         raise ImportError(name)
 

@@ -19,9 +19,10 @@ Linux-only packages (uvloop, xgrammar), so this file cannot import on the
 Windows authoring host: locally it is validated with
 ``pytest --collect-only`` (per the campaign work order); the Linux CI images
 execute it for real. The pure-Python branches (fp4 rejection, layer
-registration, op-argument plumbing) run on CPU tensors; the fake/workspace
-path carries ``pytest.mark.gpu`` because the workspace manager allocates on
-the accelerator device (auto-skipped by the repo conftest elsewhere).
+registration, op-argument plumbing) run on CPU tensors. The fake/workspace
+path allocates through the workspace manager and is a single-GPU test in the
+functional tree
+(``coverage_tests/functional/compilation/test_cov_sparse_indexer_gpu.py``).
 
 C1 tranche of the supplementary coverage suite (flagcicd_cov).
 """
@@ -178,48 +179,3 @@ def test_indexer_function_rejects_fp4_cache():
             True,  # use_fp4_cache
         )
     assert "requires FP8 cache" in str(excinfo.value)
-
-
-@pytest.mark.gpu
-def test_indexer_function_fake_path_returns_the_buffer():
-    """Non-dict attn_metadata takes the fake/workspace path returning the buffer.
-
-    The fake path allocates the radix workspace through the workspace
-    manager, which requires an initialized accelerator device — hence the
-    gpu marker (the repo conftest auto-skips it on accelerator-less hosts).
-    """
-    from vllm.forward_context import ForwardContext, override_forward_context
-    from vllm.platforms import current_platform
-    from vllm.v1.worker.workspace import init_workspace_manager
-
-    init_workspace_manager(torch.device(current_platform.device_type))
-    device = current_platform.device_type
-    prefix = "cov_indexer_fake"
-    _make_indexer(prefix)
-    buffer = torch.full((16, 8), -3, dtype=torch.int32, device=device)
-    ctx = ForwardContext(
-        no_compile_layers={},
-        attn_metadata=object(),  # non-dict metadata selects the fake branch
-        slot_mapping=None,
-    )
-    with override_forward_context(ctx):
-        result = si.portable_sparse_attn_indexer(
-            torch.zeros(2, 128, device=device),
-            si._encode_layer_name(prefix),
-            torch.zeros(4, 8, 32, dtype=torch.uint8, device=device),
-            torch.zeros(2, 32, 128, device=device),
-            None,
-            torch.zeros(2, 128, device=device),
-            torch.ones(2, 32, device=device),
-            128,
-            "e4m3",
-            8,
-            128,
-            1024,
-            4096,
-            buffer,
-            True,
-            False,
-        )
-    assert result is buffer
-    assert bool((buffer == -3).all())

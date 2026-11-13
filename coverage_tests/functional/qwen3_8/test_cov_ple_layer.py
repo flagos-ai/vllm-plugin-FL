@@ -133,9 +133,7 @@ class TestNGramEmbeddingConstruction:
         assert module.layer_multipliers.tolist() == expected_multipliers
         assert all(value % 2 == 1 for value in expected_multipliers)
 
-        expected_sizes = [
-            ple_layer._nth_prime_after(96, head + 1) for head in range(4)
-        ]
+        expected_sizes = [ple_layer._nth_prime_after(96, head + 1) for head in range(4)]
         assert module.ngram_heads_vocab_sizes.tolist() == expected_sizes
         expected_offsets = [0]
         for size in expected_sizes[:-1]:
@@ -202,7 +200,9 @@ class TestRequiredShards:
             (0, 20, {0, 1}),
         ],
     )
-    def test_shard_ids_are_clamped_to_the_original_vocabulary(self, start, end, expected):
+    def test_shard_ids_are_clamped_to_the_original_vocabulary(
+        self, start, end, expected
+    ):
         owner = _shard_owner(10, 2, start, end)
         assert owner._required_embedding_shards() == expected
 

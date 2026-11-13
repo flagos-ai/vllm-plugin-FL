@@ -79,8 +79,16 @@ def _desc(num_tokens, num_reqs=None, uniform=True, num_active_loras=0):
     )
 
 
-def _runner(dispatcher, *, loras=0, enable_sp=False, tp_size=1, dp_size=1,
-            is_encoder_decoder=False, cudagraph_metrics=False):
+def _runner(
+    dispatcher,
+    *,
+    loras=0,
+    enable_sp=False,
+    tp_size=1,
+    dp_size=1,
+    is_encoder_decoder=False,
+    cudagraph_metrics=False,
+):
     return SimpleNamespace(
         _is_uniform_decode=_uniform_recorder(),
         uniform_decode_query_len=1,
@@ -90,15 +98,15 @@ def _runner(dispatcher, *, loras=0, enable_sp=False, tp_size=1, dp_size=1,
         ),
         _pad_for_sequence_parallelism=lambda n: n,
         cudagraph_dispatcher=dispatcher,
-        compilation_config=SimpleNamespace(pass_config=SimpleNamespace(enable_sp=enable_sp)),
+        compilation_config=SimpleNamespace(
+            pass_config=SimpleNamespace(enable_sp=enable_sp)
+        ),
         vllm_config=SimpleNamespace(
             parallel_config=SimpleNamespace(
                 tensor_parallel_size=tp_size,
                 data_parallel_size=dp_size,
             ),
-            observability_config=SimpleNamespace(
-                cudagraph_metrics=cudagraph_metrics
-            ),
+            observability_config=SimpleNamespace(cudagraph_metrics=cudagraph_metrics),
         ),
         parallel_config=SimpleNamespace(data_parallel_rank=0),
     )

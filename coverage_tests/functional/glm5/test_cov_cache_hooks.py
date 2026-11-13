@@ -80,9 +80,7 @@ class TestInnerSpecs:
 
         monkeypatch.setattr(kvif, "UniformTypeKVCacheSpecs", FakeUniform)
         spec_a, spec_b = object(), object()
-        group = SimpleNamespace(
-            kv_cache_spec=FakeUniform({"a": spec_a, "b": spec_b})
-        )
+        group = SimpleNamespace(kv_cache_spec=FakeUniform({"a": spec_a, "b": spec_b}))
         assert list(pc._inner_specs([group])) == [("a", spec_a), ("b", spec_b)]
 
     def test_plain_groups_repeat_the_group_spec_per_layer(self):
@@ -125,9 +123,7 @@ class TestGroupGlm5Kpool:
         assert isinstance(attn_group.kv_cache_spec, UniformTypeKVCacheSpecs)
         assert tail_group.layer_names == ["layers.0.indexer.tail_cache"]
         assert isinstance(tail_group.kv_cache_spec, UniformTypeKVCacheSpecs)
-        tail = tail_group.kv_cache_spec.kv_cache_specs[
-            "layers.0.indexer.tail_cache"
-        ]
+        tail = tail_group.kv_cache_spec.kv_cache_specs["layers.0.indexer.tail_cache"]
         assert tail.page_size_padded == _mla_spec(compress_ratio=4).page_size_bytes
         assert isinstance(mamba_group.kv_cache_spec, MambaSpec)
 
@@ -222,9 +218,7 @@ class TestMetadataBuilderPatch:
         assert result == "base"
         assert calls == [(owner, "config", "device", 8, 2)]
 
-    def test_layout_rewrites_the_builder_spec_and_records_the_layout(
-        self, monkeypatch
-    ):
+    def test_layout_rewrites_the_builder_spec_and_records_the_layout(self, monkeypatch):
         from vllm.v1.worker import utils as worker_utils
 
         built = []
@@ -238,9 +232,7 @@ class TestMetadataBuilderPatch:
 
         layout = PhysicalCacheLayout(64, 32, 32)
         _install_layout(monkeypatch, layout)
-        spec = SimpleNamespace(
-            copy_with_new_block_size=lambda size: ("spec", size)
-        )
+        spec = SimpleNamespace(copy_with_new_block_size=lambda size: ("spec", size))
         backend = SimpleNamespace(get_builder_cls=lambda: FakeBuilder)
         monkeypatch.setattr(
             worker_utils.AttentionGroup,
@@ -249,9 +241,7 @@ class TestMetadataBuilderPatch:
         )
         _capture(monkeypatch, worker_utils.AttentionGroup, "create_metadata_builders")
         patch = pc._create_metadata_builders_patch("fp")
-        owner = SimpleNamespace(
-            backend=backend, kv_cache_spec=spec, layer_names=["p"]
-        )
+        owner = SimpleNamespace(backend=backend, kv_cache_spec=spec, layer_names=["p"])
         assert patch.replacement(owner, "config", "device", 8, 2) is None
         assert len(built) == 2
         assert built[0].spec == ("spec", 64)
@@ -281,9 +271,7 @@ class TestIndexerBuildPatch:
             indexer_backend.DeepseekV32IndexerMetadataBuilder,
             "build",
         )
-        monkeypatch.setattr(
-            provider, "use_nvidia_reference", lambda: use_nvidia
-        )
+        monkeypatch.setattr(provider, "use_nvidia_reference", lambda: use_nvidia)
         patch = pc._indexer_build_patch("fp")
         return patch, calls
 
@@ -341,8 +329,7 @@ class TestIndexerBuildPatch:
             False,
         )
         assert (
-            first.block_table_tensor.data_ptr()
-            == second.block_table_tensor.data_ptr()
+            first.block_table_tensor.data_ptr() == second.block_table_tensor.data_ptr()
         )
 
     def test_width_and_row_capacity_changes_are_rejected(self, monkeypatch):

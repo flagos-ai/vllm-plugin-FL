@@ -203,9 +203,7 @@ class TestCompressedSlotMapping:
         requests = torch.zeros(2, dtype=torch.int32)
         positions = torch.tensor([3, 7], dtype=torch.int64)
         out = torch.full((5,), 9, dtype=torch.int64)
-        got = qc.compressed_qsa_slot_mapping(
-            table, requests, positions, 4, 4, out=out
-        )
+        got = qc.compressed_qsa_slot_mapping(table, requests, positions, 4, 4, out=out)
         assert got.tolist() == [8, 9]
         assert out.tolist() == [8, 9, -1, -1, -1]
         assert got.data_ptr() == out.data_ptr()
@@ -431,7 +429,9 @@ class TestStateCache:
     def test_registers_in_static_forward_context(self):
         vllm_config = _state_config()
         cache = _state_cache(vllm_config=vllm_config)
-        assert vllm_config.compilation_config.static_forward_context["qsa.state"] is cache
+        assert (
+            vllm_config.compilation_config.static_forward_context["qsa.state"] is cache
+        )
         assert cache.forward() is None
         assert cache.get_attn_backend() is qc.QSAStateBackend
         assert cache.kv_cache.numel() == 0
@@ -636,7 +636,11 @@ class TestPleShardCopy:
     def test_copy_rejects_incompatible_shapes(self):
         with pytest.raises(ValueError, match="matching ranks"):
             copy_ple_embedding_shard_(
-                torch.zeros(2), torch.zeros(2, 2), checkpoint_start=0, tp_start=0, tp_end=2
+                torch.zeros(2),
+                torch.zeros(2, 2),
+                checkpoint_start=0,
+                tp_start=0,
+                tp_end=2,
             )
         with pytest.raises(ValueError, match="dimensions do not match"):
             copy_ple_embedding_shard_(

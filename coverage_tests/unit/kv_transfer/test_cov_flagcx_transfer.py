@@ -83,9 +83,7 @@ def worker_env(monkeypatch):
         if groups is None:
             groups = [helpers.full_attention_group(0, block_size=block_size)]
         cfg = helpers.vllm_config(
-            model=helpers.ModelInfo(
-                use_mla=use_mla, total_num_kv_heads=total_kv_heads
-            ),
+            model=helpers.ModelInfo(use_mla=use_mla, total_num_kv_heads=total_kv_heads),
             parallel=helpers.ParallelInfo(tp_size=tp_size),
             transfer=helpers.TransferInfo(
                 kv_role=role, extra_config=extra_config or {}
@@ -338,9 +336,7 @@ def test_worker_source_tree_prefers_lib_library_path(monkeypatch, tmp_path):
     plugin.interservice = interservice
     monkeypatch.setitem(sys.modules, "plugin", plugin)
     monkeypatch.setitem(sys.modules, "plugin.interservice", interservice)
-    monkeypatch.setitem(
-        sys.modules, "plugin.interservice.flagcx_wrapper", wrapper
-    )
+    monkeypatch.setitem(sys.modules, "plugin.interservice.flagcx_wrapper", wrapper)
 
     _flagcx_env.drop_connector_module()
     try:
@@ -428,9 +424,7 @@ def test_register_kv_caches_consumer_regions(worker_env):
 
     storage = cache.untyped_storage()
     registers = [c for c in recorder if c[0] == "flagcxP2pRegister"]
-    assert registers == [
-        ("flagcxP2pRegister", storage.data_ptr(), storage.nbytes())
-    ]
+    assert registers == [("flagcxP2pRegister", storage.data_ptr(), storage.nbytes())]
     assert w.rpc_port == 4242
     assert ("flagcxP2pStartRpcServer",) in recorder
     # A consumer owns no sender executor or sender thread.
@@ -641,7 +635,14 @@ def test_get_transfer_regions_keeps_tensors_whole(worker_env):
     )
 
     assert [
-        (r.layer_name, r.layer_index, r.base_addr, r.block_len, r.kv_block_len, r.group_index)
+        (
+            r.layer_name,
+            r.layer_index,
+            r.base_addr,
+            r.block_len,
+            r.kv_block_len,
+            r.group_index,
+        )
         for r in regions
     ] == [
         ("l0", 3, 0x1000, 512, 512, 0),
@@ -664,7 +665,11 @@ def test_get_transfer_regions_blocks_first_splits_attention_only(worker_env):
         [4096, 8192, 12288],
         [512, 512, 512],
         [256, 256, 256],
-        ["model.layers.0.self_attn", "model.layers.2.mamba", "model.layers.5.self_attn"],
+        [
+            "model.layers.0.self_attn",
+            "model.layers.2.mamba",
+            "model.layers.5.self_attn",
+        ],
         [0, 2, 5],
         [0, 1, 2],
     )
@@ -724,7 +729,12 @@ def test_build_transfer_params_per_block_when_not_coalescable(worker_env):
     )
 
     assert src == [0x1000, 0x1200, 0x1800, 0x1A00]
-    assert dst == [0x8000 + 2 * 512, 0x8000 + 3 * 512, 0x8800 + 2 * 512, 0x8800 + 3 * 512]
+    assert dst == [
+        0x8000 + 2 * 512,
+        0x8000 + 3 * 512,
+        0x8800 + 2 * 512,
+        0x8800 + 3 * 512,
+    ]
     assert sizes == [256, 256, 256, 256]
 
 

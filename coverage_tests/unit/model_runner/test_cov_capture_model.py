@@ -145,9 +145,7 @@ def test_capture_model_captures_descriptors_then_encoder_graphs():
         compilation_config=SimpleNamespace(cudagraph_mode=CUDAGraphMode.PIECEWISE),
         _limit_musa_piecewise_capture_sizes=_Recorder(),
         _maybe_init_encoder_cudagraph_manager=_Recorder(),
-        cudagraph_dispatcher=SimpleNamespace(
-            get_capture_descs=lambda: list(descs)
-        ),
+        cudagraph_dispatcher=SimpleNamespace(get_capture_descs=lambda: list(descs)),
         _capture_cudagraphs=captured,
         encoder_cudagraph_manager=encoder_manager,
         device="cpu",
@@ -161,8 +159,11 @@ def test_capture_model_captures_descriptors_then_encoder_graphs():
     with (
         _Patch(mr_module, "current_platform", platform),
         _Patch(mr_module, "compilation_counter", counter),
-        _Patch(mr_module, "set_cudagraph_capturing_enabled",
-               lambda value: enabled.append(value)),
+        _Patch(
+            mr_module,
+            "set_cudagraph_capturing_enabled",
+            lambda value: enabled.append(value),
+        ),
         _Patch(mr_module, "graph_capture", _capture_ctx(capture_ctx)),
         _Patch(mr_module, "_accelerator_synchronize", lambda: synced.append(True)),
         _Patch(mr_module, "lock_workspace", lambda: locked.append(True)),
@@ -347,7 +348,9 @@ def test_capture_cudagraphs_rejects_invalid_mode():
     runner = SimpleNamespace(parallel_config=SimpleNamespace(use_ubatching=False))
     with pytest.raises(AssertionError, match="Invalid cudagraph runtime mode"):
         ModelRunnerFL._capture_cudagraphs(
-            runner, batch_descriptors=[_desc(2)], cudagraph_runtime_mode=CUDAGraphMode.NONE
+            runner,
+            batch_descriptors=[_desc(2)],
+            cudagraph_runtime_mode=CUDAGraphMode.NONE,
         )
 
 
@@ -357,9 +360,7 @@ def test_profile_cudagraph_memory_without_graphs_cleans_up():
         vllm_config=object(),
         _init_minimal_kv_cache_for_profiling=_Recorder(),
         _create_encoder_cudagraph_manager=_Recorder(result=None),
-        cudagraph_dispatcher=SimpleNamespace(
-            get_capture_descs=_Recorder(result=[])
-        ),
+        cudagraph_dispatcher=SimpleNamespace(get_capture_descs=_Recorder(result=[])),
         _cleanup_profiling_kv_cache=_Recorder(),
     )
     counter = SimpleNamespace(num_cudagraph_captured=7)
@@ -414,13 +415,15 @@ def test_profile_cudagraph_memory_estimates_shared_and_encoder_pools():
         _Patch(mr_module, "compilation_counter", counter),
         _Patch(mr_module, "GraphWrapper", _fake_wrapper_cls([wrapper])),
         _Patch(mr_module, "BreakableCUDAGraphWrapper", _fake_wrapper_cls([])),
-        _Patch(mr_module, "set_cudagraph_capturing_enabled",
-               lambda value: enabled.append(value)),
+        _Patch(
+            mr_module,
+            "set_cudagraph_capturing_enabled",
+            lambda value: enabled.append(value),
+        ),
         _Patch(mr_module, "graph_capture", _capture_ctx([])),
         _Patch(mr_module, "_accelerator_synchronize", lambda: None),
         _Patch(mr_module, "_clear_decoder_graphs", lambda rt: cleared.append(rt)),
-        _Patch(mr_module, "set_current_vllm_config",
-               _set_config_calls([])),
+        _Patch(mr_module, "set_current_vllm_config", _set_config_calls([])),
         _Patch(
             mr_module.torch,
             "accelerator",

@@ -45,9 +45,7 @@ def _text_config(**overrides):
 
 def _causal_vllm_config(config, *, mamba_mode="align"):
     return SimpleNamespace(
-        model_config=SimpleNamespace(
-            hf_text_config=config, dtype=torch.bfloat16
-        ),
+        model_config=SimpleNamespace(hf_text_config=config, dtype=torch.bfloat16),
         cache_config=SimpleNamespace(mamba_cache_mode=mamba_mode),
         quant_config=None,
         scheduler_config=SimpleNamespace(max_num_batched_tokens=16),
@@ -139,18 +137,14 @@ class TestCausalLMConstruction:
         moe_calls = []
         _install_causal_doubles(monkeypatch, moe_calls=moe_calls)
         config = _text_config(num_experts=0)
-        qwen_model.Qwen3_8FlashNextForCausalLM(
-            vllm_config=_causal_vllm_config(config)
-        )
+        qwen_model.Qwen3_8FlashNextForCausalLM(vllm_config=_causal_vllm_config(config))
         assert moe_calls == []
 
     def test_all_mamba_cache_mode_is_rejected(self, monkeypatch):
         _install_causal_doubles(monkeypatch)
         with pytest.raises(NotImplementedError, match="mamba-cache-mode=align"):
             qwen_model.Qwen3_8FlashNextForCausalLM(
-                vllm_config=_causal_vllm_config(
-                    _text_config(), mamba_mode="all"
-                )
+                vllm_config=_causal_vllm_config(_text_config(), mamba_mode="all")
             )
 
     def test_forward_delegates_every_argument(self, monkeypatch):
@@ -264,9 +258,7 @@ def _conditional_config(*, deepstack=(), hidden_size=8):
             out_hidden_size=6,
             rms_norm_eps=1e-6,
         ),
-        text_config=SimpleNamespace(
-            rms_norm_eps=1e-6, hidden_size=hidden_size
-        ),
+        text_config=SimpleNamespace(rms_norm_eps=1e-6, hidden_size=hidden_size),
     )
 
 
@@ -317,9 +309,7 @@ def _build_conditional(
         lambda: SimpleNamespace(is_first_rank=pp_first, is_last_rank=True),
     )
     vllm_config = SimpleNamespace(
-        model_config=SimpleNamespace(
-            hf_config=config, multimodal_config=multimodal
-        ),
+        model_config=SimpleNamespace(hf_config=config, multimodal_config=multimodal),
         quant_config=None,
         scheduler_config=SimpleNamespace(max_num_batched_tokens=16),
     )
@@ -341,9 +331,7 @@ class TestConditionalGenerationConstruction:
             quant_config=None,
         )
         with pytest.raises(ValueError, match="requires multimodal_config"):
-            qwen_model.Qwen3_8FlashNextForConditionalGeneration(
-                vllm_config=vllm_config
-            )
+            qwen_model.Qwen3_8FlashNextForConditionalGeneration(vllm_config=vllm_config)
 
     def test_language_model_only_keeps_the_tower_missing(self, monkeypatch):
         model, created = _build_conditional(monkeypatch, language_model_only=True)
@@ -358,12 +346,8 @@ class TestConditionalGenerationConstruction:
         assert model.language_model is created.language
         assert model.make_empty_intermediate_tensors == "factory"
 
-    def test_full_multimodal_construction_builds_the_vision_tower(
-        self, monkeypatch
-    ):
-        model, created = _build_conditional(
-            monkeypatch, language_model_only=False
-        )
+    def test_full_multimodal_construction_builds_the_vision_tower(self, monkeypatch):
+        model, created = _build_conditional(monkeypatch, language_model_only=False)
         assert created.vision is not None
         assert created.vision.kwargs["prefix"] == "root.visual"
         assert model._tokenizer == "tokenizer"
@@ -398,8 +382,8 @@ class TestConditionalGenerationConstruction:
         self, monkeypatch
     ):
         model, _ = _build_conditional(monkeypatch)
-        model._embed_text_input_ids = (
-            lambda input_ids, embed, is_multimodal=None: "text-embeds"
+        model._embed_text_input_ids = lambda input_ids, embed, is_multimodal=None: (
+            "text-embeds"
         )
         assert model.embed_input_ids(torch.tensor([1])) == "text-embeds"
         assert model.embed_input_ids(torch.tensor([1]), []) == "text-embeds"
@@ -434,9 +418,7 @@ class TestConditionalGenerationConstruction:
             return "merged"
 
         model._compute_deepstack_embeds = compute_deepstack
-        model._set_deepstack_input_embeds = lambda value: merged.update(
-            deepstack=value
-        )
+        model._set_deepstack_input_embeds = lambda value: merged.update(deepstack=value)
         monkeypatch.setattr(
             qwen_model, "_require_is_multimodal", lambda value: "validated"
         )
@@ -542,9 +524,7 @@ class TestConditionalGenerationConstruction:
         assert calls["inputs_embeds"] is None
         assert calls["deepstack_input_embeds"] is None
 
-    def test_load_weights_skips_visual_only_for_language_model_only(
-        self, monkeypatch
-    ):
+    def test_load_weights_skips_visual_only_for_language_model_only(self, monkeypatch):
         calls = []
 
         class FakeLoader:
@@ -556,11 +536,11 @@ class TestConditionalGenerationConstruction:
 
         monkeypatch.setattr(qwen_model, "AutoWeightsLoader", FakeLoader)
         monkeypatch.setattr(
-            qwen_model, "pack_gated_hc_projection_weights", lambda model: calls.append("packed")
+            qwen_model,
+            "pack_gated_hc_projection_weights",
+            lambda model: calls.append("packed"),
         )
-        model = object.__new__(
-            qwen_model.Qwen3_8FlashNextForConditionalGeneration
-        )
+        model = object.__new__(qwen_model.Qwen3_8FlashNextForConditionalGeneration)
         from torch import nn
 
         nn.Module.__init__(model)

@@ -281,9 +281,7 @@ def _ple_vllm_config(**overrides):
         model_config=SimpleNamespace(dtype=torch.bfloat16),
         cache_config=SimpleNamespace(mamba_cache_dtype="float32"),
         quant_config=None,
-        scheduler_config=SimpleNamespace(
-            max_num_batched_tokens=16, max_num_seqs=4
-        ),
+        scheduler_config=SimpleNamespace(max_num_batched_tokens=16, max_num_seqs=4),
         num_speculative_tokens=2,
     )
     values.update(overrides)
@@ -356,9 +354,7 @@ class TestPleLayerConstruction:
         assert created.static_context["p"] is layer
 
     def test_explicit_dense_layer_id_wins(self, monkeypatch):
-        layer, _ = _build_ple_layer(
-            monkeypatch, layer_idx=1, ple_dense_layer_id=5
-        )
+        layer, _ = _build_ple_layer(monkeypatch, layer_idx=1, ple_dense_layer_id=5)
         assert layer.ple_dense_layer_id == 5
 
     def test_duplicate_prefix_is_rejected(self, monkeypatch):
@@ -413,10 +409,7 @@ class TestPleLayerConstruction:
         assert recorded["dtype"] == (torch.bfloat16, "float32")
         # conv_state_len 6 + num_spec 2 + 1 == 9.
         assert recorded["shape"] == (1, 8, 9)
-        assert (
-            layer.mamba_type
-            is ple_layer.MambaAttentionBackendEnum.SHORT_CONV
-        )
+        assert layer.mamba_type is ple_layer.MambaAttentionBackendEnum.SHORT_CONV
         assert layer.get_attn_backend() is ple_layer.PleShortConvAttentionBackend
 
 
@@ -525,9 +518,7 @@ class TestShortConvKernels:
         output = layer._short_conv_dilated_dispatch(
             torch.zeros(5, 4), metadata, torch.zeros(1, 3, 4), torch.zeros(3, 4)
         )
-        expected = torch.tensor(
-            [[1.0] * 4, [1.0] * 4, [2.0] * 4, [3.0] * 4, [3.0] * 4]
-        )
+        expected = torch.tensor([[1.0] * 4, [1.0] * 4, [2.0] * 4, [3.0] * 4, [3.0] * 4])
         assert output.tolist() == expected.tolist()
 
     def test_pure_spec_batch_returns_the_spec_output(self, monkeypatch):

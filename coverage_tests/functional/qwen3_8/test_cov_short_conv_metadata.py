@@ -86,7 +86,9 @@ class TestBuildForCudagraphCapture:
             calls.append((prefix, common, fast_build, kwargs))
             return "metadata"
 
-        monkeypatch.setattr(sc.PleShortConvAttentionMetadataBuilder, "build", fake_build)
+        monkeypatch.setattr(
+            sc.PleShortConvAttentionMetadataBuilder, "build", fake_build
+        )
         builder = _builder(use_spec_decode=False)
         common = SimpleNamespace(
             num_reqs=3,
@@ -103,7 +105,9 @@ class TestBuildForCudagraphCapture:
             calls.append((prefix, common, kwargs))
             return "metadata"
 
-        monkeypatch.setattr(sc.PleShortConvAttentionMetadataBuilder, "build", fake_build)
+        monkeypatch.setattr(
+            sc.PleShortConvAttentionMetadataBuilder, "build", fake_build
+        )
         builder = _builder(use_spec_decode=True)
         common = SimpleNamespace(
             num_reqs=2,
@@ -158,9 +162,7 @@ class TestBuildRouting:
         )
         assert calls == [(0, common, False, draft, {})]
 
-    def test_all_minus_one_draft_counts_stay_on_the_non_spec_route(
-        self, monkeypatch
-    ):
+    def test_all_minus_one_draft_counts_stay_on_the_non_spec_route(self, monkeypatch):
         calls = []
 
         def fake_non_spec(
@@ -211,9 +213,7 @@ def captured_build(monkeypatch):
             captured.update(changes)
             return "metadata"
 
-        monkeypatch.setattr(
-            BaseMambaAttentionMetadataBuilder, "build", fake_base
-        )
+        monkeypatch.setattr(BaseMambaAttentionMetadataBuilder, "build", fake_base)
         monkeypatch.setattr(sc, "replace", fake_replace)
 
     return captured, install
@@ -294,16 +294,12 @@ class TestNonSpecMetadata:
         assert captured["max_prefill_query_len"] == 3
         assert captured["num_decode_draft_tokens_cpu"] is None
 
-    def test_full_graph_padding_rows_get_null_initial_state(
-        self, captured_build
-    ):
+    def test_full_graph_padding_rows_get_null_initial_state(self, captured_build):
         captured, install = captured_build
         metadata = _fake_metadata(
             num_decodes=2,
             num_decode_tokens=2,
-            state_indices_tensor_d=torch.tensor(
-                [7, 8, -1, -1], dtype=torch.int32
-            ),
+            state_indices_tensor_d=torch.tensor([7, 8, -1, -1], dtype=torch.int32),
         )
         install(metadata)
         common = SimpleNamespace(

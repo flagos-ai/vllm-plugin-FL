@@ -221,8 +221,9 @@ def _patch_forward_env(stated_calls, connector_output="kv-conn-out"):
 
     return _PatchGroup(
         [
-            _Patch(mr_module, "record_function_or_nullcontext",
-                   lambda name: nullcontext()),
+            _Patch(
+                mr_module, "record_function_or_nullcontext", lambda name: nullcontext()
+            ),
             _Patch(mr_module, "set_forward_context", _set_forward_context),
             _Patch(mr_module, "maybe_create_ubatch_slices", lambda *a: (None, None)),
         ]
@@ -257,7 +258,8 @@ def test_execute_model_external_launcher_runs_dummy_before_empty_output():
     """external_launcher+DP keeps ranks in sync with a one-token dummy run."""
     runner, _, _, _ = _runner(
         parallel_config=SimpleNamespace(
-            use_ubatching=False, num_ubatches=1,
+            use_ubatching=False,
+            num_ubatches=1,
             distributed_executor_backend="external_launcher",
             data_parallel_size=2,
         )

@@ -244,12 +244,19 @@ class TestConnectorAndRegistrationEntries:
             KVConnectorFactory,
         )
 
-        vllm_fl._register_flagcx_connector()
-        for alias in ("FlagCXConnector", "FlagcxConnector"):
-            assert callable(KVConnectorFactory._registry[alias])
-        first = KVConnectorFactory._registry["FlagCXConnector"]
-        vllm_fl._register_flagcx_connector()
-        assert KVConnectorFactory._registry["FlagCXConnector"] is first
+        # The factory registry is process-global; restore it afterwards so the
+        # registration this test exercises cannot leak into sibling suites.
+        saved_registry = dict(KVConnectorFactory._registry)
+        try:
+            vllm_fl._register_flagcx_connector()
+            for alias in ("FlagCXConnector", "FlagcxConnector"):
+                assert callable(KVConnectorFactory._registry[alias])
+            first = KVConnectorFactory._registry["FlagCXConnector"]
+            vllm_fl._register_flagcx_connector()
+            assert KVConnectorFactory._registry["FlagCXConnector"] is first
+        finally:
+            KVConnectorFactory._registry.clear()
+            KVConnectorFactory._registry.update(saved_registry)
 
     def test_register_router_early_returns_when_oot_disabled(self, monkeypatch):
         """With OOT registration off, no fused-MoE import happens."""

@@ -33,12 +33,11 @@ import torch
 from torch import nn
 
 from . import _import_shim  # noqa: F401  (idempotent; no-op on CI)
-from vllm_fl.models.qwen3_8_flash_next.gpu import model as qwen_model
 
 # Drift-isolated at the supplementary entry (coverage_tests/run.py): the
 # vllm 0.24 image lacks maybe_fuse_shared_experts, so this module is only
 # imported and collected once the image ships vllm >= 0.33.
-from vllm_fl.models.qwen3_8_flash_next.gpu import mtp
+from vllm_fl.models.qwen3_8_flash_next.gpu import model as qwen_model, mtp
 
 
 class TestMtpLayerRemap:
@@ -92,9 +91,7 @@ class TestMtpWeightRemap:
 
     def test_draft_config_requires_a_speculative_draft_model(self):
         with pytest.raises(ValueError, match="draft_model_config must be set"):
-            mtp._make_draft_vllm_config(
-                SimpleNamespace(speculative_config=None), 0
-            )
+            mtp._make_draft_vllm_config(SimpleNamespace(speculative_config=None), 0)
         with pytest.raises(ValueError, match="draft_model_config must be set"):
             mtp._make_draft_vllm_config(
                 SimpleNamespace(

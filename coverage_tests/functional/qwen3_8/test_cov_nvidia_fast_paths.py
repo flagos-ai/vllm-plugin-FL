@@ -224,7 +224,9 @@ class TestApplyRope:
         return torch.arange(rows * width, dtype=torch.float32).reshape(rows, width)
 
     def _tensor(self, tokens, width=6):
-        return torch.arange(tokens * width, dtype=torch.float32).reshape(tokens, 1, width)
+        return torch.arange(tokens * width, dtype=torch.float32).reshape(
+            tokens, 1, width
+        )
 
     @pytest.mark.parametrize("interleaved", [False, True])
     def test_three_axis_sections_select_the_documented_channels(self, interleaved):
@@ -241,37 +243,55 @@ class TestApplyRope:
         cos, sin = rotary.calls[0]
         if interleaved:
             expected_cos = torch.tensor(
-                [[cache[1, 0], cache[3, 1], cache[1, 2]],
-                 [cache[2, 0], cache[4, 1], cache[2, 2]]]
+                [
+                    [cache[1, 0], cache[3, 1], cache[1, 2]],
+                    [cache[2, 0], cache[4, 1], cache[2, 2]],
+                ]
             )
             expected_sin = torch.tensor(
-                [[cache[1, 3], cache[3, 4], cache[1, 5]],
-                 [cache[2, 3], cache[4, 4], cache[2, 5]]]
+                [
+                    [cache[1, 3], cache[3, 4], cache[1, 5]],
+                    [cache[2, 3], cache[4, 4], cache[2, 5]],
+                ]
             )
         else:
             # Sections (2, 1, 0) take channels [0, 1] from axis 0 and
             # channel [2] from axis 1.
             expected_cos = torch.tensor(
-                [[cache[1, 0], cache[1, 1], cache[3, 2]],
-                 [cache[2, 0], cache[2, 1], cache[4, 2]]]
+                [
+                    [cache[1, 0], cache[1, 1], cache[3, 2]],
+                    [cache[2, 0], cache[2, 1], cache[4, 2]],
+                ]
             )
             expected_sin = torch.tensor(
-                [[cache[1, 3], cache[1, 4], cache[3, 5]],
-                 [cache[2, 3], cache[2, 4], cache[4, 5]]]
+                [
+                    [cache[1, 3], cache[1, 4], cache[3, 5]],
+                    [cache[2, 3], cache[2, 4], cache[4, 5]],
+                ]
             )
         torch.testing.assert_close(cos, expected_cos)
         torch.testing.assert_close(sin, expected_sin)
         torch.testing.assert_close(result, tensor)
+        # One rotary call, and the fake native kernel echoes the input shape.
+        assert len(rotary.calls) == 1
+        assert result.shape == tensor.shape
+        assert torch.equal(result, tensor)
 
     def test_one_dimensional_positions_bypass_section_recombination(self):
         cache = self._cache(width=6)
         rotary = FakeRotary(cache, rotary_dim=6, sections=(3, 0, 0))
         tensor = self._tensor(2)
         positions = torch.tensor([1, 3])
-        apply_qsa_rope(rotary, positions, tensor)
+        result = apply_qsa_rope(rotary, positions, tensor)
         cos, sin = rotary.calls[0]
         torch.testing.assert_close(cos, cache[positions][:, :3])
         torch.testing.assert_close(sin, cache[positions][:, 3:])
+        # 1-D positions skip section recombination: cos/sin are the plain cache
+        # halves for the two requested positions and the tensor passes through.
+        assert cos.shape == (2, 3)
+        assert sin.shape == (2, 3)
+        assert result.shape == tensor.shape
+        assert torch.equal(result, tensor)
 
     def test_rotated_prefix_is_concatenated_with_untouched_tail(self):
         cache = self._cache(width=6)
@@ -281,6 +301,9 @@ class TestApplyRope:
         result = apply_qsa_rope(rotary, positions, tensor)
         # forward_native echoes the 4-wide prefix; the 2-wide tail is appended.
         torch.testing.assert_close(result, tensor)
+        assert result.shape == (2, 1, 6)
+        assert torch.equal(result[..., :4], tensor[..., :4])
+        assert torch.equal(result[..., 4:], tensor[..., 4:])
 
 
 class TestFlashinferNorm:
@@ -372,11 +395,19 @@ class TestMropeKernelProbe:
 class TestFastQsaRopeGates:
     def test_non_nvidia_or_cpu_tensor_returns_none(self, monkeypatch):
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: False)
-        assert nf.fast_qsa_rope(SimpleNamespace(), torch.zeros(1), torch.zeros(1, 1, 1), None, None) is None
+        assert (
+            nf.fast_qsa_rope(
+                SimpleNamespace(), torch.zeros(1), torch.zeros(1, 1, 1), None, None
+            )
+            is None
+        )
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: True)
-        assert nf.fast_qsa_rope(
-            SimpleNamespace(), torch.zeros(1), torch.zeros(1, 1, 4), None, None
-        ) is None
+        assert (
+            nf.fast_qsa_rope(
+                SimpleNamespace(), torch.zeros(1), torch.zeros(1, 1, 4), None, None
+            )
+            is None
+        )
 
 
 @pytest.mark.gpu
@@ -395,7 +426,9 @@ class TestFastQsaRopeCuda:
             rotary_dim=4,
             apply_rotary_emb=SimpleNamespace(forward_cuda=forward_cuda),
         )
-        result = nf.fast_qsa_rope(rotary, torch.tensor([0, 1], device=device), tensor, cos, sin)
+        result = nf.fast_qsa_rope(
+            rotary, torch.tensor([0, 1], device=device), tensor, cos, sin
+        )
         assert len(seen) == 1
         torch.testing.assert_close(result, tensor * 2)
 
@@ -448,9 +481,17 @@ class TestFastQsaRopeCuda:
             sin,
         )
         assert len(calls) == 1
-        q, output, cos_arg, sin_arg, sections, head_dim, rotary_dim, interleaved, neox = (
-            calls[0]
-        )
+        (
+            q,
+            output,
+            cos_arg,
+            sin_arg,
+            sections,
+            head_dim,
+            rotary_dim,
+            interleaved,
+            neox,
+        ) = calls[0]
         assert neox is True
         assert q.shape == (2, 4)
         assert output.shape == (2, 4)

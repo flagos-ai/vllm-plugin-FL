@@ -243,9 +243,7 @@ def test_profile_run_runs_dummy_model_and_sampler():
         _sync_device=_Recorder(),
         encoder_cache={"stale": 1},
     )
-    with _Patch(
-        mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True)
-    ):
+    with _Patch(mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True)):
         ModelRunnerFL.profile_run(runner)
 
     assert runner._dummy_run.calls[0][0] == (32,)
@@ -268,9 +266,7 @@ def test_profile_run_pooling_model_uses_pooler():
         _sync_device=_Recorder(),
         encoder_cache={},
     )
-    with _Patch(
-        mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True)
-    ):
+    with _Patch(mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True)):
         ModelRunnerFL.profile_run(runner)
     assert runner._dummy_pooler_run.calls[0][0][0] == "hidden"
     assert runner._dummy_sampler_run.calls == []
@@ -288,9 +284,7 @@ def test_profile_run_non_last_rank_skips_output_work():
         _sync_device=_Recorder(),
         encoder_cache={},
     )
-    with _Patch(
-        mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=False)
-    ):
+    with _Patch(mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=False)):
         ModelRunnerFL.profile_run(runner)
     assert runner._dummy_sampler_run.calls == []
     assert runner._dummy_pooler_run.calls == []
@@ -311,9 +305,7 @@ def _mm_runner(**overrides):
         encoder_cache={},
         _get_mm_dummy_batch=_Recorder(result={"pixel_values": torch.zeros(2, 4)}),
         model=SimpleNamespace(
-            embed_multimodal=_Recorder(
-                result=[torch.zeros(1, 4), torch.zeros(1, 4)]
-            )
+            embed_multimodal=_Recorder(result=[torch.zeros(1, 4), torch.zeros(1, 4)])
         ),
     )
     for key, value in overrides.items():
@@ -329,9 +321,7 @@ def test_profile_run_encoder_budget_skips_embedding_only_models():
         mm_max_toks_per_item=0,
         mm_max_items_per_batch={},
     )
-    with _Patch(
-        mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True)
-    ):
+    with _Patch(mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True)):
         ModelRunnerFL.profile_run(runner)
     assert runner._get_mm_dummy_batch.calls == []
     assert runner.model.embed_multimodal.calls == []
@@ -371,9 +361,7 @@ def test_profile_run_skip_mm_profiling_flag_bypasses_encoder():
             multimodal_config=SimpleNamespace(skip_mm_profiling=True)
         )
     )
-    with _Patch(
-        mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True)
-    ):
+    with _Patch(mr_module, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True)):
         ModelRunnerFL.profile_run(runner)
     assert runner.model.embed_multimodal.calls == []
 
@@ -484,7 +472,8 @@ def test_dummy_pooler_run_picks_the_largest_output_task():
         get_supported_pooling_tasks=lambda: ["a", "b"],
         _dummy_pooler_run_task=_Recorder(
             result_factory=lambda hidden, task: (
-                [SimpleNamespace(nbytes=10)] if task == "a"
+                [SimpleNamespace(nbytes=10)]
+                if task == "a"
                 else [SimpleNamespace(nbytes=20), None]
             )
         ),
@@ -537,9 +526,7 @@ def test_init_minimal_kv_cache_overrides_and_restores_block_count():
         get_kv_cache_spec=_Recorder(result=spec),
         vllm_config=object(),
         compilation_config=SimpleNamespace(max_cudagraph_capture_size=32),
-        cache_config=SimpleNamespace(
-            num_gpu_blocks_override=7, num_gpu_blocks=None
-        ),
+        cache_config=SimpleNamespace(num_gpu_blocks_override=7, num_gpu_blocks=None),
         initialize_kv_cache=_Recorder(),
     )
     registry = SimpleNamespace(check_kv_cache_spec_registry=_Recorder())
@@ -553,8 +540,7 @@ def test_init_minimal_kv_cache_overrides_and_restores_block_count():
 
     with (
         _Patch(mr_module, "KVCacheSpecRegistry", registry),
-        _Patch(kv_utils, "get_kv_cache_groups",
-               _Recorder(result=groups)),
+        _Patch(kv_utils, "get_kv_cache_groups", _Recorder(result=groups)),
         _Patch(kv_utils, "get_kv_cache_config_from_groups", _config_from_groups),
     ):
         ModelRunnerFL._init_minimal_kv_cache_for_profiling(runner)
@@ -573,7 +559,9 @@ def test_cleanup_profiling_kv_cache_drops_graphs_and_scales():
     second = torch.zeros(3)
     layer = SimpleNamespace(
         kv_cache=torch.zeros(4, 2),
-        impl=SimpleNamespace(_k_scale_cache=torch.ones(1), _v_scale_cache=torch.ones(1)),
+        impl=SimpleNamespace(
+            _k_scale_cache=torch.ones(1), _v_scale_cache=torch.ones(1)
+        ),
     )
     runner = SimpleNamespace(
         common_attention_metadata_graph=metadata_graph,
@@ -581,9 +569,7 @@ def test_cleanup_profiling_kv_cache_drops_graphs_and_scales():
         attn_groups={"layer": "group"},
         kv_cache_config=object(),
         cache_config=SimpleNamespace(num_gpu_blocks=11),
-        compilation_config=SimpleNamespace(
-            static_forward_context={"layer": layer}
-        ),
+        compilation_config=SimpleNamespace(static_forward_context={"layer": layer}),
     )
     synced = []
     with (
@@ -646,9 +632,7 @@ def test_shutdown_releases_model_workspace_and_rope():
     runner = SimpleNamespace(
         graph_runtime=SimpleNamespace(clear_decoder_graphs=cleared),
         _cleanup_profiling_kv_cache=_Recorder(),
-        compilation_config=SimpleNamespace(
-            static_forward_context={"layer": object()}
-        ),
+        compilation_config=SimpleNamespace(static_forward_context={"layer": object()}),
         model=object(),
     )
     reset = _Recorder()
@@ -702,8 +686,11 @@ def test_shutdown_rocm_drops_graphs_and_empties_cache():
         ),
         _Patch(rope_module, "_ROPE_DICT", {}),
         _Patch(workspace, "reset_workspace_manager", _Recorder()),
-        _Patch(mr_module.torch, "accelerator",
-               SimpleNamespace(empty_cache=lambda: empty_cache())),
+        _Patch(
+            mr_module.torch,
+            "accelerator",
+            SimpleNamespace(empty_cache=lambda: empty_cache()),
+        ),
         _Patch(mr_module, "_accelerator_synchronize", lambda: synced()),
         _Patch(mr_module, "gc", SimpleNamespace(collect=lambda: collected())),
     ):

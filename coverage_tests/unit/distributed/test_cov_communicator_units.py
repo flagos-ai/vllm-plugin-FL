@@ -249,9 +249,11 @@ def _expected_reduce_scatter(input_, dim, world_size, rank):
     transformed = input_.movedim(0, dim).contiguous()
     chunk = transformed.shape[0] // world_size
     start = rank * chunk
-    return transformed[start : start + chunk].movedim(0, dim).contiguous(), (
-        transformed
-    ), chunk
+    return (
+        transformed[start : start + chunk].movedim(0, dim).contiguous(),
+        (transformed),
+        chunk,
+    )
 
 
 def test_reduce_scatter_negative_dim_matches_closed_form():
@@ -261,18 +263,16 @@ def test_reduce_scatter_negative_dim_matches_closed_form():
         inp.movedim(0, 1).contiguous(),
         (inp + 1000.0).movedim(0, 1).contiguous(),
     ]
-    fake = _FakeFlagcx(
-        world_size=world_size, rank=rank, reduce_peers=transformed_peers
-    )
+    fake = _FakeFlagcx(world_size=world_size, rank=rank, reduce_peers=transformed_peers)
     comm = _make_comm(world_size=world_size, rank=rank, pyflagcx=fake)
 
     out = comm.reduce_scatter(inp, dim=-1)
 
     chunk = transformed_peers[0].shape[0] // world_size
     expected_chunk = transformed_peers[0][rank * chunk : (rank + 1) * chunk]
-    expected_chunk = expected_chunk + transformed_peers[1][
-        rank * chunk : (rank + 1) * chunk
-    ]
+    expected_chunk = (
+        expected_chunk + transformed_peers[1][rank * chunk : (rank + 1) * chunk]
+    )
     expected = expected_chunk.movedim(0, 1).contiguous()
     assert torch.equal(out, expected)
     assert out.shape == (4, 3)
@@ -343,9 +343,7 @@ def test_reduce_scatterv_uses_rank_chunk_sizes():
     sizes = [2, 3]
     inp = torch.arange(20, dtype=torch.float32).reshape(5, 4)
     peers = [inp, inp + 100, inp + 200]
-    fake = _FakeFlagcx(
-        world_size=world_size, rank=rank, reducev_peers=peers
-    )
+    fake = _FakeFlagcx(world_size=world_size, rank=rank, reducev_peers=peers)
     comm = _make_comm(world_size=world_size, rank=rank, pyflagcx=fake)
 
     out = comm.reduce_scatterv(inp, dim=0, sizes=sizes)
@@ -660,9 +658,7 @@ def test_dispatch_and_combine_delegate_to_manager():
     ids = torch.zeros(2, 1, dtype=torch.int64)
     extras = [torch.zeros(1)]
 
-    assert (
-        comm.dispatch(hidden, weights, ids, True, extras) == "dispatched"
-    )
+    assert comm.dispatch(hidden, weights, ids, True, extras) == "dispatched"
     assert manager.calls[0] == (
         "dispatch",
         hidden,

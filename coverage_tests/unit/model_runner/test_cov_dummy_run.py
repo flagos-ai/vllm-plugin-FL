@@ -90,8 +90,14 @@ class _FakeProposer:
 HIDDEN = torch.arange(32, dtype=torch.float32).reshape(16, 2)
 
 
-def _runner(*, mode=CUDAGraphMode.NONE, padded=5, should_ubatch=False,
-            across_dp=None, **overrides):
+def _runner(
+    *,
+    mode=CUDAGraphMode.NONE,
+    padded=5,
+    should_ubatch=False,
+    across_dp=None,
+    **overrides,
+):
     def _make_descriptor(**kwargs):
         return (
             mode,
@@ -161,10 +167,15 @@ def _patches(status_calls, pp_is_first=True):
 
     with ExitStack() as stack:
         stack.enter_context(
-            _Patch(mr_module, "get_pp_group",
-                   lambda: SimpleNamespace(is_first_rank=pp_is_first))
+            _Patch(
+                mr_module,
+                "get_pp_group",
+                lambda: SimpleNamespace(is_first_rank=pp_is_first),
+            )
         )
-        stack.enter_context(_Patch(mr_module, "set_forward_context", _set_forward_context))
+        stack.enter_context(
+            _Patch(mr_module, "set_forward_context", _set_forward_context)
+        )
         stack.enter_context(
             _Patch(mr_module, "maybe_create_ubatch_slices", lambda *a: (None, None))
         )
@@ -179,9 +190,7 @@ def _prepare_attention_buffers(runner, *, max_reqs=8, cumsum=(1, 2, 3, 5)):
     runner.input_batch = SimpleNamespace(
         block_table=SimpleNamespace(commit_block_table=_Recorder())
     )
-    runner._get_cumsum_and_arange = _Recorder(
-        result=np.array(cumsum, dtype=np.int32)
-    )
+    runner._get_cumsum_and_arange = _Recorder(result=np.array(cumsum, dtype=np.int32))
     runner._run_common_attention_metadata = _Recorder()
     runner._build_attention_metadata = _Recorder(result=({}, None))
 
@@ -287,9 +296,7 @@ def test_dummy_run_builds_attention_metadata_with_profile_seq_lens():
     _prepare_attention_buffers(runner)
     forward = []
     with _patches(forward):
-        ModelRunnerFL._dummy_run(
-            runner, 5, force_attention=True, profile_seq_lens=7
-        )
+        ModelRunnerFL._dummy_run(runner, 5, force_attention=True, profile_seq_lens=7)
 
     # seq_lens mirrors the profiling length on live rows and zero elsewhere.
     assert runner.optimistic_seq_lens_cpu[:4].tolist() == [7, 7, 7, 7]
@@ -363,9 +370,7 @@ def test_dummy_run_non_first_pp_rank_gathers_intermediate_tensors():
     with _patches([], pp_is_first=False):
         ModelRunnerFL._dummy_run(runner, 4)
 
-    assert runner.sync_and_gather_intermediate_tensors.calls[0][0] == (
-        4, None, False
-    )
+    assert runner.sync_and_gather_intermediate_tensors.calls[0][0] == (4, None, False)
     assert runner.model.calls[0][1]["intermediate_tensors"] == "gathered"
 
 
@@ -376,10 +381,8 @@ def test_dummy_run_adjusts_padded_size_for_a_single_ubatch():
     padded_slice = SimpleNamespace(num_tokens=3)
     forward = []
     with (
-        _Patch(mr_module, "get_pp_group",
-               lambda: SimpleNamespace(is_first_rank=True)),
-        _Patch(mr_module, "set_forward_context",
-               _ctx(forward)),
+        _Patch(mr_module, "get_pp_group", lambda: SimpleNamespace(is_first_rank=True)),
+        _Patch(mr_module, "set_forward_context", _ctx(forward)),
         _Patch(
             mr_module,
             "maybe_create_ubatch_slices",
@@ -413,15 +416,14 @@ def _spec(*, eagle=True, draft=False, extract=False, enforce_eager=False):
     )
 
 
-def _run_spec_case(*, spec, specialize=False, capturing=True,
-                   mode=CUDAGraphMode.PIECEWISE):
+def _run_spec_case(
+    *, spec, specialize=False, capturing=True, mode=CUDAGraphMode.PIECEWISE
+):
     runner, _ = _runner(mode=mode)
     drafter = _FakeProposer()
     runner.speculative_config = spec
     runner.drafter = drafter
-    runner.compilation_config = SimpleNamespace(
-        cudagraph_specialize_lora=specialize
-    )
+    runner.compilation_config = SimpleNamespace(cudagraph_specialize_lora=specialize)
     with (
         _Patch(mr_module, "EagleProposer", _FakeProposer),
         _Patch(mr_module, "DFlashProposer", _FakeProposer),

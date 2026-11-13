@@ -399,3 +399,12 @@ class TestIndexerPrepareInputs:
         torch.testing.assert_close(
             q_kernel.float(), q_ref.float(), rtol=1e-2, atol=1e-1
         )
+
+        # Independently derive the UE8M0 scale straight from the source rule:
+        # one power-of-two scale per 128-element group, s = 2**ceil(log2(max/448)).
+        assert s_kernel.shape == (64, 1)
+        assert s_kernel.dtype == torch.float32
+        absmax = x.reshape(-1, 128).abs().amax(dim=-1, keepdim=True).clamp_min(1e-10)
+        expected_scale = torch.exp2(torch.ceil(torch.log2(absmax / FP8_MAX)))
+        assert torch.equal(s_kernel, expected_scale)
+        assert q_kernel.dtype == torch.float8_e4m3fn

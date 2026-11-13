@@ -145,6 +145,8 @@ def test_slot_mappings_kept_when_common_metadata_graph_is_current():
 
     # No -1 fill: the full padded range keeps the block-table values.
     torch.testing.assert_close(by_gid[0], block_slots)
+    assert by_gid[0][8:].tolist() == list(range(8, 16))
+    assert -1 not in by_gid[0].tolist()
 
 
 def test_slot_mappings_encoder_only_group_uses_zero_slots():
