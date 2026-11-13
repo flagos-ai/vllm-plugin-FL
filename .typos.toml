@@ -37,6 +37,11 @@ cann = "cann"
 CANN = "CANN"
 HSA = "HSA"
 
+# API and model-parameter words used by the supplementary tests
+arange = "arange"
+indx = "indx"
+ba = "ba"
+
 [default.extend-identifiers]
 # APIs and FP8 scale format used by supplementary tests
 arange = "arange"
