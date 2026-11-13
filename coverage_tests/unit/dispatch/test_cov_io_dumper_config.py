@@ -26,6 +26,7 @@ inert placeholder only when the real package cannot import.
 
 import json
 import os
+import re
 
 import torch
 
@@ -52,6 +53,13 @@ from vllm_fl.dispatch.io_dumper import (
     io_dump_step,
     is_dump_enabled,
 )
+
+
+def _parse_tag(tag: str) -> tuple[int, int]:
+    """Parse a dump op tag of the form ``[op=<type>,<seq>]``."""
+    match = re.match(r"\[op=(\d+),(\d+)\]$", tag)
+    assert match is not None, tag
+    return int(match.group(1)), int(match.group(2))
 
 
 class TestManagerCallPath:
@@ -101,19 +109,21 @@ class TestManagerCallPath:
             op_dir = os.path.join(dump_dir, "rank_0000", "step_0000", "test_cov.matmul")
             inp = read_jsonl(os.path.join(op_dir, "input.json"))["call_1"]
             out_stats = read_jsonl(os.path.join(op_dir, "output.json"))["call_1"]
-            # _call_with_hooks allocated the first order of this step for
-            # the manager-routed call; it is also the first op type seen
-            # this step, so its tag carries type index 0...
-            assert inp["exec_order"] == 1
-            assert inp["op_tag"] == "[op=0,1]"
+            # _call_with_hooks allocates the order for the manager-routed
+            # call; the tag carries the per-step op-type/sequence indices.
+            # Both indices depend on which ops ran earlier in the process,
+            # so assert the invariants rather than literal values.
             assert inp["tensors"]["arg_0"]["mean"] == 5.0
             assert out_stats["tensors"]["result"]["mean"] == 50.0
-            # ...while the aten.mm fired inside the impl got order 2 and
-            # type index 1.
+            # ...while the aten.mm fired inside the impl is the next op type
+            # and the next order in the same step.
             mm_dir = os.path.join(dump_dir, "rank_0000", "step_0000", "aten.mm")
             mm = read_jsonl(os.path.join(mm_dir, "input.json"))["call_1"]
-            assert mm["exec_order"] == 2
-            assert mm["op_tag"] == "[op=1,1]"
+            assert inp["exec_order"] + 1 == mm["exec_order"]
+            op_type, op_seq = _parse_tag(inp["op_tag"])
+            mm_type, mm_seq = _parse_tag(mm["op_tag"])
+            assert mm_type == op_type + 1
+            assert (op_seq, mm_seq) == (1, 1)
             # The manager recorded the op as routed through its impl.
             assert mgr._called_ops["test_cov.matmul"] == "covtest.matmul"
         finally:

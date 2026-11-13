@@ -63,6 +63,7 @@ def _policy(monkeypatch, *, whitelist=None, blacklist=None, enabled=None):
 
 
 def test_enable_returns_when_flaggems_vllm_disabled(monkeypatch):
+    """Checks that compile-time enabling does nothing when FlagGems vLLM is off."""
     _compile_flags(monkeypatch, env=False)
     config = SimpleNamespace(custom_ops=[])
     Mod.enable_fused_activations_for_compile(config)
@@ -70,6 +71,7 @@ def test_enable_returns_when_flaggems_vllm_disabled(monkeypatch):
 
 
 def test_enable_returns_when_oot_disabled(monkeypatch):
+    """Checks that compile-time enabling does nothing when OOT mode is off."""
     _compile_flags(monkeypatch, oot=False)
     config = SimpleNamespace(custom_ops=[])
     Mod.enable_fused_activations_for_compile(config)
@@ -77,6 +79,7 @@ def test_enable_returns_when_oot_disabled(monkeypatch):
 
 
 def test_enable_appends_all_selected_ops(monkeypatch):
+    """Checks that enabling appends all three fused activation ops to custom_ops."""
     _compile_flags(monkeypatch)
     _policy(monkeypatch)
     config = SimpleNamespace(custom_ops=[])
@@ -89,6 +92,7 @@ def test_enable_appends_all_selected_ops(monkeypatch):
 
 
 def test_enable_skips_policy_disabled_op(monkeypatch):
+    """Checks that an op disabled by policy is not appended."""
     _compile_flags(monkeypatch)
     _policy(monkeypatch, enabled={"silu_and_mul": False})
     config = SimpleNamespace(custom_ops=[])
@@ -97,6 +101,7 @@ def test_enable_skips_policy_disabled_op(monkeypatch):
 
 
 def test_enable_skips_blacklisted_op(monkeypatch):
+    """Checks that a blacklisted op is not appended."""
     _compile_flags(monkeypatch)
     _policy(monkeypatch, blacklist=["gelu_and_mul"])
     config = SimpleNamespace(custom_ops=[])
@@ -105,6 +110,7 @@ def test_enable_skips_blacklisted_op(monkeypatch):
 
 
 def test_enable_respects_whitelist(monkeypatch):
+    """Checks that only whitelisted ops are appended."""
     _compile_flags(monkeypatch)
     _policy(monkeypatch, whitelist=["silu_and_mul"])
     config = SimpleNamespace(custom_ops=[])
@@ -114,6 +120,7 @@ def test_enable_respects_whitelist(monkeypatch):
 
 @pytest.mark.parametrize("disabled", ["-silu_and_mul", "-SiluAndMul"])
 def test_enable_honours_disabled_alias(monkeypatch, disabled):
+    """Checks that both silu aliases written with a minus sign disable SiluAndMul."""
     _compile_flags(monkeypatch)
     _policy(monkeypatch)
     config = SimpleNamespace(custom_ops=[disabled])
@@ -123,6 +130,7 @@ def test_enable_honours_disabled_alias(monkeypatch, disabled):
 
 
 def test_enable_does_not_duplicate_already_selected(monkeypatch):
+    """Checks that an already selected op is not appended twice."""
     _compile_flags(monkeypatch)
     _policy(monkeypatch)
     config = SimpleNamespace(custom_ops=["+SiluAndMul"])
@@ -139,6 +147,7 @@ def test_enable_does_not_duplicate_already_selected(monkeypatch):
     ],
 )
 def test_fake_kernels_allocate_half_width_output(fake, args, expected_shape):
+    """Checks that the graph fakes allocate half-width outputs with the input dtype and device."""
     x = torch.zeros(2, 8, dtype=torch.float16)
     out = fake(x, *args)
     assert out.shape == expected_shape
@@ -147,6 +156,7 @@ def test_fake_kernels_allocate_half_width_output(fake, args, expected_shape):
 
 
 def test_silu_graph_passes_none_compilation_config(monkeypatch):
+    """Checks that the Silu graph calls the kernel with a None compilation config."""
     expected = torch.full((2, 4), 3.0)
     recorder = _Recorder(expected)
     monkeypatch.setattr(Mod, "_silu_and_mul", recorder)
@@ -159,6 +169,7 @@ def test_silu_graph_passes_none_compilation_config(monkeypatch):
 
 
 def test_gelu_graph_passes_approximate_namespace(monkeypatch):
+    """Checks that the GELU graph passes an approximate namespace and the input to the kernel."""
     expected = torch.full((2, 4), 4.0)
     recorder = _Recorder(expected)
     monkeypatch.setattr(Mod, "_gelu_and_mul", recorder)
@@ -170,6 +181,7 @@ def test_gelu_graph_passes_approximate_namespace(monkeypatch):
 
 
 def test_clamp_graph_passes_default_swiglu_params(monkeypatch):
+    """Checks that the clamp graph passes default swiglu limit, alpha and beta."""
     expected = torch.full((2, 4), 5.0)
     recorder = _Recorder(expected)
     monkeypatch.setattr(Mod, "_silu_and_mul_with_clamp", recorder)
@@ -181,6 +193,7 @@ def test_clamp_graph_passes_default_swiglu_params(monkeypatch):
 
 
 def test_silu_forward_oot_dispatches_instance_and_input(monkeypatch):
+    """Checks that SiluAndMulFL.forward_oot dispatches the instance and input."""
     recorder = _Recorder("out")
     monkeypatch.setattr(Mod, "_silu_and_mul", recorder)
     instance = _bare(Mod.SiluAndMulFL)
@@ -192,6 +205,7 @@ def test_silu_forward_oot_dispatches_instance_and_input(monkeypatch):
 
 
 def test_silu_forward_oot_uses_graph_when_compiling(monkeypatch):
+    """Checks that SiluAndMulFL.forward_oot uses the graph kernel while compiling."""
     expected = torch.full((2, 4), 6.0)
     recorder = _Recorder(expected)
     monkeypatch.setattr(Mod, "_silu_and_mul", recorder)
@@ -205,6 +219,7 @@ def test_silu_forward_oot_uses_graph_when_compiling(monkeypatch):
 
 
 def test_silu_forward_hip_delegates_to_oot(monkeypatch):
+    """Checks that SiluAndMulFL.forward_hip delegates to forward_oot."""
     recorder = _Recorder("hip")
     monkeypatch.setattr(Mod, "_silu_and_mul", recorder)
     instance = _bare(Mod.SiluAndMulFL)
@@ -214,6 +229,7 @@ def test_silu_forward_hip_delegates_to_oot(monkeypatch):
 
 
 def test_silu_and_mul_constructor_calls_upstream(monkeypatch):
+    """Checks that SiluAndMulFL construction calls the upstream SiluAndMul init."""
     calls = []
     monkeypatch.setattr(Mod.SiluAndMul, "__init__", lambda self: calls.append(self))
     instance = Mod.SiluAndMulFL()
@@ -221,6 +237,7 @@ def test_silu_and_mul_constructor_calls_upstream(monkeypatch):
 
 
 def test_gelu_forward_oot_and_hip_dispatch_instance(monkeypatch):
+    """Checks that GeluAndMulFL.forward_oot and forward_hip both dispatch the instance."""
     recorder = _Recorder("gelu")
     monkeypatch.setattr(Mod, "_gelu_and_mul", recorder)
     instance = _bare(Mod.GeluAndMulFL, approximate="tanh")
@@ -232,6 +249,7 @@ def test_gelu_forward_oot_and_hip_dispatch_instance(monkeypatch):
 
 
 def test_gelu_forward_oot_uses_graph_when_compiling(monkeypatch):
+    """Checks that GeluAndMulFL.forward_oot uses the graph kernel with the approximate mode while compiling."""
     expected = torch.full((2, 4), 7.0)
     recorder = _Recorder(expected)
     monkeypatch.setattr(Mod, "_gelu_and_mul", recorder)
@@ -245,6 +263,7 @@ def test_gelu_forward_oot_uses_graph_when_compiling(monkeypatch):
 
 
 def test_gelu_constructor_forwards_approximate(monkeypatch):
+    """Checks that GeluAndMulFL forwards the approximate argument to the upstream init."""
     calls = []
 
     def fake_init(self, approximate="none"):
@@ -286,11 +305,13 @@ def _clamp_controls(monkeypatch, controls, default_on):
 def test_clamp_enabled_reads_compilation_controls(
     monkeypatch, controls, default_on, expected
 ):
+    """Checks that clamp enablement follows compilation custom-op controls and the default-on value."""
     _clamp_controls(monkeypatch, controls, default_on)
     assert Mod.SiluAndMulWithClampFL.enabled() is expected
 
 
 def test_clamp_enabled_rejects_conflicting_controls(monkeypatch):
+    """Checks that simultaneous enable and disable controls raise an assertion."""
     _clamp_controls(
         monkeypatch,
         ["+silu_and_mul_with_clamp", "-silu_and_mul_with_clamp"],
@@ -302,6 +323,7 @@ def test_clamp_enabled_rejects_conflicting_controls(monkeypatch):
 
 @pytest.mark.parametrize("attrs", [{"alpha": 2.0}, {"beta": 1.0}])
 def test_clamp_forward_oot_uses_native_for_non_default_params(monkeypatch, attrs):
+    """Checks that non-default alpha or beta use the native forward instead of the fused kernel."""
     kernel = _Recorder("fused")
     monkeypatch.setattr(Mod, "_silu_and_mul_with_clamp", kernel)
     instance = _bare(
@@ -319,6 +341,7 @@ def test_clamp_forward_oot_uses_native_for_non_default_params(monkeypatch, attrs
 
 
 def test_clamp_forward_oot_uses_fused_kernel(monkeypatch):
+    """Checks that default parameters dispatch the fused clamp kernel with the instance and input."""
     kernel = _Recorder("fused")
     monkeypatch.setattr(Mod, "_silu_and_mul_with_clamp", kernel)
     instance = _bare(Mod.SiluAndMulWithClampFL, swiglu_limit=7.0, alpha=1.0, beta=0.0)
@@ -330,6 +353,7 @@ def test_clamp_forward_oot_uses_fused_kernel(monkeypatch):
 
 
 def test_clamp_forward_oot_uses_graph_when_compiling(monkeypatch):
+    """Checks that the clamp kernel is used with the swiglu limit while compiling."""
     expected = torch.full((2, 4), 8.0)
     kernel = _Recorder(expected)
     monkeypatch.setattr(Mod, "_silu_and_mul_with_clamp", kernel)

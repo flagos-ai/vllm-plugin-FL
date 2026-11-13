@@ -55,6 +55,7 @@ def _expected_unpack(packed_weight: torch.Tensor, in_features: int) -> torch.Ten
 
 
 def test_scheme_constructor_forwards_channel_w8a8_settings(packed):
+    """Verifies the constructor forwards channel W8A8 settings to the base scheme."""
     module, env = packed
     scheme = module.CompressedTensorsPackedW8A8Int8(layer_name="layers.0")
     assert env.base_init_calls == [
@@ -69,6 +70,7 @@ def test_scheme_constructor_forwards_channel_w8a8_settings(packed):
 
 
 def test_create_weights_rejects_input_not_divisible_by_four(packed):
+    """Verifies an input size not divisible by 4 raises ValueError without side effects."""
     module, env = packed
     scheme = module.CompressedTensorsPackedW8A8Int8()
     layer = _layer()
@@ -85,6 +87,7 @@ def test_create_weights_rejects_input_not_divisible_by_four(packed):
 
 
 def test_create_weights_registers_packed_int32_and_shape_buffers(packed):
+    """Verifies create_weights registers the packed int32 weight and shape buffers."""
     module, env = packed
     scheme = module.CompressedTensorsPackedW8A8Int8()
     layer = _layer()
@@ -123,6 +126,7 @@ def test_create_weights_registers_packed_int32_and_shape_buffers(packed):
 
 
 def test_process_weights_unpacks_and_replaces_parameter(packed):
+    """Verifies processing unpacks the int32 payload into an int8 weight parameter."""
     module, env = packed
     scheme = module.CompressedTensorsPackedW8A8Int8()
     layer = _layer()
@@ -154,6 +158,7 @@ def test_process_weights_unpacks_and_replaces_parameter(packed):
 
 
 def test_install_wrapper_selects_packed_scheme_for_channel_weights(packed):
+    """Verifies the install wrapper selects the packed scheme for channel weights and is idempotent."""
     module, env = packed
     assert module.install_packed_w8a8_scheme() is True
     assert module.install_packed_w8a8_scheme() is True  # idempotent
@@ -170,6 +175,7 @@ def test_install_wrapper_selects_packed_scheme_for_channel_weights(packed):
 
 
 def test_install_wrapper_delegates_non_packed_metadata(packed):
+    """Verifies non-packed metadata delegates to the original scheme selector."""
     module, env = packed
     assert module.install_packed_w8a8_scheme() is True
     config = env.CompressedTensorsConfig()
@@ -195,6 +201,7 @@ def test_install_wrapper_delegates_non_packed_metadata(packed):
 
 
 def test_install_wrapper_uses_quant_format_when_format_missing(packed):
+    """Verifies a missing format falls back to the config's quant format."""
     module, env = packed
     assert module.install_packed_w8a8_scheme() is True
     config = env.CompressedTensorsConfig(quant_format="pack-quantized")
@@ -207,6 +214,7 @@ def test_install_wrapper_uses_quant_format_when_format_missing(packed):
 
 
 def test_install_wrapper_rejects_group_weight_strategy(packed):
+    """Verifies a group weight strategy raises ValueError requiring per-channel weights."""
     module, env = packed
     assert module.install_packed_w8a8_scheme() is True
     config = env.CompressedTensorsConfig()

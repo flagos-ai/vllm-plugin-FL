@@ -87,6 +87,7 @@ def _cpu_device(monkeypatch):
 
 
 def test_package_exports_both_gated_delta_rule_ops():
+    """Checks that the FLA package exports both gated-delta-rule ops."""
     assert FLA.ChunkGatedDeltaRuleOp is chunk_mod.ChunkGatedDeltaRuleOp
     assert (
         FLA.FusedRecurrentGatedDeltaRuleOp
@@ -99,6 +100,7 @@ def test_package_exports_both_gated_delta_rule_ops():
 
 
 def test_input_guard_makes_positional_and_keyword_tensors_contiguous():
+    """Checks that input_guard makes positional and keyword tensor arguments contiguous and preserves other arguments."""
     seen = {}
 
     @utils_mod.input_guard
@@ -117,6 +119,7 @@ def test_input_guard_makes_positional_and_keyword_tensors_contiguous():
 
 
 def test_input_guard_selects_first_keyword_tensor_for_device(_cpu_device):
+    """Checks that input_guard uses the first keyword tensor to pick the device context."""
     seen = {}
 
     @utils_mod.input_guard
@@ -131,6 +134,8 @@ def test_input_guard_selects_first_keyword_tensor_for_device(_cpu_device):
 
 
 def test_input_guard_uses_nullcontext_without_tensors(_cpu_device):
+    """Checks that input_guard runs without a device context when no tensor is passed."""
+
     @utils_mod.input_guard
     def target(value):
         return value * 2
@@ -140,6 +145,7 @@ def test_input_guard_uses_nullcontext_without_tensors(_cpu_device):
 
 
 def test_input_guard_prefers_npu_device_when_available(monkeypatch):
+    """Checks that input_guard selects the NPU device context when NPU is available."""
     calls = []
 
     class _Npu:
@@ -168,6 +174,7 @@ def _chunk_ctx():
 
 
 def test_chunk_forward_marshals_kernel_with_l2norm(monkeypatch):
+    """Checks that chunk forward applies L2 normalization and marshals all kernel arguments and saved context."""
     l2norm_calls = []
 
     def l2norm(value):
@@ -228,6 +235,7 @@ def test_chunk_forward_marshals_kernel_with_l2norm(monkeypatch):
 
 
 def test_chunk_forward_skips_l2norm_when_disabled(monkeypatch):
+    """Checks that chunk forward skips L2 normalization when it is disabled in the kernel."""
     l2norm = _Recorder()
     kernel = _Recorder()
     monkeypatch.setattr(chunk_mod, "l2norm_fwd", l2norm)
@@ -262,6 +270,7 @@ def _chunk_op(monkeypatch, **kwargs):
 
 
 def test_chunk_op_constructor_reads_environment(monkeypatch):
+    """Checks that the chunk op stores its flags and reads the recompute suppress level from the environment."""
     monkeypatch.setenv("GDN_RECOMPUTE_SUPPRESS_LEVEL", "5")
     op = _chunk_op(monkeypatch, output_final_state=True, use_qk_l2norm_in_kernel=True)
     assert op.output_final_state is True
@@ -282,6 +291,7 @@ def _check_dtype_and_beta(op):
 
 
 def test_chunk_op_forward_validates_dtype_and_beta(monkeypatch):
+    """Checks that the chunk op rejects mismatched dtypes, float32 inputs and wrong-width beta."""
     op = _chunk_op(monkeypatch)
     _check_dtype_and_beta(op)
     # Independently drive one contract violation from the test body: a beta
@@ -293,6 +303,7 @@ def test_chunk_op_forward_validates_dtype_and_beta(monkeypatch):
 
 
 def test_chunk_op_warns_on_head_first_shapes(monkeypatch):
+    """Checks that head-first chunk inputs emit a format-mismatch warning and return the expected shapes."""
     apply = _Recorder(result=(torch.zeros(1, 2, 4, 8, dtype=torch.float16), None))
     monkeypatch.setattr(chunk_mod.ChunkGatedDeltaRuleFunction, "apply", apply)
     op = _chunk_op(monkeypatch)
@@ -305,6 +316,7 @@ def test_chunk_op_warns_on_head_first_shapes(monkeypatch):
 
 
 def test_chunk_op_scales_and_forwards_options(monkeypatch):
+    """Checks that the chunk op computes the default scale and forwards state, cu_seqlens and options."""
     apply = _Recorder(result=(torch.zeros(1, 2, 2, 4), "state"))
     monkeypatch.setattr(chunk_mod.ChunkGatedDeltaRuleFunction, "apply", apply)
     op = _chunk_op(monkeypatch, output_final_state=True, use_qk_l2norm_in_kernel=True)
@@ -326,6 +338,7 @@ def test_chunk_op_scales_and_forwards_options(monkeypatch):
 
 
 def test_chunk_op_rejects_cu_seqlens_with_batch(monkeypatch):
+    """Checks that the chunk op rejects cu_seqlens when the batch size is not one."""
     op = _chunk_op(monkeypatch)
     q = torch.zeros(2, 2, 2, 4, dtype=torch.float16)
     beta = torch.zeros(2, 2, 2)
@@ -334,6 +347,7 @@ def test_chunk_op_rejects_cu_seqlens_with_batch(monkeypatch):
 
 
 def test_chunk_op_rejects_initial_state_count(monkeypatch):
+    """Checks that the chunk op rejects an initial state count that does not match cu_seqlens."""
     op = _chunk_op(monkeypatch)
     q = torch.zeros(1, 2, 2, 4, dtype=torch.float16)
     beta = torch.zeros(1, 2, 2)
@@ -351,6 +365,7 @@ def test_chunk_op_rejects_initial_state_count(monkeypatch):
 
 
 def test_chunk_op_uses_explicit_scale(monkeypatch):
+    """Checks that the chunk op forwards an explicit scale unchanged."""
     apply = _Recorder(result=(torch.zeros(1, 2, 2, 4), None))
     monkeypatch.setattr(chunk_mod.ChunkGatedDeltaRuleFunction, "apply", apply)
     op = _chunk_op(monkeypatch)
@@ -366,6 +381,7 @@ def test_chunk_op_uses_explicit_scale(monkeypatch):
 
 
 def test_recurrent_function_marshals_contiguous_inputs(monkeypatch):
+    """Checks that the recurrent forward makes g and beta contiguous and marshals every kernel argument."""
     kernel = _Recorder(result=("o", "state"))
     monkeypatch.setattr(recurrent_mod, "fused_recurrent_gated_delta_rule_fwd", kernel)
     q = torch.zeros(1, 2, 2, 4)
@@ -416,6 +432,7 @@ def _recurrent_op(monkeypatch, **kwargs):
 
 
 def test_recurrent_op_constructor_and_default_scale(monkeypatch):
+    """Checks that the recurrent op stores its flags, defaults beta to ones and forwards the default scale."""
     apply = _Recorder(result=("o", None))
     monkeypatch.setattr(recurrent_mod.FusedRecurrentFunction, "apply", apply)
     op = _recurrent_op(monkeypatch, inplace_final_state=True)
@@ -431,6 +448,7 @@ def test_recurrent_op_constructor_and_default_scale(monkeypatch):
 
 
 def test_recurrent_op_requires_positive_scale(monkeypatch):
+    """Checks that the recurrent op rejects a non-positive scale."""
     op = _recurrent_op(monkeypatch)
     q = torch.zeros(1, 2, 2, 4)
     with pytest.raises(AssertionError, match="scale must be positive"):
@@ -438,6 +456,7 @@ def test_recurrent_op_requires_positive_scale(monkeypatch):
 
 
 def test_recurrent_op_rejects_cu_seqlens_with_batch(monkeypatch):
+    """Checks that the recurrent op rejects cu_seqlens when the batch size is not one."""
     op = _recurrent_op(monkeypatch)
     q = torch.zeros(2, 2, 2, 4)
     with pytest.raises(ValueError, match="batch size is expected to be 1"):
@@ -447,6 +466,7 @@ def test_recurrent_op_rejects_cu_seqlens_with_batch(monkeypatch):
 
 
 def test_recurrent_op_keeps_explicit_scale(monkeypatch):
+    """Checks that the recurrent op forwards an explicit scale unchanged."""
     apply = _Recorder(result=("o", None))
     monkeypatch.setattr(recurrent_mod.FusedRecurrentFunction, "apply", apply)
     op = _recurrent_op(monkeypatch)

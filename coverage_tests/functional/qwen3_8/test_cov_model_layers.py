@@ -200,6 +200,7 @@ def _install_decoder_doubles(
 
 class TestDecoderLayerConstruction:
     def test_linear_attention_passes_reduce_results_when_supported(self, monkeypatch):
+        """Passes reduce_results and disables the internal reduction for GDN attention."""
         created = _install_decoder_doubles(monkeypatch)
         config = _text_config()
         layer = qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -215,6 +216,7 @@ class TestDecoderLayerConstruction:
     def test_linear_attention_disables_internal_reduction_without_the_kwarg(
         self, monkeypatch
     ):
+        """Disables internal reduction when the GDN constructor lacks the kwarg."""
         created = _install_decoder_doubles(
             monkeypatch, gdn_accepts_reduce=False, gdn_forward_has_output=True
         )
@@ -229,6 +231,7 @@ class TestDecoderLayerConstruction:
     def test_full_attention_without_an_indexer_uses_the_stock_qwen_attention(
         self, monkeypatch
     ):
+        """Builds stock Qwen attention for full attention without an indexer."""
         created = _install_decoder_doubles(monkeypatch)
         config = _text_config()
         qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -243,6 +246,7 @@ class TestDecoderLayerConstruction:
         assert kwargs["quant_config"] is None
 
     def test_full_attention_with_an_indexer_builds_the_qsa_owner(self, monkeypatch):
+        """Builds the QSA attention owner for full attention with an indexer."""
         created = _install_decoder_doubles(monkeypatch)
         config = _text_config(indexer_n_heads=4)
         layer = qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -256,6 +260,7 @@ class TestDecoderLayerConstruction:
         assert kwargs["prefix"] == "layers.3.self_attn"
 
     def test_invalid_layer_type_is_rejected(self, monkeypatch):
+        """Rejects unsupported decoder layer types."""
         _install_decoder_doubles(monkeypatch)
         with pytest.raises(ValueError, match="Invalid layer_type"):
             qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -263,6 +268,7 @@ class TestDecoderLayerConstruction:
             )
 
     def test_ple_layer_is_attached_for_member_layer_indices(self, monkeypatch):
+        """Attaches the PLE layer only for member layer indices."""
         _install_decoder_doubles(monkeypatch)
         config = _text_config(ple_layer_ids=[1, 3])
         layer = qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -281,6 +287,7 @@ class TestDecoderLayerConstruction:
         )
 
     def test_force_disable_ple_skips_the_embedding_layer(self, monkeypatch):
+        """Skips the PLE layer when PLE is force-disabled."""
         _install_decoder_doubles(monkeypatch)
         config = _text_config(ple_layer_ids=[1])
         layer = qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -292,6 +299,7 @@ class TestDecoderLayerConstruction:
         assert layer.ple is None
 
     def test_moe_and_dense_mlp_selection_follows_sparse_step(self, monkeypatch):
+        """Selects MoE or dense MLP from the absolute layer and sparse step."""
         created = _install_decoder_doubles(monkeypatch)
         config = _text_config(num_experts=2, decoder_sparse_step=2)
         qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -312,6 +320,7 @@ class TestDecoderLayerConstruction:
         assert created.dense.kwargs["reduce_results"] is False
 
     def test_mlp_only_layers_never_become_moe(self, monkeypatch):
+        """Keeps mlp-only layers dense even when experts are configured."""
         created = _install_decoder_doubles(monkeypatch)
         config = _text_config(num_experts=4, decoder_sparse_step=1, mlp_only_layers=[0])
         qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -321,6 +330,7 @@ class TestDecoderLayerConstruction:
         assert created.dense is not None
 
     def test_both_hyper_connections_are_attached_in_role_order(self, monkeypatch):
+        """Attaches attention and MLP hyper connections in role order."""
         created = _install_decoder_doubles(monkeypatch)
         config = _text_config()
         layer = qwen_model.Qwen3_8FlashNextDecoderLayer(
@@ -406,6 +416,7 @@ def _forward_layer(
 
 class TestDecoderLayerForward:
     def test_legacy_residual_tensor_is_rejected(self):
+        """Rejects the legacy residual tensor argument."""
         layer = _forward_layer()
         with pytest.raises(ValueError, match="prev_block_output/prev_injection"):
             layer(torch.zeros(2, 16), residual=torch.zeros(2, 16))
@@ -431,6 +442,7 @@ class TestDecoderLayerForward:
         ],
     )
     def test_ple_requires_every_context_input(self, kwargs, message):
+        """Requires input_ids, query_start_loc and ngram_context for PLE layers."""
         layer = _forward_layer(ple=lambda *args: torch.zeros(2, 16))
 
         def call(**inputs):
@@ -440,6 +452,7 @@ class TestDecoderLayerForward:
             call(**kwargs)
 
     def test_ple_materializes_a_pending_combine_before_adding(self, monkeypatch):
+        """Materializes a pending combine before the PLE addition."""
         monkeypatch.setattr(
             qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
         )
@@ -471,6 +484,7 @@ class TestDecoderLayerForward:
         assert layer.attn_hyper_connection.mix_calls[0][2] is None
 
     def test_linear_attention_writes_into_the_caller_buffer(self, monkeypatch):
+        """Lets linear attention write into the caller-provided output buffer."""
         monkeypatch.setattr(
             qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
         )
@@ -491,6 +505,7 @@ class TestDecoderLayerForward:
     def test_linear_attention_without_a_buffer_returns_the_projection(
         self, monkeypatch
     ):
+        """Returns the projection directly when no output buffer is required."""
         monkeypatch.setattr(
             qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
         )
@@ -501,6 +516,7 @@ class TestDecoderLayerForward:
         assert kwargs["hidden_states"].tolist() == torch.full((2, 16), 10.0).tolist()
 
     def test_full_attention_receives_positions(self, monkeypatch):
+        """Passes positions and mixed hidden states to full attention."""
         monkeypatch.setattr(
             qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
         )
@@ -516,6 +532,7 @@ class TestDecoderLayerForward:
         )
 
     def test_unknown_layer_type_fails_at_forward(self, monkeypatch):
+        """Rejects an unknown layer type at forward time."""
         monkeypatch.setattr(
             qwen_model, "get_tensor_model_parallel_world_size", lambda: 1
         )
@@ -524,6 +541,7 @@ class TestDecoderLayerForward:
             layer(torch.zeros(2, 16), positions=torch.zeros(2))
 
     def test_tp_reduction_applies_to_attention_and_reducible_mlp(self, monkeypatch):
+        """Applies tensor-parallel reduction to attention and a reducible MLP."""
         reduced = []
 
         def fake_all_reduce(tensor):
@@ -543,6 +561,7 @@ class TestDecoderLayerForward:
         assert block.tolist() == torch.full((2, 16), 6.0).tolist()
 
     def test_moe_layers_skip_the_second_reduction(self, monkeypatch):
+        """Skips the MLP reduction for MoE layers."""
         reduced = []
 
         def fake_all_reduce(tensor):
@@ -629,6 +648,7 @@ class TestModelConstruction:
         return model, created, calls
 
     def test_last_rank_builds_embedding_layers_and_final_mixer(self, monkeypatch):
+        """Builds embeddings, layers and the final mixer on the last rank."""
         config = _text_config(
             layer_types=["full_attention", "linear_attention", "full_attention"],
             indexer_n_heads=4,
@@ -655,6 +675,7 @@ class TestModelConstruction:
         assert model.hyper_connection_mixer.use_combine is False
 
     def test_indexer_free_config_has_no_qsa_layers(self, monkeypatch):
+        """Reports no QSA layers for an indexer-free config."""
         config = _text_config(
             layer_types=["full_attention", "full_attention"],
             indexer_n_heads=None,
@@ -664,12 +685,14 @@ class TestModelConstruction:
         assert model._qsa_layer_ids == frozenset()
 
     def test_non_last_rank_skips_the_mixer(self, monkeypatch):
+        """Skips the final mixer on a non-last pipeline rank."""
         config = _text_config(num_hidden_layers=1)
         model, created, _ = self._build(monkeypatch, config, pp_last=False)
         assert model.hyper_connection_mixer is None
         assert created.hyper == []
 
     def test_mtp_speculation_allocates_the_multi_stream_buffer(self, monkeypatch):
+        """Allocates the multi-stream MTP buffer in BF16 for MTP speculation."""
         config = _text_config(num_hidden_layers=1)
         spec = SimpleNamespace(method="mtp")
         model, _, _ = self._build(monkeypatch, config, spec=spec)
@@ -678,11 +701,13 @@ class TestModelConstruction:
 
     @pytest.mark.parametrize("spec", [None, SimpleNamespace(method="eagle")])
     def test_other_speculation_modes_allocate_no_buffer(self, monkeypatch, spec):
+        """Allocates no MTP buffer for absent or non-MTP speculation."""
         config = _text_config(num_hidden_layers=1)
         model, _, _ = self._build(monkeypatch, config, spec=spec)
         assert model._mtp_hidden_buffer is None
 
     def test_empty_intermediate_tensors_use_the_multi_stream_width(self, monkeypatch):
+        """Builds empty intermediate tensors with the multi-stream width and dtype."""
         config = _text_config(num_hidden_layers=1)
         model, _, _ = self._build(monkeypatch, config)
         tensors = model.make_empty_intermediate_tensors(2, torch.float32, "cpu")
@@ -746,6 +771,7 @@ class TestModelForward:
         )
 
     def test_first_rank_embeds_and_repeats_the_hidden_state(self, monkeypatch):
+        """Embeds and repeats the hidden state and returns the mixed output on the first rank."""
         self._patch_pp(monkeypatch)
         layer = _BackboneLayer(0)
         model = _backbone(layers=[layer])
@@ -757,6 +783,7 @@ class TestModelForward:
         assert out.tolist() == torch.full((3, 8), 16.0).tolist()
 
     def test_inputs_embeds_bypass_the_embedding_table(self, monkeypatch):
+        """Uses inputs_embeds instead of the embedding table."""
         self._patch_pp(monkeypatch)
         layer = _BackboneLayer(0)
         model = _backbone(layers=[layer])
@@ -765,12 +792,14 @@ class TestModelForward:
         assert torch.equal(layer.calls[0]["hidden_states"], embeds.repeat(1, 2))
 
     def test_missing_inputs_raises_on_the_first_rank(self, monkeypatch):
+        """Raises when neither input_ids nor inputs_embeds is provided."""
         self._patch_pp(monkeypatch)
         model = _backbone(layers=[])
         with pytest.raises(ValueError, match="input_ids or inputs_embeds"):
             model.forward(None, torch.zeros(1))
 
     def test_non_first_rank_requires_and_reads_intermediate_tensors(self, monkeypatch):
+        """Requires and reads intermediate tensors on non-first ranks."""
         from vllm.sequence import IntermediateTensors
 
         self._patch_pp(monkeypatch, first=False)
@@ -787,6 +816,7 @@ class TestModelForward:
         assert torch.equal(layer.calls[0]["hidden_states"], hidden)
 
     def test_pipeline_boundary_materializes_the_pending_mlp_block(self, monkeypatch):
+        """Materializes the pending MLP block at a pipeline boundary."""
         from vllm.sequence import IntermediateTensors
 
         self._patch_pp(monkeypatch, first=True, last=False)
@@ -802,6 +832,7 @@ class TestModelForward:
         ]
 
     def test_pending_state_is_threaded_between_layers(self, monkeypatch):
+        """Threads pending block output and injection between layers."""
         self._patch_pp(monkeypatch)
         first = _BackboneLayer(0)
         second = _BackboneLayer(1)
@@ -812,6 +843,7 @@ class TestModelForward:
         assert first.calls[0]["prev_block_output"] is None
 
     def test_layer_slice_honours_pipeline_sharding(self, monkeypatch):
+        """Runs only the layers inside the pipeline shard."""
         self._patch_pp(monkeypatch)
         first = _BackboneLayer(0)
         middle = _BackboneLayer(1)
@@ -825,6 +857,7 @@ class TestModelForward:
         assert last.calls == []
 
     def test_deepstack_embeddings_are_expanded_and_added(self, monkeypatch):
+        """Expands hidden states and adds deepstack embeddings before the pending combine."""
         self._patch_pp(monkeypatch, first=True, last=False)
         layer = _BackboneLayer(0)
         model = _backbone(layers=[layer])
@@ -839,6 +872,7 @@ class TestModelForward:
         assert out["hidden_states"].tolist() == torch.full((2, 8), 109.0).tolist()
 
     def test_mtp_buffer_captures_the_pre_mixer_hidden_state(self, monkeypatch):
+        """Captures the pre-mixer hidden state into the MTP buffer."""
         self._patch_pp(monkeypatch)
         layer = _BackboneLayer(0)
         buffer = torch.zeros(8, 8)

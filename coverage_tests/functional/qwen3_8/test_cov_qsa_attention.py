@@ -36,6 +36,7 @@ from vllm_fl.models.qwen3_8_flash_next.gpu.ops import qsa as qsa_ops
 
 class TestAttentionBackend:
     def test_advertised_contract(self):
+        """Verifies advertised contract."""
         backend = qsa_module.Qwen3_8FlashNextQSAAttentionBackend
         assert backend.get_name() == "QWEN38_FLASH_NEXT_QSA_FLAGTREE"
         assert backend.get_builder_cls() is QSAMetadataBuilder
@@ -54,18 +55,21 @@ class TestAttentionBackend:
         assert backend.supported_kv_cache_dtypes == ["auto", "bfloat16"]
 
     def test_kv_cache_shape_keeps_the_kv_dimension(self):
+        """Verifies kv cache shape keeps the kv dimension."""
         shape = qsa_module.Qwen3_8FlashNextQSAAttentionBackend.get_kv_cache_shape(
             5, 16, 1, 8, cache_dtype_str="bfloat16"
         )
         assert shape == (5, 2, 16, 1, 8)
 
     def test_impl_class_is_rejected(self):
+        """Verifies impl class is rejected."""
         with pytest.raises(NotImplementedError, match="out-of-band"):
             qsa_module.Qwen3_8FlashNextQSAAttentionBackend.get_impl_cls()
 
 
 class TestUnpackCache:
     def test_legacy_five_dimensional_cache_splits_into_views(self):
+        """Verifies legacy five dimensional cache splits into views."""
         storage = torch.zeros(2, 2, 3, 1, 4, dtype=torch.bfloat16)
         key, value = qsa_module._unpack_qsa_kv_cache(storage, head_size=4)
         assert key.shape == (2, 3, 1, 4)
@@ -82,14 +86,17 @@ class TestUnpackCache:
         [(2, 3, 3, 1, 4), (2, 2, 3, 1, 8)],
     )
     def test_invalid_five_dimensional_geometry_is_rejected(self, shape):
+        """Verifies invalid five dimensional geometry is rejected."""
         with pytest.raises(ValueError, match="invalid legacy QSA KV cache shape"):
             qsa_module._unpack_qsa_kv_cache(torch.zeros(shape), head_size=4)
 
     def test_packed_four_dimensional_layout_is_rejected(self):
+        """Verifies packed four dimensional layout is rejected."""
         with pytest.raises(ValueError, match="packed 4-D"):
             qsa_module._unpack_qsa_kv_cache(torch.zeros(2, 1, 3, 8), head_size=4)
 
     def test_other_ranks_are_rejected(self):
+        """Verifies other ranks are rejected."""
         with pytest.raises(ValueError, match="invalid QSA KV cache rank"):
             qsa_module._unpack_qsa_kv_cache(torch.zeros(2, 3, 8), head_size=4)
 
@@ -101,6 +108,7 @@ class TestPreparedTokenToRequest:
         )
 
     def test_returns_the_prepared_request_rows(self):
+        """Verifies returns the prepared request rows."""
         compressed = SimpleNamespace(
             num_actual_tokens=3, token_to_req=torch.tensor([0, 1, 2, 3])
         )
@@ -110,6 +118,7 @@ class TestPreparedTokenToRequest:
         assert got.tolist() == [0, 1, 2]
 
     def test_token_count_disagreement_is_rejected(self):
+        """Verifies token count disagreement is rejected."""
         compressed = SimpleNamespace(
             num_actual_tokens=2, token_to_req=torch.tensor([0, 1, 2])
         )
@@ -217,6 +226,7 @@ def _build_attention(monkeypatch, *, config=None, vllm_config=None, **kwargs):
 
 class TestQsaAttentionConstruction:
     def test_valid_configuration_wires_every_owner(self, monkeypatch):
+        """Verifies valid configuration wires every owner."""
         layer, created = _build_attention(monkeypatch)
         assert layer.hidden_size == 8
         assert layer.total_num_heads == 2
@@ -244,6 +254,7 @@ class TestQsaAttentionConstruction:
         )
 
     def test_layer_registers_in_the_static_forward_context(self, monkeypatch):
+        """Verifies layer registers in the static forward context."""
         vllm_config = _attention_vllm_config()
         _build_attention(monkeypatch, vllm_config=vllm_config)
         static = vllm_config.compilation_config.static_forward_context
@@ -252,6 +263,7 @@ class TestQsaAttentionConstruction:
             _build_attention(monkeypatch, vllm_config=vllm_config)
 
     def test_replicated_kv_heads_are_clamped_to_one(self, monkeypatch):
+        """Verifies replicated kv heads are clamped to one."""
         layer, _ = _build_attention(
             monkeypatch,
             tp_size=4,
@@ -292,6 +304,7 @@ class TestQsaAttentionConstruction:
         ],
     )
     def test_vllm_configuration_guards(self, monkeypatch, overrides, tp, message):
+        """Verifies vllm configuration guards."""
         _install_attention_doubles(monkeypatch, tp_size=tp)
         with pytest.raises((ValueError, NotImplementedError), match=message):
             qsa_module.Qwen3_8FlashNextQSAAttention(
@@ -302,6 +315,7 @@ class TestQsaAttentionConstruction:
             )
 
     def test_kv_quantization_scheme_is_rejected(self, monkeypatch):
+        """Verifies kv quantization scheme is rejected."""
         _install_attention_doubles(monkeypatch)
         with pytest.raises(NotImplementedError, match="KV quantization"):
             qsa_module.Qwen3_8FlashNextQSAAttention(
@@ -313,6 +327,7 @@ class TestQsaAttentionConstruction:
             )
 
     def test_non_causal_attention_is_rejected(self, monkeypatch):
+        """Verifies non causal attention is rejected."""
         _install_attention_doubles(monkeypatch)
         with pytest.raises(NotImplementedError, match="causal"):
             qsa_module.Qwen3_8FlashNextQSAAttention(
@@ -323,6 +338,7 @@ class TestQsaAttentionConstruction:
             )
 
     def test_head_divisibility_guards(self, monkeypatch):
+        """Verifies head divisibility guards."""
         _install_attention_doubles(monkeypatch, tp_size=2)
         with pytest.raises(ValueError, match="heads must be divisible by TP"):
             qsa_module.Qwen3_8FlashNextQSAAttention(
@@ -340,6 +356,7 @@ class TestQsaAttentionConstruction:
             )
 
     def test_replicated_kv_heads_guard(self, monkeypatch):
+        """Verifies replicated kv heads guard."""
         _install_attention_doubles(monkeypatch, tp_size=4)
         with pytest.raises(ValueError, match="replicated QSA KV heads"):
             qsa_module.Qwen3_8FlashNextQSAAttention(
@@ -350,6 +367,7 @@ class TestQsaAttentionConstruction:
             )
 
     def test_dual_chunk_rope_is_rejected(self, monkeypatch):
+        """Verifies dual chunk rope is rejected."""
         _install_attention_doubles(monkeypatch)
         with pytest.raises(NotImplementedError, match="dual-chunk"):
             qsa_module.Qwen3_8FlashNextQSAAttention(
@@ -360,6 +378,7 @@ class TestQsaAttentionConstruction:
             )
 
     def test_non_bf16_cache_storage_is_rejected(self, monkeypatch):
+        """Verifies non bf16 cache storage is rejected."""
         _install_attention_doubles(monkeypatch, kv_dtype=torch.float16)
         with pytest.raises(NotImplementedError, match="BF16 cache storage"):
             qsa_module.Qwen3_8FlashNextQSAAttention(
@@ -370,6 +389,7 @@ class TestQsaAttentionConstruction:
             )
 
     def test_kv_cache_spec_uses_the_local_head_geometry(self, monkeypatch):
+        """Verifies kv cache spec uses the local head geometry."""
         layer, _ = _build_attention(monkeypatch)
         recorded = {}
 
@@ -451,6 +471,7 @@ class TestRunQsa:
         return {"p.attn": main, "raw": side, "compressed": compressed}
 
     def test_fallback_store_then_sparse_attention(self, monkeypatch):
+        """Verifies fallback store then sparse attention."""
         layer = self._layer()
         metadata = self._metadata()
         monkeypatch.setattr(
@@ -504,6 +525,7 @@ class TestRunQsa:
         assert torch.equal(sparse_call[2]["gate"], gate)
 
     def test_native_cache_update_replaces_the_fallback_store(self, monkeypatch):
+        """Verifies native cache update replaces the fallback store."""
         layer = self._layer()
         metadata = self._metadata()
         monkeypatch.setattr(
@@ -549,6 +571,7 @@ class TestRunQsa:
         assert args[7].item() == 2.0
 
     def test_non_dict_metadata_zeroes_the_output(self, monkeypatch):
+        """Verifies non dict metadata zeroes the output."""
         layer = self._layer()
         monkeypatch.setattr(
             qsa_module,
@@ -568,6 +591,7 @@ class TestRunQsa:
         assert output.tolist() == torch.zeros(2, 2, 4).tolist()
 
     def test_metadata_list_uses_the_first_entry(self, monkeypatch):
+        """Verifies metadata list uses the first entry."""
         layer = self._layer()
         metadata = self._metadata()
         monkeypatch.setattr(
@@ -610,6 +634,7 @@ class TestRunQsa:
         assert len(sparse_calls) == 1
 
     def test_empty_cache_is_rejected(self, monkeypatch):
+        """Verifies empty cache is rejected."""
         layer = self._layer(kv_cache=torch.tensor([]))
         monkeypatch.setattr(
             qsa_module,
@@ -628,6 +653,7 @@ class TestRunQsa:
             )
 
     def test_side_cache_token_disagreement_is_rejected(self, monkeypatch):
+        """Verifies side cache token disagreement is rejected."""
         layer = self._layer()
         monkeypatch.setattr(
             qsa_module,
@@ -646,6 +672,7 @@ class TestRunQsa:
             )
 
     def test_indexer_selection_width_is_validated(self, monkeypatch):
+        """Verifies indexer selection width is validated."""
         indexer = _IndexerCallable(5, selected=torch.zeros(2, 4, dtype=torch.int32))
         layer = self._layer(indexer=indexer)
         monkeypatch.setattr(
@@ -665,6 +692,7 @@ class TestRunQsa:
             )
 
     def test_compressed_request_map_disagreement_is_rejected(self, monkeypatch):
+        """Verifies compressed request map disagreement is rejected."""
         layer = self._layer()
         monkeypatch.setattr(
             qsa_module,
@@ -683,6 +711,7 @@ class TestRunQsa:
             )
 
     def test_non_bf16_cache_is_rejected(self, monkeypatch):
+        """Verifies non bf16 cache is rejected."""
         layer = self._layer(kv_cache=torch.zeros(2, 2, 3, 1, 4))
         metadata = self._metadata()
         monkeypatch.setattr(
@@ -706,6 +735,7 @@ class TestRunQsa:
 
 class TestCustomOpBoundary:
     def test_op_dispatches_to_the_owner(self, monkeypatch):
+        """Verifies op dispatches to the owner."""
         calls = []
         layer = object.__new__(qsa_module.Qwen3_8FlashNextQSAAttention)
         layer._run_qsa = lambda *args: calls.append(args)
@@ -721,6 +751,7 @@ class TestCustomOpBoundary:
         assert calls[0][6] is tensors[6]
 
     def test_wrong_owner_type_is_rejected(self, monkeypatch):
+        """Verifies wrong owner type is rejected."""
         monkeypatch.setattr(
             qsa_module,
             "get_forward_context",
@@ -732,6 +763,7 @@ class TestCustomOpBoundary:
             )
 
     def test_fake_impl_is_inert(self):
+        """Verifies fake impl is inert."""
         assert (
             qsa_module.qwen3_8_flash_next_qsa_with_output_fake(
                 *[torch.zeros(1) for _ in range(7)], layer_name="p.attn"
@@ -768,6 +800,7 @@ class TestQsaAttentionForward:
         return layer
 
     def test_forward_uses_the_registered_op(self, monkeypatch):
+        """Verifies forward uses the registered op."""
         layer = self._layer()
         recorded = []
 
@@ -798,6 +831,7 @@ class TestQsaAttentionForward:
         assert projected.tolist() == torch.full((2, 8), 5.0).tolist()
 
     def test_opaque_attention_uses_torch_ops(self, monkeypatch):
+        """Verifies opaque attention uses torch ops."""
         layer = self._layer()
         recorded = []
 
@@ -823,6 +857,7 @@ class TestQsaAttentionForward:
         assert layer.o_proj.calls[0][0].tolist() == torch.full((2, 8), 7.0).tolist()
 
     def test_missing_output_gate_is_rejected(self, monkeypatch):
+        """Verifies missing output gate is rejected."""
         layer = self._layer(gate=False)
         monkeypatch.setattr(
             qsa_module,

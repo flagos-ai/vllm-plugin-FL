@@ -59,6 +59,7 @@ def _config(**attrs):
 
 
 def test_install_patches_both_modules_and_is_idempotent(moe):
+    """Verifies install patches both modules with the same wrapper and is idempotent."""
     module, env = moe
     assert module.install_fl_w8a8_moe_selector() is True
     wrapper = env.oracle_module.select_int8_moe_backend
@@ -70,6 +71,7 @@ def test_install_patches_both_modules_and_is_idempotent(moe):
 
 
 def test_install_wraps_quant_config_builder_for_static_inputs(moe):
+    """Verifies static-input quant configs delegate to the original builder."""
     module, env = moe
     module.install_fl_w8a8_moe_selector()
     builder = env.scheme_module.make_int8_moe_quant_config
@@ -98,6 +100,7 @@ def test_install_wraps_quant_config_builder_for_static_inputs(moe):
 
 
 def test_install_wraps_quant_config_builder_for_dynamic_tokens(moe):
+    """Verifies dynamic-token quant configs use the W8A8 builder."""
     module, env = moe
     module.install_fl_w8a8_moe_selector()
     builder = env.scheme_module.make_int8_moe_quant_config
@@ -118,6 +121,7 @@ def test_install_wraps_quant_config_builder_for_dynamic_tokens(moe):
 
 
 def test_selector_prefers_flaggems_on_canonical_w8a8(moe):
+    """Verifies canonical W8A8 keys select FlagGems experts and log the choice."""
     module, env = moe
     module.install_fl_w8a8_moe_selector()
     selector = env.oracle_module.select_int8_moe_backend
@@ -134,6 +138,7 @@ def test_selector_prefers_flaggems_on_canonical_w8a8(moe):
 
 
 def test_selector_rejects_lora_for_flaggems_path(moe):
+    """Verifies LoRA configs raise NotImplementedError on the FlagGems path."""
     module, env = moe
     module.install_fl_w8a8_moe_selector()
     selector = env.oracle_module.select_int8_moe_backend
@@ -142,6 +147,7 @@ def test_selector_rejects_lora_for_flaggems_path(moe):
 
 
 def test_selector_rejects_batched_activation_for_flaggems_path(moe):
+    """Verifies batched activation format raises ValueError on the FlagGems path."""
     module, env = moe
     module.install_fl_w8a8_moe_selector()
     selector = env.oracle_module.select_int8_moe_backend
@@ -153,6 +159,7 @@ def test_selector_rejects_batched_activation_for_flaggems_path(moe):
 
 
 def test_selector_honours_flaggems_policy_gate(moe):
+    """Verifies a disabled FlagGems policy falls back to functional experts."""
     module, env = moe
     env.flaggems_ops = {"fused_moe": False}
     module.install_fl_w8a8_moe_selector()
@@ -163,6 +170,7 @@ def test_selector_honours_flaggems_policy_gate(moe):
 
 
 def test_selector_requires_oot_enabled_for_flaggems(moe):
+    """Verifies FlagGems requires OOT enabled, else functional experts."""
     module, env = moe
     env.oot_enabled = False
     module.install_fl_w8a8_moe_selector()
@@ -172,6 +180,7 @@ def test_selector_requires_oot_enabled_for_flaggems(moe):
 
 
 def test_selector_delegates_non_cuda_or_non_canonical(moe):
+    """Verifies non-canonical keys and non-CUDA platforms delegate to the oracle selector."""
     module, env = moe
     module.install_fl_w8a8_moe_selector()
     selector = env.oracle_module.select_int8_moe_backend
@@ -186,6 +195,7 @@ def test_selector_delegates_non_cuda_or_non_canonical(moe):
 
 
 def test_native_fallback_returns_functional_bridge(moe):
+    """Verifies native fallback returns the functional bridge without calling the oracle."""
     module, env = moe
     env.flaggems_default = False
     module.install_fl_w8a8_moe_selector()
@@ -197,6 +207,7 @@ def test_native_fallback_returns_functional_bridge(moe):
 
 
 def test_native_fallback_replaces_triton_experts_for_modular_activation(moe):
+    """Verifies native fallback swaps Triton experts for the bridge on modular activation."""
     module, env = moe
     env.flaggems_default = False
     env.oracle_selector_result = (Int8MoeBackend.CUTLASS, env.TritonExperts)
@@ -210,6 +221,7 @@ def test_native_fallback_replaces_triton_experts_for_modular_activation(moe):
 
 
 def test_native_fallback_treats_swiglu_params_as_modular(moe):
+    """Verifies swiglu parameters make native fallback treat the config as modular."""
     module, env = moe
     env.flaggems_default = False
     env.oracle_selector_result = (Int8MoeBackend.TRITON, env.TritonExperts)
@@ -221,6 +233,7 @@ def test_native_fallback_treats_swiglu_params_as_modular(moe):
 
 
 def test_native_fallback_keeps_non_triton_experts(moe):
+    """Verifies native fallback keeps non-Triton experts unchanged."""
     module, env = moe
     env.flaggems_default = False
     other = type("OtherExperts", (), {})
@@ -250,6 +263,7 @@ def test_native_fallback_keeps_non_triton_experts(moe):
     ],
 )
 def test_native_fallback_rejects_unsupported_config(moe, config, exc_key, match):
+    """Verifies native fallback rejects LoRA and batched activation configs."""
     module, env = moe
     env.flaggems_default = False
     module.install_fl_w8a8_moe_selector()

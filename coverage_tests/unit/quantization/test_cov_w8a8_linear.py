@@ -72,6 +72,7 @@ def _layer(
 
 
 def test_is_supported_follows_oot_and_policy_gates(linear):
+    """Verifies is_supported reflects the OOT enable flag and FlagGems policy gate."""
     module, env = linear
     assert module.FLW8A8DynamicLinearKernel.is_supported(90) == (True, None)
 
@@ -90,6 +91,7 @@ def test_is_supported_follows_oot_and_policy_gates(linear):
 
 
 def test_can_implement_requires_dynamic_symmetric_channelwise(linear):
+    """Verifies can_implement enforces channelwise, dynamic and symmetric configs."""
     module, env = linear
     config_cls = env.Int8ScaledMMLinearLayerConfig
     assert module.FLW8A8DynamicLinearKernel.can_implement(config_cls()) == (
@@ -108,6 +110,7 @@ def test_can_implement_requires_dynamic_symmetric_channelwise(linear):
 
 
 def test_process_weights_transposes_and_normalizes(linear):
+    """Verifies weight transposition, scale normalization and metadata clearing."""
     module, env = linear
     kernel = module.FLW8A8DynamicLinearKernel()
     weight = torch.arange(32, dtype=torch.int8).reshape(4, 8)
@@ -148,6 +151,7 @@ def test_process_weights_transposes_and_normalizes(linear):
     ],
 )
 def test_process_weights_rejects_bad_checkpoint(linear, weight, weight_scale, match):
+    """Verifies malformed weight or scale shapes raise ValueError."""
     module, _ = linear
     kernel = module.FLW8A8DynamicLinearKernel()
     layer = _layer(weight=weight, weight_scale=weight_scale)
@@ -156,6 +160,7 @@ def test_process_weights_rejects_bad_checkpoint(linear, weight, weight_scale, ma
 
 
 def test_apply_weights_quantizes_and_calls_scaled_mm(linear):
+    """Verifies apply quantizes activations and marshals scaled-mm arguments."""
     module, env = linear
     kernel = module.FLW8A8DynamicLinearKernel()
     weight = torch.randint(-8, 8, (4, 8), dtype=torch.int8)
@@ -192,6 +197,7 @@ def test_apply_weights_quantizes_and_calls_scaled_mm(linear):
 
 
 def test_register_prepends_kernel_and_keeps_duplicates_out(linear):
+    """Verifies registration prepends the kernel once and avoids duplicates."""
     module, env = linear
     registry = {}
     assert module.register_fl_w8a8_linear_kernel(registry) is True

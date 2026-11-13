@@ -80,6 +80,7 @@ def _policy(monkeypatch, *, oot=True, whitelist=None, blacklist=None, ops=None):
 
 
 def test_register_returns_early_when_oot_disabled(monkeypatch):
+    """Checks that registration still patches the MoE oracle but skips ops when OOT is disabled."""
     _policy(monkeypatch, oot=False)
     oracle_calls = []
     monkeypatch.setattr(
@@ -90,6 +91,8 @@ def test_register_returns_early_when_oot_disabled(monkeypatch):
 
 
 def test_register_applies_whitelist_blacklist_and_unknown_warning(monkeypatch):
+    """Checks that registration honors the whitelist, skips policy-disabled ops, and warns about unknown names."""
+
     class Silu(_CustomBase):
         pass
 
@@ -132,6 +135,8 @@ def test_register_applies_whitelist_blacklist_and_unknown_warning(monkeypatch):
 
 
 def test_register_registers_all_ops_and_enables_fused_moe(monkeypatch):
+    """Checks that registration registers every op and enables the fused-MoE factory with FlagGems."""
+
     class Pluggable(_PluggableBase):
         pass
 
@@ -169,6 +174,8 @@ def test_register_registers_all_ops_and_enables_fused_moe(monkeypatch):
 
 
 def test_register_honours_explicit_whitelist_argument(monkeypatch):
+    """Checks that an explicit whitelist argument restricts registration to listed ops."""
+
     class Silu(_CustomBase):
         pass
 
@@ -194,6 +201,7 @@ def test_register_honours_explicit_whitelist_argument(monkeypatch):
 
 
 def test_register_blacklists_fused_moe_and_skips_factory(monkeypatch):
+    """Checks that blacklisting fused_moe skips the factory patch."""
     _policy(monkeypatch, whitelist=None, blacklist=["fused_moe"])
     monkeypatch.setattr(Mod, "OOT_OPS", {})
     monkeypatch.setattr(Mod, "logger", _logger())
@@ -213,6 +221,7 @@ def test_register_blacklists_fused_moe_and_skips_factory(monkeypatch):
 
 
 def test_register_applies_vendor_patches_for_platform(monkeypatch):
+    """Checks that registration applies the vendor patches matching the platform's device, vendor and name."""
     _policy(monkeypatch, whitelist=None, blacklist=None)
     monkeypatch.setattr(Mod, "OOT_OPS", {})
     monkeypatch.setattr(Mod, "logger", _logger())
@@ -260,6 +269,7 @@ def test_register_applies_vendor_patches_for_platform(monkeypatch):
 def test_patch_unquantized_moe_oracle_wraps_both_modules(monkeypatch):
     # The patcher imports these modules by dotted name; on the image the real
     # parents are already loaded, so patch the exact objects it resolves.
+    """Checks that the oracle patch installs one shared wrapper in both upstream modules."""
     import vllm.model_executor.layers.fused_moe.oracle.unquantized as oracle_module
     import vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method as method_module
 
@@ -292,6 +302,7 @@ def test_patch_unquantized_moe_oracle_wraps_both_modules(monkeypatch):
 
 def test_patch_fused_moe_factory_rewrites_bound_model_symbols(monkeypatch):
     # Patch the real defining modules the factory patcher resolves.
+    """Checks that the factory patch rewrites bound FusedMoE symbols and leaves unrelated ones and repeat calls alone."""
     import vllm.model_executor.layers.fused_moe as package
     import vllm.model_executor.layers.fused_moe.layer as layer
 

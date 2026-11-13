@@ -61,6 +61,7 @@ class TestCanonicalRopePositions:
     """Positions are packed as exact ``[tokens, 1, 3]`` int64 rows."""
 
     def test_one_dimensional_positions_are_replicated_on_all_axes(self):
+        """Verifies one dimensional positions are replicated on all axes."""
         positions = torch.tensor([4, 7], dtype=torch.int32)
         got = qc.canonical_qsa_rope_positions(positions)
         assert got.shape == (2, 1, 3)
@@ -68,16 +69,19 @@ class TestCanonicalRopePositions:
         assert got.tolist() == [[[4, 4, 4]], [[7, 7, 7]]]
 
     def test_single_axis_rows_are_broadcast_to_three_axes(self):
+        """Verifies single axis rows are broadcast to three axes."""
         positions = torch.tensor([[1, 2, 3]], dtype=torch.int64)
         got = qc.canonical_qsa_rope_positions(positions)
         assert got.tolist() == [[[1, 1, 1]], [[2, 2, 2]], [[3, 3, 3]]]
 
     def test_three_axis_rows_are_transposed_into_token_rows(self):
+        """Verifies three axis rows are transposed into token rows."""
         positions = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=torch.int64)
         got = qc.canonical_qsa_rope_positions(positions)
         assert got.tolist() == [[[1, 3, 5]], [[2, 4, 6]]]
 
     def test_unsupported_rank_and_axis_count_are_rejected(self):
+        """Verifies unsupported rank and axis count are rejected."""
         with pytest.raises(ValueError, match=r"\[tokens\] or \[1\|3, tokens\]"):
             qc.canonical_qsa_rope_positions(torch.zeros(2, 3))
         with pytest.raises(ValueError, match="RoPE positions"):
@@ -88,6 +92,7 @@ class TestLogicalPositions:
     """Logical positions are request-relative absolute sequence positions."""
 
     def test_matches_loop_reference(self):
+        """Verifies matches loop reference."""
         query_start_loc = torch.tensor([0, 2, 5], dtype=torch.int32)
         seq_lens = torch.tensor([5, 6], dtype=torch.int32)
         token_to_req = torch.tensor([0, 0, 1, 1, 1], dtype=torch.int32)
@@ -99,6 +104,7 @@ class TestLogicalPositions:
         assert got.tolist() == expected
 
     def test_zero_tokens_returns_empty_int64(self):
+        """Verifies zero tokens returns empty int64."""
         got = qc._logical_positions(
             torch.tensor([0, 0], dtype=torch.int32),
             torch.tensor([3], dtype=torch.int32),
@@ -109,6 +115,7 @@ class TestLogicalPositions:
         assert got.dtype == torch.int64
 
     def test_precomputed_arange_is_sliced_to_token_count(self):
+        """Verifies precomputed arange is sliced to token count."""
         query_start_loc = torch.tensor([0, 3], dtype=torch.int32)
         seq_lens = torch.tensor([10], dtype=torch.int32)
         token_to_req = torch.zeros(3, dtype=torch.int32)
@@ -123,6 +130,7 @@ class TestPopulateTokenToReq:
     """The pure-Torch fallback maps real tokens and zeroes padding rows."""
 
     def test_maps_query_tokens_and_zeroes_padding(self):
+        """Verifies maps query tokens and zeroes padding."""
         common = SimpleNamespace(
             num_actual_tokens=6,
             query_start_loc_cpu=torch.tensor([0, 2, 5], dtype=torch.int32),
@@ -134,6 +142,7 @@ class TestPopulateTokenToReq:
         assert got.data_ptr() == out.data_ptr()
 
     def test_all_padding_when_no_query_tokens(self):
+        """Verifies all padding when no query tokens."""
         common = SimpleNamespace(
             num_actual_tokens=3,
             query_start_loc_cpu=torch.tensor([0, 0], dtype=torch.int32),
@@ -147,6 +156,7 @@ class TestLogicalToPhysicalSlots:
     """Logical positions are translated through the two-dimensional table."""
 
     def test_broadcasts_request_indices_across_position_rows(self):
+        """Verifies broadcasts request indices across position rows."""
         table = torch.tensor([[5, 6], [7, 8]], dtype=torch.int32)
         requests = torch.tensor([[0], [1]], dtype=torch.int64)
         positions = torch.tensor([[0, 3], [4, 7]], dtype=torch.int64)
@@ -157,6 +167,7 @@ class TestLogicalToPhysicalSlots:
         ]
 
     def test_invalid_requests_negative_positions_and_blocks_are_masked(self):
+        """Verifies invalid requests negative positions and blocks are masked."""
         table = torch.tensor([[5, 6], [7, 8]], dtype=torch.int32)
         requests = torch.tensor([0, 5, 1, 0], dtype=torch.int64)
         positions = torch.tensor([-1, 0, 8, 0], dtype=torch.int64)
@@ -166,6 +177,7 @@ class TestLogicalToPhysicalSlots:
         assert got.tolist() == [-1, -1, -1, 20]
 
     def test_empty_table_returns_all_minus_one(self):
+        """Verifies empty table returns all minus one."""
         table = torch.zeros((0, 2), dtype=torch.int32)
         requests = torch.tensor([0, 0], dtype=torch.int64)
         positions = torch.tensor([0, 1], dtype=torch.int64)
@@ -174,6 +186,7 @@ class TestLogicalToPhysicalSlots:
         assert got.dtype == torch.int64
 
     def test_rejects_non_positive_block_size_and_rank(self):
+        """Verifies rejects non positive block size and rank."""
         table = torch.zeros((1, 2), dtype=torch.int32)
         positions = torch.tensor([0], dtype=torch.int64)
         requests = torch.tensor([0], dtype=torch.int64)
@@ -189,6 +202,7 @@ class TestCompressedSlotMapping:
     """Only complete groups receive a slot; everything else is ``-1``."""
 
     def test_matches_loop_reference_for_partial_groups(self):
+        """Verifies matches loop reference for partial groups."""
         table = torch.tensor([[2, 0, 4, 6], [1, 3, 5, 7]], dtype=torch.int32)
         requests = torch.tensor([0, 0, 1, 1], dtype=torch.int32)
         positions = torch.tensor([0, 3, 4, 7], dtype=torch.int64)
@@ -199,6 +213,7 @@ class TestCompressedSlotMapping:
         assert got.tolist() == [-1, 8, -1, 5]
 
     def test_out_buffer_is_filled_and_tail_reset_to_minus_one(self):
+        """Verifies out buffer is filled and tail reset to minus one."""
         table = torch.tensor([[2, 0, 4, 6]], dtype=torch.int32)
         requests = torch.zeros(2, dtype=torch.int32)
         positions = torch.tensor([3, 7], dtype=torch.int64)
@@ -209,6 +224,7 @@ class TestCompressedSlotMapping:
         assert got.data_ptr() == out.data_ptr()
 
     def test_rejects_non_positive_block_size_or_ratio(self):
+        """Verifies rejects non positive block size or ratio."""
         table = torch.zeros((1, 2), dtype=torch.int32)
         requests = torch.zeros(1, dtype=torch.int32)
         positions = torch.zeros(1, dtype=torch.int64)
@@ -235,6 +251,7 @@ class TestForwardMetadataPrepare:
     """The metadata object produces replay-sensitive outputs exactly once."""
 
     def test_ratio_one_uses_common_slots_and_loop_reference(self):
+        """Verifies ratio one uses common slots and loop reference."""
         common = _common_metadata()
         token_to_req = torch.zeros(5, dtype=torch.int32)
         logical = torch.zeros(5, dtype=torch.int64)
@@ -262,6 +279,7 @@ class TestForwardMetadataPrepare:
         assert logical.tolist() == [99, 99, 99, 99, 99]
 
     def test_ratio_one_marks_graph_padding_rows_invalid(self):
+        """Verifies ratio one marks graph padding rows invalid."""
         common = _common_metadata(num_tokens=6)
         metadata = qc.QSAForwardMetadata(
             common=common,
@@ -276,6 +294,7 @@ class TestForwardMetadataPrepare:
         assert metadata.logical_positions.tolist() == [3, 4, 3, 4, 5, -1]
 
     def test_compressed_fallback_matches_compressed_reference(self):
+        """Verifies compressed fallback matches compressed reference."""
         common = _common_metadata()
         token_to_req = torch.zeros(5, dtype=torch.int32)
         logical = torch.zeros(5, dtype=torch.int64)
@@ -336,6 +355,7 @@ class TestMetadataBuilder:
     """Builders allocate fixed-address buffers and prepare only when eager."""
 
     def test_buffers_start_zeroed_and_logical_positions_are_invalid(self, monkeypatch):
+        """Verifies buffers start zeroed and logical positions are invalid."""
         builder = _builder(monkeypatch)
         assert builder.compress_ratio == 4
         assert builder.defer_metadata_to_forward is False
@@ -345,6 +365,7 @@ class TestMetadataBuilder:
         assert builder.logical_positions_buffer.dtype == torch.int64
 
     def test_eager_build_prepares_compressed_metadata(self, monkeypatch):
+        """Verifies eager build prepares compressed metadata."""
         builder = _builder(monkeypatch)
         common = _common_metadata()
         metadata = builder.build(0, common)
@@ -366,6 +387,7 @@ class TestMetadataBuilder:
         assert metadata._prepared is True
 
     def test_ratio_one_build_aliases_common_slot_mapping(self, monkeypatch):
+        """Verifies ratio one build aliases common slot mapping."""
         builder = _builder(monkeypatch)
         builder.compress_ratio = 1
         common = _common_metadata()
@@ -374,6 +396,7 @@ class TestMetadataBuilder:
         assert metadata._prepared is False
 
     def test_deferred_build_leaves_prepare_to_model_forward(self, monkeypatch):
+        """Verifies deferred build leaves prepare to model forward."""
         builder = _builder(monkeypatch, defer=True)
         assert builder.defer_metadata_to_forward is True
         metadata = builder.build(0, _common_metadata())
@@ -387,6 +410,7 @@ class TestStateBackends:
     """Static cache-owner contracts used by the allocator."""
 
     def test_backend_names_and_builders(self):
+        """Verifies backend names and builders."""
         assert qc.QSAStateBackend.get_name() == "QWEN38_FLASH_NEXT_EXP_QSA_STATE"
         assert qc.QSAStateBackend.get_builder_cls() is qc.QSAMetadataBuilder
         assert qc.QSAStateBackend.indexes_kv_by_block_stride() is True
@@ -394,10 +418,12 @@ class TestStateBackends:
         assert qc.QSAStateBackend.get_kv_cache_stride_order(True) == (0, 1, 2, 3, 4)
 
     def test_impl_is_out_of_band(self):
+        """Verifies impl is out of band."""
         with pytest.raises(NotImplementedError):
             qc.QSAStateBackend.get_impl_cls()
 
     def test_kv_cache_shape_requires_one_kv_head(self):
+        """Verifies kv cache shape requires one kv head."""
         assert qc.QSAStateBackend.get_kv_cache_shape(4, 16, 1, 8) == (4, 16, 1, 8)
         with pytest.raises(ValueError, match="exactly one KV head"):
             qc.QSAStateBackend.get_kv_cache_shape(4, 16, 2, 8)
@@ -427,6 +453,7 @@ class TestStateCache:
     """Base cache owner validation, registration and binding."""
 
     def test_registers_in_static_forward_context(self):
+        """Verifies registers in static forward context."""
         vllm_config = _state_config()
         cache = _state_cache(vllm_config=vllm_config)
         assert (
@@ -437,6 +464,7 @@ class TestStateCache:
         assert cache.kv_cache.numel() == 0
 
     def test_bind_replaces_storage(self):
+        """Verifies bind replaces storage."""
         cache = _state_cache()
         tensor = torch.zeros(2, 4, 1, 8, dtype=torch.bfloat16)
         cache.bind_kv_cache(tensor)
@@ -457,10 +485,12 @@ class TestStateCache:
         ],
     )
     def test_rejects_invalid_geometry(self, overrides, message):
+        """Verifies rejects invalid geometry."""
         with pytest.raises(ValueError, match=message):
             _state_cache(**overrides)
 
     def test_duplicate_prefix_is_rejected(self):
+        """Verifies duplicate prefix is rejected."""
         vllm_config = _state_config()
         _state_cache(vllm_config=vllm_config)
         with pytest.raises(ValueError, match="Duplicate layer name"):
@@ -485,16 +515,19 @@ class TestKeyStateCache:
 
     @pytest.mark.parametrize(("head", "offset"), [(8, 8), (10, 12), (4, 4), (5, 8)])
     def test_position_offset_rounds_up_to_int64(self, head, offset):
+        """Verifies position offset rounds up to int64."""
         cache = _key_cache(head_size=head)
         assert cache.key_head_size == head
         assert cache.rope_position_offset == offset
 
     def test_rope_positions_add_three_aligned_axes(self):
+        """Verifies rope positions add three aligned axes."""
         cache = _key_cache(head_size=8, cache_rope_positions=True)
         assert cache.head_size == 8 + 3 * 4
         assert cache.cache_rope_positions is True
 
     def test_bind_without_positions_creates_key_view_only(self):
+        """Verifies bind without positions creates key view only."""
         cache = _key_cache()
         storage = torch.zeros(2, 4, 1, 8, dtype=torch.bfloat16)
         cache.bind_kv_cache(storage)
@@ -505,6 +538,7 @@ class TestKeyStateCache:
         )
 
     def test_bind_with_positions_creates_int64_tail_view(self):
+        """Verifies bind with positions creates int64 tail view."""
         cache = _key_cache(head_size=8, cache_rope_positions=True)
         storage = torch.zeros(2, 4, 1, 20, dtype=torch.bfloat16)
         cache.bind_kv_cache(storage)
@@ -525,11 +559,13 @@ class TestKeyStateCache:
         ],
     )
     def test_validation_rejects_bad_layouts(self, storage, message):
+        """Verifies validation rejects bad layouts."""
         cache = _key_cache()
         with pytest.raises(ValueError, match=message):
             cache.validate_kv_cache(storage)
 
     def test_validation_rejects_non_contiguous_last_dimension(self):
+        """Verifies validation rejects non contiguous last dimension."""
         cache = _key_cache(head_size=20)
         flat = torch.zeros(2 * 4 * 20 * 2, dtype=torch.bfloat16)
         storage = torch.as_strided(flat, (2, 4, 1, 20), (160, 40, 40, 2))
@@ -538,6 +574,7 @@ class TestKeyStateCache:
             cache.validate_kv_cache(storage)
 
     def test_validation_rejects_misaligned_position_pack(self):
+        """Verifies validation rejects misaligned position pack."""
         cache = _key_cache(head_size=20, cache_rope_positions=True)
         # head_size 20 packs to a 32-element storage width; storage_offset 1
         # makes the position tail start at an odd bf16 element.
@@ -548,6 +585,7 @@ class TestKeyStateCache:
             cache.validate_kv_cache(storage)
 
     def test_key_spec_is_a_padded_full_attention_spec(self):
+        """Verifies key spec is a padded full attention spec."""
         cache = _key_cache()
         spec = cache.get_kv_cache_spec(SimpleNamespace())
         assert spec.block_size == 16
@@ -556,6 +594,7 @@ class TestKeyStateCache:
         assert spec.dtype == torch.bfloat16
 
     def test_compressed_spec_carries_the_compression_ratio(self):
+        """Verifies compressed spec carries the compression ratio."""
         cache = qc.QSACompressedKeyCache(
             head_size=8,
             dtype=torch.bfloat16,
@@ -574,6 +613,7 @@ class TestPleShardCopy:
     """Checkpoint shards are intersected with the local TP vocabulary range."""
 
     def test_overlap_intersects_checkpoint_and_tp_ranges(self):
+        """Verifies overlap intersects checkpoint and tp ranges."""
         overlap = compute_ple_shard_overlap(
             checkpoint_start=0, checkpoint_rows=10, tp_start=3, tp_end=7
         )
@@ -584,6 +624,7 @@ class TestPleShardCopy:
         )
 
     def test_disjoint_ranges_have_no_overlap(self):
+        """Verifies disjoint ranges have no overlap."""
         assert (
             compute_ple_shard_overlap(
                 checkpoint_start=10, checkpoint_rows=5, tp_start=0, tp_end=10
@@ -592,6 +633,7 @@ class TestPleShardCopy:
         )
 
     def test_overlap_rejects_invalid_bounds(self):
+        """Verifies overlap rejects invalid bounds."""
         with pytest.raises(ValueError, match="non-negative"):
             compute_ple_shard_overlap(
                 checkpoint_start=-1, checkpoint_rows=1, tp_start=0, tp_end=2
@@ -602,6 +644,7 @@ class TestPleShardCopy:
             )
 
     def test_copy_places_only_the_overlapping_rows(self):
+        """Verifies copy places only the overlapping rows."""
         destination = torch.full((4, 2), -1.0)
         loaded = torch.arange(12, dtype=torch.float32).reshape(6, 2)
         copied = copy_ple_embedding_shard_(
@@ -620,6 +663,7 @@ class TestPleShardCopy:
         ]
 
     def test_copy_reports_zero_for_disjoint_shard(self):
+        """Verifies copy reports zero for disjoint shard."""
         destination = torch.zeros((2, 2))
         loaded = torch.ones((2, 2))
         assert (
@@ -634,6 +678,7 @@ class TestPleShardCopy:
         )
 
     def test_copy_rejects_incompatible_shapes(self):
+        """Verifies copy rejects incompatible shapes."""
         with pytest.raises(ValueError, match="matching ranks"):
             copy_ple_embedding_shard_(
                 torch.zeros(2),

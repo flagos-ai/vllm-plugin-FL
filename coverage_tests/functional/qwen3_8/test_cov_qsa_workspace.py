@@ -30,6 +30,7 @@ from vllm_fl.models.qwen3_8_flash_next.gpu.ops import qsa as ops
 class TestTritonSupportProbe:
     @pytest.mark.parametrize("has_triton", [False, True])
     def test_non_host_devices_follow_the_triton_flag(self, monkeypatch, has_triton):
+        """Verifies non host devices follow the triton flag."""
         monkeypatch.setattr(ops, "HAS_TRITON", has_triton)
         assert (
             ops.qsa_forward_metadata_triton_supported(torch.device("cuda"))
@@ -45,6 +46,7 @@ class TestPrepareSplitWorkspace:
         return q, k_cache
 
     def test_single_split_needs_no_workspace(self, monkeypatch):
+        """Verifies single split needs no workspace."""
         monkeypatch.setattr(ops, "qsa_sparse_split_count", lambda *args: 1)
         q, k_cache = self._inputs()
         cache = {}
@@ -52,6 +54,7 @@ class TestPrepareSplitWorkspace:
         assert cache == {}
 
     def test_multi_split_workspace_is_cached_by_bucket(self, monkeypatch):
+        """Verifies multi split workspace is cached by bucket."""
         monkeypatch.setattr(ops, "qsa_sparse_split_count", lambda *args: 3)
         q, k_cache = self._inputs()
         cache = {}
@@ -69,6 +72,7 @@ class TestPrepareSplitWorkspace:
         assert again[1] is workspace
 
     def test_missing_cache_still_allocates_a_fresh_workspace(self, monkeypatch):
+        """Verifies missing cache still allocates a fresh workspace."""
         monkeypatch.setattr(ops, "qsa_sparse_split_count", lambda *args: 2)
         q, k_cache = self._inputs()
         first = ops.qsa_prepare_split_workspace(q, k_cache, 7)
@@ -99,6 +103,7 @@ class TestSparsePagedAttentionForwarding:
         return calls
 
     def test_single_split_forwards_without_workspace(self, monkeypatch):
+        """Verifies single split forwards without workspace."""
         calls = self._install(monkeypatch, splits=1)
         inputs = self._inputs()
         assert ops.qsa_sparse_paged_attention(*inputs, 0.5) == "attended"
@@ -109,6 +114,7 @@ class TestSparsePagedAttentionForwarding:
         assert kwargs["gate"] is None
 
     def test_multi_split_allocates_a_workspace(self, monkeypatch):
+        """Verifies multi split allocates a workspace."""
         calls = self._install(monkeypatch, splits=3)
         inputs = self._inputs()
         ops.qsa_sparse_paged_attention(
@@ -127,6 +133,7 @@ class TestSparsePagedAttentionForwarding:
         assert kwargs["gate"] == "gate"
 
     def test_explicit_workspace_is_forwarded_unchanged(self, monkeypatch):
+        """Verifies explicit workspace is forwarded unchanged."""
         calls = self._install(monkeypatch, splits=3)
         inputs = self._inputs()
         workspace = ("out", "a", "b")
@@ -152,6 +159,7 @@ class TestChunkedSelection:
         )
 
     def test_rows_are_processed_in_budget_sized_chunks(self, monkeypatch):
+        """Verifies rows are processed in budget sized chunks."""
         monkeypatch.setattr(ops, "_LOGITS_WORKSPACE_BYTES", 64)
         calls = []
         expands = []
@@ -188,6 +196,7 @@ class TestChunkedSelection:
         ]
 
     def test_whole_batch_is_one_chunk_when_the_budget_allows(self, monkeypatch):
+        """Verifies whole batch is one chunk when the budget allows."""
         calls = []
         captured = {}
 
@@ -217,6 +226,7 @@ class TestChunkedSelection:
         assert captured["out"].data_ptr() == out.data_ptr()
 
     def test_output_width_is_validated(self):
+        """Verifies output width is validated."""
         inputs = self._inputs()
         with pytest.raises(ValueError, match="invalid shape"):
             ops.qsa_select_paged_tokens(
@@ -229,6 +239,7 @@ class TestChunkedSelection:
 
 class TestSelectAllDelegation:
     def test_all_visible_blocks_are_expanded_in_canonical_order(self, monkeypatch):
+        """Verifies all visible blocks are expanded in canonical order."""
         captured = {}
 
         def fake_expand(blocks, positions, lengths, requests, ratio, topk, out):
@@ -262,6 +273,7 @@ class TestSelectAllDelegation:
         assert captured["out"] == "buffer"
 
     def test_empty_rows_produce_an_empty_block_grid(self, monkeypatch):
+        """Verifies empty rows produce an empty block grid."""
         captured = {}
 
         def fake_expand(blocks, *args):

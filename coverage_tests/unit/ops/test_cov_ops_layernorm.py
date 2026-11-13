@@ -41,6 +41,7 @@ def _bare(**attrs):
 
 
 def test_forward_oot_forwards_instance_input_and_residual(monkeypatch):
+    """Checks that forward_oot dispatches the instance, input and residual to the RMSNorm kernel."""
     recorder = _Recorder("dispatched")
     monkeypatch.setattr(Mod, "_rms_norm", recorder)
     instance = _bare()
@@ -56,6 +57,7 @@ def test_forward_oot_forwards_instance_input_and_residual(monkeypatch):
 
 
 def test_forward_oot_passes_none_residual(monkeypatch):
+    """Checks that forward_oot passes a None residual when none is given."""
     recorder = _Recorder("none")
     monkeypatch.setattr(Mod, "_rms_norm", recorder)
     instance = _bare()
@@ -66,6 +68,7 @@ def test_forward_oot_passes_none_residual(monkeypatch):
 
 
 def test_constructor_forwards_to_upstream_rms_norm(monkeypatch):
+    """Checks that construction forwards the geometry and options positionally to the upstream RMSNorm."""
     init_calls = []
     monkeypatch.setattr(
         Mod.RMSNorm,

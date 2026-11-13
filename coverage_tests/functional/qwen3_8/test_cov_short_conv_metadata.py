@@ -35,6 +35,7 @@ from vllm_fl.models.qwen3_8_flash_next.common import short_conv_attn as sc
 
 class TestBackendStatics:
     def test_short_conv_backend_names_and_flags(self):
+        """Verifies short conv backend names and flags."""
         assert sc.ShortConvAttentionBackend.get_name() == "SHORT_CONV_ATTN"
         assert (
             sc.ShortConvAttentionBackend.get_builder_cls()
@@ -43,6 +44,7 @@ class TestBackendStatics:
         assert sc.ShortConvAttentionBackend.is_ssm() is True
 
     def test_ple_backend_uses_uniform_batch_graphs(self):
+        """Verifies ple backend uses uniform batch graphs."""
         assert sc.PleShortConvAttentionBackend.get_name() == "PLE_SHORT_CONV_ATTN"
         assert (
             sc.PleShortConvAttentionBackend.get_builder_cls()
@@ -54,6 +56,7 @@ class TestBackendStatics:
         assert builder.supports_update_block_table is False
 
     def test_metadata_inherits_the_generic_short_conv_metadata(self):
+        """Verifies metadata inherits the generic short conv metadata."""
         assert issubclass(
             sc.PleShortConvAttentionMetadata, sc.ShortConvAttentionMetadata
         )
@@ -80,6 +83,7 @@ def _builder(**overrides):
 
 class TestBuildForCudagraphCapture:
     def test_decode_only_capture_calls_build_without_spec_fields(self, monkeypatch):
+        """Verifies decode only capture calls build without spec fields."""
         calls = []
 
         def fake_build(self, prefix, common, fast_build=False, **kwargs):
@@ -99,6 +103,7 @@ class TestBuildForCudagraphCapture:
         assert calls == [(0, common, False, {})]
 
     def test_spec_capture_derives_accepted_and_draft_counts(self, monkeypatch):
+        """Verifies spec capture derives accepted and draft counts."""
         calls = []
 
         def fake_build(self, prefix, common, fast_build=False, **kwargs):
@@ -120,6 +125,7 @@ class TestBuildForCudagraphCapture:
         assert kwargs["num_decode_draft_tokens_cpu"].tolist() == [1, 2]
 
     def test_over_capture_sized_batches_are_rejected(self):
+        """Verifies over capture sized batches are rejected."""
         builder = _builder()
         too_many_reqs = SimpleNamespace(
             num_reqs=5,
@@ -139,6 +145,7 @@ class TestBuildForCudagraphCapture:
 
 class TestBuildRouting:
     def test_non_spec_decode_route_forwards_to_non_spec_builder(self, monkeypatch):
+        """Verifies non spec decode route forwards to non spec builder."""
         calls = []
 
         def fake_non_spec(
@@ -163,6 +170,7 @@ class TestBuildRouting:
         assert calls == [(0, common, False, draft, {})]
 
     def test_all_minus_one_draft_counts_stay_on_the_non_spec_route(self, monkeypatch):
+        """Verifies all minus one draft counts stay on the non spec route."""
         calls = []
 
         def fake_non_spec(
@@ -225,6 +233,7 @@ class TestNonSpecMetadata:
     def test_pure_decode_keeps_padded_state_rows_and_initial_flags(
         self, captured_build
     ):
+        """Verifies pure decode keeps padded state rows and initial flags."""
         captured, install = captured_build
         metadata = _fake_metadata(
             num_decodes=2,
@@ -251,6 +260,7 @@ class TestNonSpecMetadata:
     def test_pure_prefill_uses_prefill_indices_and_max_query_length(
         self, captured_build
     ):
+        """Verifies pure prefill uses prefill indices and max query length."""
         captured, install = captured_build
         metadata = _fake_metadata(
             num_prefills=2,
@@ -271,6 +281,7 @@ class TestNonSpecMetadata:
         assert captured["max_prefill_query_len"] == 3
 
     def test_mixed_batch_concatenates_decodes_then_prefills(self, captured_build):
+        """Verifies mixed batch concatenates decodes then prefills."""
         captured, install = captured_build
         metadata = _fake_metadata(
             num_decodes=1,
@@ -295,6 +306,7 @@ class TestNonSpecMetadata:
         assert captured["num_decode_draft_tokens_cpu"] is None
 
     def test_full_graph_padding_rows_get_null_initial_state(self, captured_build):
+        """Verifies full graph padding rows get null initial state."""
         captured, install = captured_build
         metadata = _fake_metadata(
             num_decodes=2,

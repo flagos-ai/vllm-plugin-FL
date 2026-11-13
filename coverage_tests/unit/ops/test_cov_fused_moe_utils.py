@@ -196,6 +196,7 @@ def _clean_environment(monkeypatch):
 
 
 def test_get_current_platform_resolves_at_call_time():
+    """Checks that _get_current_platform reads vllm.platforms.current_platform at call time."""
     import vllm.platforms
 
     platform = _REAL_GET_CURRENT_PLATFORM()
@@ -208,6 +209,7 @@ def test_get_current_platform_resolves_at_call_time():
 
 
 def test_select_cpu_and_tpu_short_circuit(monkeypatch):
+    """Checks that CPU and TPU platforms short-circuit selection to their dedicated backends."""
     _patch_platform(monkeypatch, _Platform("cpu"))
     assert Mod.select_unquantized_moe_backend_oot(_moe()) == (Backend.CPU, None)
 
@@ -228,6 +230,7 @@ def test_select_cpu_and_tpu_short_circuit(monkeypatch):
 def test_select_npu_rejects_grouped_moe_configs(
     monkeypatch, moe_kwargs, parallel_kwargs
 ):
+    """Checks that NPU rejects LoRA, EPLB, PCP, DP-only and batched-format grouped MoE configs."""
     _patch_platform(monkeypatch, _Platform("npu", device_type="npu"))
     config = _moe(parallel=_parallel(**parallel_kwargs), **moe_kwargs)
     with pytest.raises(NotImplementedError, match="Ascend grouped MoE"):
@@ -235,6 +238,7 @@ def test_select_npu_rejects_grouped_moe_configs(
 
 
 def test_select_npu_rejects_sequence_parallel_without_dp_ep(monkeypatch):
+    """Checks that NPU rejects sequence parallelism unless DP EP all-gather is enabled."""
     _patch_platform(monkeypatch, _Platform("npu", device_type="npu"))
     config = _moe(parallel=_parallel(is_sequence_parallel=True))
     with pytest.raises(NotImplementedError, match="requires DP EP AllGather"):
@@ -242,6 +246,7 @@ def test_select_npu_rejects_sequence_parallel_without_dp_ep(monkeypatch):
 
 
 def test_select_npu_rejects_unknown_explicit_backend(monkeypatch):
+    """Checks that NPU raises for an explicit backend that is not supported."""
     _patch_platform(monkeypatch, _Platform("npu", device_type="npu"))
     config = _moe(backend="flashinfer")
     with pytest.raises(NotImplementedError, match="Unsupported explicit Ascend"):
@@ -258,6 +263,7 @@ def _fake_vllm_config(*, enable_sp: bool, placement: str):
 
 
 def test_select_npu_ep_success_requires_hccl_linear_even_split(monkeypatch):
+    """Checks that a valid HCCL linear DP EP deployment selects the Triton experts kernel."""
     _patch_platform(
         monkeypatch,
         _Platform(
@@ -300,6 +306,7 @@ def test_select_npu_ep_success_requires_hccl_linear_even_split(monkeypatch):
 def test_select_npu_ep_rejects_invalid_deployments(
     monkeypatch, parallel_kwargs, vllm_kwargs, match
 ):
+    """Checks that invalid NPU EP deployments are rejected with the expected messages."""
     dist_backend = vllm_kwargs.pop("dist_backend", "hccl")
     _patch_platform(
         monkeypatch,
@@ -334,6 +341,7 @@ def test_select_npu_ep_rejects_invalid_deployments(
 
 @pytest.mark.parametrize("backend", ["triton", "auto"])
 def test_select_flaggems_experts_for_triton_and_auto(monkeypatch, backend):
+    """Checks that FlagGems selects the FL Triton experts for explicit triton and auto backends."""
     _patch_platform(
         monkeypatch, _Platform("cuda", out_of_tree=True, vendor_name="nvidia")
     )
@@ -346,6 +354,7 @@ def test_select_flaggems_experts_for_triton_and_auto(monkeypatch, backend):
 
 
 def test_select_flaggems_declined_for_explicit_other_backend(monkeypatch):
+    """Checks that FlagGems is skipped for an explicit non-triton backend."""
     _patch_platform(
         monkeypatch, _Platform("cuda", out_of_tree=True, vendor_name="nvidia")
     )
@@ -375,6 +384,7 @@ def test_select_flaggems_declined_for_explicit_other_backend(monkeypatch):
 def test_select_flaggems_requires_all_conditions(
     monkeypatch, prefer, use_flaggems, out_of_tree
 ):
+    """Checks that FlagGems selection requires the preference, the FlagGems flag and an out-of-tree platform."""
     _patch_platform(
         monkeypatch,
         _Platform("cuda", out_of_tree=out_of_tree, vendor_name="nvidia"),
@@ -393,6 +403,7 @@ def test_select_flaggems_requires_all_conditions(
 
 
 def test_select_lora_returns_triton_kernel(monkeypatch):
+    """Checks that LoRA-enabled configs select the Triton backend and kernel."""
     kernels = _install_registry(monkeypatch, _registry([Backend.TRITON]))
     backend, kernel = Mod.select_unquantized_moe_backend_oot(_moe(lora=True))
     assert backend is Backend.TRITON
@@ -418,11 +429,13 @@ def test_select_lora_returns_triton_kernel(monkeypatch):
     ],
 )
 def test_get_priority_backends_by_platform(monkeypatch, platform, expected):
+    """Checks the priority backend list derived for CUDA, ROCm, XPU, CPU and portable platforms."""
     _patch_platform(monkeypatch, platform)
     assert Mod._get_priority_backends(_moe()) == expected
 
 
 def test_get_priority_backends_moves_cutlass_back_with_dp(monkeypatch):
+    """Checks that DP greater than one moves FlashInfer CUTLASS behind Triton."""
     _patch_platform(monkeypatch, _Platform("cuda", vendor_name="nvidia"))
     config = _moe(parallel=_parallel(dp_size=2))
     assert Mod._get_priority_backends(config) == [
@@ -439,6 +452,7 @@ def test_get_priority_backends_moves_cutlass_back_with_dp(monkeypatch):
 
 
 def test_select_explicit_backend_returns_kernel(monkeypatch):
+    """Checks that an explicit backend returns its kernel and standard activation format arguments."""
     kernels = _install_registry(
         monkeypatch,
         _registry([Backend.TRITON]),
@@ -452,6 +466,7 @@ def test_select_explicit_backend_returns_kernel(monkeypatch):
 
 
 def test_select_explicit_triton_with_batched_format_switches_kernel(monkeypatch):
+    """Checks that explicit triton switches to the batched Triton kernel when the batched format is enabled."""
     kernels = _install_registry(
         monkeypatch,
         _registry([Backend.BATCHED_TRITON]),
@@ -467,6 +482,7 @@ def test_select_explicit_triton_with_batched_format_switches_kernel(monkeypatch)
 
 
 def test_select_unsupported_explicit_backend_raises_with_reason(monkeypatch):
+    """Checks that an unsupported explicit backend raises with the kernel's reason."""
     _install_registry(
         monkeypatch,
         {
@@ -481,6 +497,7 @@ def test_select_unsupported_explicit_backend_raises_with_reason(monkeypatch):
 
 
 def test_select_unsupported_explicit_backend_raises_without_reason(monkeypatch):
+    """Checks that an unsupported explicit backend raises the generic message when no reason exists."""
     _install_registry(
         monkeypatch,
         {Backend.TRITON: _Kernel(Backend.TRITON, supported=False, reason=None)},
@@ -496,6 +513,7 @@ def test_select_unsupported_explicit_backend_raises_without_reason(monkeypatch):
 
 
 def test_select_auto_returns_first_supported_backend(monkeypatch):
+    """Checks that auto selection returns the first supported backend without probing later kernels."""
     kernels = _install_registry(monkeypatch, _registry(CUDA_BACKENDS))
     backend, kernel = Mod.select_unquantized_moe_backend_oot(_moe())
     assert backend is Backend.FLASHINFER_TRTLLM
@@ -504,6 +522,7 @@ def test_select_auto_returns_first_supported_backend(monkeypatch):
 
 
 def test_select_auto_falls_through_unsupported_backends(monkeypatch):
+    """Checks that auto selection skips unsupported backends and lands on Triton."""
     kernels = _install_registry(
         monkeypatch,
         _registry(
@@ -520,6 +539,7 @@ def test_select_auto_falls_through_unsupported_backends(monkeypatch):
 
 
 def test_select_auto_raises_when_nothing_supported(monkeypatch):
+    """Checks that auto selection raises when no backend supports the deployment."""
     _install_registry(
         monkeypatch,
         _registry(CUDA_BACKENDS, supported=dict.fromkeys(CUDA_BACKENDS, False)),
@@ -534,6 +554,7 @@ def test_select_auto_raises_when_nothing_supported(monkeypatch):
 
 
 def test_select_flashinfer_fp16_disabled_removes_flashinfer_candidates(monkeypatch):
+    """Checks that disabling FlashInfer FP16 drops both FlashInfer candidates."""
     monkeypatch.setenv("VLLM_USE_FLASHINFER_MOE_FP16", "0")
     kernels = _install_registry(monkeypatch, _registry(CUDA_BACKENDS))
     backend, kernel = Mod.select_unquantized_moe_backend_oot(_moe())
@@ -558,6 +579,7 @@ def _install_flashinfer_enum(monkeypatch):
     ],
 )
 def test_select_flashinfer_fp16_explicit_backend(monkeypatch, explicit, expected):
+    """Checks that an explicit FlashInfer backend selects the matching unquantized backend."""
     monkeypatch.setenv("VLLM_USE_FLASHINFER_MOE_FP16", "1")
     monkeypatch.setenv("VLLM_FLASHINFER_MOE_BACKEND", explicit)
     monkeypatch.setattr(
@@ -573,6 +595,7 @@ def test_select_flashinfer_fp16_explicit_backend(monkeypatch, explicit, expected
 
 
 def test_select_flashinfer_fp16_explicit_unsupported_enum(monkeypatch):
+    """Checks that an explicit unsupported FlashInfer enum value raises."""
     monkeypatch.setenv("VLLM_USE_FLASHINFER_MOE_FP16", "1")
     monkeypatch.setenv("VLLM_FLASHINFER_MOE_BACKEND", "other")
     monkeypatch.setattr(
@@ -593,6 +616,7 @@ def test_select_flashinfer_fp16_explicit_unsupported_enum(monkeypatch):
 
 
 def test_select_flashinfer_fp16_tries_both_candidates(monkeypatch):
+    """Checks that FlashInfer FP16 falls back from TRT-LLM to CUTLASS when TRT-LLM is unsupported."""
     monkeypatch.setenv("VLLM_USE_FLASHINFER_MOE_FP16", "1")
     kernels = _install_registry(
         monkeypatch,
@@ -607,6 +631,7 @@ def test_select_flashinfer_fp16_tries_both_candidates(monkeypatch):
 
 
 def test_select_flashinfer_fp16_no_supported_candidate_raises(monkeypatch):
+    """Checks that FlashInfer FP16 raises when neither candidate is supported."""
     monkeypatch.setenv("VLLM_USE_FLASHINFER_MOE_FP16", "1")
     _install_registry(
         monkeypatch,
@@ -628,6 +653,7 @@ def test_select_flashinfer_fp16_no_supported_candidate_raises(monkeypatch):
 
 
 def test_select_aiter_disabled_removes_candidate(monkeypatch):
+    """Checks that disabling the AITER MoE flag removes the AITER candidate."""
     _patch_platform(monkeypatch, _Platform("rocm", vendor_name="amd"))
     monkeypatch.setattr(
         Mod,
@@ -645,6 +671,7 @@ def test_select_aiter_disabled_removes_candidate(monkeypatch):
 
 
 def test_select_aiter_enabled_returns_aiter(monkeypatch):
+    """Checks that enabling both AITER flags selects the AITER backend."""
     _patch_platform(monkeypatch, _Platform("rocm", vendor_name="amd"))
     monkeypatch.setattr(
         Mod,
@@ -662,6 +689,7 @@ def test_select_aiter_enabled_returns_aiter(monkeypatch):
 
 
 def test_select_flaggems_skipped_when_rocm_aiter_requested(monkeypatch):
+    """Checks that FlagGems is skipped when ROCm AITER is requested."""
     _patch_platform(
         monkeypatch,
         _Platform("rocm", out_of_tree=True, vendor_name="amd"),
@@ -705,6 +733,7 @@ def _install_align(monkeypatch):
 
 
 def test_prepare_expert_assignment_naive_path(monkeypatch):
+    """Checks that the naive path flattens top-k ids without invoking block alignment."""
     calls = _install_align(monkeypatch)
     topk_ids = torch.tensor([[0, 1], [1, 0]], dtype=torch.int32)
     result = Mod._prepare_expert_assignment(
@@ -747,6 +776,7 @@ def test_prepare_expert_assignment_naive_path(monkeypatch):
 def test_prepare_expert_assignment_aligned_path(
     monkeypatch, kwargs, expected_expert_map
 ):
+    """Checks that the aligned path calls block alignment with the expected block size, experts and expert map."""
     calls = _install_align(monkeypatch)
     topk_ids = torch.tensor([[0, 1], [1, 0]], dtype=torch.int32)
     params = {
@@ -767,6 +797,7 @@ def test_prepare_expert_assignment_aligned_path(
 
 
 def test_prepare_expert_assignment_passes_ignore_invalid(monkeypatch):
+    """Checks that ignore_invalid_experts is forwarded to block alignment."""
     calls = _install_align(monkeypatch)
     topk_ids = torch.tensor([[0, 1]], dtype=torch.int32)
     Mod._prepare_expert_assignment(
@@ -782,6 +813,7 @@ def test_prepare_expert_assignment_passes_ignore_invalid(monkeypatch):
 
 
 def test_prepare_expert_assignment_zero_block_shape_stays_naive(monkeypatch):
+    """Checks that a zero-width block shape keeps the naive flattening path."""
     calls = _install_align(monkeypatch)
     topk_ids = torch.tensor([[0, 1]], dtype=torch.int32)
     sorted_ids, flat_topk, padded = Mod._prepare_expert_assignment(
@@ -957,6 +989,7 @@ def _install_generic_apply_helpers(monkeypatch):
 
 
 def test_apply_native_triton_clamp_path(monkeypatch):
+    """Checks that a native Triton clamp config delegates apply to the upstream TritonExperts."""
     _patch_platform(monkeypatch, _Platform("cuda", vendor_name="nvidia"))
     monkeypatch.setattr(Mod, "has_native_triton_moe", lambda: True)
     calls = []
@@ -998,6 +1031,7 @@ def test_apply_native_triton_clamp_path(monkeypatch):
 
 
 def test_apply_npu_path_dispatches_to_packaged_ops(monkeypatch):
+    """Checks that the NPU path forwards quant options and scales to the packaged fused experts op."""
     _patch_platform(
         monkeypatch,
         _Platform("npu", device_type="npu", vendor_name="ascend"),
@@ -1056,6 +1090,7 @@ def test_apply_npu_path_dispatches_to_packaged_ops(monkeypatch):
     [(True, None), (False, 1.0)],
 )
 def test_apply_npu_rejects_lora_or_clamped_experts(monkeypatch, lora, clamp):
+    """Checks that the NPU path rejects LoRA and clamped experts."""
     _patch_platform(
         monkeypatch,
         _Platform("npu", device_type="npu", vendor_name="ascend"),
@@ -1069,6 +1104,7 @@ def test_apply_npu_rejects_lora_or_clamped_experts(monkeypatch, lora, clamp):
 
 
 def test_apply_kunlunxin_path(monkeypatch):
+    """Checks that the Kunlunxin path calls the vendor fused experts impl with int8 options."""
     _patch_platform(
         monkeypatch,
         _Platform("cuda", vendor_name="kunlunxin", device_type="cuda"),
@@ -1103,6 +1139,7 @@ def test_apply_kunlunxin_path(monkeypatch):
 
 @pytest.mark.parametrize("use_flaggems_vllm", [True, False])
 def test_apply_flaggems_fast_path(monkeypatch, use_flaggems_vllm):
+    """Checks the FlagGems fast path through flaggems_vllm or flag_gems with int4 options."""
     _patch_platform(monkeypatch, _Platform("cuda", vendor_name="nvidia"))
     monkeypatch.setattr(
         Mod,
@@ -1142,6 +1179,7 @@ def test_apply_flaggems_fast_path(monkeypatch, use_flaggems_vllm):
 
 
 def test_apply_generic_pipeline_argument_mapping(monkeypatch):
+    """Checks the generic two-GEMM pipeline argument mapping, activation, quantization and sum order."""
     state = _install_generic_apply_helpers(monkeypatch)
     experts = _make_experts(_quant_conf())
     hidden = torch.randn(4, 8, dtype=torch.float16)
@@ -1220,6 +1258,7 @@ def test_apply_generic_pipeline_argument_mapping(monkeypatch):
 
 
 def test_apply_generic_pipeline_lora_order_and_reuse(monkeypatch):
+    """Checks the LoRA call order and reused shapes in the generic pipeline."""
     state = _install_generic_apply_helpers(monkeypatch)
     experts = _make_experts(_quant_conf(), lora_context=object())
     w13_calls = []
@@ -1271,6 +1310,7 @@ def test_apply_generic_pipeline_lora_order_and_reuse(monkeypatch):
     ],
 )
 def test_apply_generic_compute_type_mapping(monkeypatch, dtype, expected):
+    """Checks the compute type selected for bf16, fp32 and float8 hidden inputs."""
     state = _install_generic_apply_helpers(monkeypatch)
     experts = _make_experts(_quant_conf())
     hidden = torch.zeros(4, 8, dtype=dtype)
@@ -1283,6 +1323,7 @@ def test_apply_generic_compute_type_mapping(monkeypatch, dtype, expected):
 
 
 def test_apply_generic_int4_hidden_size_is_halved(monkeypatch):
+    """Checks that int4 weights halve the hidden size passed to config lookup."""
     state = _install_generic_apply_helpers(monkeypatch)
     experts = _make_experts(_quant_conf(use_int4_w4a16=True))
     hidden = torch.randn(4, 8, dtype=torch.float16)
@@ -1321,6 +1362,7 @@ def test_apply_generic_int4_hidden_size_is_halved(monkeypatch):
     ],
 )
 def test_apply_rejects_invalid_inputs(monkeypatch, hidden_factory, w1_shape, match):
+    """Checks that apply rejects hidden-size mismatches, wrong ranks, non-contiguous inputs and integer dtypes."""
     _patch_platform(monkeypatch, _Platform("cpu"))
     hidden = hidden_factory()
     w1 = torch.randn(*w1_shape, dtype=torch.float16)
@@ -1331,6 +1373,7 @@ def test_apply_rejects_invalid_inputs(monkeypatch, hidden_factory, w1_shape, mat
 
 
 def test_apply_requires_unit_stride_on_weights(monkeypatch):
+    """Checks that apply requires unit stride on the last weight dimension."""
     _patch_platform(monkeypatch, _Platform("cpu"))
     hidden = torch.randn(4, 4, dtype=torch.float16)
     w1 = torch.empty_strided((2, 4, 4), (32, 8, 2), dtype=torch.float16)
@@ -1342,6 +1385,7 @@ def test_apply_requires_unit_stride_on_weights(monkeypatch):
 
 
 def test_moe_sum_delegates_to_cached_op(monkeypatch):
+    """Checks that moe_sum delegates to the cached _moe_sum op with the same tensors."""
     recorded = []
     monkeypatch.setattr(Mod, "_moe_sum", lambda inp, out: recorded.append((inp, out)))
     experts = object.__new__(Mod.TritonExpertsFL)

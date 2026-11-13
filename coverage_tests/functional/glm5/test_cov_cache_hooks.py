@@ -72,6 +72,7 @@ def _mamba_spec():
 
 class TestInnerSpecs:
     def test_uniform_groups_yield_their_member_mapping(self, monkeypatch):
+        """Verifies uniform groups yield their member mapping."""
         import vllm.v1.kv_cache_interface as kvif
 
         class FakeUniform:
@@ -84,11 +85,13 @@ class TestInnerSpecs:
         assert list(pc._inner_specs([group])) == [("a", spec_a), ("b", spec_b)]
 
     def test_plain_groups_repeat_the_group_spec_per_layer(self):
+        """Verifies plain groups repeat the group spec per layer."""
         spec = object()
         group = SimpleNamespace(kv_cache_spec=spec, layer_names=["x", "y"])
         assert list(pc._inner_specs([group])) == [("x", spec), ("y", spec)]
 
     def test_tail_specs_identify_kpool_groups(self):
+        """Verifies tail specs identify kpool groups."""
         tail = _tail_spec()
         assert (
             pc._is_glm5_kpool_groups(
@@ -106,6 +109,7 @@ class TestInnerSpecs:
 
 class TestGroupGlm5Kpool:
     def test_attention_tail_and_mamba_groups_are_separated(self):
+        """Verifies attention tail and mamba groups are separated."""
         specs = {
             "layers.0.mla": _mla_spec(),
             "layers.0.indexer.k_cache": _mla_spec(compress_ratio=4),
@@ -128,6 +132,7 @@ class TestGroupGlm5Kpool:
         assert isinstance(mamba_group.kv_cache_spec, MambaSpec)
 
     def test_mamba_is_optional(self):
+        """Verifies mamba is optional."""
         specs = {
             "mla": _mla_spec(),
             "index": _mla_spec(compress_ratio=4),
@@ -137,6 +142,7 @@ class TestGroupGlm5Kpool:
         assert len(groups) == 2
 
     def test_non_mla_attention_is_rejected(self):
+        """Verifies non mla attention is rejected."""
         specs = {
             "mla": _mla_spec(),
             "index": _mla_spec(compress_ratio=4),
@@ -153,6 +159,7 @@ class _Owner:
 
 class TestRuntimePatchRegistry:
     def test_capture_and_lookup_are_keyed_by_owner_and_attribute(self, monkeypatch):
+        """Verifies capture and lookup are keyed by owner and attribute."""
         monkeypatch.setattr(pc, "_RUNTIME_BASELINES", {})
         pc._capture_runtime_baseline(_Owner, "value")
         assert pc._runtime_pristine(_Owner, "value") == "pristine"
@@ -160,6 +167,7 @@ class TestRuntimePatchRegistry:
         assert target.endswith("_Owner.value")
 
     def test_runtime_patch_records_the_pristine_callable(self, monkeypatch):
+        """Verifies runtime patch records the pristine callable."""
         monkeypatch.setattr(pc, "_RUNTIME_BASELINES", {})
         pc._capture_runtime_baseline(_Owner, "value")
 
@@ -195,6 +203,7 @@ def _install_layout(monkeypatch, layout):
 
 class TestMetadataBuilderPatch:
     def test_layout_none_delegates_to_the_pristine_builder(self, monkeypatch):
+        """Verifies layout none delegates to the pristine builder."""
         from vllm.v1.worker import utils as worker_utils
 
         calls = []
@@ -219,6 +228,7 @@ class TestMetadataBuilderPatch:
         assert calls == [(owner, "config", "device", 8, 2)]
 
     def test_layout_rewrites_the_builder_spec_and_records_the_layout(self, monkeypatch):
+        """Verifies layout rewrites the builder spec and records the layout."""
         from vllm.v1.worker import utils as worker_utils
 
         built = []
@@ -284,6 +294,7 @@ class TestIndexerBuildPatch:
     def test_block_table_is_downsampled_and_copied_into_a_stable_buffer(
         self, monkeypatch
     ):
+        """Verifies block table is downsampled and copied into a stable buffer."""
         patch, calls = self._build(monkeypatch)
         table = torch.arange(8, dtype=torch.int32).reshape(2, 4)
         owner = SimpleNamespace(
@@ -307,6 +318,7 @@ class TestIndexerBuildPatch:
         assert calls[0][3] is False
 
     def test_buffer_is_reused_across_graph_buckets(self, monkeypatch):
+        """Verifies buffer is reused across graph buckets."""
         patch, _ = self._build(monkeypatch, physical=False)
         owner = SimpleNamespace(
             kv_cache_spec=SimpleNamespace(block_size=8),
@@ -333,6 +345,7 @@ class TestIndexerBuildPatch:
         )
 
     def test_width_and_row_capacity_changes_are_rejected(self, monkeypatch):
+        """Verifies width and row capacity changes are rejected."""
         patch, _ = self._build(monkeypatch, physical=False)
         owner = SimpleNamespace(
             kv_cache_spec=SimpleNamespace(block_size=8),
@@ -360,6 +373,7 @@ class TestIndexerBuildPatch:
             )
 
     def test_absent_kernel_block_size_skips_translation(self, monkeypatch):
+        """Verifies absent kernel block size skips translation."""
         patch, _ = self._build(monkeypatch, physical=False)
         table = torch.arange(8, dtype=torch.int32).reshape(2, 4)
         owner = SimpleNamespace(
@@ -377,6 +391,7 @@ class TestIndexerBuildPatch:
 
 class TestZeroerPatch:
     def test_groups_with_a_physical_layout_are_removed(self, monkeypatch):
+        """Verifies groups with a physical layout are removed."""
         from vllm.v1.worker import utils as worker_utils
 
         calls = []
@@ -427,6 +442,7 @@ class TestZeroerPatch:
 
 class TestPatchBundle:
     def test_bundle_contains_all_worker_patches(self, monkeypatch):
+        """Verifies bundle contains all worker patches."""
         from vllm.v1.attention.backends.mla import indexer as indexer_backend
         from vllm.v1.worker import utils as worker_utils
 
@@ -447,6 +463,7 @@ class TestPatchBundle:
         assert all(patch.fingerprint == "fp" for patch in patches)
 
     def test_install_is_idempotent_after_the_first_transaction(self, monkeypatch):
+        """Verifies install is idempotent after the first transaction."""
         marker = object()
         bound = []
         monkeypatch.setattr(pc, "_EARLY_PATCHES", [marker])

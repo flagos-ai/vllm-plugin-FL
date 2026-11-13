@@ -79,6 +79,7 @@ class TestProcessWeightsDelegation:
     """Kernels outside the packed-checkpoint path keep stock behavior."""
 
     def test_untagged_kernel_delegates(self, fake_env):
+        """Verifies an untagged kernel delegates to stock processing and records no shape."""
         layer = make_layer(fake_env, _payload(), _scales())
         kernel = make_kernel(fake_env, packed=False)
 
@@ -90,6 +91,7 @@ class TestProcessWeightsDelegation:
         assert fake_env.pack_calls == []
 
     def test_non_g128_group_size_delegates(self, fake_env):
+        """Verifies a kernel with a non-128 group size delegates to stock processing."""
         layer = make_layer(fake_env, _payload(), _scales())
         kernel = make_kernel(fake_env, group_size=64)
 
@@ -100,6 +102,7 @@ class TestProcessWeightsDelegation:
         assert fake_env.pack_calls == []
 
     def test_zero_points_checkpoint_delegates(self, fake_env):
+        """Verifies a zero-point checkpoint delegates to stock processing."""
         layer = make_layer(fake_env, _payload(), _scales())
         kernel = make_kernel(fake_env, zero_points=True)
 
@@ -114,6 +117,7 @@ class TestProcessWeightsPacked:
     """The packed path unpacks, repacks and rewrites layer parameters."""
 
     def test_packed_checkpoint_is_unpacked_and_repacked(self, fake_env):
+        """Verifies packed payloads are unpacked, repacked and the layer params rewritten."""
         payload = _payload()
         scales = _scales()
         layer = make_layer(
@@ -157,6 +161,7 @@ class TestProcessWeightsPacked:
         assert [name for _, name, _ in fake_env.replace_calls] == ["weight_packed"]
 
     def test_missing_weight_shape_skips_packed_validation(self, fake_env):
+        """Verifies a missing weight_shape skips shape validation but still repacks."""
         layer = make_layer(fake_env, _payload(), _scales())
         kernel = make_kernel(fake_env)
 
@@ -168,6 +173,7 @@ class TestProcessWeightsPacked:
         assert kernel._vllm_fl_arm_w4a8_shape == (N, K)
 
     def test_non_packed_int8_checkpoint_still_repacks(self, fake_env):
+        """Verifies an int8 non-packed checkpoint is repacked while keeping its shape tensor."""
         weight = torch.remainder(torch.arange(N * K).reshape(N, K), 7).to(torch.int8)
         scales = _scales()
         original_shape = torch.tensor([N, K], dtype=torch.int64)
@@ -186,6 +192,7 @@ class TestProcessWeightsPacked:
         assert kernel._vllm_fl_arm_w4a8_shape == (N, K)
 
     def test_non_contiguous_scales_are_made_contiguous(self, fake_env):
+        """Verifies non-contiguous loaded scales become contiguous before repacking."""
         scales = torch.arange(N * (K // 64), dtype=torch.float32).reshape(N, K // 64)[
             :, ::2
         ]
@@ -209,6 +216,7 @@ class TestProcessWeightsPacked:
         ],
     )
     def test_invalid_weight_shape_raises(self, fake_env, loaded_shape):
+        """Verifies an unexpected packed-Q4 weight_shape raises RuntimeError before packing."""
         weight_shape = torch.tensor(loaded_shape, dtype=torch.int64)
         layer = make_layer(fake_env, _payload(), _scales(), weight_shape=weight_shape)
         kernel = make_kernel(fake_env)
@@ -220,6 +228,7 @@ class TestProcessWeightsPacked:
         assert fake_env.pack_calls == []
 
     def test_non_int8_unpacked_payload_raises(self, fake_env):
+        """Verifies a non-int8 unpacked payload raises RuntimeError."""
         weight = torch.zeros(N, K, dtype=torch.float16)
         layer = make_layer(fake_env, weight, _scales())
         kernel = make_kernel(fake_env)
@@ -232,6 +241,7 @@ class TestProcessWeightsPacked:
         assert fake_env.pack_calls == []
 
     def test_wrong_scale_shape_raises(self, fake_env):
+        """Verifies an unexpected scale shape raises RuntimeError."""
         weight = torch.zeros(N, K, dtype=torch.int8)
         scales = torch.zeros(N, K // 128 + 1, dtype=torch.float32)
         layer = make_layer(fake_env, weight, scales)
@@ -245,6 +255,7 @@ class TestProcessWeightsPacked:
         assert fake_env.pack_calls == []
 
     def test_aliased_weight_sharing_storage_is_emptied(self, fake_env):
+        """Verifies an aliased weight sharing the payload storage is replaced with an empty tensor."""
         payload = _payload()
         layer = make_layer(fake_env, payload, _scales(), alias=payload)
         kernel = make_kernel(fake_env)
@@ -260,6 +271,7 @@ class TestProcessWeightsPacked:
         assert layer.weight.requires_grad is False
 
     def test_distinct_weight_alias_is_left_untouched(self, fake_env):
+        """Verifies a distinct weight alias is left untouched."""
         payload = _payload()
         alias = torch.zeros(N, K // 8, dtype=torch.int32)
         layer = make_layer(fake_env, payload, _scales(), alias=alias)
@@ -272,6 +284,7 @@ class TestProcessWeightsPacked:
         assert torch.equal(layer.weight, alias)
 
     def test_weight_named_quantized_parameter_skips_alias_emptying(self, fake_env):
+        """Verifies a weight registered under the quantized name skips alias emptying."""
         payload = _payload()
         layer = make_layer(fake_env, payload, _scales(), weight_name="weight")
         kernel = make_kernel(fake_env, w_q_name="weight")
@@ -295,6 +308,7 @@ class TestApplyWeights:
         return layer
 
     def test_unset_shape_delegates_to_original(self, fake_env):
+        """Verifies an unset packed shape delegates to the original apply."""
         layer = self._layer(fake_env)
         kernel = make_kernel(fake_env, packed=False)
         activations = torch.zeros(2, K, dtype=torch.float32)
@@ -307,6 +321,7 @@ class TestApplyWeights:
         assert torch.equal(output, torch.full((2, 2), -1.25))
 
     def test_bfloat16_input_keeps_dtype_and_passes_kernel_args(self, fake_env):
+        """Verifies bf16 activations keep their dtype and pass the recorded kernel arguments."""
         layer = self._layer(fake_env)
         kernel = make_kernel(fake_env)
         kernel._vllm_fl_arm_w4a8_shape = (N, K)
@@ -325,6 +340,7 @@ class TestApplyWeights:
         assert (n, k) == (N, K)
 
     def test_float32_input_is_converted_round_trip(self, fake_env):
+        """Verifies fp32 activations are converted to bf16 for the kernel and back."""
         layer = self._layer(fake_env)
         kernel = make_kernel(fake_env)
         kernel._vllm_fl_arm_w4a8_shape = (N, K)
@@ -342,6 +358,7 @@ class TestApplyWeights:
         assert torch.equal(kernel_input, converted)
 
     def test_float32_bias_is_cast_to_bfloat16_output(self, fake_env):
+        """Verifies an fp32 bias is added in the bf16 output dtype."""
         layer = self._layer(fake_env)
         kernel = make_kernel(fake_env)
         kernel._vllm_fl_arm_w4a8_shape = (N, K)
@@ -356,6 +373,7 @@ class TestApplyWeights:
         assert torch.equal(output, expected)
 
     def test_bfloat16_bias_is_cast_to_float32_output(self, fake_env):
+        """Verifies a bf16 bias is cast to fp32 output dtype without mutating the input."""
         layer = self._layer(fake_env)
         kernel = make_kernel(fake_env)
         kernel._vllm_fl_arm_w4a8_shape = (N, K)

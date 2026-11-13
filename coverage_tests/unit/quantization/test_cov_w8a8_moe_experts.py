@@ -120,6 +120,7 @@ def _quant_config(**changes):
 
 
 def test_constructor_copies_swiglu_params_without_mutating_source(experts):
+    """Verifies swiglu params are copied onto a new config without mutating the source."""
     module, env = experts
     source = _quant_config()
     cls = module.VllmFunctionalW8A8Experts
@@ -137,6 +138,7 @@ def test_constructor_copies_swiglu_params_without_mutating_source(experts):
 
 
 def test_constructor_without_swiglu_params_keeps_config(experts):
+    """Verifies a config without swiglu params is passed through unchanged."""
     module, env = experts
     source = _quant_config()
     instance = module.VllmFunctionalW8A8Experts(_moe_config(), source)
@@ -154,6 +156,7 @@ def test_constructor_without_swiglu_params_keeps_config(experts):
     ],
 )
 def test_vllm_functional_apply_routes_modular_configs_to_super(experts, moe_attrs):
+    """Verifies modular activation configs delegate to the superclass apply."""
     module, env = experts
     instance = module.VllmFunctionalW8A8Experts(
         _moe_config(**moe_attrs), _quant_config()
@@ -168,6 +171,7 @@ def test_vllm_functional_apply_routes_modular_configs_to_super(experts, moe_attr
 
 
 def test_vllm_functional_apply_routes_non_silu_to_super(experts):
+    """Verifies non-SILU activations delegate to the superclass apply."""
     module, env = experts
     instance = module.VllmFunctionalW8A8Experts(_moe_config(), _quant_config())
     kwargs = _apply_args(module, activation=MoEActivation.GELU)
@@ -177,6 +181,7 @@ def test_vllm_functional_apply_routes_non_silu_to_super(experts):
 
 
 def test_vllm_functional_apply_calls_fused_experts_and_copies(experts):
+    """Verifies the functional path calls fused experts and copies the output in place."""
     module, env = experts
     instance = module.VllmFunctionalW8A8Experts(_moe_config(), _quant_config())
     kwargs = _apply_args(module)
@@ -268,6 +273,7 @@ def test_vllm_functional_apply_calls_fused_experts_and_copies(experts):
 def test_vllm_functional_apply_rejects_invalid_contract(
     experts, changes, a1q, a2q, dtype, lora, exc_key, match
 ):
+    """Verifies invalid quant configs, dtypes and LoRA raise the documented errors."""
     module, _ = experts
     instance = module.VllmFunctionalW8A8Experts(_moe_config(), _quant_config(**changes))
     instance._lora_context = lora
@@ -278,6 +284,7 @@ def test_vllm_functional_apply_rejects_invalid_contract(
 
 
 def test_flag_gems_apply_marshals_full_w8a8_contract(experts):
+    """Verifies the FlagGems adapter marshals the full W8A8 expert contract."""
     module, env = experts
     w1_scale = torch.rand(2, 8, 1)
     w2_scale = torch.rand(2, 8, 1)
@@ -375,6 +382,7 @@ def test_flag_gems_apply_marshals_full_w8a8_contract(experts):
 def test_flag_gems_apply_rejects_invalid_contract(
     experts, changes, a1q, dtype, lora, exc_key, match
 ):
+    """Verifies the FlagGems adapter rejects invalid quant config, dtype and LoRA."""
     module, _ = experts
     instance = module.FlagGemsW8A8Experts(_moe_config(), _quant_config(**changes))
     instance._lora_context = lora
@@ -406,6 +414,7 @@ def _contract_call(module, **overrides):
 
 
 def test_validate_w8a8_contract_accepts_valid_inputs(experts):
+    """Verifies valid contract inputs pass validation unchanged."""
     module, _ = experts
     _, values = _contract_call(module)
     result = module._validate_w8a8_contract(**values)
@@ -523,6 +532,7 @@ def test_validate_w8a8_contract_accepts_valid_inputs(experts):
 def test_validate_w8a8_contract_rejects_invalid_inputs(
     experts, mutation, exc_key, match
 ):
+    """Verifies each malformed contract field raises the expected error."""
     module, _ = experts
     _, values = _contract_call(module)
     mutation(values)
@@ -531,6 +541,7 @@ def test_validate_w8a8_contract_rejects_invalid_inputs(
 
 
 def test_flaggems_impl_selects_backend_by_environment(experts):
+    """Verifies the impl selects the vLLM or FlagGems backend from the env flag."""
     module, env = experts
     env.fl_envs.__dict__["VLLM_FL_USE_FLAGGEMS_VLLM"] = True
     try:

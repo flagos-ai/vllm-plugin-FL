@@ -57,6 +57,7 @@ def _cache(rows, rotary_dim):
 
 
 def test_forward_oot_splits_rotary_and_pass_dims(monkeypatch):
+    """Checks that forward_oot splits rotary and pass-through dimensions and recombines the kernel output."""
     recorder = _Recorder()
     monkeypatch.setattr(Mod, "_rotary_embedding", recorder)
     rotary_dim = 4
@@ -104,6 +105,7 @@ def test_forward_oot_splits_rotary_and_pass_dims(monkeypatch):
 
 
 def test_forward_oot_without_pass_dims_reshapes_kernel_output(monkeypatch):
+    """Checks that forward_oot returns the kernel output directly when no pass dimensions exist."""
     recorder = _Recorder()
     monkeypatch.setattr(Mod, "_rotary_embedding", recorder)
     cache = _cache(4, 4)
@@ -128,6 +130,7 @@ def test_forward_oot_without_pass_dims_reshapes_kernel_output(monkeypatch):
 
 
 def test_forward_oot_npu_compile_boundary_keeps_buffer(monkeypatch):
+    """Checks that forward_oot keeps the cos/sin cache buffer on NPU while compiling."""
     recorder = _Recorder()
     monkeypatch.setattr(Mod, "_rotary_embedding", recorder)
     original_to = torch.Tensor.to
@@ -156,6 +159,7 @@ def test_forward_oot_npu_compile_boundary_keeps_buffer(monkeypatch):
 
 
 def test_forward_oot_updates_buffer_outside_npu_compile(monkeypatch):
+    """Checks that forward_oot refreshes the cos/sin cache buffer outside the NPU compile boundary."""
     recorder = _Recorder()
     monkeypatch.setattr(Mod, "_rotary_embedding", recorder)
     original_to = torch.Tensor.to
@@ -184,6 +188,7 @@ def test_forward_oot_updates_buffer_outside_npu_compile(monkeypatch):
 
 
 def test_forward_hip_without_key_uses_base_implementation(monkeypatch):
+    """Checks that forward_hip without a key delegates to the base rotary implementation."""
     base_calls = []
     monkeypatch.setattr(
         Mod.RotaryEmbedding,
@@ -206,6 +211,7 @@ def test_forward_hip_without_key_uses_base_implementation(monkeypatch):
 
 
 def test_forward_hip_with_key_delegates_to_oot(monkeypatch):
+    """Checks that forward_hip with a key delegates to forward_oot."""
     calls = []
     monkeypatch.setattr(
         Mod.RotaryEmbeddingFL,

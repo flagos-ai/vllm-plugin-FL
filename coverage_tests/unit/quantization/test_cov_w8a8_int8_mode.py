@@ -59,6 +59,7 @@ def int8_mode():
 
 
 def test_packed_int8_weight_accepts_channel_and_group(int8_mode):
+    """Verifies packed int8 weights accept both channel and group strategies."""
     assert int8_mode.is_packed_int8_weight(_args(), PACKED) is True
     assert (
         int8_mode.is_packed_int8_weight(
@@ -69,6 +70,7 @@ def test_packed_int8_weight_accepts_channel_and_group(int8_mode):
 
 
 def test_packed_int8_weight_rejects_none_and_wrong_format(int8_mode):
+    """Verifies None args and a wrong quant format are rejected as not packed int8."""
     assert int8_mode.is_packed_int8_weight(None, PACKED) is False
     assert int8_mode.is_packed_int8_weight(_args(), "int-quantized") is False
 
@@ -84,10 +86,12 @@ def test_packed_int8_weight_rejects_none_and_wrong_format(int8_mode):
     ],
 )
 def test_packed_int8_weight_rejects_non_packed_metadata(int8_mode, changes):
+    """Verifies non-packed metadata attributes are rejected as packed int8 weights."""
     assert int8_mode.is_packed_int8_weight(_args(**changes), PACKED) is False
 
 
 def test_dynamic_token_int8_accepts_canonical_metadata(int8_mode):
+    """Verifies canonical token-wise dynamic int8 metadata is accepted."""
     args = _args(strategy=QuantizationStrategy.TOKEN, dynamic=True)
     assert int8_mode.is_dynamic_token_int8(args) is True
 
@@ -103,12 +107,14 @@ def test_dynamic_token_int8_accepts_canonical_metadata(int8_mode):
     ],
 )
 def test_dynamic_token_int8_rejects_other_metadata(int8_mode, changes):
+    """Verifies other metadata variants and None are rejected as dynamic token int8."""
     args = _args(strategy=QuantizationStrategy.TOKEN, dynamic=True)
     assert int8_mode.is_dynamic_token_int8(replace(args, **changes)) is False
     assert int8_mode.is_dynamic_token_int8(None) is False
 
 
 def test_should_use_packed_w8a8_selects_channel_weights(int8_mode):
+    """Verifies channel weights with dynamic token activations select packed W8A8."""
     weight = _args()
     activation = _args(strategy=QuantizationStrategy.TOKEN, dynamic=True)
     assert int8_mode.should_use_packed_w8a8(weight, activation, PACKED) is True
@@ -138,10 +144,12 @@ def test_should_use_packed_w8a8_selects_channel_weights(int8_mode):
 def test_should_use_packed_w8a8_rejects_incomplete_config(
     int8_mode, weight, activation, quant_format
 ):
+    """Verifies incomplete weight, activation or format configs are rejected."""
     assert int8_mode.should_use_packed_w8a8(weight, activation, quant_format) is False
 
 
 def test_should_use_packed_w8a8_rejects_group_strategy_with_value_failure(int8_mode):
+    """Verifies a group weight strategy raises ValueError requiring per-channel weights."""
     weight = _args(strategy=QuantizationStrategy.GROUP, group_size=128)
     activation = _args(strategy=QuantizationStrategy.TOKEN, dynamic=True)
     with pytest.raises(ValueError, match="requires per-channel weights"):

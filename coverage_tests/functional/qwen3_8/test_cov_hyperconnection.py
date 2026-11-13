@@ -51,12 +51,14 @@ def _config(**overrides):
 
 class TestConfigAndNorm:
     def test_defaults_match_the_reference_config(self):
+        """Checks the default HyperConnectionConfig stream count and flags."""
         config = HyperConnectionConfig()
         assert (config.hc_count, config.hidden_size) == (4, 64)
         assert config.mtp_hc is False
         assert config.hc_per_branch_norm is False
 
     def test_grouped_norm_validates_divisibility_and_weight(self):
+        """Checks grouped RMSNorm initialization and divisibility validation."""
         norm = GroupedGemmaRMSNorm(8, eps=1e-5, group_size=4, dtype=torch.float32)
         assert norm.variance_epsilon == 1e-5
         assert torch.count_nonzero(norm.weight) == 0
@@ -69,6 +71,7 @@ class TestAverageVariant:
     """HyperConnectionBase averages the HC streams and broadcasts back."""
 
     def test_mix_and_combine_match_loop_reference(self):
+        """Matches mix and combine against a per-channel loop reference."""
         hc_count, hidden = 3, 4
         module = HyperConnectionBase(_config(hc_count=hc_count, hidden_size=hidden))
         assert module.hyper_hidden_size == hc_count * hidden
@@ -104,6 +107,7 @@ class TestAverageVariant:
                     )
 
     def test_shape_assertions_guard_the_layout(self):
+        """Rejects malformed mix and combine inputs with shape assertions."""
         module = HyperConnectionBase(_config())
         with pytest.raises(AssertionError):
             module.mix(torch.zeros(2, module.hyper_hidden_size - 1))
@@ -118,6 +122,7 @@ class TestGatedVariantConstruction:
     """Packing preserves checkpoint names while sharing one allocation."""
 
     def test_combined_module_shares_one_packed_allocation(self):
+        """Shares one packed storage between the down and injection projections."""
         module = GatedResidualSimple(_config())
         packed = module._packed_down_inject_weight
         assert packed is not None
@@ -130,6 +135,7 @@ class TestGatedVariantConstruction:
         assert module.pack_down_inject_weights() is True
 
     def test_mix_only_module_has_no_injection_projection(self):
+        """Omits the injection projection and combine path for a mix-only module."""
         module = GatedResidualSimple(_config(), use_combine=False)
         assert hasattr(module, "input_mix_weight_down")
         assert not hasattr(module, "block_inject_weight")
@@ -139,6 +145,7 @@ class TestGatedVariantConstruction:
             module.combine(torch.zeros(2, 4), (torch.zeros(2, 12), None, None))
 
     def test_combine_only_module_has_no_mix_projection(self):
+        """Omits the mix projection and rejects mix calls for a combine-only module."""
         module = GatedResidualSimple(_config(), use_mix=False)
         assert not hasattr(module, "input_mix_weight_down")
         assert hasattr(module, "block_inject_weight")
@@ -147,6 +154,7 @@ class TestGatedVariantConstruction:
             module.mix(torch.zeros(2, 12))
 
     def test_fully_disabled_module_raises_for_both_halves(self):
+        """Rejects both mix and combine when both halves are disabled."""
         module = GatedResidualSimple(_config(), use_mix=False, use_combine=False)
         assert module.pack_down_inject_weights() is False
         with pytest.raises(RuntimeError, match="mix was disabled"):
@@ -155,6 +163,7 @@ class TestGatedVariantConstruction:
             module.combine(torch.zeros(2, 4), (torch.zeros(2, 12), None, None))
 
     def test_pending_combine_requires_both_tensors(self):
+        """Requires both block output and injection for a pending combine."""
         module = GatedResidualSimple(_config())
         with pytest.raises(ValueError, match="provided together"):
             module.combine_and_mix(
@@ -164,6 +173,7 @@ class TestGatedVariantConstruction:
             )
 
     def test_pack_walks_the_module_tree(self):
+        """Packs nested gated-residual modules through the module tree walk."""
         root = nn.Module()
         root.add_module("packed", GatedResidualSimple(_config()))
         root.add_module("mix_only", GatedResidualSimple(_config(), use_combine=False))
@@ -214,6 +224,7 @@ class TestGatedVariantKernels:
     ATOL = 2e-2
 
     def test_mix_and_combine_match_documented_reference(self, device):
+        """Matches fused mix and combine to the documented reference math."""
         config = _config(
             hc_count=2,
             hidden_size=4,
@@ -254,6 +265,7 @@ class TestGatedVariantKernels:
         assert combined.shape == hyper_input.shape
 
     def test_grouped_norm_matches_gemma_reference(self, device):
+        """Matches grouped norm output to the Gemma reference including weighting."""
         hidden, group_size = 8, 4
         norm = GroupedGemmaRMSNorm(
             hidden, eps=1e-6, group_size=group_size, dtype=self.DTYPE

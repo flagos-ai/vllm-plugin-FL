@@ -40,6 +40,7 @@ def _expected_unpack(packed: torch.Tensor) -> torch.Tensor:
 
 
 def test_unpack_uint8b128_int32_matches_shift_reference():
+    """Verifies unpack uint8b128 int32 matches shift reference."""
     packed = torch.tensor(
         [
             [0x00010203, 0x7F7E7D7C],
@@ -61,6 +62,7 @@ def test_unpack_uint8b128_int32_matches_shift_reference():
 
 
 def test_unpack_uint8b128_int32_truncates_to_in_features():
+    """Verifies unpack uint8b128 int32 truncates to in features."""
     packed = torch.arange(4, dtype=torch.int32).reshape(2, 2)
     unpacked = unpack_uint8b128_int32(packed, in_features=5)
     assert unpacked.shape == (2, 5)
@@ -69,6 +71,7 @@ def test_unpack_uint8b128_int32_truncates_to_in_features():
 
 @pytest.mark.parametrize("in_features", [-1, 9])
 def test_unpack_uint8b128_int32_rejects_bad_in_features(in_features):
+    """Verifies unpack uint8b128 int32 rejects bad in features."""
     packed = torch.zeros(2, 2, dtype=torch.int32)
     with pytest.raises(ValueError, match="in_features is incompatible"):
         unpack_uint8b128_int32(packed, in_features=in_features)
@@ -83,11 +86,13 @@ def test_unpack_uint8b128_int32_rejects_bad_in_features(in_features):
     ],
 )
 def test_unpack_uint8b128_int32_requires_2d_int32(tensor):
+    """Verifies unpack uint8b128 int32 requires 2d int32."""
     with pytest.raises(ValueError, match="2D int32 tensor"):
         unpack_uint8b128_int32(tensor)
 
 
 def test_dynamic_per_token_quant_int8_matches_reference():
+    """Verifies dynamic per token quant int8 matches reference."""
     x = torch.tensor(
         [
             [-128.0, 0.0, 64.0, 256.0],
@@ -112,6 +117,7 @@ def test_dynamic_per_token_quant_int8_matches_reference():
 
 
 def test_dynamic_per_token_quant_int8_preserves_shape_metadata():
+    """Verifies dynamic per token quant int8 preserves shape metadata."""
     x = torch.linspace(-3.0, 3.0, 12).reshape(3, 4)
     quantized, scale = dynamic_per_token_quant_int8(x)
     assert quantized.shape == x.shape
@@ -124,11 +130,13 @@ def test_dynamic_per_token_quant_int8_preserves_shape_metadata():
     [torch.zeros(4), torch.zeros(2, 2, 2)],
 )
 def test_dynamic_per_token_quant_int8_requires_2d(x):
+    """Verifies dynamic per token quant int8 requires 2d."""
     with pytest.raises(ValueError, match="2D"):
         dynamic_per_token_quant_int8(x)
 
 
 def test_dynamic_per_token_quant_int8_requires_float():
+    """Verifies dynamic per token quant int8 requires float."""
     with pytest.raises(TypeError, match="floating point"):
         dynamic_per_token_quant_int8(torch.zeros(2, 4, dtype=torch.int8))
 
@@ -154,6 +162,7 @@ def _linear_reference(
 
 
 def test_w8a8_linear_reference_matches_independent_formula():
+    """Verifies w8a8 linear reference matches independent formula."""
     torch.manual_seed(0)
     x = torch.randn(5, 16, dtype=torch.float16)
     weight = torch.randint(-128, 127, (8, 16), dtype=torch.int8)
@@ -166,6 +175,7 @@ def test_w8a8_linear_reference_matches_independent_formula():
 
 
 def test_w8a8_linear_reference_adds_bias_and_flattens_leading_dims():
+    """Verifies w8a8 linear reference adds bias and flattens leading dims."""
     torch.manual_seed(1)
     x = torch.randn(2, 3, 16, dtype=torch.float32)
     weight = torch.randint(-128, 127, (4, 16), dtype=torch.int8)
@@ -178,6 +188,7 @@ def test_w8a8_linear_reference_adds_bias_and_flattens_leading_dims():
 
 
 def test_w8a8_linear_reference_rejects_bad_weight():
+    """Verifies w8a8 linear reference rejects bad weight."""
     with pytest.raises(ValueError, match="2D int8"):
         w8a8_linear_reference(
             torch.zeros(2, 4),

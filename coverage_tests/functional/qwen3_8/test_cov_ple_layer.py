@@ -47,16 +47,19 @@ def _splitmix_reference(value):
 class TestHashPrimitives:
     def test_splitmix_matches_known_vector_and_reference(self):
         # Standard splitmix64 output of zero.
+        """Verifies splitmix matches known vector and reference."""
         assert ple_layer._splitmix64(0) == 0xE220A8397B1DCDAF
         for value in (1, 2, 1234, _GAMMA, (1 << 63)):
             assert ple_layer._splitmix64(value) == _splitmix_reference(value)
 
     @pytest.mark.parametrize("value", [2, 3, 5, 7, 11, 97, 2**61 - 1])
     def test_primes_are_accepted(self, value):
+        """Verifies primes are accepted."""
         assert ple_layer._is_prime_64(value) is True
 
     @pytest.mark.parametrize("value", [-3, 0, 1, 4, 9, 15, 561, 2**62 - 1])
     def test_composites_and_small_numbers_are_rejected(self, value):
+        """Verifies composites and small numbers are rejected."""
         assert ple_layer._is_prime_64(value) is False
 
     @pytest.mark.parametrize(
@@ -64,6 +67,7 @@ class TestHashPrimitives:
         [(0, 0, 0), (0, 1, 2), (1, 1, 2), (2, 1, 3), (10, 1, 11), (10, 3, 17)],
     )
     def test_nth_prime_walk(self, start, count, expected):
+        """Verifies nth prime walk."""
         assert ple_layer._nth_prime_after(start, count) == expected
 
 
@@ -119,6 +123,7 @@ def _build_embedding(**overrides):
 
 class TestNGramEmbeddingConstruction:
     def test_hash_tables_follow_the_seeded_contract(self, fake_embedding):
+        """Verifies hash tables follow the seeded contract."""
         module = _build_embedding()
         assert module.ngram_heads == 4
         assert module.head_dim == 1
@@ -156,6 +161,7 @@ class TestNGramEmbeddingConstruction:
         ],
     )
     def test_rejects_invalid_geometry(self, fake_embedding, overrides, message):
+        """Verifies rejects invalid geometry."""
         kwargs = dict(overrides)
         embedding_dim = 4
         if overrides == {}:
@@ -171,6 +177,7 @@ class TestNGramEmbeddingConstruction:
             )
 
     def test_required_shards_cover_the_local_tp_range(self, fake_embedding):
+        """Verifies required shards cover the local tp range."""
         module = _build_embedding()
         assert module._required_embedding_shards() == {0, 1}
 
@@ -203,6 +210,7 @@ class TestRequiredShards:
     def test_shard_ids_are_clamped_to_the_original_vocabulary(
         self, start, end, expected
     ):
+        """Verifies shard ids are clamped to the original vocabulary."""
         owner = _shard_owner(10, 2, start, end)
         assert owner._required_embedding_shards() == expected
 
@@ -215,6 +223,7 @@ class TestLoadValidation:
         return root
 
     def test_complete_load_is_released_after_success(self):
+        """Verifies complete load is released after success."""
         root = self._root()
 
         @ple_layer.validate_ple_embedding_weights
@@ -232,6 +241,7 @@ class TestLoadValidation:
         assert not hasattr(root.ple, "_ple_embedding_load_state")
 
     def test_missing_shards_raise_and_state_is_cleaned_up(self):
+        """Verifies missing shards raise and state is cleaned up."""
         root = self._root()
 
         @ple_layer.validate_ple_embedding_weights
@@ -267,6 +277,7 @@ def _preader(name, calls, *, fused=False, fill=None):
 
 class TestShortConvDispatch:
     def test_pure_prefill_uses_the_fused_prefill_then_fallback(self, monkeypatch):
+        """Verifies pure prefill uses the fused prefill then fallback."""
         calls = []
         monkeypatch.setattr(
             ple_layer,
@@ -308,6 +319,7 @@ class TestShortConvDispatch:
         assert conv["has_initial_state"].tolist() == [True]
 
     def test_pure_prefill_with_output_buffer_returns_none(self, monkeypatch):
+        """Verifies pure prefill with output buffer returns none."""
         calls = []
         monkeypatch.setattr(
             ple_layer, "ple_prefill_short_conv_", _preader("prefill", calls)
@@ -339,6 +351,7 @@ class TestShortConvDispatch:
         assert buffer[:, 0].tolist() == [5, 5, 5]
 
     def test_empty_prefill_returns_an_empty_result(self, monkeypatch):
+        """Verifies empty prefill returns an empty result."""
         monkeypatch.setattr(
             ple_layer, "ple_prefill_short_conv_", _preader("prefill", [])
         )
@@ -363,6 +376,7 @@ class TestShortConvDispatch:
         assert result.shape == (0, 4)
 
     def test_speculative_only_batch_uses_varlen_conv(self, monkeypatch):
+        """Verifies speculative only batch uses varlen conv."""
         calls = []
         monkeypatch.setattr(
             ple_layer, "ple_short_conv_", _preader("conv", calls, fill=9)
@@ -396,6 +410,7 @@ class TestShortConvDispatch:
         assert kwargs["max_query_len"] == 2
 
     def test_decode_only_batch_passes_initial_state_flags(self, monkeypatch):
+        """Verifies decode only batch passes initial state flags."""
         calls = []
         monkeypatch.setattr(
             ple_layer, "ple_short_conv_", _preader("conv", calls, fill=4)
@@ -436,6 +451,7 @@ class TestShortConvGuards:
         return layer
 
     def test_missing_attn_metadata_uses_profiling_fallback(self, monkeypatch):
+        """Verifies missing attn metadata uses profiling fallback."""
         monkeypatch.setattr(
             ple_layer,
             "get_forward_context",
@@ -444,6 +460,7 @@ class TestShortConvGuards:
         assert self._configured_layer()._short_conv(torch.zeros(1, 4)) == "fallback"
 
     def test_non_dict_metadata_is_rejected(self, monkeypatch):
+        """Verifies non dict metadata is rejected."""
         monkeypatch.setattr(
             ple_layer,
             "get_forward_context",
@@ -453,6 +470,7 @@ class TestShortConvGuards:
             self._configured_layer()._short_conv(torch.zeros(1, 4))
 
     def test_missing_layer_key_is_rejected(self, monkeypatch):
+        """Verifies missing layer key is rejected."""
         monkeypatch.setattr(
             ple_layer,
             "get_forward_context",
@@ -462,6 +480,7 @@ class TestShortConvGuards:
             self._configured_layer()._short_conv(torch.zeros(1, 4))
 
     def test_wrong_metadata_type_is_rejected(self, monkeypatch):
+        """Verifies wrong metadata type is rejected."""
         monkeypatch.setattr(
             ple_layer,
             "get_forward_context",
@@ -471,6 +490,7 @@ class TestShortConvGuards:
             self._configured_layer()._short_conv(torch.zeros(1, 4))
 
     def test_undersized_cache_is_rejected(self, monkeypatch):
+        """Verifies undersized cache is rejected."""
         metadata = object.__new__(ple_layer.PleShortConvAttentionMetadata)
         monkeypatch.setattr(
             ple_layer,
@@ -482,6 +502,7 @@ class TestShortConvGuards:
             self._configured_layer()._short_conv(torch.zeros(1, 4))
 
     def test_forward_requires_matching_token_lengths(self):
+        """Verifies forward requires matching token lengths."""
         layer = object.__new__(ple_layer.Qwen3_8FlashNextPLELayer)
         nn.Module.__init__(layer)
         with pytest.raises(ValueError, match="same token length"):
@@ -495,6 +516,8 @@ class TestShortConvGuards:
 
 class TestCustomOpBoundary:
     def test_op_copies_layer_result_into_output(self, monkeypatch):
+        """Verifies op copies layer result into output."""
+
         def short_conv(inputs, output=None):
             return torch.full_like(inputs, 3)
 
@@ -510,6 +533,7 @@ class TestCustomOpBoundary:
         assert (output == 3).all()
 
     def test_op_leaves_output_when_layer_returns_none(self, monkeypatch):
+        """Verifies op leaves output when layer returns none."""
         monkeypatch.setattr(
             ple_layer,
             "get_forward_context",
@@ -524,6 +548,7 @@ class TestCustomOpBoundary:
         assert (output == 6).all()
 
     def test_fake_op_is_inert(self):
+        """Verifies fake op is inert."""
         assert (
             ple_layer.qwen3_8_flash_next_ple_short_conv_fake(
                 torch.zeros(1), torch.zeros(1), "p"

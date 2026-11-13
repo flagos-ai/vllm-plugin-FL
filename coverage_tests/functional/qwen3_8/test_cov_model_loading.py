@@ -54,6 +54,7 @@ from vllm_fl.models.qwen3_8_flash_next.gpu import model as qwen_model
 def test_stacked_weight_mapping_attaches_shard_metadata(
     name, expected_name, expected_shard
 ):
+    """Renames stacked projections and attaches the expected shard metadata."""
     weight = torch.zeros(1)
     [(got_name, got_weight)] = list(qwen_model._map_stacked_weights([(name, weight)]))
     assert got_name == expected_name
@@ -75,6 +76,7 @@ class TestFusedExpertWeight:
         return SimpleNamespace(weight_loader=recorder.loader)
 
     def test_gate_up_tensor_is_split_into_w1_and_w3_experts(self):
+        """Splits a fused gate_up tensor into per-expert w1 and w3 loads."""
         recorder = _Recorder()
         weight = torch.zeros(2, 4, 3)
         for expert in range(2):
@@ -101,6 +103,7 @@ class TestFusedExpertWeight:
         assert torch.equal(recorder.calls[2][0], weight.chunk(2, dim=-2)[1][0])
 
     def test_down_projection_uses_the_mapped_shard(self):
+        """Loads the down projection through the mapped w2 shard."""
         recorder = _Recorder()
         weight = torch.arange(24, dtype=torch.float32).reshape(2, 4, 3)
         param = self._param(recorder)
@@ -119,6 +122,7 @@ class TestFusedExpertWeight:
         assert torch.equal(recorder.calls[1][0], weight[1])
 
     def test_unowned_parameter_is_skipped(self):
+        """Skips a fused load when the target parameter is not owned."""
         recorder = _Recorder()
         handled, loaded = qwen_model._load_fused_expert_weight(
             "mlp.experts.down_proj",
@@ -131,12 +135,14 @@ class TestFusedExpertWeight:
         assert recorder.calls == []
 
     def test_unrelated_name_is_not_handled(self):
+        """Reports an unrelated weight name as not handled."""
         handled, loaded = qwen_model._load_fused_expert_weight(
             "model.embed_tokens.weight", torch.zeros(1), {}, [], 2
         )
         assert (handled, loaded) == (False, set())
 
     def test_non_three_dimensional_tensor_is_rejected(self):
+        """Rejects a non-3-D tensor for a fused expert weight."""
         with pytest.raises(ValueError, match="fused 3-D MoE tensor"):
             qwen_model._load_fused_expert_weight(
                 "mlp.experts.gate_up_proj",
@@ -147,6 +153,7 @@ class TestFusedExpertWeight:
             )
 
     def test_mapping_without_a_matching_weight_name_is_handled(self):
+        """Handles a fused name whose mapping has no matching weight."""
         handled, loaded = qwen_model._load_fused_expert_weight(
             "mlp.experts.gate_up_proj",
             torch.zeros(1, 4, 3),
@@ -162,6 +169,7 @@ class TestStackedAutoLoader:
         return qwen_model._StackedAutoWeightsLoader(nn.Module())
 
     def test_packed_weight_calls_the_parameter_loader(self):
+        """Calls the parameter loader for a packed weight with shard metadata."""
         loader = self._loader()
         calls = []
         param = SimpleNamespace(weight_loader=lambda *args: calls.append(args))
@@ -171,6 +179,7 @@ class TestStackedAutoLoader:
         assert calls == [(param, weight, "q")]
 
     def test_packed_weight_requires_a_loader(self):
+        """Raises when a packed weight has no parameter loader."""
         loader = self._loader()
         weight = torch.ones(1)
         weight.shard_id = "q"
@@ -178,6 +187,7 @@ class TestStackedAutoLoader:
             list(loader._load_param("p", SimpleNamespace(), [("", weight)]))
 
     def test_nested_weight_is_rejected(self):
+        """Rejects loading a nested weight through the stacked loader."""
         loader = self._loader()
         weight = torch.ones(1)
         weight.shard_id = "q"
@@ -185,6 +195,7 @@ class TestStackedAutoLoader:
             list(loader._load_param("p", SimpleNamespace(), [("child", weight)]))
 
     def test_ignored_suffix_and_aliased_names_are_skipped(self, monkeypatch):
+        """Skips ignorable and aliasable weights in the stacked loader."""
         loader = self._loader()
         weight = torch.ones(1)
         weight.shard_id = "q"
@@ -196,6 +207,7 @@ class TestStackedAutoLoader:
         assert list(loader._load_param("p", SimpleNamespace(), [("", weight)])) == []
 
     def test_unpacked_weights_delegate_to_the_base_loader(self, monkeypatch):
+        """Delegates unpacked weights to the base auto weight loader."""
         loader = self._loader()
         delegated = []
 
@@ -251,6 +263,7 @@ class TestModelLoadWeights:
         return packs
 
     def test_native_mapper_path_remaps_and_loads(self, monkeypatch):
+        """Remaps QSA names and loads through the native mapper path."""
         packs = self._install(monkeypatch)
         monkeypatch.setattr(qwen_model, "_HAS_NATIVE_STACKED_WEIGHTS_MAPPER", True)
         model = self._model()
@@ -276,6 +289,7 @@ class TestModelLoadWeights:
         ]
 
     def test_legacy_stacked_path_maps_names_and_forces_no_mapper(self, monkeypatch):
+        """Maps stacked names and disables the mapper on the legacy path."""
         packs = self._install(monkeypatch)
         monkeypatch.setattr(qwen_model, "_HAS_NATIVE_STACKED_WEIGHTS_MAPPER", False)
         monkeypatch.setattr(
@@ -292,6 +306,7 @@ class TestModelLoadWeights:
         assert mapped.shard_id == "q"
 
     def test_legacy_expert_adapter_absorbs_fused_and_single_weights(self, monkeypatch):
+        """Absorbs fused and single expert weights through the legacy adapter."""
         packs = self._install(monkeypatch)
         monkeypatch.setattr(qwen_model, "_HAS_NATIVE_STACKED_WEIGHTS_MAPPER", False)
         monkeypatch.setattr(
@@ -328,6 +343,7 @@ class TestModelLoadWeights:
         assert [name for name, _ in loader.loaded] == ["layers.0.qkv_proj.weight"]
 
     def test_causal_lm_loader_skips_mtp_and_packs(self, monkeypatch):
+        """Skips MTP weights and packs HC projections in the causal-LM loader."""
         _FakeLoader.instances = []
         monkeypatch.setattr(qwen_model, "AutoWeightsLoader", _FakeLoader)
         packs = []

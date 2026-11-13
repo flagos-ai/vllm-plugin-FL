@@ -46,6 +46,7 @@ class _FakeConv3d(nn.Module):
 
 class TestPatchEmbed:
     def test_convolution_is_applied_per_temporal_patch(self, monkeypatch):
+        """Verifies convolution is applied per temporal patch."""
         monkeypatch.setattr(mm, "Conv3dLayer", _FakeConv3d)
         embed = mm.Glm5NextVisionPatchEmbed(
             patch_size=2, temporal_patch_size=1, in_channels=3, hidden_size=5
@@ -106,6 +107,7 @@ def _install_linear_doubles(monkeypatch):
 
 class TestVisionMlp:
     def test_gate_up_values_are_clamped_before_silu(self, monkeypatch):
+        """Verifies gate up values are clamped before silu."""
         _install_linear_doubles(monkeypatch)
         mlp = mm.Glm5NextVisionMLP(
             in_features=4, hidden_features=3, swiglu_limit=2.0, bias=False
@@ -147,6 +149,7 @@ def _attention_layer(head_dim=2, heads=2):
 
 class TestVisionAttention:
     def test_split_qkv_restores_the_head_layout(self):
+        """Verifies split qkv restores the head layout."""
         layer = _attention_layer()
         qkv = torch.arange(2 * 1 * 3 * 4, dtype=torch.float32).reshape(2, 1, 12)
         q, k, v = layer.split_qkv(qkv)
@@ -156,6 +159,7 @@ class TestVisionAttention:
         assert torch.equal(v, qkv[:, :, 8:].view(2, 1, 2, 2))
 
     def test_forward_normalizes_rotates_and_projects(self, monkeypatch):
+        """Verifies forward normalizes rotates and projects."""
         monkeypatch.setattr(mm, "use_nvidia_reference", lambda: False)
         layer = _attention_layer()
         qkv = torch.arange(2 * 1 * 12, dtype=torch.float32).reshape(2, 1, 12)
@@ -189,6 +193,7 @@ class TestVisionAttention:
         assert torch.allclose(records["value"], expected_v.transpose(0, 1).contiguous())
 
     def test_missing_rotary_embeddings_skip_the_rotation(self, monkeypatch):
+        """Verifies missing rotary embeddings skip the rotation."""
         monkeypatch.setattr(mm, "use_nvidia_reference", lambda: False)
         layer = _attention_layer()
         qkv = torch.ones(1, 1, 12)
@@ -214,6 +219,7 @@ class TestVisionAttention:
 
 class TestVisionBlock:
     def test_residual_order_is_attention_then_mlp(self):
+        """Verifies residual order is attention then mlp."""
         block = object.__new__(mm.Glm5NextVisionBlock)
         nn.Module.__init__(block)
         block.norm1 = lambda x: x
@@ -237,6 +243,7 @@ class TestVisionBlock:
 
 class TestPatchMerger:
     def test_projection_norm_gelu_and_clamped_swiglu(self, monkeypatch):
+        """Verifies projection norm gelu and clamped swiglu."""
         _install_linear_doubles(monkeypatch)
         merger = mm.Glm5NextPatchMerger(
             d_model=4, context_dim=3, swiglu_limit=2.0, bias=False
@@ -261,6 +268,7 @@ class TestPatchMerger:
 
 class TestRotaryPositions:
     def test_two_grids_match_the_plain_python_layout(self):
+        """Verifies two grids match the plain python layout."""
         layer = object.__new__(mm.Glm5NextVisionTransformer)
         nn.Module.__init__(layer)
         layer.spatial_merge_size = 2
@@ -311,6 +319,7 @@ class TestAttentionMask:
         ],
     )
     def test_max_seqlen_only_for_length_aware_backends(self, backend, expected):
+        """Verifies max seqlen only for length aware backends."""
         layer = object.__new__(mm.Glm5NextVisionTransformer)
         layer.attn_backend = backend
         got = layer.compute_attn_mask_seqlen(torch.tensor([0, 2, 5], dtype=torch.int32))
@@ -335,6 +344,7 @@ class TestPrepareEncoderMetadata:
         return layer
 
     def test_sequence_boundaries_are_padded_to_the_capture_batch(self, monkeypatch):
+        """Verifies sequence boundaries are padded to the capture batch."""
         recorded = {}
 
         class FakeEncoderAttention:
@@ -370,6 +380,8 @@ class TestPrepareEncoderMetadata:
         assert recorded["recompute"] == (8, 2)
 
     def test_max_seqlen_override_and_frame_padding(self, monkeypatch):
+        """Verifies max seqlen override and frame padding."""
+
         class FakeEncoderAttention:
             @staticmethod
             def maybe_compute_seq_lens(*args):
@@ -396,6 +408,7 @@ class TestPrepareEncoderMetadata:
         assert metadata["cu_seqlens"] == "cu"
 
     def test_dtype_and_device_follow_the_patch_embedding(self):
+        """Verifies dtype and device follow the patch embedding."""
         layer = object.__new__(mm.Glm5NextVisionTransformer)
         layer.patch_embed = SimpleNamespace(
             proj=SimpleNamespace(weight=torch.zeros(1, dtype=torch.bfloat16))
@@ -448,6 +461,7 @@ class TestVisionTransformerForward:
         return layer
 
     def test_encoder_metadata_skips_the_cpu_rebuild(self):
+        """Verifies encoder metadata skips the cpu rebuild."""
         layer = self._layer()
         metadata = {
             "rotary_pos_emb_cos": "cos",
@@ -468,6 +482,7 @@ class TestVisionTransformerForward:
         ]
 
     def test_eager_path_builds_boundaries_from_the_grid(self):
+        """Verifies eager path builds boundaries from the grid."""
         layer = self._layer()
         layer.rot_pos_emb = lambda grid: ("cos", "sin", None)
         layer.compute_attn_mask_seqlen = lambda cu: "max"
@@ -529,6 +544,7 @@ def _processing_info():
 
 class TestProcessingInfoBudget:
     def test_budget_accessors_track_the_processor_config(self):
+        """Verifies budget accessors track the processor config."""
         info, _ = _processing_info()
         assert info.get_max_image_tokens() == 512
         assert info._vision_budget("video").max_tokens == 64
@@ -538,6 +554,7 @@ class TestProcessingInfoBudget:
         assert (size.width, size.height) == (112, 112)
 
     def test_vision_info_counts_patches_after_alignment(self):
+        """Verifies vision info counts patches after alignment."""
         info, _ = _processing_info()
         size, tokens = info._get_vision_info(
             image_width=112, image_height=112, num_frames=1
@@ -553,10 +570,12 @@ class TestProcessingInfoBudget:
 
     @pytest.mark.parametrize(("max_tokens", "expected"), [(10, 0), (20, 2)])
     def test_video_frame_search_respects_the_token_ceiling(self, max_tokens, expected):
+        """Verifies video frame search respects the token ceiling."""
         info, _ = _processing_info()
         assert info._get_max_video_frames(max_tokens) == expected
 
     def test_max_tokens_per_item_uses_pixels_frames_and_timestamps(self):
+        """Verifies max tokens per item uses pixels frames and timestamps."""
         info, processor = _processing_info()
         processor.serving_budgets["video"].max_pixels = 2 * 14 * 14 * 4 * 10
         result = info.get_mm_max_tokens_per_item(128, {"image": 1, "video": 1})
@@ -564,6 +583,7 @@ class TestProcessingInfoBudget:
         assert result == {"image": 512, "video": 20}
 
     def test_video_placeholder_interleaves_timestamps_and_image_tokens(self):
+        """Verifies video placeholder interleaves timestamps and image tokens."""
         info, processor = _processing_info()
         info._get_video_second_idx_glm46v = lambda *args: [0.0, 1.0]
         placeholder = info._construct_glm5_video_placeholder(
@@ -585,6 +605,7 @@ class TestProcessingInfoBudget:
         ]
 
     def test_video_placeholder_rejects_a_sampling_grid_mismatch(self):
+        """Verifies video placeholder rejects a sampling grid mismatch."""
         info, _ = _processing_info()
         info._get_video_second_idx_glm46v = lambda *args: [0.0]
         with pytest.raises(ValueError, match="sampling and encoder grid"):
@@ -593,6 +614,7 @@ class TestProcessingInfoBudget:
             )
 
     def test_video_second_indices_follow_the_sampler(self, monkeypatch):
+        """Verifies video second indices follow the sampler."""
         import vllm_fl.models.glm5.processor as processor_module
 
         calls = []
@@ -628,6 +650,7 @@ class _DummyInputs:
 
 class TestDummyInputs:
     def test_processor_inputs_force_the_maximal_frame_set(self, monkeypatch):
+        """Verifies processor inputs force the maximal frame set."""
         monkeypatch.setattr(
             mm.Glm4vDummyInputsBuilder,
             "get_dummy_processor_inputs",
@@ -645,6 +668,7 @@ class TestDummyInputs:
         }
 
     def test_dummy_media_uses_the_effective_canvases(self):
+        """Verifies dummy media uses the effective canvases."""
         info, _ = _processing_info()
         info._vision_budget = lambda modality: SimpleNamespace(
             largest_canvas=lambda frames=1: (8, 8)
@@ -669,10 +693,12 @@ class TestDummyInputs:
 
 class TestProcessorHooks:
     def test_prompt_updates_are_owned_by_vllm(self):
+        """Verifies prompt updates are owned by vllm."""
         processor = object.__new__(mm.Glm5NextMultiModalProcessor)
         assert processor._hf_processor_applies_updates("prompt", {}, {}, {}) is False
 
     def test_empty_mm_data_delegates_to_the_base_processor(self, monkeypatch):
+        """Verifies empty mm data delegates to the base processor."""
         processor = object.__new__(mm.Glm5NextMultiModalProcessor)
         calls = []
         monkeypatch.setattr(
@@ -687,6 +713,7 @@ class TestProcessorHooks:
         assert calls[0][2] == {}
 
     def test_hf_processor_is_built_once_and_serving_configured(self, monkeypatch):
+        """Verifies hf processor is built once and serving configured."""
         import vllm_fl.models.glm5.processor as processor_module
 
         created = {}
@@ -731,6 +758,7 @@ class TestProcessorHooks:
 
 class TestConditionalGeneration:
     def test_encoder_cudagraph_config_drops_position_embeddings(self, monkeypatch):
+        """Verifies encoder cudagraph config drops position embeddings."""
         config = SimpleNamespace(buffer_keys=["pos_embeds", "rotary"])
         monkeypatch.setattr(
             mm.Glm4vForConditionalGeneration,
@@ -741,6 +769,7 @@ class TestConditionalGeneration:
         assert model.get_encoder_cudagraph_config().buffer_keys == ["rotary"]
 
     def test_mamba_state_hooks_delegate_to_the_text_model(self, monkeypatch):
+        """Verifies mamba state hooks delegate to the text model."""
         import vllm_fl.models.glm5.model as text_model
 
         calls = []
@@ -766,6 +795,7 @@ class TestConditionalGeneration:
         assert calls == ["dtype", "shape", "copy"]
 
     def test_construction_wires_tower_and_language_model(self, monkeypatch):
+        """Verifies construction wires tower and language model."""
         from contextlib import nullcontext
 
         import vllm_fl.models.glm5.runtime as runtime
@@ -822,6 +852,7 @@ class TestConditionalGeneration:
         assert model.language_model == "language-model"
 
     def test_load_weights_filters_and_audits(self, monkeypatch):
+        """Verifies load weights filters and audits."""
         from contextlib import nullcontext
 
         import vllm_fl.models.glm5.loader as loader

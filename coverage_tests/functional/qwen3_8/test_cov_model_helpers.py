@@ -79,12 +79,14 @@ class TestQsaScaleNameRemap:
         ],
     )
     def test_only_qsa_layer_scale_names_are_rewritten(self, name, expected):
+        """Rewrites only QSA layer scale names while leaving other names unchanged."""
         got = qwen_model._remap_qsa_cache_scale_name(name, frozenset({2}))
         assert got == expected
 
 
 class TestExpertWeightLoader:
     def test_return_success_and_none_are_normalized_to_true(self):
+        """Treats a None return from the expert loader as success."""
         calls = []
 
         def loader(param, value, name, *, shard_id, expert_id, return_success=True):
@@ -97,6 +99,7 @@ class TestExpertWeightLoader:
         assert calls == [(param, value, "p", "w1", 3, True)]
 
     def test_false_result_is_propagated(self):
+        """Propagates an explicit False result from the expert loader."""
         param = SimpleNamespace(
             weight_loader=lambda *args, **kwargs: False,
         )
@@ -106,12 +109,14 @@ class TestExpertWeightLoader:
         )
 
     def test_missing_loader_is_a_type_error(self):
+        """Raises a TypeError when the parameter has no weight loader."""
         with pytest.raises(TypeError, match="has no weight_loader"):
             qwen_model._call_expert_weight_loader(
                 object(), torch.zeros(1), "p", "w1", 0
             )
 
     def test_legacy_loader_without_return_success_kwarg_is_retried(self):
+        """Retries the loader without return_success when the legacy ABI rejects it."""
         calls = []
 
         def loader(*args, **kwargs):
@@ -128,6 +133,7 @@ class TestExpertWeightLoader:
         assert calls == [{"shard_id": "w2", "expert_id": 1}]
 
     def test_unrelated_type_error_is_reraised(self):
+        """Reraises TypeErrors unrelated to the return_success keyword."""
         param = SimpleNamespace(
             weight_loader=lambda *args, **kwargs: (_ for _ in ()).throw(
                 TypeError("boom")
@@ -137,6 +143,7 @@ class TestExpertWeightLoader:
             qwen_model._call_expert_weight_loader(param, torch.zeros(1), "p", "w1", 0)
 
     def test_single_expert_routes_through_the_named_parameter(self):
+        """Routes a single-expert load through the matching named parameter."""
         calls = []
         param = SimpleNamespace(
             weight_loader=lambda *args, **kwargs: calls.append(kwargs) or True,
@@ -153,6 +160,7 @@ class TestExpertWeightLoader:
         assert calls == [{"shard_id": "w2", "expert_id": 0, "return_success": True}]
 
     def test_single_expert_skips_unrelated_and_missing_parameters(self):
+        """Skips loads for unrelated names and reports handled missing parameters."""
         mapping = [
             ("mlp.experts.routed_experts.w2_weight", "mlp.experts.down_proj", 0, "w2")
         ]
@@ -189,6 +197,7 @@ class TestExpertMappingProbe:
         return regular, helper
 
     def test_fused_mapping_uses_parent_and_projection_names(self, monkeypatch):
+        """Builds fused expert mappings with parent and projection names."""
         regular, helper = self._helper()
         monkeypatch.setattr(qwen_model, "fused_moe_make_expert_params_mapping", helper)
         mappings = qwen_model._get_expert_mappings(object(), 8, 1)
@@ -200,10 +209,13 @@ class TestExpertMappingProbe:
         ]
 
     def test_non_callable_helper_disables_the_legacy_path(self, monkeypatch):
+        """Disables the legacy expert path when the mapping helper is not callable."""
         monkeypatch.setattr(qwen_model, "fused_moe_make_expert_params_mapping", None)
         assert qwen_model._get_expert_mappings(object(), 8, 0) is None
 
     def test_helper_type_errors_disable_the_legacy_path(self, monkeypatch):
+        """Disables the legacy expert path when the helper raises TypeError."""
+
         def helper(*args, **kwargs):
             raise TypeError("new ABI")
 
@@ -213,6 +225,8 @@ class TestExpertMappingProbe:
     def test_unexpected_checkpoint_name_shape_disables_the_legacy_path(
         self, monkeypatch
     ):
+        """Disables the legacy path for an unexpected checkpoint name shape."""
+
         def helper(*args, **kwargs):
             if kwargs.get("ckpt_gate_proj_name") == "gate_proj":
                 return [("p.w1_", "p.gate_proj", 0, "w1")]
@@ -222,6 +236,7 @@ class TestExpertMappingProbe:
         assert qwen_model._get_expert_mappings(object(), 8, 0) is None
 
     def test_empty_mappings_disable_the_legacy_path(self, monkeypatch):
+        """Disables the legacy path when the helper returns empty mappings."""
         monkeypatch.setattr(
             qwen_model, "fused_moe_make_expert_params_mapping", lambda *a, **k: []
         )
@@ -230,6 +245,7 @@ class TestExpertMappingProbe:
 
 class TestMapperProbe:
     def test_native_qwen35_mapper_wins(self, monkeypatch):
+        """Prefers the native Qwen3.5 mapper when it is available."""
         marker = object()
         monkeypatch.setattr(
             qwen_model,
@@ -239,6 +255,7 @@ class TestMapperProbe:
         assert qwen_model._get_qwen35_hf_to_vllm_mapper() is marker
 
     def test_qwen3_next_mapper_is_the_fallback(self, monkeypatch):
+        """Falls back to the Qwen3Next mapper when the native one is absent."""
         marker = object()
         monkeypatch.setattr(
             qwen_model, "Qwen3_5Model", SimpleNamespace(hf_to_vllm_mapper=None)
@@ -251,6 +268,7 @@ class TestMapperProbe:
         assert qwen_model._get_qwen35_hf_to_vllm_mapper() is marker
 
     def test_default_mapper_is_created_when_neither_exists(self, monkeypatch):
+        """Creates a default WeightsMapper when neither source mapper exists."""
         monkeypatch.setattr(
             qwen_model, "Qwen3_5Model", SimpleNamespace(hf_to_vllm_mapper=None)
         )
@@ -264,6 +282,7 @@ class TestMapperProbe:
 
 class TestModelClassHooks:
     def test_mrope_positions_are_identical_on_all_three_axes(self):
+        """Returns identical long positions on all three MRoPE axes."""
         instance = object.__new__(qwen_model.Qwen3_8FlashNextForCausalLM)
         positions, delta = instance.get_mrope_input_positions([0, 1, 2], [])
         assert delta == 0
@@ -271,6 +290,7 @@ class TestModelClassHooks:
         assert positions.dtype == torch.long
 
     def test_model_state_classes_are_the_configured_owners(self):
+        """Returns the configured model-state classes for both model wrappers."""
         causal = qwen_model.Qwen3_8FlashNextForCausalLM
         assert causal.get_model_state_cls() is Qwen3_8FlashNextModelState
         assert causal.get_legacy_model_state_cls() is Qwen3_8FlashNextLegacyModelState
@@ -281,12 +301,14 @@ class TestModelClassHooks:
         )
 
     def test_mtp_hidden_buffer_is_returned_by_reference(self):
+        """Returns the MTP hidden buffer by reference from the causal model."""
         instance = object.__new__(qwen_model.Qwen3_8FlashNextForCausalLM)
         nn.Module.__init__(instance)
         instance.model = SimpleNamespace(_mtp_hidden_buffer="buffer")
         assert instance.get_mtp_target_hidden_states() == "buffer"
 
     def test_conditional_generation_delegates_mtp_hidden_states(self):
+        """Delegates MTP hidden-state lookup to the conditional model's language model."""
         instance = object.__new__(qwen_model.Qwen3_8FlashNextForConditionalGeneration)
         nn.Module.__init__(instance)
         instance.language_model = SimpleNamespace(
@@ -297,6 +319,7 @@ class TestModelClassHooks:
 
 class TestParallelismGuards:
     def test_sparse_moe_rejects_sequence_parallel(self):
+        """Rejects sequence-parallel MoE in the sparse block constructor."""
         config = SimpleNamespace(
             parallel_config=SimpleNamespace(use_sequence_parallel_moe=True)
         )
@@ -304,6 +327,7 @@ class TestParallelismGuards:
             qwen_model.Qwen3_8FlashNextSparseMoeBlock(vllm_config=config)
 
     def test_decoder_layer_rejects_sequence_parallel(self):
+        """Rejects sequence-parallel MoE in the decoder-layer constructor."""
         config = SimpleNamespace(
             parallel_config=SimpleNamespace(use_sequence_parallel_moe=True),
             model_config=SimpleNamespace(
@@ -339,6 +363,7 @@ def _decoder_with(mlp):
 
 class TestMoeBookkeeping:
     def test_collects_sparse_layers_and_example_counts(self):
+        """Collects sparse MLP layers and expert counts from the model layers."""
         sparse = _sparse_moe()
         instance = object.__new__(qwen_model.Qwen3_8FlashNextMixtureOfExperts)
         instance.model = SimpleNamespace(
@@ -356,6 +381,7 @@ class TestMoeBookkeeping:
         assert instance.num_shared_experts == 0
 
     def test_dense_model_zeroes_every_count(self):
+        """Zeroes all MoE bookkeeping counts for a dense model."""
         instance = object.__new__(qwen_model.Qwen3_8FlashNextMixtureOfExperts)
         instance.model = SimpleNamespace(layers=[_decoder_with(object())])
         instance._set_moe_parameters()
@@ -367,6 +393,7 @@ class TestMoeBookkeeping:
         assert instance.num_redundant_experts == 0
 
     def test_language_model_fallback_is_used_when_model_is_absent(self):
+        """Falls back to the language model's layers when model is absent."""
         sparse = _sparse_moe()
         instance = object.__new__(qwen_model.Qwen3_8FlashNextMixtureOfExperts)
         instance.language_model = SimpleNamespace(
@@ -376,6 +403,7 @@ class TestMoeBookkeeping:
         assert instance.moe_mlp_layers == [sparse]
 
     def test_physical_expert_update_propagates_to_every_moe(self):
+        """Propagates physical-expert updates to every MoE layer and expert map."""
         sparse = _sparse_moe()
         calls = []
         sparse.experts = SimpleNamespace(update_expert_map=lambda: calls.append(1))
@@ -394,6 +422,7 @@ class TestMoeBookkeeping:
 
 class TestMambaGeometry:
     def test_ple_state_shape_accounts_for_spec_tokens(self, monkeypatch):
+        """Derives the PLE mamba state shape including speculative tokens."""
         recorded = {}
 
         def fake_shape(*, tp_world_size, intermediate_size, conv_kernel):
@@ -432,6 +461,7 @@ class TestMambaGeometry:
         }
 
     def test_ple_state_shape_without_speculation(self, monkeypatch):
+        """Derives the PLE mamba state shape without speculative tokens."""
         recorded = {}
 
         def fake_shape(*, tp_world_size, intermediate_size, conv_kernel):
@@ -460,6 +490,7 @@ class TestMambaGeometry:
         assert recorded["conv_kernel"] == 9
 
     def test_ple_state_dtype_forwards_both_cache_dtypes(self, monkeypatch):
+        """Forwards the model and mamba cache dtypes to the PLE state dtype helper."""
         recorded = {}
 
         def fake_dtype(model_dtype, mamba_cache_dtype):
@@ -489,6 +520,7 @@ class TestMambaGeometry:
         }
 
     def test_gdn_shape_forwards_linear_head_geometry(self, monkeypatch):
+        """Forwards tensor-parallel and linear-head geometry to the GDN shape helper."""
         recorded = {}
 
         def fake_shape(*args):
@@ -519,6 +551,7 @@ class TestMambaGeometry:
         assert recorded["args"] == (2, 4, 8, 16, 8, 4, 1)
 
     def test_gdn_dtype_forwards_ssm_cache_dtype(self, monkeypatch):
+        """Forwards model, mamba and SSM cache dtypes to the GDN dtype helper."""
         recorded = {}
 
         def fake_dtype(model_dtype, mamba_cache_dtype, ssm_cache_dtype):
@@ -545,6 +578,7 @@ class TestMambaGeometry:
         assert recorded["args"] == (torch.bfloat16, "float32", "float32")
 
     def test_state_copy_dispatch_requires_every_mamba_type(self):
+        """Maps every requested mamba backend to its state copy functions."""
         from vllm.model_executor.layers.mamba.mamba_utils import (
             MambaStateCopyFuncCalculator,
         )
@@ -573,6 +607,7 @@ class TestMambaGeometry:
 
 class TestPackageRegistration:
     def test_lazy_package_attributes_resolve_known_names(self):
+        """Resolves lazy package attributes and rejects unknown names."""
         import vllm_fl.models.qwen3_8_flash_next as package
         from vllm_fl.models.qwen3_8_flash_next.common import hyperconnection
 
@@ -582,6 +617,7 @@ class TestPackageRegistration:
             operator.attrgetter("NotAModel")(package)
 
     def test_common_package_lazy_attributes(self):
+        """Resolves lazy attributes from the common package and rejects unknown names."""
         import vllm_fl.models.qwen3_8_flash_next.common as common
         from vllm_fl.models.qwen3_8_flash_next.common import hyperconnection
 

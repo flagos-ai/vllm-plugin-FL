@@ -119,6 +119,7 @@ def _install_causal_doubles(monkeypatch, *, moe_calls=None):
 
 class TestCausalLMConstruction:
     def test_wires_backbone_head_and_logits_processor(self, monkeypatch):
+        """Wires the backbone, LM head and logits processor with the expected prefixes."""
         moe_calls = []
         _install_causal_doubles(monkeypatch, moe_calls=moe_calls)
         config = _text_config(num_experts=4)
@@ -134,6 +135,7 @@ class TestCausalLMConstruction:
         assert moe_calls == [model]
 
     def test_dense_configuration_skips_moe_parameter_setup(self, monkeypatch):
+        """Skips MoE parameter setup for a dense configuration."""
         moe_calls = []
         _install_causal_doubles(monkeypatch, moe_calls=moe_calls)
         config = _text_config(num_experts=0)
@@ -141,6 +143,7 @@ class TestCausalLMConstruction:
         assert moe_calls == []
 
     def test_all_mamba_cache_mode_is_rejected(self, monkeypatch):
+        """Rejects the all mamba cache mode."""
         _install_causal_doubles(monkeypatch)
         with pytest.raises(NotImplementedError, match="mamba-cache-mode=align"):
             qwen_model.Qwen3_8FlashNextForCausalLM(
@@ -148,6 +151,7 @@ class TestCausalLMConstruction:
             )
 
     def test_forward_delegates_every_argument(self, monkeypatch):
+        """Delegates every forward argument to the backbone."""
         _install_causal_doubles(monkeypatch)
         model = qwen_model.Qwen3_8FlashNextForCausalLM(
             vllm_config=_causal_vllm_config(_text_config())
@@ -175,6 +179,7 @@ class TestCausalLMConstruction:
         assert kwargs["ngram_context"].shape == (1, 2)
 
     def test_embedding_and_logits_delegate(self, monkeypatch):
+        """Delegates embedding and logits computation to the backbone and processor."""
         _install_causal_doubles(monkeypatch)
         model = qwen_model.Qwen3_8FlashNextForCausalLM(
             vllm_config=_causal_vllm_config(_text_config())
@@ -187,6 +192,7 @@ class TestCausalLMConstruction:
         assert model.logits_processor.calls[0] == (model.lm_head, hidden)
 
     def test_mtp_hidden_state_lookup_passes_through(self, monkeypatch):
+        """Passes MTP hidden-state lookup through to the backbone buffer."""
         _install_causal_doubles(monkeypatch)
         model = qwen_model.Qwen3_8FlashNextForCausalLM(
             vllm_config=_causal_vllm_config(_text_config())
@@ -194,6 +200,7 @@ class TestCausalLMConstruction:
         assert model.get_mtp_target_hidden_states() == "buffer"
 
     def test_mamba_specs_cover_gdn_and_ple_state(self, monkeypatch):
+        """Builds GDN and PLE mamba specs and delegates the generic shape and dtype hooks."""
         gdn_shape = ((4, 8), (8, 8))
         ple_shape = ((16, 24),)
 
@@ -323,6 +330,7 @@ def _build_conditional(
 
 class TestConditionalGenerationConstruction:
     def test_multimodal_config_is_required(self, monkeypatch):
+        """Requires a multimodal config for conditional generation."""
         monkeypatch.setattr(qwen_model, "with_platform_quantization", lambda c: c)
         vllm_config = SimpleNamespace(
             model_config=SimpleNamespace(
@@ -334,6 +342,7 @@ class TestConditionalGenerationConstruction:
             qwen_model.Qwen3_8FlashNextForConditionalGeneration(vllm_config=vllm_config)
 
     def test_language_model_only_keeps_the_tower_missing(self, monkeypatch):
+        """Keeps the vision tower missing for a language-model-only build."""
         model, created = _build_conditional(monkeypatch, language_model_only=True)
         assert created.vision is None
         assert isinstance(model.visual, qwen_model.StageMissingLayer)
@@ -347,6 +356,7 @@ class TestConditionalGenerationConstruction:
         assert model.make_empty_intermediate_tensors == "factory"
 
     def test_full_multimodal_construction_builds_the_vision_tower(self, monkeypatch):
+        """Builds the vision tower and tokenizer for a full multimodal model."""
         model, created = _build_conditional(monkeypatch, language_model_only=False)
         assert created.vision is not None
         assert created.vision.kwargs["prefix"] == "root.visual"
@@ -359,6 +369,7 @@ class TestConditionalGenerationConstruction:
         assert not hasattr(model, "deepstack_input_embeds")
 
     def test_deepstack_allocates_one_buffer_per_level(self, monkeypatch):
+        """Allocates one deepstack embedding buffer per visual level."""
         model, _ = _build_conditional(
             monkeypatch, language_model_only=False, deepstack=(0, 1, 2)
         )
@@ -370,6 +381,7 @@ class TestConditionalGenerationConstruction:
         assert model.deepstack_input_embeds_num_tokens == 0
 
     def test_pipeline_rank_must_start_after_the_deepstack_levels(self, monkeypatch):
+        """Requires the pipeline shard to start after the deepstack levels."""
         with pytest.raises(AssertionError, match="start_layer"):
             _build_conditional(
                 monkeypatch,
@@ -381,6 +393,7 @@ class TestConditionalGenerationConstruction:
     def test_embed_input_ids_short_circuits_without_multimodal_embeddings(
         self, monkeypatch
     ):
+        """Returns plain text embeddings when no multimodal embeddings are given."""
         model, _ = _build_conditional(monkeypatch)
         model._embed_text_input_ids = lambda input_ids, embed, is_multimodal=None: (
             "text-embeds"
@@ -389,6 +402,7 @@ class TestConditionalGenerationConstruction:
         assert model.embed_input_ids(torch.tensor([1]), []) == "text-embeds"
 
     def test_language_model_only_rejects_multimodal_embeddings(self, monkeypatch):
+        """Rejects multimodal embeddings in language-model-only mode."""
         model, _ = _build_conditional(monkeypatch, language_model_only=True)
         model._embed_text_input_ids = lambda *args, **kwargs: "text-embeds"
         with pytest.raises(ValueError, match="does not accept multimodal"):
@@ -399,6 +413,7 @@ class TestConditionalGenerationConstruction:
             )
 
     def test_deepstack_branch_sets_and_merges_the_sidebar(self, monkeypatch):
+        """Computes deepstack sidebars, stores them and merges adjusted embeddings."""
         model, _ = _build_conditional(
             monkeypatch, language_model_only=False, deepstack=(0,)
         )
@@ -434,6 +449,7 @@ class TestConditionalGenerationConstruction:
         assert merged["deepstack"] == {"deepstack_input_embeds_0": "sidebar"}
 
     def test_non_deepstack_branch_merges_directly(self, monkeypatch):
+        """Merges multimodal embeddings directly when deepstack is disabled."""
         model, _ = _build_conditional(monkeypatch, language_model_only=False)
         model._embed_text_input_ids = lambda *args, **kwargs: "text-embeds"
         called = {}
@@ -459,6 +475,7 @@ class TestConditionalGenerationConstruction:
         assert torch.equal(called_embeds[0], torch.zeros(1, 8))
 
     def test_forward_routes_state_inputs_to_the_backbone(self, monkeypatch):
+        """Routes inputs embeds, deepstack sidebars and state inputs to the backbone."""
         model, _ = _build_conditional(monkeypatch)
         calls = {}
 
@@ -497,6 +514,7 @@ class TestConditionalGenerationConstruction:
     def test_forward_clears_inputs_embeds_when_intermediate_tensors_exist(
         self, monkeypatch
     ):
+        """Clears inputs embeds and deepstack when intermediate tensors are present."""
         model, _ = _build_conditional(monkeypatch)
         calls = {}
 
@@ -525,6 +543,7 @@ class TestConditionalGenerationConstruction:
         assert calls["deepstack_input_embeds"] is None
 
     def test_load_weights_skips_visual_only_for_language_model_only(self, monkeypatch):
+        """Skips visual weights only for language-model-only builds and always packs."""
         calls = []
 
         class FakeLoader:
@@ -555,6 +574,7 @@ class TestConditionalGenerationConstruction:
         assert calls[-1] == "packed"
 
     def test_mamba_classmethods_delegate_to_the_causal_model(self, monkeypatch):
+        """Delegates every mamba state classmethod to the causal model."""
         calls = []
         monkeypatch.setattr(
             qwen_model.Qwen3_8FlashNextForCausalLM,

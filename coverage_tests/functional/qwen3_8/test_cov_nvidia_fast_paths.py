@@ -44,6 +44,7 @@ def _platform(*, cuda=True, rocm=False, cap90=True, family120=False):
 
 class TestPlatformGates:
     def test_nvidia_platform_excludes_rocm_and_failures(self, monkeypatch):
+        """Excludes ROCm, non-CUDA and failing platform probes from NVIDIA."""
         monkeypatch.setattr(nf, "current_platform", _platform())
         assert nf.is_nvidia_platform() is True
         monkeypatch.setattr(nf, "current_platform", _platform(rocm=True))
@@ -62,10 +63,12 @@ class TestPlatformGates:
         assert nf.is_nvidia_platform() is False
 
     def test_cuda_kernel_probe_requires_nvidia_platform(self, monkeypatch):
+        """Reports no CUDA kernel on a non-NVIDIA platform."""
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: False)
         assert nf._has_cuda_kernel("_C::anything") is False
 
     def test_cuda_kernel_probe_checks_dispatch_registration(self, monkeypatch):
+        """Checks kernel availability through CUDA dispatch registration."""
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: True)
         monkeypatch.setattr(
             nf,
@@ -82,6 +85,7 @@ class TestPlatformGates:
         assert nf._has_cuda_kernel("_C::missing") is False
 
     def test_cuda_kernel_probe_swallows_runtime_errors(self, monkeypatch):
+        """Treats dispatch probe runtime errors as kernel absence."""
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: True)
 
         def explode(op, key):
@@ -97,6 +101,7 @@ class TestPlatformGates:
         assert nf._has_cuda_kernel("_C::op") is False
 
     def test_native_topk_requires_both_kernels(self, monkeypatch):
+        """Requires both cooperative and persistent TopK kernels."""
         seen = []
 
         def fake(op):
@@ -113,6 +118,7 @@ class TestPlatformGates:
 
 class TestNativeTopk:
     def test_unavailable_kernels_raise(self, monkeypatch):
+        """Raises when native QSA TopK is unavailable."""
         monkeypatch.setattr(nf, "has_native_topk", lambda: False)
         with pytest.raises(RuntimeError, match="native QSA TopK is unavailable"):
             nf.native_topk(
@@ -137,6 +143,7 @@ class TestNativeTopk:
     def test_dispatch_selection_uses_rows_stride_and_capability(
         self, monkeypatch, rows, width, cap90, family120, expected
     ):
+        """Selects cooperative or persistent TopK from rows, stride and capability."""
         calls = []
         fake_ops = SimpleNamespace(
             _C=SimpleNamespace(
@@ -162,6 +169,7 @@ class TestNativeTopk:
 
 class TestNativeCacheUpdate:
     def test_unavailable_kernel_raises(self, monkeypatch):
+        """Raises when the fused QSA cache update kernel is unavailable."""
         monkeypatch.setattr(nf, "has_native_cache_update", lambda: False)
         with pytest.raises(RuntimeError, match="fused QSA cache update"):
             nf.native_cache_update(
@@ -176,6 +184,7 @@ class TestNativeCacheUpdate:
             )
 
     def test_available_kernel_receives_full_abi(self, monkeypatch):
+        """Passes the full cache-update ABI to the available kernel."""
         calls = []
         fake_ops = SimpleNamespace(
             _C_cache_ops=SimpleNamespace(
@@ -230,6 +239,7 @@ class TestApplyRope:
 
     @pytest.mark.parametrize("interleaved", [False, True])
     def test_three_axis_sections_select_the_documented_channels(self, interleaved):
+        """Selects the documented cos/sin channels for three-axis MRoPE sections."""
         cache = self._cache(width=6)
         rotary = FakeRotary(
             cache,
@@ -278,6 +288,7 @@ class TestApplyRope:
         assert torch.equal(result, tensor)
 
     def test_one_dimensional_positions_bypass_section_recombination(self):
+        """Uses plain cache halves for one-dimensional positions."""
         cache = self._cache(width=6)
         rotary = FakeRotary(cache, rotary_dim=6, sections=(3, 0, 0))
         tensor = self._tensor(2)
@@ -294,6 +305,7 @@ class TestApplyRope:
         assert torch.equal(result, tensor)
 
     def test_rotated_prefix_is_concatenated_with_untouched_tail(self):
+        """Concatenates the rotated prefix with the untouched tail."""
         cache = self._cache(width=6)
         rotary = FakeRotary(cache, rotary_dim=4, sections=(2, 0, 0))
         tensor = self._tensor(2, width=6)
@@ -322,16 +334,19 @@ class TestFlashinferNorm:
         monkeypatch.setitem(sys.modules, "flashinfer.norm", norm)
 
     def test_non_nvidia_host_never_imports_flashinfer(self, monkeypatch):
+        """Skips importing FlashInfer norm on a non-NVIDIA host."""
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: False)
         assert nf._flashinfer_gemma_rmsnorm() is None
 
     def test_import_failure_disables_the_fast_path(self, monkeypatch):
+        """Disables the FlashInfer fast path when the import fails."""
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: True)
         monkeypatch.setitem(sys.modules, "flashinfer", None)
         monkeypatch.setitem(sys.modules, "flashinfer.norm", None)
         assert nf._flashinfer_gemma_rmsnorm() is None
 
     def test_import_success_is_returned_and_cached(self, monkeypatch):
+        """Returns and caches the FlashInfer Gemma RMSNorm function."""
         marker = object()
 
         def gemma_rmsnorm(*args, **kwargs):
@@ -343,11 +358,13 @@ class TestFlashinferNorm:
         assert nf._flashinfer_gemma_rmsnorm() is gemma_rmsnorm
 
     def test_cpu_tensor_falls_back_even_with_a_kernel(self, monkeypatch):
+        """Falls back for CPU tensors even when a kernel is available."""
         monkeypatch.setattr(nf, "_flashinfer_gemma_rmsnorm", lambda: lambda *a: 1)
         tensor = torch.zeros(2, 4)
         assert nf.fast_gemma_rmsnorm(SimpleNamespace(), tensor) is None
 
     def test_missing_kernel_returns_none(self, monkeypatch):
+        """Returns None when no FlashInfer kernel is available."""
         monkeypatch.setattr(nf, "_flashinfer_gemma_rmsnorm", lambda: None)
         assert nf.fast_gemma_rmsnorm(SimpleNamespace(), torch.zeros(2, 4)) is None
 
@@ -367,10 +384,12 @@ class TestMropeKernelProbe:
         )
 
     def test_non_nvidia_host_returns_none(self, monkeypatch):
+        """Returns no MRoPE kernel on a non-NVIDIA host."""
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: False)
         assert nf._mrope_kernel() == (None, False)
 
     def test_import_failure_returns_none(self, monkeypatch):
+        """Returns no MRoPE kernel when the import fails."""
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: True)
         monkeypatch.setitem(
             sys.modules, "vllm.model_executor.layers.rotary_embedding.mrope", None
@@ -378,6 +397,8 @@ class TestMropeKernelProbe:
         assert nf._mrope_kernel() == (None, False)
 
     def test_abi_probe_detects_is_neox_style(self, monkeypatch):
+        """Detects whether the MRoPE kernel accepts is_neox_style."""
+
         def without_neox(*args):
             return None
 
@@ -394,6 +415,7 @@ class TestMropeKernelProbe:
 
 class TestFastQsaRopeGates:
     def test_non_nvidia_or_cpu_tensor_returns_none(self, monkeypatch):
+        """Returns None for non-NVIDIA hosts or CPU tensors."""
         monkeypatch.setattr(nf, "is_nvidia_platform", lambda: False)
         assert (
             nf.fast_qsa_rope(
@@ -413,6 +435,7 @@ class TestFastQsaRopeGates:
 @pytest.mark.gpu
 class TestFastQsaRopeCuda:
     def test_one_dimensional_path_uses_forward_cuda(self, device):
+        """Uses forward_cuda for one-dimensional RoPE positions."""
         tensor = torch.arange(8, dtype=torch.float32, device=device).reshape(2, 1, 4)
         cos = torch.ones(2, 2, device=device)
         sin = torch.zeros(2, 2, device=device)
@@ -433,6 +456,7 @@ class TestFastQsaRopeCuda:
         torch.testing.assert_close(result, tensor * 2)
 
     def test_two_dimensional_path_uses_probed_mrope_abi(self, monkeypatch, device):
+        """Calls the probed MRoPE ABI with positional is_neox_style for 2-D positions."""
         tensor = torch.zeros(2, 1, 4, device=device)
         cos = torch.ones(3, 2, 2, device=device)
         sin = torch.zeros(3, 2, 2, device=device)

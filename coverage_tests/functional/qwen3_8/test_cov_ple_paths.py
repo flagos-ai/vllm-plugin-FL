@@ -135,6 +135,7 @@ def _reference_forward(module, input_ids, query_start_loc, ngram_context):
 
 class TestNGramForward:
     def test_two_requests_match_the_independent_reference(self, monkeypatch):
+        """Verifies two requests match the independent reference."""
         module = _build_embedding(monkeypatch)
         input_ids = torch.tensor([5, 6, 7, 8, 9])
         query_start_loc = torch.tensor([0, 2, 5])
@@ -146,6 +147,7 @@ class TestNGramForward:
         )
 
     def test_history_window_and_eos_masking_match_the_reference(self, monkeypatch):
+        """Verifies history window and eos masking match the reference."""
         module = _build_embedding(monkeypatch)
         input_ids = torch.tensor([5, 0, 6])
         query_start_loc = torch.tensor([0, 3])
@@ -156,6 +158,7 @@ class TestNGramForward:
         )
 
     def test_padding_rows_past_the_request_boundary_use_eos(self, monkeypatch):
+        """Verifies padding rows past the request boundary use eos."""
         module = _build_embedding(monkeypatch)
         input_ids = torch.tensor([5, 6, 7])
         query_start_loc = torch.tensor([0, 2])
@@ -172,6 +175,7 @@ class TestNGramForward:
         ]
 
     def test_empty_token_batch_keeps_the_embedding_width(self, monkeypatch):
+        """Verifies empty token batch keeps the embedding width."""
         module = _build_embedding(monkeypatch)
         result = module(
             torch.empty(0, dtype=torch.long),
@@ -181,6 +185,7 @@ class TestNGramForward:
         assert result.shape == (0, 4)
 
     def test_no_requests_and_no_tokens_is_an_empty_result(self, monkeypatch):
+        """Verifies no requests and no tokens is an empty result."""
         module = _build_embedding(monkeypatch)
         result = module(
             torch.empty(0, dtype=torch.long),
@@ -222,11 +227,13 @@ class TestNGramForward:
     def test_context_shape_guards(
         self, monkeypatch, input_ids, query_start_loc, context, message
     ):
+        """Verifies context shape guards."""
         module = _build_embedding(monkeypatch)
         with pytest.raises(ValueError, match=message):
             module(input_ids, query_start_loc, context)
 
     def test_token_and_request_workspace_limits(self, monkeypatch):
+        """Verifies token and request workspace limits."""
         module = _build_embedding(monkeypatch)
         with pytest.raises(ValueError, match="at most 16"):
             module(
@@ -333,6 +340,7 @@ def _build_ple_layer(monkeypatch, **overrides):
 
 class TestPleLayerConstruction:
     def test_layer_geometry_and_registration(self, monkeypatch):
+        """Verifies layer geometry and registration."""
         layer, created = _build_ple_layer(monkeypatch, layer_idx=2)
         assert layer.hidden_size == 4
         assert layer.hc_count == 2
@@ -354,10 +362,13 @@ class TestPleLayerConstruction:
         assert created.static_context["p"] is layer
 
     def test_explicit_dense_layer_id_wins(self, monkeypatch):
+        """Verifies explicit dense layer id wins."""
         layer, _ = _build_ple_layer(monkeypatch, layer_idx=1, ple_dense_layer_id=5)
         assert layer.ple_dense_layer_id == 5
 
     def test_duplicate_prefix_is_rejected(self, monkeypatch):
+        """Verifies duplicate prefix is rejected."""
+
         class FakeNgram(nn.Module):
             def __init__(self, *args, **kwargs):
                 super().__init__()
@@ -383,6 +394,7 @@ class TestPleLayerConstruction:
             )
 
     def test_state_contracts_forward_cache_types(self, monkeypatch):
+        """Verifies state contracts forward cache types."""
         layer, _ = _build_ple_layer(monkeypatch)
         recorded = {}
 
@@ -421,6 +433,7 @@ def _dispatch_layer(monkeypatch):
 
 class TestShortConvKernels:
     def test_profiling_fallback_builds_an_empty_state(self, monkeypatch):
+        """Verifies profiling fallback builds an empty state."""
         layer = _dispatch_layer(monkeypatch)
         recorded = []
 
@@ -436,6 +449,7 @@ class TestShortConvKernels:
         assert kwargs["dilation"] == layer.short_conv_dilation
 
     def test_decode_batch_passes_initial_state(self, monkeypatch):
+        """Verifies decode batch passes initial state."""
         layer = _dispatch_layer(monkeypatch)
         recorded = []
         monkeypatch.setattr(
@@ -456,6 +470,7 @@ class TestShortConvKernels:
         assert kwargs["null_block_id"] == ple_layer.NULL_BLOCK_ID
 
     def test_spec_batch_slices_request_bounded_metadata(self, monkeypatch):
+        """Verifies spec batch slices request bounded metadata."""
         layer = _dispatch_layer(monkeypatch)
         recorded = []
         monkeypatch.setattr(
@@ -479,6 +494,7 @@ class TestShortConvKernels:
         assert kwargs["max_query_len"] == 2
 
     def test_mixed_spec_batch_merges_spec_first_then_non_spec(self, monkeypatch):
+        """Verifies mixed spec batch merges spec first then non spec."""
         layer = _dispatch_layer(monkeypatch)
         monkeypatch.setattr(
             layer,
@@ -522,6 +538,7 @@ class TestShortConvKernels:
         assert output.tolist() == expected.tolist()
 
     def test_pure_spec_batch_returns_the_spec_output(self, monkeypatch):
+        """Verifies pure spec batch returns the spec output."""
         layer = _dispatch_layer(monkeypatch)
         monkeypatch.setattr(
             layer,
@@ -548,6 +565,7 @@ class TestShortConvKernels:
         assert output.tolist() == torch.full((2, 4), 4.0).tolist()
 
     def test_short_conv_slices_the_cache_to_the_required_state(self, monkeypatch):
+        """Verifies short conv slices the cache to the required state."""
         layer = _dispatch_layer(monkeypatch)
         layer.prefix = "p"
         layer.num_spec_tokens = 2
@@ -575,6 +593,7 @@ class TestShortConvKernels:
 
 class TestPleLayerForward:
     def test_gated_value_and_convolution_are_added(self, monkeypatch):
+        """Verifies gated value and convolution are added."""
         layer, _ = _build_ple_layer(monkeypatch)
 
         class FakeEmbedding(nn.Module):

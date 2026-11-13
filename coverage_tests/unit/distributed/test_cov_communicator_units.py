@@ -203,6 +203,7 @@ def _make_comm(*, world_size=2, rank=0, pyflagcx=None, all2all=None, device="cpu
 
 
 def test_all_reduce_returns_flagcx_result():
+    """Checks that all_reduce returns the FlagCX result and passes the input through."""
     expected = torch.tensor([1.0, 2.0])
     fake = _FakeFlagcx()
     fake.all_reduce_result = expected
@@ -214,6 +215,7 @@ def test_all_reduce_returns_flagcx_result():
 
 
 def test_all_reduce_falls_back_to_torch_when_flagcx_returns_none(monkeypatch):
+    """Checks that all_reduce falls back to torch.distributed on a copy when FlagCX returns None."""
     fake = _FakeFlagcx()
     fake.all_reduce_result = None
     comm = _make_comm(pyflagcx=fake)
@@ -235,6 +237,7 @@ def test_all_reduce_falls_back_to_torch_when_flagcx_returns_none(monkeypatch):
 
 
 def test_all_reduce_requires_flagcx():
+    """Checks that all_reduce asserts when no FlagCX communicator exists."""
     comm = _make_comm(pyflagcx=None)
     with pytest.raises(AssertionError):
         comm.all_reduce(torch.zeros(2))
@@ -257,6 +260,7 @@ def _expected_reduce_scatter(input_, dim, world_size, rank):
 
 
 def test_reduce_scatter_negative_dim_matches_closed_form():
+    """Checks reduce_scatter with a negative dim against the closed-form chunk reduction and buffer layout."""
     world_size, rank = 2, 1
     inp = torch.arange(24, dtype=torch.float32).reshape(4, 6)
     transformed_peers = [
@@ -287,6 +291,7 @@ def test_reduce_scatter_negative_dim_matches_closed_form():
 
 
 def test_reduce_scatter_dim_zero_uses_leading_axis():
+    """Checks that reduce_scatter with dim zero chunks along the leading axis."""
     world_size, rank = 3, 0
     inp = torch.arange(12, dtype=torch.float64).reshape(6, 2)
     fake = _FakeFlagcx(world_size=world_size, rank=rank)
@@ -301,6 +306,7 @@ def test_reduce_scatter_dim_zero_uses_leading_axis():
 
 
 def test_reduce_scatter_contiguous_copy_for_noncontiguous_input():
+    """Checks that reduce_scatter copies non-contiguous input into a contiguous buffer."""
     world_size, rank = 2, 0
     inp = torch.arange(48, dtype=torch.float32).reshape(4, 12)[:, ::2]
     assert inp.shape == (4, 6)
@@ -318,6 +324,7 @@ def test_reduce_scatter_contiguous_copy_for_noncontiguous_input():
 
 
 def test_reduce_scatter_rejects_indivisible_first_axis():
+    """Checks that reduce_scatter asserts when the first axis is not divisible by world size."""
     fake = _FakeFlagcx(world_size=2, rank=0)
     comm = _make_comm(pyflagcx=fake)
     with pytest.raises(AssertionError):
@@ -325,12 +332,14 @@ def test_reduce_scatter_rejects_indivisible_first_axis():
 
 
 def test_reduce_scatter_requires_flagcx():
+    """Checks that reduce_scatter asserts when no FlagCX communicator exists."""
     comm = _make_comm(pyflagcx=None)
     with pytest.raises(AssertionError):
         comm.reduce_scatter(torch.zeros(4, 3))
 
 
 def test_reduce_scatter_propagates_flagcx_errors():
+    """Checks that reduce_scatter propagates errors raised by FlagCX."""
     fake = _FakeFlagcx(world_size=2, rank=0)
     fake.error = RuntimeError("flagcx failure")
     comm = _make_comm(pyflagcx=fake)
@@ -339,6 +348,7 @@ def test_reduce_scatter_propagates_flagcx_errors():
 
 
 def test_reduce_scatterv_uses_rank_chunk_sizes():
+    """Checks that reduce_scatterv reduces per-rank chunk sizes and forwards the sizes list."""
     world_size, rank = 2, 1
     sizes = [2, 3]
     inp = torch.arange(20, dtype=torch.float32).reshape(5, 4)
@@ -358,6 +368,7 @@ def test_reduce_scatterv_uses_rank_chunk_sizes():
 
 
 def test_reduce_scatterv_negative_dim_and_even_split_fallback():
+    """Checks that reduce_scatterv with no sizes falls back to an even reduce_scatter along a negative dim."""
     world_size, rank = 2, 0
     inp = torch.arange(24, dtype=torch.float32).reshape(4, 6)
     fake = _FakeFlagcx(world_size=world_size, rank=rank)
@@ -372,6 +383,7 @@ def test_reduce_scatterv_negative_dim_and_even_split_fallback():
 
 
 def test_reduce_scatterv_validates_sizes():
+    """Checks that reduce_scatterv rejects a sizes list of the wrong length or total."""
     fake = _FakeFlagcx(world_size=2, rank=0)
     comm = _make_comm(pyflagcx=fake)
     with pytest.raises(AssertionError):
@@ -386,6 +398,7 @@ def test_reduce_scatterv_validates_sizes():
 
 
 def test_all_gatherv_uneven_sizes_pads_and_trims():
+    """Checks that all_gatherv gathers uneven sizes into one padded output and forwards local input and sizes."""
     world_size, rank = 3, 1
     sizes = [2, 3, 1]
     payload = [
@@ -411,6 +424,7 @@ def test_all_gatherv_uneven_sizes_pads_and_trims():
 
 
 def test_all_gatherv_equal_sizes_falls_back_to_all_gather():
+    """Checks that all_gatherv uses plain all_gather when all sizes are equal."""
     world_size, rank = 3, 2
     sizes = [2, 2, 2]
     payload = [
@@ -428,6 +442,7 @@ def test_all_gatherv_equal_sizes_falls_back_to_all_gather():
 
 
 def test_all_gatherv_without_sizes_multiplies_first_axis():
+    """Checks that all_gatherv without sizes uses all_gather and scales the first axis by world size."""
     world_size, rank = 2, 0
     payload = [
         torch.arange(6, dtype=torch.float32).reshape(2, 3),
@@ -444,6 +459,7 @@ def test_all_gatherv_without_sizes_multiplies_first_axis():
 
 
 def test_all_gatherv_list_uses_group_and_preserves_order():
+    """Checks that all_gatherv over a list brackets the group and preserves list order."""
     world_size, rank = 2, 1
     first = [
         torch.full((1, 2), 1.0),
@@ -472,6 +488,7 @@ def test_all_gatherv_list_uses_group_and_preserves_order():
 
 
 def test_all_gatherv_empty_list_still_brackets_group():
+    """Checks that all_gatherv over an empty list returns empty but still brackets the group."""
     fake = _FakeFlagcx(world_size=2, rank=0)
     comm = _make_comm(pyflagcx=fake)
     assert comm.all_gatherv([]) == []
@@ -480,6 +497,7 @@ def test_all_gatherv_empty_list_still_brackets_group():
 
 @pytest.mark.parametrize("dim", [1, -1])
 def test_all_gatherv_rejects_nonzero_dim(dim):
+    """Checks that all_gatherv rejects any dim other than zero."""
     fake = _FakeFlagcx(world_size=2, rank=0)
     comm = _make_comm(pyflagcx=fake)
     with pytest.raises(NotImplementedError, match="only dim 0"):
@@ -487,6 +505,7 @@ def test_all_gatherv_rejects_nonzero_dim(dim):
 
 
 def test_all_gatherv_validates_sizes_against_world_and_rank():
+    """Checks that all_gatherv asserts on a sizes list that does not match world size and rank."""
     fake = _FakeFlagcx(world_size=2, rank=0)
     comm = _make_comm(pyflagcx=fake)
     with pytest.raises(AssertionError):
@@ -496,6 +515,7 @@ def test_all_gatherv_validates_sizes_against_world_and_rank():
 
 
 def test_all_gatherv_requires_enabled_flagcx():
+    """Checks that all_gatherv asserts when FlagCX is missing or disabled."""
     comm = _make_comm(pyflagcx=None)
     with pytest.raises(AssertionError):
         comm.all_gatherv(torch.zeros(2, 2))
@@ -511,6 +531,7 @@ def test_all_gatherv_requires_enabled_flagcx():
 
 
 def test_send_uses_flagcx_and_explicit_dst():
+    """Checks that send forwards the tensor and explicit destination to FlagCX."""
     fake = _FakeFlagcx(world_size=3, rank=0)
     comm = _make_comm(world_size=3, rank=0, pyflagcx=fake)
     tensor = torch.arange(4)
@@ -521,6 +542,7 @@ def test_send_uses_flagcx_and_explicit_dst():
 
 
 def test_send_default_dst_wraps_to_zero():
+    """Checks that send without a destination wraps from the last rank to rank zero."""
     fake = _FakeFlagcx(world_size=3, rank=2)
     comm = _make_comm(world_size=3, rank=2, pyflagcx=fake)
     tensor = torch.zeros(1)
@@ -532,6 +554,7 @@ def test_send_default_dst_wraps_to_zero():
 
 
 def test_send_default_dst_advances_to_next_rank():
+    """Checks that send without a destination advances to the next rank."""
     fake = _FakeFlagcx(world_size=4, rank=1)
     comm = _make_comm(world_size=4, rank=1, pyflagcx=fake)
     tensor = torch.zeros(1)
@@ -543,6 +566,7 @@ def test_send_default_dst_advances_to_next_rank():
 
 @pytest.mark.parametrize("fake_flagcx", ["none", "disabled"])
 def test_send_falls_back_to_torch_with_global_rank(monkeypatch, fake_flagcx):
+    """Checks that send falls back to torch.distributed with the global destination when FlagCX is missing or disabled."""
     if fake_flagcx == "none":
         pyflagcx = None
     else:
@@ -563,6 +587,7 @@ def test_send_falls_back_to_torch_with_global_rank(monkeypatch, fake_flagcx):
 
 
 def test_send_fallback_default_dst_uses_ranks_table(monkeypatch):
+    """Checks that the send fallback default destination comes from the ranks table."""
     comm = _make_comm(world_size=2, rank=1, pyflagcx=None)
     comm.ranks = [7, 9]
     recorded = []
@@ -576,6 +601,7 @@ def test_send_fallback_default_dst_uses_ranks_table(monkeypatch):
 
 
 def test_recv_allocates_and_fills_tensor_via_flagcx():
+    """Checks that recv allocates a tensor of the requested shape, dtype and device and fills it via FlagCX."""
     fake = _FakeFlagcx(world_size=2, rank=1)
     fake.recv_fill = torch.tensor([4.0, 5.0])
     comm = _make_comm(world_size=2, rank=1, pyflagcx=fake)
@@ -590,6 +616,7 @@ def test_recv_allocates_and_fills_tensor_via_flagcx():
 
 
 def test_recv_default_src_wraps_to_last_rank():
+    """Checks that recv without a source wraps from rank zero to the last rank."""
     fake = _FakeFlagcx(world_size=3, rank=0)
     comm = _make_comm(world_size=3, rank=0, pyflagcx=fake)
     comm.recv((1,), torch.float32)
@@ -597,6 +624,7 @@ def test_recv_default_src_wraps_to_last_rank():
 
 
 def test_recv_default_src_steps_back_one_rank():
+    """Checks that recv without a source steps back one rank."""
     fake = _FakeFlagcx(world_size=4, rank=2)
     comm = _make_comm(world_size=4, rank=2, pyflagcx=fake)
     comm.recv((1,), torch.float32)
@@ -605,6 +633,7 @@ def test_recv_default_src_steps_back_one_rank():
 
 @pytest.mark.parametrize("fake_flagcx", ["none", "disabled"])
 def test_recv_falls_back_to_torch_with_global_rank(monkeypatch, fake_flagcx):
+    """Checks that recv falls back to torch.distributed with the global source when FlagCX is missing or disabled."""
     if fake_flagcx == "none":
         pyflagcx = None
     else:
@@ -632,6 +661,7 @@ def test_recv_falls_back_to_torch_with_global_rank(monkeypatch, fake_flagcx):
 
 
 def test_destroy_clears_flagcx_and_all2all_manager():
+    """Checks that destroy clears both communicators and destroys the all2all manager."""
     fake_flagcx = _FakeFlagcx()
     manager = _FakeAll2All()
     comm = _make_comm(pyflagcx=fake_flagcx, all2all=manager)
@@ -644,6 +674,7 @@ def test_destroy_clears_flagcx_and_all2all_manager():
 
 
 def test_destroy_is_safe_without_components():
+    """Checks that destroy is a no-op when neither component exists."""
     comm = _make_comm(pyflagcx=None, all2all=None)
     comm.destroy()
     assert comm.pyflagcx_comm is None
@@ -651,6 +682,7 @@ def test_destroy_is_safe_without_components():
 
 
 def test_dispatch_and_combine_delegate_to_manager():
+    """Checks that dispatch and combine forward their arguments to the all2all manager."""
     manager = _FakeAll2All()
     comm = _make_comm(all2all=manager)
     hidden = torch.zeros(2, 2)
@@ -673,6 +705,7 @@ def test_dispatch_and_combine_delegate_to_manager():
 
 @pytest.mark.parametrize("method", ["dispatch", "combine"])
 def test_dispatch_combine_require_manager(method):
+    """Checks that dispatch and combine assert when no all2all manager exists."""
     comm = _make_comm(all2all=None)
     if method == "dispatch":
         args = (torch.zeros(1), torch.zeros(1), torch.zeros(1))

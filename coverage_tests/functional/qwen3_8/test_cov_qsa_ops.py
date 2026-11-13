@@ -31,6 +31,7 @@ from vllm_fl.models.qwen3_8_flash_next.gpu.ops import qsa as ops
 
 class TestTritonCapability:
     def test_host_tensors_are_not_triton_devices(self):
+        """Verifies host tensors are not triton devices."""
         assert ops._is_triton_device(torch.zeros(1)) is False
         assert ops._is_triton_device(torch.zeros(1, device="meta")) is False
         assert ops.qsa_forward_metadata_triton_supported(torch.device("cpu")) is False
@@ -53,6 +54,7 @@ class TestBuildForwardMetadata:
     """Early exits and every ABI validation of the fused metadata builder."""
 
     def test_ratio_one_never_enters_the_kernel(self):
+        """Verifies ratio one never enters the kernel."""
         tensors = _metadata_tensors()
         before = tensors["logical_positions"].clone()
         assert (
@@ -66,6 +68,7 @@ class TestBuildForwardMetadata:
         assert torch.equal(tensors["logical_positions"], before)
 
     def test_host_tensor_without_triton_returns_false(self):
+        """Verifies host tensor without triton returns false."""
         assert (
             ops.build_qsa_forward_metadata(
                 **_metadata_tensors(), storage_block_size=4, compress_ratio=4
@@ -119,6 +122,7 @@ class TestBuildForwardMetadata:
         ],
     )
     def test_rejects_incompatible_metadata(self, force_triton, mutate, message):
+        """Verifies rejects incompatible metadata."""
         tensors = _metadata_tensors()
         mutate(tensors)
         with pytest.raises(ValueError, match=message):
@@ -127,6 +131,7 @@ class TestBuildForwardMetadata:
             )
 
     def test_non_positive_geometry_is_rejected(self, force_triton):
+        """Verifies non positive geometry is rejected."""
         with pytest.raises(ValueError, match="must be positive"):
             ops.build_qsa_forward_metadata(
                 **_metadata_tensors(), storage_block_size=0, compress_ratio=4
@@ -137,6 +142,7 @@ class TestBuildForwardMetadata:
             )
 
     def test_zero_rows_is_a_successful_no_op(self, force_triton):
+        """Verifies zero rows is a successful no op."""
         tensors = _metadata_tensors(rows=0)
         assert (
             ops.build_qsa_forward_metadata(
@@ -146,6 +152,7 @@ class TestBuildForwardMetadata:
         )
 
     def test_empty_requests_or_table_returns_false(self, force_triton):
+        """Verifies empty requests or table returns false."""
         empty_requests = _metadata_tensors()
         empty_requests["seq_lens"] = torch.zeros(0, dtype=torch.int32)
         empty_requests["query_start_loc"] = torch.tensor([0], dtype=torch.int32)
@@ -182,6 +189,7 @@ class TestDeterministicBlockTopk:
     """Score-descending membership with logical-index ascending order."""
 
     def test_ties_and_invisible_blocks_are_resolved_deterministically(self):
+        """Verifies ties and invisible blocks are resolved deterministically."""
         logits = torch.tensor(
             [[0.5, 2.0, 1.0, 1.5], [3.0, 2.0, 1.0, 0.0]], dtype=torch.float32
         )
@@ -192,6 +200,7 @@ class TestDeterministicBlockTopk:
         assert got.tolist() == [[1, -1], [0, 1]]
 
     def test_topk_wider_than_the_table_keeps_the_strict_width(self):
+        """Verifies topk wider than the table keeps the strict width."""
         logits = torch.tensor([[0.0, 2.0, 1.0]])
         visible = torch.tensor([2])
         got = ops._qsa_deterministic_block_topk(logits, visible, 5)
@@ -199,6 +208,7 @@ class TestDeterministicBlockTopk:
         assert got.tolist() == [[0, 1, -1, -1, -1]]
 
     def test_invalid_shapes_and_budget_are_rejected(self):
+        """Verifies invalid shapes and budget are rejected."""
         logits = torch.zeros(2, 4)
         with pytest.raises(ValueError, match="incompatible shapes"):
             ops._qsa_deterministic_block_topk(logits, torch.zeros(3), 2)
@@ -210,6 +220,7 @@ class TestDeterministicBlockTopk:
 
 class TestSplitWorkspace:
     def test_workspace_shape_and_dtype_are_derived_from_q(self):
+        """Verifies workspace shape and dtype are derived from q."""
         q = torch.zeros(2, 3, 4, dtype=torch.float32)
         output, stats_a, stats_b = ops._qsa_get_split_workspace(q, 2)
         assert output.shape == (2, 3, 2, 4)
@@ -226,6 +237,7 @@ class TestSplitWorkspace:
 
 class TestSelectPagedTokens:
     def test_empty_rows_return_the_expected_width(self):
+        """Verifies empty rows return the expected width."""
         q = torch.zeros(0, 2, 4)
         out = ops.qsa_select_paged_tokens(
             q,
@@ -241,6 +253,7 @@ class TestSelectPagedTokens:
         assert out.dtype == torch.int32
 
     def test_explicit_output_shape_is_enforced(self):
+        """Verifies explicit output shape is enforced."""
         with pytest.raises(ValueError, match="invalid shape"):
             ops.qsa_select_paged_tokens(
                 torch.zeros(0, 2, 4),
@@ -278,16 +291,19 @@ class TestSelectAllValidation:
         ],
     )
     def test_rejects_contexts_outside_the_budget(self, overrides, message):
+        """Verifies rejects contexts outside the budget."""
         with pytest.raises(ValueError, match=message):
             self._call(**overrides)
 
     def test_valid_host_call_requires_an_accelerator_kernel(self):
+        """Verifies valid host call requires an accelerator kernel."""
         with pytest.raises(RuntimeError, match="accelerator Triton"):
             self._call()
 
 
 class TestExpandValidation:
     def test_host_tensor_is_rejected_before_validation(self):
+        """Verifies host tensor is rejected before validation."""
         with pytest.raises(RuntimeError, match="accelerator Triton"):
             ops.expand_qsa_block_indices(
                 torch.zeros(1, 2, dtype=torch.int32),
@@ -325,10 +341,12 @@ class TestExpandValidation:
         ],
     )
     def test_rejects_invalid_arguments(self, force_triton, overrides, message):
+        """Verifies rejects invalid arguments."""
         with pytest.raises(ValueError, match=message):
             ops.expand_qsa_block_indices(**self._valid(**overrides))
 
     def test_zero_rows_returns_the_output_unchanged(self, force_triton):
+        """Verifies zero rows returns the output unchanged."""
         out = ops.expand_qsa_block_indices(
             **self._valid(
                 block_indices=torch.zeros(0, 2, dtype=torch.int32),
@@ -380,6 +398,7 @@ def _select_all_reference(query_positions, sequence_lengths, token_to_req, topk,
 @pytest.mark.gpu
 class TestSelectAllAccelerator:
     def test_expansion_matches_complete_block_and_tail_reference(self, device):
+        """Verifies expansion matches complete block and tail reference."""
         topk, ratio = 8, 2
         query_positions = torch.tensor([0, 1, 2, 3], dtype=torch.int64, device=device)
         sequence_lengths = torch.tensor([4], dtype=torch.int32, device=device)

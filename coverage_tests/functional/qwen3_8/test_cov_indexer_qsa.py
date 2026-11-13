@@ -112,6 +112,7 @@ class TestQsaIndexerConstruction:
         return SimpleNamespace(**values)
 
     def test_constructs_caches_and_projections(self, monkeypatch):
+        """Builds the indexer caches and projection with the documented prefixes and shapes."""
         created = self._install(monkeypatch)
         indexer = indexer_qsa.QSAIndexer(
             vllm_config=self._vllm_config(),
@@ -140,6 +141,7 @@ class TestQsaIndexerConstruction:
         assert created.compressed.kwargs["compress_ratio"] == 2
 
     def test_unprefixed_projection_name(self, monkeypatch):
+        """Uses bare parameter prefixes when no prefix is supplied."""
         created = self._install(monkeypatch)
         indexer = indexer_qsa.QSAIndexer(
             vllm_config=self._vllm_config(),
@@ -168,6 +170,7 @@ class TestQsaIndexerConstruction:
         ],
     )
     def test_configuration_guards(self, monkeypatch, overrides, message):
+        """Rejects missing paged cache and non-BF16 configurations."""
         self._install(monkeypatch)
         with pytest.raises((ValueError, NotImplementedError), match=message):
             indexer_qsa.QSAIndexer(
@@ -189,6 +192,7 @@ class TestQsaIndexerConstruction:
     def test_select_all_requires_context_within_budget_and_no_export(
         self, monkeypatch, max_model_len, topk, kv_transfer, expected
     ):
+        """Selects all tokens only when the context fits the budget without KV export."""
         self._install(monkeypatch)
         vllm_config = self._vllm_config(kv_transfer_config=kv_transfer)
         vllm_config.model_config.max_model_len = max_model_len
@@ -238,6 +242,7 @@ def _indexer(
 
 class TestProjectQk:
     def test_splits_projects_normalizes_and_rotates(self, monkeypatch):
+        """Splits, normalizes and rotates the Q projection while passing keys through."""
         indexer = _indexer()
         raw = torch.arange(24, dtype=torch.float32).reshape(2, 12)
         indexer.index_qk_proj = _Linear(raw)
@@ -260,6 +265,7 @@ class TestProjectQk:
         assert rotation_calls[0][1] is positions
 
     def test_fast_norm_result_is_preferred_when_available(self, monkeypatch):
+        """Prefers the fused RMSNorm result over the fallback normalization."""
         indexer = _indexer()
         raw = torch.ones(2, 12)
         indexer.index_qk_proj = _Linear(raw)
@@ -273,6 +279,7 @@ class TestProjectQk:
 
 class TestNormalizeCompressedKeys:
     def test_plain_rope_uses_the_first_token_position(self, monkeypatch):
+        """Uses the first token position for plain RoPE pooled keys."""
         indexer = _indexer(rotary=SimpleNamespace(rotary_dim=4, mrope_section=None))
         recorded = []
         monkeypatch.setattr(indexer_qsa, "fast_gemma_rmsnorm", lambda norm, x: None)
@@ -289,6 +296,7 @@ class TestNormalizeCompressedKeys:
         assert recorded[0].tolist() == [5, 8]
 
     def test_mrope_uses_the_transposed_group_positions(self, monkeypatch):
+        """Transposes MRoPE group positions before rotating pooled keys."""
         indexer = _indexer(
             rotary=SimpleNamespace(rotary_dim=4, mrope_section=(2, 1, 1))
         )
@@ -333,6 +341,7 @@ def _metadata(raw_tokens=2, compressed_tokens=2, device_type="cpu"):
 
 class TestMetadataPreparation:
     def test_non_dict_metadata_returns_none(self, monkeypatch):
+        """Returns None when the attention metadata is neither a dict nor a list."""
         indexer = _indexer()
         monkeypatch.setattr(
             indexer_qsa,
@@ -342,6 +351,7 @@ class TestMetadataPreparation:
         assert indexer._metadata() is None
 
     def test_list_metadata_uses_the_first_entry(self, monkeypatch):
+        """Uses the first entry of list-shaped attention metadata."""
         indexer = _indexer()
         raw, compressed = _metadata()
         monkeypatch.setattr(
@@ -354,6 +364,7 @@ class TestMetadataPreparation:
         assert indexer._metadata() == (raw, compressed)
 
     def test_prepares_compressed_then_validates_raw_on_cpu(self, monkeypatch):
+        """Prepares compressed metadata before validating raw metadata on CPU."""
         indexer = _indexer()
         raw, compressed = _metadata()
         monkeypatch.setattr(
@@ -368,6 +379,7 @@ class TestMetadataPreparation:
         assert raw.prepare_calls == 1
 
     def test_non_cpu_metadata_skips_the_raw_comparison(self, monkeypatch):
+        """Skips raw comparison when metadata positions live off CPU."""
         indexer = _indexer()
         raw, compressed = _metadata(device_type="meta")
         monkeypatch.setattr(
@@ -382,6 +394,7 @@ class TestMetadataPreparation:
         assert raw.prepare_calls == 0
 
     def test_token_count_disagreement_is_rejected(self, monkeypatch):
+        """Rejects side-cache metadata with mismatched token counts."""
         indexer = _indexer()
         raw, compressed = _metadata(raw_tokens=3)
         monkeypatch.setattr(
@@ -395,6 +408,7 @@ class TestMetadataPreparation:
             indexer._metadata()
 
     def test_position_disagreement_on_cpu_is_rejected(self, monkeypatch):
+        """Rejects raw and compressed metadata whose CPU positions disagree."""
         indexer = _indexer()
         raw, compressed = _metadata()
         raw.logical_positions = torch.ones(2)
@@ -422,6 +436,7 @@ class TestCompressionImpl:
     def test_selects_fused_only_for_the_supported_layout(
         self, head_dim, rotary_dim, sections, neox, expected
     ):
+        """Selects the fused compression kernel only for the supported MRoPE layout."""
         rotary = SimpleNamespace(
             rotary_dim=rotary_dim,
             mrope_section=sections,
@@ -437,6 +452,7 @@ class TestCompressionImpl:
         assert impl is target
 
     def test_missing_mrope_section_uses_a_plain_one_axis_layout(self):
+        """Synthesizes a single-axis MRoPE section when none is configured."""
         rotary = SimpleNamespace(rotary_dim=64, is_neox_style=True)
         indexer = _indexer(head_dim=128, rotary=rotary)
         impl = indexer._compression_impl()
@@ -446,6 +462,7 @@ class TestCompressionImpl:
 
 class TestForwardDispatch:
     def test_no_metadata_returns_minus_one_padding(self, monkeypatch):
+        """Returns an int32 tensor filled with -1 and honors an output buffer."""
         indexer = _indexer(compress_ratio=2)
         monkeypatch.setattr(indexer, "_metadata", lambda: None)
         hidden = torch.zeros(3, 8)
@@ -458,6 +475,7 @@ class TestForwardDispatch:
         assert out.tolist() == torch.full((3, 9), -1).tolist()
 
     def test_select_all_skips_projection_and_cache_updates(self, monkeypatch):
+        """Skips projection and cache updates on the select-all path."""
         indexer = _indexer(select_all=True)
         raw, compressed = _metadata()
         compressed.logical_positions = torch.tensor([0, 0])
@@ -484,6 +502,7 @@ class TestForwardDispatch:
         assert calls[0][6] is out
 
     def test_standard_path_slices_tokens_and_threads_output(self, monkeypatch):
+        """Slices token_k to the actual tokens and threads the caller's output buffer."""
         indexer = _indexer(select_all=False)
         raw, compressed = _metadata()
         raw.num_actual_tokens = 5
@@ -513,6 +532,7 @@ class TestForwardDispatch:
 
 class TestSelectAndCompressionUpdates:
     def test_select_forwards_the_fixed_width_contract(self, monkeypatch):
+        """Forwards the fixed-width selection arguments to the paged-token kernel."""
         indexer = _indexer()
         recorded = []
         monkeypatch.setattr(
@@ -536,6 +556,7 @@ class TestSelectAndCompressionUpdates:
         assert args[8] == "out"
 
     def test_generic_compression_normalizes_and_stores(self, monkeypatch):
+        """Normalizes generic compression output and stores raw then compressed rows."""
         indexer = _indexer(rotary=SimpleNamespace(rotary_dim=4, mrope_section=None))
         indexer.raw_key_cache = SimpleNamespace(
             key_cache="raw-cache", rope_position_cache=None
@@ -582,6 +603,7 @@ class TestSelectAndCompressionUpdates:
         assert stores[1][2] == ("normalized", "pooled", "first-positions")
 
     def test_rope_position_cache_is_stored_with_canonical_positions(self, monkeypatch):
+        """Stores canonical rope positions between the raw and compressed cache writes."""
         indexer = _indexer(rotary=SimpleNamespace(rotary_dim=4, mrope_section=None))
         position_cache = torch.zeros(8)
         indexer.raw_key_cache = SimpleNamespace(
@@ -627,6 +649,7 @@ class TestSelectAndCompressionUpdates:
     def test_fused_compression_passes_the_unit_norm_and_rope_parameters(
         self, monkeypatch
     ):
+        """Passes the norm weight, cos/sin cache and MRoPE parameters to the fused kernel."""
         rotary = SimpleNamespace(
             rotary_dim=64,
             mrope_section=(32, 16, 16),

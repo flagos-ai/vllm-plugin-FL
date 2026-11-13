@@ -57,6 +57,7 @@ class TestInstall:
     """Install bookkeeping, idempotency and the partial-install guard."""
 
     def test_first_install_patches_and_records_originals(self, raw_env):
+        """Verifies the first install patches all five entry points and records the originals."""
         scheme_cls = raw_env.CompressedTensorsW4A8Int
         config_cls = raw_env.CompressedTensorsConfig
         kernel_cls = raw_env.Dynamic4bitLinearKernel
@@ -83,6 +84,7 @@ class TestInstall:
         assert kernel_cls._vllm_fl_arm_original_apply is original_apply
 
     def test_second_install_returns_false_and_keeps_patches(self, raw_env):
+        """Verifies a second install is a no-op that returns False and keeps patches."""
         scheme_cls = raw_env.CompressedTensorsW4A8Int
         assert install_arm_cpu_packed_w4a8() is True
         patched_init = scheme_cls.__init__
@@ -93,6 +95,7 @@ class TestInstall:
         assert scheme_cls.create_weights is patched_create
 
     def test_scheme_marker_without_kernel_marker_raises(self, raw_env):
+        """Verifies a scheme-only install marker raises RuntimeError and leaves classes untouched."""
         scheme_cls = raw_env.CompressedTensorsW4A8Int
         kernel_cls = raw_env.Dynamic4bitLinearKernel
         scheme_cls._vllm_fl_arm_packed_w4a8 = True
@@ -107,6 +110,7 @@ class TestInstall:
         assert not hasattr(kernel_cls, "_vllm_fl_arm_w4a8")
 
     def test_kernel_marker_without_scheme_marker_raises(self, raw_env):
+        """Verifies a kernel-only install marker raises RuntimeError and leaves classes untouched."""
         scheme_cls = raw_env.CompressedTensorsW4A8Int
         kernel_cls = raw_env.Dynamic4bitLinearKernel
         kernel_cls._vllm_fl_arm_w4a8 = True
@@ -125,6 +129,7 @@ class TestSchemeInit:
     """The patched scheme constructor and the metadata it stores."""
 
     def test_packed_true_stores_pack_factor_for_four_bits(self, fake_env):
+        """Verifies packed four-bit schemes store the checkpoint flag and pack factor 8."""
         scheme = make_scheme(fake_env, packed=True, num_bits=4)
 
         assert scheme._vllm_fl_checkpoint_packed is True
@@ -142,6 +147,7 @@ class TestSchemeInit:
         ]
 
     def test_eight_bits_halves_the_pack_factor(self, fake_env):
+        """Verifies eight-bit schemes record a pack factor of 4."""
         scheme = make_scheme(fake_env, packed=False, num_bits=8)
 
         assert scheme._vllm_fl_checkpoint_packed is False
@@ -164,6 +170,7 @@ class TestGetSchemeFromParts:
         return config
 
     def test_pack_format_dynamic_token_returns_packed_scheme(self, fake_env):
+        """Verifies pack-quantized dynamic-token input returns the packed adapter scheme."""
         fake_env.dynamic_result = True
         config = self._config(fake_env, "pack-quantized")
         weight_quant = _quant_args()
@@ -187,6 +194,7 @@ class TestGetSchemeFromParts:
         assert fake_env.original_get_scheme_calls == []
 
     def test_none_format_falls_back_to_config_quant_format(self, fake_env):
+        """Verifies a missing format falls back to the config's quant format."""
         fake_env.dynamic_result = True
         config = self._config(fake_env, "pack-quantized")
 
@@ -200,6 +208,7 @@ class TestGetSchemeFromParts:
         assert len(fake_env.dynamic_token_calls) == 1
 
     def test_non_pack_format_delegates_without_dynamic_probe(self, fake_env):
+        """Verifies a non-pack format delegates without probing dynamic tokens."""
         fake_env.dynamic_result = True
         fake_env.original_get_scheme_result = "stock-scheme"
         config = self._config(fake_env, "int-quantized")
@@ -223,6 +232,7 @@ class TestGetSchemeFromParts:
         ]
 
     def test_pack_format_without_dynamic_token_delegates(self, fake_env):
+        """Verifies pack format without a dynamic token input delegates to the original."""
         fake_env.dynamic_result = False
         fake_env.original_get_scheme_result = "stock-scheme"
         config = self._config(fake_env, "pack-quantized")
@@ -236,6 +246,7 @@ class TestGetSchemeFromParts:
         assert fake_env.original_get_scheme_calls[0]["format"] == "pack-quantized"
 
     def test_delegate_forwards_output_quant_and_format(self, fake_env):
+        """Verifies delegation forwards output_quant, format and layer_name verbatim."""
         fake_env.original_get_scheme_result = "stock-scheme"
         config = self._config(fake_env, "int-quantized")
         output_quant = object()

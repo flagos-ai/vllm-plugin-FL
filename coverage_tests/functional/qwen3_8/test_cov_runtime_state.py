@@ -63,12 +63,14 @@ def _seed_cpu(num_reqs, max_len, rows):
 
 class TestTokenHistoryAllocation:
     def test_sentinel_eos_and_free_slots_are_initialized(self):
+        """Verifies sentinel eos and free slots are initialized."""
         history = _history()
         assert history.sentinel == 3 * 8
         assert history.tokens[history.sentinel].item() == 0
         assert history._free_slots == [2, 1, 0]
 
     def test_forget_unknown_request_is_a_no_op(self):
+        """Verifies forget unknown request is a no op."""
         history = _history()
         history.forget(["missing"])
         assert history._slots == {}
@@ -77,6 +79,7 @@ class TestTokenHistoryAllocation:
 
 class TestTokenHistoryPrepare:
     def test_reads_left_context_and_stores_current_token(self):
+        """Verifies reads left context and stores current token."""
         history = _history()
         cpu = _seed_cpu(3, 8, {0: [5, 6]})
         context = torch.empty((1, 2), dtype=torch.int32)
@@ -97,6 +100,7 @@ class TestTokenHistoryPrepare:
         assert history.tokens[0:3].tolist() == [5, 6, 7]
 
     def test_second_step_reads_the_previously_written_tokens(self):
+        """Verifies second step reads the previously written tokens."""
         history = _history()
         history.prepare(
             req_ids=["a"],
@@ -125,6 +129,7 @@ class TestTokenHistoryPrepare:
         assert history.tokens[3].item() == 8
 
     def test_token_mask_replaces_non_token_placeholders_with_eos(self):
+        """Verifies token mask replaces non token placeholders with eos."""
         history = _history(max_num_reqs=2, max_num_tokens=4)
         cpu = _seed_cpu(2, 8, {0: [5, 6]})
         context = torch.empty((1, 2), dtype=torch.int32)
@@ -142,6 +147,7 @@ class TestTokenHistoryPrepare:
         assert context.tolist() == [[5, 0]]
 
     def test_negative_async_placeholder_is_rejected(self):
+        """Verifies negative async placeholder is rejected."""
         history = _history()
         with pytest.raises(RuntimeError, match="async placeholders"):
             history.prepare(
@@ -158,6 +164,7 @@ class TestTokenHistoryPrepare:
 
     @pytest.mark.parametrize("start", [-1, 8])
     def test_positions_outside_model_capacity_are_rejected(self, start):
+        """Verifies positions outside model capacity are rejected."""
         history = _history()
         with pytest.raises(ValueError, match="exceed model capacity"):
             history.prepare(
@@ -173,6 +180,7 @@ class TestTokenHistoryPrepare:
             )
 
     def test_empty_batch_fills_all_context_rows_with_eos(self):
+        """Verifies empty batch fills all context rows with eos."""
         history = _history()
         context = torch.empty((2, 2), dtype=torch.int32)
         history.prepare(
@@ -189,6 +197,7 @@ class TestTokenHistoryPrepare:
         assert context.tolist() == [[0, 0], [0, 0]]
 
     def test_requests_missing_from_the_batch_release_their_slot(self):
+        """Verifies requests missing from the batch release their slot."""
         history = _history()
         history.prepare(
             req_ids=["a", "b"],
@@ -252,6 +261,7 @@ def _vllm_config(
 
 class TestModelStateConstruction:
     def test_non_ngram_model_skips_context_buffers(self, base_state):
+        """Verifies non ngram model skips context buffers."""
         state = base_state.Qwen3_8FlashNextModelState(
             _vllm_config(ple_layer_ids=()), None, None, CPU
         )
@@ -261,6 +271,7 @@ class TestModelStateConstruction:
         assert not hasattr(state, "ngram_context")
 
     def test_ngram_model_allocates_context_and_offsets(self, base_state):
+        """Verifies ngram model allocates context and offsets."""
         state = base_state.Qwen3_8FlashNextModelState(_vllm_config(), None, None, CPU)
         assert state.uses_ngram_embedding is True
         assert state.ngram_context_len == 2
@@ -270,10 +281,12 @@ class TestModelStateConstruction:
         assert state.ple_query_start_loc.shape == (5,)
 
     def test_pipeline_parallel_is_rejected(self, base_state):
+        """Verifies pipeline parallel is rejected."""
         with pytest.raises(RuntimeError, match="pipeline_parallel_size=1"):
             base_state.Qwen3_8FlashNextModelState(_vllm_config(pp=2), None, None, CPU)
 
     def test_ngram_size_one_has_no_left_context(self, base_state):
+        """Verifies ngram size one has no left context."""
         with pytest.raises(ValueError, match="context length >= 1"):
             base_state.Qwen3_8FlashNextModelState(
                 _vllm_config(ngram_size=1), None, None, CPU
@@ -289,6 +302,7 @@ def _req_states(token_store, computed):
 
 class TestPrepareNgramContext:
     def test_gathers_left_context_and_eos_fills_invalid_positions(self, base_state):
+        """Verifies gathers left context and eos fills invalid positions."""
         state = base_state.Qwen3_8FlashNextModelState(_vllm_config(), None, None, CPU)
         token_store = torch.tensor(
             [[10, 11, 12, 13, 14], [20, 21, 22, 23, 24]], dtype=torch.int32
@@ -306,6 +320,7 @@ class TestPrepareNgramContext:
         assert context.tolist() == [[2, 20], [10, 11], [2, 2]]
 
     def test_empty_batch_returns_eos_filled_padding(self, base_state):
+        """Verifies empty batch returns eos filled padding."""
         state = base_state.Qwen3_8FlashNextModelState(_vllm_config(), None, None, CPU)
         input_batch = SimpleNamespace(
             num_reqs=0,
@@ -326,6 +341,7 @@ class TestModelStateInputs:
     def test_prepare_inputs_adds_padded_query_offsets_and_context(
         self, base_state, monkeypatch
     ):
+        """Verifies prepare inputs adds padded query offsets and context."""
         monkeypatch.setattr(
             ms.MambaHybridModelState,
             "prepare_inputs",
@@ -347,6 +363,7 @@ class TestModelStateInputs:
     def test_non_ngram_prepare_inputs_returns_base_mapping(
         self, base_state, monkeypatch
     ):
+        """Verifies non ngram prepare inputs returns base mapping."""
         monkeypatch.setattr(
             ms.MambaHybridModelState,
             "prepare_inputs",
@@ -362,6 +379,7 @@ class TestModelStateInputs:
     def test_dummy_inputs_split_tokens_and_fill_eos(
         self, base_state, monkeypatch, num_reqs, num_tokens, expected
     ):
+        """Verifies dummy inputs split tokens and fill eos."""
         monkeypatch.setattr(
             ms.MambaHybridModelState,
             "prepare_dummy_inputs",
@@ -439,6 +457,7 @@ def _first_rank(monkeypatch, ranks=(0,)):
 
 class TestLegacyModelState:
     def test_non_ngram_model_returns_empty_kwargs(self, monkeypatch):
+        """Verifies non ngram model returns empty kwargs."""
         _first_rank(monkeypatch)
         runner = _runner(CPU, ple_layer_ids=())
         state = lms.Qwen3_8FlashNextLegacyModelState(runner)
@@ -448,22 +467,26 @@ class TestLegacyModelState:
         state.remove_requests(["a"])  # no history to forget
 
     def test_pipeline_parallel_is_rejected_for_ngram(self, monkeypatch):
+        """Verifies pipeline parallel is rejected for ngram."""
         _first_rank(monkeypatch, ranks=(0, 1))
         with pytest.raises(RuntimeError, match="pipeline_parallel_size=1"):
             lms.Qwen3_8FlashNextLegacyModelState(_runner(CPU))
 
     def test_ngram_size_one_is_rejected(self, monkeypatch):
+        """Verifies ngram size one is rejected."""
         _first_rank(monkeypatch)
         with pytest.raises(ValueError, match="context length >= 1"):
             lms.Qwen3_8FlashNextLegacyModelState(_runner(CPU, ngram_size=1))
 
     def test_missing_input_ids_on_first_rank_is_rejected(self, monkeypatch):
+        """Verifies missing input ids on first rank is rejected."""
         _first_rank(monkeypatch)
         state = lms.Qwen3_8FlashNextLegacyModelState(_runner(CPU))
         with pytest.raises(RuntimeError, match="token ids"):
             state.prepare_inputs(1, 4, None)
 
     def test_encoder_decoder_skips_ngram_kwargs(self, monkeypatch):
+        """Verifies encoder decoder skips ngram kwargs."""
         _first_rank(monkeypatch)
         state = lms.Qwen3_8FlashNextLegacyModelState(
             _runner(CPU, is_encoder_decoder=True)
@@ -471,6 +494,7 @@ class TestLegacyModelState:
         assert state.prepare_inputs(1, 4, None) == {}
 
     def test_dummy_inputs_fill_query_offsets_and_eos_context(self, monkeypatch):
+        """Verifies dummy inputs fill query offsets and eos context."""
         _first_rank(monkeypatch)
         runner = _runner(CPU)
         state = lms.Qwen3_8FlashNextLegacyModelState(runner)
@@ -480,6 +504,7 @@ class TestLegacyModelState:
         assert state.ple_token_history._slots == {}
 
     def test_ngram_kwargs_require_an_offset_source(self, monkeypatch):
+        """Verifies ngram kwargs require an offset source."""
         _first_rank(monkeypatch)
         state = lms.Qwen3_8FlashNextLegacyModelState(_runner(CPU))
         with pytest.raises(RuntimeError, match="query_start_loc is required"):

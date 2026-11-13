@@ -225,6 +225,7 @@ class TestProfilingBranch:
     def test_missing_metadata_reserves_workspace_and_returns_the_buffer(
         self, monkeypatch
     ):
+        """Verifies missing metadata reserves workspace and returns the buffer."""
         backend, workspace = _install_backend(monkeypatch)
         monkeypatch.setattr(
             si, "get_forward_context", lambda: SimpleNamespace(attn_metadata=None)
@@ -237,6 +238,7 @@ class TestProfilingBranch:
         assert len(workspace.calls[0][2]) == 1
 
     def test_configured_scheduler_sizes_the_logits_sentinel(self, monkeypatch):
+        """Verifies configured scheduler sizes the logits sentinel."""
         _install_backend(monkeypatch)
         monkeypatch.setattr(
             si, "get_forward_context", lambda: SimpleNamespace(attn_metadata=None)
@@ -270,6 +272,7 @@ class TestPrefillSelection:
         }
 
     def test_short_prefill_attends_to_every_token_causally(self, monkeypatch):
+        """Verifies short prefill attends to every token causally."""
         _install_backend(monkeypatch)
         metadata = self._metadata(slots=torch.zeros(3, dtype=torch.int64))
         monkeypatch.setattr(
@@ -285,6 +288,7 @@ class TestPrefillSelection:
         assert out.tolist() == expected.tolist()
 
     def test_long_prefill_gathers_scores_and_selects_topk(self, monkeypatch):
+        """Verifies long prefill gathers scores and selects topk."""
         _install_backend(monkeypatch)
         chunk = SimpleNamespace(
             token_start=0,
@@ -326,6 +330,7 @@ class TestPrefillSelection:
         assert out.tolist() == torch.full((3, 4), -1).tolist()
 
     def test_pool_prefill_expands_selected_pools(self, monkeypatch):
+        """Verifies pool prefill expands selected pools."""
         _install_backend(monkeypatch)
         chunk = SimpleNamespace(
             token_start=0,
@@ -372,6 +377,7 @@ class TestDecodeSelection:
         }
 
     def test_uniform_decode_scores_selects_and_writes_the_buffer(self, monkeypatch):
+        """Verifies uniform decode scores selects and writes the buffer."""
         _install_backend(monkeypatch)
         decode = SimpleNamespace(
             decode_lens=torch.tensor([2]),
@@ -407,6 +413,7 @@ class TestDecodeSelection:
         assert out.tolist() == torch.full((2, 4), -1).tolist()
 
     def test_padded_decode_packs_and_unpacks_query_rows(self, monkeypatch):
+        """Verifies padded decode packs and unpacks query rows."""
         _install_backend(monkeypatch)
         decode = SimpleNamespace(
             decode_lens=torch.tensor([1, 0, 1]),
@@ -444,6 +451,7 @@ class TestDecodeSelection:
         assert out[:2].tolist() == torch.full((2, 4), -1).tolist()
 
     def test_pool_decode_uses_token_granular_tail_lengths(self, monkeypatch):
+        """Verifies pool decode uses token granular tail lengths."""
         _install_backend(monkeypatch)
         decode = SimpleNamespace(
             decode_lens=torch.tensor([1]),
@@ -479,6 +487,7 @@ class TestDecodeSelection:
         assert out[:1, :6].tolist() == torch.full((1, 6), 5).tolist()
 
     def test_non_uniform_pool_decode_scatters_and_updates_the_tail(self, monkeypatch):
+        """Verifies non uniform pool decode scatters and updates the tail."""
         _install_backend(monkeypatch)
         decode = SimpleNamespace(
             decode_lens=torch.tensor([1, 0, 1]),
@@ -542,6 +551,7 @@ def _custop_config():
 
 class TestFakeAndClassEntryPoints:
     def test_fake_returns_the_buffer(self):
+        """Verifies fake returns the buffer."""
         buffer = torch.zeros(1, 4, dtype=torch.int32)
         assert (
             si.sparse_attn_indexer_kpool_fake(
@@ -585,6 +595,7 @@ class TestFakeAndClassEntryPoints:
         return layer, backend
 
     def test_nvidia_without_deep_gemm_is_rejected(self, monkeypatch):
+        """Verifies nvidia without deep gemm is rejected."""
         backend = _Backend()
         backend.is_nvidia = True
         backend.has_nvidia_deep_gemm = False
@@ -605,6 +616,7 @@ class TestFakeAndClassEntryPoints:
             )
 
     def test_native_forward_delegates_to_cuda(self, monkeypatch):
+        """Verifies native forward delegates to cuda."""
         layer, _ = self._op_layer(monkeypatch)
         calls = []
         monkeypatch.setattr(
@@ -634,6 +646,7 @@ class TestFakeAndClassEntryPoints:
         }
 
     def test_cuda_forward_dispatches_the_registered_operator(self, monkeypatch):
+        """Verifies cuda forward dispatches the registered operator."""
         layer, _ = self._op_layer(monkeypatch, use_fp4=True)
         recorded = []
         monkeypatch.setattr(
@@ -672,6 +685,7 @@ class TestFakeAndClassEntryPoints:
         assert args[21] == "tail"
 
     def test_fp8_cuda_forward_passes_a_none_scale(self, monkeypatch):
+        """Verifies fp8 cuda forward passes a none scale."""
         layer, _ = self._op_layer(monkeypatch, use_fp4=False)
         recorded = []
         monkeypatch.setattr(
@@ -686,6 +700,7 @@ class TestFakeAndClassEntryPoints:
         assert recorded[0][21] == "tail"
 
     def test_hip_forward_guards_and_dispatches(self, monkeypatch):
+        """Verifies hip forward guards and dispatches."""
         layer, _ = self._op_layer(monkeypatch, use_fp4=True)
         with pytest.raises(AssertionError, match="doesn't support fp4"):
             layer.forward_hip("hidden", torch.zeros(1), "k", "weights")
@@ -711,6 +726,7 @@ class TestFakeAndClassEntryPoints:
         assert recorded[0][1]["skip_k_cache_insert"] is False
 
     def test_hip_forward_rejects_a_fp4_tuple(self, monkeypatch):
+        """Verifies hip forward rejects a fp4 tuple."""
         layer, _ = self._op_layer(monkeypatch, use_fp4=False)
         with pytest.raises(AssertionError, match="single FP8"):
             layer.forward_hip(

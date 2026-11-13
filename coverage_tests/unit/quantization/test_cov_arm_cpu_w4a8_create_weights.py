@@ -63,6 +63,7 @@ class TestUnpackedCreateWeights:
     """The non-packed path defers entirely to stock vLLM behavior."""
 
     def test_delegates_every_argument_to_original(self, fake_env):
+        """Confirms the non-packed path delegates all arguments without registering parameters."""
         scheme = make_scheme(fake_env, packed=False)
         layer = torch.nn.Module()
 
@@ -99,6 +100,7 @@ class TestPackedCreateWeights:
     """The packed path builds packed parameters and a packed kernel."""
 
     def test_group_quantized_parameter_shapes_and_kernel(self, fake_env):
+        """Checks the packed group-quantized parameters, shapes and kernel configuration."""
         scheme = make_scheme(fake_env, packed=True, group_size=128)
         layer = torch.nn.Module()
 
@@ -159,6 +161,7 @@ class TestPackedCreateWeights:
         assert scheme.kernel._vllm_fl_arm_packed_checkpoint is True
 
     def test_row_parallel_group_size_minus_one_uses_partition(self, fake_env):
+        """Verifies group size -1 on row-parallel weights uses the input partition size."""
         scheme = make_scheme(fake_env, packed=True, group_size=-1)
         layer = torch.nn.Module()
         partition_input = 128
@@ -182,6 +185,7 @@ class TestPackedCreateWeights:
         assert isinstance(layer.weight_scale, fake_env.ChannelQuantScaleParameter)
 
     def test_non_row_parallel_group_size_minus_one_uses_full_input(self, fake_env):
+        """Verifies group size -1 on non-row-parallel weights uses the full input size."""
         scheme = make_scheme(fake_env, packed=True, group_size=-1)
         layer = torch.nn.Module()
 
@@ -200,6 +204,7 @@ class TestPackedCreateWeights:
         assert isinstance(layer.weight_scale, fake_env.GroupQuantScaleParameter)
 
     def test_explicit_group_size_controls_scale_columns(self, fake_env):
+        """Checks an explicit group size sets the scale dtype and column count."""
         scheme = make_scheme(fake_env, packed=True, group_size=64)
         layer = torch.nn.Module()
 
@@ -218,6 +223,7 @@ class TestPackedCreateWeights:
         assert tuple(layer.weight_scale.shape) == (PARTITION_SUM, INPUT // 64)
 
     def test_partition_not_divisible_by_group_size_raises(self, fake_env):
+        """Verifies an indivisible partition raises ValueError without side effects."""
         scheme = make_scheme(fake_env, packed=True, group_size=128)
         layer = torch.nn.Module()
 

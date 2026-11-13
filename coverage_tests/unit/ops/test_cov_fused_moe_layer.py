@@ -40,6 +40,7 @@ class _Recorder:
 
 
 def test_fl_quant_method_selects_backend_and_calls_super(monkeypatch):
+    """Checks that the FL quant method calls the base init, selects the unquantized backend, and records the backend and experts class."""
     base_init_calls = []
 
     def base_init(self, moe):
@@ -75,16 +76,20 @@ def _bare(**attrs):
 
 
 def test_is_monolithic_prefers_composed_kernel():
+    """Checks that is_monolithic prefers the composed kernel's flag when a moe kernel is present."""
     kernel = SimpleNamespace(is_monolithic=True)
     instance = _bare(moe_kernel=kernel, experts_cls=object())
     assert instance.is_monolithic is True
 
 
 def test_is_monolithic_true_without_kernel_or_experts():
+    """Checks that is_monolithic is True when neither a moe kernel nor an experts class is set."""
     assert _bare(moe_kernel=None, experts_cls=None).is_monolithic is True
 
 
 def test_is_monolithic_uses_experts_class():
+    """Checks that is_monolithic falls back to the experts class static flag when no kernel exists."""
+
     class Experts:
         @staticmethod
         def is_monolithic():
@@ -94,6 +99,8 @@ def test_is_monolithic_uses_experts_class():
 
 
 def test_factory_replaces_only_unquantized_method(monkeypatch):
+    """Checks that the factory delegates to upstream FusedMoE and replaces only an unquantized quant method."""
+
     class FakeUnquantized:
         pass
 
@@ -136,6 +143,8 @@ def test_factory_replaces_only_unquantized_method(monkeypatch):
 
 
 def test_factory_preserves_quantized_method(monkeypatch):
+    """Checks that the factory keeps an already-quantized method, installs the router, and logs the preservation."""
+
     class FakeUnquantized:
         pass
 

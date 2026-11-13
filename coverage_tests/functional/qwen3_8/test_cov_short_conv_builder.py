@@ -71,6 +71,7 @@ def _new_builder(monkeypatch, *, full_graph=False, capture_size=None, num_spec=1
 
 class TestBuilderConstruction:
     def test_capture_geometry_and_persistent_buffers(self, monkeypatch):
+        """Verifies capture geometry and persistent buffers."""
         builder = _new_builder(monkeypatch, num_spec=2)
         assert builder.num_spec == 2
         assert builder.use_full_cuda_graph is False
@@ -88,6 +89,7 @@ class TestBuilderConstruction:
         assert builder.has_initial_states_d.dtype is torch.bool
 
     def test_capture_size_caps_requests_and_tokens(self, monkeypatch):
+        """Verifies capture size caps requests and tokens."""
         builder = _new_builder(monkeypatch, capture_size=5, num_spec=2)
         assert builder.decode_cudagraph_max_bs == 4
         assert builder.decode_cudagraph_max_tokens == 5
@@ -96,6 +98,7 @@ class TestBuilderConstruction:
         assert builder.decode_cudagraph_max_tokens == 2
 
     def test_full_graph_flag_comes_from_the_compilation_config(self, monkeypatch):
+        """Verifies full graph flag comes from the compilation config."""
         builder = _new_builder(monkeypatch, full_graph=True)
         assert builder.use_full_cuda_graph is True
 
@@ -146,6 +149,7 @@ def _spec_builder(monkeypatch, **kwargs):
 
 class TestSpeculativeBuild:
     def test_pure_spec_batch_uses_every_token_as_spec(self, monkeypatch):
+        """Verifies pure spec batch uses every token as spec."""
         builder = _spec_builder(monkeypatch, num_spec=1)
         table = torch.tensor([[10, 0, 0], [20, 0, 0]], dtype=torch.int32)
         monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
@@ -181,6 +185,7 @@ class TestSpeculativeBuild:
         assert metadata.seq_lens is common.seq_lens
 
     def test_accepted_counts_follow_the_spec_request_order(self, monkeypatch):
+        """Verifies accepted counts follow the spec request order."""
         builder = _spec_builder(monkeypatch, num_spec=1)
         table = torch.tensor([[10, 0], [20, 0], [30, 0]], dtype=torch.int32)
         monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
@@ -205,6 +210,7 @@ class TestSpeculativeBuild:
         assert metadata.spec_sequence_masks.tolist() == [True, False, True]
 
     def test_mixed_batch_groups_spec_then_decode_then_prefill(self, monkeypatch):
+        """Verifies mixed batch groups spec then decode then prefill."""
         builder = _spec_builder(monkeypatch, num_spec=1)
         table = torch.tensor([[10, 0], [20, 0], [30, 0]], dtype=torch.int32)
         monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
@@ -245,6 +251,7 @@ class TestSpeculativeBuild:
         assert metadata.num_accepted_tokens.tolist() == [2]
 
     def test_full_graph_spec_batch_aliases_the_persistent_buffers(self, monkeypatch):
+        """Verifies full graph spec batch aliases the persistent buffers."""
         builder = _spec_builder(monkeypatch, full_graph=True, num_spec=1)
         table = torch.tensor([[10, 0], [20, 0]], dtype=torch.int32)
         monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
@@ -282,6 +289,7 @@ class TestSpeculativeBuild:
         assert metadata.num_accepted_tokens.tolist() == [2, 1]
 
     def test_missing_accepted_tokens_is_rejected(self, monkeypatch):
+        """Verifies missing accepted tokens is rejected."""
         builder = _spec_builder(monkeypatch)
         table = torch.tensor([[10, 0]], dtype=torch.int32)
         monkeypatch.setattr(sc, "mamba_get_block_table_tensor", lambda *args: table)
@@ -302,6 +310,7 @@ class TestSpeculativeBuild:
 
 class TestNonSpecOneDimensionalStateIndices:
     def test_decode_only_one_dimensional_indices_are_kept(self, monkeypatch):
+        """Verifies decode only one dimensional indices are kept."""
         builder = _new_builder(monkeypatch)
         builder.use_spec_decode = False
         metadata = object.__new__(sc.PleShortConvAttentionMetadata)
