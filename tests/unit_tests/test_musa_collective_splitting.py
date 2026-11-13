@@ -776,12 +776,13 @@ def test_actual_cached_op_fullgraph_uses_model_load_warmup():
     hot = ns["CachedOp"]("warm_cpu_contract")
     sample = torch.ones(2)
     try:
-        # The actual CachedOp slow path enters an untraceable manager lock.
+        # A cold CachedOp rejects fullgraph tracing before dispatch resolution.
         cold_compiled = torch.compile(
             lambda value: cold(value) + 1, backend="eager", fullgraph=True
         )
-        with pytest.raises(torch._dynamo.exc.Unsupported, match="RLock"):
+        with pytest.raises(torch._dynamo.exc.Unsupported):
             cold_compiled(sample)
+        assert cold._impl is None
         run_actual_load_model_dispatch_guard(
             "musa", Mode.VLLM_COMPILE, ns["warmup_cached_ops"]
         )
