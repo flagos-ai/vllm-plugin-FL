@@ -25,6 +25,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import ProxyHandler, Request, build_opener
 
+FLAGOS_WHITELIST_ENV = "VLLM_FL_FLAGOS_WHITELIST"
+
 REQUEST_IDS = {
     "text_single": ("text-llm-details",),
     "text_concurrent_8": tuple(f"text-{i:02d}" for i in range(1, 9)),
@@ -643,6 +645,7 @@ def main():
     os.environ["SUNRISE_GATE_REPO"] = str(repo)
     gate = repo / "tools/adaptation-gate-cases"
     env = os.environ.copy()
+    env.pop(FLAGOS_WHITELIST_ENV, None)
     if env.get("VLLM_FL_SUNRISE_BENCH_BASELINE_GDN_CORE_ATTN_ZEROS", "0") != "0":
         parser.error("Zero-output GDN benchmarking is forbidden in correctness Gates")
     env["NO_PROXY"] = env.get("NO_PROXY", "") + ",127.0.0.1,localhost"

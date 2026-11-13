@@ -152,6 +152,53 @@ def test_kv_capacity_uses_actual_token_capacity(gate):
         gate.kv_cache_capacity("GPU KV cache size: 4,096 tokens", 8192)
 
 
+def test_gate_removes_inherited_whitelist_from_server_launch(
+    gate, monkeypatch, tmp_path
+):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "config.json").write_text("{}")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_gate.py",
+            "--model",
+            str(model),
+            "--mode",
+            "eager",
+            "--output-dir",
+            str(tmp_path / "output"),
+        ],
+    )
+    monkeypatch.setenv(gate.FLAGOS_WHITELIST_ENV, "rsqrt")
+    monkeypatch.setenv("SUNRISE_GATE_REPO", str(HERE.parents[2]))
+    monkeypatch.delenv(
+        "VLLM_FL_SUNRISE_BENCH_BASELINE_GDN_CORE_ATTN_ZEROS", raising=False
+    )
+    launches = []
+    popen = gate.subprocess.Popen
+    check = f"import os; assert {gate.FLAGOS_WHITELIST_ENV!r} not in os.environ"
+    server_probe = (
+        f"{check}; import subprocess, sys; "
+        f"subprocess.run([sys.executable, '-c', {check!r}], check=True)"
+    )
+
+    def record_launch(command, *, env, **kwargs):
+        launches.append((command, env))
+        with popen([sys.executable, "-c", server_probe], env=env) as probe:
+            launches.append(probe.wait(timeout=10))
+        raise RuntimeError("Stop before launching the server")
+
+    monkeypatch.setattr(gate.subprocess, "Popen", record_launch)
+    assert gate.main() == 1
+    (command, env), probe_returncode = launches
+    assert "serve" in command
+    assert gate.FLAGOS_WHITELIST_ENV not in env
+    assert probe_returncode == 0
+    assert gate.os.environ[gate.FLAGOS_WHITELIST_ENV] == "rsqrt"
+
+
 def test_reuse_server_is_local_explicit_and_not_owned(gate, tmp_path):
     log = tmp_path / "external.log"
     log.write_text("keep")

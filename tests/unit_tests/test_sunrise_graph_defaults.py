@@ -46,9 +46,18 @@ def configure(monkeypatch):
         for n in platform.body
         if isinstance(n, ast.FunctionDef) and n.name == "apply_config_platform_defaults"
     )
+    config_check = next(
+        n
+        for n in platform.body
+        if isinstance(n, ast.FunctionDef) and n.name == "check_and_update_config"
+    )
     namespace = {}
     exec(
-        compile(ast.Module(body=[helper, hook], type_ignores=[]), str(path), "exec"),
+        compile(
+            ast.Module(body=[helper, hook, config_check], type_ignores=[]),
+            str(path),
+            "exec",
+        ),
         namespace,
     )
     config = ModuleType("vllm.config")
@@ -59,7 +68,12 @@ def configure(monkeypatch):
     monkeypatch.setitem(sys.modules, config.__name__, config)
     monkeypatch.setitem(sys.modules, envs.__name__, envs)
     hook_class = type(
-        "TestPlatform", (), {"apply_config_platform_defaults": namespace[hook.name]}
+        "TestPlatform",
+        (),
+        {
+            hook.name: namespace[hook.name],
+            config_check.name: namespace[config_check.name],
+        },
     )
     return SimpleNamespace(apply=namespace[helper.name], envs=envs, platform=hook_class)
 
@@ -81,6 +95,18 @@ def make_config(
             use_inductor_graph_partition=False,
         ),
     )
+
+
+@pytest.mark.parametrize("use_v2_model_runner", [False, True])
+def test_sunrise_rejects_encoder_only_before_worker_selection(
+    configure, use_v2_model_runner
+):
+    configure.platform.device_type = "ptpu"
+    config = SimpleNamespace(
+        is_mm_encoder_only=True, use_v2_model_runner=use_v2_model_runner
+    )
+    with pytest.raises(NotImplementedError, match="encoder-only execution on PTPU"):
+        configure.platform.check_and_update_config(config)
 
 
 def test_bare_sunrise_defaults_to_native_v2_decode_graphs(configure):

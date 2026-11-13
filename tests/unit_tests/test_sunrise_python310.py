@@ -44,7 +44,7 @@ class Builder:
 
 
 def test_multiline_aliases_and_nested_imports_remain_executable(compat):
-    source = """# 非 ASCII header tests UTF-8 AST column offsets.
+    source = """# Non-ASCII header (€) should survive rewriting.
 def helper():
     from typing import (
         Self as Result,
@@ -58,7 +58,7 @@ def helper():
     import typing_extensions
 
     assert namespace["helper"]()[0] is typing_extensions.Self
-    assert patched.startswith("# 非 ASCII")
+    assert patched.startswith("# Non-ASCII header (€)")
 
 
 def test_ordinary_python310_types_are_unchanged(compat):

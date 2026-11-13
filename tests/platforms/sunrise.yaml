@@ -29,30 +29,37 @@ persistence_m:
   tests:
     unit:
       include:
-        - tests/unit_tests/dispatch/test_sunrise_attention.py
-        - tests/unit_tests/dispatch/test_sunrise_runtime.py
-        - tests/unit_tests/dispatch/test_sunrise_graph_capture.py
-        - tests/unit_tests/dispatch/test_sunrise_embedding.py
-        - tests/unit_tests/dispatch/test_sunrise_kv_cache.py
-        - tests/unit_tests/dispatch/test_sunrise_cache_update.py
-        - tests/unit_tests/distributed/test_sunrise_flagcx_wheel.py
-        - tests/unit_tests/worker/test_sunrise_worker.py
-        - tests/unit_tests/worker/test_sunrise_model_runner.py
-        - tests/unit_tests/worker/test_sunrise_v2_model_runner.py
-        - tests/unit_tests/test_sunrise_device_utils.py
-        - tests/unit_tests/test_sunrise_python310.py
-        - tests/unit_tests/test_sunrise_ir.py
-        - tests/unit_tests/test_sunrise_compiler.py
-        - tests/unit_tests/test_sunrise_graph_defaults.py
-        - tests/unit_tests/ops/test_sunrise_topk.py
+        - test_sunrise_attention
+        - test_sunrise_runtime
+        - test_sunrise_graph_capture
+        - test_sunrise_embedding
+        - test_sunrise_kv_cache
+        - test_sunrise_cache_update
+        - test_sunrise_flagcx_wheel
+        - test_sunrise_worker
+        - test_sunrise_model_runner
+        - test_sunrise_v2_model_runner
+        - test_sunrise_device_utils
+        - test_sunrise_python310
+        - test_sunrise_ir
+        - test_sunrise_compiler
+        - test_sunrise_graph_defaults
+        - test_sunrise_test_config
+        - test_sunrise_topk
       exclude: []
     functional:
       include:
-        - tests/functional_tests/compilation/test_graph_capture.py
-        - tests/functional_tests/ops/test_sunrise_kv_cache.py
-        - tests/functional_tests/ops/test_sunrise_activation_compat.py
-        - tests/functional_tests/ops/test_sunrise_moe_routing.py
+        - test_graph_capture
+        - test_sunrise_kv_cache
+        - test_sunrise_activation_compat
+        - test_sunrise_moe_routing
       exclude: []
     e2e:
-      serving:
-        qwen3_6: [27b_tp2_eager, 27b_tp2_graph, 35b_a3b_tp2_eager, 35b_a3b_tp2_graph]
+      pr: &serving_cases
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+      nightly: *serving_cases

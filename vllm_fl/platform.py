@@ -488,6 +488,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.device_type == "ptpu" and vllm_config.is_mm_encoder_only:
+            raise NotImplementedError(
+                "Sunrise does not support encoder-only execution on PTPU."
+            )
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(

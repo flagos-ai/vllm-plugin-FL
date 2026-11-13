@@ -47,9 +47,11 @@ fields fail verification. `effective-configuration.json` records the observed
 configuration; requested CLI values are never substituted for missing evidence.
 The runner
 never opens a borrowed log for writing or terminates a borrowed server. The
-borrowed server must have been started with the same standard configuration and,
-for graph mode, native graph metrics. An owned server and the shared test client
-are cleaned up only by their task-created process sessions.
+borrowed server must have been started with the same standard configuration
+and with `VLLM_FL_FLAGOS_WHITELIST` unset. Graph mode also requires native graph
+metrics. The Gate removes any inherited operator whitelist from its
+subprocess environment. An owned server and the shared test client are cleaned
+up only by their task-created process sessions.
 
 Each model/mode must pass all five shared scenarios: text single (1 request),
 image single (1), text concurrency eight (8), image concurrency eight (8), and
