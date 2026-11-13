@@ -1,0 +1,17 @@
+[run]
+source = vllm_fl
+patch = subprocess
+sigterm = True
+omit =
+    tests/*
+    examples/*
+    benchmarks/*
+    coverage_tests/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
