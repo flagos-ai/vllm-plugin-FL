@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: Apache-2.0
+"""CPU contract harness for a runtime whose FlagTree import requires a device.
+
+Executes declarations from the real source files; only framework base classes
+and distributed/dispatch imports are stubbed. This is not a runtime-import or
+GPU-kernel validation. Device tests live separately in tests/models/qwen3_8_flash_next/.
+"""
+
+import __future__
+
+import ast
+import importlib.util
+import math
+import sys
+from contextvars import ContextVar
+from dataclasses import dataclass, field, replace
+from functools import wraps
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+
+import numpy as np
+import torch
+from torch import nn
+
+ROOT = Path(__file__).resolve().parents[3]
+
+_limits_spec = importlib.util.spec_from_file_location(
+    "qwen_cpu_tuning",
+    ROOT
+    / "vllm_fl/dispatch/backends/vendor/metax/impl/qwen3_8_flash_next/shape_limits.py",
+)
+_limits = importlib.util.module_from_spec(_limits_spec)
+_limits_spec.loader.exec_module(_limits)
+
+
+def declarations(path, name, namespace=None, names=None):
+    module = ModuleType(name)
+    module.__dict__.update(
+        torch=torch,
+        nn=nn,
+        np=np,
+        math=math,
+        dataclass=dataclass,
+        field=field,
+        is_metax=lambda: True,
+        replace=replace,
+        SimpleNamespace=SimpleNamespace,
+        ContextVar=ContextVar,
+        wraps=wraps,
+        load_tuning_config=_limits.load_tuning_config,
+    )
+    if namespace:
+        module.__dict__.update(namespace)
+    sys.modules[name] = module
+    tree = ast.parse(Path(path).read_text())
+    body = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.Assign, ast.AnnAssign))
+        and (names is None or getattr(node, "name", None) in names)
+    ]
+    exec(
+        compile(
+            ast.Module(body=body, type_ignores=[]),
+            str(path),
+            "exec",
+            flags=__future__.annotations.compiler_flag,
+        ),
+        module.__dict__,
+    )
+    return module
+
+
+class GenericBase:
+    @classmethod
+    def __class_getitem__(cls, _):
+        return cls
+
+
+loading = declarations(
+    ROOT / "vllm_fl/models/qwen3_8_flash_next/common/ple.py",
+    "qwen_cpu_loading",
+)
+ngram = declarations(
+    ROOT / "vllm_fl/models/qwen3_8_flash_next/gpu/host_ngram.py",
+    "qwen_cpu_ngram",
+    {
+        "copy_ple_embedding_shard_": loading.copy_ple_embedding_shard_,
+        "_MASK64": loading._MASK64,
+        "_SPLITMIX_GAMMA": loading._SPLITMIX_GAMMA,
+        "_PLE_HASH_BUFFER_NAMES": loading._PLE_HASH_BUFFER_NAMES,
+        "initialize_ple_hash_buffers": loading.initialize_ple_hash_buffers,
+        "validate_ple_embedding_shard": loading.validate_ple_embedding_shard,
+        "validate_ple_embedding_weights": loading.validate_ple_embedding_weights,
+        "get_tensor_model_parallel_world_size": lambda: 1,
+        "get_tensor_model_parallel_rank": lambda: 0,
+        "tensor_model_parallel_all_reduce": lambda x: x,
+    },
+)
+ple = declarations(
+    ROOT / "vllm_fl/models/qwen3_8_flash_next/gpu/ple_layer.py",
+    "qwen_cpu_ple",
+    {
+        "MambaBase": GenericBase,
+        "GroupedGemmaRMSNorm": nn.Module,
+        "NULL_BLOCK_ID": 0,
+        "resolve_op": lambda name: None,
+        "_PLE_HASH_BUFFER_NAMES": loading._PLE_HASH_BUFFER_NAMES,
+        "initialize_ple_hash_buffers": loading.initialize_ple_hash_buffers,
+        "validate_ple_embedding_shard": loading.validate_ple_embedding_shard,
+        "validate_ple_embedding_weights": loading.validate_ple_embedding_weights,
+    },
+)
+sampling_metadata = declarations(
+    ROOT / "vllm_fl/worker/qwen3_8_flash_next_sampling.py",
+    "qwen_cpu_sampling_metadata",
+)
+worker_namespace = {
+    "install_sampling_contract": sampling_metadata.install_sampling_contract
+}
+ple_inputs = declarations(
+    ROOT / "vllm_fl/worker/qwen3_8_flash_next_ple.py",
+    "qwen_cpu_ple_inputs",
+)
+worker_namespace.update(
+    {
+        name: getattr(ple_inputs, name)
+        for name in (
+            "committed_context_cpu",
+            "_validate_base",
+            "async_context_plan",
+            "_AsyncNgramContext",
+            "_HostInputBuffers",
+            "_mrv1_prepare",
+        )
+    }
+)
+worker = declarations(
+    ROOT / "vllm_fl/worker/qwen3_8_flash_next.py",
+    "qwen_cpu_worker",
+    worker_namespace,
+)
+
+# This fixture exercises the MetaX worker contract without loading a device.
+worker.is_metax = lambda: True

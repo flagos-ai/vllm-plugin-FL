@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 from typing import Any
 
 import torch
@@ -141,22 +142,31 @@ def select_unquantized_moe_backend_oot(
         # modular AgRs path then gathers/scatters on EP, followed by the model's
         # TP gather. This is independent of compiler-level sequence parallelism.
         if parallel.is_sequence_parallel and not (
-            parallel.use_ep and parallel.dp_size > 1
+            parallel.use_ep
+            and parallel.dp_size > 1
             and parallel.all2all_backend == "allgather_reducescatter"
         ):
-            raise NotImplementedError("Ascend MoE token splitting requires DP EP AllGather")
+            raise NotImplementedError(
+                "Ascend MoE token splitting requires DP EP AllGather"
+            )
         if parallel.use_ep:
             from vllm.config import get_current_vllm_config
 
             vllm_config = get_current_vllm_config()
             config = vllm_config.parallel_config
             if vllm_config.compilation_config.pass_config.enable_sp:
-                raise NotImplementedError("Ascend native EP does not support compiler SP")
-            if (runtime_platform.dist_backend != "hccl"
-                    or config.expert_placement_strategy != "linear"
-                    or moe_config.num_experts % parallel.ep_size != 0
-                    or (parallel.dp_size > 1
-                        and parallel.all2all_backend != "allgather_reducescatter")):
+                raise NotImplementedError(
+                    "Ascend native EP does not support compiler SP"
+                )
+            if (
+                runtime_platform.dist_backend != "hccl"
+                or config.expert_placement_strategy != "linear"
+                or moe_config.num_experts % parallel.ep_size != 0
+                or (
+                    parallel.dp_size > 1
+                    and parallel.all2all_backend != "allgather_reducescatter"
+                )
+            ):
                 raise NotImplementedError(
                     "Ascend EP requires HCCL AllGather and evenly partitioned linear experts"
                 )
@@ -323,6 +333,11 @@ def select_unquantized_moe_backend_oot(
     )
 
 
+@lru_cache(maxsize=8)
+def _metax_moe_device_name(device_index):
+    return torch.cuda.get_device_name(device_index)
+
+
 def _prepare_expert_assignment(
     topk_ids: torch.Tensor,
     config: dict[str, Any],
@@ -373,6 +388,30 @@ def _prepare_expert_assignment(
 
 
 class TritonExpertsFL(TritonExperts):
+    def __init__(self, moe_config, quant_config):
+        super().__init__(moe_config, quant_config)
+        self._qwen38_silu_out = None
+        platform = _get_current_platform()
+        if getattr(platform, "vendor_name", None) == "metax":
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.mctlass_moe import (
+                direct_outputs_supported,
+                silu_activation_out,
+            )
+
+            device = torch.device(moe_config.device)
+            if device.type == "cuda" and direct_outputs_supported(
+                moe_config, quant_config, _metax_moe_device_name(device.index)
+            ):
+                self._qwen38_silu_out = silu_activation_out
+
+    @property
+    def supports_output_buffer_alias(self):
+        return (
+            getattr(self, "_qwen38_silu_out", None) is not None
+            and self._lora_context is None
+            and self.gemm1_clamp_limit is None
+        )
+
     def apply(
         self,
         output: torch.Tensor,
@@ -573,6 +612,66 @@ class TritonExpertsFL(TritonExperts):
             block_shape=self.block_shape,
         )
 
+        config_gemm1, config_gemm2 = config, config
+        closed_moe_eligible = False
+        if (
+            getattr(runtime_platform, "vendor_name", None) == "metax"
+            and hidden_states.device.type == "cuda"
+        ):
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.moe_launch import (
+                select_stage_configs,
+            )
+
+            config_gemm1, config_gemm2, _ = select_stage_configs(
+                config,
+                num_tokens=num_tokens,
+                w1_shape=w1.shape,
+                w2_shape=w2.shape,
+                topk=top_k_num,
+                dtype=(
+                    hidden_states.dtype
+                    if w1.dtype == w2.dtype == hidden_states.dtype
+                    else None
+                ),
+                vendor=runtime_platform.vendor_name,
+                device_name=_metax_moe_device_name(hidden_states.device.index),
+                activation=activation.value,
+                quantized=(
+                    self.quant_dtype is not None
+                    or self.quant_config.use_fp8_w8a8
+                    or self.quant_config.use_int8_w8a8
+                    or self.quant_config.use_int8_w8a16
+                    or self.quant_config.use_int4_w4a16
+                    or self.gemm1_clamp_limit is not None
+                ),
+                has_lora=self._lora_context is not None,
+                has_bias=self.w1_bias is not None or self.w2_bias is not None,
+            )
+
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.mctlass_moe import (
+                moe_eligible,
+            )
+
+            closed_moe_eligible = moe_eligible(
+                hidden_states,
+                w1,
+                w2,
+                top_k_num,
+                _metax_moe_device_name(hidden_states.device.index),
+                activation.value,
+                self.quant_dtype is not None
+                or self.quant_config.use_fp8_w8a8
+                or self.quant_config.use_int8_w8a8
+                or self.quant_config.use_int8_w8a16
+                or self.quant_config.use_int4_w4a16
+                or self.gemm1_clamp_limit is not None,
+                self._lora_context is not None,
+                self.w1_bias is not None or self.w2_bias is not None,
+                expert_map,
+                global_num_experts,
+                apply_router_weight_on_input,
+            )
+
         if hidden_states.dtype == torch.bfloat16:
             compute_type = tl.bfloat16
         elif hidden_states.dtype == torch.float16:
@@ -595,10 +694,30 @@ class TritonExpertsFL(TritonExperts):
         )
         intermediate_cache3 = _resize_cache(workspace2, (num_tokens, top_k_num, K))
 
+        closed_gemm1 = closed_gemm2 = None
+        if closed_moe_eligible:
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.mctlass_moe import (
+                prepare_moe_stages,
+            )
+
+            closed_gemm1, closed_gemm2 = prepare_moe_stages(
+                hidden_states,
+                w1,
+                w2,
+                intermediate_cache1,
+                intermediate_cache2,
+                intermediate_cache3,
+                eligible=True,
+            )
+            if closed_gemm1 is not None:
+                config_gemm1 = dict(config_gemm1, BLOCK_SIZE_M=closed_gemm1.block_m)
+            if closed_gemm2 is not None:
+                config_gemm2 = dict(config_gemm2, BLOCK_SIZE_M=closed_gemm2.block_m)
+
         sorted_token_ids, expert_ids, num_tokens_post_padded = (
             _prepare_expert_assignment(
                 topk_ids,
-                config,
+                config_gemm1,
                 num_tokens,
                 top_k_num,
                 global_num_experts,
@@ -609,28 +728,36 @@ class TritonExpertsFL(TritonExperts):
             )
         )
 
-        _invoke_fused_moe_triton_kernel(
-            hidden_states,
-            w1,
-            intermediate_cache1,
-            a1q_scale,
-            self.w1_scale,
-            None,  # topk_weights
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            False,  # mul_routed_weights
-            top_k_num,
-            config,
-            compute_type=compute_type,
-            use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
-            use_int8_w8a8=self.quant_config.use_int8_w8a8,
-            use_int8_w8a16=self.quant_config.use_int8_w8a16,
-            use_int4_w4a16=self.quant_config.use_int4_w4a16,
-            per_channel_quant=self.per_act_token_quant,
-            block_shape=self.block_shape,
-            B_bias=self.w1_bias,
-        )
+        if closed_gemm1 is not None:
+            closed_gemm1.run(
+                hidden_states,
+                w1,
+                intermediate_cache1,
+                (sorted_token_ids, expert_ids, num_tokens_post_padded),
+            )
+        else:
+            _invoke_fused_moe_triton_kernel(
+                hidden_states,
+                w1,
+                intermediate_cache1,
+                a1q_scale,
+                self.w1_scale,
+                None,  # topk_weights
+                sorted_token_ids,
+                expert_ids,
+                num_tokens_post_padded,
+                False,  # mul_routed_weights
+                top_k_num,
+                config_gemm1,
+                compute_type=compute_type,
+                use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                per_channel_quant=self.per_act_token_quant,
+                block_shape=self.block_shape,
+                B_bias=self.w1_bias,
+            )
 
         # LoRA w13: applied to intermediate_cache1 before activation, using
         # hidden_states as the lora_a input.  moe_lora_align_block_size is
@@ -666,6 +793,9 @@ class TritonExpertsFL(TritonExperts):
             clamp_limit=self.quant_config.gemm1_clamp_limit,
             alpha=self.gemm1_alpha,
             beta=self.gemm1_beta,
+            silu_out=(
+                self._qwen38_silu_out if self.supports_output_buffer_alias else None
+            ),
         )
 
         a2q_scale: torch.Tensor | None = None
@@ -679,28 +809,51 @@ class TritonExpertsFL(TritonExperts):
             quantization_emulation=self.quantization_emulation,
         )
 
-        _invoke_fused_moe_triton_kernel(
-            qintermediate_cache2,
-            w2,
-            intermediate_cache3,
-            a2q_scale,
-            self.w2_scale,
-            topk_weights,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            not apply_router_weight_on_input,
-            1,
-            config,
-            compute_type=compute_type,
-            use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
-            use_int8_w8a8=self.quant_config.use_int8_w8a8,
-            use_int8_w8a16=self.quant_config.use_int8_w8a16,
-            use_int4_w4a16=self.quant_config.use_int4_w4a16,
-            per_channel_quant=self.per_act_token_quant,
-            block_shape=self.block_shape,
-            B_bias=self.w2_bias,
-        )
+        if config_gemm2["BLOCK_SIZE_M"] != config_gemm1["BLOCK_SIZE_M"]:
+            sorted_token_ids, expert_ids, num_tokens_post_padded = (
+                _prepare_expert_assignment(
+                    topk_ids,
+                    config_gemm2,
+                    num_tokens,
+                    top_k_num,
+                    global_num_experts,
+                    expert_map,
+                    use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                    use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                    block_shape=self.block_shape,
+                )
+            )
+        if closed_gemm2 is not None:
+            closed_gemm2.run(
+                qintermediate_cache2,
+                w2,
+                intermediate_cache3,
+                (sorted_token_ids, expert_ids, num_tokens_post_padded),
+                topk_weights,
+            )
+        else:
+            _invoke_fused_moe_triton_kernel(
+                qintermediate_cache2,
+                w2,
+                intermediate_cache3,
+                a2q_scale,
+                self.w2_scale,
+                topk_weights,
+                sorted_token_ids,
+                expert_ids,
+                num_tokens_post_padded,
+                not apply_router_weight_on_input,
+                1,
+                config_gemm2,
+                compute_type=compute_type,
+                use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                per_channel_quant=self.per_act_token_quant,
+                block_shape=self.block_shape,
+                B_bias=self.w2_bias,
+            )
 
         # LoRA w2: applied to intermediate_cache3 before moe_sum, using the
         # unquantized intermediate_cache2 as the lora_a input.  Reuses the

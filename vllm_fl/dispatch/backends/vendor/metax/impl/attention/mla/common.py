@@ -196,23 +196,10 @@ from typing import ClassVar, Generic, TypeVar
 
 import torch
 
-from vllm import _custom_ops as ops
-from vllm import envs
-from vllm.v1.attention.backend import (
-    AttentionBackend,
-    AttentionLayer,
-    MLAAttentionImpl,
-)
-from vllm.model_executor.layers.attention.mla_attention import get_mla_dims
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
-
-# --------------------------------------------------------------
-# Note: use Maca's merge_attn_states to get cuda kernel invoked
-# --------------------------------------------------------------
-from ..ops.merge_attn_states import merge_attn_states
-from ..utils.fa_utils import get_flash_attn_version
+from vllm import _custom_ops as ops, envs
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.distributed.parallel_state import get_dcp_group
+from vllm.model_executor.layers.attention.mla_attention import get_mla_dims
 from vllm.model_executor.layers.batch_invariant import (
     _batch_invariant_MODE as _bi_mode,
 )
@@ -223,7 +210,12 @@ from vllm.model_executor.layers.linear import (
 )
 from vllm.platforms import current_platform
 from vllm.utils.math_utils import cdiv, round_down
-from vllm.v1.attention.backend import AttentionMetadataBuilder
+from vllm.v1.attention.backend import (
+    AttentionBackend,
+    AttentionLayer,
+    AttentionMetadataBuilder,
+    MLAAttentionImpl,
+)
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
@@ -231,7 +223,14 @@ from vllm.v1.attention.backends.utils import (
     infer_global_hyperparameters,
     split_decodes_and_prefills,
 )
+from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
 from vllm.v1.kv_cache_interface import AttentionSpec
+
+# --------------------------------------------------------------
+# Note: use Maca's merge_attn_states to get cuda kernel invoked
+# --------------------------------------------------------------
+from ..ops.merge_attn_states import merge_attn_states
+from ..utils.fa_utils import get_flash_attn_version
 
 
 class QueryLenSupport(Enum):
@@ -258,10 +257,10 @@ is_vllm_fa = False
 # \------------------------- Metax Modification -------------------------/
 
 try:
-    from flashinfer import BatchPrefillWithRaggedKVCacheWrapper
-
     # /------------------------  Metax Modification -------------------------\
     from typing import Any
+
+    from flashinfer import BatchPrefillWithRaggedKVCacheWrapper
 
     cudnn_batch_prefill_with_kv_cache: Any = None  # type: ignore
     # \------------------------- Metax Modification -------------------------/
@@ -434,10 +433,14 @@ def use_flashinfer_prefill() -> bool:
 
     vllm_config = get_current_vllm_config()
     return (
-        not vllm_config.attention_config.disable_flashinfer_prefill
+        not getattr(vllm_config.attention_config, "disable_flashinfer_prefill", True)
         and flashinfer_available
-        and not vllm_config.attention_config.use_cudnn_prefill
-        and not vllm_config.attention_config.use_trtllm_ragged_deepseek_prefill
+        and not getattr(vllm_config.attention_config, "use_cudnn_prefill", False)
+        and not getattr(
+            vllm_config.attention_config,
+            "use_trtllm_ragged_deepseek_prefill",
+            False,
+        )
         and current_platform.is_device_capability_family(100)
     )
 

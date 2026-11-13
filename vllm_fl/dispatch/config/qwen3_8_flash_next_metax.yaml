@@ -1,0 +1,65 @@
+# Qwen3.8 basic integration: retain MetaX defaults, select local compatibility contracts.
+prefer: flagos
+strict: false
+op_backends:
+  attention_backend:
+  - vendor:metax
+  silu_and_mul:
+  - flagos
+  - reference
+  rms_norm:
+  - flagos
+  - reference
+  rotary_embedding:
+  - flagos
+  - reference
+  topk_softmax:
+  - flagos
+  - reference
+  gdn_prefill:
+  - impl:vendor.metax.qwen38
+  # Scoped exclusion: FG flag_gems.topk is slow for FP32 QSA K=512;
+  # FGV ops.DSA.bin_topk.tle_bucket_sort_topk fails MetaX TLE atomics.
+  # Native FGV per-row TLE also fails MetaX atomic type verification.
+  # The local provider explicitly selects generic non-TLE per-row for M<=128,
+  # retains radix for larger M in short buckets; opted-in long buckets use
+  # per-row selection. It bypasses score/selection when all blocks fit.
+  # Scope: FP32 K=512, score widths <=32768; FG remains the outside fallback.
+  # A global blacklist cannot distinguish these QSA-only library entrypoints.
+  qsa_select_paged_tokens:
+  - impl:vendor.metax.qwen38
+  # Measured graph-static QSA split count; outside scope returns single.
+  qsa_sparse_split_count:
+  - impl:vendor.metax.qwen38
+  qsa_sparse_paged_attention:
+  - impl:vendor.metax.qwen38
+  qwen38_small_projection:
+  - impl:vendor.metax.qwen38
+  # Scoped native BF16 GR down policy; other shapes retain FG linear.
+  qwen38_grdown_projection:
+  - impl:vendor.metax.qwen38
+  qwen38_grup_projection:
+  - impl:vendor.metax.qwen38
+  qwen38_ple_gate:
+  - impl:vendor.metax.qwen38
+  qwen38_gdn_mixed_qkv:
+  - impl:vendor.metax.qwen38
+  # HC-only BF16 intermediate-rounding contract; keep generic FG ops available.
+  qwen38_hc_grouped_norm:
+  - impl:vendor.metax.qwen38
+  qwen38_hc_gate_reduce:
+  - impl:vendor.metax.qwen38
+  qwen38_hc_inject_combine:
+  - impl:vendor.metax.qwen38
+  qwen38_qsa_rope:
+  - impl:vendor.metax.qwen38
+  qwen38_qsa_compress_norm_rope:
+  - impl:vendor.metax.qwen38
+  qwen38_hc_down_activation:
+  - impl:vendor.metax.qwen38
+flagos_blacklist:
+- masked_fill
+- masked_fill_
+oot_blacklist:
+- masked_fill
+- masked_fill_

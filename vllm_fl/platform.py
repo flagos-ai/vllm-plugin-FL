@@ -215,7 +215,9 @@ class PlatformFL(Platform):
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
     dist_backend: str = (
-        "flagcx" if _flagcx_backend_enabled() else dist_backend_dict.get(device_name, "nccl")
+        "flagcx"
+        if _flagcx_backend_enabled()
+        else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
     # translated into the ordinal visible to this process. Leaving the
@@ -343,6 +345,7 @@ class PlatformFL(Platform):
                 from vllm_fl.dispatch.backends.vendor.txda.patch import (
                     apply_txda_patches,
                 )
+
                 apply_txda_patches()
             except Exception as e:
                 logger.warning(f"Failed to apply txda patches: {e}")
@@ -475,10 +478,16 @@ class PlatformFL(Platform):
             if model_config is not None:
                 model_config.disable_cascade_attn = True
             if attention_config := vllm_config.attention_config:
-                attention_config.use_cudnn_prefill = False
-                attention_config.use_trtllm_ragged_deepseek_prefill = False
-                attention_config.use_trtllm_attention = False
-                attention_config.disable_flashinfer_prefill = True
+                # vLLM 0.24 removed some legacy prefill flags. Adding them
+                # dynamically breaks its dataclass replace() during MTP setup.
+                for name, value in (
+                    ("use_cudnn_prefill", False),
+                    ("use_trtllm_ragged_deepseek_prefill", False),
+                    ("use_trtllm_attention", False),
+                    ("disable_flashinfer_prefill", True),
+                ):
+                    if hasattr(attention_config, name):
+                        setattr(attention_config, name, value)
 
         # GCU relies on ECCL for collectives; custom all-reduce kernels are
         # not available.
@@ -775,10 +784,7 @@ class PlatformFL(Platform):
                 # path — the GroupCoordinator that matters is built after
                 # check_and_update_config has finalized cudagraph_mode.
                 return False
-            return (
-                vllm_config.compilation_config.cudagraph_mode
-                != CUDAGraphMode.NONE
-            )
+            return vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         # HIP communicators also use ctypes. Keep them opaque to Dynamo,
         # matching vLLM's ROCm platform even when is_cuda_alike() is False.
         return cls.vendor_name in ("nvidia", "amd", "hygon", "thead", "iluvatar")

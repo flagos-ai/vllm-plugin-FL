@@ -1,0 +1,59 @@
+{
+  "schema_version": 3,
+  "status": "Installable fixed MetaX C550 composition",
+  "runtime": {
+    "vllm_version": "0.24.0",
+    "vllm_base": "ee0da84ab9e04ac7610e28580af62c365e898389",
+    "flag_gems_base": "a7620cc191a0b42e040194622c5758b22a7a25dc",
+    "flaggems_vllm_base": "0f3df8ecbff9b48b2f8745c7160e0df8cb5486b5",
+    "flagtree": "0.6.1+metax3.6"
+  },
+  "published_component_references": {
+    "FG-index-address-product": "https://github.com/flagos-ai/FlagGems/pull/7981",
+    "FGV-PLE": "https://github.com/flagos-ai/FlagGems-vllm/pull/959",
+    "FGV-inplace-MoE": "https://github.com/flagos-ai/FlagGems-vllm/pull/1000",
+    "FGV-per-row-topk": "https://github.com/flagos-ai/FlagGems-vllm/pull/1024",
+    "FG-index-select-host-iteration": "https://github.com/flagos-ai/FlagGems/pull/8299",
+    "FGV-GDN-caller-metadata": "https://github.com/flagos-ai/FlagGems-vllm/pull/1056"
+  },
+  "native_vllm_capability": {
+    "api": "default-off modular expert output-buffer alias",
+    "status": "Included in the fixed vllm revision above; disabled unless the expert opts in"
+  },
+  "runtime_source_guards": "vllm_fl/dispatch/config/qwen3_8_flash_next_metax_tuning.json: source_files",
+  "installation_requirement": "Install the fixed revisions with matching MetaX Torch/MACA/FlagTree. See requirements.txt and the model guide. Source hashes remain compatibility checks.",
+  "fallback_requirement": "Keep native/reference paths and sampling contracts. Do not edit installed sources or disable FlagOS to conceal a missing dependency.",
+  "fixed_dependencies": {
+    "flag_gems": {
+      "version": "5.3.5",
+      "repository": "https://github.com/cshujie131-bot/FlagGems",
+      "commit": "4818d1b178644d80c0cff0c176a339b20a3da161"
+    },
+    "flaggems_vllm": {
+      "version": "0.3.0.dev1",
+      "repository": "https://github.com/cshujie131-bot/FlagGems-vllm",
+      "commit": "960fcbe2333044bb94ad35c10212213ca4488ffa"
+    },
+    "vllm": {
+      "version": "0.24.0+empty",
+      "repository": "https://github.com/cshujie131-bot/vllm",
+      "commit": "33f44bfa5f0e197ed84c4a4615de3eeeb6832c8c"
+    }
+  },
+  "runtime_image": "harbor.baai.ac.cn/flagos-inner-models-release/qwen3.8-flash-next-metax@sha256:f8a61974b673afe85a87bda27c1df777c2bfe6ef63f421d7dc335b4f0be53218",
+  "required_apis": [
+    "MetaX block Top20/top-p and optional race sampling",
+    "MetaX BF16 projection/expert GEMM plans",
+    "HC grouped norm, gate/reduce, residual injection and divide/SiLU",
+    "Mapped-host row gather and BF16 partial/MRoPE/cache-store",
+    "QSA indexer packing and native paged-attention wrappers",
+    "Model-scoped masked scalar assignment"
+  ],
+  "measured_launch_selections": {
+    "url": "https://github.com/cshujie131-bot/vllm-plugin-FL/releases/download/qwen38-metax-vllm024-20261113/qwen38-c550-selected-tuning.tar.gz",
+    "sha256": "dc80777db93657cef0c6c7e76295b478dea650c8c85d53f15d4fe4b15c4ec6b6",
+    "scope": "MetaX C550, the fixed source revisions and FlagTree 0.6.1+metax3.6",
+    "selected_records": 213,
+    "compiled_binaries": false
+  }
+}

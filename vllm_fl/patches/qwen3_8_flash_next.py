@@ -9,6 +9,9 @@ without modifying either the checkpoint or the installed vLLM package.
 from __future__ import annotations
 
 import logging
+from threading import RLock
+
+_registration_lock = RLock()
 from typing import TYPE_CHECKING
 
 from vllm.model_executor.models.config import Qwen3_5ForConditionalGenerationConfig
@@ -113,12 +116,76 @@ class Qwen3_8FlashNextForConditionalGenerationConfig(
         if multimodal_config is not None and multimodal_config.language_model_only:
             _strip_mrope(vllm_config.model_config)
 
+        from vllm_fl.models.qwen3_8_flash_next.gpu.runtime import is_metax
+
+        if is_metax():
+            _verify_metax_config(vllm_config)
+            return
         spec_config = vllm_config.speculative_config
         if spec_config is not None:
             raise NotImplementedError(
                 "Qwen4Exp Day0 serves normal next-token generation first; "
                 "native MTP/speculative decoding is a separate follow-up gate"
             )
+
+
+def _verify_metax_config(vllm_config):
+    cache_config = vllm_config.cache_config
+    multimodal_config = vllm_config.model_config.multimodal_config
+    import torch
+
+    from vllm import envs
+
+    if envs.VLLM_USE_V2_MODEL_RUNNER:
+        raise NotImplementedError(
+            "Qwen3.8 basic integration requires ModelRunnerFL/MRV1"
+        )
+    if (
+        vllm_config.speculative_config is not None
+        and vllm_config.speculative_config.num_speculative_tokens not in (1, 2, 3)
+    ):
+        raise NotImplementedError("Qwen3.8 basic integration supports MTP K1, K2 or K3")
+    if (
+        vllm_config.speculative_config is not None
+        and not vllm_config.speculative_config.disable_padded_drafter_batch
+    ):
+        raise NotImplementedError(
+            "Qwen3.8 vLLM 0.24 MTP requires disable_padded_drafter_batch=True "
+            "for chunked-prefill token alignment"
+        )
+    if vllm_config.model_config.dtype != torch.bfloat16:
+        raise ValueError("Qwen3.8 basic integration requires BF16 weights")
+    if cache_config.mamba_ssm_cache_dtype != "float32":
+        raise ValueError("Qwen3.8 recurrent state requires float32")
+    if cache_config.mamba_cache_mode != "none":
+        raise NotImplementedError("Qwen3.8 requires mamba_cache_mode=none")
+    if cache_config.enable_prefix_caching:
+        raise NotImplementedError("Qwen3.8 prefix caching is not supported")
+    if (
+        vllm_config.scheduler_config.async_scheduling
+        and vllm_config.speculative_config is not None
+    ):
+        raise NotImplementedError("Qwen3.8 MTP still requires synchronous scheduling")
+    if vllm_config.speculative_config is not None:
+        if (
+            vllm_config.additional_config.get("qwen38_ngram_mode", "shared_buffer")
+            != "shared_buffer"
+        ):
+            raise NotImplementedError("Qwen3.8 MTP requires shared_buffer lookup")
+        if vllm_config.scheduler_config.max_num_batched_tokens != 2048:
+            raise NotImplementedError("Qwen3.8 MTP requires MBT2048")
+    if vllm_config.additional_config.get(
+        "qwen38_tuning_profile", False
+    ) and vllm_config.scheduler_config.max_num_batched_tokens not in (2048, 4096, 8192):
+        raise ValueError(
+            "The reviewed Qwen3.8 profile supports MBT2048, MBT4096 or MBT8192"
+        )
+    if vllm_config.parallel_config.pipeline_parallel_size != 1:
+        raise NotImplementedError("Qwen3.8 basic integration requires PP1")
+    if multimodal_config is not None and not multimodal_config.language_model_only:
+        raise NotImplementedError(
+            "Qwen3.8 basic integration currently supports text-only serving"
+        )
 
 
 class Qwen3_8FlashNextForCausalLMConfig(Qwen3_8FlashNextForConditionalGenerationConfig):
@@ -229,7 +296,7 @@ def _register_compilation_boundaries() -> None:
             CompilationConfig._attention_ops.append(op)
 
 
-def apply_qwen3_8_flash_next_patches() -> bool:
+def _apply_qwen3_8_flash_next_patches() -> bool:
     """Install idempotent config, model and v0.24 metadata registrations."""
     from vllm.model_executor.models import (
         config as model_config,
@@ -267,11 +334,69 @@ def apply_qwen3_8_flash_next_patches() -> bool:
             architecture, f"{module}:{class_name}"
         )
 
-    _patch_common_attention_token_to_req_cache()
-    _patch_ple_metadata_bridge()
+    from vllm_fl.models.qwen3_8_flash_next.gpu.runtime import is_metax
+
+    if is_metax():
+        from .qwen3_8_flash_next_mtp import install_qwen38_mtp_compat
+
+        install_qwen38_mtp_compat()
+    else:
+        _patch_common_attention_token_to_req_cache()
+        _patch_ple_metadata_bridge()
     _register_compilation_boundaries()
     logger.info("Installed Qwen3.8-Flash-Next / Qwen4Exp Day0 runtime support")
     return True
+
+
+def apply_qwen3_8_flash_next_patches() -> bool:
+    """Register model configuration and compatibility hooks atomically."""
+    from vllm.config.compilation import CompilationConfig
+    from vllm.config.speculative import SpeculativeConfig
+    from vllm.model_executor.models import (
+        config as model_config,
+        registry as model_registry,
+    )
+    from vllm.transformers_utils import config as transformers_config
+
+    from vllm_fl.models.qwen3_8_flash_next.gpu.runtime import is_metax
+    from vllm_fl.patches._qwen38_installation import InstallationTransaction
+
+    non_metax = not is_metax()
+    if non_metax:
+        from vllm.v1.attention.backend import CommonAttentionMetadata
+        from vllm.v1.worker.gpu.model_states.mamba_hybrid import MambaHybridAttnMetadata
+
+    registries = (
+        transformers_config._CONFIG_REGISTRY,
+        model_config.MODELS_CONFIG_MAP,
+        model_registry._MULTIMODAL_MODELS,
+        model_registry._TEXT_GENERATION_MODELS,
+        model_registry._VLLM_MODELS,
+        model_registry.ModelRegistry.models,
+    )
+    with _registration_lock, InstallationTransaction() as transaction:
+        aliases = (
+            "qwen3_8_flash_next",
+            "qwen3_8_flash_next_text",
+            "qwen4_exp",
+            "qwen4_exp_text",
+        )
+        transaction.mapping(registries[0], aliases)
+        names = (*_ARCHITECTURES, "Qwen3_8FlashNextMTP", "Qwen4ExpMTP")
+        for registry in registries[1:]:
+            transaction.mapping(registry, names)
+        transaction.sequence_additions(
+            CompilationConfig._attention_ops,
+            (
+                "vllm::qwen3_8_flash_next_ple_short_conv",
+                "vllm::qwen3_8_flash_next_qsa_with_output",
+            ),
+        )
+        transaction.attribute(SpeculativeConfig, "hf_config_override")
+        if non_metax:
+            transaction.attribute(CommonAttentionMetadata, "token_to_req_indices")
+            transaction.attribute(MambaHybridAttnMetadata, "get_extra_attn_kwargs")
+        return _apply_qwen3_8_flash_next_patches()
 
 
 __all__ = [

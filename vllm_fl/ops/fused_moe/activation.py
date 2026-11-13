@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
-from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+
 from vllm.model_executor.layers.fused_moe.activation import (
+    MoEActivation,
     apply_moe_activation as upstream_apply_moe_activation,
 )
 
@@ -19,6 +20,7 @@ def apply_moe_activation(
     clamp_limit: float | None = None,
     alpha: float = 1.0,
     beta: float = 0.0,
+    silu_out=None,
 ) -> torch.Tensor:
     """Apply MoE activation function."""
     assert input.dim() == 2, "Input must be 2D"
@@ -37,7 +39,10 @@ def apply_moe_activation(
     # Activations with gated multiplication (gate × activation(up))
     if activation == MoEActivation.SILU:
         if clamp_limit is None:
-            output.copy_(_silu_and_mul(None, input))
+            if silu_out is None:
+                output.copy_(_silu_and_mul(None, input))
+            else:
+                silu_out(input, output)
         else:
             if input.device.type == "cpu":
                 # The imported GPU clamp kernel cannot accept CPU tensors.
