@@ -614,6 +614,11 @@ class ModelRunnerFL(
         self.use_ascend_attention = (
             getattr(current_platform, "vendor_name", None) == "ascend"
         )
+        self.use_ascend_hybrid_cache = False
+        if self.use_ascend_attention:
+            from vllm_fl.kv_cache.ascend.hybrid import uses_dense_hybrid_cache
+
+            self.use_ascend_hybrid_cache = uses_dense_hybrid_cache(model_config)
         self._ascend_attn_state = None
         self.graph_runtime = None
         if self.use_ascend_attention:
@@ -8052,10 +8057,6 @@ class ModelRunnerFL(
         if self.speculative_config:
             attn_groups += getattr(self.drafter, "draft_attn_groups", [])
         kernel_kv_caches = map_kv_caches_to_kernel_blocks(kv_caches, attn_groups)
-        if self.use_ascend_attention:
-            from vllm_fl.kv_cache.ascend.native_032 import adapt_layer_kv_caches
-
-            kernel_kv_caches = adapt_layer_kv_caches(kernel_kv_caches, attn_groups)
         bind_kv_cache(
             kv_caches,
             self.compilation_config.static_forward_context,
@@ -8276,6 +8277,12 @@ class ModelRunnerFL(
                     )
                 kv_cache_spec[layer_name] = spec
 
+        if self.use_ascend_hybrid_cache:
+            from vllm_fl.kv_cache.ascend.hybrid import pad_attention_specs
+
+            kv_cache_spec = pad_attention_specs(
+                kv_cache_spec, self.cache_config.mamba_page_size_padded
+            )
         return kv_cache_spec
 
     def _to_list(self, sampled_token_ids: torch.Tensor) -> list[list[int]]:

@@ -521,7 +521,6 @@ class AscendAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[int]:
-        # vLLM 0.32 passes the spec; FIA's native block size stays unchanged.
         return [128]
 
 
@@ -711,20 +710,20 @@ class AscendAttentionBackendImpl(AttentionImpl):
             batch_size = attn_metadata.seq_lens.shape[0]
             block_table = attn_metadata.block_tables[:batch_size, :]
             num_block, block_size, _, _ = self.key_cache.shape
-            key = self.key_cache.contiguous().view(num_block, block_size, -1)
-            value = self.value_cache.contiguous().view(num_block, block_size, -1)
+            key = self.key_cache.view(num_block, block_size, -1).contiguous()
+            value = self.value_cache.view(num_block, block_size, -1).contiguous()
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
         elif attn_metadata.attn_state == AscendAttentionState.DecodeOnly:
             num_block, block_size, _, _ = self.key_cache.shape
-            key = self.key_cache.contiguous().view(num_block, block_size, -1)
-            value = self.value_cache.contiguous().view(num_block, block_size, -1)
+            key = self.key_cache.view(num_block, block_size, -1).contiguous()
+            value = self.value_cache.view(num_block, block_size, -1).contiguous()
             block_table = attn_metadata.block_tables
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
         else:
             # ChunkedPrefill
             num_block, block_size, _, _ = self.key_cache.shape
-            key = self.key_cache.contiguous().view(num_block, block_size, -1)
-            value = self.value_cache.contiguous().view(num_block, block_size, -1)
+            key = self.key_cache.view(num_block, block_size, -1).contiguous()
+            value = self.value_cache.view(num_block, block_size, -1).contiguous()
             block_table = attn_metadata.block_tables
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
 

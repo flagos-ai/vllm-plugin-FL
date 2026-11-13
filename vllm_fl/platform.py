@@ -962,6 +962,19 @@ class PlatformFL(Platform):
         dst_cache[:, dst_block_indices] = _src_cache.cpu()
 
     @classmethod
+    def _align_hybrid_block_size(cls, vllm_config, backend_cls) -> None:
+        if cls.vendor_name == "ascend":
+            from vllm_fl.kv_cache.ascend.hybrid import (
+                align_hybrid_block_size,
+                uses_dense_hybrid_cache,
+            )
+
+            if uses_dense_hybrid_cache(vllm_config.model_config):
+                align_hybrid_block_size(vllm_config)
+                return
+        super()._align_hybrid_block_size(vllm_config, backend_cls)
+
+    @classmethod
     def support_hybrid_kv_cache(cls) -> bool:
         return True
 
