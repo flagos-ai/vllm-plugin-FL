@@ -154,6 +154,11 @@ def _apply_legacy_kunlunxin_patches():
     )
     apply_mamba_align_compat()
 
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.v2_greedy_sampler import (
+        apply_v2_greedy_sampler,
+    )
+    apply_v2_greedy_sampler()
+
 
 def _install_graph_patch(owner, name, replacement, replacements):
     if replacements is None:
