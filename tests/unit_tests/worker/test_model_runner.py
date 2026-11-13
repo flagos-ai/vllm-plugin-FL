@@ -89,11 +89,8 @@ def test_full_graph_exclusion_survives_dp_redispatch(
         uniform_decode_query_len=1,
         model_config=SimpleNamespace(is_encoder_decoder=False),
         input_batch=SimpleNamespace(lora_id_to_lora_request={}),
-        _pad_for_sequence_parallelism=lambda tokens: tokens,
         cudagraph_dispatcher=dispatcher,
-        compilation_config=SimpleNamespace(
-            pass_config=SimpleNamespace(enable_sp=False)
-        ),
+        compilation_config=SimpleNamespace(pass_config=SimpleNamespace()),
         parallel_config=parallel,
         vllm_config=SimpleNamespace(
             parallel_config=parallel,
@@ -120,6 +117,66 @@ def test_full_graph_exclusion_survives_dp_redispatch(
         assert call.kwargs["invalid_modes"] == (
             {CUDAGraphMode.FULL} if disable_full else None
         )
+
+
+@pytest.mark.parametrize("num_tokens", [1, 10, 15])
+def test_batch_padding_ignores_tensor_parallel_size(monkeypatch, num_tokens):
+    """vLLM 0.32 dropped sequence parallelism, so TP never pads num_tokens."""
+    from vllm.config import CUDAGraphMode
+
+    module = import_module("vllm_fl.worker.model_runner")
+
+    dispatcher = MagicMock()
+    dispatcher.dispatch.return_value = (
+        CUDAGraphMode.NONE,
+        SimpleNamespace(num_tokens=num_tokens),
+    )
+    parallel = SimpleNamespace(
+        data_parallel_size=1,
+        data_parallel_rank=0,
+        tensor_parallel_size=4,
+    )
+    runner = SimpleNamespace(
+        _is_uniform_decode=module.ModelRunnerFL._is_uniform_decode,
+        uniform_decode_query_len=1,
+        model_config=SimpleNamespace(is_encoder_decoder=False),
+        input_batch=SimpleNamespace(lora_id_to_lora_request={}),
+        cudagraph_dispatcher=dispatcher,
+        compilation_config=SimpleNamespace(pass_config=SimpleNamespace()),
+        parallel_config=parallel,
+        vllm_config=SimpleNamespace(
+            parallel_config=parallel,
+            observability_config=SimpleNamespace(cudagraph_metrics=False),
+        ),
+    )
+
+    module.ModelRunnerFL._determine_batch_execution_and_padding(
+        runner,
+        num_tokens=num_tokens,
+        num_reqs=1,
+        num_scheduled_tokens_np=np.array([num_tokens]),
+        max_num_scheduled_tokens=num_tokens,
+        use_cascade_attn=False,
+    )
+
+    # Before 0.32 the token count was rounded up to a multiple of TP when
+    # sequence parallelism was on; the graph dispatch must now see it unchanged.
+    assert dispatcher.dispatch.call_args.kwargs["num_tokens"] == num_tokens
+
+
+def test_init_is_wrapped_by_jit_warmup_capture():
+    """The V1 runner must open its JIT warmup scope through upstream's capture.
+
+    Upstream decorates ``GPUModelRunner.__init__``; ``ModelRunnerFL`` does not
+    inherit that class, so the decorator is applied here instead. Dropping it
+    silently disables JIT warmup collection.
+    """
+    module = import_module("vllm_fl.worker.model_runner")
+
+    init = module.ModelRunnerFL.__init__
+
+    assert hasattr(init, "__wrapped__"), "ModelRunnerFL.__init__ is not decorated"
+    assert init.__wrapped__.__name__ == "__init__"
 
 
 # =============================================================================
@@ -273,68 +330,6 @@ class TestGetCumsumAndArange:
         )
 
         assert cu_num_tokens.dtype == np.int64
-
-
-# =============================================================================
-# Layer 2: _pad_for_sequence_parallelism Logic Tests
-# =============================================================================
-
-
-class TestPadForSequenceParallelism:
-    """Test sequence parallelism padding logic."""
-
-    @pytest.fixture
-    def mock_model_runner(self):
-        """Create mock model runner for padding tests."""
-        from vllm_fl.worker.model_runner import ModelRunnerFL
-
-        mock_runner = MagicMock(spec=ModelRunnerFL)
-        mock_runner.vllm_config = MagicMock()
-        mock_runner.vllm_config.parallel_config = MagicMock()
-        mock_runner.compilation_config = MagicMock()
-        mock_runner.compilation_config.pass_config = MagicMock()
-        mock_runner._pad_for_sequence_parallelism = (
-            ModelRunnerFL._pad_for_sequence_parallelism.__get__(
-                mock_runner, ModelRunnerFL
-            )
-        )
-        return mock_runner
-
-    def test_no_padding_when_sp_disabled(self, mock_model_runner):
-        """SP disabled should return original token count."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = 4
-        mock_model_runner.compilation_config.pass_config.enable_sp = False
-
-        assert mock_model_runner._pad_for_sequence_parallelism(10) == 10
-
-    def test_no_padding_when_tp_size_1(self, mock_model_runner):
-        """TP size 1 means no parallelism, no padding needed."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = 1
-        mock_model_runner.compilation_config.pass_config.enable_sp = True
-
-        assert mock_model_runner._pad_for_sequence_parallelism(10) == 10
-
-    @pytest.mark.parametrize(
-        "num_tokens,tp_size,expected",
-        [
-            (10, 4, 12),  # 10 -> ceil to multiple of 4
-            (8, 4, 8),  # 8 already multiple of 4
-            (10, 8, 16),  # 10 -> ceil to multiple of 8
-            (1, 4, 4),  # 1 -> ceil to multiple of 4
-            (15, 8, 16),  # 15 -> ceil to multiple of 8
-        ],
-    )
-    def test_padding_calculation(
-        self, mock_model_runner, num_tokens, tp_size, expected
-    ):
-        """Verify padding rounds up to next multiple of tp_size."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = tp_size
-        mock_model_runner.compilation_config.pass_config.enable_sp = True
-
-        result = mock_model_runner._pad_for_sequence_parallelism(num_tokens)
-
-        assert result == expected
-        assert result % tp_size == 0  # Must be divisible
 
 
 # =============================================================================

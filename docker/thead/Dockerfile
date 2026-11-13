@@ -23,7 +23,8 @@
 #
 # Optional named context "thead_wheels" may supply pre-downloaded wheels
 # (vllm-0.32.0+empty, flagtree-<ver>, flag_gems-<ver>). Without it, flagtree and
-# FlagGems come from INDEX_URL and vLLM is built from source in empty mode.
+# FlagGems come from INDEX_URL, while the vLLM +empty wheel stays mandatory:
+# the build fails instead of falling back to a source build.
 
 ARG THEAD_BASE_IMAGE=harbor.baai.ac.cn/flagos-app/sglang0.5.12-thead-ppu2.1.0:2.2.0-0.2.0@sha256:27de587ef3919caf649128795178ce4e516ee44991305f61d16fa033228c0149
 
