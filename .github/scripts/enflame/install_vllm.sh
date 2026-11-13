@@ -19,9 +19,8 @@ printf '%s\n' \
   'triton==3.6.0' \
   'triton-gcu==3.6.0+1.0.20260722' \
   'flagtree==0.7.0+enflame3.6' \
-  'flag-gems==5.4.0' > "$WORK/constraints.txt"
+  'flag-gems==5.5.0.dev0' > "$WORK/constraints.txt"
 printf '%s\n' \
-  'flag-gems==5.4.0 --hash=sha256:09cb175e29f4fdfc78b87df46c4500d5a9b451e12cd64dda9a7d669f522bf5e5' \
   'flagtree==0.7.0+enflame3.6 --hash=sha256:94b3aaf9f9aefa02f535ee5339f16c5304c52a1de5e7e749f742f7b4bf01332d' \
   'triton-gcu==3.6.0+1.0.20260722 --hash=sha256:59d7a450a48f8de2a965ea6e456ea7c13bf53cb83abd5df929e4e8558da5f8f9' > "$WORK/wheels.txt"
 # Fetch inputs before modifying the installed environment. No package fallback.
@@ -43,7 +42,7 @@ python -m pip install --index-url "$PYPI_INDEX" 'setuptools>=77.0.3,<81' 'setupt
   'scikit-build-core==0.11' pybind11 ninja 'cmake>=3.26.1' \
   -c "$WORK/constraints.txt"
 python -m pip install --no-deps --no-index --find-links "$WORK/wheels" \
-  'triton-gcu==3.6.0+1.0.20260722' 'flagtree==0.7.0+enflame3.6' 'flag-gems==5.4.0'
+  'triton-gcu==3.6.0+1.0.20260722' 'flagtree==0.7.0+enflame3.6'
 python -m pip install --index-url "$PYPI_INDEX" \
   -r "$SOURCE/requirements/common.txt" -c "$WORK/constraints.txt"
 python -m pip install --index-url "$PYPI_INDEX" \

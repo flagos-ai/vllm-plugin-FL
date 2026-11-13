@@ -12,7 +12,7 @@ RUNTIME = {
 }
 PACKAGES = {
     **RUNTIME,
-    "flag-gems": "5.4.0",
+    "flag-gems": "5.5.0.dev0",
     "flagtree": "0.7.0+enflame3.6",
     "triton-gcu": "3.6.0+1.0.20260722",
     "openai": "3.28.0",

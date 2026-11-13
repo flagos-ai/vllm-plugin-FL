@@ -487,7 +487,7 @@ def release_verifier(tmp_path, monkeypatch):
     monkeypatch.setattr(verifier, "EXPECTED_BYTES", len(raw))
     monkeypatch.setattr(verifier, "EXPECTED_SHA256", hashlib.sha256(raw).hexdigest())
     distribution = SimpleNamespace(
-        version="5.4.0", locate_file=lambda path: tmp_path / path
+        version="5.5.0.dev0", locate_file=lambda path: tmp_path / path
     )
     monkeypatch.setattr(
         verifier.importlib.metadata, "distribution", lambda name: distribution

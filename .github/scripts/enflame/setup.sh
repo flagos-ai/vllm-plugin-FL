@@ -21,7 +21,9 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
 fi
 
 # The image supplies the vendor SDK, not necessarily the target vLLM release.
-# Install first, then enforce the same strict package gate as the Docker recipe.
+# Install the exact FlagGems source release before resolving vLLM constraints.
+bash docker/enflame/install_flaggems.sh
+# Install vLLM, then enforce the same strict package gate as the Docker recipe.
 bash .github/scripts/enflame/install_vllm.sh
 python .github/scripts/enflame/verify_stack.py
 
@@ -29,7 +31,7 @@ python .github/scripts/enflame/verify_stack.py
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip install --index-url "${PYPI_INDEX_URL:-https://pypi.org/simple}" "pytest-xdist>=3.0.0"
 
-python .github/scripts/install_flaggems_vllm.py
+python .github/scripts/install_flaggems_vllm.py --platform enflame
 
 # Verify pinned release files after all package installation steps.
 python docker/enflame/verify_compiler.py
