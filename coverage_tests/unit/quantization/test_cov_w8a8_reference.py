@@ -193,6 +193,7 @@ def test_w8a8_linear_reference_rejects_bad_weight():
 
 
 def test_w8a8_linear_reference_rejects_incompatible_input():
+    """Inputs that are not a multiple of the packed width raise ValueError."""
     weight = torch.zeros(4, 8, dtype=torch.int8)
     with pytest.raises(ValueError, match="incompatible input dimensions"):
         w8a8_linear_reference(torch.zeros(2, 7), weight, torch.ones(4))
@@ -201,6 +202,7 @@ def test_w8a8_linear_reference_rejects_incompatible_input():
 
 
 def test_w8a8_linear_reference_validates_scale_and_bias_width():
+    """Scale and bias must carry exactly one value per output channel."""
     weight = torch.zeros(4, 8, dtype=torch.int8)
     x = torch.zeros(2, 8)
     with pytest.raises(ValueError, match="one value per output channel"):

@@ -228,6 +228,7 @@ def test_forward_hip_with_key_delegates_to_oot(monkeypatch):
 
 
 def test_init_forwards_geometry_and_initializes_ascend_on_npu(monkeypatch):
+    """Construction forwards the geometry and runs Ascend rotary init on NPU."""
     init_calls = []
     ascend_calls = []
     fake_module = types.ModuleType(
@@ -253,6 +254,7 @@ def test_init_forwards_geometry_and_initializes_ascend_on_npu(monkeypatch):
 
 
 def test_init_skips_ascend_initialization_off_npu(monkeypatch):
+    """Non-NPU devices forward the geometry without touching Ascend rotary init."""
     init_calls = []
     monkeypatch.setattr(Mod.current_platform, "device_type", "cuda")
     monkeypatch.setattr(

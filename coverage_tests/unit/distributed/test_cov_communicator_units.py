@@ -735,6 +735,7 @@ def _patch_init_dependencies(monkeypatch, *, use_all2all):
 
 
 def test_init_creates_flagcx_only_for_multirank_groups(monkeypatch):
+    """Single-rank groups skip FlagCX; multirank groups build it with the group."""
     _patch_init_dependencies(monkeypatch, use_all2all=False)
     group = SimpleNamespace(world_size=1)
     device = torch.device("cpu")
@@ -754,6 +755,7 @@ def test_init_creates_flagcx_only_for_multirank_groups(monkeypatch):
 
 
 def test_init_builds_ag_rs_all2all_manager_when_enabled(monkeypatch):
+    """When enabled, the all2all manager receives the CPU group and TCP store."""
     _patch_init_dependencies(monkeypatch, use_all2all=True)
     group = SimpleNamespace(world_size=2)
     store = object()

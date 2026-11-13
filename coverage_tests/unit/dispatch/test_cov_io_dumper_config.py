@@ -39,6 +39,7 @@ from vllm_fl.dispatch import io_dumper
 from vllm_fl.dispatch.io_common import (
     dispatch_mode_mgr,
     get_step,
+    reset_exec_order,
     reset_step,
 )
 from vllm_fl.dispatch.io_dumper import (
@@ -87,6 +88,10 @@ class TestManagerCallPath:
             dump_dir = str(tmp_path / "dump")
             x = torch.full((2, 2), 5.0)  # built before enabling the mode
             enable_io_dump(dump_dir=dump_dir, with_metas=True)
+            # Policy/manager setup may execute dispatched ops before the dump
+            # mode is enabled; start the counter at zero so the assertions do
+            # not depend on whichever file ran earlier in the session.
+            reset_exec_order()
             try:
                 out = mgr.call("test_cov.matmul", x, x)
                 io_dumper._wait_and_flush()
