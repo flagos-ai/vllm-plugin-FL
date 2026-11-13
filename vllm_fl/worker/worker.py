@@ -14,7 +14,6 @@ from datetime import timedelta
 from types import NoneType
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import regex as re
 import torch
 import torch.nn as nn
@@ -103,11 +102,6 @@ from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
 from vllm_fl.dispatch.io_common import managed_inference_mode
-from vllm_fl.vllm_compat import (
-    init_batch_invariance,
-    is_residual_scattered_for_sp,
-    return_routed_experts_enabled,
-)
 from vllm_fl.worker.runtime import _initialize_fl_runtime
 
 logger = init_logger(__name__)
@@ -337,9 +331,11 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
-        # this flag to select the matching block-table and KV-cache kernels.
-        self.use_v2_model_runner = False
+        # Follow the upstream selection (V2 unless the config or the platform
+        # rules it out). Vendors that only ship the V1 ModelRunnerFL reject V2
+        # in PlatformFL.check_and_update_config, so the value seen here is
+        # already the runner this process is going to build.
+        self.use_v2_model_runner = vllm_config.use_v2_model_runner
 
         # Hybrid models (mamba/linear attention + full attention) keep the
         # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
@@ -382,7 +378,6 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        self.use_v2_model_runner = vllm_config.use_v2_model_runner
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 
@@ -646,7 +641,17 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            _install_v2_runner_compat()
+            vendor_name = getattr(current_platform, "vendor_name", "")
+            if vendor_name == "thead":
+                # Platform-side adaptations for the upstream V2 runner; see
+                # vllm_fl/dispatch/backends/vendor/thead/patches/.
+                from vllm_fl.dispatch.backends.vendor.thead.patches import (
+                    v2_runner_compat,
+                )
+
+                v2_runner_compat.install_v2_runner_compat()
+            elif current_platform.device_type == "musa":
+                _install_v2_runner_compat()
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
@@ -973,13 +978,21 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if return_routed_experts_enabled(self.vllm_config):
+        # vLLM 0.32 moved the flag to ``VllmConfig.aux_output_config``; the
+        # ModelConfig field only exists on older builds.
+        aux_output_config = getattr(self.vllm_config, "aux_output_config", None)
+        routed_experts_source = (
+            aux_output_config
+            if aux_output_config is not None
+            else self.model_config
+        )
+        if getattr(routed_experts_source, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
         # allocator and are not discarded during sleep/wake cycles.
-        if kv_cache_config.needs_kv_cache_zeroing and hasattr(
+        if getattr(kv_cache_config, "needs_kv_cache_zeroing", False) and hasattr(
             self.model_runner, "_init_kv_zero_meta"
         ):
             self.model_runner._init_kv_zero_meta()
@@ -1376,39 +1389,7 @@ class WorkerFL(WorkerBase):
 
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         all_gather_tensors = {}
-        compilation_config = self.vllm_config.compilation_config
-        parallel_config = self.vllm_config.parallel_config
-
-        if (
-            parallel_config.pipeline_parallel_size > 1
-            and getattr(compilation_config.pass_config, "enable_sp", False)
-            and forward_pass
-        ):
-            # currently only supported by V1 GPUModelRunner
-            assert not self.use_v2_model_runner
-            num_scheduled_tokens_np = np.array(
-                list(scheduler_output.num_scheduled_tokens.values()),
-                dtype=np.int32,
-            )
-            # TODO(lucas): This is pretty gross; ideally we should only ever call
-            # `_determine_batch_execution_and_padding` once (will get called again
-            # in `execute_model`) but this requires a larger refactor of PP.
-            _, batch_desc, _, _, _ = (
-                self.model_runner._determine_batch_execution_and_padding(
-                    num_tokens=num_scheduled_tokens,
-                    num_reqs=len(num_scheduled_tokens_np),
-                    num_scheduled_tokens_np=num_scheduled_tokens_np,
-                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
-                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
-                )
-            )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
-                )
-            }
 
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (
@@ -1718,6 +1699,11 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
+    # vLLM 0.32 keeps the module under ``determinism``; the 0.28 location
+    # (``layers.batch_invariant``) no longer exists.
+    from vllm.model_executor.determinism.batch_invariant import (
+        init_batch_invariance,
+    )
 
     init_batch_invariance()
     override_envs_for_eplb(

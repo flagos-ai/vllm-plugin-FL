@@ -48,6 +48,14 @@ from vllm_fl.utils import (
 logger = init_logger(__name__)
 
 
+def _vllm_c_available() -> bool:
+    """True when this build ships upstream's CUDA IR kernels (``vllm._C``)."""
+    try:
+        return importlib.util.find_spec("vllm._C") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     """Configure eager FX execution with ordinary Ascend FULL decode graphs.
 
@@ -778,16 +786,17 @@ class PlatformFL(Platform):
             # `vllm::all_reduce` wrapper. torch_musa's MCCL cannot submit or poll
             # those while a graph is recording, so split them out too; they then
             # run eagerly between the captured regions.
-            from vllm_fl.dispatch.backends.vendor.musa.graph_config import (
-                append_collective_splitting_ops,
-            )
-
-            if append_collective_splitting_ops(compilation_config.splitting_ops):
-                logger.info(
-                    "MUSA: excluding c10d collectives from cudagraphs "
-                    "(MCCL is not capture-safe); splitting_ops=%s",
-                    compilation_config.splitting_ops,
+            if compilation_config.cudagraph_mode.has_piecewise_cudagraphs():
+                from vllm_fl.dispatch.backends.vendor.musa.graph_config import (
+                    append_collective_splitting_ops,
                 )
+
+                if append_collective_splitting_ops(compilation_config.splitting_ops):
+                    logger.info(
+                        "MUSA: excluding c10d collectives from cudagraphs "
+                        "(MCCL is not capture-safe); splitting_ops=%s",
+                        compilation_config.splitting_ops,
+                    )
 
     @classmethod
     def get_attn_backend_cls(
@@ -1096,27 +1105,25 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Mirror upstream CUDA's IR-op defaults without hardcoding CUDA APIs.
-
-        vLLM 0.32 registers ``gelu_and_mul_sparse`` only for the ``triton`` and
-        ``native`` providers, so the generic ``["vllm_c", "native"]`` default is
-        rejected there by ``IrOp._filter_priority_impls``.  Keep upstream's
-        per-op override so EMPTY builds (MUSA and other OOT vendors) start.
-        """
-        from dataclasses import fields
-
+        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
-        overrides = {"rms_norm": default, "fused_add_rms_norm": default}
-        # Only override ops the installed vLLM knows about: with_default() forwards
-        # kwargs straight to the dataclass, so an unknown name is a TypeError.
-        if any(f.name == "gelu_and_mul_sparse" for f in fields(IrOpPriorityConfig)):
-            overrides["gelu_and_mul_sparse"] = ["triton", "native"]
-        return IrOpPriorityConfig.with_default(default, **overrides)
+        default = ["native"]
+        if not using_inductor and _vllm_c_available():
+            # ``vllm_c`` is only a valid provider when the build actually ships
+            # upstream's CUDA IR kernels. VLLM_TARGET_DEVICE=empty builds have no
+            # vllm._C, and keeping it in the priority list makes
+            # KernelConfig.set_default fail with "All providers in priority must
+            # be registered implementations".
+            default = ["vllm_c", "native"]
+        return IrOpPriorityConfig.with_default(
+            default,
+            rms_norm=default,
+            fused_add_rms_norm=default,
+        )
 
     @classmethod
     def is_arch_support_pdl(cls) -> bool:

@@ -89,8 +89,7 @@ def fused_topk(
     # vLLM 0.32 can pad the batch and marks the extra rows through
     # ``is_padding``; the native ``_moe_C`` kernel accepts that mask, the FL
     # kernel does not. Keep upstream's implementation where it exists and
-    # reproduce the mask below otherwise -- the +empty builds used by the
-    # vendor platforms do not ship ``_moe_C`` at all.
+    # reproduce the mask below otherwise.
     padding_mask = _get_padding_mask(M)
     if scoring_func != "softmax" or (
         padding_mask is not None and _has_native_moe_topk()
