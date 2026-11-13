@@ -607,9 +607,9 @@ class WorkerFL(WorkerBase):
                 self.model_runner.get_model(),
             )
 
-        # vLLM 0.32 keeps profiling, compilation and serving under the same
-        # Dynamo thread guard; do not change it after model warmup.
-        set_torch_threads_for_runtime()
+        if self.device.type == "npu":
+            # Keep the Dynamo thread guard stable from graph warmup to serving.
+            set_torch_threads_for_runtime()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
@@ -903,7 +903,6 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        # vLLM 0.32 moved routed-experts output to the aux-output connector.
         if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
@@ -1096,7 +1095,10 @@ class WorkerFL(WorkerBase):
 
         # Eager execution permits runtime JIT compilation. Match the 0.32
         # worker and monitor only when kernel warmup was enabled.
-        if self.vllm_config.kernel_config.enable_jit_warmup:
+        if (
+            self.device.type != "npu"
+            or self.vllm_config.kernel_config.enable_jit_warmup
+        ):
             activate_jit_monitor(
                 mode=self.observability_config.jit_monitor_mode,
                 verbose=self.observability_config.jit_monitor_verbose,
@@ -1110,6 +1112,9 @@ class WorkerFL(WorkerBase):
         # Warmup / first-compile is done — activate the `VLLM_GPU_SYNC_CHECK`
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
+
+        if self.device.type != "npu":
+            set_torch_threads_for_runtime()
 
         return CompilationTimes(
             language_model=self.compilation_config.compilation_time,
@@ -1616,14 +1621,11 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    try:
-        from vllm.model_executor.determinism.batch_invariant import (
-            init_batch_invariance,
-        )
-    except ImportError:  # vLLM 0.28 keeps the helper under layers/.
-        from vllm.model_executor.layers.batch_invariant import (
-            init_batch_invariance,
-        )
+    # vLLM 0.32 keeps the module under ``determinism``; the 0.28 location
+    # (``layers.batch_invariant``) no longer exists.
+    from vllm.model_executor.determinism.batch_invariant import (
+        init_batch_invariance,
+    )
 
     init_batch_invariance()
     override_envs_for_eplb(

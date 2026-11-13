@@ -168,10 +168,10 @@ def fixture(
     **passes,
 ):
     config = ConfigContract()
+    config.decoder_replay_cudagraph_capture_sizes = []
     config.mode = Mode.VLLM_COMPILE if compile_mode is None else compile_mode
     config.cudagraph_mode = GraphMode.PIECEWISE if graph_mode is None else graph_mode
     config.compile_sizes = None
-    config.decoder_replay_cudagraph_capture_sizes = []
     config.inductor_compile_config = {}
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
@@ -180,6 +180,8 @@ def fixture(
             "fuse_attn_quant": False,
             "fuse_rope_kvcache": True,
             "fuse_qk_norm_rope_kvcache": True,
+            "enable_sp": False,
+            "fuse_gemm_comms": False,
             **passes,
         }
     )
@@ -451,28 +453,41 @@ def test_explicit_list_keeps_identity_and_existing_order():
 
 
 @pytest.mark.parametrize(
-    "options,expected",
+    "passes",
     [
-        ({}, GraphMode.NONE),
-        ({"fuse_attn_quant": True}, GraphMode.FULL),
-        (
-            {"fuse_attn_quant": True, "graph_mode": GraphMode.FULL_AND_PIECEWISE},
-            GraphMode.FULL,
-        ),
-        ({"fuse_attn_quant": True, "graph_mode": GraphMode.FULL}, GraphMode.FULL),
+        {},
+        {"fuse_attn_quant": True},
+        {"enable_sp": True},
+        {"fuse_gemm_comms": True},
     ],
 )
-def test_initializer_graph_mode_changes_are_preserved(options, expected):
-    # vLLM 0.32 removed the enable_sp/fuse_gemm_comms branches here. Exercise
-    # supported fusion promotion after MUSA normalizes incoming graph modes.
-    split = None if options.get("fuse_attn_quant") else []
-    platform, vconfig, _ = fixture(split=split, **options)
+def test_initializer_graph_mode_changes_are_preserved(passes):
+    if not passes:
+        # Explicit contract for the bare configuration: no passes and no SP
+        # means no piecewise graph and no splitting ops, regardless of what
+        # the upstream initializer decides.
+        platform, vconfig, _ = fixture(split=[])
+        platform.check_and_update_config(vconfig)
+        assert vconfig.compilation_config.cudagraph_mode is GraphMode.NONE
+        assert vconfig.compilation_config.splitting_ops == []
+        vconfig.compilation_config.set_splitting_ops_for_v1(
+            "allgather_reducescatter", 3
+        )
+        assert vconfig.compilation_config.cudagraph_mode is GraphMode.NONE
+        return
+
+    _, reference, _ = fixture(split=None, **passes)
+    reference.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
+    expected = reference.compilation_config.cudagraph_mode
+    expected_ops = list(reference.compilation_config.splitting_ops)
+    if expected.has_piecewise_cudagraphs() and "vllm::all_reduce" not in expected_ops:
+        expected_ops.append("vllm::all_reduce")
+    platform, vconfig, _ = fixture(split=None, **passes)
     platform.check_and_update_config(vconfig)
     assert vconfig.compilation_config.cudagraph_mode is expected
-    assert vconfig.compilation_config.splitting_ops == []
+    assert vconfig.compilation_config.splitting_ops == expected_ops
     vconfig.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
     assert vconfig.compilation_config.cudagraph_mode is expected
-    assert vconfig.compilation_config.splitting_ops == []
 
 
 @pytest.mark.parametrize(
