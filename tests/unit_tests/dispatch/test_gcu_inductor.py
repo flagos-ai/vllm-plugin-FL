@@ -576,18 +576,22 @@ def test_gcu_silu_grid_config_is_private_and_preserves_smaller_limits(limits):
 
     from vllm_fl.dispatch.backends.vendor.gcu.impl import activation
 
-    config_type = make_dataclass("Config", ["max_grid_size", "max_tile_size"])
+    config_type = make_dataclass(
+        "Config", ["max_grid_size", "max_tile_size", "prefer_block_pointer"]
+    )
 
     class Kernel:
         def __init__(self, fx, scalar_fn, config):
             self.fx, self._scalar_fn, self.config = fx, scalar_fn, config
 
-    original = Kernel(object(), object(), config_type(limits, 512))
+    original = Kernel(object(), object(), config_type(limits, 512, True))
     adapted = activation._gcu_pointwise_kernel(original)
     assert adapted is not original
     assert adapted.config is not original.config
     assert original.config.max_grid_size == limits
     assert adapted.config.max_grid_size == tuple(min(x, 65535) for x in limits)
     assert adapted.config.max_tile_size == 512
+    assert adapted.config.prefer_block_pointer is False
+    assert original.config.prefer_block_pointer is True
     assert adapted.fx is original.fx
     assert adapted._scalar_fn is original._scalar_fn

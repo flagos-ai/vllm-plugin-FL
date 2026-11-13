@@ -19,6 +19,9 @@ def _gcu_pointwise_kernel(kernel):
     config = replace(
         kernel.config,
         max_grid_size=tuple(min(limit, 65535) for limit in kernel.config.max_grid_size),
+        # GCU block-pointer grid-stride loads fault on large strided MLP inputs.
+        # Masked pointer loads retain the same tiling and cover partial tiles.
+        prefer_block_pointer=False,
     )
     return type(kernel)(kernel.fx, kernel._scalar_fn, config=config)
 
