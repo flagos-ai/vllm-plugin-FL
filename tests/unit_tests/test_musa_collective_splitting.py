@@ -172,6 +172,7 @@ def fixture(
     config.mode = Mode.VLLM_COMPILE if compile_mode is None else compile_mode
     config.cudagraph_mode = GraphMode.PIECEWISE if graph_mode is None else graph_mode
     config.compile_sizes = None
+    config.decoder_replay_cudagraph_capture_sizes = []
     config.inductor_compile_config = {}
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor

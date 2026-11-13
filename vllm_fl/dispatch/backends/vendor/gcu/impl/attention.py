@@ -13,42 +13,40 @@ from typing import ClassVar
 import numpy as np
 import torch
 
-from vllm.v1.attention.backend import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionType,
-    MultipleOf,
-)
-from vllm.utils.torch_utils import is_quantized_kv_cache
-from vllm.model_executor.layers.attention.attention import Attention
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
-from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
-
-
-from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
-from vllm.config.cache import CacheDType
-from vllm.distributed.parallel_state import get_dcp_group
-from vllm.logger import init_logger
-from vllm.model_executor.layers.batch_invariant import _batch_invariant_MODE as _bi_mode
-from vllm.utils.math_utils import cdiv
-from vllm.v1.attention.backend import (
-    AttentionCGSupport,
-    AttentionMetadataBuilder,
-)
-from vllm.v1.attention.backends.utils import (
-    CommonAttentionMetadata,
-    get_dcp_local_seq_lens,
-    get_kv_cache_layout,
-)
-from vllm.v1.kv_cache_interface import AttentionSpec
-from vllm.platforms.interface import DeviceCapability
-
 # GCU: use Enflame-native flash_attn_varlen_func for best performance,
 # plus PyTorch native reshape_and_cache_flash (upstream triton kernel has
 # GCU compatibility issues — see reshape_and_cache.py for details).
 from flash_attn.vllm_flash_attn import (  # type: ignore[import]
-    flash_attn_varlen_func,            # Enflame native kernel
+    flash_attn_varlen_func,  # Enflame native kernel
 )
+
+from vllm.config import VllmConfig, get_layers_from_vllm_config
+from vllm.config.cache import CacheDType
+from vllm.distributed.parallel_state import get_dcp_group
+from vllm.logger import init_logger
+from vllm.model_executor.determinism.batch_invariant import (
+    _batch_invariant_MODE as _bi_mode,
+)
+from vllm.model_executor.layers.attention.attention import Attention
+from vllm.platforms.interface import DeviceCapability
+from vllm.utils.math_utils import cdiv
+from vllm.utils.torch_utils import is_quantized_kv_cache
+from vllm.v1.attention.backend import (
+    AttentionBackend,
+    AttentionCGSupport,
+    AttentionImpl,
+    AttentionMetadataBuilder,
+    AttentionType,
+    MultipleOf,
+)
+from vllm.v1.attention.backends.utils import (
+    CommonAttentionMetadata,
+    get_dcp_local_seq_lens,
+)
+from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
+from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
+from vllm.v1.kv_cache_interface import AttentionSpec
+
 # AOT scheduler metadata generation (FA3 feature).
 # Enflame .so exposes scheduler_metadata parameter; upstream fa_utils
 # provides the Python helper to pre-compute it.
@@ -69,8 +67,14 @@ class AttentionGCUBackend(AttentionBackend):
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
-        vllm_config = get_current_vllm_config()
+    def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[int | MultipleOf]:
+        # Spec customization in vLLM 0.32 runs outside the current-config
+        # context. All supported hybrid sizes are also multiples of 16.
+        from vllm.config.vllm import get_current_vllm_config_or_none
+
+        vllm_config = get_current_vllm_config_or_none()
+        if vllm_config is None:
+            return [MultipleOf(16)]
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
         if (
@@ -96,6 +100,7 @@ class AttentionGCUBackend(AttentionBackend):
             AttentionType.ENCODER_ONLY,
             AttentionType.ENCODER_DECODER,
         )
+
     @staticmethod
     def get_impl_cls() -> type["AttentionGCUImpl"]:
         return AttentionGCUImpl
@@ -116,34 +121,6 @@ class AttentionGCUBackend(AttentionBackend):
         if kv_cache_dtype.startswith("fp8"):
             return True
         return kv_cache_dtype in ["auto"]
-    @staticmethod
-    def get_kv_cache_shape(
-        num_blocks: int,
-        block_size: int,
-        num_kv_heads: int,
-        head_size: int,
-        cache_dtype_str: str = "auto",
-    ) -> tuple[int, ...]:
-        if block_size % 16 != 0:
-            raise ValueError("Block size must be a multiple of 16.")
-        return (2, num_blocks, block_size, num_kv_heads, head_size)
-
-    @staticmethod
-    def get_kv_cache_stride_order(
-        include_num_layers_dimension: bool = False,
-    ) -> tuple[int, ...]:
-        cache_layout = get_kv_cache_layout()
-        if cache_layout == "NHD" and include_num_layers_dimension:
-            return (2, 0, 1, 3, 4, 5)
-        elif cache_layout == "NHD":
-            stride_order = (0, 1, 2, 3, 4)
-        elif cache_layout == "HND" and include_num_layers_dimension:
-            return (2, 4, 0, 1, 3, 5)
-        elif cache_layout == "HND":
-            stride_order = (0, 1, 3, 2, 4)
-        else:
-            raise ValueError(f"Unknown cache layout format {cache_layout}.")
-        return stride_order
 
     @classmethod
     def supports_head_size(cls, head_size: int) -> bool:
@@ -163,6 +140,7 @@ class AttentionGCUBackend(AttentionBackend):
     ) -> str | None:
         # Enflame FA kernel supports sinks via s_aux parameter.
         return None
+
 
 @dataclass
 class AttentionGCUMetadata:
@@ -252,7 +230,7 @@ class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]
                 vllm_config.scheduler_config.max_num_seqs,
                 self.max_cudagraph_size or 0,
             )
-            sched_meta_size = (1024 + (max_batch_size + 1) * 16)
+            sched_meta_size = 1024 + (max_batch_size + 1) * 16
             self.scheduler_metadata = torch.zeros(
                 sched_meta_size,
                 dtype=torch.int32,
@@ -516,7 +494,7 @@ class AttentionGCUImpl(AttentionImpl):
             key: shape = [num_tokens, num_kv_heads, head_size]
             value: shape = [num_tokens, num_kv_heads, head_size]
             kv_cache: shape =
-                [2, num_blocks, block_size, num_kv_heads, head_size]
+                [num_blocks, num_kv_heads, block_size, 2 * head_size]
             attn_metadata: Metadata for attention.
         Returns:
             shape = [num_tokens, num_heads * head_size]
@@ -551,7 +529,14 @@ class AttentionGCUImpl(AttentionImpl):
             )
 
         # For decoder and cross-attention, use KV cache as before
-        key_cache, value_cache = kv_cache.unbind(0)
+        # vLLM 0.32 binds a standardized (B, H, N, 2*D) cache view.
+        # Vendor kernels consume separate (B, N, H, D) K/V views.
+        if kv_cache.ndim != 4 or kv_cache.shape[-1] != 2 * self.head_size:
+            raise ValueError(
+                "GCU attention requires a (B, H, N, 2*head_size) KV cache "
+                "with equal K/V head sizes"
+            )
+        key_cache, value_cache = kv_cache.transpose(1, 2).split(self.head_size, dim=-1)
 
         if (
             self.kv_sharing_target_layer_name is None

@@ -133,7 +133,9 @@ def profile_factory():
                 device_type=device,
                 graph_pool_handle=lambda: next(pools),
                 get_global_graph_pool=lambda: "decoder pool",
-                torch_device_fn=NS(Stream=Mock(return_value=stream)),
+                torch_device_fn=NS(
+                    Stream=Mock(return_value=stream), current_stream=lambda: stream
+                ),
                 is_rocm=lambda: device == "rocm",
             ),
             "CUDAGraphWrapper": clears[0],
@@ -294,6 +296,8 @@ def test_exhausted_budget_diagnostics_preserve_accounting(
         vllm_config=NS(compilation_config=NS(cudagraph_mode=Mode.PIECEWISE)),
         model_config=NS(multimodal_config=object()),
         parallel_config=NS(_api_process_count=2),
+        _scoped_allocator_max_split=lambda **kwargs: nullcontext(),
+        randomize_dummy_inputs=False,
     )
     logger = Mock()
     reserve = Mock(side_effect=lambda amount, *_: amount)
@@ -310,6 +314,8 @@ def test_exhausted_budget_diagnostics_preserve_accounting(
                 ),
             ),
             "maybe_apply_startup_plan": Mock(),
+            "maybe_rocm_profiling_fallback": lambda _: None,
+            "set_current_vllm_config": lambda _: nullcontext(),
             "memory_profiling": lambda *args, **kwargs: nullcontext(profile),
             "CUDAGraphMode": Mode,
             "envs": NS(VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=estimate_enabled),
@@ -388,7 +394,7 @@ def pool_lifecycle(monkeypatch):
             graph_pool_handle=new_pool,
             get_global_graph_pool=lambda: global_pool,
             is_rocm=lambda: device == "rocm",
-            torch_device_fn=NS(Stream=new_stream),
+            torch_device_fn=NS(Stream=new_stream, current_stream=lambda: object()),
         )
 
         @contextmanager

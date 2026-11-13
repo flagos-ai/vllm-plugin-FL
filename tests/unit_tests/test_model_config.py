@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
+
+import pytest
 
 from tests.utils import platform_config
 from tests.utils.model_config import ModelConfig
@@ -138,6 +141,95 @@ def test_load_without_matching_device_case_override_uses_base_config(
     assert cfg.engine["gpu_memory_utilization"] == 0.95
 
 
+@pytest.mark.parametrize(
+    "case",
+    ["27b_tp2_eager", "27b_tp2_graph", "35b_a3b_tp2_eager", "35b_a3b_tp2_graph"],
+)
+def test_enflame_s60_compilation_config_reaches_engine_and_cli(case, monkeypatch):
+    monkeypatch.delenv("FL_TEST_PLATFORM", raising=False)
+    monkeypatch.delenv("FL_TEST_DEVICE", raising=False)
+    cfg = ModelConfig.load("qwen3_6", case, platform="enflame", device="s60")
+    expected = {
+        "custom_ops": ["none", "+SiluAndMul"],
+        "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32],
+    }
+    assert cfg.engine_kwargs()["compilation_config"] == expected
+    assert cfg.engine_kwargs()["max_num_batched_tokens"] == 4096
+    assert cfg.engine_kwargs()["max_model_len"] == 8192
+    args = cfg.serve_args()
+    assert json.loads(args[args.index("--compilation-config") + 1]) == expected
+    assert args[args.index("--max-num-batched-tokens") + 1] == "4096"
+    baseline = ModelConfig.load("qwen3_6", case)
+    assert "compilation_config" not in baseline.engine_kwargs()
+    assert "max_num_batched_tokens" not in baseline.engine_kwargs()
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["27b_tp2_eager", "27b_tp2_graph", "35b_a3b_tp2_eager", "35b_a3b_tp2_graph"],
+)
+def test_enflame_s60_compilation_config_inherits_runner_environment(case, monkeypatch):
+    monkeypatch.setenv("FL_TEST_PLATFORM", "enflame")
+    monkeypatch.setenv("FL_TEST_DEVICE", "s60")
+    inherited = ModelConfig.load("qwen3_6", case)
+    explicit = ModelConfig.load("qwen3_6", case, platform="enflame", device="s60")
+    assert inherited.engine_kwargs() == explicit.engine_kwargs()
+    assert inherited.engine_kwargs()["compilation_config"] == {
+        "custom_ops": ["none", "+SiluAndMul"],
+        "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32],
+    }
+    assert inherited.serve_args() == explicit.serve_args()
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["27b_tp4_eager", "27b_tp4_graph", "35b_a3b_tp4_eager", "35b_a3b_tp4_graph"],
+)
+@pytest.mark.parametrize("inherit_environment", [False, True])
+def test_thead_graph_capture_sizes_reach_engine_and_cli(
+    case, inherit_environment, monkeypatch
+):
+    monkeypatch.delenv("FL_TEST_PLATFORM", raising=False)
+    monkeypatch.delenv("FL_TEST_DEVICE", raising=False)
+    if inherit_environment:
+        monkeypatch.setenv("FL_TEST_PLATFORM", "thead")
+        monkeypatch.setenv("FL_TEST_DEVICE", "zw810e")
+        cfg = ModelConfig.load("qwen3_6", case)
+    else:
+        cfg = ModelConfig.load("qwen3_6", case, platform="thead", device="zw810e")
+    expected = {
+        "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32, 64, 128, 256],
+        "max_cudagraph_capture_size": 256,
+    }
+    assert cfg.engine_kwargs()["compilation_config"] == expected
+    assert cfg.engine_kwargs()["enforce_eager"] == case.endswith("eager")
+    args = cfg.serve_args()
+    assert json.loads(args[args.index("--compilation-config") + 1]) == expected
+    assert ("--enforce-eager" in args) == case.endswith("eager")
+
+
+def test_serve_args_serializes_nested_json(tmp_path):
+    _write(
+        tmp_path / "nested.yaml",
+        """
+        llm:
+          model: test-model
+          compilation_config:
+            custom_ops: ["none", "+SiluAndMul"]
+            nested:
+              enabled: true
+              optional: null
+              label: 'a "quoted" value'
+        """,
+    )
+    cfg = ModelConfig.load("nested", models_dir=tmp_path)
+    args = cfg.serve_args()
+    assert (
+        json.loads(args[args.index("--compilation-config") + 1])
+        == (cfg.engine_kwargs()["compilation_config"])
+    )
+
+
 def test_ascend_910c_caps_offline_profile_batch():
     cfg = ModelConfig.load(
         "qwen3_6",
@@ -151,3 +243,24 @@ def test_ascend_910c_caps_offline_profile_batch():
         cfg.serve_args()[cfg.serve_args().index("--max-num-batched-tokens") + 1]
         == "4096"
     )
+
+
+def test_enflame_ci_does_not_mask_known_failures_or_expand_defaults():
+    from tests.utils.platform_config import PlatformConfig
+
+    config = PlatformConfig.load("enflame", device="s60")
+    assert "TORCHINDUCTOR_EMULATE_PRECISION_CASTS" not in config.env_defaults
+    overrides = config.get_device_case_overrides("qwen3_6", "35b_a3b_tp2_graph")
+    assert overrides["llm"]["gpu_memory_utilization"] == 0.90
+    cfg = ModelConfig.load(
+        "qwen3_6", "35b_a3b_tp2_graph", platform="enflame", device="s60"
+    )
+    assert cfg.engine_kwargs()["max_num_seqs"] == 64
+    args = cfg.serve_args()
+    assert args[args.index("--max-num-seqs") + 1] == "64"
+    assert overrides["serve"] == {"startup_retries": 180}
+    assert cfg.serve.startup_retries == 180
+    for phase in ("pr", "nightly"):
+        tasks = config.device_tests["s60"]["tests"]["e2e"][phase]
+        for families in tasks.values():
+            assert "35b_a3b_tp2_eager" not in families.get("qwen3_6", [])

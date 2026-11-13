@@ -121,7 +121,8 @@ platforms:
       - vllm_fl/dispatch/config/musa.yaml
       - vllm_fl/dispatch/backends/vendor/musa/
   enflame:
-    enabled: false
+    # setup.sh builds pinned vLLM 0.32 on top of the vendor dependency image.
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/

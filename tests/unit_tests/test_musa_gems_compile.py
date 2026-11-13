@@ -11,6 +11,7 @@ GPU kernel correctness still needs hardware acceptance.
 
 import ast
 import builtins
+import logging
 import math
 import sys
 from pathlib import Path
@@ -23,6 +24,31 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 
 ROOT = Path(__file__).resolve().parents[2]
 IMPL = ROOT / "vllm_fl/dispatch/backends/flaggems/impl"
+
+
+@pytest.mark.parametrize("shape", [(2, 16), (2, 3, 32)])
+def test_gcu_silu_fullgraph_bypasses_autograd_logging(boundary, monkeypatch, shape):
+    logger = logging.getLogger("silu_compile_regression")
+
+    class LoggedSilu(torch.autograd.Function):
+        @staticmethod
+        def forward(context, first, second):
+            logger.debug("GEMS SILU AND MUL FORWARD")
+            return silu_reference(first, second)
+
+    kernels = ModuleType("flaggems_vllm.ops.silu_and_mul")
+    kernels.silu_and_mul_kernel = silu_reference
+    monkeypatch.setitem(sys.modules, "flaggems_vllm.ops.silu_and_mul", kernels)
+    monkeypatch.setattr(boundary.silu_module, "gems_silu_and_mul", LoggedSilu.apply)
+    boundary.platform.device_type = "gcu"
+    value = torch.randn(shape)
+    graphs = []
+    actual = compiled(lambda value: boundary.gcu_activation(None, value), graphs)(value)
+    half = shape[-1] // 2
+    torch.testing.assert_close(
+        actual, silu_reference(value[..., :half], value[..., half:])
+    )
+    assert len(graphs) == 1
 
 
 def rms_kernel(x, residual, weight, epsilon):
@@ -194,6 +220,11 @@ def boundary():
 
     provider.__getattr__ = provider_export
     fake_modules["flaggems_vllm"] = provider
+    # The vendor adapter resolves this ABI at import time, before each test.
+    # Install the stub before loading it, independent of other test imports.
+    compiled_silu = ModuleType("flaggems_vllm.ops.silu_and_mul")
+    compiled_silu.silu_and_mul_kernel = silu_reference
+    fake_modules["flaggems_vllm.ops.silu_and_mul"] = compiled_silu
     # Restore only fake dependency keys; normal Torch modules imported during
     # compilation must survive alongside their persistent cache registrations.
     module_patch = pytest.MonkeyPatch()
@@ -262,7 +293,12 @@ def boundary():
             guard = CPUTensorGuard()
             tree = guard.visit(tree)
             assert guard.count == (2 if path.stem == "rotary" else 1)
-        name = "musa_boundary_contract_" + path.stem + ("_cpu" if cpu_tensor else "")
+        name = (
+            "musa_boundary_contract_"
+            + ("gcu_" if "gcu" in path.parts else "")
+            + path.stem
+            + ("_cpu" if cpu_tensor else "")
+        )
         module = ModuleType(name)
         module.__dict__["__builtins__"] = {**vars(builtins), "__import__": imports}
         sys.modules[name] = module
@@ -279,6 +315,9 @@ def boundary():
     state.rope_module = fake_modules["flag_gems.modules.rotary_embedding"]
     state.config_module = fake_modules["flag_gems.config"]
     state.original_activation = load(IMPL / "activation.py").silu_and_mul_flaggems
+    state.gcu_activation = load(
+        IMPL.parents[1] / "vendor/gcu/impl/activation.py"
+    ).silu_and_mul_gcu
     state.original_norm = load(IMPL / "normalization.py").rms_norm_flaggems
     state.runtime = runtime
     state.rms_module = fake_modules["flag_gems.modules.normalization"]

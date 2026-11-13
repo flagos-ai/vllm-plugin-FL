@@ -37,11 +37,8 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.85
       trust_remote_code: true
-      # Upstream's default table captures 51 sizes. With this 9-size table a
-      # graph case measures ~26 min (35b_a3b_tp4_graph, 1584s), so the 51-size
-      # default would push both e2e jobs past the job limit. Cap the table and
-      # keep the same graph coverage inside the time budget (same approach as
-      # hygon's bw1000 overrides).
+      # Preserve the base THead capture configuration. A smaller table changes
+      # graph capture and replay behavior and needs device correctness validation.
       compilation_config:
         cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32, 64, 128, 256]
         max_cudagraph_capture_size: 256
@@ -106,11 +103,10 @@ zw810e:
             - 35b_a3b_tp4_graph
     timeouts:
       e2e:
-        # Inference serializes (every case is TP4 over the only 4 visible
-        # cards). Measured with the 9-size capture table: 27B eager 8.4 min,
-        # 35B eager 6.7 min, 35B graph 26.4 min (~42 min total). The added 27B
-        # graph case keeps the job near 70 min. 120 covers it with headroom.
-        inference: 120
+        # All four TP4 cases serialize on the four visible cards. The cold
+        # inference job reached the 120-minute job limit in CI; allow the same
+        # budget as serving so cancellation does not hide case-level results.
+        inference: 180
         serving: 180
         concurrent: 180
     functional:

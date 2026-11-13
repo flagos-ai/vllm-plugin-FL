@@ -129,6 +129,7 @@ def fused_topk(
     # mask to the native kernel.
     if padding_mask is not None:
         topk_weights = topk_weights.masked_fill(padding_mask.unsqueeze(1), 0.0)
+        topk_ids = torch.where(padding_mask[:, None], -1, topk_ids)
 
     return topk_weights, topk_ids, token_expert_indices
 

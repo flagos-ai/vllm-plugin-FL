@@ -16,43 +16,22 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     TORCH_GCU_ENABLE_INT64_AND_UINT64 \
     ENABLE_I64_CHECK \
     TORCHGCU_INDUCTOR_ENABLE; do
-    echo "${name}=${!name}" >> "${GITHUB_ENV}"
+    echo "${name}=${!name:-}" >> "${GITHUB_ENV}"
   done
 fi
 
-# Reject the old CI image before installing this PR checkout. Keep vendor
-# torch and compiler packages pinned; editable plugin install uses --no-deps.
-python - <<'PY'
-from importlib.metadata import version
+# The image supplies the vendor SDK, not necessarily the target vLLM release.
+# Install the exact FlagGems source release before resolving vLLM constraints.
+bash docker/enflame/install_flaggems.sh
+# Install vLLM, then enforce the same strict package gate as the Docker recipe.
+bash .github/scripts/enflame/install_vllm.sh
+python .github/scripts/enflame/verify_stack.py
 
-from packaging.version import Version
-
-vllm_version = version("vllm")
-parsed = Version(vllm_version)
-if parsed.base_version != "0.28.0" or "empty" not in (parsed.local or "").split("."):
-    raise RuntimeError(f"Expected vLLM 0.28.0 empty build, found {vllm_version}")
-
-expected = {
-    "torch": "2.11.0+cpu",
-    "torch-gcu": "2.11.0+3.8.20260713",
-    "flag-gems": "5.4.0",
-    "flagtree": "0.7.0+enflame3.6",
-    "triton-gcu": "3.6.0+1.0.20260722",
-    "openai": "3.28.0",
-    "pandas": "3.0.6",
-}
-for package, wanted in expected.items():
-    actual = version(package)
-    if actual != wanted:
-        raise RuntimeError(f"Expected {package} {wanted}, found {actual}")
-print("Enflame CI package versions match the vLLM 0.28 recipe")
-PY
-
-# The vendor runtime, vLLM, and FlagGems come from the pinned base image.
+# Preserve the installed runtime when installing the PR checkout.
 python -m pip install --no-build-isolation --no-deps -e .
-python -m pip install --extra-index-url https://pypi.org/simple "pytest-xdist>=3.0.0"
+python -m pip install --index-url "${PYPI_INDEX_URL:-https://pypi.org/simple}" "pytest-xdist>=3.0.0"
 
-python .github/scripts/install_flaggems_vllm.py
+python .github/scripts/install_flaggems_vllm.py --platform enflame
 
 # Verify pinned release files after all package installation steps.
 python docker/enflame/verify_compiler.py

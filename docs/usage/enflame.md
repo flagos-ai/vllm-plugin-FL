@@ -1,5 +1,9 @@
 # Enflame S60 Deployment Guide
 
+The pinned image and deployment instructions below describe vLLM 0.28.
+For the vLLM 0.32.0 build requirements, see the
+[image recipe](../../docker/enflame/README.md).
+
 This guide starts an OpenAI-compatible vLLM service on Enflame S60 GCUs using
 the dependency stack validated by this repository. Use the pinned image and
 install the plugin from the revision you intend to deploy; the image does not

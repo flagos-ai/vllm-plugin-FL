@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# vLLM 0.28 empty-device recipe for Enflame S60. Keep the vendor torch_gcu
+# vLLM 0.32 empty-device recipe for Enflame S60. Keep the vendor torch_gcu
 # 2.11 stack and install official Enflame compiler/operator wheels.
 # The runtime is validated on driver 1.10.6. The old vendor wrapper
 # remains in Dockerfile.v0.20.2.
@@ -25,17 +25,17 @@ ARG VLLM_SOURCE_URL=https://github.com/vllm-project/vllm.git
 FROM ${ENFLAME_BASE_IMAGE} AS base
 
 ARG ENFLAME_BASE_IMAGE
-ARG VLLM_VERSION=0.28.0
+ARG VLLM_VERSION=0.32.0
 ARG VLLM_SOURCE_URL
-ARG VLLM_SOURCE_COMMIT=2cf0a6915ce544dc493a0990f2ea38d81601128a
+ARG VLLM_SOURCE_COMMIT=5df63a7203cdb9328d824a27b682e77c7b9928be
 ARG DRIVER_VERSION=1.10.6
 ARG FLAGOS_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-enflame/simple
-ARG FLAGGEMS_VERSION=5.4.0
+ARG PYPI_INDEX_URL=https://pypi.org/simple
+ARG FLAGGEMS_VERSION=5.5.0.dev0
 ARG FLAGTREE_VERSION=0.7.0+enflame3.6
 ARG TRITON_GCU_VERSION=3.6.0+1.0.20260722
 ARG OPENAI_VERSION=3.28.0
 ARG PANDAS_VERSION=3.0.6
-ARG FLAGGEMS_SHA256=09cb175e29f4fdfc78b87df46c4500d5a9b451e12cd64dda9a7d669f522bf5e5
 ARG FLAGTREE_SHA256=94b3aaf9f9aefa02f535ee5339f16c5304c52a1de5e7e749f742f7b4bf01332d
 ARG TRITON_GCU_SHA256=59d7a450a48f8de2a965ea6e456ea7c13bf53cb83abd5df929e4e8558da5f8f9
 ARG BUILD_DATE=unknown
@@ -71,12 +71,12 @@ RUN apt-get update \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-# Build tooling for vLLM 0.28 empty mode: setuptools >= 77 (PEP 639 SPDX
+# Build tooling for vLLM 0.32 empty mode: setuptools >= 77 (PEP 639 SPDX
 # license) and setuptools-rust are missing from the vendor bundle. cloudpickle is
 # upgraded because the bundle ships 1.6.0, which cannot pickle Python 3.12
 # code objects (no qualname field) and breaks vLLM's model-registry
 # subprocess.
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         "setuptools>=77.0.3,<81.0.0" \
         wheel \
         "setuptools-scm>=8" \
@@ -94,7 +94,6 @@ RUN python -m pip install --no-cache-dir \
 # and install the matching triton-gcu shim before FlagTree. Changing wheel
 # versions also requires matching hashes from the official backend index.
 RUN printf '%s --hash=sha256:%s\n' \
-        "flag-gems==${FLAGGEMS_VERSION}" "${FLAGGEMS_SHA256}" \
         "flagtree==${FLAGTREE_VERSION}" "${FLAGTREE_SHA256}" \
         "triton-gcu==${TRITON_GCU_VERSION}" "${TRITON_GCU_SHA256}" \
         > /tmp/enflame-wheel-requirements.txt \
@@ -106,9 +105,10 @@ RUN printf '%s --hash=sha256:%s\n' \
         "triton-gcu==${TRITON_GCU_VERSION}" \
     && python -m pip install --no-deps --no-index --find-links /tmp/enflame-wheels \
         "flagtree==${FLAGTREE_VERSION}" \
-    && python -m pip install --no-deps --no-index --find-links /tmp/enflame-wheels \
-        "flag-gems==${FLAGGEMS_VERSION}" \
     && rm -rf /tmp/enflame-wheels /tmp/enflame-wheel-requirements.txt
+
+COPY install_flaggems.sh /tmp/enflame-install-flaggems.sh
+RUN bash /tmp/enflame-install-flaggems.sh && rm /tmp/enflame-install-flaggems.sh
 
 # Replace the vendor vLLM with the official empty-device build; the plugin
 # registers the GCU platform via the vLLM platform_plugins entry point.
@@ -131,12 +131,12 @@ RUN (python -m pip uninstall -y vllm || true) \
         "flagtree==${FLAGTREE_VERSION}" \
         "flag-gems==${FLAGGEMS_VERSION}" \
         > /tmp/enflame-vendor-constraints.txt \
-    && python -m pip install --no-cache-dir -r requirements/common.txt \
+    && python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" -r requirements/common.txt \
         -c /tmp/enflame-vendor-constraints.txt \
-    && python -m pip install --no-cache-dir --upgrade \
+    && python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" --upgrade \
         "openai==${OPENAI_VERSION}" "pandas==${PANDAS_VERSION}" \
         -c /tmp/enflame-vendor-constraints.txt \
-    && VLLM_TARGET_DEVICE=empty python -m pip install --no-cache-dir \
+    && VLLM_TARGET_DEVICE=empty python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         --no-build-isolation --no-deps . \
     && cd / \
     && rm -rf /tmp/vllm /tmp/enflame-vendor-constraints.txt
@@ -214,7 +214,7 @@ WORKDIR /workspace
 # ---------- dev stage ----------
 FROM base AS dev
 
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         pytest==8.4.1 \
         pytest-cov \
         pytest-json-report \
@@ -226,7 +226,7 @@ WORKDIR /workspace
 # ---------- ci stage ----------
 FROM dev AS ci
 
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         pytest-timeout \
         pytest-metadata \
         requests \

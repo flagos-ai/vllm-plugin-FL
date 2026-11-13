@@ -129,3 +129,56 @@ def test_gcu_launchers_patch_consumers_and_preserve_official_kernels(monkeypatch
         fused_recurrent.fused_recurrent_gated_delta_rule_packed_decode_kernel
         is packed_kernel
     )
+
+
+def test_gcu_output_grid_dimensions_do_not_specialize():
+    from vllm_fl.dispatch.backends.vendor.gcu.impl.chunk_o_gcu import chunk_fwd_kernel_o
+
+    kernel = chunk_fwd_kernel_o
+    while not hasattr(kernel, "params"):
+        kernel = kernel.fn
+    for name in ("T", "GCU_NT", "GCU_BH"):
+        parameter = next(param for param in kernel.params if param.name == name)
+        assert parameter.do_not_specialize
+        assert not parameter.is_constexpr
+
+
+def test_gcu_fla_autotuning_preserves_tiles_and_is_idempotent(monkeypatch):
+    from triton.runtime.autotuner import Autotuner
+
+    from vllm.third_party.flash_linear_attention.ops import (
+        chunk_scaled_dot_kkt,
+        solve_tril,
+        wy_fast,
+    )
+
+    from vllm_fl.dispatch.backends.vendor.gcu.impl import fla_autotune
+    from vllm_fl.dispatch.backends.vendor.gcu.impl.chunk_o_gcu import chunk_fwd_kernel_o
+
+    kernels = (
+        chunk_scaled_dot_kkt.chunk_scaled_dot_kkt_fwd_kernel,
+        solve_tril.solve_tril_16x16_kernel,
+        solve_tril.merge_16x16_to_32x32_inverse_kernel,
+        solve_tril.merge_16x16_to_64x64_inverse_kernel,
+        wy_fast.recompute_w_u_fwd_kernel,
+        chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64_gcu,
+        chunk_fwd_kernel_o,
+    )
+    tuners = []
+    for kernel in kernels:
+        while not isinstance(kernel, Autotuner):
+            kernel = kernel.fn
+        original = kernel.configs
+        expected = [c for c in original if c.num_warps == 4 and c.num_stages == 2]
+        assert expected
+        monkeypatch.setattr(kernel, "configs", original)
+        tuners.append((kernel, expected))
+    monkeypatch.setattr(torch, "gcu", SimpleNamespace(is_available=lambda: True))
+    monkeypatch.setattr(fla_autotune, "_patched", False)
+
+    fla_autotune.apply_fla_autotune_gcu_patch()
+    fla_autotune.apply_fla_autotune_gcu_patch()
+
+    for tuner, expected in tuners:
+        assert tuner.configs == expected
+        assert all(c.num_warps == 4 and c.num_stages == 2 for c in tuner.configs)
