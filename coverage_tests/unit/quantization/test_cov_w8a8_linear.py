@@ -26,6 +26,9 @@ from __future__ import annotations
 import pytest
 import torch
 
+# The real package must load before the fake import window below;
+# otherwise the first import of vllm_fl happens under the fakes.
+import vllm_fl  # noqa: F401
 from ._w8a8_fakes import build_linear_environment, import_under_fakes
 
 MODULE = "vllm_fl.quantization.w8a8.linear"
