@@ -149,7 +149,7 @@ from vllm.tracing import instrument
 from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.gpu_sync_debug import gpu_sync_allowed
 from vllm.utils.import_utils import resolve_obj_by_qualname
-from vllm.utils.math_utils import cdiv, round_up
+from vllm.utils.math_utils import cdiv
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.nvtx_pytorch_hooks import PytHooks
 from vllm.utils.platform_utils import num_compute_units
@@ -274,7 +274,6 @@ from vllm.v1.worker.utils import (
     bind_kv_cache,
     copy_kv_cache_blocks_inplace,
     customize_attention_spec,
-    is_residual_scattered_for_sp,
     map_kv_caches_to_kernel_blocks,
     prepare_kernel_block_sizes,
     raise_if_nan_logits,
@@ -585,6 +584,10 @@ class ExecuteModelState(NamedTuple):
 class ModelRunnerFL(
     LoRAModelRunnerMixin, KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin
 ):
+    # vLLM >= 0.32 collects JIT warmup providers for the whole runner setup.
+    # Upstream applies this decorator to ``GPUModelRunner.__init__``; the fork
+    # does not inherit that class, so apply it here to get the same registry and
+    # the same guaranteed teardown when construction fails.
     @JitWarmupRegistry.capture
     def __init__(
         self,
@@ -3692,20 +3695,9 @@ class ModelRunnerFL(
     ) -> IntermediateTensors:
         assert self.intermediate_tensors is not None
 
-        tp = self.vllm_config.parallel_config.tensor_parallel_size
-        is_rs = is_residual_scattered_for_sp(self.vllm_config, num_tokens)
-
-        # When sequence parallelism is enabled, the "residual" tensor is
-        # sharded across TP ranks. All-gather it here because downstream
-        # QKV + Attention needs the full residual before the SP split point.
         if sync_self:
             assert intermediate_tensors is not None
             for k, v in intermediate_tensors.items():
-                is_scattered = k == "residual" and is_rs
-                if is_scattered:
-                    local_len = num_tokens // tp
-                    v = get_tp_group().all_gather(v[:local_len], dim=0)
-
                 self.intermediate_tensors[k][:num_tokens].copy_(
                     v[:num_tokens], non_blocking=True
                 )
@@ -3810,17 +3802,6 @@ class ModelRunnerFL(
             finished_mask=finished_mask,
             async_output_copy_stream=self._get_or_create_async_output_copy_stream(),
         )
-
-    def _pad_for_sequence_parallelism(self, num_scheduled_tokens: int) -> int:
-        # Pad tokens to multiple of tensor_parallel_size when
-        # enabled collective fusion for SP
-        tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-        if (
-            getattr(self.compilation_config.pass_config, "enable_sp", False)
-            and tp_size > 1
-        ):
-            return round_up(num_scheduled_tokens, tp_size)
-        return num_scheduled_tokens
 
     def _prepare_padding_mask(
         self, num_tokens_unpadded: int, num_tokens_padded: int
@@ -4367,7 +4348,9 @@ class ModelRunnerFL(
         )
         has_lora = num_active_loras > 0 if force_has_lora is None else force_has_lora
 
-        num_tokens_padded = self._pad_for_sequence_parallelism(num_tokens)
+        # vLLM 0.32 removed the sequence-parallel passes, so no padding is
+        # applied on this path any more.
+        num_tokens_padded = num_tokens
 
         disable_full = disable_full or use_cascade_attn or has_encoder_output
 
@@ -4383,15 +4366,6 @@ class ModelRunnerFL(
 
         cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded)
         num_tokens_padded = batch_descriptor.num_tokens
-        if getattr(self.compilation_config.pass_config, "enable_sp", False):
-            assert (
-                batch_descriptor.num_tokens
-                % self.vllm_config.parallel_config.tensor_parallel_size
-                == 0
-            ), (
-                "Sequence parallelism requires num_tokens to be "
-                "a multiple of tensor parallel size"
-            )
 
         # Extra coordination when running data-parallel since we need to coordinate
         # across ranks
@@ -4898,15 +4872,9 @@ class ModelRunnerFL(
 
                 sample_hidden_states = hidden_states[logits_indices]
                 if not get_pp_group().is_last_rank:
-                    all_gather_tensors = {
-                        "residual": not is_residual_scattered_for_sp(
-                            self.vllm_config, num_tokens_padded
-                        )
-                    }
                     get_pp_group().send_tensor_dict(
                         hidden_states.tensors,
                         all_gather_group=get_tp_group(),
-                        all_gather_tensors=all_gather_tensors,
                     )
                     logits = None
                 else:
