@@ -186,11 +186,9 @@ mounts, model mounts and allocated CI device IDs aligned with the selected
 runner.
 
 The [Ascend matrix](../../tests/platforms/ascend.yaml) explicitly selects
-`VLLM_USE_V2_MODEL_RUNNER=1`. Its existing `USE_FLAGGEMS=1` and
-`VLLM_FL_FLAGOS_WHITELIST=zeros` settings are retained. Broadening that CI
-operator coverage requires its own validation; the separate full-policy
-operator checks below exercise a wider set of registrations. The Ascend
-benchmark uses its own
+`VLLM_USE_V2_MODEL_RUNNER=1` and enables FlagGems with the
+[Ascend dispatch policy](../../vllm_fl/dispatch/config/ascend.yaml).
+The Ascend benchmark uses its own
 [`smoke_ascend.yaml`](../../tests/benchmarks/configs/smoke_ascend.yaml) so the
 0.6B dummy-serving smoke also passes explicit eager, disabled chunked
 prefill, disabled async scheduling and disabled prefix caching options. Both
