@@ -62,6 +62,12 @@ HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-hy
 HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.32.0}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
 HYGON_PYTHON_VERSION="${HYGON_PYTHON_VERSION:-3.10}"
+THEAD_BASE_IMAGE="${THEAD_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/sglang0.5.12-thead-ppu2.1.0:2.2.0-0.2.0@sha256:27de587ef3919caf649128795178ce4e516ee44991305f61d16fa033228c0149}"
+THEAD_VLLM_VERSION="${THEAD_VLLM_VERSION:-0.32.0}"
+THEAD_PYTHON_VERSION="${THEAD_PYTHON_VERSION:-3.12}"
+THEAD_FLAGTREE_VERSION="${THEAD_FLAGTREE_VERSION:-0.7.0+ppu3.6}"
+THEAD_FLAGGEMS_VERSION="${THEAD_FLAGGEMS_VERSION:-5.5.0.dev0+g317b76320}"
+THEAD_WHEELS_DIR="${THEAD_WHEELS_DIR:-}"
 FLAGGEMS_VERSION="${FLAGGEMS_VERSION:-62d70b9e858ec407572153ee8cdf65cc24a637d5}"
 VLLM_PLUGIN_FL_VERSION="${VLLM_PLUGIN_FL_VERSION:-ffa2ee3eb3831f3873dd0966d12fc8e0b4e6e3d4}"
 
@@ -96,7 +102,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -156,6 +162,12 @@ VERSIONS (override via environment variables):
     HYGON_GIT_CONFIG    Optional Git-only proxy config mounted as a BuildKit secret
     HYGON_VLLM_WHEEL_DIR Optional directory containing one validated empty vLLM wheel
     HYGON_VLLM_WHEEL_SHA256 SHA256 required with HYGON_VLLM_WHEEL_DIR
+  T-Head PPU:
+    THEAD_BASE_IMAGE     FlagOS base image with digest (default: ${THEAD_BASE_IMAGE})
+    THEAD_VLLM_VERSION   vLLM empty-mode version (default: ${THEAD_VLLM_VERSION})
+    THEAD_FLAGTREE_VERSION PPU FlagTree/Triton wheel version (default: ${THEAD_FLAGTREE_VERSION})
+    THEAD_FLAGGEMS_VERSION FlagGems version (default: ${THEAD_FLAGGEMS_VERSION})
+    THEAD_WHEELS_DIR     Required for thead: directory with the vllm/flagtree/flag_gems wheels
 
 EXAMPLES:
     # Build CUDA dev image
@@ -173,6 +185,8 @@ EXAMPLES:
 
     # Build Hygon CI image
     ./build.sh --platform hygon --target ci
+    # Build T-Head PPU CI image from pre-downloaded wheels
+    THEAD_WHEELS_DIR=/path/to/wheels ./build.sh --platform thead --target ci
 
     # Build MetaX CI image
     ./build.sh --platform metax --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
@@ -332,6 +346,31 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
     fi
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${HYGON_VLLM_VERSION}-hygon-${TARGET}"
+    fi
+elif [[ "${PLATFORM}" == "thead" ]]; then
+    PYTHON_VERSION="${THEAD_PYTHON_VERSION}"
+    VLLM_VERSION="${THEAD_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
+    fi
+    BUILD_ARGS+=(
+        --build-arg "THEAD_BASE_IMAGE=${THEAD_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${THEAD_VLLM_VERSION}"
+        --build-arg "FLAGTREE_VERSION=${THEAD_FLAGTREE_VERSION}"
+        --build-arg "FLAGGEMS_VERSION=${THEAD_FLAGGEMS_VERSION}"
+        --build-arg "PLUGIN_SOURCE_SHA=${PLUGIN_SOURCE_SHA:-$(git -C "${SCRIPT_DIR}/.." rev-parse HEAD 2>/dev/null || true)}"
+    )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
+    if [[ -z "${THEAD_WHEELS_DIR}" ]]; then
+        err "THEAD_WHEELS_DIR is required: the thead image installs a prebuilt vllm-${THEAD_VLLM_VERSION}+empty wheel (see docker/thead/README.md)."
+    fi
+    [[ -d "${THEAD_WHEELS_DIR}" ]] || err "THEAD_WHEELS_DIR directory does not exist."
+    thead_vllm_wheels=("${THEAD_WHEELS_DIR}"/vllm-"${THEAD_VLLM_VERSION}"+empty-*.whl)
+    [[ -e "${thead_vllm_wheels[0]}" ]] || err "no vllm-${THEAD_VLLM_VERSION}+empty wheel in ${THEAD_WHEELS_DIR}."
+    BUILD_ARGS+=(--build-context "thead_wheels=${THEAD_WHEELS_DIR}")
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="v${THEAD_VLLM_VERSION}-thead-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "metax" ]]; then
     PYTHON_VERSION="${METAX_PYTHON_VERSION}"

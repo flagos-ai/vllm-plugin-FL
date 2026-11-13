@@ -48,6 +48,14 @@ from vllm_fl.utils import (
 logger = init_logger(__name__)
 
 
+def _vllm_c_available() -> bool:
+    """True when this build ships upstream's CUDA IR kernels (``vllm._C``)."""
+    try:
+        return importlib.util.find_spec("vllm._C") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     """Configure eager FX execution with ordinary Ascend FULL decode graphs.
 
@@ -1091,37 +1099,24 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs.
-
-        vLLM 0.32 dispatches IR ops (``rms_norm``, ``fused_add_rms_norm``,
-        ``gelu_and_mul_sparse``) through the ``vllm.ir.op`` registry and asserts
-        that every provider in the priority list is registered for that op.
-        ``vllm_c`` is only registered when the vendor wheel ships ``vllm._C``,
-        and even then not for every op, so filter it per op instead of
-        assuming the CUDA layout.
-        """
+        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        preferred = ["native"] if using_inductor else ["vllm_c", "native"]
-
-        try:
-            from vllm.ir.op import IrOp
-        except ImportError:
-            IrOp = None  # type: ignore[assignment]
-
-        def for_op(name: str) -> list[str]:
-            if IrOp is None or name not in IrOp.registry:
-                return ["native"]
-            impls = IrOp.registry[name].impls
-            return [p for p in preferred if p in impls] or ["native"]
-
-        return IrOpPriorityConfig(
-            rms_norm=for_op("rms_norm"),
-            fused_add_rms_norm=for_op("fused_add_rms_norm"),
-            gelu_and_mul_sparse=for_op("gelu_and_mul_sparse"),
+        default = ["native"]
+        if not using_inductor and _vllm_c_available():
+            # ``vllm_c`` is only a valid provider when the build actually ships
+            # upstream's CUDA IR kernels. VLLM_TARGET_DEVICE=empty builds have no
+            # vllm._C, and keeping it in the priority list makes
+            # KernelConfig.set_default fail with "All providers in priority must
+            # be registered implementations".
+            default = ["vllm_c", "native"]
+        return IrOpPriorityConfig.with_default(
+            default,
+            rms_norm=default,
+            fused_add_rms_norm=default,
         )
 
     @classmethod
