@@ -74,6 +74,19 @@ for Qwen3.6-27B and Qwen3.6-35B-A3B with BF16 and FlagCX TP4 in both eager
 and graph modes. The [adaptation gate](../../tools/adaptation-gate-cases/README.md)
 exercises 26 text, image and mixed requests for each model and mode.
 
+The 27B TP4 inference cases also verify that Mamba `align` produces identical
+greedy tokens across a block boundary with a cold cache and a reused prefix.
+Run the separate hardware regression to compare against prefix caching
+disabled as well:
+
+```sh
+FL_TEST_PLATFORM=kunlunxin FL_TEST_DEVICE=p800 VLLM_USE_V2_MODEL_RUNNER=1 \
+  python -m pytest -q -s tests/e2e_tests/inference/test_kunlunxin_mamba_align.py
+```
+
+Speculative decoding with Mamba `align` is unsupported on P800. For
+speculative decoding with these hybrid models, disable prefix caching.
+
 Graph mode uses native full-decode graph capture with batch sizes up to
 eight. Prefill and larger batches run eagerly. The platform disables
 torch.compile and async scheduling. Pass `--enforce-eager` to disable

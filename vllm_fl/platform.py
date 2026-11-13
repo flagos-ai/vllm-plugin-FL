@@ -495,6 +495,20 @@ class PlatformFL(Platform):
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
+        if (
+            cls.vendor_name == "kunlunxin"
+            and getattr(vllm_config, "speculative_config", None) is not None
+            and (
+                getattr(model_config, "is_hybrid", False)
+                or getattr(model_config, "is_attention_free", False)
+            )
+            and vllm_config.cache_config.mamba_cache_mode == "align"
+        ):
+            raise ValueError(
+                "Kunlunxin does not support speculative decoding with Mamba "
+                "cache mode 'align'. Disable speculative decoding or use "
+                "--no-enable-prefix-caching."
+            )
         parallel_config = vllm_config.parallel_config
         if cls.device_type == "txda":
             if getattr(vllm_config, "speculative_config", None) is not None:

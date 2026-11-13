@@ -134,11 +134,6 @@ def _apply_legacy_kunlunxin_patches():
     )
     apply_topk_topp_compat()
 
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.postprocess_mamba_compat import (
-        apply_postprocess_mamba_compat,
-    )
-    apply_postprocess_mamba_compat()
-
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat import (
         apply_vl_compat,
     )
@@ -153,6 +148,11 @@ def _apply_legacy_kunlunxin_patches():
         apply_mamba_hybrid_compat,
     )
     apply_mamba_hybrid_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_align_compat import (
+        apply_mamba_align_compat,
+    )
+    apply_mamba_align_compat()
 
 
 def _install_graph_patch(owner, name, replacement, replacements):
