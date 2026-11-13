@@ -6,6 +6,7 @@ from types import NoneType
 from typing import Any
 
 import torch
+
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.distributed.parallel_state import get_pp_group, get_tp_group
 from vllm.platforms import current_platform
@@ -23,8 +24,11 @@ from vllm_fl.dispatch.backends.vendor.iluvatar.patches.worker_compat import (
 from vllm_fl.dispatch.io_common import managed_inference_mode
 
 apply_import_compat()
-from vllm_fl.worker.worker import AsyncIntermediateTensors, logger
-from vllm_fl.worker.worker import WorkerFL as BaseWorkerFL
+from vllm_fl.worker.worker import (
+    AsyncIntermediateTensors,
+    WorkerFL as BaseWorkerFL,
+    logger,
+)
 
 
 class IluvatarWorkerFL(BaseWorkerFL):
@@ -229,5 +233,8 @@ class IluvatarWorkerFL(BaseWorkerFL):
         )
         # Metadata is reaped by GroupCoordinator; only wait on device sends.
         self._pp_send_work = handles[1:]
+
+        if self.use_v2_model_runner and self.model_runner.is_pooling_model:
+            self.model_runner.pool()
 
         return None

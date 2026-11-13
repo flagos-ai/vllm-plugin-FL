@@ -1336,6 +1336,9 @@ class WorkerFL(WorkerBase):
             all_gather_tensors=all_gather_tensors,
         )
 
+        if self.use_v2_model_runner and self.model_runner.is_pooling_model:
+            self.model_runner.pool()
+
         return None
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:

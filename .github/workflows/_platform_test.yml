@@ -226,19 +226,24 @@ jobs:
   # Feishu notification — per-platform status
   # ============================================================
   notify:
-    needs: [functional, e2e, benchmark, iluvatar-gates]
+    needs: [setup, functional, unit, e2e, benchmark, iluvatar-gates]
     if: always()
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}
       status: >-
-        ${{ (needs.functional.result == 'success' &&
+        ${{ (needs.setup.result == 'success' &&
+             (needs.unit.result == 'success' ||
+              (needs.unit.result == 'skipped' && !fromJson(needs.setup.outputs.config).unit_devices[0])) &&
+             needs.functional.result == 'success' &&
              (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
              (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped') &&
              (needs.iluvatar-gates.result == 'success' ||
               (inputs.platform != 'iluvatar' && needs.iluvatar-gates.result == 'skipped')))
             && 'success'
-            || (needs.functional.result == 'cancelled' ||
+            || (needs.setup.result == 'cancelled' ||
+                 needs.unit.result == 'cancelled' ||
+                 needs.functional.result == 'cancelled' ||
                 needs.e2e.result == 'cancelled' ||
                 needs.benchmark.result == 'cancelled' ||
                 needs.iluvatar-gates.result == 'cancelled')

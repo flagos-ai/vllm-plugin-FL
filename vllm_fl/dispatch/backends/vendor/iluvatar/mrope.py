@@ -25,9 +25,11 @@ def _wrap_mrope_forward(original):
     def forward(self, positions, query, key=None, offsets=None):
         if (
             positions.ndim != 2
+            or positions.shape[0] != 3
             or key is None
             or offsets is not None
             or not self.mrope_section
+            or len(self.mrope_section) != 3
             or query.device.type != "cuda"
         ):
             return original(self, positions, query, key, offsets)

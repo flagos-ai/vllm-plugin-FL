@@ -376,3 +376,60 @@ def test_shared_v2_route_preserves_upstream_for_other_platforms(vendor):
     )
     expected = IluvatarGPUModelRunnerV2 if vendor == "iluvatar" else GPUModelRunner
     assert namespace["GPUModelRunnerV2"] is expected
+
+
+@pytest.mark.parametrize("vendor", [False, True])
+@pytest.mark.parametrize("v2,pooling", [(True, True), (True, False), (False, True)])
+@pytest.mark.parametrize("last_rank", [False, True])
+def test_pooling_pipeline_state_is_consumed(
+    monkeypatch, vendor, v2, pooling, last_rank
+):
+    import inspect
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker import worker as iluvatar
+    from vllm_fl.worker import worker as shared
+
+    module = iluvatar if vendor else shared
+    cls = module.IluvatarWorkerFL if vendor else module.WorkerFL
+    group = SimpleNamespace(
+        is_first_rank=True,
+        is_last_rank=last_rank,
+        isend_tensor_dict=Mock(return_value=[Mock(), Mock()]),
+    )
+    monkeypatch.setattr(module, "get_pp_group", lambda: group)
+    monkeypatch.setattr(module, "get_tp_group", lambda: None)
+    runner = SimpleNamespace(is_pooling_model=pooling, pending=False, calls=0)
+
+    def execute(*args):
+        assert not runner.pending
+        runner.pending = v2 and pooling
+        return None if last_rank else module.IntermediateTensors({})
+
+    def pool():
+        assert runner.pending
+        runner.pending = False
+        runner.calls += 1
+
+    runner.execute_model, runner.pool = execute, pool
+    instance = SimpleNamespace(
+        model_runner=runner,
+        use_v2_model_runner=v2,
+        _pp_send_work=[],
+        annotate_profile=lambda _: nullcontext(),
+        vllm_config=SimpleNamespace(
+            parallel_config=SimpleNamespace(distributed_executor_backend="mp")
+        ),
+    )
+    # Exercise the real method without inference/profiling decorators or devices.
+    method = inspect.unwrap(cls.execute_model)
+    for _ in range(2):
+        assert method(instance, SimpleNamespace(total_num_scheduled_tokens=1)) is None
+        assert not runner.pending
+    assert runner.calls == (2 if v2 and pooling else 0)
+    assert group.isend_tensor_dict.call_count == (0 if last_rank else 2)
+    if not last_rank:
+        handles = group.isend_tensor_dict.return_value
+        assert instance._pp_send_work == (handles[1:] if vendor else handles)
+        handles[-1].wait.assert_called_once()

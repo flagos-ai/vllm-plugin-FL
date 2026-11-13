@@ -432,3 +432,50 @@ class TestGetPositions:
         expected = mock_model_runner.mrope_positions.gpu[:, indices]
         assert result.shape == (3, 4)
         torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parametrize("mode", ["none", "align"])
+def test_hybrid_speculative_postprocess_032(monkeypatch, mode):
+    module = import_module("vllm_fl.worker.model_runner")
+    align = MagicMock()
+    monkeypatch.setattr(module.mamba_utils, "postprocess_mamba_align_gpu", align)
+    accepted = torch.zeros(2, dtype=torch.int32)
+    cpu = torch.zeros_like(accepted)
+    event = MagicMock()
+    runner = SimpleNamespace(
+        speculative_config=True,
+        model_config=SimpleNamespace(is_hybrid=True),
+        cache_config=SimpleNamespace(mamba_cache_mode=mode),
+        num_accepted_tokens=SimpleNamespace(gpu=accepted),
+        input_batch=SimpleNamespace(num_accepted_tokens_cpu_tensor=cpu),
+        num_accepted_tokens_event=event,
+        _get_mamba_bufs=lambda: "bufs",
+        kv_cache_config="kv",
+        compilation_config=SimpleNamespace(static_forward_context={}),
+        _get_mamba_state_copy_funcs=lambda: "copy-functions",
+    )
+    module.ModelRunnerFL._update_states_after_model_execute(
+        runner, torch.tensor([[7, -1, -1], [3, 4, -1]]), SimpleNamespace()
+    )
+    assert accepted.tolist() == [1, 2]
+    event.record.assert_called_once()
+    if mode == "align":
+        align.assert_called_once()
+        assert align.call_args.kwargs["num_reqs"] == 2
+        assert align.call_args.kwargs["bufs"] == "bufs"
+    else:
+        align.assert_not_called()
+        assert cpu.tolist() == [1, 2]
+
+
+def test_runner_has_no_removed_mamba_api_references():
+    import inspect
+
+    module = import_module("vllm_fl.worker.model_runner")
+    source = inspect.getsource(module.ModelRunnerFL)
+    for removed in (
+        "postprocess_mamba_all",
+        "preprocess_mamba_all_specdec",
+        "mamba_prev_last_scheduled_idx",
+    ):
+        assert removed not in source
