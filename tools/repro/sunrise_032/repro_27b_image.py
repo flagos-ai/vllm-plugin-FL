@@ -266,7 +266,7 @@ def run(args):
     return code
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument(
@@ -305,7 +305,7 @@ def main():
     try:
         return run(args)
     except (OSError, ValueError) as error:
-        parser.error(str(error))
+        return parser.error(str(error))
 
 
 if __name__ == "__main__":

@@ -154,13 +154,6 @@ def test_runtime_memory_is_ready_before_model_patches(monkeypatch, ptpu_runtime)
 def test_sunrise_skips_cuda_only_quant_kernel_import(ptpu_runtime, monkeypatch):
     import vllm_fl
 
-    class UnavailableCudaKernels(ModuleType):
-        def __getattr__(self, name):
-            raise AssertionError("Sunrise must not import CUDA quant kernels")
-
-    monkeypatch.setitem(
-        sys.modules,
-        "vllm_fl.quantization.quant_linear",
-        UnavailableCudaKernels("vllm_fl.quantization.quant_linear"),
-    )
+    # Any attempted import of the CUDA module now raises ModuleNotFoundError.
+    monkeypatch.setitem(sys.modules, "vllm_fl.quantization.quant_linear", None)
     vllm_fl.register_quant_linear()

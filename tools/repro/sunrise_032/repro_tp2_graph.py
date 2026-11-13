@@ -255,7 +255,7 @@ def main(argv=None) -> int:
         updates = environment_updates(args, os.environ)
         rendezvous = new_rendezvous(args.rendezvous_dir or Path(tempfile.gettempdir()))
     except (ValueError, argparse.ArgumentTypeError, FileExistsError) as exc:
-        parser.error(str(exc))
+        return parser.error(str(exc))
     # Process-local only, after explicit device selection and full validation.
     os.environ.update(updates)
     emit(

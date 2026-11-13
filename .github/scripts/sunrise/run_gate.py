@@ -629,7 +629,7 @@ def main():
                 args.reuse_server_url, args.served_model_name, args.server_log
             )
         except ValueError as error:
-            parser.error(str(error))
+            return parser.error(str(error))
         served_model = args.served_model_name
         server_log = Path(args.server_log).resolve()
     else:

@@ -53,7 +53,7 @@ def main(argv=None) -> int:
     try:
         updates = environment_updates(args, os.environ)
     except (ValueError, argparse.ArgumentTypeError) as exc:
-        parser.error(str(exc))
+        return parser.error(str(exc))
     if (
         not Path(args.model).is_dir()
         or not (Path(args.model) / "config.json").is_file()

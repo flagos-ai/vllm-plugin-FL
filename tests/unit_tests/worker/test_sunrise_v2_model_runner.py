@@ -21,8 +21,9 @@ def runner_v2(monkeypatch):
     events = []
 
     def install(name, **attrs):
-        if "." in name:
-            parent_name, child = name.rsplit(".", 1)
+        parent_name, _, child = name.rpartition(".")
+        parent = None
+        if parent_name:
             parent = sys.modules.get(parent_name)
             if parent is None:
                 parent = install(parent_name)
@@ -30,7 +31,7 @@ def runner_v2(monkeypatch):
         module.__path__ = []
         vars(module).update(attrs)
         monkeypatch.setitem(sys.modules, name, module)
-        if "." in name:
+        if parent is not None:
             monkeypatch.setattr(parent, child, module, raising=False)
         return module
 

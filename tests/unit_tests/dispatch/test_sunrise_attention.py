@@ -19,8 +19,9 @@ import torch
 @pytest.fixture
 def sunrise_modules(monkeypatch):
     def install(name, **attrs):
-        if "." in name:
-            parent_name, child_name = name.rsplit(".", 1)
+        parent_name, _, child_name = name.rpartition(".")
+        parent = None
+        if parent_name:
             parent = sys.modules.get(parent_name)
             if parent is None:
                 parent = install(parent_name)
@@ -28,7 +29,7 @@ def sunrise_modules(monkeypatch):
         module.__path__ = []
         module.__dict__.update(attrs)
         monkeypatch.setitem(sys.modules, name, module)
-        if "." in name:
+        if parent is not None:
             monkeypatch.setattr(parent, child_name, module, raising=False)
         return module
 

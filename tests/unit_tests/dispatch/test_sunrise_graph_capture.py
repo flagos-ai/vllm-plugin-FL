@@ -20,8 +20,9 @@ def graph_runtime(monkeypatch):
     events = []
 
     def install(name, **attrs):
-        if "." in name:
-            parent_name, child = name.rsplit(".", 1)
+        parent_name, _, child = name.rpartition(".")
+        parent = None
+        if parent_name:
             parent = sys.modules.get(parent_name)
             if parent is None:
                 parent = install(parent_name)
@@ -29,7 +30,7 @@ def graph_runtime(monkeypatch):
         module.__path__ = []
         vars(module).update(attrs)
         monkeypatch.setitem(sys.modules, name, module)
-        if "." in name:
+        if parent is not None:
             monkeypatch.setattr(parent, child, module, raising=False)
         return module
 
@@ -192,7 +193,7 @@ def test_explicit_capture_stream_is_reused_and_restored_on_error(graph_runtime):
     ):
         assert context is explicit
         assert state.alias.current_stream() is explicit.stream
-        raise RuntimeError("capture failed")
+        Mock(side_effect=RuntimeError("capture failed"))()
     state.runtime.Stream.assert_not_called()
     assert state.runtime.current_stream() is state.default_stream
 
