@@ -61,6 +61,15 @@ def execute(nodes, namespace):
 
 LOGGER = SimpleNamespace(info=lambda *args: None, warning_once=lambda *args: None)
 CONFIG_NS = {"enum": enum, "logger": LOGGER}
+
+# MUSA splits the torch_musa MCCL collectives out of every captured region.
+C10D_SPLIT_OPS = [
+    "_c10d_functional::all_reduce_",
+    "_c10d_functional::all_reduce",
+    "_c10d_functional::reduce_scatter",
+    "_c10d_functional::all_gather_into_tensor",
+    "_c10d_functional::wait_tensor",
+]
 config_path = UPSTREAM / "config/compilation.py"
 execute(
     [node(config_path, "CompilationMode"), node(config_path, "CUDAGraphMode")],
@@ -175,6 +184,11 @@ def fixture(
     config.inductor_compile_config = {}
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
+    # Fields vLLM 0.32's __post_init__ reads; the upstream dataclass supplies
+    # them as defaults, this contract double has to be explicit.
+    config.decoder_replay_cudagraph_capture_sizes = []
+    config.encoder_cudagraph_max_frames_per_batch = None
+    config.encoder_cudagraph_max_vision_items_per_batch = 0
     config.pass_config = SimpleNamespace(
         **{
             "fuse_attn_quant": False,
@@ -350,8 +364,18 @@ def test_real_compile_config_default_preserves_graph_contract(
         assert config.backend == expected_backend
         assert config.mode is Mode.VLLM_COMPILE
         assert config.cudagraph_mode is GraphMode.PIECEWISE
-        assert config.cudagraph_capture_sizes is capture_sizes
-        assert tuple(config.cudagraph_capture_sizes) == expected_sizes
+        if device == "musa":
+            # torch_musa does not share the graph pool, so the ladder is
+            # thinned: at most 10 sizes, ordered, unique and a subset of the
+            # configured ladder that still keeps the largest batch size.
+            sizes = config.cudagraph_capture_sizes
+            assert len(sizes) <= 10
+            assert sizes == sorted(set(sizes))
+            assert set(sizes) <= set(capture_sizes)
+            assert sizes[-1] == capture_sizes[-1]
+        else:
+            assert config.cudagraph_capture_sizes is capture_sizes
+            assert tuple(config.cudagraph_capture_sizes) == expected_sizes
         assert config.use_inductor_graph_partition is False
         assert config.is_attention_compiled_piecewise()
     if device == "musa":
@@ -421,11 +445,16 @@ def test_defaults_and_upstream_second_initialization(moe, expected_dp):
     config = vconfig.compilation_config
     attention_before = list(ConfigContract._attention_ops)
     platform.check_and_update_config(vconfig)
-    assert config.splitting_ops == attention_before + [
-        "vllm::unified_kv_cache_update",
-        "vllm::unified_mla_kv_cache_update",
-        "vllm::all_reduce",
-    ]
+    assert (
+        config.splitting_ops
+        == attention_before
+        + [
+            "vllm::unified_kv_cache_update",
+            "vllm::unified_mla_kv_cache_update",
+            "vllm::all_reduce",
+        ]
+        + C10D_SPLIT_OPS
+    )
     assert calls == [
         (
             (),
@@ -449,7 +478,8 @@ def test_explicit_list_keeps_identity_and_existing_order():
     platform.check_and_update_config(vconfig)
     platform.check_and_update_config(vconfig)
     assert vconfig.compilation_config.splitting_ops is original
-    assert original == ["custom::boundary", "vllm::all_reduce"]
+    assert original[:2] == ["custom::boundary", "vllm::all_reduce"]
+    assert original[2:] == C10D_SPLIT_OPS
 
 
 @pytest.mark.parametrize(
@@ -485,6 +515,10 @@ def test_initializer_graph_mode_changes_are_preserved(passes):
     platform, vconfig, _ = fixture(split=None, **passes)
     platform.check_and_update_config(vconfig)
     assert vconfig.compilation_config.cudagraph_mode is expected
+    # Under a piecewise graph MUSA also splits out the c10d collectives vLLM
+    # 0.32 lowers TP to, so MCCL never runs while a region is being recorded.
+    if expected.has_piecewise_cudagraphs():
+        expected_ops = expected_ops + C10D_SPLIT_OPS
     assert vconfig.compilation_config.splitting_ops == expected_ops
     vconfig.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
     assert vconfig.compilation_config.cudagraph_mode is expected

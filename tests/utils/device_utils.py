@@ -98,13 +98,16 @@ def get_backend() -> str:
     if runtime is not None and runtime.is_available():
         return "enflame"
     if torch.cuda.is_available():
-        # Hygon HIP and T-Head PPU use Torch CUDA APIs, but remain distinct
-        # test backends so NVIDIA-only cases cannot run through those aliases.
+        # Hygon HIP, T-Head PPU and MUSA expose Torch CUDA APIs, but remain
+        # distinct test backends so NVIDIA-only cases cannot run through those
+        # aliases.
         vendor = os.environ.get("GEMS_VENDOR", "").lower()
         if vendor == "hygon":
             return "hygon"
         if vendor == "thead":
             return "thead"
+        if vendor == "mthreads":
+            return "musa"
         return "nvidia"
     try:
         import torch_npu  # noqa: F401

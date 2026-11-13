@@ -235,6 +235,7 @@ def device_utils(monkeypatch):
         gcu=False,
         cuda=False,
         npu=False,
+        musa=False,
         txda_installed=False,
         txda=False,
     ):
@@ -242,6 +243,10 @@ def device_utils(monkeypatch):
         torch.cuda = SimpleNamespace(
             is_available=Mock(return_value=cuda),
             device_count=Mock(return_value=2),
+        )
+        torch.musa = SimpleNamespace(
+            is_available=Mock(return_value=musa),
+            device_count=Mock(return_value=4),
         )
         torch.gcu = SimpleNamespace(
             is_available=Mock(return_value=gcu),
@@ -254,7 +259,9 @@ def device_utils(monkeypatch):
         torch.npu = SimpleNamespace(is_available=Mock(return_value=npu))
         torch.device = Mock(side_effect=lambda name: name)
         monkeypatch.setitem(sys.modules, "torch", torch)
-        monkeypatch.setitem(sys.modules, "torch_musa", None)
+        monkeypatch.setitem(
+            sys.modules, "torch_musa", ModuleType("torch_musa") if musa else None
+        )
         monkeypatch.setitem(
             sys.modules, "torch_gcu", ModuleType("torch_gcu") if installed else None
         )
@@ -387,6 +394,15 @@ def test_vendor_keeps_cuda_api_as_a_distinct_backend(device_utils, vendor, expec
     (mark,) = nvidia_only.pytestmark
     assert mark.name == "skipif"
     assert mark.args == (True,)
+
+
+def test_mthreads_vendor_keeps_musa_backend_over_cuda_alias(device_utils):
+    # torch_musa builds can expose torch.cuda aliases; GEMS_VENDOR=mthreads must
+    # still select the MUSA backend so NVIDIA-only cases cannot run on it.
+    utils, _ = device_utils(vendor="MTHREADS", cuda=True, musa=True)
+    assert utils.get_backend() == "musa"
+    assert utils.get_device(3) == "musa:3"
+    assert utils.get_device_count() == 4
 
 
 def test_hygon_vendor_does_not_override_native_gcu(device_utils):

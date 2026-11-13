@@ -213,6 +213,10 @@ def boundary():
             return fake_modules[name]
         if name == "musa_ops" and level == 1:
             return runtime
+        if name == "vllm_fl.dispatch.backends.flaggems.impl.musa_ops" and level == 0:
+            # rotary.py imports the MUSA ops by absolute path so the module can
+            # also be loaded standalone; keep that bound to the loaded stub.
+            return runtime
         return builtins.__import__(name, globals, locals, fromlist, level)
 
     def load(path, *, namespace_replace=False, cpu_tensor=False):

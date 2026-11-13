@@ -28,6 +28,9 @@ rsqrt = "rsqrt"
 dout = "dout"
 bfloat = "bfloat"
 
+# Package names installed as dependencies
+certifi = "certifi"
+
 # Hardware / vendor terminology
 npu = "npu"
 NPU = "NPU"

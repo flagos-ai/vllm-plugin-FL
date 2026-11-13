@@ -116,6 +116,98 @@ def _num_workspace_lanes(vllm_config: VllmConfig, use_v2_model_runner: bool) -> 
     )
 
 
+_CUDA_TO_MUSA_FOR_V2 = {
+    "Stream": "Stream",
+    "Event": "Event",
+    "stream": "stream",
+    "current_stream": "current_stream",
+    "set_stream": "set_stream",
+    "graph": "graph",
+    "CUDAGraph": "MUSAGraph",
+    "current_blas_handle": "current_blas_handle",
+    "synchronize": "synchronize",
+    "set_device": "set_device",
+    "current_device": "current_device",
+    "device_count": "device_count",
+    "device": "device",
+    "device_of": "device_of",
+    "get_device_properties": "get_device_properties",
+    "_get_device_properties": "get_device_properties",
+}
+
+
+def _install_v2_runner_compat() -> None:
+    """Adapt the upstream V2 runner internals to torch_musa.
+
+    torch_musa is built against a CUDA-less torch, so every ``torch.cuda``
+    attribute the V2 runner drives is a stub that raises "PyTorch was compiled
+    without CUDA support". Bind the names the V2 runner actually uses to their
+    ``torch.musa`` counterparts, and force the explicit-copy buffer path
+    because MUSA can pin host memory but cannot map it into the device address
+    space.
+
+    ``torch.cuda.is_available`` is deliberately left untouched:
+    ``torch._dynamo`` consults it and would then save CUDA RNG state through
+    the stubbed ``_lazy_init``.
+
+    Remove this once the torch_musa build, or upstream vLLM, routes the V2
+    runner through the vendor device abstraction.
+    """
+    musa = getattr(torch, "musa", None)
+    if musa is None:
+        return
+    try:
+        if torch.cuda.is_available():
+            return
+    except Exception:
+        # torch_musa raises instead of returning False on some builds; a
+        # raising stub means CUDA is unusable, so fall through to MUSA.
+        pass
+
+    for cuda_name, musa_name in _CUDA_TO_MUSA_FOR_V2.items():
+        impl = getattr(musa, musa_name, None)
+        if impl is not None:
+            setattr(torch.cuda, cuda_name, impl)
+
+    from vllm.v1.worker.gpu import buffer_utils
+
+    buffer_utils.is_uva_available = lambda: False
+
+    _install_v2_dispatch_warmup()
+
+
+def _install_v2_dispatch_warmup() -> None:
+    """Resolve every dispatch op before the first compiled V2 forward.
+
+    The V2 runner traces the model forward with ``fullgraph=True``, so Dynamo
+    cannot fall back to eager for the per-op dispatcher.  ``CachedOp`` only
+    caches after its first lookup, and the lookup path (process lock, PID
+    check, policy epoch, registry scan) is not traceable.  Warm the cache on
+    the first dummy run, which is where vLLM triggers compilation.
+
+    Remove this together with ``_install_v2_runner_compat``.
+    """
+    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+
+    if getattr(GPUModelRunner._dummy_run, "_fl_dispatch_warmup", False):
+        return
+
+    orig_dummy_run = GPUModelRunner._dummy_run
+    warmed = False
+
+    def _dummy_run_with_dispatch_warmup(self, *args, **kwargs):
+        nonlocal warmed
+        if not warmed:
+            warmed = True
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops()
+        return orig_dummy_run(self, *args, **kwargs)
+
+    _dummy_run_with_dispatch_warmup._fl_dispatch_warmup = True
+    GPUModelRunner._dummy_run = _dummy_run_with_dispatch_warmup
+
+
 def _normalize_process_group_backend(backend: str) -> str:
     """Return the torch.distributed backend for the active platform."""
     if current_platform.device_type == "ptpu" and backend in {"flagcx", "nccl"}:
@@ -549,7 +641,8 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            if getattr(current_platform, "vendor_name", "") == "thead":
+            vendor_name = getattr(current_platform, "vendor_name", "")
+            if vendor_name == "thead":
                 # Platform-side adaptations for the upstream V2 runner; see
                 # vllm_fl/dispatch/backends/vendor/thead/patches/.
                 from vllm_fl.dispatch.backends.vendor.thead.patches import (
@@ -557,6 +650,8 @@ class WorkerFL(WorkerBase):
                 )
 
                 v2_runner_compat.install_v2_runner_compat()
+            elif current_platform.device_type == "musa":
+                _install_v2_runner_compat()
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
@@ -883,7 +978,15 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if getattr(self.model_config, "enable_return_routed_experts", False):
+        # vLLM 0.32 moved the flag to ``VllmConfig.aux_output_config``; the
+        # ModelConfig field only exists on older builds.
+        aux_output_config = getattr(self.vllm_config, "aux_output_config", None)
+        routed_experts_source = (
+            aux_output_config
+            if aux_output_config is not None
+            else self.model_config
+        )
+        if getattr(routed_experts_source, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping

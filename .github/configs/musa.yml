@@ -17,15 +17,25 @@
 
 platform: musa
 
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+# FlagOS 2.2 runtime base (flagos-runtime-mthreads-musa4.3.6:2.2.0) + vLLM 0.32.0 empty.
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:9bcde3f187884dd201b7d1a8ad459ffe29d0773125d7fc36e2233fc24e81d6a0
 
 runner_labels:
   - mt-cicd-vllm-plugin
 
+# _platform_test.yml derives the reusable unit-workflow matrix from this list.
+# Leaving it unset yields an empty matrix: GitHub then creates no unit job but
+# marks the whole called workflow as failed, which turns ci-gate red even
+# though every real job passed. MUSA only has s5000, so this leg runs the same
+# device as the default unit pass inside the functional job.
+unit_devices: [s5000]
+
 container_volumes:
   - /data:/data:ro
 
-# The vLLM 0.28 image uses the native MUSA runtime without privileged mode.
+# The image ships the vendor stack, the vLLM 0.32.0 empty wheel and the test
+# tooling. The plugin itself and flaggems-vllm are installed from the checkout by
+# .github/scripts/musa/setup.sh, which then asserts the pinned dependency tuple.
 # GEMS_VENDOR selects the Mthreads kernels; VLLM_PLUGINS enables the FL plugin.
 # This runner allocates host cards 4..7; the SDK sees their logical IDs 0..3.
 # Keep both masks to preserve that allocation; see docs/usage/musa.md.

@@ -39,9 +39,11 @@ def vendor_modules():
     )
     musa = ModuleType("torch_musa")
     musa.empty_cache = Mock(return_value=None)
+    musa.memory_allocated = Mock(return_value=64)
     musa.max_memory_allocated = Mock(return_value=128)
     musa.memory_stats = Mock(return_value={"allocated_bytes.all.peak": 128})
     musa.memory_reserved = Mock(return_value=256)
+    musa.max_memory_reserved = Mock(return_value=320)
     musa.reset_peak_memory_stats = Mock(return_value=None)
     musa.mem_get_info = Mock(return_value=(512, 1024))
     musa.device = Mock(return_value=object())
@@ -195,7 +197,6 @@ def test_patch_entry_point_retries_after_incomplete_vendor_api(
     del musa.mem_get_info
     other_patches = [
         "patch_topk_topp_sampler",
-        "patch_triton_reshape_and_cache_flash",
         "patch_cuda_get_device_properties",
         "patch_cuda_stream_for_musa",
         "patch_inductor_triton_for_musa",
@@ -203,6 +204,10 @@ def test_patch_entry_point_retries_after_incomplete_vendor_api(
         "patch_triton_mtgpu_alias_for_musa",
         "patch_device_config_for_musa",
         "patch_musa_vision_rotary_layout",
+        # These import flag_gems, so running them under the fake ``torch``
+        # module below would cache a poisoned flag_gems in sys.modules.
+        "patch_flag_gems_capture_safe_tuning",
+        "patch_flag_gems_disable_flagtune",
     ]
     for name in other_patches:
         monkeypatch.setattr(musa_patch, name, Mock())
@@ -259,6 +264,116 @@ def test_synchronize_vendor_errors_are_not_hidden(
     with pytest.raises(RuntimeError, match="MUSA device is unavailable"):
         torch.accelerator.synchronize(2)
     musa.synchronize.assert_called_once_with(2)
+
+
+def _fake_torch_with_device(*, accepts_bare_musa):
+    """Fake ``torch`` whose ``device()`` mirrors an old torch_musa build.
+
+    Those builds raise ``RuntimeError: Device string must not be empty`` for the
+    bare ``"musa"`` string. Every accepted call records its arguments so the
+    tests can assert which device object vLLM ends up with.
+    """
+
+    def device(*args):
+        if args == ("musa",) and not accepts_bare_musa:
+            raise RuntimeError("Device string must not be empty")
+        return ("device",) + args
+
+    torch_module = ModuleType("torch")
+    torch_module.device = device
+    return torch_module
+
+
+def _fake_device_config_class(torch_module):
+    """Minimal stand-in for the vllm 0.32 ``DeviceConfig`` post-init contract."""
+
+    class DeviceConfig:
+        def __init__(self, device="auto"):
+            self.device = device
+            self.device_type = None
+            self.__post_init__()
+
+        def __post_init__(self):
+            if self.device == "auto":
+                from vllm.platforms import current_platform
+
+                self.device_type = current_platform.device_type
+            elif isinstance(self.device, str):
+                self.device_type = self.device.split(":")[0]
+            # 0.32 rebuilds the device from the bare type, which is exactly the
+            # call that fails on the older torch_musa build.
+            self.device = torch_module.device(self.device_type)
+
+    return DeviceConfig
+
+
+def _install_device_config_modules(
+    monkeypatch, torch_module, device_config_cls, device_type="musa"
+):
+    vllm = ModuleType("vllm")
+    vllm_config = ModuleType("vllm.config")
+    vllm_device = ModuleType("vllm.config.device")
+    vllm_device.DeviceConfig = device_config_cls
+    vllm_config.device = vllm_device
+    vllm.config = vllm_config
+    vllm_platforms = ModuleType("vllm.platforms")
+    vllm_platforms.current_platform = SimpleNamespace(device_type=device_type)
+    vllm.platforms = vllm_platforms
+
+    for name, module in {
+        "torch": torch_module,
+        "torch_musa": ModuleType("torch_musa"),
+        "vllm": vllm,
+        "vllm.config": vllm_config,
+        "vllm.config.device": vllm_device,
+        "vllm.platforms": vllm_platforms,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+
+@pytest.mark.parametrize("raw_device", ["auto", "musa"])
+def test_device_config_patch_keeps_the_musa_device_unindexed(
+    monkeypatch, musa_patch, raw_device
+):
+    torch_module = _fake_torch_with_device(accepts_bare_musa=False)
+    device_config_cls = _fake_device_config_class(torch_module)
+    _install_device_config_modules(monkeypatch, torch_module, device_config_cls)
+
+    musa_patch.patch_device_config_for_musa()
+
+    config = device_config_cls(raw_device)
+    assert config.device_type == "musa"
+    # Index-free: a hard-coded ``musa:0`` would bind every TP rank to card 0.
+    assert config.device == ("device", "musa", None)
+
+
+def test_device_config_patch_is_skipped_when_bare_musa_is_supported(
+    monkeypatch, musa_patch
+):
+    torch_module = _fake_torch_with_device(accepts_bare_musa=True)
+    device_config_cls = _fake_device_config_class(torch_module)
+    _install_device_config_modules(monkeypatch, torch_module, device_config_cls)
+    original = device_config_cls.__post_init__
+
+    musa_patch.patch_device_config_for_musa()
+
+    assert device_config_cls.__post_init__ is original
+    assert not getattr(device_config_cls, "_musa_post_init_patched", False)
+    assert device_config_cls("auto").device == ("device", "musa")
+
+
+def test_device_config_patch_leaves_other_platforms_untouched(monkeypatch, musa_patch):
+    torch_module = _fake_torch_with_device(accepts_bare_musa=False)
+    device_config_cls = _fake_device_config_class(torch_module)
+    _install_device_config_modules(
+        monkeypatch, torch_module, device_config_cls, device_type="cuda"
+    )
+
+    musa_patch.patch_device_config_for_musa()
+
+    config = device_config_cls("auto")
+    assert config.device_type == "cuda"
+    assert config.device == ("device", "cuda")
 
 
 @pytest.fixture

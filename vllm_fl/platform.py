@@ -470,12 +470,11 @@ class PlatformFL(Platform):
             patch_mm_encoder_attention()
 
         if (
-            cls.device_type in {"npu", "musa", "txda"}
+            cls.device_type in {"npu", "txda"}
             and vllm_config.use_v2_model_runner
         ):
             platform_name = {
                 "npu": "Ascend",
-                "musa": "MUSA",
                 "txda": "Tsingmicro TXDA",
             }[cls.device_type]
             raise ValueError(
@@ -629,9 +628,16 @@ class PlatformFL(Platform):
             _pc = getattr(compilation_config, "pass_config", None)
             if _pc is not None:
                 _pc.fuse_rope_kvcache_cat_mla = False
-            os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
             # Iluvatar lacks is_cuda_alike(): the vLLM UVA helper is
-            # unavailable while Model Runner V2 needs UvaBuffer. Use V1.
+            # unavailable while Model Runner V2 needs UvaBuffer. Default to V1
+            # and say so; an explicit value is left untouched.
+            if os.environ.get("VLLM_USE_V2_MODEL_RUNNER") is None:
+                os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
+                logger.warning(
+                    "[vllm_fl] iluvatar cannot execute the upstream V2 model "
+                    "runner (no is_cuda_alike()/UvaBuffer); defaulting "
+                    "VLLM_USE_V2_MODEL_RUNNER=0 to ModelRunnerFL (V1)."
+                )
 
         if cls.device_type == "npu":
             _configure_ascend_compilation(vllm_config)
@@ -648,6 +654,23 @@ class PlatformFL(Platform):
                 compilation_config.cudagraph_mode,
             )
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+
+        if (
+            cls.device_type == "musa"
+            and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        ):
+            from vllm_fl.dispatch.backends.vendor.musa.graph_config import (
+                limit_cudagraph_capture_sizes,
+            )
+
+            thinned = limit_cudagraph_capture_sizes(compilation_config)
+            if thinned is not None:
+                logger.info(
+                    "MUSA: limiting cudagraph capture to %d batch sizes %s "
+                    "(torch_musa does not share the graph pool across captures)",
+                    len(thinned),
+                    thinned,
+                )
 
         if (
             parallel_config.all2all_backend == "deepep_high_throughput"
@@ -759,6 +782,21 @@ class PlatformFL(Platform):
                 and "vllm::all_reduce" not in compilation_config.splitting_ops
             ):
                 compilation_config.splitting_ops.append("vllm::all_reduce")
+            # vLLM 0.32 lowers TP collectives to `_c10d_functional` ops, not the
+            # `vllm::all_reduce` wrapper. torch_musa's MCCL cannot submit or poll
+            # those while a graph is recording, so split them out too; they then
+            # run eagerly between the captured regions.
+            if compilation_config.cudagraph_mode.has_piecewise_cudagraphs():
+                from vllm_fl.dispatch.backends.vendor.musa.graph_config import (
+                    append_collective_splitting_ops,
+                )
+
+                if append_collective_splitting_ops(compilation_config.splitting_ops):
+                    logger.info(
+                        "MUSA: excluding c10d collectives from cudagraphs "
+                        "(MCCL is not capture-safe); splitting_ops=%s",
+                        compilation_config.splitting_ops,
+                    )
 
     @classmethod
     def get_attn_backend_cls(
