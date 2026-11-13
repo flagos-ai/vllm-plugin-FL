@@ -112,7 +112,6 @@ def apply_topk_topp_compat() -> None:
     *that* module's namespace.  We must patch it there, not only in the
     triton module it was imported from.
     """
-    patched_any = False
     for mod_name in (
         "vllm.v1.sample.ops.topk_topp_triton",
         "vllm.v1.sample.ops.topk_topp_sampler",
@@ -134,7 +133,6 @@ def apply_topk_topp_compat() -> None:
 
         setattr(_apply_top_k_top_p_torch, _PATCH_FLAG, True)
         mod.apply_top_k_top_p_triton = _apply_top_k_top_p_torch
-        patched_any = True
         logger.info(
             "Patched apply_top_k_top_p_triton in %s with the torch path",
             mod_name,

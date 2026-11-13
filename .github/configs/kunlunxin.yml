@@ -38,7 +38,6 @@ container_options: >-
   --env GEMS_VENDOR=kunlunxin
   --env VLLM_PLUGINS=fl
   --env USE_FLAGGEMS=1
-  --env VLLM_FL_FLAGOS_WHITELIST=silu_and_mul,rms_norm,rotary_embedding
   --env CUDA_VISIBLE_DEVICES=0,1,2,3
   --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
   --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800

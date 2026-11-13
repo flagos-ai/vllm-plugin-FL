@@ -387,7 +387,6 @@ def _make_combine_sampled_and_draft_tokens_torch():
         logits_indices = torch.empty(
             num_logits, dtype=torch.int64, device=input_ids.device
         )
-        num_speculative_steps = draft_tokens.shape[-1]
 
         for batch_idx in range(num_reqs):
             req_state_idx = idx_mapping[batch_idx].item()
@@ -602,6 +601,7 @@ def apply_input_batch_compat() -> None:
                 ", ".join(mr_patched),
             )
     except ImportError:
+        # The V2 runner may not be available on this build.
         pass
 
     # sampler.py and rejection_sampler.py also import get_num_sampled_and_rejected
@@ -625,4 +625,5 @@ def apply_input_batch_compat() -> None:
                         mod_path,
                     )
             except ImportError:
-                pass
+                # The optional sampler is absent on this build.
+                continue

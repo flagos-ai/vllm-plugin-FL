@@ -50,10 +50,13 @@ export GEMS_VENDOR=kunlunxin
 export VLLM_PLUGINS=fl
 export USE_FLAGGEMS=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3
-export VLLM_FL_FLAGOS_WHITELIST=silu_and_mul,rms_norm,rotary_embedding
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
 ```
+
+The [Kunlunxin dispatch configuration](../../vllm_fl/dispatch/config/kunlunxin.yaml)
+enables FlagGems for SiLU, RMSNorm, and rotary embedding. Other ATen
+operators keep the vendor Torch path.
 
 The [P800 test profile](../../tests/platforms/kunlunxin.yaml) uses
 `block_size=128`, `gpu_memory_utilization=0.7` and `max_num_seqs=256`.

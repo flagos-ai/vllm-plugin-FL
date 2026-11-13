@@ -42,8 +42,6 @@ COPY .github/scripts/install_flaggems_vllm.py /opt/kunlunxin-build/install_flagg
 RUN PIP_INDEX_URL="${INDEX_URL:-https://pypi.org/simple}" \
     python /opt/kunlunxin-build/install_flaggems_vllm.py --source-archive
 
-ENV VLLM_FL_FLAGOS_WHITELIST=silu_and_mul,rms_norm,rotary_embedding
-
 COPY . /opt/vllm-plugin-FL
 RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.dev0 \
         python -m pip install --no-build-isolation --no-deps /opt/vllm-plugin-FL \

@@ -23,7 +23,7 @@ def fake_mamba_hybrid(monkeypatch):
         """Stand-in for a Triton kernel before the compat patch runs."""
 
         def __getitem__(self, _grid):
-            raise RuntimeError(
+            raise KeyError(
                 "original Triton kernel shim should not be called after patch"
             )
 
