@@ -253,7 +253,8 @@ def test_enflame_ci_does_not_mask_known_failures_or_expand_defaults():
     assert cfg.engine_kwargs()["max_num_seqs"] == 64
     args = cfg.serve_args()
     assert args[args.index("--max-num-seqs") + 1] == "64"
-    assert "serve" not in overrides
+    assert overrides["serve"] == {"startup_retries": 180}
+    assert cfg.serve.startup_retries == 180
     for phase in ("pr", "nightly"):
         tasks = config.device_tests["s60"]["tests"]["e2e"][phase]
         for families in tasks.values():

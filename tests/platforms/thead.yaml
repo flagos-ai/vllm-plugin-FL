@@ -103,11 +103,10 @@ zw810e:
             - 35b_a3b_tp4_graph
     timeouts:
       e2e:
-        # Inference serializes (every case is TP4 over the only 4 visible
-        # cards). Measured with the previous capture table: 27B eager 8.4 min,
-        # 35B eager 6.7 min, 35B graph 26.4 min (~42 min total). The added 27B
-        # graph case keeps the job near 70 min. 120 covers it with headroom.
-        inference: 120
+        # All four TP4 cases serialize on the four visible cards. The cold
+        # inference job reached the 120-minute job limit in CI; allow the same
+        # budget as serving so cancellation does not hide case-level results.
+        inference: 180
         serving: 180
         concurrent: 180
     functional:

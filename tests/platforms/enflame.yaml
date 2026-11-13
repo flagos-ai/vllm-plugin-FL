@@ -47,6 +47,10 @@ device_overrides:
       compilation_config:
         custom_ops: ["none", "+SiluAndMul"]
         cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32]
+    serve:
+      # Cold-cache 35B graph startup approaches the default 20-minute limit.
+      # Allow 30 minutes at the server helper's 10-second polling interval.
+      startup_retries: 180
 
 env_defaults:
   VLLM_PLUGINS: "fl"
