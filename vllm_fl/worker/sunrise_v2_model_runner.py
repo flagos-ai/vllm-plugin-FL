@@ -103,6 +103,41 @@ class _SunriseTPGraphManager(upstream.ModelCudaGraphManager):
         return result
 
 
+def _use_native_vision_mlp_gemm(model):
+    visual = getattr(model, "visual", None)
+    if visual is None:
+        return
+
+    from vllm.model_executor.layers.linear import UnquantizedLinearMethod
+    from vllm.model_executor.models.qwen3_vl import Qwen3_VisionMLP
+
+    for module in visual.modules():
+        if not isinstance(module, Qwen3_VisionMLP):
+            continue
+        projection = module.linear_fc1
+        method = projection.quant_method
+        weight = (
+            projection.weight if isinstance(method, UnquantizedLinearMethod) else None
+        )
+        if (
+            weight is not None
+            and weight.device.type == "ptpu"
+            and weight.dtype == torch.bfloat16
+            and projection.tp_size > 1
+            and weight.shape[0] % 32
+        ):
+            method._gemm_impl = _native_vision_mlp_gemm
+
+
+def _native_vision_mlp_gemm(layer, x, weight, bias):
+    # The FlagGems linear kernel can return NaNs for Sunrise BF16 vision
+    # MLP shards with an unaligned output width (2152 for Qwen3.6 TP2).
+    flat = x.reshape(-1, weight.shape[1])
+    rhs = weight.transpose(0, 1)
+    result = torch.mm(flat, rhs) if bias is None else torch.addmm(bias, flat, rhs)
+    return result.reshape(*x.shape[:-1], weight.shape[0])
+
+
 class SunriseV2ModelRunner(upstream.GPUModelRunner):
     """Native Runner V2 using Sunrise streams, graphs and FL operator dispatch."""
 
@@ -118,6 +153,7 @@ class SunriseV2ModelRunner(upstream.GPUModelRunner):
         install_sunrise_v2_runtime()
         result = super().load_model(*args, **kwargs)
         install_sunrise_v2_runtime()
+        _use_native_vision_mlp_gemm(self.model)
         register_io_module_hooks(self.model)
         draft_model = self.get_draft_model()
         if draft_model is not None:

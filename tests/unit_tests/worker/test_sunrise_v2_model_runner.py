@@ -220,3 +220,12 @@ def test_sunrise_tp_replay_drains_capture_stream(runner_v2):
     ]
     manager.release_graphs()
     assert not manager._capture_streams
+
+
+@pytest.mark.parametrize("with_bias", [False, True])
+def test_vision_gemm_preserves_linear_values_and_shape(runner_v2, with_bias):
+    x = torch.arange(24, dtype=torch.float32).reshape(2, 1, 3, 4)
+    weight = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+    bias = torch.arange(5, dtype=torch.float32) if with_bias else None
+    actual = runner_v2.module._native_vision_mlp_gemm(None, x, weight, bias)
+    torch.testing.assert_close(actual, torch.nn.functional.linear(x, weight, bias))
