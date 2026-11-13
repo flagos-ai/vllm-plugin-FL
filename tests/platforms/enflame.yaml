@@ -33,8 +33,13 @@ device_overrides:
   s60:
     cases:
       - qwen3_6/27b_tp2_eager
+      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
+      - qwen3_6/35b_a3b_tp2_graph
     llm:
+      # S60 TP2 only gets ~154 Mamba cache blocks for 35B-A3B; FULL decode
+      # cudagraphs require max_num_seqs <= the available block count.
+      max_num_seqs: 128
       gpu_memory_utilization: 0.90
       disable_custom_all_reduce: false
     serve:
@@ -53,9 +58,9 @@ s60:
   tests:
     e2e:
       inference:
-        qwen3_6: ["27b_tp2_eager"]
+        qwen3_6: ["27b_tp2_eager", "27b_tp2_graph"]
       serving:
-        qwen3_6: ["35b_a3b_tp2_eager"]
+        qwen3_6: ["35b_a3b_tp2_eager", "35b_a3b_tp2_graph"]
     functional:
       include: "*"
       exclude: []
