@@ -20,8 +20,6 @@ def _round_half_to_even(x):
     fraction = x - floor
     is_odd = tl.abs(floor - 2.0 * tl.floor(floor / 2.0)) > 0.5
     round_up = (fraction > 0.5) | ((tl.abs(fraction - 0.5) < 1e-10) & is_odd)
-    # A select with this compound predicate crashes the Kunlunxin Triton
-    # 3.0 XPU vectorizer (vllm-plugin-FL #570).
     return floor + round_up.to(tl.float32)
 
 
