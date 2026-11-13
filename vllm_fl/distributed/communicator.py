@@ -51,10 +51,15 @@ class CommunicatorFL(DeviceCommunicatorBase):
                 group=self.cpu_group,
                 device=self.device,
             )
-            if self.device.type == "npu" and self.pyflagcx_comm.disabled:
-                raise RuntimeError(
-                    "FlagCX requested on NPU but failed to initialize"
-                ) from self.pyflagcx_comm.init_error
+            if self.pyflagcx_comm.disabled:
+                from vllm.platforms import current_platform
+
+                vendor = getattr(current_platform, "vendor_name", None)
+                if self.device.type == "npu" or vendor == "amd":
+                    device_name = "AMD" if vendor == "amd" else "NPU"
+                    raise RuntimeError(
+                        f"FlagCX requested on {device_name} but failed to initialize"
+                    ) from self.pyflagcx_comm.init_error
 
         if self.use_all2all:
             self._init_all2all_manager(tcp_store_group)

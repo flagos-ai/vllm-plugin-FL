@@ -15,12 +15,13 @@ active simultaneously.
 | PyTorch | `2.13.0+git733fca1` (ROCm, HIP 7.2.53211) |
 | Triton | `3.6.0`, **supplied by FlagTree** from `/opt/flagtree` |
 | FlagTree distribution | `0.7.0+amd3.6` |
-| FlagGems | `main`, post-5.4.0 — minimum commit [9a51bed](https://github.com/flagos-ai/FlagGems/commit/9a51bed) (PR [#8893](https://github.com/flagos-ai/FlagGems/pull/8893): clone FakeTensor fix for torch.compile tracing) |
+| FlagGems | Pinned commit [9a51bed](https://github.com/flagos-ai/FlagGems/commit/9a51bed) from PR [#8893](https://github.com/flagos-ai/FlagGems/pull/8893), which fixes FakeTensor `clone` under `torch.compile` |
 | FlagGems-vllm | Commit [`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19) (`v0.2.0`; package metadata reports `0.1.0`) — the project-wide pin |
 | FlagCX | `0.15.0.dev52+g591cfbf`, built with `USE_AMD=1` (RCCL backend) |
 | Attention backend | `TRITON_ATTN` (dense), `TRITON_MLA` (MLA); ViT uses Torch SDPA |
 | Communication | FlagCX over RCCL; custom all-reduce disabled |
-| Compilation | **Eager only** — see [Validation scope](#validation-scope) |
+| Model runner | vLLM 0.32 selects V2 for supported configurations |
+| Compilation | See [Validation scope](#validation-scope) for results by model and mode |
 
 Two properties of this hardware drive several choices below:
 
@@ -165,14 +166,14 @@ python3 -c "import vllm; print(vllm.__version__)"   # 0.32.0+empty
 
 ### 4.4 FlagGems, FlagGems-vllm and FlagCX
 
-FlagGems must come from `main`: the AMD fix that sets
-`triton_extra_name="hip"` for the `_amd` backend is not in the 5.4.0 release,
-and without it every FlagGems kernel emits CUDA `__nv_*` symbols that the AMD
-Triton backend rejects.
+Use the same FlagGems commit as the AMD Dockerfile. It includes the HIP
+libdevice selection for the `_amd` backend and the FakeTensor `clone` fix.
 
 ```bash
-# FlagGems (main)
+# FlagGems
 git clone https://github.com/flagos-ai/FlagGems /work/FlagGems
+git -C /work/FlagGems fetch origin 9a51bed1322bd17800e76cbaa39a7490230022bd
+git -C /work/FlagGems checkout --detach FETCH_HEAD
 SP=$(python3 -c "import site; print(site.getsitepackages()[0])")
 cp -r /work/FlagGems/src/flag_gems "$SP/flag_gems"
 pip install -q sqlalchemy
@@ -187,6 +188,7 @@ pip install --no-deps --no-build-isolation /work/FlagGems-vllm
 # FlagCX with the AMD adaptor
 apt-get update -qq && apt-get install -y -qq nlohmann-json3-dev
 git clone https://github.com/flagos-ai/FlagCX /work/FlagCX
+git -C /work/FlagCX checkout 591cfbf77e35eefb323b0c6ec6860afba25519ee
 cd /work/FlagCX && make USE_AMD=1 -j"$(nproc)"
 FLAGCX_ADAPTOR=amd USE_AMD=1 FLAGCX_HOME=/work/FlagCX \
   pip install --no-deps --no-build-isolation .
@@ -232,44 +234,44 @@ print('vendor', P.vendor_name, '| device_type', P.device_type,
       '| is_rocm', P().is_rocm())"
 ```
 
-Confirm FlagCX is genuinely carrying collectives rather than falling back to
-RCCL. A `backend=flagcx` log line alone only shows which backend was
-requested, so check that `libflagcx.so` is mapped into the process and that a
-real collective is correct:
+Verify the direct FlagCX path with an all-reduce. The CPU rendezvous uses
+Gloo, and the collective runs on FlagCX's AMD adaptor:
 
 ```bash
 cat > /tmp/check_flagcx.py <<'PY'
-import os, torch, torch.distributed as dist
-dist.init_process_group(backend="flagcx")
+import torch
+import torch.distributed as dist
+from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
+
+dist.init_process_group(backend="gloo")
 rank, ws = dist.get_rank(), dist.get_world_size()
-torch.cuda.set_device(rank)
-with open("/proc/self/maps") as f:
-    libs = sorted({l.split()[-1] for l in f if "flagcx" in l.lower()})
-t = torch.full((4,), float(rank + 1), device=f"cuda:{rank}")
-dist.all_reduce(t)
+device = torch.device("cuda", rank)
+torch.cuda.set_device(device)
+comm = PyFlagcxCommunicator(dist.group.WORLD, device)
+if comm.disabled:
+    raise RuntimeError("Failed to initialize FlagCX") from comm.init_error
+t = torch.full((4,), float(rank + 1), device=device)
+out = comm.all_reduce(t)
+torch.cuda.synchronize(device)
 expected = float(sum(range(1, ws + 1)))
-ok = bool((t == expected).all().item())
-print(f"rank {rank}: reduce {t[0].item()} expected {expected} -> "
-      f"{'OK' if ok else 'FAIL'}; flagcx libs {libs or 'NONE'}", flush=True)
-# Every rank must reach this barrier before any of them exits, otherwise a
-# fast rank tears its communicator down mid-collective and the job hangs.
+torch.testing.assert_close(out, torch.full_like(out, expected), rtol=0, atol=0)
+print(f"rank {rank}: FlagCX sum {out[0].item()}", flush=True)
 dist.barrier()
-# FlagCX's destroy_process_group segfaults on ROCm, so exit without it.
-os._exit(0)
+dist.destroy_process_group()
 PY
 
-FLAGCX_PATH=/work/FlagCX LD_LIBRARY_PATH=/work/FlagCX/build/lib \
-  torchrun --nproc-per-node=2 /tmp/check_flagcx.py
+VLLM_PLUGINS=fl FLAGCX_PATH=/work/FlagCX \
+  LD_LIBRARY_PATH=/work/FlagCX/build/lib:$LD_LIBRARY_PATH \
+  torchrun --standalone --nproc-per-node=2 /tmp/check_flagcx.py
 ```
 
-`/work/FlagCX/build/lib/libflagcx.so` must appear and the reduction must match.
-`librccl.so` also being mapped is expected: FlagCX's AMD adaptor uses RCCL
-underneath.
+Both ranks must report a sum of 3. FlagCX's AMD adaptor uses RCCL.
 
 ## 6. Start the service
 
-FlagCX is selected by the presence of `FLAGCX_PATH`. Without it vLLM silently
-uses `backend=nccl` (RCCL) instead.
+Set `FLAGCX_PATH` to the built FlagCX source tree to enable FlagCX
+tensor-parallel collectives. PyTorch device process groups use RCCL and log
+`backend=nccl`. The vLLM tensor-parallel communicator calls FlagCX directly.
 
 ```bash
 export VLLM_PLUGINS=fl USE_FLAGGEMS=1
@@ -284,13 +286,13 @@ vllm serve /models/Qwen3.6-27B \
   --enforce-eager
 ```
 
-This Qwen3.6 TP8 example uses the validated eager configuration. See
-[Validation scope](#validation-scope) for the Qwen3-4B graph run.
+Leave `VLLM_USE_V2_MODEL_RUNNER` unset to use vLLM's automatic runner
+selection. See [Validation scope](#validation-scope) for the tested settings.
 
-Confirm all three components are active in the service log:
+Check the service log and run the FlagCX collective check above:
 
 ```
-backend=flagcx                       # once per TP rank
+backend=nccl                         # PyTorch process groups on ROCm
 using 'default.flagos'               # FlagGems executing the FL operators
 Using Torch SDPA backend for ViT     # correct for RDNA
 Application startup complete
@@ -308,36 +310,42 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
 
 ## Validation scope
 
-See [PR #659](https://github.com/flagos-ai/vllm-plugin-FL/pull/659) for the
-full evidence. In summary:
+The [adaptation gate](../../tools/adaptation-gate-cases/README.md) covers
+eager and graph execution on Qwen3.6-27B and Qwen3.6-35B-A3B. Run it on
+8× W7900D at TP8 with FlagGems, FlagTree, and FlagCX enabled. Each model and
+mode has five scenarios and 26 requests, covering single and concurrent
+text, image, and mixed text-image requests.
 
-**Passing** — the adaptation gate's eager groups, on 8× W7900D at TP8, with
-FlagGems, FlagTree and FlagCX active simultaneously:
-
-| Group | Scenarios | Requests |
+| Model and runner | Eager | Graph |
 |---|---|---|
-| `Qwen3.6-27B` eager | 5/5 | 26/26 |
-| `Qwen3.6-35B-A3B` eager | 5/5 | 26/26 |
+| Qwen3.6-27B, V2 | 26/26 requests | 26/26 requests with the default graph configuration |
+| Qwen3.6-35B-A3B, V2 | 26/26 requests | 26/26 requests with the decode graph settings below |
+| Qwen3.6-27B and 35B-A3B, V1 | 52/52 requests | 52/52 requests |
 
-covering single and 8-way-concurrent text, image, and mixed text-image
-requests, on a dense model and an MoE model.
+The V2 graph runs recorded `FULL` execution during requests. For 35B-A3B
+on the ROCm 7.2.3 container, the default graph path hit a GPU page fault
+during capture. The passing FlagCX runs used a 20 GiB KV cache budget per
+worker and captured decode sizes up to 32, with and without Dynamo compilation.
+Add these options to the graph command in place of `--enforce-eager`:
 
-FlagCX was confirmed to be in the data path rather than merely requested:
-those runs log `backend=flagcx` on all 8 ranks with no `backend=nccl`, the
-platform resolves the communicator to `CommunicatorFL`, and the check in
-section 5 shows `libflagcx.so` mapped into the process with a correct
-`all_reduce`.
+```bash
+--kv-cache-memory-bytes 21474836480 \
+--compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32]}' \
+--cudagraph-metrics
+```
 
-**Graph mode** passed on Qwen3-4B at TP1 on one W7900D, with both PIECEWISE
-and FULL capture in the recorded [PR #659](https://github.com/flagos-ai/vllm-plugin-FL/pull/659)
-hardware run. For Qwen3.6 GDN models, use the validated eager configuration
-while [FlagGems #8095](https://github.com/flagos-ai/FlagGems/issues/8095)
-tracks the graph compatibility work.
+The V2 test processes set `HSA_TOOLS_DISABLE_REGISTER=1` after a ROCr
+event-loop failure on a separate W7900D host.
 
-**Not covered**: FP8/quantised paths, performance characterisation, and
-automatic AMD CI. Results
-apply to the recorded artifacts and do not establish complete operator or
-collective ABI coverage.
+See [PR #659](https://github.com/flagos-ai/vllm-plugin-FL/pull/659) for hardware
+results by revision, including the earlier Qwen3-4B TP1 graph smoke. The
+pinned FlagGems commit includes the FakeTensor `aten::clone` fix from
+[FlagGems #8893](https://github.com/flagos-ai/FlagGems/pull/8893).
+[FlagGems #8460](https://github.com/flagos-ai/FlagGems/issues/8460) tracks
+the broader `torch.compile` compatibility problem.
+
+The manual gate covers BF16 serving. It does not cover FP8 or other
+quantized paths, performance characterization, or multi-node collectives.
 
 ## Troubleshooting
 
@@ -349,8 +357,8 @@ collective ABI coverage.
   plugin adds them for AMD in `vllm_fl/patches/flagtree_target_info.py`; make
   sure the plugin is actually imported (`VLLM_PLUGINS=fl`).
 - **`Implicit conversion of CUDA __nv_powf device function has been dropped`:**
-  FlagGems is resolving CUDA libdevice. Use FlagGems from `main` — the released
-  5.4.0 lacks `triton_extra_name="hip"` for the `_amd` backend.
+  FlagGems is resolving CUDA libdevice. Use the FlagGems revision pinned in
+  section 4.4 for HIP libdevice support on the `_amd` backend.
 - **`All providers in priority must be registered implementations`:** an empty
   vLLM build registers only the `native` IR-op provider. The plugin probes the
   registry; if you see this, confirm the plugin revision includes that probe.

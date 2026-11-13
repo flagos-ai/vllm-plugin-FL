@@ -77,11 +77,12 @@ class AMDBackend(Backend):
 
         We use the Triton backends (``TRITON_MLA`` for MLA models,
         ``TRITON_ATTN`` otherwise) because they run on the FlagTree Triton
-        compiler validated on gfx1100. Sparse attention is not validated on
-        this hardware yet; fall back to the dense Triton MLA path.
+        compiler validated on gfx1100.
         """
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
+        if use_sparse:
+            raise NotImplementedError("Sparse MLA is unsupported by the AMD backend")
         if use_mla:
             return AttentionBackendEnum.TRITON_MLA.get_path()
         return AttentionBackendEnum.TRITON_ATTN.get_path()

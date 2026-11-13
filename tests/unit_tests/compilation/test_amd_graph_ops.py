@@ -24,6 +24,18 @@ def _load_class(path, name, **scope):
     return scope[name]
 
 
+def test_amd_rejects_sparse_mla_before_selecting_a_dense_backend(monkeypatch):
+    registry = ModuleType("vllm.v1.attention.backends.registry")
+    registry.AttentionBackendEnum = object()
+    monkeypatch.setitem(sys.modules, registry.__name__, registry)
+    backend = _load_class(
+        "vllm_fl/dispatch/backends/vendor/amd/amd.py", "AMDBackend", Backend=object
+    )
+
+    with pytest.raises(NotImplementedError, match="Sparse MLA"):
+        backend().attention_backend(use_mla=True, use_sparse=True)
+
+
 @pytest.mark.parametrize(
     "source, name, base, dispatcher, op",
     [

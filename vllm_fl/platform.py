@@ -924,6 +924,8 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
+            if cls.vendor_name == "amd":
+                return "vllm_fl.distributed.cuda_flagcx_communicator.CudaFlagcxCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
@@ -934,6 +936,13 @@ class PlatformFL(Platform):
     def get_static_graph_wrapper_cls(cls) -> str:
         if cls.device_type == "musa":
             return "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper"
+        if cls.vendor_name == "amd":
+            from vllm.config import get_current_vllm_config_or_none
+
+            config = get_current_vllm_config_or_none()
+            if config is not None and config.use_v2_model_runner:
+                # V2's graph profiler manages the upstream wrapper registry.
+                return "vllm.compilation.cuda_graph.CUDAGraphWrapper"
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod
@@ -1108,6 +1117,8 @@ class PlatformFL(Platform):
             cls.device_type == "txda"
             or cls.vendor_name in ("nvidia", "thead", "iluvatar")
             or (cls.device_type == "musa" and cls.dist_backend == "mccl")
+            # Keep FlagCX ctypes calls out of Dynamo's tracing.
+            or (cls.vendor_name == "amd" and cls.dist_backend == "flagcx")
         )
 
     @classmethod

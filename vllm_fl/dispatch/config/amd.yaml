@@ -4,10 +4,9 @@
 # Preferred default backend type: flagos, vendor, reference
 prefer: flagos
 
-# Strict Mode:
-#   true  = Raise an error immediately on failure; do not attempt other backends.
-#   false = Attempt the next available backend in sequence upon failure (Default).
-strict: false
+# Resolve an available backend before invocation. An in-place kernel may
+# already have modified its inputs when execution raises.
+strict: true
 
 # Vendor Whitelist (Optional, allows all if not set)
 # allow_vendors:
@@ -19,7 +18,7 @@ strict: false
 
 
 # Per-operator backend execution order (Optional)
-# Only the backends listed here will be attempted, in the order specified.
+# Resolve the first available backend in the specified order.
 #
 # Supported tokens:
 #   - flagos    : Default FlagGems implementation (Triton via FlagTree)
@@ -28,9 +27,8 @@ strict: false
 #   - vendor:amd: AMD-specific vendor backend (attention backend selection)
 #
 # On AMD/ROCm, FlagGems runs with generic (non-arch-specialized) Triton kernels
-# on gfx1100; they are correct but unspecialized. Prefer FlagGems first, then
-# fall back to the PyTorch reference. The AMD vendor backend only supplies the
-# attention-backend selection (vendor:amd under attention_backend).
+# on gfx1100. Prefer FlagGems when available, then the PyTorch reference.
+# The AMD vendor backend supplies attention-backend selection.
 op_backends:
   attention_backend:
     - vendor:amd

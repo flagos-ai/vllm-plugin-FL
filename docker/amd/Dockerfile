@@ -34,7 +34,7 @@ SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 ARG PYTHON_VERSION=3.12
 ARG VLLM_VERSION=0.32.0
 ARG FLAGTREE_VERSION=0.7.0+amd3.6
-ARG FLAGGEMS_COMMIT=9a51bed
+ARG FLAGGEMS_COMMIT=9a51bed1322bd17800e76cbaa39a7490230022bd
 ARG FLAGCX_COMMIT=591cfbf
 ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
@@ -101,7 +101,9 @@ v = version("vllm"); print("vllm:", v); assert v.endswith("+empty"), v'
 # FlagGems must come from main: the gfx1100 fix that sets
 # triton_extra_name="hip" for the _amd backend is not in the 5.4.0 release.
 RUN git clone https://github.com/flagos-ai/FlagGems.git /opt/FlagGems \
-    && git -C /opt/FlagGems checkout "${FLAGGEMS_COMMIT}" \
+    && (git -C /opt/FlagGems checkout "${FLAGGEMS_COMMIT}" \
+        || (git -C /opt/FlagGems fetch origin "${FLAGGEMS_COMMIT}" \
+            && git -C /opt/FlagGems checkout --detach FETCH_HEAD)) \
     && python3 -m pip install --no-cache-dir --no-build-isolation \
         ${INDEX_URL:+--index-url "${INDEX_URL}"} \
         /opt/FlagGems \
