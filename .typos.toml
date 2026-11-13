@@ -19,6 +19,8 @@
 extend-ignore-re = [
     # Hex-encoded strings and hashes
     "[0-9a-fA-F]{32,}",
+    # Opaque completion IDs captured in request reports.
+    '\bchatcmpl-[0-9a-fA-F]{16,}\b',
 ]
 
 [default.extend-words]
