@@ -154,10 +154,14 @@ def test_enflame_s60_compilation_config_reaches_engine_and_cli(case, monkeypatch
         "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32],
     }
     assert cfg.engine_kwargs()["compilation_config"] == expected
+    assert cfg.engine_kwargs()["max_num_batched_tokens"] == 4096
+    assert cfg.engine_kwargs()["max_model_len"] == 8192
     args = cfg.serve_args()
     assert json.loads(args[args.index("--compilation-config") + 1]) == expected
+    assert args[args.index("--max-num-batched-tokens") + 1] == "4096"
     baseline = ModelConfig.load("qwen3_6", case)
     assert "compilation_config" not in baseline.engine_kwargs()
+    assert "max_num_batched_tokens" not in baseline.engine_kwargs()
 
 
 @pytest.mark.parametrize(

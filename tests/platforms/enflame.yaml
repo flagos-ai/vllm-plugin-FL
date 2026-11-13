@@ -39,6 +39,8 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.90
       max_num_seqs: 64
+      # Bound prefill/profile workspace independently of decode capture sizes.
+      max_num_batched_tokens: 4096
       disable_custom_all_reduce: false
       # Explicit FL SiLU dispatch is required by the validated S60 cases.
       # Do not extend this policy to other models without validation.
@@ -52,6 +54,7 @@ env_defaults:
   TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
   ENABLE_I64_CHECK: "0"
   TORCHGCU_INDUCTOR_ENABLE: "1"
+  GRAPH_COMPILATION_CONFIG: '{"cudagraph_capture_sizes":[1,2,4,8,16,32]}'
 # Set TORCHINDUCTOR_EMULATE_PRECISION_CASTS=1 explicitly only for validated
 # BF16 compiled runs; it is not a platform-wide test default.
 

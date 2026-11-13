@@ -37,3 +37,5 @@ flagos_blacklist:
   # FlagGems scalar fill corrupts successive int64 scalar assignments on GCU
   # (including V2 Mamba pointer/stride metadata). Keep the native in-place fill.
   - fill_scalar_
+  # Singleton cumsum_out returns its input without writing graph metadata.
+  - cumsum_out

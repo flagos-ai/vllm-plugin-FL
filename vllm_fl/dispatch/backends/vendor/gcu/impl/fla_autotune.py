@@ -13,7 +13,8 @@ _patched = False
 
 def apply_fla_autotune_gcu_patch() -> None:
     global _patched
-    if _patched or not torch.gcu.is_available():
+    gcu = getattr(torch, "gcu", None)
+    if _patched or gcu is None or not gcu.is_available():
         return
 
     from vllm.third_party.flash_linear_attention.ops import (
