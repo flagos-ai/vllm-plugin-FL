@@ -248,20 +248,8 @@ def register():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
-    if vendor_name in (
-        "ascend",
-        "mthreads",
-        "enflame",
-        "gcu",
-        "tsingmicro",
-    ):
-        # These backends use ModelRunnerFL. Set the default before imports
-        # that can read the upstream runner selection.
-        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
-
     if vendor_name == "kunlunxin":
-        # Override explicit values because vLLM's padding-aware route calls
-        # the CUDA-only _moe_C op. The FL router handles every row on Kunlunxin.
+        # vLLM's padding-aware route calls the CUDA-only _moe_C op.
         os.environ["VLLM_MOE_SKIP_PADDING"] = "0"
 
     if vendor_name != "nvidia":
@@ -281,6 +269,11 @@ def register():
 
     if vendor_name == "kunlunxin":
         _install_kunlunxin_fla_alias()
+
+    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
+        # These backends use ModelRunnerFL; choose it before VllmConfig reads
+        # model defaults for the upstream V2 runner.
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
 

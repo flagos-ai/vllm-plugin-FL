@@ -1073,7 +1073,10 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        if self.vllm_config.kernel_config.enable_jit_warmup:
+        if (
+            getattr(current_platform, "vendor_name", None) != "kunlunxin"
+            or self.vllm_config.kernel_config.enable_jit_warmup
+        ):
             activate_jit_monitor(
                 mode=self.observability_config.jit_monitor_mode,
                 verbose=self.observability_config.jit_monitor_verbose,

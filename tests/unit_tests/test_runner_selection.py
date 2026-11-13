@@ -70,22 +70,17 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
         monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
     else:
         monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
-    monkeypatch.setenv("VLLM_MOE_SKIP_PADDING", "1")
     monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
     monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
     monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
-    monkeypatch.setattr(vllm_fl, "_install_kunlunxin_fla_alias", lambda: None)
     monkeypatch.setattr(
         vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name=vendor)
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
-    assert os.environ["VLLM_MOE_SKIP_PADDING"] == (
-        "0" if vendor == "kunlunxin" else "1"
-    )
 
 
 @pytest.mark.parametrize(
@@ -169,6 +164,7 @@ def test_kunlunxin_register_preserves_v2_default(monkeypatch, requested, expecte
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    assert os.environ["VLLM_MOE_SKIP_PADDING"] == "0"
     if expected is None:
         assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
     else:

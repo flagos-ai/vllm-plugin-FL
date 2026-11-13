@@ -175,7 +175,7 @@ dist_backend_dict = {
 
 
 def _use_flagcx(vendor_name: str) -> bool:
-    if os.environ.get("FLAGCX_PATH"):
+    if "FLAGCX_PATH" in os.environ:
         return True
     if vendor_name != "kunlunxin":
         return False
@@ -481,13 +481,15 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        platform_name = {
-            "npu": "Ascend",
-            "musa": "MUSA",
-            "txda": "Tsingmicro TXDA",
-        }.get(cls.device_type)
-        # Kunlunxin supports the V2 model runner; do not block it here.
-        if platform_name and vllm_config.use_v2_model_runner:
+        if (
+            cls.device_type in {"npu", "musa", "txda"}
+            and vllm_config.use_v2_model_runner
+        ):
+            platform_name = {
+                "npu": "Ascend",
+                "musa": "MUSA",
+                "txda": "Tsingmicro TXDA",
+            }[cls.device_type]
             raise ValueError(
                 f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."

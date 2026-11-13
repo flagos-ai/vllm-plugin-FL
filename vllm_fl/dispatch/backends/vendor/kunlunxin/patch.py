@@ -155,13 +155,6 @@ def _apply_legacy_kunlunxin_patches():
     )
     apply_mamba_hybrid_compat()
 
-    # NOTE: mm_rope_compat and block_tables_compat are intentionally NOT wired.
-    # FlagTree compiles _prepare_rope_positions_kernel and
-    # _gather_block_tables_kernel / _compute_slot_mappings_kernel correctly
-    # (gate 19 passed all 27B tests without these shims).  The torch
-    # replacements introduced wrong-token corruption at specific positions in
-    # concurrent batches (text-06 '>|', image-03 '\tsuperellipse').
-
 
 def _install_graph_patch(owner, name, replacement, replacements):
     if replacements is None:
