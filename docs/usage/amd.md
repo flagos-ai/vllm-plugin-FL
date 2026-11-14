@@ -11,6 +11,8 @@ active simultaneously.
 | Accelerator | AMD Radeon PRO W7900D 48 GB, **gfx1100 (RDNA3)**, 8 cards |
 | Host base | Ubuntu 24.04 / ROCm 7.2.4 |
 | Container base | `vllm/vllm-openai-rocm:latest` (ROCm 7.2.3, Python 3.12) |
+| Primary gate driver and RCCL | Host `amdgpu` module `6.16.13`, container RCCL package `2.27.7.70203-90~22.04` |
+| Default graph retest driver and RCCL | Host `amdgpu` module `6.14.14`, ROCm 7.2.4 container RCCL package `2.27.7.70204-93~24.04` |
 | vLLM | `0.32.0+empty` — rebuilt from tag `v0.32.0` with `VLLM_TARGET_DEVICE=empty` |
 | PyTorch | `2.13.0+git733fca1` (ROCm, HIP 7.2.53211) |
 | Triton | `3.6.0`, **supplied by FlagTree** from `/opt/flagtree` |
@@ -336,6 +338,10 @@ Add these options to the graph command in place of `--enforce-eager`:
 
 The V2 test processes set `HSA_TOOLS_DISABLE_REGISTER=1` after a ROCr
 event-loop failure on a separate W7900D host.
+
+The ROCm 7.2.4 retest passed all 26 requests for 35B-A3B with the
+default graph mode and capture sizes. Its request log contains real FULL
+execution. That configuration used automatic KV sizing.
 
 See [PR #659](https://github.com/flagos-ai/vllm-plugin-FL/pull/659) for hardware
 results by revision, including the earlier Qwen3-4B TP1 graph smoke. The

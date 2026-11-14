@@ -311,6 +311,7 @@ def test_exhausted_budget_diagnostics_preserve_accounting(
             ),
             "maybe_apply_startup_plan": Mock(),
             "memory_profiling": lambda *args, **kwargs: nullcontext(profile),
+            "nullcontext": nullcontext,
             "CUDAGraphMode": Mode,
             "envs": NS(VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=estimate_enabled),
             "logger": logger,

@@ -936,7 +936,7 @@ class PlatformFL(Platform):
     def get_static_graph_wrapper_cls(cls) -> str:
         if cls.device_type == "musa":
             return "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper"
-        if cls.vendor_name == "amd":
+        if getattr(cls, "vendor_name", None) == "amd":
             from vllm.config import get_current_vllm_config_or_none
 
             config = get_current_vllm_config_or_none()
