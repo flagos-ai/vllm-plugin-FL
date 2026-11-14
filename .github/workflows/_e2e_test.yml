@@ -129,18 +129,8 @@ jobs:
         if: inputs.platform == 'nvidia' && inputs.device == 'h20'
         run: echo 'NCCL_NVLS_ENABLE=0' >> "$GITHUB_ENV"
 
-      - name: Provision Iluvatar FlagCX
-        if: inputs.platform == 'iluvatar'
-        env:
-          FLAGCX_PATH: ${{ vars.ILUVATAR_FLAGCX_PATH }}
-        run: bash .github/scripts/iluvatar/install_flagcx.sh
-
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
-
-      - name: Validate Iluvatar full stack
-        if: inputs.platform == 'iluvatar'
-        run: python .github/scripts/iluvatar/verify_stack.py
 
       - name: Check test models
         run: |

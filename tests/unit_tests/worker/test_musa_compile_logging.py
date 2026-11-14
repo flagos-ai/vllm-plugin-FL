@@ -29,7 +29,10 @@ class Mode(IntEnum):
 
 
 @pytest.fixture(autouse=True)
-def isolated_dynamo_logging():
+def isolated_dynamo_logging(monkeypatch):
+    # This contract exercises CPU Dynamo only. Otherwise Dynamo also snapshots
+    # accelerator RNG state, making it depend on unrelated device tests.
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     with dynamo_config.patch(ignore_logger_methods=set()):
         torch._dynamo.reset()
         yield

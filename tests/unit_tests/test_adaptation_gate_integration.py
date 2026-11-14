@@ -37,11 +37,26 @@ def test_platform_gate_config(case):
     assert ("--enforce-eager" in args) == case.endswith("eager")
 
 
-def test_shared_workflow_preserves_stack_and_reports():
+def test_shared_workflow_uses_published_iluvatar_image_and_reports():
     workflow = yaml.safe_load((ROOT / ".github/workflows/_e2e_test.yml").read_text())
     steps = workflow["jobs"]["e2e-test"]["steps"]
-    assert any("install_flagcx.sh" in step.get("run", "") for step in steps)
-    assert any("verify_stack.py" in step.get("run", "") for step in steps)
+    runs = "\n".join(step.get("run", "") for step in steps)
+    assert "install_flagcx.sh" not in runs
+    assert "verify_stack.py" not in runs
+    assert any(".github/scripts/${{ inputs.platform }}/setup.sh" in step.get("run", "") for step in steps)
+
+    config = yaml.safe_load((ROOT / ".github/configs/iluvatar.yml").read_text())
+    assert config["ci_image"] == "harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci"
+    assert "/usr/local/corex-4.5.0/bin/ixsmi:/usr/local/corex/bin/ixsmi" in config["container_volumes"]
+    assert "/mnt/share/user_homes/models:/data/models/Qwen:ro" in config["container_volumes"]
+    for option in ("--user root", "--ulimit nofile=65535:65535"):
+        assert option in config["container_options"]
+
+    setup = (ROOT / ".github/scripts/iluvatar/setup.sh").read_text()
+    assert "pip install --no-build-isolation --no-deps -e ." in setup
+    for removed in ("install_flagcx", "install_flaggems", "install_flagtree", "install_vllm", "pytest-xdist", "verify_stack"):
+        assert removed not in setup
+
     upload = next(
         step
         for step in steps
