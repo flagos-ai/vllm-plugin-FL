@@ -307,11 +307,37 @@ def test_flaggems_mm_on_npu():
             _assert(actual, expected, dtype, reduction=True)
 
 
+def test_default_ascend_biased_vision_linear_preserves_each_row():
+    generator = torch.Generator().manual_seed(703)
+    weight = (torch.randn(1152, 1536, generator=generator) * 0.04).bfloat16()
+    bias = (torch.randn(1152, generator=generator) * 0.10).bfloat16()
+    # Qwen3.6's vision patch projection shape. Zero input makes the
+    # exact expected output independent of GEMM accumulation precision.
+    x = torch.zeros((1900, 1536), dtype=torch.bfloat16, device="npu")
+    device_weight, device_bias = weight.to("npu"), bias.to("npu")
+
+    with _enable("linear", native=True):
+        actual = F.linear(x, device_weight, device_bias)
+
+    expected = bias.expand(x.shape[0], -1)
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+
+
+@pytest.fixture
+def _full_precision_conv():
+    # This is a torch_npu dynamic option, not a normal Python attribute.
+    # monkeypatch.undo() attempts delattr and cannot restore the native option.
+    previous = torch.npu.conv.allow_hf32
+    try:
+        torch.npu.conv.allow_hf32 = False
+        yield
+    finally:
+        torch.npu.conv.allow_hf32 = previous
+
+
 @pytest.mark.parametrize("op", ["conv1d", "conv2d"])
-def test_default_ascend_convolution_on_npu(op, monkeypatch):
-    # torch_npu enables HF32 convolution by default. Validate the FP32 CPU
-    # reference in full precision without relaxing its original tolerance.
-    monkeypatch.setattr(torch.npu.conv, "allow_hf32", False)
+def test_default_ascend_convolution_on_npu(op, _full_precision_conv):
+    # Validate the FP32 CPU reference in full precision, keeping its tolerance.
     generator = torch.Generator().manual_seed(19)
     for dtype in (torch.float32, torch.bfloat16):
         for groups in (1, 2):
@@ -525,3 +551,18 @@ def test_silu_and_mul_flaggems_fallback_on_npu(dtype, layout):
         actual = silu_and_mul_flaggems(None, npu)
         torch.npu.synchronize()
     _assert(actual, expected, dtype)
+
+
+@pytest.mark.parametrize("scalar", [False, True])
+def test_default_ascend_ne_inplace_preserves_strided_values(scalar):
+    cpu, npu = _inputs(torch.float32, "strided")
+    other = 0.25 if scalar else cpu.flip(-1).contiguous()
+    expected = cpu.clone().ne_(other)
+    npu_other = other if scalar else other.to("npu")
+    storage = npu.data_ptr()
+    with _enable("ne_scalar_" if scalar else "ne_", native=not scalar):
+        registered = set(flag_gems.all_registered_ops())
+        assert not {"not_equal_scalar_", "not_equal_"} & registered
+        actual = npu.ne_(npu_other)
+        assert actual is npu and actual.data_ptr() == storage
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)

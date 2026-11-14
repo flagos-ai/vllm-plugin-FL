@@ -53,21 +53,38 @@ op_backends:
     - flagos
     - reference
 
-# Exclusions validated against the image's FlagGems 3b406c36 / FlagTree ascend3.5.
+# Baseline exclusions originated with FlagGems 3b406c36 / FlagTree ascend3.5.
+# The v2 empty-buffer exclusions below also cover the FlagGems 5.4 image.
 # ATen exclusions use implementation function names, not torch schema names.
 # Vendor-auto-excluded ops (to_copy, copy_, cat, exponential_) need no duplicate
 # entry here. Performance preferences belong in op_backends above.
 flagos_blacklist:
+  # FlagGems 5.4 registers the ne_.Scalar/Tensor schemas twice, through
+  # canonical ne_* and not_equal_* aliases. Exclude only the duplicate aliases;
+  # the canonical scalar inequality kernel remains enabled.
+  - not_equal_scalar_
+  - not_equal_
+  # The canonical tensor ne_ misreads stride-2 views (17/561 wrong values
+  # on FlagGems 5.4). Preserve native in-place tensor comparisons.
+  - ne_
   # qwen-vllm_for_ascend (3b406c36) wraps argmax twice with LibEntry,
   # failing sampler warmup with "Invalid Runtime Function". Use torch_npu.
   - argmax
   # FlagTree cannot lower pow(float32, int32) in FlagGems' tanh GELU.
   # Keep vision activation on the native torch_npu implementation.
   - gelu
+  # FlagGems 5.4 corrupts the first row of the biased BF16 linear used
+  # for Qwen3.6 vision patch projection (M=1900, K=1536, N=1152).
+  - linear
   # FlagGems conv1d faults in Qwen3.6-27B's GDN prefill process with
   # 5120 groups, T=15, K=4, padding=3. Keep conv2d enabled: the
   # native conv1d path passes text/image serving with that override active.
   - conv1d
+  # Qwen3.6-27B TP2 r2 plog identifies FlagGems 5.4's shared pad
+  # kernel _pad_jit_function_1 (hash 17118823940470532360) as the
+  # vector-core fault. Both registered entries use that implementation.
+  - pad
+  - constant_pad_nd
   # Mixed bool values in a stride-2 view are read incorrectly by the
   # pinned bitwise_not kernel, breaking native boolean indexing.
   - bitwise_not
@@ -79,12 +96,30 @@ flagos_blacklist:
   # FlagGems Ascend index assumes contiguous input and misreads the
   # strided cosine/sine cache used by Qwen vision RoPE (3b406c36).
   - index
+  # FlagGems 5.4 index_copy_ corrupts scheduler copy-on-write rows and
+  # overlapping dense-cache planes; the native int32 path passes the same cases.
+  - index_copy_
+  # FlagGems 5.4 index_fill_ fails to compile strided int32 cache planes.
+  # Native index_fill_ preserves the overlapping-plane zero contract.
+  - index_fill_
   # In-place masked scatter rejects noncontiguous tensors. Scatter variants
   # miscalculate strided offsets, including their CPU reduction fallback.
   - masked_scatter_
   - scatter_add_
   - scatter
   - scatter_
+  # FlagGems 5.4 fresh-tensor copies launch a zero-sized grid for empty
+  # construction temporaries (including vLLM attention scale initialization).
+  # Native fresh/copy semantics also retain the required alias contract.
+  - lift_fresh
+  - lift_fresh_copy
+  - lift_fresh_copy_out
+  # v2 creates empty state buffers. These FlagGems 5.4 implementations
+  # form zero-sized grids (or tl.arange(0, 0)); verified on the 910C stack.
+  - zero_
+  - full_like
+  - arange
+  - arange_start
   # Empty inputs cause zero-sized Triton blocks or invalid coreDim launches.
   - ones
   - ones_like

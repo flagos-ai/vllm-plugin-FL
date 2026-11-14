@@ -11,6 +11,7 @@ import torch
 
 _REPO_ROOT = Path(__file__).parents[3]
 _REFERENCE_MODULE = "vllm_fl.dispatch.backends.reference.impl.rotary"
+_ASCEND_ROTARY_MODULE = "vllm_fl.dispatch.backends.vendor.ascend.impl.rotary"
 
 
 def _load_source_module(name, relative_path):
@@ -26,6 +27,8 @@ def _load_source_module(name, relative_path):
             if name == "vllm.platforms" and level == 0:
                 assert tuple(fromlist) == ("current_platform",)
                 return SimpleNamespace(current_platform=platform)
+            if name == _ASCEND_ROTARY_MODULE and level == 0:
+                return ascend_rotary
             if name == "musa_ops" and level == 1:
                 raise AssertionError("Ascend source contract must not import MUSA ops")
             if name == "torch_musa":
@@ -472,9 +475,8 @@ def test_flaggems_ascend_rotary_packed_partial_views_on_npu(inplace, interleaved
 
     assert flag_gems.vendor_name == "ascend"
     assert not use_c_extension
-    assert not flaggems_rotary._supports_inplace_argument(
-        flag_gems.apply_rotary_pos_emb
-    )
+    # The selected FlagGems 5.4 image exposes inplace; earlier Ascend builds
+    # do not. Both signatures must preserve the packed-view contract below.
 
     packed_cpu = torch.randn(4, 3, 2, 16, dtype=torch.float32).to(torch.bfloat16)
     packed = packed_cpu.to("npu")
@@ -560,6 +562,8 @@ def test_flaggems_ascend_common_wrapper_preserves_requested_inplace(
 
     def common_rotary(*args, **kwargs):
         calls.append(kwargs)
+        if kwargs["inplace"]:
+            return args[0].view_as(args[0]), args[1].view_as(args[1])
         return args[0], args[1]
 
     _install_fake_flaggems(

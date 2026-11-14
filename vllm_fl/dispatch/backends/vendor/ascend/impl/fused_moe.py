@@ -10,6 +10,40 @@ import torch.nn.functional as F
 import torch_npu
 
 
+def fused_topk(
+    gating_output: torch.Tensor,
+    topk: int,
+    renormalize: bool,
+    indices_type: torch.dtype | None,
+    scoring_func: str,
+    padding_mask: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Route NPU rows without the CUDA-only vLLM top-k operators."""
+    logits = gating_output.float()
+    if scoring_func == "softmax":
+        scores = logits.softmax(dim=-1)
+    elif scoring_func == "sigmoid":
+        scores = logits.sigmoid()
+    else:
+        raise ValueError(f"Unsupported scoring function: {scoring_func}")
+    weights, ids = scores.topk(topk, dim=-1)
+    if renormalize:
+        denominator = weights.sum(dim=-1, keepdim=True)
+        weights = weights / torch.where(
+            denominator > 0, denominator, torch.ones_like(denominator)
+        )
+    ids = ids.to(torch.int32 if indices_type is None else indices_type)
+    if padding_mask is not None:
+        padded = padding_mask[: logits.shape[0]].unsqueeze(-1)
+        ids = torch.where(padded, -1, ids)
+        weights = torch.where(padded, 0.0, weights)
+    # Match vLLM's source-row scratch indexing: k_idx * num_rows + row_idx.
+    rows = torch.arange(logits.shape[0], device=logits.device, dtype=torch.int32)
+    slots = torch.arange(topk, device=logits.device, dtype=torch.int32)
+    token_expert_indices = rows[:, None] + slots[None, :] * logits.shape[0]
+    return weights, ids, token_expert_indices
+
+
 def topk_softmax(
     topk_weights, topk_ids, token_expert_indices, gating_output, renormalize
 ):
@@ -21,6 +55,24 @@ def topk_softmax(
     topk_weights.copy_(weights)
     topk_ids.copy_(indices.to(topk_ids.dtype))
     return topk_weights, topk_ids
+
+
+def _prepare_native_routes(hidden_states, topk_ids, topk_weights, num_experts):
+    """Keep invalid routes out of the init-routing/unpermute index contract.
+
+    init_routing_v2 accepts negative expert IDs, but its invalid expanded rows
+    are not a valid permutation for token_unpermute. Map those slots to a
+    real expert with zero probability so the native permutation stays total.
+    Entirely padded rows use zero input, including when their unused buffer
+    contains NaNs. All shapes remain static for the existing graph path.
+    """
+    valid_routes = (topk_ids >= 0) & (topk_ids < num_experts)
+    valid_tokens = valid_routes.any(dim=-1, keepdim=True)
+    return (
+        hidden_states.masked_fill(~valid_tokens, 0),
+        topk_ids.masked_fill(~valid_routes, 0).to(torch.int32),
+        topk_weights.masked_fill(~valid_routes, 0),
+    )
 
 
 def _torch_fused_experts_impl(
@@ -52,12 +104,16 @@ def _torch_fused_experts_impl(
     if num_tokens == 0:
         return hidden_states if inplace else torch.empty_like(hidden_states)
 
+    routed_input, native_ids, native_weights = _prepare_native_routes(
+        hidden_states, topk_ids, topk_weights, num_experts
+    )
+
     # The current rc1 dispatcher uses count-mode expert tokens and pairs its
     # init-routing interface with token_unpermute (not finalize_routing).
     # BF16 needs no custom quantization/routing extension.
     routed, row_indices, expert_tokens, _ = torch_npu.npu_moe_init_routing_v2(
-        hidden_states,
-        topk_ids.to(torch.int32),
+        routed_input,
+        native_ids,
         active_num=num_tokens * topk_ids.size(1),
         expert_num=num_experts,
         expert_tokens_num_type=1,
@@ -99,7 +155,7 @@ def _torch_fused_experts_impl(
     result = torch_npu.npu_moe_token_unpermute(
         permuted_tokens=expert_output,
         sorted_indices=torch.abs(row_indices),
-        probs=topk_weights,
+        probs=native_weights,
     )
     if inplace:
         hidden_states.copy_(result)

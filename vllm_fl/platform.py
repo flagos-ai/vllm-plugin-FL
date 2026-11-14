@@ -56,98 +56,6 @@ def _vllm_c_available() -> bool:
         return False
 
 
-def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
-    """Configure eager FX execution with ordinary Ascend FULL decode graphs.
-
-    Ascend compiler options may be omitted or explicitly disabled with False.
-    The six recognized rc1 compiler options have no implementation here; reject
-    true values, non-booleans and unknown keys, including in eager mode.
-    """
-    from vllm.config import CompilationMode, CUDAGraphMode
-
-    additional_config = vllm_config.additional_config
-    if additional_config is None:
-        additional_config = {}
-    if not isinstance(additional_config, dict):
-        raise TypeError("additional_config must be a dict")
-    ascend_compilation = additional_config.get("ascend_compilation_config", {})
-    if not isinstance(ascend_compilation, dict):
-        raise TypeError("additional_config.ascend_compilation_config must be a dict")
-    disabled_compiler_options = {
-        "enable_npugraph_ex",
-        "enable_static_kernel",
-        "fuse_norm_quant",
-        "fuse_qknorm_rope",
-        "fuse_allreduce_rms",
-        "fuse_muls_add",
-    }
-    for name, enabled in ascend_compilation.items():
-        if name not in disabled_compiler_options:
-            raise ValueError(f"Unknown ascend_compilation_config option: {name!r}")
-        if not isinstance(enabled, bool):
-            raise TypeError(f"ascend_compilation_config.{name} must be bool")
-        if enabled:
-            raise NotImplementedError(
-                f"{name}=true is not supported by FL basic Ascend graph support"
-            )
-
-    compilation = vllm_config.compilation_config
-    model_config = vllm_config.model_config
-    enforce_eager = bool(model_config is not None and model_config.enforce_eager)
-    if (
-        model_config is None
-        or enforce_eager
-        or compilation.cudagraph_mode == CUDAGraphMode.NONE
-    ):
-        compilation.mode = CompilationMode.NONE
-        compilation.cudagraph_mode = CUDAGraphMode.NONE
-        return
-    if compilation.cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY:
-        raise NotImplementedError(
-            "FL basic Ascend graph support requires NONE or FULL_DECODE_ONLY"
-        )
-    # Match the runner's upstream switch (including vLLM's cached env value).
-    # BreakableCUDAGraphWrapper bypasses our runner-owned graph task lifecycle.
-    from vllm.envs import VLLM_USE_BREAKABLE_CUDAGRAPH
-
-    if VLLM_USE_BREAKABLE_CUDAGRAPH:
-        raise NotImplementedError(
-            "VLLM_USE_BREAKABLE_CUDAGRAPH=1 is not supported by FL Ascend graphs; "
-            "ordinary FULL_DECODE_ONLY graphs require the runner-owned runtime"
-        )
-    if vllm_config.parallel_config.use_ubatching:
-        raise NotImplementedError(
-            "FL basic Ascend FULL decode graphs do not support ubatching"
-        )
-    if compilation.mode not in (
-        None,
-        CompilationMode.NONE,
-        CompilationMode.VLLM_COMPILE,
-    ):
-        raise NotImplementedError(
-            "FL Ascend graph compilation supports VLLM_COMPILE or NONE"
-        )
-    if os.environ.get("ASCEND_LAUNCH_BLOCKING", "0") == "1":
-        raise ValueError("ACL graph is incompatible with ASCEND_LAUNCH_BLOCKING=1")
-    if (
-        getattr(compilation, "backend", None) == "inductor"
-        and compilation.mode != CompilationMode.NONE
-    ):
-        raise ValueError(
-            "Ascend graph execution requires compilation backend='eager'; "
-            "the Inductor backend is not supported on torch_npu."
-        )
-    compilation.mode = CompilationMode.VLLM_COMPILE
-    compilation.backend = "eager"
-    compilation.use_inductor = False
-    compilation.use_inductor_graph_partition = False
-    compilation.splitting_ops = []
-    compilation.cudagraph_num_of_warmups = 1
-    compilation.pass_config.fuse_norm_quant = False
-    compilation.pass_config.fuse_act_quant = False
-    compilation.pass_config.fuse_attn_quant = False
-
-
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -164,6 +72,7 @@ def _safe_device_type(device_info, vendor: str) -> str:
     except ValueError:
         logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
         return ""
+
 
 dist_backend_dict = {
     "npu": "hccl",
@@ -407,7 +316,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -469,12 +386,8 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        if (
-            cls.device_type in {"npu", "musa", "txda"}
-            and vllm_config.use_v2_model_runner
-        ):
+        if cls.device_type in {"musa", "txda"} and vllm_config.use_v2_model_runner:
             platform_name = {
-                "npu": "Ascend",
                 "musa": "MUSA",
                 "txda": "Tsingmicro TXDA",
             }[cls.device_type]
@@ -520,7 +433,7 @@ class PlatformFL(Platform):
                     "plugin/interservice/flagcx_wrapper.py and build/lib/libflagcx.so."
                 )
         if cls.device_type == "npu" and model_config is not None:
-            from vllm_fl.patches.ascend_glm_dsa import (
+            from vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_glm_dsa import (
                 prepare_glm_dsa_dense_fallback,
             )
 
@@ -634,6 +547,10 @@ class PlatformFL(Platform):
             # unavailable while Model Runner V2 needs UvaBuffer. Use V1.
 
         if cls.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.patches.compilation import (
+                _configure_ascend_compilation,
+            )
+
             _configure_ascend_compilation(vllm_config)
 
         if (
@@ -1074,7 +991,7 @@ class PlatformFL(Platform):
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"]
-        if not using_inductor and _vllm_c_available():
+        if not using_inductor and cls.device_type != "npu" and _vllm_c_available():
             # ``vllm_c`` is only a valid provider when the build actually ships
             # upstream's CUDA IR kernels. VLLM_TARGET_DEVICE=empty builds have no
             # vllm._C, and keeping it in the priority list makes

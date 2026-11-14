@@ -42,10 +42,8 @@ MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
-ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.28.0}"
-ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
-ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3b406c36212744b98b9720bf6d0a5387c09fe96b}"
-ASCEND_FLAGTREE_VERSION="${ASCEND_FLAGTREE_VERSION:-0.6.2a1+ascend3.5}"
+ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.32.0}"
+ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-ascend-cann9.0.0-910c:2.2.0-0.3.0@sha256:fc83d07a4fbecd090dc471e9caa5d978dc34715fcfcca537b7bbf720a298dd51}"
 ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853}"
 ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.10.6}"
 ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
@@ -104,7 +102,7 @@ Build the vllm-plugin-FL Docker image.
 OPTIONS:
     --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
-    --image-name NAME      Image name (default: ${IMAGE_NAME})
+    --image-name NAME      Image repository (default: ${IMAGE_NAME}; Ascend: harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend)
     --image-tag TAG        Image tag (default: auto-generated)
     --index-url URL        PyPI index URL (for custom mirrors)
     --extra-index-url URL  Extra PyPI index URL
@@ -124,8 +122,7 @@ VERSIONS (override via environment variables):
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
     ASCEND_VLLM_VERSION  vLLM version to install in empty mode (default: ${ASCEND_VLLM_VERSION})
     ASCEND_BASE_IMAGE    Ascend CANN / torch_npu base image (default: ${ASCEND_BASE_IMAGE})
-    ASCEND_FLAGGEMS_VERSION FlagGems git ref for Ascend (default: ${ASCEND_FLAGGEMS_VERSION})
-    ASCEND_FLAGTREE_VERSION FlagTree Ascend wheel (default: ${ASCEND_FLAGTREE_VERSION})
+    FlagGems / FlagTree  Retained from ASCEND_BASE_IMAGE; not installed from separate refs
   MetaX:
     METAX_BASE_IMAGE     Base image (default: ${METAX_BASE_IMAGE})
     METAX_MACA_VERSION   MACA version used in generated image tag (default: ${METAX_MACA_VERSION})
@@ -180,7 +177,7 @@ EXAMPLES:
     ./build.sh --platform ascend --target ci
 
     # Override the Ascend base image when validating a new stack
-    ASCEND_BASE_IMAGE=quay.io/ascend/vllm-ascend:v0.20.2rc1-a3 \
+    ASCEND_BASE_IMAGE="registry.example/flagos/ascend:tag" \
         ./build.sh --platform ascend --target ci
 
     # Build Hygon CI image
@@ -298,14 +295,17 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend"
+    fi
     BUILD_ARGS+=(
         --build-arg "ASCEND_BASE_IMAGE=${ASCEND_BASE_IMAGE}"
         --build-arg "VLLM_VERSION=${ASCEND_VLLM_VERSION}"
-        --build-arg "FLAGGEMS_VERSION=${ASCEND_FLAGGEMS_VERSION}"
-        --build-arg "FLAGTREE_VERSION=${ASCEND_FLAGTREE_VERSION}"
     )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="ascend-vllm${VLLM_VERSION}-a3-${TARGET}"
+        IMAGE_TAG="vllm${VLLM_VERSION}-a3-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     PYTHON_VERSION="${HYGON_PYTHON_VERSION}"
@@ -443,8 +443,7 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  Base image:     ${ASCEND_BASE_IMAGE}"
-    msg "  FlagGems:       ${ASCEND_FLAGGEMS_VERSION}"
-    msg "  FlagTree:       ${ASCEND_FLAGTREE_VERSION}"
+    msg "  Vendor stack:   preserved from the pinned FlagOS application image"
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     msg "  DTK:            ${HYGON_DTK_VERSION}"
     msg "  Hygon Python:   ${HYGON_PYTHON_VERSION}"

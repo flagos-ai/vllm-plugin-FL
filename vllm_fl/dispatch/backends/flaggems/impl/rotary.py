@@ -143,4 +143,10 @@ def rotary_embedding_flaggems(
         query.copy_(q_embed)
         key.copy_(k_embed)
         return query, key
+    if inplace and getattr(flag_gems, "vendor_name", None) == "ascend":
+        from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
+            restore_flaggems_rotary_inplace,
+        )
+
+        return restore_flaggems_rotary_inplace(query, key, result)
     return result
