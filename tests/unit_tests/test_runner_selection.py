@@ -59,7 +59,7 @@ def _make_ascend_vllm_config(
     "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro", "metax"]
 )
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
-def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
+def test_accelerator_runner_environment_policy(monkeypatch, vendor, requested, expected):
     import os
     from types import SimpleNamespace
 
@@ -80,7 +80,9 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
-    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+    if vendor == "metax":
+        expected = requested
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == expected
 
 
 @pytest.mark.parametrize(
@@ -91,7 +93,6 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
-        ("cuda", "metax", "MetaX V2.*explicit.*VLLM_USE_V2_MODEL_RUNNER=1"),
     ],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(
@@ -103,8 +104,6 @@ def test_accelerator_rejects_explicit_upstream_v2_runner(
 
     monkeypatch.setattr(PlatformFL, "device_type", device_type)
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
-    if vendor == "metax":
-        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
     with pytest.raises(ValueError, match=error_pattern):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
 

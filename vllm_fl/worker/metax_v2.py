@@ -1,7 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Opt-in MetaX support for the unchanged upstream vLLM 0.32 V2 runner."""
-
-import os
+"""MetaX compatibility for the upstream vLLM 0.32 V2 runner."""
 
 import torch
 
@@ -35,7 +33,6 @@ def prepare_metax_v2_runtime(vllm_config) -> bool:
     if not (
         getattr(current_platform, "vendor_name", None) == "metax"
         and vllm_config.use_v2_model_runner
-        and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1"
     ):
         return False
 

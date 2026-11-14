@@ -268,7 +268,7 @@ def register():
     if vendor_name == "kunlunxin":
         _install_kunlunxin_fla_alias()
 
-    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro", "metax"):
+    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
         # These backends use ModelRunnerFL; choose it before VllmConfig reads
         # model defaults for the upstream V2 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")

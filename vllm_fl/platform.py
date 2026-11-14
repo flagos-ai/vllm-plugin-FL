@@ -48,6 +48,13 @@ from vllm_fl.utils import (
 logger = init_logger(__name__)
 
 
+def _metax_uses_v2_runner() -> bool:
+    from vllm.config import get_current_vllm_config_or_none
+
+    config = get_current_vllm_config_or_none()
+    return config is not None and config.use_v2_model_runner
+
+
 def _vllm_c_available() -> bool:
     """True when this build ships upstream's CUDA IR kernels (``vllm._C``)."""
     try:
@@ -426,15 +433,6 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
-        if (
-            cls.vendor_name == "metax"
-            and vllm_config.use_v2_model_runner
-            and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") != "1"
-        ):
-            raise ValueError(
-                "MetaX V2 is experimental and requires explicit "
-                "VLLM_USE_V2_MODEL_RUNNER=1."
-            )
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(
@@ -891,10 +889,7 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
-            if (
-                cls.vendor_name == "metax"
-                and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1"
-            ):
+            if cls.vendor_name == "metax" and _metax_uses_v2_runner():
                 return "vllm_fl.distributed.metax_communicator.MetaxCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
@@ -906,11 +901,8 @@ class PlatformFL(Platform):
     def get_static_graph_wrapper_cls(cls) -> str:
         if cls.device_type == "musa":
             return "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper"
-        if (
-            getattr(cls, "vendor_name", None) == "metax"
-            and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1"
-        ):
-            return "vllm.compilation.cuda_graph.CUDAGraphWrapper"
+        if getattr(cls, "vendor_name", None) == "metax":
+            return "vllm_fl.compilation.graph.make_metax_graph_wrapper"
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod

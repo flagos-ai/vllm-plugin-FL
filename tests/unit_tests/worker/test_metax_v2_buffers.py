@@ -306,11 +306,6 @@ def test_metax_v2_native_graph_nondefault_stream_values(metax_v2_runtime, dtype,
     from vllm.forward_context import BatchDescriptor
     from vllm.platforms import current_platform
 
-    # The real adapter installs the native-first weak-ref bridge.
-    assert (
-        current_platform.get_static_graph_wrapper_cls()
-        == "vllm.compilation.cuda_graph.CUDAGraphWrapper"
-    )
     config = VllmConfig(
         compilation_config=CompilationConfig(
             mode=CompilationMode.NONE,
@@ -331,12 +326,18 @@ def test_metax_v2_native_graph_nondefault_stream_values(metax_v2_runtime, dtype,
         return torch.relu(value * 2 + 1)
 
     descriptor = BatchDescriptor(num_tokens=rows, num_reqs=rows, uniform=True)
-    wrapper = CUDAGraphWrapper(
+    from vllm.utils.import_utils import resolve_obj_by_qualname
+
+    wrapper_factory = resolve_obj_by_qualname(
+        current_platform.get_static_graph_wrapper_cls()
+    )
+    wrapper = wrapper_factory(
         runnable,
         config,
         CUDAGraphMode.FULL,
         CUDAGraphOptions(debug_log_enable=False, weak_ref_output=True),
     )
+    assert type(wrapper) is CUDAGraphWrapper
     try:
         with (
             torch.cuda.stream(stream),

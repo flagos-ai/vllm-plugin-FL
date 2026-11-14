@@ -130,24 +130,16 @@ def runtime(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "vendor,requested,use_v2",
+    "vendor,use_v2",
     [
-        ("nvidia", "1", True),
-        ("ascend", "1", True),
-        ("mthreads", "1", True),
-        ("metax", None, True),
-        ("metax", "0", True),
-        ("metax", "1", False),
+        ("nvidia", True),
+        ("ascend", True),
+        ("mthreads", True),
+        ("metax", False),
     ],
 )
-def test_out_of_scope_prepare_has_no_import_or_mutation(
-    runtime, monkeypatch, vendor, requested, use_v2
-):
+def test_out_of_scope_prepare_has_no_import_or_mutation(runtime, vendor, use_v2):
     runtime.platform.vendor_name = vendor
-    if requested is None:
-        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER")
-    else:
-        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
     assert runtime.prepare(SimpleNamespace(use_v2_model_runner=use_v2)) is False
     assert runtime.imports == [] and runtime.queries == []
     assert runtime.buffers.is_uva_available is runtime.original_uva
@@ -156,8 +148,9 @@ def test_out_of_scope_prepare_has_no_import_or_mutation(
 
 @pytest.mark.parametrize("native", [False, True, RuntimeError("no schema")])
 def test_native_detection_uses_cpu_kernel_and_preserves_native_predicate(
-    runtime, native
+    runtime, monkeypatch, native
 ):
+    monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER")
     runtime.native = native
     assert runtime.prepare(SimpleNamespace(use_v2_model_runner=True))
     assert runtime.queries == [("_C::get_cuda_view_from_cpu_tensor", "CPU")]
@@ -227,24 +220,19 @@ def test_real_upstream_uva_backed_tensor_updates_data_without_aliasing_cpu(runti
 
 
 @pytest.mark.parametrize(
-    "vendor,device,requested,expected",
+    "vendor,device,expected",
     [
-        ("metax", "cuda", "1", "vllm.compilation.cuda_graph.CUDAGraphWrapper"),
-        ("metax", "cuda", "0", "vllm_fl.compilation.graph.GraphWrapper"),
-        ("metax", "cuda", None, "vllm_fl.compilation.graph.GraphWrapper"),
-        ("nvidia", "cuda", "1", "vllm_fl.compilation.graph.GraphWrapper"),
-        ("ascend", "npu", "1", "vllm_fl.compilation.graph.GraphWrapper"),
+        ("metax", "cuda", "vllm_fl.compilation.graph.make_metax_graph_wrapper"),
+        ("nvidia", "cuda", "vllm_fl.compilation.graph.GraphWrapper"),
+        ("ascend", "npu", "vllm_fl.compilation.graph.GraphWrapper"),
         (
             "mthreads",
             "musa",
-            "1",
             "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper",
         ),
     ],
 )
-def test_platform_wrapper_policy_is_scoped_to_explicit_metax_v2(
-    monkeypatch, vendor, device, requested, expected
-):
+def test_platform_selects_metax_config_aware_wrapper_factory(vendor, device, expected):
     tree = ast.parse((ROOT / "vllm_fl/platform.py").read_text(encoding="utf-8"))
     cls = next(
         n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "PlatformFL"
@@ -255,7 +243,7 @@ def test_platform_wrapper_policy_is_scoped_to_explicit_metax_v2(
         for n in cls.body
         if getattr(n, "name", None) == "get_static_graph_wrapper_cls"
     ]
-    scope = {"os": os}
+    scope = {}
     exec(
         compile(
             ast.Module(body=[cls], type_ignores=[]),
@@ -267,11 +255,39 @@ def test_platform_wrapper_policy_is_scoped_to_explicit_metax_v2(
     )
     platform = scope["PlatformFL"]
     platform.vendor_name, platform.device_type = vendor, device
-    if requested is None:
-        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
-    else:
-        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
     assert platform.get_static_graph_wrapper_cls() == expected
+
+
+@pytest.mark.parametrize("use_v2", [True, False])
+def test_metax_wrapper_factory_uses_the_supplied_vllm_config(use_v2):
+    class NativeGraph:
+        def __init__(self, *args):
+            self.args = args
+
+    class FLGraph(NativeGraph):
+        pass
+
+    def selected_import(name, *args, **kwargs):
+        assert name == "vllm.compilation.cuda_graph"
+        return SimpleNamespace(CUDAGraphWrapper=NativeGraph)
+
+    scope = {
+        "GraphWrapper": FLGraph,
+        "__builtins__": {**vars(builtins), "__import__": selected_import},
+    }
+    _exec_nodes(
+        ROOT / "vllm_fl/compilation/graph.py", {"make_metax_graph_wrapper"}, scope
+    )
+    runnable, mode, options = object(), object(), object()
+    config = SimpleNamespace(use_v2_model_runner=use_v2)
+    graph = scope["make_metax_graph_wrapper"](
+        runnable=runnable,
+        vllm_config=config,
+        runtime_mode=mode,
+        cudagraph_options=options,
+    )
+    assert type(graph) is (NativeGraph if use_v2 else FLGraph)
+    assert graph.args == (runnable, config, mode, options) + (() if use_v2 else (None,))
 
 
 class Mode(IntEnum):

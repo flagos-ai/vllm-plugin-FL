@@ -196,24 +196,24 @@ def test_only_metax_flagcx_adds_opaque_collective_boundary(
         (
             "metax",
             "flagcx",
-            "1",
+            True,
             "vllm_fl.distributed.metax_communicator.MetaxCommunicatorFL",
         ),
-        ("metax", "flagcx", "0", "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("metax", "flagcx", False, "vllm_fl.distributed.communicator.CommunicatorFL"),
         ("metax", "flagcx", None, "vllm_fl.distributed.communicator.CommunicatorFL"),
         (
             "metax",
             "nccl",
-            "1",
+            True,
             "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator",
         ),
-        ("nvidia", "flagcx", "1", "vllm_fl.distributed.communicator.CommunicatorFL"),
-        ("mthreads", "flagcx", "1", "vllm_fl.distributed.communicator.CommunicatorFL"),
-        ("ascend", "flagcx", "1", "vllm_fl.distributed.communicator.CommunicatorFL"),
-        ("iluvatar", "flagcx", "1", "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("nvidia", "flagcx", True, "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("mthreads", "flagcx", True, "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("ascend", "flagcx", True, "vllm_fl.distributed.communicator.CommunicatorFL"),
+        ("iluvatar", "flagcx", True, "vllm_fl.distributed.communicator.CommunicatorFL"),
     ],
 )
-def test_only_explicit_metax_v2_flagcx_selects_cuda_graph_bridge(
+def test_resolved_metax_v2_flagcx_selects_cuda_graph_bridge(
     vendor, backend, v2, expected
 ):
     path = ROOT / "vllm_fl/platform.py"
@@ -229,9 +229,8 @@ def test_only_explicit_metax_v2_flagcx_selects_cuda_graph_bridge(
         and node.name == "get_device_communicator_cls"
     )
     method.decorator_list = []
-    env = {} if v2 is None else {"VLLM_USE_V2_MODEL_RUNNER": v2}
     namespace = _compile(
-        [method], path, {"os": SimpleNamespace(environ=env), "logger": Mock()}
+        [method], path, {"_metax_uses_v2_runner": lambda: v2, "logger": Mock()}
     )
     platform = SimpleNamespace(vendor_name=vendor, dist_backend=backend)
     assert namespace[method.name](platform) == expected

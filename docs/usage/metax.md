@@ -30,7 +30,7 @@ Its preinstalled vLLM is **0.24.0**; pulling the base alone does not install the
 | Python interoperability pins | Transformers `5.19.0`, tokenizers `0.23.3`, depyf `0.20.0`; vendor XGrammar `0.2.3+flagos` and compressed-tensors `0.17.0+flagos` retained |
 | Build dependency resolver | uv `0.13.4`, native-package overrides and explicit transitive Triton exclusion when FlagTree owns the import namespace |
 | Optional FlagCX | `v0.13.0`, [`0beba7aa7e76cc0885a9929f1975857bcd310d5e`](https://github.com/flagos-ai/FlagCX/commit/0beba7aa7e76cc0885a9929f1975857bcd310d5e); not bundled in the CI image |
-| Plugin runner | `ModelRunnerFL`, `VLLM_USE_V2_MODEL_RUNNER=0` |
+| Model runner | vLLM 0.32 selects native V2 for supported configurations and `ModelRunnerFL` when it selects V1 |
 | Attention | MACA FlashAttention; separate MACA FlashAttention MLA prefill |
 | Communication | MCCL; pass `--disable-custom-all-reduce` |
 | Default graph mode | `PIECEWISE`; explicit eager / `NONE` is preserved |
@@ -120,7 +120,6 @@ docker run -d --name "$CONTAINER" \
   --hostname vllm-plugin-fl --ipc=host --shm-size=64g \
   --device /dev/dri:/dev/dri --device /dev/mxcd:/dev/mxcd \
   -e GEMS_VENDOR=metax -e VLLM_PLUGINS=fl \
-  -e VLLM_USE_V2_MODEL_RUNNER=0 \
   -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800 \
   -e MACA_VISIBLE_DEVICES=0,1,2,3 \
   -v "$MODEL_ROOT":/data/models:ro \
@@ -536,8 +535,7 @@ response assertion failures separately from the capture and replay evidence.
 - Dense FlashMLA requires the vendor scheduler-object ABI, including
   `FlashMLASchedMeta`. Older tuple-based libraries are rejected with a dependency
   error. Sparse MLA and FP8 MLA caches are not supported by this backend.
-- `ModelRunnerFL` remains the default. Explicit `VLLM_USE_V2_MODEL_RUNNER=1`
-  enables the [native V2 path](#native-v2-runner).
+- [Runner selection](#native-v2-runner) follows the vLLM 0.32 configuration.
   FULL graphs and additional speculative/quantized configurations require
   separate hardware validation.
 - All changes are installed through the FL plugin lifecycle. Do not edit
@@ -546,9 +544,11 @@ response assertion failures separately from the capture and replay evidence.
 
 ### Native V2 runner
 
-MetaX defaults to `ModelRunnerFL`. Set `VLLM_USE_V2_MODEL_RUNNER=1` to
-select vLLM 0.32's native `vllm.v1.worker.gpu.model_runner.GPUModelRunner`.
-The MetaX model E2E CI variant sets this flag for eager and graph cases.
+Leave `VLLM_USE_V2_MODEL_RUNNER` unset to let vLLM 0.32 select the runner for
+the model configuration. The MetaX eager and graph E2E cases use this default.
+For configurations where upstream selects V2, MetaX uses
+`vllm.v1.worker.gpu.model_runner.GPUModelRunner`. An explicit
+`VLLM_USE_V2_MODEL_RUNNER=0` selects `ModelRunnerFL` where vLLM allows V1.
 When the empty wheel lacks a native CPU-dispatch mapped-memory kernel,
 only V2's buffer module uses its existing `NonUvaBuffer` copy fallback;
 global pinned-memory and CUDA platform classification are unchanged.

@@ -4,7 +4,6 @@
 set -euo pipefail
 
 export PATH="/flagos/bin:/opt/conda/bin:${PATH}"
-export VLLM_USE_V2_MODEL_RUNNER="${VLLM_USE_V2_MODEL_RUNNER:-0}"
 # First-use FlagGems/FlagTree tuning can outlast vLLM's 300-second RPC limit.
 # Keep a finite deadline and preserve an explicitly configured deployment value.
 export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS="${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-1800}"
@@ -28,7 +27,6 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     PATH \
     GEMS_VENDOR \
     VLLM_PLUGINS \
-    VLLM_USE_V2_MODEL_RUNNER \
     VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS \
     FLAGGEMS_CACHE_DIR; do
     echo "${name}=${!name}" >> "${GITHUB_ENV}"

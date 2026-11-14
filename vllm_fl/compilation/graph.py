@@ -8,7 +8,7 @@ import dataclasses
 import weakref
 from collections.abc import Callable
 from contextlib import ExitStack, nullcontext, suppress
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import patch
 
 import torch
@@ -26,6 +26,9 @@ from vllm.forward_context import (
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import current_stream
+
+if TYPE_CHECKING:
+    from vllm.compilation.cuda_graph import CUDAGraphOptions, CUDAGraphWrapper
 
 logger = init_logger(__name__)
 
@@ -301,6 +304,23 @@ class GraphOptions:
     debug_log_enable: bool = True
     gc_disable: bool = False
     weak_ref_output: bool = True
+
+
+def make_metax_graph_wrapper(
+    runnable: Callable,
+    vllm_config: VllmConfig,
+    runtime_mode: CUDAGraphMode,
+    cudagraph_options: "CUDAGraphOptions | None" = None,
+    graph_runtime: Any | None = None,
+) -> "CUDAGraphWrapper | GraphWrapper":
+    """Build the wrapper from the config passed by the upstream compiler."""
+    if vllm_config.use_v2_model_runner:
+        from vllm.compilation.cuda_graph import CUDAGraphWrapper
+
+        return CUDAGraphWrapper(runnable, vllm_config, runtime_mode, cudagraph_options)
+    return GraphWrapper(
+        runnable, vllm_config, runtime_mode, cudagraph_options, graph_runtime
+    )
 
 
 class GraphWrapper:
