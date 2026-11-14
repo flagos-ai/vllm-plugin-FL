@@ -96,6 +96,8 @@ flagos_blacklist:
   - sort_stable
   # FlagTree cannot lower the broadcast tensor comparison used for top-k.
   - lt
+  # The full-vocabulary in-place cumulative probability scan faults on XPU.
+  - cumsum_out
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

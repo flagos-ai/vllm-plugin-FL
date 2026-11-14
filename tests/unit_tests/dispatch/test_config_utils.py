@@ -52,6 +52,7 @@ def test_kunlunxin_policy_keeps_only_known_kernel_exclusions():
         "sort",
         "sort_stable",
         "lt",
+        "cumsum_out",
     ]
 
 
