@@ -59,7 +59,9 @@ def _make_ascend_vllm_config(
     "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro", "metax"]
 )
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
-def test_accelerator_runner_environment_policy(monkeypatch, vendor, requested, expected):
+def test_accelerator_runner_environment_policy(
+    monkeypatch, vendor, requested, expected
+):
     import os
     from types import SimpleNamespace
 
