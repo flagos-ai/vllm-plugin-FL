@@ -17,7 +17,7 @@ import torch
 
 
 @pytest.fixture
-def sunrise_modules(monkeypatch):
+def sunrise_modules(monkeypatch, request):
     def install(name, **attrs):
         parent_name, _, child_name = name.rpartition(".")
         parent = None
@@ -147,12 +147,13 @@ def sunrise_modules(monkeypatch):
     cache_kernel = Mock(side_effect=write_cache)
     strided_cache_kernel = Mock(side_effect=write_cache)
     flash_kernel = Mock(side_effect=lambda **kwargs: kwargs["out"].copy_(kwargs["q"]))
-    install(
+    provider = install(
         "flaggems_vllm",
         flash_attn_varlen_func=flash_kernel,
         reshape_and_cache_flash=cache_kernel,
-        reshape_and_cache_flash_strided=strided_cache_kernel,
     )
+    if getattr(request, "param", True):
+        provider.reshape_and_cache_flash_strided = strided_cache_kernel
     install("vllm_fl.dispatch.backends.base", Backend=type("Backend", (), {}))
     root = Path(__file__).resolve().parents[3]
     vendor = root / "vllm_fl/dispatch/backends/vendor/sunrise"
@@ -394,6 +395,7 @@ def test_forward_updates_native_v032_logical_kv_cache(sunrise_modules):
     assert sunrise_modules.flash_kernel.call_args.kwargs["k"].shape == (1, 16, 1, 8)
 
 
+@pytest.mark.parametrize("sunrise_modules", [False], indirect=True)
 def test_kernel_capability_is_pure_without_a_current_config(
     sunrise_modules, monkeypatch
 ):
