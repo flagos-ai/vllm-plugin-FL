@@ -50,14 +50,11 @@ ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/flagos-inner-models-
 ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.10.6}"
 ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
 ENFLAME_VLLM_VERSION="${ENFLAME_VLLM_VERSION:-0.28.0}"
-KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/plugin/xvllm-ubuntu2204-py310-torch29-0200:v20.0.10.0}"
-KUNLUNXIN_DRIVER_VERSION="${KUNLUNXIN_DRIVER_VERSION:-5.0.21.43}"
+KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-kunlunxin-xre5.37.1:2.3.0-0.3.0@sha256:db1cceff13d438142abfd695500ac0820ebfe6ae13d909017a2ce073ac607b17}"
+KUNLUNXIN_DRIVER_VERSION="${KUNLUNXIN_DRIVER_VERSION:-5.37.1}"
 KUNLUNXIN_PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION:-3.10}"
 KUNLUNXIN_TORCH_VERSION="${KUNLUNXIN_TORCH_VERSION:-2.9.0}"
-KUNLUNXIN_VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION:-0.20.2}"
-KUNLUNXIN_FLAGGEMS_REF="${KUNLUNXIN_FLAGGEMS_REF:-v5.0.0}"
-KUNLUNXIN_FLAGCX_REF="${KUNLUNXIN_FLAGCX_REF:-v0.13.0}"
-KUNLUNXIN_PLUGIN_FL_REF="${KUNLUNXIN_PLUGIN_FL_REF:-38e7dbc20197e2db742c4e4c9687d36ea4df9900}"
+KUNLUNXIN_VLLM_VERSION="0.32.0"
 HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.baai.ac.cn/plugin/hygon-dtk26.04-tree0.6.0hcu3.6-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt2100-x64:202609041747@sha256:d2530485457ede1d17dbb26704a3d4408d760ff3e363402599e1738dc5828807}"
 HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.28.0}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
@@ -149,10 +146,6 @@ VERSIONS (override via environment variables):
     KUNLUNXIN_DRIVER_VERSION Driver version used in generated image tag (default: ${KUNLUNXIN_DRIVER_VERSION})
     KUNLUNXIN_PYTHON_VERSION Python version in the base image (default: ${KUNLUNXIN_PYTHON_VERSION})
     KUNLUNXIN_TORCH_VERSION  PyTorch version in the base image (default: ${KUNLUNXIN_TORCH_VERSION})
-    KUNLUNXIN_VLLM_VERSION   vLLM version installed in empty mode (default: ${KUNLUNXIN_VLLM_VERSION})
-    KUNLUNXIN_FLAGGEMS_REF   FlagGems git ref (default: ${KUNLUNXIN_FLAGGEMS_REF})
-    KUNLUNXIN_FLAGCX_REF     FlagCX git ref (default: ${KUNLUNXIN_FLAGCX_REF})
-    KUNLUNXIN_PLUGIN_FL_REF  vllm-plugin-FL git ref (default: ${KUNLUNXIN_PLUGIN_FL_REF})
   Hygon:
     HYGON_BASE_IMAGE     Base image (default: ${HYGON_BASE_IMAGE})
     HYGON_VLLM_VERSION   vLLM version installed in empty mode (default: ${HYGON_VLLM_VERSION})
@@ -410,6 +403,7 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
         IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
+    BUILD_CONTEXT="${SCRIPT_DIR}/.."
     PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION}"
     VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION}"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
@@ -417,11 +411,6 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     fi
     BUILD_ARGS+=(
         --build-arg "KUNLUNXIN_BASE_IMAGE=${KUNLUNXIN_BASE_IMAGE}"
-        --build-arg "VLLM_VERSION=${KUNLUNXIN_VLLM_VERSION}"
-        --build-arg "FLAGGEMS_REF=${KUNLUNXIN_FLAGGEMS_REF}"
-        --build-arg "FLAGCX_REF=${KUNLUNXIN_FLAGCX_REF}"
-        --build-arg "VLLM_PLUGIN_FL_REF=${KUNLUNXIN_PLUGIN_FL_REF}"
-        --build-arg "DRIVER_VERSION=${KUNLUNXIN_DRIVER_VERSION}"
         --build-arg "INDEX_URL=${INDEX_URL}"
         --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
     )
@@ -468,9 +457,6 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     msg "  Driver:         ${KUNLUNXIN_DRIVER_VERSION}"
     msg "  Kunlunxin base: ${KUNLUNXIN_BASE_IMAGE}"
     msg "  Kunlunxin PyTorch: ${KUNLUNXIN_TORCH_VERSION}"
-    msg "  FlagGems:       ${KUNLUNXIN_FLAGGEMS_REF}"
-    msg "  FlagCX:         ${KUNLUNXIN_FLAGCX_REF}"
-    msg "  Plugin:         ${KUNLUNXIN_PLUGIN_FL_REF}"
 fi
 if [[ "${PLATFORM}" != "ascend" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"

@@ -248,6 +248,10 @@ def register():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
+    if vendor_name == "kunlunxin":
+        # vLLM's padding-aware route calls the CUDA-only _moe_C op.
+        os.environ["VLLM_MOE_SKIP_PADDING"] = "0"
+
     if vendor_name != "nvidia":
         # Other accelerators still use EMPTY wheels. NVIDIA uses upstream's
         # native CUDA extensions and must not replace failed imports with stubs.

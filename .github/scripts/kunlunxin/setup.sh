@@ -3,13 +3,65 @@
 # Setup script for Kunlunxin P800 CI environment.
 set -euo pipefail
 
-if [[ -d /root/miniconda/envs/python310_torch29_cuda/bin ]]; then
-  export PATH="/root/miniconda/envs/python310_torch29_cuda/bin:${PATH}"
+index_url="${INDEX_URL:-https://pypi.org/simple}"
+
+if [[ -r /etc/bash_env.sh ]]; then
+  # The release image adds FlagTree under /opt through its vendor profile.
+  # shellcheck disable=SC1091
+  source /etc/bash_env.sh
 fi
+
+# The base image exports an operator whitelist from its Bash startup profile.
+# Keep the native library paths loaded above and clear out the CI restriction.
+unset VLLM_FL_FLAGOS_WHITELIST BASH_ENV
+
+if [[ -x /flagos/bin/python ]]; then
+  export PATH="/flagos/bin:${PATH}"
+fi
+
+# The published application image carries the native P800 libraries. Upgrade
+# its vLLM runtime through the same installer used by docker/kunlunxin.
+if [[ -x /flagos/bin/python ]] && python -c '
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    installed_vllm = version("vllm")
+except PackageNotFoundError:
+    installed_vllm = None
+
+raise SystemExit(installed_vllm not in {None, "0.24.0+flagos"})
+'; then
+  INDEX_URL="$index_url" bash docker/kunlunxin/install-vllm.sh
+fi
+
+# The selected Python must come from the image's Kunlunxin runtime environment.
+# Check it before changing packages in the job container.
+python - <<'PY'
+import sys
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    installed_vllm = version("vllm")
+except PackageNotFoundError:
+    installed_vllm = "missing"
+
+if installed_vllm not in {"0.32.0+flagos", "0.32.0+empty"}:
+    raise SystemExit(
+        "[kunlunxin/setup] Expected vLLM 0.32.0+flagos or 0.32.0+empty; "
+        f"found {installed_vllm!r}."
+    )
+
+minimum_python = (3, 10) if installed_vllm == "0.32.0+flagos" else (3, 11)
+if not minimum_python <= sys.version_info[:2] < (3, 14):
+    raise SystemExit(
+        f"[kunlunxin/setup] vLLM {installed_vllm} with vllm-plugin-FL "
+        f"requires Python 3.{minimum_python[1]}-3.13; "
+        f"found Python {sys.version.split()[0]} at {sys.executable}."
+    )
+PY
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
-: "${FLAGCX_PATH:?FLAGCX_PATH is not set}"
 : "${CUDA_VISIBLE_DEVICES:?CUDA_VISIBLE_DEVICES is not set}"
 
 # Align with #566 iluvatar: FlagGems vendor ops must be enabled in CI.
@@ -23,13 +75,14 @@ git config --global --add safe.directory "$(pwd)"
 # (declaration must not mask a command substitution's return value).
 export PYTHONPATH="${PWD}${PYTHONPATH:+:${PYTHONPATH}}"
 
-if [[ -d "${FLAGCX_PATH}/build/lib" ]]; then
+if [[ -n "${FLAGCX_PATH:-}" && -d "${FLAGCX_PATH}/build/lib" ]]; then
   export LD_LIBRARY_PATH="${FLAGCX_PATH}/build/lib:/opt/kunlun/lib:${LD_LIBRARY_PATH:-}"
-else
-  echo "::warning::${FLAGCX_PATH}/build/lib not found; FlagCX may be unavailable."
 fi
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
+  # GitHub Actions starts each step in a new shell. Override both image
+  # defaults before that shell starts so it cannot re-load the whitelist.
+  printf '%s\n' 'BASH_ENV=' 'VLLM_FL_FLAGOS_WHITELIST=' >> "${GITHUB_ENV}"
   for name in \
     PATH \
     PYTHONPATH \
@@ -55,9 +108,11 @@ fi
 # exactly the failure mode this job has hit.
 python -m pip uninstall -y vllm-plugin-fl || true
 python -m pip install --no-build-isolation --no-deps -e .
-python -m pip install "pytest-xdist>=3.0.0"
+python -m pip install --index-url "$index_url" \
+  pytest pytest-cov pytest-timeout pytest-json-report "pytest-xdist>=3.0.0" \
+  requests openai pillow decorator pyyaml sqlalchemy pybind11
 
-python .github/scripts/install_flaggems_vllm.py
+PIP_INDEX_URL="$index_url" python .github/scripts/install_flaggems_vllm.py --source-archive
 
 python - <<'PY'
 import os
@@ -216,7 +271,9 @@ assert _plugin_file == _root or _plugin_file.startswith(_root + os.sep), (
     f"PYTHONPATH={os.environ.get('PYTHONPATH')!r})"
 )
 
-assert _vlm_ver.startswith("0.28") and "empty" in _vlm_ver, f"[kunlunxin/setup] vllm version mismatch: {_vlm_ver!r} (expect 0.28.*+empty)"
+assert _vlm_ver.split("+", 1)[0] == "0.32.0", (
+    f"[kunlunxin/setup] imported vLLM {_vlm_ver!r}; expected 0.32.0"
+)
 assert torch.cuda.is_available(), "Kunlunxin accelerator is unavailable"
 assert torch.cuda.device_count() >= 4, torch.cuda.device_count()
 assert current_platform.device_type == "cuda", (

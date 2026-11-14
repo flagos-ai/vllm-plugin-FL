@@ -39,6 +39,32 @@ def test_unknown_platform_keeps_no_config():
     assert load_platform_config("unknown_platform") is None
 
 
+def test_kunlunxin_policy_keeps_only_known_kernel_exclusions():
+    config = load_platform_config("kunlunxin")
+    assert "flagos_whitelist" not in config
+    assert config["flagos_blacklist"] == [
+        "pow_scalar",
+        "copy_",
+        "_scaled_dot_product_attention_math",
+        "_safe_softmax",
+        "where_self_out",
+        "zeros",
+        "zero_",
+        "nonzero",
+        "sort",
+        "sort_stable",
+        "lt",
+        "le",
+        "softmax",
+        "cumsum_out",
+    ]
+
+
+def test_kunlunxin_routes_decoder_attention_to_the_vendor_backend():
+    config = load_platform_config("kunlunxin")
+    assert config["op_backends"]["attention_backend"] == ["vendor:kunlunxin"]
+
+
 def _platform_with_capability(major: int, minor: int = 0):
     return SimpleNamespace(
         get_device_capability=lambda: SimpleNamespace(major=major, minor=minor)

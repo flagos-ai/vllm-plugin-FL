@@ -18,8 +18,9 @@ from vllm.model_executor.layers.fused_moe.fused_moe import (
     try_get_optimal_moe_config,
 )
 from vllm.model_executor.layers.fused_moe.utils import moe_kernel_quantize_input
+from vllm.platforms import current_platform
 from vllm.triton_utils import tl
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.dispatch import CachedOp, resolve_op
 
 _moe_align_block_size = CachedOp("moe_align_block_size")
 _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
@@ -274,8 +275,12 @@ def fused_experts(
     if quant_config is None:
         quant_config = FUSED_MOE_UNQUANTIZED_CONFIG
 
+    execute = fused_experts_impl
+    if getattr(current_platform, "vendor_name", None) == "kunlunxin":
+        execute = resolve_op("fused_experts")
+
     ###NOTE: weight per_channel_quant same as act per_act_token_quant
-    return fused_experts_impl(
+    return execute(
         hidden_states=hidden_states,
         w1=w1,
         w2=w2,

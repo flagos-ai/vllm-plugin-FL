@@ -12,36 +12,34 @@ This module provides Kunlunxin attention using xtorch_ops:
   - xtorch_ops.reshape_and_cache(...)          -- KV cache update (HND layout)
   - xtorch_ops.reshape_and_cache_flash(...)    -- KV cache update (hybrid attention, e.g. Qwen3-Next)
 
-KV cache layout HND by default: (2, num_blocks, num_kv_heads, block_size, head_size)
+K and V each use HND layout within a physical cache block.
 """
 
 from __future__ import annotations
 
-import os
 import logging
 import math
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Tuple, Type
+import os
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, ClassVar, List, Optional, Tuple, Type
 
 import torch
 
-from vllm.v1.attention.backends.utils import (
-    AttentionBackend,
-    AttentionImpl,
-    CommonAttentionMetadata,
-    split_decodes_and_prefills,
-)
+from vllm.config import VllmConfig
+from vllm.utils.torch_utils import get_dtype_size
 from vllm.v1.attention.backend import (
+    AttentionBackend,
     AttentionCGSupport,
+    AttentionImpl,
     AttentionLayer,
-    AttentionType,
     AttentionMetadataBuilder,
+    AttentionType,
+    CommonAttentionMetadata,
 )
-
+from vllm.v1.attention.backends.utils import split_decodes_and_prefills
 from vllm.v1.attention.ops.paged_attn import PagedAttention
 from vllm.v1.kv_cache_interface import AttentionSpec
-
-from vllm.config import VllmConfig
+from vllm.v1.kv_cache_layout import KVCacheLayout
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
@@ -424,13 +422,17 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
     ) -> KunlunxinMetadata:
         num_reqs = common_attn_metadata.num_reqs
         num_actual_tokens = common_attn_metadata.num_actual_tokens
-        max_query_len = common_attn_metadata.max_query_len
         block_table_tensor = common_attn_metadata.block_table_tensor
         slot_mapping = common_attn_metadata.slot_mapping
-        seq_lens_cpu = common_attn_metadata.seq_lens_cpu
         seq_lens = common_attn_metadata.seq_lens
+        # Kunlunxin disables async scheduling, so the CPU upper bound contains
+        # exact sequence lengths, including in graph capture.
+        seq_lens_cpu = common_attn_metadata.seq_lens_cpu_upper_bound
+        if seq_lens_cpu is None:
+            seq_lens_cpu = seq_lens.cpu()
+        seq_lens_cpu = seq_lens_cpu[:num_reqs]
 
-        max_kv_len = max(seq_lens_cpu).item()
+        max_kv_len = common_attn_metadata.max_seq_len
         query_start_loc_host = common_attn_metadata.query_start_loc_cpu
         query_start_loc = common_attn_metadata.query_start_loc
 
@@ -518,12 +520,27 @@ class KunlunxinAttentionBackend(AttentionBackend):
     """
     Kunlunxin attention backend.
 
-    KV cache shape: (2, num_blocks, num_kv_heads, block_size, head_size), must be contiguous
+    Each K/V plane stores one dense HND page per block.
     """
-    # crucial to cuda graph
-    accept_output_buffer: bool = True
 
     supports_quant_query_input: bool = False
+
+    @classmethod
+    def customize_spec(cls, spec: AttentionSpec) -> AttentionSpec:
+        if spec.head_size != spec.head_size_v:
+            raise ValueError("Kunlunxin attention requires equal K/V head sizes")
+        # Logical [B, 2, N, H*C], with each plane reinterpreted as [B, H, N, C].
+        return replace(
+            spec,
+            num_head_slots=2,
+            state_content_bytes=spec.num_kv_heads
+            * spec.head_size
+            * get_dtype_size(spec.dtype),
+        )
+
+    @classmethod
+    def supported_kv_cache_layouts(cls) -> tuple[KVCacheLayout, ...]:
+        return (KVCacheLayout.LHBNC, KVCacheLayout.LBHNC)
 
     @staticmethod
     def get_name() -> str:
@@ -542,7 +559,7 @@ class KunlunxinAttentionBackend(AttentionBackend):
         return KunlunxinAttentionMetadataBuilder
 
     @staticmethod
-    def get_supported_head_size() -> List[int]:
+    def get_supported_head_sizes() -> list[int]:
         # Note: 128 is best for performance
         return [32, 64, 80, 96, 112, 120, 128, 192, 256]
 
@@ -554,7 +571,7 @@ class KunlunxinAttentionBackend(AttentionBackend):
         head_size: int,
         cache_dtype_str: str = "auto",
     ) -> Tuple[int, ...]:
-        # Kunlunxin uses NHD layout
+        # Legacy callers allocate separate K/V planes.
         return (2, num_blocks, num_kv_heads, block_size, head_size)
 
     @staticmethod
@@ -580,12 +597,21 @@ class KunlunxinPagedAttention(PagedAttention):
         num_kv_heads: int,
         head_size: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        num_blocks = kv_cache.shape[1]
-        key_cache = kv_cache[0]
-        key_cache = key_cache.view(num_blocks, num_kv_heads, -1, head_size)
-        value_cache = kv_cache[1]
-        value_cache = value_cache.view(num_blocks, num_kv_heads, -1, head_size)
-        return key_cache, value_cache
+        if kv_cache.ndim == 4:
+            key_cache, value_cache = kv_cache.unbind(dim=1)
+        else:
+            key_cache, value_cache = kv_cache.unbind(dim=0)
+        shape = (key_cache.shape[0], num_kv_heads, -1, head_size)
+        return key_cache.view(shape), value_cache.view(shape)
+
+    @staticmethod
+    def physical_block_stride(key_cache: torch.Tensor) -> int:
+        # Attention kernels index dense pages relative to each plane's pointer.
+        # The stride-aware cache writer receives the original tensor views.
+        stride, padding = divmod(key_cache.stride(0), key_cache.shape[1:].numel())
+        if padding:
+            raise ValueError("Kunlunxin KV cache stride is not a whole number of pages")
+        return stride
 
     @staticmethod
     def split_write_to_paged_cache(
@@ -599,7 +625,7 @@ class KunlunxinPagedAttention(PagedAttention):
         k_scale: torch.Tensor,
         v_scale: torch.Tensor,
     ) -> None:
-        # Split fused kv_cache [2, num_blocks, ...] into key_cache / value_cache
+        # Split the cache into separate dense key and value planes.
         key_cache, value_cache = KunlunxinPagedAttention.split_kv_cache(
             kv_cache,
             num_kv_heads,
@@ -744,16 +770,16 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         self.alibi_slopes = alibi_slopes
         self.sliding_window = sliding_window
         self.kv_cache_dtype = kv_cache_dtype
+        self.attn_type = attn_type
 
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
-        # 0.13.0 get_supported_head_size is not avaiable any more
-        suppored_head_sizes = KunlunxinAttentionBackend.get_supported_head_size()
-        if head_size not in suppored_head_sizes:
+        supported_head_sizes = KunlunxinAttentionBackend.get_supported_head_sizes()
+        if head_size not in supported_head_sizes:
             raise ValueError(
                 f"Head size {head_size} is not supported by KunlunxinAttentionBackend. "
-                f"Supported head sizes are: {suppored_head_sizes}.")
+                f"Supported head sizes are: {supported_head_sizes}.")
 
     def _get_window_size(
         self, attn_type: AttentionType
@@ -774,11 +800,13 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         attn_metadata: Optional[KunlunxinMetadata],
         k_scale: Optional[torch.Tensor] = None,
         v_scale: Optional[torch.Tensor] = None,
-        attn_type: AttentionType = AttentionType.DECODER,
+        attn_type: AttentionType | None = None,
         output: Optional[torch.Tensor] = None,
         output_scale: Optional[torch.Tensor] = None,
         output_block_scale: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if attn_type is None:
+            attn_type = self.attn_type
         query = query.view(-1, self.num_heads, self.head_size)
         if output is None:
             output = torch.empty_like(query)
@@ -835,41 +863,32 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
             # we still need to break out key_cache and value_cache
             # i.e. for later use by paged attention
 
-            updated_slot_mapping = attn_metadata.slot_mapping
-
-            # Reshape the input keys and values and store them in the cache.
-            # If kv_cache is not provided, the new key and value tensors are
-            # not cached. This happens during the initial memory
-            # profiling run.
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
-                key_cache, value_cache = KunlunxinPagedAttention.split_kv_cache(
-                    kv_cache, self.num_kv_heads, self.head_size
-                )
+            key_cache, value_cache = KunlunxinPagedAttention.split_kv_cache(
+                kv_cache, self.num_kv_heads, self.head_size
+            )
+            if key is not None and value is not None:
                 key = key.contiguous()
                 value = value.contiguous()
-                KunlunxinPagedAttention.reshape_and_cache_flash(
-                    key,
-                    value,
-                    key_cache,
-                    value_cache,
-                    updated_slot_mapping,
-                    BLHD_LAYOUT=False,
-                )
-            else:
-                key = key.contiguous()
-                value = value.contiguous()
-                KunlunxinPagedAttention.split_write_to_paged_cache(
-                                                key,
-                                                value,
-                                                kv_cache,
-                                                self.num_kv_heads,
-                                                self.head_size,
-                                                updated_slot_mapping,
-                                                self.kv_cache_dtype,
-                                                k_scale, v_scale)
-                key_cache, value_cache = KunlunxinPagedAttention.split_kv_cache(
-                    kv_cache, self.num_kv_heads, self.head_size
-                )
+                if (
+                    not key_cache.is_contiguous()
+                    or os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1"
+                ):
+                    KunlunxinPagedAttention.reshape_and_cache_flash(
+                        key,
+                        value,
+                        key_cache,
+                        value_cache,
+                        attn_metadata.slot_mapping,
+                        BLHD_LAYOUT=False,
+                    )
+                else:
+                    xtorch_ops.reshape_and_cache(
+                        key,
+                        value,
+                        key_cache,
+                        value_cache,
+                        attn_metadata.slot_mapping.flatten(),
+                    )
 
         # Handle encoder-only and encoder attention (e.g., BERT, BGE models)
         if attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
@@ -916,13 +935,10 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
 
         if num_decode_tokens != 0:
             decode_meta = attn_metadata.decode_metadata
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
-                # For hybrid Attention (Qwen3-Next, Qwen3.5)
-                tmp_block_tables = (
-                    decode_meta.block_tables * 2
-                )
-            else:
-                tmp_block_tables = decode_meta.block_tables
+            physical_stride = KunlunxinPagedAttention.physical_block_stride(key_cache)
+            block_tables = decode_meta.block_tables
+            if physical_stride != 1:
+                block_tables = block_tables * physical_stride
 
             if attn_metadata.decode_metadata.is_spec_decode:
                 # query_start_loc_host = decode_meta.query_start_loc_host.to(torch.int32)
@@ -937,7 +953,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                     query,
                     key_cache,
                     value_cache,
-                    tmp_block_tables,
+                    block_tables,
                     decode_meta.seq_lens_tensor,
                     decode_meta.seq_lens_tensor_host,
                     decode_meta.max_decode_seq_len,
@@ -983,12 +999,10 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
 
         # prefix cache part
         if actual_query_start_loc_host[-1] != kv_prefix_start_loc_host[-1]:
-            max_kv_len = attn_metadata.max_kv_len
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
-                # For hybrid Attention (Qwen3-Next, Qwen3.5)
-                tmp_block_tables = (attn_metadata.block_tables * 2)
-            else:
-                tmp_block_tables = attn_metadata.block_tables
+            physical_stride = KunlunxinPagedAttention.physical_block_stride(key_cache)
+            block_tables = attn_metadata.block_tables
+            if physical_stride != 1:
+                block_tables = block_tables * physical_stride
             xtorch_ops.prefill_attention(
                 query,
                 key_cache,
@@ -1001,14 +1015,13 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                 context_qlen_lod_xpu=actual_query_start_loc,
                 context_kvlen_lod_cpu=kv_prefix_start_loc_host,
                 context_kvlen_lod_xpu=kv_prefix_start_loc,
-                block_table=tmp_block_tables,
+                block_table=block_tables,
                 alibi_slopes=self.alibi_slopes,
                 swa_left=window_left,
                 swa_right=window_right,
             )
         # no prefix cache part
         else:
-            max_kv_len = attn_metadata.max_query_len
             xtorch_ops.prefill_attention(
                 query,
                 key,

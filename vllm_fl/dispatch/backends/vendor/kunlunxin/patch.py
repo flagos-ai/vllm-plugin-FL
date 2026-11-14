@@ -81,8 +81,6 @@ def _apply_legacy_kunlunxin_patches():
     # RESTORED from old version: Critical Triton kernel compatibility patches
     patch_block_table_slot_mapping()
     patch_attention_backend_registry()
-    patch_topk_topp_sampler()
-    patch_fused_moe()
 
     # Existing patches
     patch_causal_conv1d()
@@ -90,6 +88,75 @@ def _apply_legacy_kunlunxin_patches():
     patch_fused_gdn_gating()
     patch_ssm_cache_update()
     patch_sampler_rng()
+
+    # V2 model runner compatibility shims — applied in every process so that
+    # worker subprocesses (which re-import independently) also get them.  Each
+    # shim tolerates a missing upstream module and is idempotent, so they are
+    # safe to call unconditionally regardless of VLLM_USE_V2_MODEL_RUNNER.
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.uva_compat import (
+        apply_uva_compat,
+    )
+    apply_uva_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.rope_compat import (
+        apply_rope_compat,
+    )
+    apply_rope_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.penalties_compat import (
+        apply_penalties_compat,
+    )
+    apply_penalties_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.input_batch_compat import (
+        apply_input_batch_compat,
+    )
+    apply_input_batch_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.block_table_compat import (
+        apply_block_table_compat,
+    )
+    apply_block_table_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_utils_compat import (
+        apply_mamba_utils_compat,
+    )
+    apply_mamba_utils_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.structured_outputs_compat import (
+        apply_structured_outputs_compat,
+    )
+    apply_structured_outputs_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.topk_topp_compat import (
+        apply_topk_topp_compat,
+    )
+    apply_topk_topp_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat import (
+        apply_vl_compat,
+    )
+    apply_vl_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.buffer_utils_compat import (
+        apply_buffer_utils_compat,
+    )
+    apply_buffer_utils_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_hybrid_compat import (
+        apply_mamba_hybrid_compat,
+    )
+    apply_mamba_hybrid_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.mamba_align_compat import (
+        apply_mamba_align_compat,
+    )
+    apply_mamba_align_compat()
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.v2_greedy_sampler import (
+        apply_v2_greedy_sampler,
+    )
+    apply_v2_greedy_sampler()
 
 
 def _install_graph_patch(owner, name, replacement, replacements):
@@ -147,6 +214,7 @@ def patch_graph_adaptations():
         replacements = []
         for prepare in (
             patch_cudagraph_dispatcher,
+            patch_v2_graph_capture,
             patch_breakable_cudagraph_mode,
             patch_breakable_private_pools,
             patch_breakable_full_only,
@@ -171,6 +239,20 @@ def patch_graph_adaptations():
             elif name in vars(owner):
                 delattr(owner, name)
         raise RuntimeError("Kunlunxin graph adaptation installation failed") from exc
+
+
+def patch_v2_graph_capture(replacements=None):
+    """Use FL's stream context for the graph capture imported by GPUModelRunner V2."""
+    from importlib import import_module
+
+    from vllm_fl.worker.model_runner import _device_graph_capture
+
+    cudagraph_utils = import_module("vllm.v1.worker.gpu.cudagraph_utils")
+    # The upstream coordinator only accepts its own CUDA and XPU
+    # communicators. Replace the V2 caller's local alias for CommunicatorFL.
+    _install_graph_patch(
+        cudagraph_utils, "graph_capture", _device_graph_capture, replacements
+    )
 
 
 def patch_native_piecewise_boundaries(replacements=None):
@@ -653,13 +735,22 @@ def patch_block_table_slot_mapping():
     try:
         import torch
 
-        from vllm.v1.worker.block_table import BlockTable
+        from vllm.v1.worker.block_table import BlockTable, SlotMappingMode
 
         PAD_SLOT_ID = -1
 
         def compute_slot_mapping_xpu(self, num_reqs, query_start_loc, positions):
+            if self.slot_mapping_mode == SlotMappingMode.NONE:
+                return
+
             device = positions.device
             num_tokens = positions.shape[0]
+
+            # Derive max_num_blocks_per_req from the block table tensor when
+            # the attribute is not present (e.g. in unit-test stubs).
+            max_num_blocks_per_req = getattr(
+                self, "max_num_blocks_per_req", self.block_table.gpu.shape[1]
+            )
 
             total_cp_world_size = self.pcp_world_size * self.dcp_world_size
             total_cp_rank = self.pcp_rank * self.dcp_world_size + self.dcp_rank
@@ -674,22 +765,24 @@ def patch_block_table_slot_mapping():
             if total_cp_world_size > 1:
                 virtual_block_size = self.block_size * total_cp_world_size
                 bt_indices = (
-                    req_indices * self.max_num_blocks_per_req
+                    req_indices * max_num_blocks_per_req
                     + positions // virtual_block_size
                 )
                 block_numbers = self.block_table.gpu.view(-1)[bt_indices]
                 virtual_block_offsets = positions % virtual_block_size
+
+                # DCP controls per-token ownership; use dcp_world_size and
+                # dcp_rank (NOT total_cp_rank) so each DCP rank sees exactly
+                # block_size / dcp_world_size slots per virtual block.
+                interleave = self.cp_kv_cache_interleave_size
                 mask = (
-                    virtual_block_offsets
-                    // self.cp_kv_cache_interleave_size
-                    % total_cp_world_size
-                    == total_cp_rank
+                    virtual_block_offsets // interleave % self.dcp_world_size
+                    == self.dcp_rank
                 )
                 block_offsets = (
-                    virtual_block_offsets
-                    // (total_cp_world_size * self.cp_kv_cache_interleave_size)
-                    * self.cp_kv_cache_interleave_size
-                    + virtual_block_offsets % self.cp_kv_cache_interleave_size
+                    virtual_block_offsets // (self.dcp_world_size * interleave)
+                    * interleave
+                    + virtual_block_offsets % interleave
                 )
                 slot_vals = block_numbers * self.block_size + block_offsets
                 self.slot_mapping.gpu[:num_tokens] = torch.where(
@@ -699,7 +792,7 @@ def patch_block_table_slot_mapping():
                 )
             else:
                 bt_indices = (
-                    req_indices * self.max_num_blocks_per_req
+                    req_indices * max_num_blocks_per_req
                     + positions // self.block_size
                 )
                 block_numbers = self.block_table.gpu.view(-1)[bt_indices]
@@ -708,10 +801,12 @@ def patch_block_table_slot_mapping():
                     block_numbers * self.block_size + block_offsets
                 )
 
-            # Pad remaining slots
-            self.slot_mapping.gpu[num_tokens : self.max_num_batched_tokens] = (
-                PAD_SLOT_ID
+            # Pad remaining slots; derive length from the slot_mapping tensor
+            # when max_num_batched_tokens is absent (unit-test stubs).
+            max_batched = getattr(
+                self, "max_num_batched_tokens", self.slot_mapping.gpu.shape[0]
             )
+            self.slot_mapping.gpu[num_tokens:max_batched] = PAD_SLOT_ID
 
         BlockTable.compute_slot_mapping = compute_slot_mapping_xpu
         logger.info(
@@ -741,41 +836,6 @@ def patch_attention_backend_registry():
         logger.info("Registered KunlunxinAttentionBackend as CUSTOM attention backend")
     except Exception as e:
         logger.warning("Failed to register attention backend: %s", e)
-
-
-# ── RESTORED: topk_topp_sampler ──
-def patch_topk_topp_sampler():
-    """Force PyTorch-native top-k/top-p on Kunlunxin.
-
-    The vLLM Triton top-k/top-p kernel (topk_topp_triton.py) triggers
-    kernel launch failures (error 719) on P800. Route through the PyTorch
-    path instead.
-    """
-    try:
-        import vllm.v1.sample.ops.topk_topp_sampler as sampler_mod
-        from vllm.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p_pytorch
-
-        sampler_mod.apply_top_k_top_p = apply_top_k_top_p_pytorch
-        logger.info(
-            "Patched apply_top_k_top_p to use PyTorch-native path for Kunlunxin"
-        )
-    except Exception as e:
-        logger.warning("Failed to patch top-k/top-p sampler for Kunlunxin: %s", e)
-
-
-# ── RESTORED: fused_moe ──
-def patch_fused_moe():
-    """Replace fused_experts_impl with Kunlunxin implementation."""
-    try:
-        import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_moe.fused_moe import (
-            fused_experts_impl as klx_fused_experts_impl,
-        )
-
-        fused_moe_lib.fused_experts_impl = klx_fused_experts_impl
-        logger.info("Patched fused_moe for Kunlunxin")
-    except Exception as e:
-        logger.warning("Failed to patch fused_moe ops: %s", e)
 
 
 # ── sampler RNG (TP-consistent unseeded sampling) ──

@@ -177,9 +177,12 @@ def test_get_flag_gems_blacklist_append_preserves_platform_defaults(monkeypatch)
     monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST", raising=False)
     monkeypatch.setenv("VLLM_FL_FLAGOS_BLACKLIST_APPEND", "linear,index")
 
-    with patch(
-        "vllm_fl.dispatch.config.get_flagos_blacklist",
-        return_value=["index", "copy_"],
+    with (
+        patch("vllm_fl.dispatch.config.get_flagos_whitelist", return_value=None),
+        patch(
+            "vllm_fl.dispatch.config.get_flagos_blacklist",
+            return_value=["index", "copy_"],
+        ),
     ):
         whitelist, blacklist = get_flag_gems_whitelist_blacklist()
 
