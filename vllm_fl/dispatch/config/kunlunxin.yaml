@@ -88,6 +88,9 @@ flagos_blacklist:
   - _scaled_dot_product_attention_math
   # Concurrent vision requests fault in the math SDPA safe-softmax kernel.
   - _safe_softmax
+  # Native safe softmax calls where.out on aliased, rank-4 vision scores.
+  # The FlagGems P800 where.out implementation times out during TP4 profiling.
+  - where_self_out
   # V2 KV buffers exceed the FlagTree int32 tile bound for both zeroing paths.
   - zeros
   - zero_
