@@ -1,90 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Murmur3 logical-shift regression and independent real-NPU sampling oracle."""
+"""Independent real-NPU oracle for the FL-to-vLLM Gumbel integration."""
 
-import ast
 import importlib.util
-from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
-
-
-class _Unsigned32WithArithmeticShift:
-    """Model the observed NPU signed-shift lowering and uint32 arithmetic."""
-
-    def __init__(self, value):
-        self.bits = int(value) & 0xFFFFFFFF
-
-    def __int__(self):
-        return self.bits
-
-    def __and__(self, other):
-        return type(self)(self.bits & int(other))
-
-    def __or__(self, other):
-        return type(self)(self.bits | int(other))
-
-    def __xor__(self, other):
-        return type(self)(self.bits ^ int(other))
-
-    def __mul__(self, other):
-        return type(self)(self.bits * int(other))
-
-    def __add__(self, other):
-        return type(self)(self.bits + int(other))
-
-    def __lshift__(self, shift):
-        return type(self)(self.bits << shift)
-
-    def __rshift__(self, shift):
-        signed = self.bits if self.bits < 0x80000000 else self.bits - 0x100000000
-        return type(self)(signed >> shift)
-
-
-def _production_integer_helpers():
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "vllm_fl/dispatch/backends/vendor/ascend/patches/ascend_v2_gumbel.py"
-    )
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    names = {"_murmur3_rotl32", "_murmur3_mix", "_murmur3_fmix32"}
-    nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
-    for node in nodes:
-        node.decorator_list = []
-    namespace = {"tl": SimpleNamespace(constexpr=int)}
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), namespace)
-    return namespace
-
-
-def _scalar_mix(h, key):
-    key = (key * 0xCC9E2D51) & 0xFFFFFFFF
-    key = ((key << 15) | (key >> 17)) & 0xFFFFFFFF
-    key = (key * 0x1B873593) & 0xFFFFFFFF
-    h ^= key
-    h = ((h << 13) | (h >> 19)) & 0xFFFFFFFF
-    return (h * 5 + 0xE6546B64) & 0xFFFFFFFF
-
-
-def test_murmur_helpers_preserve_unsigned_bits_under_arithmetic_right_shift():
-    functions = _production_integer_helpers()
-    values = [0, 1, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xCC9E2D51]
-    values += np.random.default_rng(13).integers(0, 1 << 32, 100).tolist()
-    for value in values:
-        wrapped = _Unsigned32WithArithmeticShift(value)
-        for shift in (13, 15):
-            expected = ((value << shift) | (value >> (32 - shift))) & 0xFFFFFFFF
-            assert int(functions["_murmur3_rotl32"](wrapped, shift)) == expected
-        assert int(functions["_murmur3_mix"](wrapped, wrapped)) == _scalar_mix(
-            value, value
-        )
-        expected = value ^ (value >> 16)
-        expected = (expected * 0x85EBCA6B) & 0xFFFFFFFF
-        expected ^= expected >> 13
-        expected = (expected * 0xC2B2AE35) & 0xFFFFFFFF
-        expected ^= expected >> 16
-        assert int(functions["_murmur3_fmix32"](wrapped)) == expected
 
 
 def _cpu_noise(seed, position, vocab_size):

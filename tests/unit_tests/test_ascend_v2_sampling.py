@@ -1,351 +1,186 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU launch-contract tests for the Ascend V2 penalty tile adapter."""
+"""CPU contracts for binding the provider's Ascend V2 sampling APIs."""
 
 import importlib.util
 import sys
-import types
-import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
 
 
-class _KernelSpy:
-    def __init__(self):
-        self.launches = []
+class _RejectOneWrite(ModuleType):
+    blocked_name = None
 
-    def __getitem__(self, grid):
-        def launch(*args, **kwargs):
-            self.launches.append((grid, args, kwargs))
-
-        return launch
-
-
-class AscendV2SamplingTests(unittest.TestCase):
-    def setUp(self):
-        path = (
-            Path(__file__).resolve().parents[2]
-            / "vllm_fl/dispatch/backends/vendor/ascend/patches/ascend_v2_sampling.py"
-        )
-        spec = importlib.util.spec_from_file_location(
-            "ascend_v2_sampling_under_test", path
-        )
-        self.adapter = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.adapter)
-        self.kernel = _KernelSpy()
-        self.upstream_launcher = object()
-        self.penalties = types.ModuleType("vllm.v1.worker.gpu.sample.penalties")
-        self.penalties._penalties_kernel = self.kernel
-        self.penalties.apply_penalties = self.upstream_launcher
-        self.ascend_kernel = types.ModuleType(
-            "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_penalties_kernel"
-        )
-        self.ascend_kernel._penalties_kernel = self.kernel
-        self.temperature = types.ModuleType("vllm.v1.worker.gpu.sample.gumbel")
-        self.temperature.apply_temperature = self.upstream_launcher
-        self.states = types.ModuleType("vllm.v1.worker.gpu.sample.states")
-        self.states.apply_temperature = self.upstream_launcher
-        self.gumbel = types.ModuleType(
-            "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_gumbel"
-        )
-        for name in (
-            "_murmur3_rotl32",
-            "_murmur3_mix",
-            "_murmur3_fmix32",
-            "murmur3_hash32",
-            "murmur3_uniform32",
-            "_uniform64_from_random53",
-            "murmur3_uniform64",
-        ):
-            setattr(self.gumbel, name, object())
-        self.platform = types.ModuleType("vllm.platforms")
-        self.platform.current_platform = SimpleNamespace(device_type="npu")
-        modules = {
-            "vllm.platforms": self.platform,
-            "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_gumbel": self.gumbel,
-            "vllm.v1.worker.gpu.sample.gumbel": self.temperature,
-            "vllm.v1.worker.gpu.sample.states": self.states,
-            "vllm.v1.worker.gpu.sample.penalties": self.penalties,
-            "vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_v2_penalties_kernel": self.ascend_kernel,
-        }
-        module_patch = patch.dict(sys.modules, modules)
-        module_patch.start()
-        self.addCleanup(module_patch.stop)
-
-    def inputs(self, vocab_size=1031, num_tokens=4):
-        logits = torch.zeros(num_tokens, vocab_size + 13)[:, :vocab_size]
-        prompt_words = (vocab_size + 31) // 32
-        prompt = torch.zeros(3, prompt_words + 5, dtype=torch.int32)[:, :prompt_words]
-        counts = torch.zeros(3, vocab_size + 7, dtype=torch.int32)[:, :vocab_size]
-        return (
-            logits,
-            torch.tensor([2, 0, 2, 1][:num_tokens], dtype=torch.int32),
-            torch.tensor([31, 32, 31, 1024][:num_tokens], dtype=torch.int32),
-            torch.tensor([0, 0, 1, 0][:num_tokens], dtype=torch.int32),
-            torch.tensor([1.2, 0.7, 1.7]),
-            torch.tensor([0.4, -0.25, 0.5]),
-            torch.tensor([-0.3, 0.6, 0.2]),
-            prompt,
-            counts,
-        )
-
-    def test_independent_source_and_output_preserve_state_and_row_strides(self):
-        inputs = self.inputs()
-        self.adapter.apply_ascend_v2_penalties(*inputs)
-        grid, args, kwargs = self.kernel.launches[0]
-        self.assertEqual(grid, (4, 2))
-        self.assertEqual(kwargs, {"BLOCK_SIZE": 1024})
-        source = args[0]
-        self.assertNotEqual(source.data_ptr(), inputs[0].data_ptr())
-        torch.testing.assert_close(source, inputs[0], rtol=0, atol=0)
-        self.assertEqual(source.stride(0), inputs[0].shape[1])
-        expected = (
-            source,
-            source.stride(0),
-            inputs[0],
-            inputs[0].stride(0),
-            *inputs[1:7],
-            inputs[7],
-            inputs[7].stride(0),
-            inputs[8],
-            inputs[8].stride(0),
-            1031,
-        )
-        self.assertEqual(len(args), len(expected))
-        for actual, original in zip(args, expected):
-            if isinstance(original, torch.Tensor):
-                self.assertIs(actual, original)
-            else:
-                self.assertEqual(actual, original)
-
-    def test_non_tile_aligned_vocabulary_tail_is_included(self):
-        for vocab_size in (1, 31, 32, 1024, 1025, 151939):
-            with self.subTest(vocab_size=vocab_size):
-                self.adapter.apply_ascend_v2_penalties(*self.inputs(vocab_size))
-                grid, _, kwargs = self.kernel.launches[-1]
-                self.assertEqual(grid[1], (vocab_size + 1023) // 1024)
-                self.assertEqual(kwargs["BLOCK_SIZE"] % 32, 0)
-
-    def test_empty_logits_do_not_launch_an_invalid_zero_grid(self):
-        self.adapter.apply_ascend_v2_penalties(*self.inputs(num_tokens=0))
-        self.adapter.apply_ascend_v2_penalties(*self.inputs(vocab_size=0))
-        self.assertEqual(self.kernel.launches, [])
-
-    def test_npu_install_is_idempotent_and_only_replaces_the_launcher(self):
-        self.assertTrue(self.adapter.install_ascend_v2_sampling_shims())
-        self.assertTrue(self.adapter.install_ascend_v2_sampling_shims())
-        self.assertIs(
-            self.penalties.apply_penalties, self.adapter.apply_ascend_v2_penalties
-        )
-        self.assertIs(self.penalties._penalties_kernel, self.kernel)
-        for name in (
-            "_murmur3_rotl32",
-            "_murmur3_mix",
-            "_murmur3_fmix32",
-            "murmur3_hash32",
-            "murmur3_uniform32",
-            "_uniform64_from_random53",
-            "murmur3_uniform64",
-        ):
-            self.assertIs(getattr(self.temperature, name), getattr(self.gumbel, name))
-        self.assertIs(
-            self.temperature.apply_temperature, self.adapter.apply_ascend_v2_temperature
-        )
-        self.assertIs(
-            self.states.apply_temperature, self.adapter.apply_ascend_v2_temperature
-        )
-
-    def test_other_platform_install_keeps_upstream_launcher(self):
-        self.platform.current_platform.device_type = "cuda"
-        self.assertFalse(self.adapter.install_ascend_v2_sampling_shims())
-        self.assertIs(self.penalties.apply_penalties, self.upstream_launcher)
-        self.assertIs(self.temperature.apply_temperature, self.upstream_launcher)
-        self.assertIs(self.states.apply_temperature, self.upstream_launcher)
+    def __setattr__(self, name, value):
+        if name == self.blocked_name:
+            object.__setattr__(self, "blocked_name", None)
+            raise RuntimeError(f"write rejected: {name}")
+        super().__setattr__(name, value)
 
 
-def _penalty_fixture(vocab_size):
-    rows = 9
-    generator = torch.Generator().manual_seed(873)
-    logits_storage = torch.full((rows, vocab_size + 7), 1234.0)
-    logits = logits_storage[:, :vocab_size]
-    logits.copy_(torch.randn(rows, vocab_size, generator=generator) * 2)
-    logits[:, 31] = 3
-    logits[:, 32] = 2
-    logits[:, 1023] = 2
-    logits[:, 1024] = 2
-    logits[0, 7] = -2
-    logits[2, 7] = -2
-    logits[0, -1] = -4
-    logits[-1, 0] = float("-inf")
-
-    mapping = torch.tensor([2, 2, 2, 2, 0, 0, 0, 1, 3], dtype=torch.int32)
-    local_pos = torch.tensor([0, 1, 2, 3, 0, 1, 2, 0, 0], dtype=torch.int32)
-    token_ids = torch.tensor(
-        [31, 31, 7, 31, 32, 31, vocab_size - 1, 33, 1024], dtype=torch.int32
+@pytest.fixture
+def sampling(monkeypatch):
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "vllm_fl/dispatch/backends/vendor/ascend/patches/ascend_v2_sampling.py"
     )
-    repetition = torch.tensor([1.2, 0.7, 1.7, 1.0], dtype=torch.float32)
-    frequency = torch.tensor([0.4, -0.25, 0.5, 0.0], dtype=torch.float32)
-    presence = torch.tensor([-0.3, 0.6, 0.2, 0.0], dtype=torch.float32)
-    prompts = (
-        {31, 32, 1024, vocab_size - 1},
-        {0, 31, 33, vocab_size - 2},
-        {7, 31, 1023, 1024, vocab_size - 1},
-        {31, 1024},
-    )
-    words = (vocab_size + 31) // 32
-    packed_storage = torch.full((4, words + 3), 123, dtype=torch.int32)
-    packed = packed_storage[:, :words]
-    packed.zero_()
-    for req, tokens in enumerate(prompts):
-        bits = {}
-        for token in tokens:
-            word, bit = divmod(token, 32)
-            bits[word] = bits.get(word, 0) | (1 << bit)
-        for word, value in bits.items():
-            packed[req, word] = value if value < (1 << 31) else value - (1 << 32)
+    spec = importlib.util.spec_from_file_location("ascend_v2_sampling_under_test", path)
+    adapter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(adapter)
 
-    counts_storage = torch.full((4, vocab_size + 11), 71, dtype=torch.int32)
-    counts = counts_storage[:, :vocab_size]
-    counts.zero_()
-    for req, tokens in enumerate(
-        (
-            {31: 2, 5: 1, vocab_size - 1: 3},
-            {33: 4, vocab_size - 2: 1},
-            {7: 2, 31: 3, vocab_size - 1: 1},
-            {31: 5},
-        )
+    upstream = Mock()
+    modules = SimpleNamespace(
+        penalties=ModuleType("vllm.v1.worker.gpu.sample.penalties"),
+        gumbel=_RejectOneWrite("vllm.v1.worker.gpu.sample.gumbel"),
+        states=ModuleType("vllm.v1.worker.gpu.sample.states"),
+        platforms=ModuleType("vllm.platforms"),
+        provider=ModuleType("flaggems_vllm"),
+        rng=ModuleType("flaggems_vllm.ops.v2_gumbel_rng"),
+    )
+    modules.platforms.current_platform = SimpleNamespace(device_type="npu")
+    modules.penalties.apply_penalties = upstream
+    modules.penalties._penalties_kernel = upstream
+    modules.gumbel.apply_temperature = upstream
+    modules.gumbel.gumbel_noised_argmax = upstream
+    modules.gumbel.gumbel_sample = upstream
+    modules.gumbel._murmur3_mix = upstream
+    modules.states.apply_temperature = upstream
+    modules.provider.v2_apply_penalties = Mock(name="v2_apply_penalties")
+    modules.provider.v2_apply_temperature = Mock(name="v2_apply_temperature")
+    modules.provider.v2_gumbel_rng = modules.rng
+    for name in ("murmur3_hash32", "murmur3_uniform32", "murmur3_uniform64"):
+        setattr(modules.gumbel, name, upstream)
+        setattr(modules.rng, name, Mock(name=name))
+    for module in (
+        modules.penalties,
+        modules.gumbel,
+        modules.states,
+        modules.platforms,
+        modules.provider,
     ):
-        for token, count in tokens.items():
-            counts[req, token] = count
-    return {
-        "logits_storage": logits_storage,
-        "logits": logits,
-        "mapping": mapping,
-        "local_pos": local_pos,
-        "tokens": token_ids,
-        "repetition": repetition,
-        "frequency": frequency,
-        "presence": presence,
-        "packed_storage": packed_storage,
-        "packed": packed,
-        "prompts": prompts,
-        "counts_storage": counts_storage,
-        "counts": counts,
-    }
-
-
-def _penalty_cpu_reference(case):
-    result = case["logits"].clone()
-    for row, request in enumerate(case["mapping"].tolist()):
-        counts = case["counts"][request].clone()
-        position = int(case["local_pos"][row])
-        start = row - position
-        for previous in range(1, position + 1):
-            counts[int(case["tokens"][start + previous])] += 1
-        output_seen = counts > 0
-        seen = output_seen.clone()
-        for token in case["prompts"][request]:
-            seen[token] = True
-        scale = torch.where(seen, case["repetition"][request], 1.0)
-        result[row] *= torch.where(result[row] > 0, scale.reciprocal(), scale)
-        result[row] -= case["frequency"][request] * counts
-        result[row] -= case["presence"][request] * output_seen
-    return result
-
-
-def _verify_penalty_oracle(case, expected):
-    # These values exercise independent prompt-only and repeated-draft cases.
-    rep = float(case["repetition"][2])
-    freq = float(case["frequency"][2])
-    pres = float(case["presence"][2])
-    checks = (
-        (0, 31, 3 / rep - freq * 3 - pres),
-        (1, 31, 3 / rep - freq * 4 - pres),
-        (3, 31, 3 / rep - freq * 5 - pres),
-        (0, 7, -2 * rep - freq * 2 - pres),
-        (2, 7, -2 * rep - freq * 3 - pres),
-        (0, 1023, 2 / rep),
-        (0, 1024, 2 / rep),
-        (0, 32, 2),
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    return SimpleNamespace(
+        install=adapter.install_ascend_v2_sampling_shims,
+        modules=modules,
+        upstream=upstream,
     )
-    for row, token, value in checks:
-        assert abs(float(expected[row, token]) - value) < 1e-6
-    torch.testing.assert_close(expected[-1], case["logits"][-1], rtol=0, atol=0)
-    assert int(case["packed"][2, 0]) < 0, "Packed bit 31 was not exercised"
 
 
-@pytest.mark.gpu
-class AscendV2PenaltiesNumericalTests(unittest.TestCase):
-    def test_upstream_kernel_matches_cpu_penalty_and_draft_reference(self):
-        if importlib.util.find_spec("torch_npu") is None:
-            self.skipTest("torch_npu is unavailable")
-        import torch_npu  # noqa: F401
+def _bindings(modules):
+    return [
+        modules.penalties.apply_penalties,
+        modules.gumbel.apply_temperature,
+        modules.states.apply_temperature,
+        modules.gumbel.murmur3_hash32,
+        modules.gumbel.murmur3_uniform32,
+        modules.gumbel.murmur3_uniform64,
+    ]
 
-        if not torch.npu.is_available():
-            self.skipTest("An Ascend NPU is unavailable")
-        device = torch.device("npu", torch.npu.current_device())
-        source = (
-            Path(__file__).resolve().parents[2]
-            / "vllm_fl/dispatch/backends/vendor/ascend/patches/ascend_v2_sampling.py"
+
+def test_uses_provider_callables_and_preserves_upstream_kernel_and_sampler(sampling):
+    m = sampling.modules
+    assert sampling.install()
+    assert sampling.install()
+    assert _bindings(m) == [
+        m.provider.v2_apply_penalties,
+        m.provider.v2_apply_temperature,
+        m.provider.v2_apply_temperature,
+        m.rng.murmur3_hash32,
+        m.rng.murmur3_uniform32,
+        m.rng.murmur3_uniform64,
+    ]
+    assert m.penalties._penalties_kernel is sampling.upstream
+    assert m.gumbel.gumbel_noised_argmax is sampling.upstream
+    assert m.gumbel.gumbel_sample is sampling.upstream
+    assert m.gumbel._murmur3_mix is sampling.upstream
+
+
+def test_passes_the_original_logits_and_state_without_copying(sampling):
+    m = sampling.modules
+    assert sampling.install()
+    logits = torch.zeros((2, 1044))[:, :1031]
+    mapping = torch.tensor([1, 0], dtype=torch.int32)
+    tokens = torch.tensor([31, 1024], dtype=torch.int32)
+    position = torch.tensor([0, 0], dtype=torch.int32)
+    repetition = torch.tensor([1.2, 1.7])
+    frequency = torch.tensor([0.4, -0.25])
+    presence = torch.tensor([-0.3, 0.6])
+    mask = torch.zeros((2, 35), dtype=torch.int32)[:, :33]
+    counts = torch.zeros((2, 1038), dtype=torch.int32)[:, :1031]
+    inputs = (
+        logits,
+        mapping,
+        tokens,
+        position,
+        repetition,
+        frequency,
+        presence,
+        mask,
+        counts,
+    )
+    m.penalties.apply_penalties(*inputs)
+    assert all(
+        a is b
+        for a, b in zip(
+            m.provider.v2_apply_penalties.call_args.args, inputs, strict=True
         )
-        spec = importlib.util.spec_from_file_location(
-            "ascend_v2_sampling_numerical", source
+    )
+
+    scale = torch.tensor([0.0, 0.7])
+    m.states.apply_temperature(logits, mapping, scale)
+    assert all(
+        a is b
+        for a, b in zip(
+            m.provider.v2_apply_temperature.call_args.args,
+            (logits, mapping, scale),
+            strict=True,
         )
-        adapter = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(adapter)
-        for vocab_size in (1031, 2057, 151939):
-            with self.subTest(vocab_size=vocab_size):
-                case = _penalty_fixture(vocab_size)
-                expected = _penalty_cpu_reference(case)
-                _verify_penalty_oracle(case, expected)
-                logits_storage = case["logits_storage"].to(device)
-                logits = logits_storage[:, :vocab_size]
-                packed_storage = case["packed_storage"].to(device)
-                packed = packed_storage[:, : case["packed"].shape[1]]
-                counts_storage = case["counts_storage"].to(device)
-                counts = counts_storage[:, :vocab_size]
-                adapter.apply_ascend_v2_penalties(
-                    logits,
-                    case["mapping"].to(device),
-                    case["tokens"].to(device),
-                    case["local_pos"].to(device),
-                    case["repetition"].to(device),
-                    case["frequency"].to(device),
-                    case["presence"].to(device),
-                    packed,
-                    counts,
-                )
-                torch.npu.synchronize()
-                actual = logits.cpu()
-                torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)
-                torch.testing.assert_close(
-                    logits_storage[:, vocab_size:].cpu(),
-                    case["logits_storage"][:, vocab_size:],
-                    rtol=0,
-                    atol=0,
-                )
-                torch.testing.assert_close(
-                    packed_storage.cpu(),
-                    case["packed_storage"],
-                    rtol=0,
-                    atol=0,
-                )
-                torch.testing.assert_close(
-                    counts_storage.cpu(),
-                    case["counts_storage"],
-                    rtol=0,
-                    atol=0,
-                )
-                torch.testing.assert_close(
-                    actual[-1],
-                    case["logits"][-1],
-                    rtol=0,
-                    atol=0,
-                )
+    )
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_other_platform_does_not_load_provider(sampling, monkeypatch):
+    m = sampling.modules
+    m.platforms.current_platform.device_type = "cuda"
+    monkeypatch.setitem(sys.modules, m.provider.__name__, None)
+    assert not sampling.install()
+    assert all(binding is sampling.upstream for binding in _bindings(m))
+
+
+@pytest.mark.parametrize(
+    ("module", "name"),
+    [
+        ("provider", "v2_apply_penalties"),
+        ("provider", "v2_apply_temperature"),
+        ("provider", "v2_gumbel_rng"),
+        ("rng", "murmur3_uniform64"),
+    ],
+)
+def test_incomplete_provider_leaves_upstream_bindings_intact(
+    sampling, monkeypatch, module, name
+):
+    m = sampling.modules
+    monkeypatch.delattr(getattr(m, module), name)
+    with pytest.raises(RuntimeError, match=name):
+        sampling.install()
+    assert all(binding is sampling.upstream for binding in _bindings(m))
+
+
+def test_missing_upstream_binding_does_not_partially_install(sampling, monkeypatch):
+    m = sampling.modules
+    monkeypatch.delattr(m.states, "apply_temperature")
+    with pytest.raises(AttributeError, match="apply_temperature"):
+        sampling.install()
+    assert m.penalties.apply_penalties is sampling.upstream
+    assert m.gumbel.apply_temperature is sampling.upstream
+    assert m.gumbel.murmur3_uniform64 is sampling.upstream
+
+
+def test_install_rolls_back_already_replaced_bindings(sampling):
+    m = sampling.modules
+    m.gumbel.blocked_name = "murmur3_uniform64"
+    with pytest.raises(RuntimeError, match="write rejected"):
+        sampling.install()
+    assert all(binding is sampling.upstream for binding in _bindings(m))
