@@ -94,8 +94,11 @@ flagos_blacklist:
   # Vocabulary-wide sampling reaches an XPU radix-sort kernel launch failure.
   - sort
   - sort_stable
-  # FlagTree cannot lower the broadcast tensor comparison used for top-k.
+  # FlagTree cannot lower broadcast tensor comparisons in top-k/top-p.
   - lt
+  - le
+  # Full-vocabulary softmax can fault or return NaNs on top-k-masked logits.
+  - softmax
   # The full-vocabulary in-place cumulative probability scan faults on XPU.
   - cumsum_out
 
