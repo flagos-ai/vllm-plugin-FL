@@ -34,7 +34,6 @@ persistence_m:
         - test_sunrise_graph_capture
         - test_sunrise_embedding
         - test_sunrise_kv_cache
-        - test_sunrise_cache_update
         - test_sunrise_flagcx_wheel
         - test_sunrise_worker
         - test_sunrise_model_runner

@@ -9,7 +9,11 @@ from typing import ClassVar
 
 import numpy as np
 import torch
-from flaggems_vllm import flash_attn_varlen_func, reshape_and_cache_flash
+from flaggems_vllm import (
+    flash_attn_varlen_func,
+    reshape_and_cache_flash,
+    reshape_and_cache_flash_strided,
+)
 
 import vllm.envs as envs
 from vllm.config import (
@@ -587,11 +591,7 @@ class AttentionFLImpl(AttentionImpl):
             # op uses the slot_mapping's shape to determine the number of
             # actual tokens.
             if kv_cache.ndim == 4:
-                from vllm_fl.dispatch.backends.vendor.sunrise.impl.cache_update import (
-                    write_kv_cache,
-                )
-
-                write_kv_cache(
+                reshape_and_cache_flash_strided(
                     key, value, key_cache, value_cache, attn_metadata.slot_mapping
                 )
             else:

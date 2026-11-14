@@ -144,16 +144,14 @@ def sunrise_modules(monkeypatch):
                 key_cache[block, offset].copy_(key[token])
                 value_cache[block, offset].copy_(value[token])
 
-    install(
-        "vllm_fl.dispatch.backends.vendor.sunrise.impl.cache_update",
-        write_kv_cache=Mock(side_effect=write_cache),
-    )
     cache_kernel = Mock(side_effect=write_cache)
+    strided_cache_kernel = Mock(side_effect=write_cache)
     flash_kernel = Mock(side_effect=lambda **kwargs: kwargs["out"].copy_(kwargs["q"]))
     install(
         "flaggems_vllm",
         flash_attn_varlen_func=flash_kernel,
         reshape_and_cache_flash=cache_kernel,
+        reshape_and_cache_flash_strided=strided_cache_kernel,
     )
     install("vllm_fl.dispatch.backends.base", Backend=type("Backend", (), {}))
     root = Path(__file__).resolve().parents[3]
@@ -177,6 +175,7 @@ def sunrise_modules(monkeypatch):
         envs=envs,
         layout=layout,
         cache_kernel=cache_kernel,
+        strided_cache_kernel=strided_cache_kernel,
         flash_kernel=flash_kernel,
     )
 
@@ -390,6 +389,8 @@ def test_forward_updates_native_v032_logical_kv_cache(sunrise_modules):
     torch.testing.assert_close(logical_cache[0, 0, 3, :8], key[0, 0])
     torch.testing.assert_close(logical_cache[0, 0, 3, 8:], value[0, 0])
     assert not logical_cache[:, :, :3].any()
+    sunrise_modules.cache_kernel.assert_not_called()
+    sunrise_modules.strided_cache_kernel.assert_called_once()
     assert sunrise_modules.flash_kernel.call_args.kwargs["k"].shape == (1, 16, 1, 8)
 
 

@@ -236,9 +236,8 @@ class TestPTPUDynamicGraphReplay:
             assert static_output.data_ptr() == output_address
 
     def test_repeated_replay_updates_strided_kv_slots(self, device):
-        from vllm_fl.dispatch.backends.vendor.sunrise.impl.cache_update import (
-            write_kv_cache,
-        )
+        from flaggems_vllm import reshape_and_cache_flash_strided
+
         from vllm_fl.dispatch.backends.vendor.sunrise.impl.kv_cache import (
             split_kv_cache,
         )
@@ -254,11 +253,13 @@ class TestPTPUDynamicGraphReplay:
         side_stream.wait_stream(runtime.current_stream(device))
         with runtime.stream(side_stream):
             for _ in range(3):
-                write_kv_cache(key, value, key_cache, value_cache, slots)
+                reshape_and_cache_flash_strided(
+                    key, value, key_cache, value_cache, slots
+                )
         side_stream.synchronize()
         graph = runtime.PTPUGraph()
         with runtime.graph(graph, stream=side_stream):
-            write_kv_cache(key, value, key_cache, value_cache, slots)
+            reshape_and_cache_flash_strided(key, value, key_cache, value_cache, slots)
         runtime.synchronize()
 
         for step, mapping in enumerate(([3, -1], [17, 9], [-1, 30]), start=1):

@@ -10,7 +10,7 @@ uses the following stack.
 | Device and communication runtime | TangRT and PCCL `1.2.0`, FlagCX `0.14.0+tangrt1.2.0` |
 | Python and PyTorch | CPython `3.10.20`, PyTorch `2.11.0+cpu`, torch-ptpu `0.2.3+torch2.11` |
 | vLLM | `0.32.0+empty` from [`5df63a7`](https://github.com/vllm-project/vllm/commit/5df63a7203cdb9328d824a27b682e77c7b9928be), with downstream Python 3.10 compatibility patches |
-| Operator libraries | FlagGems `5.4.0`, FlagGems-vllm source tag `v0.2.0` at [`b5c2c22`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19), FlagTree `0.7.0+sunrise3.6` with Triton `3.6.0` |
+| Operator libraries | FlagGems `5.4.0`, FlagGems-vllm `v0.2.0` with [the Sunrise strided KV writer](https://github.com/flagos-ai/FlagGems-vllm/commit/3b0f3880b2a781699462eacb7dd3e00cc24f2d43), FlagTree `0.7.0+sunrise3.6` with Triton `3.6.0` |
 
 Build the vLLM 0.32 runtime image from the adapted checkout. The published
 image in the table supplies the vendor dependencies for this build.

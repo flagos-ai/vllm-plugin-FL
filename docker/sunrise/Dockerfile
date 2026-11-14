@@ -93,13 +93,15 @@ RUN --mount=type=secret,id=git_config,required=false \
         GIT_CONFIG_KEY_1=http.lowSpeedLimit GIT_CONFIG_VALUE_1=1 \
         GIT_CONFIG_KEY_2=http.lowSpeedTime GIT_CONFIG_VALUE_2=60 \
     && if [ -f /opt/flaggems-provider/flaggems-vllm.bundle ]; then \
+        provider_commit=$(python /opt/sunrise-build/install_flaggems_vllm.py --sunrise --print-commit) \
+        && \
         git bundle list-heads /opt/flaggems-provider/flaggems-vllm.bundle HEAD \
-            | grep -qx 'b5c2c2249319277ccda4d41aa0f65164bd9b2a19 HEAD' \
+            | grep -Fqx "${provider_commit} HEAD" \
         && export GIT_CONFIG_COUNT=4 \
             GIT_CONFIG_KEY_3=url./opt/flaggems-provider/flaggems-vllm.bundle.insteadOf \
             GIT_CONFIG_VALUE_3=https://github.com/flagos-ai/FlagGems-vllm.git; \
     fi \
-    && python /opt/sunrise-build/install_flaggems_vllm.py \
+    && python /opt/sunrise-build/install_flaggems_vllm.py --sunrise \
     && python /opt/sunrise-build/runtime_constraints.py verify \
         /opt/sunrise-stack --vllm-version "${VLLM_VERSION}"
 

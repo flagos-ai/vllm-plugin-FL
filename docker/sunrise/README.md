@@ -78,8 +78,10 @@ transitive PyPI Triton is excluded. Build and plugin installations use
 isolated layers. A nested venv would lose the parent venv's vendor packages.
 Compiler/runtime profiles are sourced for build layers and the container
 entrypoint, then the selected interpreter takes precedence on `PATH`.
-The pinned shared installer adds FlagGems-vllm `v0.2.0` commit
-`b5c2c2249319277ccda4d41aa0f65164bd9b2a19` without replacing native packages.
+The shared installer uses a Sunrise-specific FlagGems-vllm pin based on `v0.2.0`.
+Run `python .github/scripts/install_flaggems_vllm.py --sunrise --print-commit` to
+get the exact revision. It provides `reshape_and_cache_flash_strided` for native
+vLLM 0.32 combined KV caches. Installation preserves the native packages.
 
 ## Verify on Sunrise hardware
 

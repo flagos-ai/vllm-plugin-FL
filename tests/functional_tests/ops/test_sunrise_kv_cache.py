@@ -11,9 +11,8 @@ def test_sunrise_combined_cache_writer_preserves_kv_and_padding(layout):
     pytest.importorskip("torch_ptpu")
     if not torch.ptpu.is_available():
         pytest.skip("Sunrise PTPU is unavailable")
-    from vllm_fl.dispatch.backends.vendor.sunrise.impl.cache_update import (
-        write_kv_cache,
-    )
+    from flaggems_vllm import reshape_and_cache_flash_strided
+
     from vllm_fl.dispatch.backends.vendor.sunrise.impl.kv_cache import split_kv_cache
 
     torch.ptpu.set_device(0)
@@ -29,7 +28,7 @@ def test_sunrise_combined_cache_writer_preserves_kv_and_padding(layout):
     value_cpu = key_cpu + 100
     key, value = key_cpu.to(device), value_cpu.to(device)
     slots = torch.tensor([3, -1, 17], dtype=torch.int64, device=device)
-    write_kv_cache(key, value, key_cache, value_cache, slots)
+    reshape_and_cache_flash_strided(key, value, key_cache, value_cache, slots)
     torch.ptpu.synchronize()
     expected = torch.zeros(2, 2, 16, 16, dtype=torch.bfloat16)
     expected[0, :, 3, :8] = key_cpu[0]
