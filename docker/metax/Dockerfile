@@ -99,7 +99,7 @@ RUN uv --config-file /opt/metax-stack/uv.toml pip install --python "$(command -v
 FROM dev AS ci
 
 # The base supplies FlagGems, FlagTree and FlagGems-vllm built for MACA.
-# setup.sh installs the checked-out FL plugin and preserves this native stack.
+# setup.sh installs the checked-out FL plugin and the MetaX FlagGems-vllm pin.
 ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
 

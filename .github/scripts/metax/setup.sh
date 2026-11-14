@@ -193,28 +193,9 @@ else:
         )
 PATCH
 
-# The pinned FlagOS base includes a newer MetaX FlagGems-vllm integration.
-# Preserve that image-locked package when the runtime build recorded it.
-# Older images without a manifest retain the repository's standard installer.
-python - <<'PY'
-import json
-import os
-import pathlib
-import subprocess
-import sys
-from importlib.metadata import version
-
-manifest = os.environ.get("FL_METAX_STACK_MANIFEST")
-locked = json.loads(pathlib.Path(manifest).read_text()) if manifest else {}
-bridge_version = locked.get("flaggems-vllm")
-if bridge_version is not None:
-    actual = version("flaggems-vllm")
-    if actual != bridge_version:
-        raise RuntimeError(f"MetaX FlagGems-vllm drifted: {bridge_version} -> {actual}")
-    print(f"[metax-ci] retaining image-pinned FlagGems-vllm {actual}")
-else:
-    subprocess.check_call([sys.executable, ".github/scripts/install_flaggems_vllm.py"])
-PY
+# The MetaX router uses the extended FlagGems-vllm top-k ABI. Install its
+# immutable source without resolving the wheel dependencies from PyPI.
+python .github/scripts/metax/install_flaggems_vllm.py
 
 python - <<'PY'
 import flag_gems

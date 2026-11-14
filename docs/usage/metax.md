@@ -23,7 +23,7 @@ Its preinstalled vLLM is **0.24.0**; pulling the base alone does not install the
 | PyTorch | `2.10.0+metax3.8.1.0`; `torch.version.git_version=f0eb8bf5e72d15327617097aa264c899b3581986` |
 | FlagGems | `5.5.0.dev0`; vendor distribution does not embed a Git SHA; package fingerprint `9bebc2d5c987466aefc61a4280b7e1cf9935626aa4c4e1f5c07319f582e8ad53` |
 | FlagTree / imported Triton | `0.7.0+metax3.6` / `3.6.0`; vendor distribution does not embed a Git SHA; package fingerprint `4028e7bc5821c15002a78ea1e02f242994bb8c260c51afe85c55978f8ecf3928` |
-| FlagGems-vllm | Image-pinned `0.3.0.dev1`; no embedded Git SHA; package fingerprint `9d66bf7f643b2209e774312f171a064c28644df94345b9e76f6476c1d3b428c5` |
+| FlagGems-vllm | `0.3.0.dev1` installed by MetaX setup from [`e00557103e284db5b57168386db60faa051989ef`](https://github.com/flagos-ai/FlagGems-vllm/commit/e00557103e284db5b57168386db60faa051989ef) |
 | vLLM | `0.32.0+empty`, built from [`5df63a7203cdb9328d824a27b682e77c7b9928be`](https://github.com/vllm-project/vllm/commit/5df63a7203cdb9328d824a27b682e77c7b9928be); no NVIDIA `vllm._C` |
 | MACA FlashAttention | `2.6.3+metax3.8.1.0torch2.10`; no embedded Git SHA; package fingerprint `8ed84bd3a348d70d534093b2612c35c0b44763e86ba91375fa48f3e3b781942d` |
 | Native FLA / FlashMLA / FlashInfer | `0.5.0+metax3.8.1.0torch2.10` / `1.0.1+metax3.8.1.0torch2.10` / `0.2.6+metax3.8.1.0torch2.10` |
@@ -69,10 +69,11 @@ PyPI torch, Triton or NVIDIA vLLM wheel into this image.
 ## FlagGems and FlagTree requirements
 
 Use the recorded vendor packages to reproduce this configuration. The build's
-native-stack overrides preserve them, and `setup.sh` preserves the image's
-FlagGems-vllm `0.3.0.dev1` rather than replacing it with the generic installer
-version. These are tested versions, not claims about the minimum supported
-versions of every upstream package.
+native-stack overrides preserve them. MetaX setup installs FlagGems-vllm
+`0.3.0.dev1` from the pinned commit for routed top-k with correction bias,
+padding and sigmoid scaling. The base image includes the same version string
+with an earlier API. Setup verifies the commit archive hash in the installed
+package metadata and preserves the other native packages.
 
 The FlagGems-vllm 0.3 cache writer handles block gaps but assumes compact token
 and head strides. The plugin uses a stride-aware, C550-safe Triton writer for
@@ -131,9 +132,9 @@ docker exec "$CONTAINER" bash -lc '
   bash .github/scripts/metax/setup.sh'
 ```
 
-The setup script installs the checked-out plugin, preserves the FlagOS image's
-recorded FlagGems-vllm version, verifies vLLM, and removes legacy
-`zz_fl_*.pth` boot hooks. No separate shim installer is needed.
+The setup script installs the checked-out plugin and the MetaX FlagGems-vllm
+pin, verifies vLLM and the other native package versions, and removes legacy
+`zz_fl_*.pth` boot hooks.
 
 ## Run inference or serving
 
