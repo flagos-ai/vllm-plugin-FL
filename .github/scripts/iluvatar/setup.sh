@@ -24,3 +24,7 @@ fi
 
 CI_FLAGGEMS_VLLM_VENDOR=iluvatar python .github/scripts/install_flaggems_vllm.py
 python -m pip install --no-build-isolation --no-deps -e .
+
+# The shared unit and functional runners pass -n to pytest. Older CI images
+# preinstall the other pytest plugins but do not include xdist.
+python -m pip install --break-system-packages "pytest-xdist>=3.0.0"
