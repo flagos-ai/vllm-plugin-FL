@@ -13,7 +13,8 @@ def moe_align_block_size(
     # CoreX exposes TLE imports, but cannot launch the cooperative grid barrier
     # used by the generic provider. Use its supported four-stage entry point,
     # rather than mutating HAS_TLE globally or changing the pinned dependency.
-    # ignore_invalid_experts follows the existing FlagGems adapter contract.
+    # The pinned provider always masks IDs outside [0, num_experts), including
+    # padding routes (-1), regardless of ignore_invalid_experts.
     from flaggems_vllm.ops.moe_align_block_size import moe_align_block_size_no_tle
 
     return moe_align_block_size_no_tle(
