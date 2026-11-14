@@ -36,6 +36,13 @@ METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
 METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
 METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
+AMD_BASE_IMAGE="${AMD_BASE_IMAGE:-docker.io/vllm/vllm-openai-rocm:latest}"
+AMD_FLAGOS_RUNTIME_IMAGE="${AMD_FLAGOS_RUNTIME_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-amd-rocm7.2.4:2.3.0}"
+AMD_VLLM_VERSION="${AMD_VLLM_VERSION:-0.32.0}"
+AMD_PYTHON_VERSION="${AMD_PYTHON_VERSION:-3.12}"
+AMD_FLAGTREE_VERSION="${AMD_FLAGTREE_VERSION:-0.7.0+amd3.6}"
+AMD_FLAGGEMS_COMMIT="${AMD_FLAGGEMS_COMMIT:-9a51bed1322bd17800e76cbaa39a7490230022bd}"
+AMD_FLAGCX_COMMIT="${AMD_FLAGCX_COMMIT:-591cfbf}"
 MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06}"
 MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
 MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
@@ -102,7 +109,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin, amd (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -132,6 +139,14 @@ VERSIONS (override via environment variables):
     METAX_PYTHON_VERSION Python version used in generated image tag (default: ${METAX_PYTHON_VERSION})
     METAX_PYTHON_TAG     Python tag fragment used in generated image tag (default: ${METAX_PYTHON_TAG})
     METAX_VLLM_VERSION   vLLM version installed in empty mode (default: ${METAX_VLLM_VERSION})
+  AMD:
+    AMD_BASE_IMAGE       AMD ROCm base image, Torch must target gfx1100 (default: ${AMD_BASE_IMAGE})
+    AMD_FLAGOS_RUNTIME_IMAGE
+                         Image supplying FlagTree ${AMD_FLAGTREE_VERSION}; it is not on PyPI
+                         (default: ${AMD_FLAGOS_RUNTIME_IMAGE})
+    AMD_VLLM_VERSION     vLLM empty-mode version (default: ${AMD_VLLM_VERSION})
+    AMD_FLAGGEMS_COMMIT  FlagGems commit (needs triton_extra_name="hip"; default: ${AMD_FLAGGEMS_COMMIT})
+    AMD_FLAGCX_COMMIT    FlagCX commit (default: ${AMD_FLAGCX_COMMIT})
   MUSA:
     MUSA_BASE_IMAGE      Moore Threads base image (default: ${MUSA_BASE_IMAGE})
     MUSA_VERSION         MUSA version used in image tag (default: ${MUSA_VERSION})
@@ -428,8 +443,27 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-ci"
     fi
+elif [[ "${PLATFORM}" == "amd" ]]; then
+    PYTHON_VERSION="${AMD_PYTHON_VERSION}"
+    VLLM_VERSION="${AMD_VLLM_VERSION}"
+    # The plugin and the shared FlagGems-vllm installer are COPY inputs, so the
+    # context is the repository root rather than docker/amd/.
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    BUILD_ARGS+=(
+        --build-arg "AMD_BASE_IMAGE=${AMD_BASE_IMAGE}"
+        --build-arg "FLAGOS_RUNTIME_IMAGE=${AMD_FLAGOS_RUNTIME_IMAGE}"
+        --build-arg "VLLM_VERSION=${AMD_VLLM_VERSION}"
+        --build-arg "FLAGTREE_VERSION=${AMD_FLAGTREE_VERSION}"
+        --build-arg "FLAGGEMS_COMMIT=${AMD_FLAGGEMS_COMMIT}"
+        --build-arg "FLAGCX_COMMIT=${AMD_FLAGCX_COMMIT}"
+        --build-arg "INDEX_URL=${INDEX_URL}"
+        --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="amd-vllm${VLLM_VERSION}-rocm-gfx1100-py${AMD_PYTHON_VERSION}-${TARGET}"
+    fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', or 'kunlunxin'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', 'kunlunxin', or 'amd'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"

@@ -507,6 +507,41 @@ class TestCallOpIntegration:
         # Fallback must not have been attempted
         assert call_sequence == ["failing"]
 
+    def test_amd_inplace_dispatch_does_not_retry_after_a_write(self, monkeypatch):
+        from vllm_fl.dispatch.config.utils import get_config_path
+
+        monkeypatch.setenv("VLLM_FL_CONFIG", str(get_config_path("amd")))
+        monkeypatch.delenv("VLLM_FL_STRICT", raising=False)
+        manager = get_default_manager()
+        manager._state.initialized = True
+        manager._state.init_pid = os.getpid()
+
+        def failing_impl(tensor):
+            tensor.add_(1)
+            raise RuntimeError("Primary failed after a write")
+
+        manager.registry.register_impl(
+            OpImpl(
+                op_name="rms_norm",
+                impl_id="default.partial_write",
+                kind=BackendImplKind.DEFAULT,
+                fn=failing_impl,
+            )
+        )
+        manager.registry.register_impl(
+            OpImpl(
+                op_name="rms_norm",
+                impl_id="reference.retry",
+                kind=BackendImplKind.REFERENCE,
+                fn=lambda tensor: tensor.add_(1),
+            )
+        )
+
+        tensor = torch.zeros(1)
+        with pytest.raises(RuntimeError, match="Primary failed after a write"):
+            CachedOp("rms_norm")(tensor)
+        torch.testing.assert_close(tensor, torch.ones(1))
+
     def test_vendor_filtering(self):
         """Test that vendor filtering works through call_op."""
         manager = get_default_manager()

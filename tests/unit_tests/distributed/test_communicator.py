@@ -16,6 +16,9 @@ from vllm.distributed.device_communicators.cuda_communicator import (  # noqa: E
 )
 
 from vllm_fl.distributed.communicator import CommunicatorFL  # noqa: E402
+from vllm_fl.distributed.cuda_flagcx_communicator import (  # noqa: E402
+    CudaFlagcxCommunicatorFL,
+)
 from vllm_fl.distributed.nvidia_communicator import (  # noqa: E402
     NvidiaCommunicatorFL,
 )
@@ -159,7 +162,12 @@ def test_nvidia_bridge_satisfies_cuda_graph_contract(mocked_base_init):
     assert NvidiaCommunicatorFL.broadcast is CommunicatorFL.broadcast
 
 
-def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init):
+@pytest.mark.parametrize(
+    "communicator_cls", [NvidiaCommunicatorFL, CudaFlagcxCommunicatorFL]
+)
+def test_flagcx_bridge_enters_native_graph_capture(
+    monkeypatch, mocked_base_init, communicator_cls
+):
     from contextlib import nullcontext
     from types import SimpleNamespace
 
@@ -167,7 +175,7 @@ def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init
 
     from vllm.distributed.parallel_state import GroupCoordinator
 
-    communicator = NvidiaCommunicatorFL(cpu_group=object())
+    communicator = communicator_cls(cpu_group=object())
     coordinator = SimpleNamespace(device_communicator=communicator)
     stream = object()
     capture_context = SimpleNamespace(stream=stream)

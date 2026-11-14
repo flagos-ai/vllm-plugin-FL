@@ -124,6 +124,10 @@ def _normalize_process_group_backend(backend: str) -> str:
         # CommunicatorFL uses FlagCX for tensor-parallel collectives; torch
         # process groups still use the NPU's native backend.
         return "hccl"
+    if backend == "flagcx" and getattr(current_platform, "vendor_name", None) == "amd":
+        # Keep Torch process groups on RCCL. CommunicatorFL submits TP
+        # collectives to FlagCX directly, including during HIP graph capture.
+        return "nccl"
     return backend
 
 
@@ -549,6 +553,12 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
+            if getattr(current_platform, "vendor_name", "") == "amd":
+                from vllm_fl.dispatch.backends.vendor.amd.v2_runner_compat import (
+                    install_v2_runner_compat,
+                )
+
+                install_v2_runner_compat()
             if getattr(current_platform, "vendor_name", "") == "thead":
                 # Platform-side adaptations for the upstream V2 runner; see
                 # vllm_fl/dispatch/backends/vendor/thead/patches/.
@@ -644,10 +654,25 @@ class WorkerFL(WorkerBase):
 
         maybe_apply_startup_plan(self)
 
+        is_amd = getattr(current_platform, "vendor_name", None) == "amd"
+        if is_amd:
+            # The upstream V2 runner can compile during either profile_run.
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops(amd_compile=True)
+
+        # The first compile uses the active config to select the graph wrapper
+        # whose registry the upstream V2 graph profiler manages.
+        profile_config = (
+            set_current_vllm_config(self.vllm_config)
+            if is_amd and self.use_v2_model_runner
+            else nullcontext()
+        )
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
             # max_num_batched_tokens
-            self.model_runner.profile_run()
+            with profile_config:
+                self.model_runner.profile_run()
 
             msg = (
                 f"Initial free memory {format_gib(self.init_snapshot.free_memory)} "
@@ -670,10 +695,13 @@ class WorkerFL(WorkerBase):
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
-        with memory_profiling(
-            self.init_snapshot,
-            weights_memory=int(self.model_runner.model_memory_usage),
-        ) as profile_result:
+        with (
+            memory_profiling(
+                self.init_snapshot,
+                weights_memory=int(self.model_runner.model_memory_usage),
+            ) as profile_result,
+            profile_config,
+        ):
             self.model_runner.profile_run()
 
         # Profile CUDA graph memory if graphs will be captured.
@@ -883,6 +911,9 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
+        # vLLM 0.32 dropped ModelConfig.enable_return_routed_experts when the
+        # routed-experts plumbing moved to the aux-output connector; treat an
+        # absent field as the feature being off.
         if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 

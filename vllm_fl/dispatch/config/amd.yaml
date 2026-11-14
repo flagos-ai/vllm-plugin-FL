@@ -1,0 +1,82 @@
+# vLLM-FL Dispatch Configuration for AMD GPU (ROCm / HIP)
+# Auto-loaded when running on AMD hardware (flag_gems vendor_name == "amd").
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Resolve an available backend before invocation. An in-place kernel may
+# already have modified its inputs when execution raises.
+strict: true
+
+# Vendor Whitelist (Optional, allows all if not set)
+# allow_vendors:
+#   - amd
+
+# Vendor Blacklist (Optional)
+# deny_vendors:
+#   - cuda
+
+
+# Per-operator backend execution order (Optional)
+# Resolve the first available backend in the specified order.
+#
+# Supported tokens:
+#   - flagos    : Default FlagGems implementation (Triton via FlagTree)
+#   - reference : PyTorch reference implementation
+#   - vendor    : Any available vendor backend (auto-detected)
+#   - vendor:amd: AMD-specific vendor backend (attention backend selection)
+#
+# On AMD/ROCm, FlagGems runs with generic (non-arch-specialized) Triton kernels
+# on gfx1100. Prefer FlagGems when available, then the PyTorch reference.
+# The AMD vendor backend supplies attention-backend selection.
+op_backends:
+  attention_backend:
+    - vendor:amd
+    - flagos
+    - reference
+
+  rms_norm:
+    - flagos
+    - reference
+
+  silu_and_mul:
+    - flagos
+    - reference
+
+  gelu_and_mul:
+    - flagos
+    - reference
+
+  rotary_embedding:
+    - flagos
+    - reference
+
+  fused_moe:
+    - flagos
+    - reference
+
+# FlagOS operator blacklist
+# Blacklist only ops that are known to have issues
+flagos_blacklist:
+  - cat
+  # FlagGems' pow lowers to CUDA's __nv_powf, which the FlagTree AMD backend
+  # rejects ("Implicit conversion of CUDA __nv_powf device function has been
+  # dropped"). Hit through rotary embedding's _compute_inv_freq
+  # (``base ** exponent`` -> ``pow.Scalar``). FlagGems registers
+  # overload-qualified names, so each overload must be listed. Fall back to the
+  # PyTorch reference until FlagGems emits triton.language.extra.<op>.
+  - pow.Scalar
+  - pow.Tensor_Scalar
+  - pow.Tensor_Tensor
+  - pow_.Scalar
+  - pow_.Tensor
+  - float_power.Scalar
+  - float_power.Tensor_Scalar
+  - float_power.Tensor_Tensor
+  - float_power_.Scalar
+  - float_power_.Tensor
+
+# OOT (Out-of-Tree) operator blacklist
+# These operators will NOT be registered as OOT replacements.
+# oot_blacklist:
+#   - fused_moe

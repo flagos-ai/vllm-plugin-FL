@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""FlagCX must follow the selected TXDA stream between graph regions."""
+"""FlagCX must follow the active accelerator stream during graph capture."""
 
 import ast
 from pathlib import Path
@@ -10,7 +10,7 @@ import pytest
 
 
 @pytest.fixture
-def stream_selector():
+def stream_selector(request):
     path = (
         Path(__file__).resolve().parents[3]
         / "vllm_fl/distributed/device_communicators/flagcx.py"
@@ -27,11 +27,16 @@ def stream_selector():
         if isinstance(node, ast.FunctionDef) and node.name == "_current_stream"
     )
     runtime = SimpleNamespace(
+        cuda=SimpleNamespace(current_stream=Mock()),
         npu=SimpleNamespace(current_stream=Mock()),
         txda=SimpleNamespace(current_stream=Mock()),
     )
     cached = Mock(return_value=object())
-    namespace = {"torch": runtime, "current_stream": cached}
+    namespace = {
+        "torch": runtime,
+        "current_stream": cached,
+        "_flagcx_amd_source": getattr(request, "param", False),
+    }
     exec(
         compile(ast.Module(body=[method], type_ignores=[]), str(path), "exec"),
         namespace,
@@ -66,3 +71,15 @@ def test_cuda_collectives_keep_the_upstream_stream_helper(stream_selector):
     cached.assert_called_once_with()
     runtime.txda.current_stream.assert_not_called()
     runtime.npu.current_stream.assert_not_called()
+
+
+@pytest.mark.parametrize("stream_selector", [True], indirect=True)
+def test_amd_collectives_follow_the_hip_capture_stream(stream_selector):
+    select, runtime, cached = stream_selector
+    comm = SimpleNamespace(device=SimpleNamespace(type="cuda", index=2))
+    default, capture, after_capture = object(), object(), object()
+    runtime.cuda.current_stream.side_effect = [default, capture, after_capture]
+    assert [select(comm) for _ in range(3)] == [default, capture, after_capture]
+    assert runtime.cuda.current_stream.call_count == 3
+    runtime.cuda.current_stream.assert_called_with(comm.device)
+    cached.assert_not_called()

@@ -171,6 +171,7 @@ class CachedOp:
         "__weakref__",
         "_op_name",
         "_impl",
+        "_amd_compile_ready",
         "_use_manager_call",
         "_manager_id",
         "_manager_epoch",
@@ -180,6 +181,7 @@ class CachedOp:
     def __init__(self, op_name: str) -> None:
         self._op_name = op_name
         self._impl = None
+        self._amd_compile_ready = False
         self._use_manager_call = False
         self._manager_id = -1
         self._manager_epoch = -1
@@ -199,6 +201,19 @@ class CachedOp:
         self._policy_epoch = get_policy_epoch()
 
     def __call__(self, *args, **kwargs):
+        # AMD explicitly warms this op before profiling. The compiled path
+        # calls the resolved implementation without tracing dispatch metadata.
+        if self._amd_compile_ready:
+            import torch
+
+            if torch.compiler.is_compiling():
+                impl = self._impl
+                if impl is None:
+                    raise RuntimeError(
+                        f"CachedOp {self._op_name!r} lost its warmed AMD implementation"
+                    )
+                return impl.fn(*args, **kwargs)
+
         mgr = get_default_manager()
 
         if not _OP_FAST_PATH_ENABLED:
@@ -247,7 +262,7 @@ class CachedOp:
             return mgr.call(self._op_name, *args, **kwargs)
 
 
-def warmup_cached_ops(mgr=None) -> None:
+def warmup_cached_ops(mgr=None, *, amd_compile: bool = False) -> None:
     """Best-effort resolve imported CachedOps before model compilation."""
     if mgr is None:
         mgr = get_default_manager()
@@ -257,6 +272,10 @@ def warmup_cached_ops(mgr=None) -> None:
     for cached_op in tuple(_CACHED_OPS):
         try:
             cached_op.warmup(mgr)
+            if amd_compile:
+                cached_op._amd_compile_ready = (
+                    _OP_FAST_PATH_ENABLED and not is_dump_enabled()
+                )
         except RuntimeError:
             # Optional ops can be unavailable on the active platform.
             continue
