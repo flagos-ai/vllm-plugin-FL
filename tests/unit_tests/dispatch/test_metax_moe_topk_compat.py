@@ -132,14 +132,14 @@ def test_ensure_patches_reapplies_a_successful_early_topk_import(monkeypatch):
     assert calls == [(None, None, None, None, False, None)]
 
 
-def test_missing_mcoplib_installs_torch_route_and_preserves_padding(monkeypatch):
+def test_missing_mcoplib_installs_flaggems_route_and_preserves_padding(monkeypatch):
     ops, compat, _ = _partially_imported_ops(monkeypatch)
     _finish_native_import(ops)
     monkeypatch.setitem(sys.modules, "mcoplib", None)
     monkeypatch.setenv("VLLM_MOE_SKIP_PADDING", "1")
     assert compat.apply() is True
-    assert ops.topk_softmax is compat._topk_softmax_torch
-    assert ops.topk_sigmoid is compat._topk_sigmoid_torch
+    assert ops.topk_softmax is compat._topk_softmax_flaggems
+    assert ops.topk_sigmoid is compat._topk_sigmoid_flaggems
     assert os.environ["VLLM_MOE_SKIP_PADDING"] == "1"
 
 
@@ -150,57 +150,46 @@ def test_installed_but_broken_mcoplib_surfaces_import_failure(monkeypatch):
         compat.apply()
 
 
-@pytest.mark.parametrize("sigmoid", [False, True])
-@pytest.mark.parametrize("renormalize", [False, True])
-@pytest.mark.parametrize("with_bias", [False, True])
-def test_flagos_route_preserves_bias_padding_weights_and_expanded_rows(
-    monkeypatch, sigmoid, renormalize, with_bias
-):
-    package = types.ModuleType("vllm")
-    package.__path__ = []
-    monkeypatch.setitem(sys.modules, "vllm", package)
-    monkeypatch.setitem(sys.modules, "mcoplib", None)
-    monkeypatch.setitem(sys.modules, "torch", torch)
-    ops = types.ModuleType("vllm._custom_ops")
-    monkeypatch.setitem(sys.modules, ops.__name__, ops)
-    monkeypatch.setenv("VLLM_MOE_SKIP_PADDING", "1")
-    _load(monkeypatch, "metax_pure_topk_test", _PATCHES / "moe_topk_compat.py")
-    logits = torch.tensor(
-        [[2.0, 1.0, 0.0, -1.0], [0.0, 0.0, 0.0, 0.0], [float("nan")] * 4],
-        device="cpu",
-    )
-    bias = torch.tensor([0.0, 0.0, 0.0, 10.0]) if with_bias else None
-    weights = torch.empty((3, 2), dtype=torch.float32)
-    ids = torch.empty((3, 2), dtype=torch.int32)
-    expanded_rows = torch.empty((3, 2), dtype=torch.int32)
-    padding = torch.tensor([False, False, True])
-    args = (weights, ids, expanded_rows, logits, renormalize, bias)
-    scale = 2.5 if sigmoid else 1.0
-    if sigmoid:
-        ops.topk_sigmoid(*args, routed_scaling_factor=scale, is_padding=padding)
-    else:
-        ops.topk_softmax(*args, is_padding=padding)
+def _install_flaggems_topk(monkeypatch, scoring_func, operator):
+    provider = types.ModuleType("flaggems_vllm")
+    setattr(provider, f"topk_{scoring_func}", operator)
+    monkeypatch.setitem(sys.modules, provider.__name__, provider)
 
-    # Large expert-3 bias changes expert selection, never its output weight.
-    # The second row ties, so lower expert IDs must win in a stable order.
-    expected_ids = torch.tensor(
-        [[3, 0], [3, 0], [-1, -1]] if with_bias else [[0, 1], [0, 1], [-1, -1]],
-        dtype=torch.int32,
-    )
-    torch.testing.assert_close(ids, expected_ids)
-    probabilities = (
-        torch.sigmoid(logits[:2]) if sigmoid else torch.softmax(logits[:2], -1)
-    )
-    expected_weights = probabilities.gather(1, expected_ids[:2].long())
-    if renormalize:
-        expected_weights = expected_weights / expected_weights.sum(-1, keepdim=True)
-    expected_weights *= scale
-    torch.testing.assert_close(weights[:2], expected_weights)
-    assert torch.count_nonzero(weights[2]) == 0
-    torch.testing.assert_close(
-        expanded_rows, torch.tensor([[0, 3], [1, 4], [2, 5]], dtype=torch.int32)
-    )
-    assert os.environ["VLLM_MOE_SKIP_PADDING"] == "1"
+
+@pytest.mark.parametrize("scoring_func", ["softmax", "sigmoid"])
+@pytest.mark.parametrize("extended", [False, True])
+def test_flagos_route_forwards_extended_arguments(monkeypatch, scoring_func, extended):
+    ops, compat, _ = _partially_imported_ops(monkeypatch)
+    _finish_native_import(ops)
+    monkeypatch.setitem(sys.modules, "mcoplib", None)
+    assert compat.apply() is True
+
+    seen = []
+
+    def provider(*args, **kwargs):
+        seen.append((args, kwargs))
+
+    _install_flaggems_topk(monkeypatch, scoring_func, provider)
+    tensors = tuple(object() for _ in range(4))
+    bias, padding = (object(), object()) if extended else (None, None)
+
+    if scoring_func == "sigmoid":
+        scale = 2.5 if extended else None
+        ops.topk_sigmoid(*tensors, extended, bias, scale, padding)
+        kwargs = {"routed_scaling_factor": 2.5 if extended else 1.0}
+    else:
+        ops.topk_softmax(*tensors, extended, bias, padding)
+        kwargs = {}
+    assert seen == [
+        (
+            (*tensors, extended),
+            {
+                **kwargs,
+                "e_score_correction_bias": bias,
+                "is_padding": padding,
+            },
+        )
+    ]
 
 
 def _fl_router(monkeypatch, compat, vendor, padding, upstream, cached):
@@ -231,7 +220,7 @@ def _fl_router(monkeypatch, compat, vendor, padding, upstream, cached):
 
 
 @pytest.mark.parametrize("scoring_func", ["softmax", "sigmoid"])
-def test_fl_metax_router_uses_stable_torch_bridge_after_upstream_overwrite(
+def test_fl_metax_router_uses_stable_flaggems_bridge_after_upstream_overwrite(
     monkeypatch, scoring_func
 ):
     package = types.ModuleType("vllm")
@@ -249,25 +238,29 @@ def test_fl_metax_router_uses_stable_torch_bridge_after_upstream_overwrite(
         )
 
     padding = torch.tensor([False, False, True])
-    route = _fl_router(monkeypatch, compat, "metax", padding, forbidden, forbidden)
     logits = torch.tensor([[2.0, 1.0, 0.0, -1.0], [-1.0, 0.0, 3.0, 1.0], [1.0] * 4])
+    expected_ids = torch.tensor([[0, 1], [2, 3], [-1, -1]], dtype=torch.int64)
+    expected_weights = torch.tensor([[0.75, 0.25], [0.6, 0.4], [0.0, 0.0]])
+    expected_rows = torch.tensor([[0, 3], [1, 4], [2, 5]], dtype=torch.int32)
+
+    def provider(weights, ids, rows, gating, normalize, **kwargs):
+        assert gating is logits and normalize
+        assert kwargs["is_padding"] is padding
+        assert kwargs["e_score_correction_bias"] is None
+        if scoring_func == "sigmoid":
+            assert kwargs["routed_scaling_factor"] == 1.0
+        weights.copy_(expected_weights)
+        ids.copy_(expected_ids)
+        rows.copy_(expected_rows)
+
+    _install_flaggems_topk(monkeypatch, scoring_func, provider)
+    route = _fl_router(monkeypatch, compat, "metax", padding, forbidden, forbidden)
     weights, ids, expanded = route(
         torch.zeros(3, 8), logits, 2, True, torch.int64, scoring_func
     )
-    probabilities = (
-        torch.softmax(logits[:2], -1)
-        if scoring_func == "softmax"
-        else logits[:2].sigmoid()
-    )
-    expected_ids = torch.tensor([[0, 1], [2, 3]], dtype=torch.int64)
-    expected_weights = probabilities.gather(1, expected_ids)
-    expected_weights /= expected_weights.sum(-1, keepdim=True)
-    torch.testing.assert_close(ids[:2], expected_ids)
-    torch.testing.assert_close(weights[:2], expected_weights)
-    assert (ids[2] == -1).all() and (weights[2] == 0).all()
-    torch.testing.assert_close(
-        expanded, torch.tensor([[0, 3], [1, 4], [2, 5]], dtype=torch.int32)
-    )
+    torch.testing.assert_close(ids, expected_ids)
+    torch.testing.assert_close(weights, expected_weights)
+    torch.testing.assert_close(expanded, expected_rows)
     assert not getattr(ops.topk_softmax, compat._PATCH_FLAG, False)
 
 

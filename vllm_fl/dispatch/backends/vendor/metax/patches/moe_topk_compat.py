@@ -2,7 +2,7 @@
 # 2026 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 """MetaX router bridges for native mcoplib and pure FlagOS images.
 
-vLLM 0.28 appends new trailing arguments to the routed top-k helpers:
+vLLM 0.32 passes new trailing arguments to the routed top-k helpers:
 
   vllm._custom_ops.topk_softmax(..., renormalize, e_score_correction_bias, is_padding)
   vllm._custom_ops.topk_sigmoid(..., renormalize, e_score_correction_bias,
@@ -23,8 +23,8 @@ vllm/model_executor/layers/fused_moe/router/*, and
 from vllm._custom_ops import topk_softmax in the MetaX vendor backend), so a
 single module-attribute rebind covers every call path.
 
-Images without mcoplib use Torch for the native router's padding, sigmoid and
-correction-bias paths. The regular FL softmax route still uses CachedOp.
+Images without mcoplib forward the extended router calls to FlagGems-vllm's
+public operators. The regular FL softmax route uses CachedOp.
 
 TODO: drop the six-argument bridge once mcoplib ships the extended signatures.
 """
@@ -136,62 +136,7 @@ def _make_topk_sigmoid(ns):
     return topk_sigmoid
 
 
-def _topk_torch(
-    topk_weights,
-    topk_ids,
-    token_expert_indices,
-    gating_output,
-    renormalize,
-    e_score_correction_bias,
-    is_padding,
-    *,
-    sigmoid=False,
-    routed_scaling_factor=1.0,
-):
-    """Bridge the native router ABI when a FlagOS image has no mcoplib.
-
-    The ordinary FL softmax route still uses CachedOp. This path covers
-    padding, correction bias and sigmoid routes delegated to vLLM's helpers.
-    Selection and expanded row indices follow csrc/moe/topk_softmax_kernels.cu.
-    """
-    import torch
-
-    logits = gating_output.float()
-    scores = torch.sigmoid(logits) if sigmoid else torch.softmax(logits, dim=-1)
-    scores = torch.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
-    choices = scores
-    if e_score_correction_bias is not None:
-        choices = choices + e_score_correction_bias.float()
-    # The native argmax breaks ties toward the lower expert ID. torch.topk
-    # does not guarantee that ordering; stable argsort does.
-    selected = torch.argsort(choices, dim=-1, descending=True, stable=True)[
-        :, : topk_weights.shape[-1]
-    ]
-    weights = scores.gather(1, selected)
-    if renormalize:
-        denominator = weights.sum(dim=-1, keepdim=True)
-        weights = weights / torch.where(
-            denominator > 0, denominator, torch.ones_like(denominator)
-        )
-    if routed_scaling_factor is not None:
-        weights = weights * routed_scaling_factor
-    if is_padding is not None:
-        padding = is_padding.reshape(-1, 1)
-        weights = torch.where(padding, 0.0, weights)
-        selected = torch.where(padding, -1, selected)
-    topk_weights.copy_(weights)
-    topk_ids.copy_(selected)
-    num_tokens, top_k = topk_weights.shape
-    rows = torch.arange(
-        num_tokens, dtype=token_expert_indices.dtype, device=gating_output.device
-    )[:, None]
-    slots = torch.arange(
-        top_k, dtype=token_expert_indices.dtype, device=gating_output.device
-    )[None, :]
-    token_expert_indices.copy_(slots * num_tokens + rows)
-
-
-def _topk_softmax_torch(
+def _topk_softmax_flaggems(
     topk_weights,
     topk_ids,
     token_expert_indices,
@@ -200,18 +145,20 @@ def _topk_softmax_torch(
     e_score_correction_bias=None,
     is_padding=None,
 ):
-    _topk_torch(
+    from flaggems_vllm import topk_softmax
+
+    topk_softmax(
         topk_weights,
         topk_ids,
         token_expert_indices,
         gating_output,
         renormalize,
-        e_score_correction_bias,
-        is_padding,
+        e_score_correction_bias=e_score_correction_bias,
+        is_padding=is_padding,
     )
 
 
-def _topk_sigmoid_torch(
+def _topk_sigmoid_flaggems(
     topk_weights,
     topk_ids,
     token_expert_indices,
@@ -221,32 +168,37 @@ def _topk_sigmoid_torch(
     routed_scaling_factor=1.0,
     is_padding=None,
 ):
-    _topk_torch(
+    from flaggems_vllm import topk_sigmoid
+
+    topk_sigmoid(
         topk_weights,
         topk_ids,
         token_expert_indices,
         gating_output,
         renormalize,
-        e_score_correction_bias,
-        is_padding,
-        sigmoid=True,
-        routed_scaling_factor=routed_scaling_factor,
+        e_score_correction_bias=e_score_correction_bias,
+        routed_scaling_factor=(
+            1.0 if routed_scaling_factor is None else routed_scaling_factor
+        ),
+        is_padding=is_padding,
     )
 
 
-setattr(_topk_softmax_torch, _PATCH_FLAG, True)
-setattr(_topk_sigmoid_torch, _PATCH_FLAG, True)
+setattr(_topk_softmax_flaggems, _PATCH_FLAG, True)
+setattr(_topk_sigmoid_flaggems, _PATCH_FLAG, True)
+
+
+def _make_topk_operators(ns):
+    if ns is None:
+        return {"softmax": _topk_softmax_flaggems, "sigmoid": _topk_sigmoid_flaggems}
+    return {"softmax": _make_topk_softmax(ns), "sigmoid": _make_topk_sigmoid(ns)}
 
 
 def get_topk_operator(scoring_func):
     """Return our stable callable, independent of _custom_ops rebinding."""
     global _topk_operators
     if _topk_operators is None:
-        ns = _moe_c_namespace()
-        _topk_operators = {
-            "softmax": _topk_softmax_torch if ns is None else _make_topk_softmax(ns),
-            "sigmoid": _topk_sigmoid_torch if ns is None else _make_topk_sigmoid(ns),
-        }
+        _topk_operators = _make_topk_operators(_moe_c_namespace())
     return _topk_operators[scoring_func]
 
 
@@ -254,10 +206,7 @@ def apply():
     """Rebind the routed top-k entry points. Returns True when applied."""
     global _topk_operators
     ns = _moe_c_namespace()
-    _topk_operators = {
-        "softmax": _topk_softmax_torch if ns is None else _make_topk_softmax(ns),
-        "sigmoid": _topk_sigmoid_torch if ns is None else _make_topk_sigmoid(ns),
-    }
+    _topk_operators = _make_topk_operators(ns)
     if ns is not None:
         _force_disable_skip_padding()
     try:
@@ -280,7 +229,9 @@ def apply():
     logger.info(
         "MetaX moe topk compat applied: vllm._custom_ops.topk_softmax/topk_sigmoid "
         "rebound to %s",
-        "Torch FlagOS fallback" if ns is None else "6-argument mcoplib _moe_C forms",
+        "FlagGems-vllm public operators"
+        if ns is None
+        else "6-argument mcoplib _moe_C forms",
     )
     return True
 
