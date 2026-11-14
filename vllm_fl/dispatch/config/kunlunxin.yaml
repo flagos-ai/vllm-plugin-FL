@@ -94,6 +94,8 @@ flagos_blacklist:
   # Vocabulary-wide sampling reaches an XPU radix-sort kernel launch failure.
   - sort
   - sort_stable
+  # FlagTree cannot lower the broadcast tensor comparison used for top-k.
+  - lt
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
