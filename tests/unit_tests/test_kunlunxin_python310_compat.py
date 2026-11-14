@@ -16,6 +16,7 @@ assert _SPEC is not None and _SPEC.loader is not None
 _COMPAT = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_COMPAT)
 _FILENAME = "vllm/example.py"
+_OUTLINES_FILENAME = "vllm/v1/structured_output/backend_outlines.py"
 
 
 def test_mixed_typing_import_preserves_aliases_and_indentation():
@@ -46,6 +47,28 @@ def test_datetime_utc_backports_import_and_attribute():
     _, imported_utc, attribute_utc, delta = namespace["values"]
     assert imported_utc is attribute_utc is timezone.utc
     assert delta.days == 1
+
+
+def test_outlines_regex_internals_use_python310_modules():
+    source = "from re import _constants, _parser  # type: ignore[attr-defined]\n"
+    assert _COMPAT.patch_python_source(source, _OUTLINES_FILENAME) == (
+        "import sre_constants as _constants\n"
+        "import sre_parse as _parser  # type: ignore[attr-defined]\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "filename"),
+    [
+        ("from re import _constants, _parser", _FILENAME),
+        ("from re import _parser", _OUTLINES_FILENAME),
+        ("from re import _constants, _parser as parser", _OUTLINES_FILENAME),
+        ("if True:\n    from re import _constants, _parser", _OUTLINES_FILENAME),
+    ],
+)
+def test_regex_backport_rejects_unrecognized_imports(source, filename):
+    with pytest.raises(ValueError, match="Unexpected regex internals import"):
+        _COMPAT.patch_python_source(source, filename)
 
 
 def test_exception_notes_keep_future_imports_and_work_without_add_note(monkeypatch):

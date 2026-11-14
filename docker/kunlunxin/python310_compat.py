@@ -63,6 +63,7 @@ UNSUPPORTED_ATTRIBUTES = {
     "sys": {"exception"},
     "datetime": {"UTC"},
 }
+REGEX_BACKPORTS = {"_constants": "sre_constants", "_parser": "sre_parse"}
 
 
 EXCEPTION_HELPER_PATH = "vllm/_flagos_python310.py"
@@ -88,7 +89,7 @@ def _digest(data: bytes) -> str:
 
 
 def patch_python_source(source: str, filename: str) -> str:
-    """Move unsupported typing names to the maintained typing_extensions API."""
+    """Rewrite supported Python 3.11 APIs to Python 3.10 equivalents."""
     try:
         tree = ast.parse(source, filename=filename, feature_version=(3, 10))
     except SyntaxError as exc:
@@ -110,6 +111,23 @@ def patch_python_source(source: str, filename: str) -> str:
                 raise ValueError(
                     f"Unbackported Python API in {filename}:{node.lineno}: {node.module}"
                 )
+            if node.module == "re" and names & REGEX_BACKPORTS.keys():
+                if (
+                    filename != "vllm/v1/structured_output/backend_outlines.py"
+                    or names != REGEX_BACKPORTS.keys()
+                    or node not in tree.body
+                    or any(alias.asname for alias in node.names)
+                ):
+                    raise ValueError(
+                        f"Unexpected regex internals import in {filename}:{node.lineno}"
+                    )
+                replacement = "\n".join(
+                    f"import {REGEX_BACKPORTS[alias.name]} as {alias.name}"
+                    for alias in node.names
+                )
+                start = line_offsets[node.lineno - 1] + node.col_offset
+                end = line_offsets[node.end_lineno - 1] + node.end_col_offset
+                edits.append((start, end, replacement.encode("utf-8")))
             if node.module == "datetime" and "UTC" in names:
                 utc = next(alias for alias in node.names if alias.name == "UTC")
                 others = [alias for alias in node.names if alias.name != "UTC"]
