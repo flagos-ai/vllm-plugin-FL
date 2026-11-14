@@ -1165,6 +1165,18 @@ io_dump:
 class TestStepSummary:
     """Test that advance_step logs a summary of seen modules and ops."""
 
+    def setup_method(self):
+        # Keep the module-level step/counter state isolated from tests that
+        # run before this class, including under pytest-xdist.
+        reset_step()
+        disable_io_dump()
+        reset_exec_order()
+
+    def teardown_method(self):
+        disable_io_dump()
+        reset_step()
+        reset_exec_order()
+
     def test_step_advance_logs_summary(self, dump_dir, caplog):
         """After dump_before/dump_after, advance_step should log a summary."""
         enable_io_dump(dump_dir)
