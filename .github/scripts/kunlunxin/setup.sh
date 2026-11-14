@@ -11,6 +11,10 @@ if [[ -r /etc/bash_env.sh ]]; then
   source /etc/bash_env.sh
 fi
 
+# The base image exports an operator whitelist from its Bash startup profile.
+# Keep the native library paths loaded above and clear out the CI restriction.
+unset VLLM_FL_FLAGOS_WHITELIST BASH_ENV
+
 if [[ -x /flagos/bin/python ]]; then
   export PATH="/flagos/bin:${PATH}"
 fi
@@ -76,6 +80,9 @@ if [[ -n "${FLAGCX_PATH:-}" && -d "${FLAGCX_PATH}/build/lib" ]]; then
 fi
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
+  # GitHub Actions starts each step in a new shell. Override both image
+  # defaults before that shell starts so it cannot re-load the whitelist.
+  printf '%s\n' 'BASH_ENV=' 'VLLM_FL_FLAGOS_WHITELIST=' >> "${GITHUB_ENV}"
   for name in \
     PATH \
     PYTHONPATH \

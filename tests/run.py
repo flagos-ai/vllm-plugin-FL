@@ -132,6 +132,10 @@ class TestRunner:
         """Discover and run tests, return 0 if all passed."""
         # Apply platform environment defaults
         self.config.apply_env_defaults()
+        if self.config.platform == "kunlunxin":
+            os.environ.pop("VLLM_FL_FLAGOS_WHITELIST", None)
+            os.environ.pop("BASH_ENV", None)
+            print("[run] Kunlunxin: FlagGems whitelist is unset in test processes.")
 
         # Inject platform info as env vars for conftest.py to read
         os.environ["FL_TEST_PLATFORM"] = self.config.platform

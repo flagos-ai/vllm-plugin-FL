@@ -79,13 +79,15 @@ op_backends:
     - vendor
     - reference
 
-# Keep unvalidated ATen kernels on the vendor path. On P800, FlagGems
-# large KV-cache allocations and small gather/fill kernels can fault.
-flagos_whitelist:
-  - silu_and_mul
-  - rms_norm
-  - rotary_embedding
-
+flagos_blacklist:
+  # Qwen3.6 vision RoPE uses scalar-base pow during model construction.
+  # FlagTree 0.7 fails to lower the FlagGems P800 pow_scalar kernel.
+  - pow_scalar
+  # The FlagGems copy kernel requires the unavailable TLE UNI_SRAM API.
+  # RoPE table concatenation calls copy_ internally during model startup.
+  - copy_
+  # Vision SDPA uses 72-wide heads that the FlagGems XPU matmul cannot lower.
+  - _scaled_dot_product_attention_math
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
