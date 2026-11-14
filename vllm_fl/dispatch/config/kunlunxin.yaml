@@ -91,6 +91,9 @@ flagos_blacklist:
   - zero_
   # The XPU nonzero kernel faults on the dense bool grammar mask at warmup.
   - nonzero
+  # Vocabulary-wide sampling reaches an XPU radix-sort kernel launch failure.
+  - sort
+  - sort_stable
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
