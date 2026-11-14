@@ -10,6 +10,7 @@ import torch
 from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.topk_topp_compat import (
     apply_topk_topp_compat,
 )
+from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 
 @pytest.mark.parametrize(
@@ -60,3 +61,62 @@ def test_v2_top_p_keeps_threshold_crossing_token(monkeypatch, backend, device_ty
     )
     torch.testing.assert_close(filtered, base.masked_fill(~keep, -torch.inf))
     assert sampled.tolist() == [0, 2, 1]
+
+
+@pytest.mark.gpu
+@pytest.mark.flaggems
+def test_v2_full_vocab_top_k_top_p_matches_native_policy(monkeypatch, backend):
+    if backend != "kunlunxin":
+        pytest.skip("requires a Kunlunxin accelerator")
+    flag_gems = pytest.importorskip("flag_gems")
+    if flag_gems.vendor_name != "kunlunxin":
+        pytest.skip("requires Kunlunxin FlagGems")
+    sampler_ops = pytest.importorskip("vllm.v1.sample.ops.topk_topp_sampler")
+    v2 = pytest.importorskip("vllm.v1.worker.gpu.sample.sampler")
+    for name in (
+        "VLLM_FL_CONFIG",
+        "VLLM_FL_FLAGOS_WHITELIST",
+        "VLLM_FL_FLAGOS_BLACKLIST",
+        "VLLM_FL_FLAGOS_BLACKLIST_APPEND",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+    assert whitelist is None
+    assert blacklist
+
+    # Exercise the same V2 filtering entry as runtime. Capture the logits
+    # passed to Gumbel sampling so randomness cannot hide a mask regression.
+    monkeypatch.setattr(sampler_ops, "HAS_TRITON", True)
+    monkeypatch.setattr(sampler_ops, "xpu_sampler_supported", lambda: True)
+    monkeypatch.setattr(v2, "xpu_sampler_supported", lambda: True)
+    monkeypatch.setattr(
+        v2, "gumbel_sample", lambda logits, *args, **kwargs: logits.argmax(-1)
+    )
+    apply_topk_topp_compat()
+    batch_size, vocab_size = 4, 248320
+    generator = torch.Generator().manual_seed(2030)
+    logits = torch.randn((batch_size, vocab_size), generator=generator)
+    logits[:, :3] = torch.tensor([13.0, 12.0, 11.0])
+    logits = logits.cuda()
+    top_k = torch.full((batch_size,), 50, dtype=torch.int32, device=logits.device)
+    top_p = torch.full((batch_size,), 0.7, device=logits.device)
+    slots = torch.arange(batch_size, device=logits.device)
+    sampler = object.__new__(v2.Sampler)
+    sampler.use_fp64_gumbel = False
+    sampler.sampling_states = SimpleNamespace(
+        temperature=SimpleNamespace(gpu=torch.ones_like(top_p)),
+        seeds=SimpleNamespace(gpu=slots),
+    )
+    expected = sampler_ops.apply_top_k_top_p_pytorch(logits.clone(), top_k, top_p)
+    # Top-k leaves 50 values before the cumulative distribution; top-p must
+    # reduce them further instead of leaving the entire top-k set after NaNs.
+    assert torch.isfinite(expected).sum(dim=-1).tolist() == [2] * batch_size
+
+    with flag_gems.use_gems(exclude=blacklist):
+        sampled, filtered = sampler._sample_random(
+            logits, slots, np.arange(batch_size), slots, top_k, top_p, False
+        )
+        torch.cuda.synchronize()
+
+    torch.testing.assert_close(filtered, expected, rtol=0, atol=0)
+    assert sampled.tolist() == [0] * batch_size
