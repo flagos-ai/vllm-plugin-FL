@@ -46,6 +46,7 @@ def test_kunlunxin_policy_keeps_only_known_kernel_exclusions():
         "pow_scalar",
         "copy_",
         "_scaled_dot_product_attention_math",
+        "zeros",
     ]
 
 
@@ -137,6 +138,7 @@ def test_hopper_optimization_is_disabled_by_default(monkeypatch):
         "arange_start",
         "topk",
         "_scaled_dot_product_attention_math",
+        "zeros",
         "maximum",
         "true_divide",
         "scatter_",
