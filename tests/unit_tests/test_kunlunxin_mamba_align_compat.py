@@ -45,7 +45,14 @@ def test_mamba_align_copies_shifted_conv_and_temporal_states(dim_first):
     assert torch.equal(temporal_pages, expected_temporal_pages)
 
 
-def test_mamba_align_looks_up_each_group_and_copies_distinct_blocks():
+def test_mamba_align_looks_up_each_group_and_copies_distinct_blocks(monkeypatch):
+    stack = torch.stack
+
+    def stack_int_metadata(rows, *, dim):
+        assert all(row.dtype != torch.bool for row in rows)
+        return stack(rows, dim=dim)
+
+    monkeypatch.setattr(torch, "stack", stack_int_metadata)
     first = torch.arange(12).view(6, 2)
     second = first.clone() * 10
     expected_first = first.clone()

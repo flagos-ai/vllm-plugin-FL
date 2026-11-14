@@ -65,7 +65,8 @@ def _copy_states(
 
     # Copies run before the model forward or after sampling, outside graph
     # capture/replay. Move only the selected block IDs to the host.
-    rows = torch.stack((needs_copy, token_biases, *block_ids), dim=1).tolist()
+    copy_flags = needs_copy.to(dtype=token_biases.dtype)
+    rows = torch.stack((copy_flags, token_biases, *block_ids), dim=1).tolist()
     for needs_copy_row, token_bias, *blocks in rows:
         if not needs_copy_row:
             continue
