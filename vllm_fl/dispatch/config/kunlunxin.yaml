@@ -89,6 +89,8 @@ flagos_blacklist:
   # V2 KV buffers exceed the FlagTree int32 tile bound for both zeroing paths.
   - zeros
   - zero_
+  # The XPU nonzero kernel faults on the dense bool grammar mask at warmup.
+  - nonzero
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

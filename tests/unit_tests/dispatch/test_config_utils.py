@@ -48,6 +48,7 @@ def test_kunlunxin_policy_keeps_only_known_kernel_exclusions():
         "_scaled_dot_product_attention_math",
         "zeros",
         "zero_",
+        "nonzero",
     ]
 
 
