@@ -51,6 +51,11 @@ def test_kunlunxin_policy_keeps_only_known_kernel_exclusions():
     ]
 
 
+def test_kunlunxin_routes_decoder_attention_to_the_vendor_backend():
+    config = load_platform_config("kunlunxin")
+    assert config["op_backends"]["attention_backend"] == ["vendor:kunlunxin"]
+
+
 def _platform_with_capability(major: int, minor: int = 0):
     return SimpleNamespace(
         get_device_capability=lambda: SimpleNamespace(major=major, minor=minor)

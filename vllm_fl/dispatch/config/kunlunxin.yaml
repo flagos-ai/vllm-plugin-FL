@@ -27,11 +27,9 @@ strict: false
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:kunlunxin : Kunlunxin-specific vendor backend
 op_backends:
-  # attention_backend: prioritize flagos (FlagGems Triton) implementation
+  # XPU FlagTree cannot compile upstream unified attention within the event limit.
   attention_backend:
-    - flagos
-    - vendor
-    - reference
+    - vendor:kunlunxin
 
   # rms_norm: prioritize flagos (FlagGems) implementation, fallback to vendor
   rms_norm:
