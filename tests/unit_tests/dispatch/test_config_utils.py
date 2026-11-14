@@ -46,6 +46,7 @@ def test_kunlunxin_policy_keeps_only_known_kernel_exclusions():
         "pow_scalar",
         "copy_",
         "_scaled_dot_product_attention_math",
+        "_safe_softmax",
         "zeros",
         "zero_",
         "nonzero",

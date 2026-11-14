@@ -86,6 +86,8 @@ flagos_blacklist:
   - copy_
   # Vision SDPA uses 72-wide heads that the FlagGems XPU matmul cannot lower.
   - _scaled_dot_product_attention_math
+  # Concurrent vision requests fault in the math SDPA safe-softmax kernel.
+  - _safe_softmax
   # V2 KV buffers exceed the FlagTree int32 tile bound for both zeroing paths.
   - zeros
   - zero_
