@@ -289,6 +289,17 @@ class ReferenceBackend(Backend):
             return AttentionBackendEnum.FLASHMLA.get_path()
         return AttentionBackendEnum.FLASH_ATTN.get_path()
 
+    def topk_softmax(
+        self, topk_weights, topk_indices, token_expert_indices,
+        gating_output, renormalize=False, e_score_correction_bias=None,
+    ):
+        from .impl.fused_moe import topk_softmax
+
+        return topk_softmax(
+            topk_weights, topk_indices, token_expert_indices,
+            gating_output, renormalize, e_score_correction_bias,
+        )
+
     def invoke_fused_moe_triton_kernel(
         self,
         A,

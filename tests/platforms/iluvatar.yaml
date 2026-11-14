@@ -23,10 +23,16 @@ device_overrides:
     cases:
       - qwen3_6/27b_tp4_eager
       - qwen3_6/35b_a3b_tp4_eager
+      - qwen3_6/27b_tp4_graph
+      - qwen3_6/35b_a3b_tp4_graph
     llm:
+      max_model_len: 4096
+      compilation_config:
+        cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32]
       gpu_memory_utilization: 0.90
       trust_remote_code: true
     serve:
+      adaptation_gate: true
       startup_retries: 300
       extra_engine:
         # Use replicated MM encoder inputs because TP4 weight sharding
@@ -55,6 +61,8 @@ bi_v150:
           qwen3_6:
             - 27b_tp4_eager
             - 35b_a3b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_graph
       nightly:
         inference:
           qwen3_6:
@@ -64,6 +72,8 @@ bi_v150:
           qwen3_6:
             - 27b_tp4_eager
             - 35b_a3b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_graph
         concurrent:
           qwen3_6:
             - 27b_tp4_eager

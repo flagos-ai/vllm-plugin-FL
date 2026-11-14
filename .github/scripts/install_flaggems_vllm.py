@@ -10,6 +10,9 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 RELEASE = "v0.2.0"
 COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
+if os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "iluvatar":
+    COMMIT = "90dd13cd721f2ff139e6f42ef36854518c0b2b95"
+    REPOSITORY = "https://github.com/luoyc123/FlagGems-vllm.git"
 RUNTIME_PACKAGES = ("torch", "flagtree", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
 

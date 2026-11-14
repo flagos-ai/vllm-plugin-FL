@@ -130,6 +130,16 @@ def _weak_ref_gcu_tensors(value: Any) -> Any:
 
 
 def weak_ref_tensors(value: Any) -> Any:
+    if (
+        current_platform.device_type == "cuda"
+        and getattr(current_platform, "vendor_name", None) == "iluvatar"
+    ):
+        from vllm_fl.dispatch.backends.vendor.iluvatar.graph import (
+            _weak_ref_iluvatar_tensors,
+        )
+
+        return _weak_ref_iluvatar_tensors(value)
+
     if current_platform.device_type == "npu":
         # The empty vLLM wheel registers torch.ops._C.weak_ref_tensor as an
         # identity. torch_npu's private primitive creates the real weak tensor

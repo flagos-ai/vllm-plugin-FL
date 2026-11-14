@@ -25,8 +25,8 @@ FlagGems stay on the tested versions.
 
 The Iluvatar dispatch policy is loaded automatically from
 [`vllm_fl/dispatch/config/iluvatar.yaml`](../../vllm_fl/dispatch/config/iluvatar.yaml).
-It keeps `prefer: flagos` and an empty `flagos_blacklist`, so FlagGems handles the
-listed operators with `vendor:iluvatar` and then `reference` as fallbacks. Keep
+It keeps `prefer: flagos` with the operator exclusions recorded in that file.
+The listed operator routes use `vendor:iluvatar` and then `reference` as fallbacks. Keep
 that file and the plugin source from the same revision; the policy is part of the
 validated configuration.
 
