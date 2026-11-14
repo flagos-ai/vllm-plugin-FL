@@ -464,3 +464,30 @@ def test_ascend_allows_layer_only_vllm_config(monkeypatch):
     assert config.model_config is None
     assert config.compilation_config.mode is CompilationMode.NONE
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.NONE
+
+
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+def test_sunrise_preserves_upstream_v2_runner_selection(monkeypatch, requested):
+    import os
+    from types import SimpleNamespace
+
+    import vllm_fl
+    import vllm_fl.utils
+
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    for name in (
+        "_arm_cpu_platform",
+        "_init_vendor_device",
+        "_patch_custom_ops",
+        "_patch_flash_attn_import",
+        "_get_op_config",
+    ):
+        monkeypatch.setattr(vllm_fl, name, lambda: None)
+    monkeypatch.setattr(
+        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="sunrise")
+    )
+    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested

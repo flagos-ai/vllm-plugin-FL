@@ -68,6 +68,7 @@ _VALIDATED_DEVICE_CONTROL_ENV_VARS = {
     "nvidia": "CUDA_VISIBLE_DEVICES",
     "kunlunxin": "CUDA_VISIBLE_DEVICES",
     "tsingmicro": "TXDA_VISIBLE_DEVICES",
+    "sunrise": "TANG_VISIBLE_DEVICES",
     "enflame": "TOPS_VISIBLE_DEVICES",
     "gcu": "TOPS_VISIBLE_DEVICES",
 }

@@ -33,6 +33,10 @@ def _is_ascend_npu_tensor(value: torch.Tensor) -> bool:
     return value.device.type == "npu"
 
 
+def _is_sunrise_ptpu_tensor(value: torch.Tensor) -> bool:
+    return value.device.type == "ptpu"
+
+
 def _sqrtsoftplus_topk(
     gating_output: torch.Tensor,
     e_score_correction_bias: torch.Tensor | None,
@@ -86,13 +90,12 @@ def fused_topk(
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
     M, _ = hidden_states.size()
-    # vLLM 0.32 can pad the batch and marks the extra rows through
-    # ``is_padding``; the native ``_moe_C`` kernel accepts that mask, the FL
-    # kernel does not. Keep upstream's implementation where it exists and
-    # reproduce the mask below otherwise.
-    padding_mask = _get_padding_mask(M)
+    padding_mask = _get_padding_mask(M) if scoring_func == "softmax" else None
+    sunrise_padding = padding_mask is not None and _is_sunrise_ptpu_tensor(
+        gating_output
+    )
     if scoring_func != "softmax" or (
-        padding_mask is not None and _has_native_moe_topk()
+        padding_mask is not None and not sunrise_padding and _has_native_moe_topk()
     ):
         return upstream_fused_topk(
             hidden_states=hidden_states,
@@ -125,9 +128,11 @@ def fused_topk(
         renormalize,
     )
 
-    # Padded rows must not contribute expert weights; upstream hands the same
-    # mask to the native kernel.
-    if padding_mask is not None:
+    if sunrise_padding:
+        # Preserve weights and source rows while marking padded experts invalid.
+        topk_ids.masked_fill_(padding_mask.unsqueeze(-1), -1)
+    elif padding_mask is not None:
+        # Empty builds without the native kernel suppress padded expert weights.
         topk_weights = topk_weights.masked_fill(padding_mask.unsqueeze(1), 0.0)
 
     return topk_weights, topk_ids, token_expert_indices

@@ -1,0 +1,10 @@
+# Installation command excerpt; not an instruction to rerun.
+# Absolute task/source roots are replaced by <TASK_ROOT>/<SOURCE_ROOT>.
+source /opt/sunrise-build/environment.sh
+export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+export SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.dev0
+unset VLLM_VENDOR
+python -m pip install --no-deps --no-build-isolation "<SOURCE_ROOT>/source-7e0a83b5abe39bd6e7796ec9ea957003a5ae0dc4"
+# Backend autoload disabling belongs to this installation process only.
+# The post-install receipt checks Python/package versions unchanged, and compares
+# installed distribution files byte-for-byte with the named source directory.

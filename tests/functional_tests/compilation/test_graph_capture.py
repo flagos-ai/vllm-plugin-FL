@@ -2,7 +2,7 @@
 
 """
 Functional tests for graph capture and replay.
-Tests CUDA/NPU/MUSA/GCU graph functionality for model optimization.
+Tests CUDA/NPU/MUSA/GCU/PTPU graph functionality for model optimization.
 
 Note: Unit tests for GraphOptions, GraphEntry, and GraphWrapper are in
 unit_tests/compilation/test_graph.py. This file only contains functional
@@ -36,6 +36,8 @@ def _new_graph():
         return torch.musa.MUSAGraph()
     elif current_platform.device_type == "gcu":
         return torch.gcu.GCUGraph()
+    elif current_platform.device_type == "ptpu":
+        return torch.ptpu.PTPUGraph()
     else:
         pytest.skip(f"Graph capture not supported on {current_platform.device_type}")
         return None
@@ -55,6 +57,9 @@ def _graph_capture(graph):
             yield
     elif current_platform.device_type == "gcu":
         with torch.gcu.graph(graph):
+            yield
+    elif current_platform.device_type == "ptpu":
+        with torch.ptpu.graph(graph):
             yield
     else:
         pytest.skip(f"Graph capture not supported on {current_platform.device_type}")
@@ -184,3 +189,90 @@ class TestGraphCacheManagement:
         cache[desc] = entry
 
         assert cache[desc].batch_descriptor.num_tokens == 16
+
+
+@pytest.mark.skipif(
+    current_platform.device_type != "ptpu", reason="Sunrise PTPU graph contract"
+)
+class TestPTPUDynamicGraphReplay:
+    """Replay must read changed buffers and overwrite deliberately poisoned outputs."""
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_repeated_replay_reads_dynamic_inputs(self, device, dtype):
+        runtime = torch.ptpu
+        runtime.set_device(device)
+        static_input = torch.zeros(4, 8, device=device, dtype=dtype)
+        static_output = torch.empty_like(static_input)
+        input_address = static_input.data_ptr()
+        output_address = static_output.data_ptr()
+        side_stream = runtime.Stream(device=device)
+        side_stream.wait_stream(runtime.current_stream(device))
+
+        def compute():
+            static_output.copy_(static_input)
+            static_output.mul_(2)
+            static_output.add_(1)
+
+        with runtime.stream(side_stream):
+            for _ in range(3):
+                compute()
+        side_stream.synchronize()
+        graph = runtime.PTPUGraph()
+        with runtime.graph(graph, stream=side_stream):
+            compute()
+        runtime.synchronize()
+
+        for scale, shift in [(1, -16), (-2, 7), (0, 3), (2, -8)]:
+            new_input = (torch.arange(32).reshape(4, 8) * scale + shift).to(dtype)
+            static_input.copy_(new_input.to(device))
+            static_output.fill_(-4096)
+            runtime.synchronize()
+            graph.replay()
+            runtime.synchronize()
+            torch.testing.assert_close(
+                static_output.cpu(), new_input * 2 + 1, rtol=0, atol=0
+            )
+            assert static_input.data_ptr() == input_address
+            assert static_output.data_ptr() == output_address
+
+    def test_repeated_replay_updates_strided_kv_slots(self, device):
+        from flaggems_vllm import reshape_and_cache_flash_strided
+
+        from vllm_fl.dispatch.backends.vendor.sunrise.impl.kv_cache import (
+            split_kv_cache,
+        )
+
+        runtime = torch.ptpu
+        runtime.set_device(device)
+        logical_cache = torch.zeros(2, 2, 16, 16, device=device, dtype=torch.bfloat16)
+        key_cache, value_cache = split_kv_cache(logical_cache, 8)
+        key = torch.ones(2, 2, 8, device=device, dtype=torch.bfloat16)
+        value = torch.ones_like(key)
+        slots = torch.tensor([3, -1], device=device, dtype=torch.int64)
+        side_stream = runtime.Stream(device=device)
+        side_stream.wait_stream(runtime.current_stream(device))
+        with runtime.stream(side_stream):
+            for _ in range(3):
+                reshape_and_cache_flash_strided(
+                    key, value, key_cache, value_cache, slots
+                )
+        side_stream.synchronize()
+        graph = runtime.PTPUGraph()
+        with runtime.graph(graph, stream=side_stream):
+            reshape_and_cache_flash_strided(key, value, key_cache, value_cache, slots)
+        runtime.synchronize()
+
+        for step, mapping in enumerate(([3, -1], [17, 9], [-1, 30]), start=1):
+            logical_cache.zero_()
+            key.fill_(step)
+            value.fill_(step + 10)
+            slots.copy_(torch.tensor(mapping, dtype=torch.int64, device=device))
+            runtime.synchronize()
+            graph.replay()
+            runtime.synchronize()
+            expected = torch.zeros(2, 2, 16, 16, dtype=torch.bfloat16)
+            for slot in mapping:
+                if slot >= 0:
+                    expected[slot // 16, :, slot % 16, :8] = step
+                    expected[slot // 16, :, slot % 16, 8:] = step + 10
+            torch.testing.assert_close(logical_cache.cpu(), expected, rtol=0, atol=0)

@@ -1,0 +1,19 @@
+{
+  "python": "3.10.20 (main, Jul 18 2026, 17:02:35) [Clang 22.1.3 ]",
+  "versions": {
+    "torch": "2.11.0+cpu",
+    "torch-ptpu": "0.2.3+torch2.11",
+    "triton": null,
+    "flagtree": "0.7.0+sunrise3.6",
+    "flag_gems": "5.4.0",
+    "flagcx": "0.14.0+tangrt1.2.0",
+    "vllm": "0.32.0+empty",
+    "vllm-plugin-fl": "0.5.0.dev0"
+  },
+  "plugin_source_commit": "7e0a83b5abe39bd6e7796ec9ea957003a5ae0dc4",
+  "source_file_hashes": {
+    "vllm_fl/patches/sunrise_compiler.py": "2d109b2bba18031848d52542ff7bcd89bee8ddf5de1e2f820630502d9f3e52a5",
+    "vllm_fl/worker/sunrise_v2_model_runner.py": "40cdb8516ab611d98439ac94fda3551f33018372dbdf16abb27eae079cb91181",
+    "vllm_fl/dispatch/backends/vendor/sunrise/impl/graph_capture.py": "a32b2527968ac18426ff443809a11d20c9e91095821fdadec3ee226f1b6c7c88"
+  }
+}

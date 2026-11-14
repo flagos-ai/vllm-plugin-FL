@@ -1,0 +1,92 @@
+{
+  "mode": "graph",
+  "model": "<MODEL_ROOT>/Qwen3-4B",
+  "physical_device": 4,
+  "tensor_parallel_size": 1,
+  "source_sha256": "e0bb0b35491c6f448622cde983350900512a3f6bb2212fea677ea44ae6cd2671",
+  "passed": true,
+  "derived_from": "smoke_v2_graph.py",
+  "native_async_default_preserved": true,
+  "before": [
+    {
+      "rank": 0,
+      "runner": "SunriseV2ModelRunner",
+      "runner_v2": true,
+      "tensor_parallel_size": 1,
+      "enforce_eager": false,
+      "async_scheduling": true,
+      "graph_mode": "FULL_DECODE_ONLY",
+      "capture_sizes": [
+        1,
+        2
+      ],
+      "graphs": [
+        {
+          "descriptor": "BatchExecutionDescriptor(cg_mode=<CUDAGraphMode.FULL: 2>, num_tokens=2, num_reqs=2, uniform_token_count=1, max_query_len=None, num_active_loras=0, num_ubatches=1)",
+          "native_type": "PTPUGraph",
+          "replays": 0
+        },
+        {
+          "descriptor": "BatchExecutionDescriptor(cg_mode=<CUDAGraphMode.FULL: 2>, num_tokens=1, num_reqs=1, uniform_token_count=1, max_query_len=None, num_active_loras=0, num_ubatches=1)",
+          "native_type": "PTPUGraph",
+          "replays": 0
+        }
+      ]
+    }
+  ],
+  "requests": [
+    {
+      "question": "What is the capital of France? Answer with only the city name.",
+      "expected": "paris",
+      "answer": "Paris"
+    },
+    {
+      "question": "Compute 1 + 1. Answer with only the number.",
+      "expected": "2",
+      "answer": "2"
+    },
+    {
+      "question": "What is the capital of China? Answer with only the city name.",
+      "expected": "beijing",
+      "answer": "Beijing."
+    },
+    {
+      "question": "Compute 7 + 5. Answer with only the number.",
+      "expected": "12",
+      "answer": "12"
+    },
+    {
+      "question": "What is the capital of France? Answer with only the city name.",
+      "expected": "paris",
+      "answer": "Paris"
+    }
+  ],
+  "after": [
+    {
+      "rank": 0,
+      "runner": "SunriseV2ModelRunner",
+      "runner_v2": true,
+      "tensor_parallel_size": 1,
+      "enforce_eager": false,
+      "async_scheduling": true,
+      "graph_mode": "FULL_DECODE_ONLY",
+      "capture_sizes": [
+        1,
+        2
+      ],
+      "graphs": [
+        {
+          "descriptor": "BatchExecutionDescriptor(cg_mode=<CUDAGraphMode.FULL: 2>, num_tokens=2, num_reqs=2, uniform_token_count=1, max_query_len=None, num_active_loras=0, num_ubatches=1)",
+          "native_type": "PTPUGraph",
+          "replays": 3
+        },
+        {
+          "descriptor": "BatchExecutionDescriptor(cg_mode=<CUDAGraphMode.FULL: 2>, num_tokens=1, num_reqs=1, uniform_token_count=1, max_query_len=None, num_active_loras=0, num_ubatches=1)",
+          "native_type": "PTPUGraph",
+          "replays": 5
+        }
+      ]
+    }
+  ],
+  "seconds": 35.875783508003224
+}

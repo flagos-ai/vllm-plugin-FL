@@ -1,0 +1,15 @@
+{
+  "physical_device": 2,
+  "source_sha256": "c9c96bf53575811c0bdadaf8dc64e9dfe1ed602c228bd558f43af23320738d0f",
+  "timed_out": false,
+  "worker_alive": false,
+  "exitcode": 0,
+  "complete": true,
+  "comparison_count": 9,
+  "all_values_exact": false,
+  "first_bad_addresses": [
+    68706620360
+  ],
+  "scope": "No GEMM, GPU transpose, communication, graph or reset. Full numerical value comparison. Pointer addresses are not physical-DRAM claims.",
+  "timeout_note": "Timeout stops this worker and never resets; termination cannot guarantee recovery of native GPU state."
+}
