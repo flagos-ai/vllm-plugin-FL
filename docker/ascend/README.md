@@ -50,9 +50,9 @@ of this application image on 2026-11-04 found the following packages:
 The upstream vLLM `v0.32.0` tag resolves to
 `5df63a7203cdb9328d824a27b682e77c7b9928be`; its source archive is locked
 by SHA256 `bf592c132f27bbb5f65cff0bbd2ee873eae722b79c8286934fd5b5cf88b43d61`
-in the Dockerfile. CI installs FlagGems-vllm `v0.2.0` commit
-`b5c2c2249319277ccda4d41aa0f65164bd9b2a19` (its package metadata still
-reports `0.1.0`). The active FlagTree Triton entrypoint has SHA256
+in the Dockerfile. CI installs the FlagGems-vllm `v0.2.0` Ascend sampling
+backport at `622f5bf0e476dcdb861e50ea49cc94b0852c2619`. Its package metadata
+reports `0.1.0`. The active FlagTree Triton entrypoint has SHA256
 `4ec1df745c6bfd03257370a2aab1534e7a31eaa62110cad2ff6c3b56a67cfc50`.
 
 These are observed base-image versions, rather than a new model-validation
@@ -108,6 +108,7 @@ running inference. Shared CI overlays its checkout using the Ascend setup
 script. A deployable installation should use an ordinary plugin wheel:
 
 ```bash
+python .github/scripts/install_ascend_flaggems_vllm.py
 python -m pip wheel --no-build-isolation --no-deps \
   --wheel-dir /tmp/vllm-fl-wheels .
 python -m pip install --no-deps --force-reinstall \
@@ -204,13 +205,11 @@ python tests/run.py --platform ascend --device 910c --scope e2e --stage pr --dry
 python tests/run.py --platform ascend --device 910c --scope benchmark --stage pr --dry-run
 ```
 
-Platform setup also installs FlagGems-vllm from the fixed source commit
-`b5c2c2249319277ccda4d41aa0f65164bd9b2a19` (upstream tag `v0.2.0`). Its
-installed package metadata reports `0.1.0`; setup validates the source commit
-in `direct_url.json`, rather than relying on that metadata version. The
-prepared dependency image supplies its build dependencies, but each fresh CI
-container still needs Git access to the pinned repository unless that exact
-source installation is already present.
+Platform setup installs FlagGems-vllm from the pinned Ascend sampling backport
+on `v0.2.0`. The installer validates the source archive URL and SHA256 in
+`direct_url.json` and preserves the image's native dependencies. The prepared
+image supplies build dependencies. A fresh container fetches the source archive
+from GitHub.
 
 ## Check the prepared image
 
@@ -383,7 +382,7 @@ stale `build/lib` contents:
 python -m pip wheel --no-build-isolation --no-deps --wheel-dir /tmp/ascend-gate-wheels .
 sha256sum /tmp/ascend-gate-wheels/vllm_plugin_fl-*.whl
 python -m pip install --no-deps --force-reinstall /tmp/ascend-gate-wheels/vllm_plugin_fl-*.whl
-python .github/scripts/install_flaggems_vllm.py
+python .github/scripts/install_ascend_flaggems_vllm.py
 python docker/ascend/runtime_constraints.py verify /opt/ascend-stack \
   --vllm-version 0.32.0 --check-imports
 ```

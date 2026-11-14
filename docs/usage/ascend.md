@@ -20,7 +20,7 @@ cover eager execution and `FULL_DECODE_ONLY` with native HCCL.
 | PyTorch and torch-npu | PyTorch `2.10.0+cpu`, torch-npu `2.10.0` |
 | FlagTree and Triton | FlagTree `0.7.0+ascend3.5`, active Triton `3.5.1` |
 | FlagGems | `5.4.0` at [`6ed2f39`](https://github.com/flagos-ai/FlagGems/commit/6ed2f39071ef85db26b7e64f0652a162f434959c) |
-| FlagGems-vllm | Source tag `v0.2.0` at [`b5c2c22`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19) |
+| FlagGems-vllm | Ascend V2 sampling backport on source tag `v0.2.0` at [`622f5bf`](https://github.com/flagos-ai/FlagGems-vllm/commit/622f5bf0e476dcdb861e50ea49cc94b0852c2619) |
 | Optional FlagCX | `0.14.1+cann9.0.0.910c` for the C API path below |
 
 ### Optional FlagCX device collectives on vLLM 0.32.0
