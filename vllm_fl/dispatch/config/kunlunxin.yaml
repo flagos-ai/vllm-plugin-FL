@@ -88,8 +88,9 @@ flagos_blacklist:
   - copy_
   # Vision SDPA uses 72-wide heads that the FlagGems XPU matmul cannot lower.
   - _scaled_dot_product_attention_math
-  # Large V2 KV-cache allocations exceed the int32 arange limit in FlagGems zeros.
+  # V2 KV buffers exceed the FlagTree int32 tile bound for both zeroing paths.
   - zeros
+  - zero_
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
