@@ -22,4 +22,5 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
+CI_FLAGGEMS_VLLM_VENDOR=iluvatar python .github/scripts/install_flaggems_vllm.py
 python -m pip install --no-build-isolation --no-deps -e .

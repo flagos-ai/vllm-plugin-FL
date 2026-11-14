@@ -43,18 +43,38 @@ def test_shared_workflow_uses_published_iluvatar_image_and_reports():
     runs = "\n".join(step.get("run", "") for step in steps)
     assert "install_flagcx.sh" not in runs
     assert "verify_stack.py" not in runs
-    assert any(".github/scripts/${{ inputs.platform }}/setup.sh" in step.get("run", "") for step in steps)
+    assert any(
+        ".github/scripts/${{ inputs.platform }}/setup.sh" in step.get("run", "")
+        for step in steps
+    )
 
     config = yaml.safe_load((ROOT / ".github/configs/iluvatar.yml").read_text())
-    assert config["ci_image"] == "harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci"
-    assert "/usr/local/corex-4.5.0/bin/ixsmi:/usr/local/corex/bin/ixsmi" in config["container_volumes"]
-    assert "/mnt/share/user_homes/models:/data/models/Qwen:ro" in config["container_volumes"]
+    assert (
+        config["ci_image"]
+        == "harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci"
+    )
+    assert (
+        "/usr/local/corex-4.5.0/bin/ixsmi:/usr/local/corex/bin/ixsmi"
+        in config["container_volumes"]
+    )
+    assert (
+        "/mnt/share/user_homes/models:/data/models/Qwen:ro"
+        in config["container_volumes"]
+    )
     for option in ("--user root", "--ulimit nofile=65535:65535"):
         assert option in config["container_options"]
 
     setup = (ROOT / ".github/scripts/iluvatar/setup.sh").read_text()
     assert "pip install --no-build-isolation --no-deps -e ." in setup
-    for removed in ("install_flagcx", "install_flaggems", "install_flagtree", "install_vllm", "pytest-xdist", "verify_stack"):
+    assert "python .github/scripts/install_flaggems_vllm.py" in setup
+    for removed in (
+        "install_flagcx",
+        "install_flaggems.sh",
+        "install_flagtree",
+        "install_vllm",
+        "pytest-xdist",
+        "verify_stack",
+    ):
         assert removed not in setup
 
     upload = next(
@@ -74,7 +94,7 @@ def test_shared_workflow_uses_published_iluvatar_image_and_reports():
     "value",
     [
         {"enabled": True, "disabled": False, "optional": None},
-        {"nested": [{"name": "空 格", "quote": 'a"b'}]},
+        {"nested": [{"name": "\u7a7a \u683c", "quote": 'a"b'}]},
         [1, False, None, {"nested": [2, 3]}],
     ],
 )
