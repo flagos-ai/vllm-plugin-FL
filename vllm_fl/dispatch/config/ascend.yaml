@@ -73,6 +73,9 @@ flagos_blacklist:
   # FlagTree cannot lower pow(float32, int32) in FlagGems' tanh GELU.
   # Keep vision activation on the native torch_npu implementation.
   - gelu
+  # FlagGems 5.4 corrupts the first row of the biased BF16 linear used
+  # for Qwen3.6 vision patch projection (M=1900, K=1536, N=1152).
+  - linear
   # FlagGems conv1d faults in Qwen3.6-27B's GDN prefill process with
   # 5120 groups, T=15, K=4, padding=3. Keep conv2d enabled: the
   # native conv1d path passes text/image serving with that override active.

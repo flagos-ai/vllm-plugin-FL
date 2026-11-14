@@ -307,6 +307,22 @@ def test_flaggems_mm_on_npu():
             _assert(actual, expected, dtype, reduction=True)
 
 
+def test_default_ascend_biased_vision_linear_preserves_each_row():
+    generator = torch.Generator().manual_seed(703)
+    weight = (torch.randn(1152, 1536, generator=generator) * 0.04).bfloat16()
+    bias = (torch.randn(1152, generator=generator) * 0.10).bfloat16()
+    # Qwen3.6's vision patch projection shape. Zero input makes the
+    # exact expected output independent of GEMM accumulation precision.
+    x = torch.zeros((1900, 1536), dtype=torch.bfloat16, device="npu")
+    device_weight, device_bias = weight.to("npu"), bias.to("npu")
+
+    with _enable("linear", native=True):
+        actual = F.linear(x, device_weight, device_bias)
+
+    expected = bias.expand(x.shape[0], -1)
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+
+
 @pytest.fixture
 def _full_precision_conv():
     # This is a torch_npu dynamic option, not a normal Python attribute.
