@@ -3,7 +3,10 @@
 # Setup script for MetaX C550 CI environment.
 set -euo pipefail
 
-export PATH="/opt/conda/bin:${PATH}"
+export PATH="/flagos/bin:/opt/conda/bin:${PATH}"
+# First-use FlagGems/FlagTree tuning can outlast vLLM's 300-second RPC limit.
+# Keep a finite deadline and preserve an explicitly configured deployment value.
+export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS="${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-1800}"
 
 # GitHub Actions runs the job container with HOME=/github/home, so FlagGems
 # would tune every Triton kernel from scratch inside each pytest process. The
@@ -24,6 +27,7 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     PATH \
     GEMS_VENDOR \
     VLLM_PLUGINS \
+    VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS \
     FLAGGEMS_CACHE_DIR; do
     echo "${name}=${!name}" >> "${GITHUB_ENV}"
   done
@@ -83,6 +87,7 @@ PY
 # TODO: remove when FlagGems fixes kernel hash stability in LibTuner.
 python - <<'PATCH'
 import os
+import importlib.util
 import pathlib
 import re
 
@@ -90,6 +95,13 @@ import re
 libentry = pathlib.Path(
     os.environ.get("FLAGGEMS_LIBENTRY", "/workspace/FlagGems/src/flag_gems/utils/libentry.py")
 )
+if "FLAGGEMS_LIBENTRY" not in os.environ and not libentry.is_file():
+    spec = importlib.util.find_spec("flag_gems")
+    if spec is not None and spec.origin is not None:
+        libentry = pathlib.Path(spec.origin).parent / "utils/libentry.py"
+if not libentry.is_file():
+    print("[metax-ci] FlagGems has no LibTuner source at", libentry, "- skipping legacy cache patch")
+    raise SystemExit(0)
 src = libentry.read_text()
 
 old = (
@@ -181,14 +193,21 @@ else:
         )
 PATCH
 
-python .github/scripts/install_flaggems_vllm.py
+# The MetaX router uses the extended FlagGems-vllm top-k ABI. Install its
+# immutable source without resolving the wheel dependencies from PyPI.
+python .github/scripts/metax/install_flaggems_vllm.py
 
 python - <<'PY'
 import flag_gems
+from importlib.metadata import version
 import torch
 import vllm
 import vllm_fl
 
+assert version("vllm").split("+")[0] == "0.32.0", (
+    "MetaX 0.5.0-dev requires a vLLM 0.32.0 empty wheel; "
+    f"found {version('vllm')}"
+)
 print(f"vLLM import ok: {vllm.__version__}")
 print(f"vLLM-FL import ok: {vllm_fl.__file__}")
 print(f"FlagGems import ok: {getattr(flag_gems, '__version__', 'unknown')}")

@@ -3,6 +3,7 @@
 """CPU provider/ABI contracts for MoE alignment, not hardware kernel numerics."""
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -27,11 +28,17 @@ def moe_adapter(monkeypatch):
     triton_utils.triton = SimpleNamespace(cdiv=lambda n, b: (n + b - 1) // b)
     math_utils = ModuleType("vllm.utils.math_utils")
     math_utils.round_up = lambda n, b: ((n + b - 1) // b) * b
+    platforms = ModuleType("vllm.platforms")
+    platforms.current_platform = SimpleNamespace(vendor_name="nvidia")
+    logger = ModuleType("vllm.logger")
+    logger.init_logger = logging.getLogger
     for name, module in (
         ("vllm", vllm),
         ("vllm.utils", utils),
         ("vllm.triton_utils", triton_utils),
         ("vllm.utils.math_utils", math_utils),
+        ("vllm.platforms", platforms),
+        ("vllm.logger", logger),
     ):
         monkeypatch.setitem(sys.modules, name, module)
     spec = importlib.util.spec_from_file_location("_gcu_moe_align_contract", _SOURCE)

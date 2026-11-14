@@ -19,6 +19,15 @@ from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_b
 
 # Register attention backends for MACA
 def register_attention_backends():
+    from vllm.v1.attention.backends.mla.prefill.registry import (
+        MLAPrefillBackendEnum,
+        register_mla_prefill_backend,
+    )
+
+    register_mla_prefill_backend(
+        MLAPrefillBackendEnum.FLASH_ATTN,
+        class_path="vllm_fl.dispatch.backends.vendor.metax.impl.attention.mla.prefill.MacaFlashAttnPrefillBackend",
+    )
     register_backend(
         AttentionBackendEnum.FLASHMLA,
         class_path="vllm_fl.dispatch.backends.vendor.metax.impl.attention.mla.flashmla.MacaFlashMLABackend",
@@ -61,6 +70,26 @@ class MacaBackend(Backend):
         return MacaBackend._available
 
     # ==================== Operator Implementations ====================
+
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map: torch.Tensor | None = None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        from .impl.moe_align_block_size import moe_align_block_size
+
+        return moe_align_block_size(
+            topk_ids,
+            block_size,
+            num_experts,
+            expert_map,
+            pad_sorted_ids,
+            ignore_invalid_experts,
+        )
 
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
@@ -134,12 +163,10 @@ class MacaBackend(Backend):
 
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
-        Get the attention backend class path for CUDA.
+        Get the MACA FlashAttention or dense FlashMLA backend class path.
 
-        Supports:
-        - FLASH_ATTN (default)
-        - TRITON_ATTN (when use_flaggems_op("triton_attn") is True)
-        - FLASHMLA_SPARSE (when use_mla and use_sparse are both True)
+        Sparse MLA needs a MACA-specific implementation; the native NVIDIA
+        FLASHMLA_SPARSE backend cannot execute on MetaX hardware.
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
@@ -154,7 +181,10 @@ class MacaBackend(Backend):
 
         if use_mla:
             if use_sparse:
-                return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
+                raise NotImplementedError(
+                    "Sparse MLA is not supported by the MetaX backend on vLLM 0.32; "
+                    "a MACA-specific sparse attention implementation is required."
+                )
             return AttentionBackendEnum.FLASHMLA.get_path()
 
         # Default to FLASH_ATTN

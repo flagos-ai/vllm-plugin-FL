@@ -4,9 +4,9 @@
 # reference them for pattern matching even when the native vllm._C extension
 # is not compiled for this platform.
 
+import importlib
 import logging
 import os
-from contextlib import suppress
 
 import torch
 
@@ -121,31 +121,48 @@ def _C_ops_present() -> bool:
     return any(hasattr(ops, name) for name in names)
 
 
+def _has_composite_kernel(name: str) -> bool:
+    return any(
+        torch._C._dispatch_has_kernel_for_dispatch_key(name, key)
+        for key in (
+            "CompositeImplicitAutograd",
+            "CompositeExplicitAutograd",
+            "CompositeExplicitAutogradNonFunctional",
+        )
+    )
+
+
 def register_op_schemas():
     """Register missing vLLM schemas in their upstream namespaces."""
     if getattr(register_op_schemas, "_libs", None) is not None:
         return
 
-    # Bail out before touching vllm._C when the active backend already owns _C.
-    if _is_metax_backend() or _C_ops_present():
+    is_metax = _is_metax_backend()
+    if is_metax:
+        # mcoplib predates the vLLM 0.32 schemas. Load its native registrations
+        # first, then fill only the gaps below. Importing vllm._C here would
+        # register the vendor's existing operators twice and can abort Python.
+        # FlagOS images can omit mcoplib and provide only FlagGems kernels.
+        # If the package exists, do not continue when its extension fails to
+        # load: a successful later import would duplicate our new schemas.
+        if importlib.util.find_spec("mcoplib") is not None:
+            importlib.import_module("mcoplib._C")
+    elif _C_ops_present():
         logger.debug(
             "Skipping vllm._C import: _C ops are already provided by the active backend"
         )
         return
-
-    try:
-        import vllm._C  # noqa: F401
-
-        return
-    except (ImportError, OSError):
-        pass
+    else:
+        try:
+            importlib.import_module("vllm._C")
+            return
+        except (ImportError, OSError):
+            pass
 
     # Pre-load mcoplib._C (MetaX) so its TORCH_LIBRARY registrations land
     # before our FRAGMENT definitions.  The hasattr check below will then
     # skip any ops already registered by mcoplib, avoiding c10::Error.
-    import importlib.util
-
-    if importlib.util.find_spec("mcoplib") is not None:
+    if not is_metax and importlib.util.find_spec("mcoplib") is not None:
         try:
             import mcoplib._C  # noqa: F401
         except ImportError:
@@ -181,11 +198,30 @@ def register_op_schemas():
     c_lib = libs.get("_C")
     if c_lib is not None:
         for name, fn in _QUERY_OP_IMPLS:
-            with suppress(RuntimeError):
+            if not hasattr(torch.ops._C, name):
+                continue
+            # Native query/weak-reference kernels retain ownership even if a
+            # vendor registered them under a different dispatch key.
+            qualified_name = f"_C::{name}"
+            has_native = _has_composite_kernel(qualified_name) or (
+                torch._C._dispatch_has_kernel_for_any_dispatch_key(
+                    qualified_name, torch._C._dispatch_keyset_full()
+                )
+            )
+            if not has_native:
                 c_lib.impl(name, fn, "CompositeImplicitAutograd")
 
         for name, fn in _CUDA_FALLBACK_IMPLS:
-            with suppress(RuntimeError):
+            if not hasattr(torch.ops._C, name):
+                continue
+            # torch.library.impl replaces an existing kernel (with a warning)
+            # rather than necessarily raising. Check explicit and composite
+            # registrations before installing the MACA-compatible fallback.
+            qualified_name = f"_C::{name}"
+            has_native = _has_composite_kernel(qualified_name) or (
+                torch._C._dispatch_has_kernel_for_dispatch_key(qualified_name, "CUDA")
+            )
+            if not has_native:
                 c_lib.impl(name, fn, "CUDA")
 
     # Library registrations are removed when the Library is garbage-collected.

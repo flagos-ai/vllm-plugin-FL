@@ -213,7 +213,6 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
         # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
         # kernels inside spawned workers; when every rank shares the default
         # Triton cache directory, concurrent compilation of the same kernel
@@ -549,7 +548,11 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            if getattr(current_platform, "vendor_name", "") == "thead":
+            if getattr(current_platform, "vendor_name", None) == "metax":
+                from vllm_fl.worker.metax_v2 import prepare_metax_v2_runtime
+
+                prepare_metax_v2_runtime(self.vllm_config)
+            elif getattr(current_platform, "vendor_name", None) == "thead":
                 # Platform-side adaptations for the upstream V2 runner; see
                 # vllm_fl/dispatch/backends/vendor/thead/patches/.
                 from vllm_fl.dispatch.backends.vendor.thead.patches import (
@@ -565,6 +568,12 @@ class WorkerFL(WorkerBase):
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
                 self.vllm_config, self.device
             )
+            if getattr(current_platform, "vendor_name", None) == "metax":
+                init_logger("vllm.metax_v2").info_once(
+                    "MetaX V2 model runner: %s.%s",
+                    type(self.model_runner).__module__,
+                    type(self.model_runner).__qualname__,
+                )
         else:
             from vllm_fl.worker.model_runner import ModelRunnerFL
 
@@ -589,6 +598,16 @@ class WorkerFL(WorkerBase):
         ):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
 
+        if (
+            self.use_v2_model_runner
+            and getattr(current_platform, "vendor_name", None) == "metax"
+            and self.vllm_config.compilation_config.mode != CompilationMode.NONE
+        ):
+            # ModelRunnerFL normally resolves CachedOps before Dynamo tracing.
+            # Upstream V2 does not know FL's lazy dispatch registry.
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops()
         if self.vllm_config.weight_transfer_config is not None:
             self.weight_transfer_engine = WeightTransferEngineFactory.create_engine(
                 self.vllm_config.weight_transfer_config,
@@ -596,6 +615,10 @@ class WorkerFL(WorkerBase):
                 self.device,
                 self.model_runner.get_model(),
             )
+
+        if getattr(current_platform, "vendor_name", "") == "metax":
+            # Keep the Dynamo thread guard stable from graph warmup to serving.
+            set_torch_threads_for_runtime()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
@@ -1073,10 +1096,14 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        activate_jit_monitor(
-            mode=self.observability_config.jit_monitor_mode,
-            verbose=self.observability_config.jit_monitor_verbose,
-        )
+        if (
+            getattr(current_platform, "vendor_name", "") != "metax"
+            or self.vllm_config.kernel_config.enable_jit_warmup
+        ):
+            activate_jit_monitor(
+                mode=self.observability_config.jit_monitor_mode,
+                verbose=self.observability_config.jit_monitor_verbose,
+            )
 
         # Freeze the worker heap so the GC won't scan static objects
         # (model weights, KV caches, CUDA graphs) during inference.
@@ -1087,9 +1114,8 @@ class WorkerFL(WorkerBase):
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
 
-        # Startup is done; steady-state serving gets no benefit from torch
-        # intra-op parallelism.
-        set_torch_threads_for_runtime()
+        if getattr(current_platform, "vendor_name", "") != "metax":
+            set_torch_threads_for_runtime()
 
         return CompilationTimes(
             language_model=self.compilation_config.compilation_time,

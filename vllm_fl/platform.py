@@ -48,6 +48,13 @@ from vllm_fl.utils import (
 logger = init_logger(__name__)
 
 
+def _metax_uses_v2_runner() -> bool:
+    from vllm.config import get_current_vllm_config_or_none
+
+    config = get_current_vllm_config_or_none()
+    return config is not None and config.use_v2_model_runner
+
+
 def _vllm_c_available() -> bool:
     """True when this build ships upstream's CUDA IR kernels (``vllm._C``)."""
     try:
@@ -164,6 +171,7 @@ def _safe_device_type(device_info, vendor: str) -> str:
     except ValueError:
         logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
         return ""
+
 
 dist_backend_dict = {
     "npu": "hccl",
@@ -407,7 +415,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -720,10 +736,15 @@ class PlatformFL(Platform):
             if model_config is not None:
                 model_config.disable_cascade_attn = True
             if attention_config := vllm_config.attention_config:
-                attention_config.use_cudnn_prefill = False
-                attention_config.use_trtllm_ragged_deepseek_prefill = False
                 attention_config.use_trtllm_attention = False
-                attention_config.disable_flashinfer_prefill = True
+                if attention_config.mla_prefill_backend is None:
+                    from vllm.v1.attention.backends.mla.prefill.registry import (
+                        MLAPrefillBackendEnum,
+                    )
+
+                    attention_config.mla_prefill_backend = (
+                        MLAPrefillBackendEnum.FLASH_ATTN
+                    )
 
             # Graph defaults (PIECEWISE, capture sizes, no mm-encoder graph)
             # are installed in apply_config_platform_defaults so that explicit
@@ -868,6 +889,8 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
+            if cls.vendor_name == "metax" and _metax_uses_v2_runner():
+                return "vllm_fl.distributed.metax_communicator.MetaxCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
@@ -878,6 +901,8 @@ class PlatformFL(Platform):
     def get_static_graph_wrapper_cls(cls) -> str:
         if cls.device_type == "musa":
             return "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper"
+        if getattr(cls, "vendor_name", None) == "metax":
+            return "vllm_fl.compilation.graph.make_metax_graph_wrapper"
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod
@@ -1014,10 +1039,13 @@ class PlatformFL(Platform):
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
         # Retain the registered collective routes for TXDA and native MCCL.
+        # FlagCX's ctypes calls must stay behind vLLM's opaque collective op
+        # when Dynamo traces a MetaX model. Keep the normal MCCL route intact.
         return (
             cls.device_type == "txda"
             or cls.vendor_name in ("nvidia", "thead", "iluvatar")
             or (cls.device_type == "musa" and cls.dist_backend == "mccl")
+            or (cls.vendor_name == "metax" and cls.dist_backend == "flagcx")
         )
 
     @classmethod
@@ -1073,14 +1101,28 @@ class PlatformFL(Platform):
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"]
-        if not using_inductor and _vllm_c_available():
-            # ``vllm_c`` is only a valid provider when the build actually ships
-            # upstream's CUDA IR kernels. VLLM_TARGET_DEVICE=empty builds have no
-            # vllm._C, and keeping it in the priority list makes
-            # KernelConfig.set_default fail with "All providers in priority must
-            # be registered implementations".
-            default = ["vllm_c", "native"]
+        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        if cls.vendor_name == "metax":
+            from dataclasses import fields
+
+            from vllm.ir import ops as ir_ops  # noqa: F401 - populate IR registry
+            from vllm.ir.op import IrOp
+
+            # An empty wheel's _C schemas do not register IR implementations.
+            # Filter each op separately, including defaults such as sparse GELU.
+            return IrOpPriorityConfig(
+                **{
+                    field.name: [
+                        provider
+                        for provider in default
+                        if provider in IrOp.registry[field.name].impls
+                    ]
+                    for field in fields(IrOpPriorityConfig)
+                }
+            )
+        # Empty wheels cannot select a CUDA implementation.
+        if not using_inductor and not _vllm_c_available():
+            default = ["native"]
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

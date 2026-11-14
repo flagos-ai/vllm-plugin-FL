@@ -85,23 +85,33 @@ def fused_topk(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
+    # The FL kernel implements unpadded softmax. MetaX's extended routes need
+    # a stable bridge callable: vLLM can overwrite an early _custom_ops patch
+    # while its module body finishes importing, leaving schema-only ops live.
+    padding_mask = _get_padding_mask(hidden_states.shape[0])
+    metax_topk = None
+    if scoring_func != "softmax" or padding_mask is not None:
+        from vllm.platforms import current_platform
+
+        if getattr(
+            current_platform, "vendor_name", None
+        ) == "metax" and scoring_func in ("softmax", "sigmoid"):
+            from vllm_fl.dispatch.backends.vendor.metax.patches.moe_topk_compat import (
+                get_topk_operator,
+            )
+
+            metax_topk = get_topk_operator(scoring_func)
+        elif scoring_func != "softmax" or _has_native_moe_topk():
+            return upstream_fused_topk(
+                hidden_states=hidden_states,
+                gating_output=gating_output,
+                topk=topk,
+                renormalize=renormalize,
+                indices_type=indices_type,
+                scoring_func=scoring_func,
+            )
+
     M, _ = hidden_states.size()
-    # vLLM 0.32 can pad the batch and marks the extra rows through
-    # ``is_padding``; the native ``_moe_C`` kernel accepts that mask, the FL
-    # kernel does not. Keep upstream's implementation where it exists and
-    # reproduce the mask below otherwise.
-    padding_mask = _get_padding_mask(M)
-    if scoring_func != "softmax" or (
-        padding_mask is not None and _has_native_moe_topk()
-    ):
-        return upstream_fused_topk(
-            hidden_states=hidden_states,
-            gating_output=gating_output,
-            topk=topk,
-            renormalize=renormalize,
-            indices_type=indices_type,
-            scoring_func=scoring_func,
-        )
 
     topk_weights = torch.empty(
         M, topk, dtype=torch.float32, device=hidden_states.device
@@ -115,6 +125,16 @@ def fused_topk(
     token_expert_indices = torch.empty(
         M, topk, dtype=torch.int32, device=hidden_states.device
     )
+    if metax_topk is not None:
+        metax_topk(
+            topk_weights,
+            topk_ids,
+            token_expert_indices,
+            gating_output,
+            renormalize,
+            is_padding=padding_mask,
+        )
+        return topk_weights, topk_ids, token_expert_indices
 
     # topk_weights, topk_ids = vllm_topk_softmax(
     topk_weights, topk_ids = _topk_softmax(

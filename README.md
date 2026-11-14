@@ -58,16 +58,16 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
 for the full official vLLM 0.32 CUDA image, pinned development dependencies,
 upstream V1/V2 runners and regression commands. FlagGems remains enabled.
-It replaces the previous NVIDIA 0.28 setup.
-The generic setup below applies to the other backends; their 0.32 validation
-is outside the NVIDIA adaptation. See also the
+For MetaX C550, follow the [MetaX guide](./docs/usage/metax.md) for the pinned
+vLLM 0.32 MetaX image, setup, and serving commands. See also the
 [T-Head PPU guide](./docs/usage/thead.md),
 [Enflame S60 guide](./docs/usage/enflame.md), and
 [Tsingmicro TXDA guide](./docs/usage/tsingmicro.md).
 
 1. Install vLLM
 
-    For **non-NVIDIA** chips, install vLLM from source with the `empty` device target:
+    For backends whose deployment guide calls for **vLLM 0.28**, install vLLM
+    from source with the `empty` device target:
     ```sh
     git clone -b v0.28.0 https://github.com/vllm-project/vllm.git
     cd vllm

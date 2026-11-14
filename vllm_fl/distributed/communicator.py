@@ -55,6 +55,13 @@ class CommunicatorFL(DeviceCommunicatorBase):
                 raise RuntimeError(
                     "FlagCX requested on NPU but failed to initialize"
                 ) from self.pyflagcx_comm.init_error
+            if self.device.type == "cuda" and self.pyflagcx_comm.disabled:
+                from vllm.platforms import current_platform
+
+                if getattr(current_platform, "vendor_name", None) == "metax":
+                    raise RuntimeError(
+                        "FlagCX requested on MetaX but failed to initialize"
+                    ) from self.pyflagcx_comm.init_error
 
         if self.use_all2all:
             self._init_all2all_manager(tcp_store_group)

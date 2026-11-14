@@ -123,6 +123,7 @@ def profile_factory():
             ["encoder pool"] if device == "musa" else ["decoder pool", "encoder pool"]
         )
         graph_capture = Mock(return_value=nullcontext())
+        device_graph_capture = Mock(return_value=nullcontext())
         stream = object()
         namespace = {
             "set_current_vllm_config": lambda _: nullcontext(),
@@ -144,6 +145,7 @@ def profile_factory():
                 state, "enabled", value
             ),
             "graph_capture": graph_capture,
+            "_device_graph_capture": device_graph_capture,
             "GraphCaptureContext": lambda value: NS(stream=value),
             "current_stream": lambda: stream,
             "torch": NS(
@@ -185,13 +187,15 @@ def profile_factory():
                     )
                     if encoder is not None:
                         encoder.clear.assert_called_once()
-                    kwargs = graph_capture.call_args.kwargs
-                    assert kwargs["device"] == runner.device
-                    context = kwargs["graph_capture_context"]
                     if device in ("rocm", "musa"):
+                        graph_capture.assert_not_called()
+                        kwargs = device_graph_capture.call_args.kwargs
+                        assert kwargs["device"] == runner.device
+                        context = kwargs["graph_capture_context"]
                         assert context.stream is stream
                     else:
-                        assert context is None
+                        device_graph_capture.assert_not_called()
+                        graph_capture.assert_called_once_with(device=runner.device)
 
         return invoke, state
 
@@ -362,6 +366,7 @@ def pool_lifecycle(monkeypatch):
             used={},
             pool_ids=[],
             contexts=[],
+            capture_routes=[],
             wrapper=None,
             cleanup_count=0,
         )
@@ -402,6 +407,18 @@ def pool_lifecycle(monkeypatch):
                 yield context
             finally:
                 state.stream = previous
+
+        def native_capture(*, device):
+            # vLLM 0.32's native graph_capture accepts only a device. MetaX
+            # with MCCL uses this route for both profiling and formal capture.
+            state.capture_routes.append("native")
+            return capture_context(device=device)
+
+        def device_capture(*, device, graph_capture_context):
+            state.capture_routes.append("device")
+            return capture_context(
+                device=device, graph_capture_context=graph_capture_context
+            )
 
         # Use the production wrapper constructor and clearing method: wrappers
         # born during first tracing must start in the same actual global pool.
@@ -483,7 +500,8 @@ def pool_lifecycle(monkeypatch):
             "BreakableCUDAGraphWrapper": empty_wrappers,
             "CUDAGraphMode": Mode,
             "GraphCaptureContext": lambda s: NS(stream=s),
-            "graph_capture": capture_context,
+            "graph_capture": native_capture,
+            "_device_graph_capture": device_capture,
             "current_stream": lambda: "rocm stream",
             "set_cudagraph_capturing_enabled": lambda v: setattr(state, "enabled", v),
             "torch": NS(
@@ -611,6 +629,14 @@ def test_other_backends_keep_temporary_profile_pool(pool_lifecycle, device):
     assert all(pool is not case.global_pool for pool in case.state.pool_ids)
     assert case.formal() == 130 * MIB
     assert all(pool is case.global_pool for pool in case.state.pool_ids[2:])
+    assert case.state.contexts[0] is not case.state.contexts[1]
+
+
+def test_metax_native_032_profile_and_formal_capture_use_device_only(pool_lifecycle):
+    case = pool_lifecycle(device="cuda")
+    assert case.profile() == 140 * MIB
+    assert case.formal() == 130 * MIB
+    assert case.state.capture_routes == ["native", "native"]
     assert case.state.contexts[0] is not case.state.contexts[1]
 
 

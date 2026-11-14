@@ -72,10 +72,13 @@ def test_patches_vllm028_factory_in_package_and_layer(monkeypatch):
 
     from vllm_fl.ops import custom_ops
 
-    monkeypatch.setattr(package, "FusedMoEFactory", layer_module._OrigFusedMoEFactory)
-    monkeypatch.setattr(
-        upstream_layer, "FusedMoEFactory", layer_module._OrigFusedMoEFactory
-    )
+    # Emulate the unpatched 0.28 exports even when running against 0.32,
+    # which no longer exports FusedMoEFactory. Isolate prior registration.
+    for module in (package, upstream_layer):
+        for name in ("FusedMoE", "FusedMoEFactory"):
+            monkeypatch.setattr(
+                module, name, layer_module._OrigFusedMoEFactory, raising=False
+            )
     custom_ops._patch_fused_moe_factory()
     assert package.FusedMoEFactory is layer_module.FusedMoEFactoryFL
     assert upstream_layer.FusedMoEFactory is layer_module.FusedMoEFactoryFL
