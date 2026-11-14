@@ -81,7 +81,6 @@ def _apply_legacy_kunlunxin_patches():
     # RESTORED from old version: Critical Triton kernel compatibility patches
     patch_block_table_slot_mapping()
     patch_attention_backend_registry()
-    patch_topk_topp_sampler()
 
     # Existing patches
     patch_causal_conv1d()
@@ -837,26 +836,6 @@ def patch_attention_backend_registry():
         logger.info("Registered KunlunxinAttentionBackend as CUSTOM attention backend")
     except Exception as e:
         logger.warning("Failed to register attention backend: %s", e)
-
-
-# ── RESTORED: topk_topp_sampler ──
-def patch_topk_topp_sampler():
-    """Force PyTorch-native top-k/top-p on Kunlunxin.
-
-    The vLLM Triton top-k/top-p kernel (topk_topp_triton.py) triggers
-    kernel launch failures (error 719) on P800. Route through the PyTorch
-    path instead.
-    """
-    try:
-        import vllm.v1.sample.ops.topk_topp_sampler as sampler_mod
-        from vllm.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p_pytorch
-
-        sampler_mod.apply_top_k_top_p = apply_top_k_top_p_pytorch
-        logger.info(
-            "Patched apply_top_k_top_p to use PyTorch-native path for Kunlunxin"
-        )
-    except Exception as e:
-        logger.warning("Failed to patch top-k/top-p sampler for Kunlunxin: %s", e)
 
 
 # ── sampler RNG (TP-consistent unseeded sampling) ──
