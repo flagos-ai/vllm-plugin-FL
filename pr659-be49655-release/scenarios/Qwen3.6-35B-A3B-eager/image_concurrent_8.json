@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "image_concurrent_8",
+    "model_path": "/models/Qwen3.6-35B-A3B",
+    "served_model_name": "Qwen3.6-35B-A3B",
+    "port": "18846",
+    "concurrency": 8
+  },
+  "checks_and_timings": [
+    {
+      "request_id": "image-01",
+      "kind": "image",
+      "latency_seconds": 12.811,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    },
+    {
+      "request_id": "image-02",
+      "kind": "image",
+      "latency_seconds": 12.81,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    },
+    {
+      "request_id": "image-03",
+      "kind": "image",
+      "latency_seconds": 12.402,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    },
+    {
+      "request_id": "image-04",
+      "kind": "image",
+      "latency_seconds": 9.307,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    },
+    {
+      "request_id": "image-05",
+      "kind": "image",
+      "latency_seconds": 12.212,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    },
+    {
+      "request_id": "image-06",
+      "kind": "image",
+      "latency_seconds": 9.307,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    },
+    {
+      "request_id": "image-07",
+      "kind": "image",
+      "latency_seconds": 9.306,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    },
+    {
+      "request_id": "image-08",
+      "kind": "image",
+      "latency_seconds": 9.307,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    }
+  ],
+  "summary": {
+    "request_count": 8,
+    "passed_count": 8,
+    "failed_count": 0,
+    "passed": true
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "base": "4cd14672156c8d6fbb8a637ecb2e54c6dd8c221c",
+  "candidate": "be496551412e20353bface934407daa37d7c5739",
+  "image": "sha256:0fd7d28f6c5c4a2921c1056bfb2b69e43784c680470edd5524ec15bf39c11c6c",
+  "flagcx_json_revision": "a0e9fb1e638cfbb5b8b556b7c51eaa81977bad48",
+  "dockerfile_body_sha256": "5e29db2a15e13997b698655c17547264c03542d420ba943e2f3bb76544aa2fa6",
+  "gate_exit": 0,
+  "smoke_exit": 0,
+  "requests": 104,
+  "passed": 104,
+  "groups": {
+    "Qwen3.6-27B-eager": {
+      "exit": 0,
+      "scenarios": {
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        }
+      },
+      "requests": 26,
+      "passed": 26,
+      "full_replays": 0,
+      "pytorch_group": "RCCL"
+    },
+    "Qwen3.6-27B-graph": {
+      "exit": 0,
+      "scenarios": {
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        }
+      },
+      "requests": 26,
+      "passed": 26,
+      "full_replays": 222,
+      "pytorch_group": "RCCL"
+    },
+    "Qwen3.6-35B-A3B-eager": {
+      "exit": 0,
+      "scenarios": {
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        }
+      },
+      "requests": 26,
+      "passed": 26,
+      "full_replays": 0,
+      "pytorch_group": "RCCL"
+    },
+    "Qwen3.6-35B-A3B-graph": {
+      "exit": 0,
+      "scenarios": {
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        }
+      },
+      "requests": 26,
+      "passed": 26,
+      "full_replays": 231,
+      "pytorch_group": "RCCL"
+    }
+  },
+  "model_fingerprints": {
+    "Qwen3.6-27B": {
+      "config.json": "69db4eb7196bc8190813231b3018ca05d8c2e3abc7b1af19d55c157af44a9d9c",
+      "model.safetensors.index.json": "a8ad2c26fb707ff8c245806315b03e3b4b74595528492423af5dae0ce39b4d9b"
+    },
+    "Qwen3.6-35B-A3B": {
+      "config.json": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+      "model.safetensors.index.json": "41b9356101ebf8e7519e150dc811f80c4226e727301fbb032b890f006ed0be83"
+    }
+  }
+}

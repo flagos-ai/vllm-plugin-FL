@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "text_single",
+    "model_path": "/models/Qwen3.6-35B-A3B",
+    "served_model_name": "Qwen3.6-35B-A3B",
+    "port": "18843",
+    "concurrency": 1
+  },
+  "checks_and_timings": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "latency_seconds": 13.872,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true
+    }
+  ],
+  "summary": {
+    "request_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "passed": true
+  }
+}
