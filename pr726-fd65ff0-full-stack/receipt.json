@@ -1039,6 +1039,20 @@
         "total": 26,
         "noc_idle_timeout_matches": 0,
         "image_05_output": "HELLO\nVLLM"
+      },
+      "35b_reverse_tp_fixed_rank_sum_prefill_graph": {
+        "passed": 26,
+        "total": 26,
+        "image_05_output": "HELLO\nVLLM",
+        "noc_idle_timeout_matches": 0,
+        "full_replays_3_to_4": 3,
+        "all_full_replays": 229,
+        "active_ranks": [
+          0,
+          1,
+          2,
+          3
+        ]
       }
     }
   }
