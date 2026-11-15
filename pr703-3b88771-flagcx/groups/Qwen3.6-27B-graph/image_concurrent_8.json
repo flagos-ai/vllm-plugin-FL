@@ -1,0 +1,534 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "image_concurrent_8",
+    "model_path": "models/Qwen3.6-27B",
+    "served_model_name": "Qwen3.6-27B",
+    "port": "18772",
+    "concurrency": 8
+  },
+  "started_at": "2026-11-15T15:34:53.798904+00:00",
+  "finished_at": "2026-11-15T15:36:40.015257+00:00",
+  "input": [
+    {
+      "request_id": "image-01",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Name the four quadrant colors in this order: top-left, top-right, bottom-left, bottom-right. Reply with color names only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file:tools/adaptation-gate-cases/images/image_01.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "tools/adaptation-gate-cases/images/image_01.png",
+      "required_terms": [
+        "red",
+        "green",
+        "blue",
+        "yellow"
+      ]
+    },
+    {
+      "request_id": "image-02",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Name the four quadrant colors in this order: top-left, top-right, bottom-left, bottom-right. Reply with color names only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file:tools/adaptation-gate-cases/images/image_02.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "tools/adaptation-gate-cases/images/image_02.png",
+      "required_terms": [
+        "blue",
+        "yellow",
+        "red",
+        "green"
+      ]
+    },
+    {
+      "request_id": "image-03",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Name the three shapes from left to right. Reply with shape names only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file:tools/adaptation-gate-cases/images/image_03.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "tools/adaptation-gate-cases/images/image_03.png",
+      "required_terms": [
+        "circle",
+        "square",
+        "triangle"
+      ]
+    },
+    {
+      "request_id": "image-04",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "How many triangles are in the image? Reply with the number only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file:tools/adaptation-gate-cases/images/image_04.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "tools/adaptation-gate-cases/images/image_04.png",
+      "required_terms": [
+        "3"
+      ]
+    },
+    {
+      "request_id": "image-05",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Does this image contain visible text? Reply yes or no."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file:tools/adaptation-gate-cases/images/image_05.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "tools/adaptation-gate-cases/images/image_05.png",
+      "required_terms": [
+        "yes"
+      ]
+    },
+    {
+      "request_id": "image-06",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "What shape is inside the red circle? Reply with the shape name only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file:tools/adaptation-gate-cases/images/image_06.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "tools/adaptation-gate-cases/images/image_06.png",
+      "required_terms": [
+        "square"
+      ]
+    },
+    {
+      "request_id": "image-07",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "What color is the triangle? Reply with the color name only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file:tools/adaptation-gate-cases/images/image_07.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "tools/adaptation-gate-cases/images/image_07.png",
+      "required_terms": [
+        "yellow"
+      ]
+    },
+    {
+      "request_id": "image-08",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "How many blue circles are in the image? Reply with the number only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file:tools/adaptation-gate-cases/images/image_08.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "tools/adaptation-gate-cases/images/image_08.png",
+      "required_terms": [
+        "4"
+      ]
+    }
+  ],
+  "output": [
+    {
+      "request_id": "image-01",
+      "kind": "image",
+      "latency_seconds": 106.214,
+      "text": "Red, Green, Blue, Yellow",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp2-bc92f411",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "content": "Red, Green, Blue, Yellow",
+            "reasoning": null
+          }
+        ],
+        "usage": {
+          "completion_tokens": 8,
+          "prompt_tokens": 201,
+          "total_tokens": 209,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    },
+    {
+      "request_id": "image-02",
+      "kind": "image",
+      "latency_seconds": 106.211,
+      "text": "Blue, Yellow, Red, Green",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp2-bc92f411",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "content": "Blue, Yellow, Red, Green",
+            "reasoning": null
+          }
+        ],
+        "usage": {
+          "completion_tokens": 8,
+          "prompt_tokens": 201,
+          "total_tokens": 209,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    },
+    {
+      "request_id": "image-03",
+      "kind": "image",
+      "latency_seconds": 101.481,
+      "text": "Circle, Square, Triangle",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp2-bc92f411",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "content": "Circle, Square, Triangle",
+            "reasoning": null
+          }
+        ],
+        "usage": {
+          "completion_tokens": 6,
+          "prompt_tokens": 189,
+          "total_tokens": 195,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    },
+    {
+      "request_id": "image-04",
+      "kind": "image",
+      "latency_seconds": 95.227,
+      "text": "3",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp2-bc92f411",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "content": "3",
+            "reasoning": null
+          }
+        ],
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 188,
+          "total_tokens": 190,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    },
+    {
+      "request_id": "image-05",
+      "kind": "image",
+      "latency_seconds": 95.224,
+      "text": "yes",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp2-bc92f411",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "content": "yes",
+            "reasoning": null
+          }
+        ],
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 1050,
+          "total_tokens": 1052,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    },
+    {
+      "request_id": "image-06",
+      "kind": "image",
+      "latency_seconds": 95.224,
+      "text": "square",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp2-bc92f411",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "content": "square",
+            "reasoning": null
+          }
+        ],
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 189,
+          "total_tokens": 191,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    },
+    {
+      "request_id": "image-07",
+      "kind": "image",
+      "latency_seconds": 95.222,
+      "text": "yellow",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp2-bc92f411",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "content": "yellow",
+            "reasoning": null
+          }
+        ],
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 187,
+          "total_tokens": 189,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    },
+    {
+      "request_id": "image-08",
+      "kind": "image",
+      "latency_seconds": 95.223,
+      "text": "4",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp2-bc92f411",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "content": "4",
+            "reasoning": null
+          }
+        ],
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 189,
+          "total_tokens": 191,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 8,
+    "passed_count": 8,
+    "failed_count": 0,
+    "passed": true
+  }
+}

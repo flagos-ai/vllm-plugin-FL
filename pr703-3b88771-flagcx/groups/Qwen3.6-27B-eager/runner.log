@@ -1,0 +1,2 @@
+(Worker) INFO 11-15 15:10:38 [model_runner_v2.py:108] Ascend model runner V2 active: vllm_fl.dispatch.backends.vendor.ascend.worker.model_runner_v2.GPUModelRunnerFLV2
+(Worker) INFO 11-15 15:10:39 [model_runner_v2.py:108] Ascend model runner V2 active: vllm_fl.dispatch.backends.vendor.ascend.worker.model_runner_v2.GPUModelRunnerFLV2

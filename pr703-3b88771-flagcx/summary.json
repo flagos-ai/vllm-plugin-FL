@@ -1,0 +1,41 @@
+{
+  "commit": "3b887716f6005718876e5794e444652a445f4bf6",
+  "groups": {
+    "Qwen3.6-27B-eager": {
+      "total": 26,
+      "passed": 26,
+      "worker_replay_by_size": {},
+      "failed": []
+    },
+    "Qwen3.6-27B-graph": {
+      "total": 26,
+      "passed": 26,
+      "worker_replay_by_size": {
+        "1": 400,
+        "2": 10,
+        "4": 16,
+        "8": 6
+      },
+      "failed": []
+    },
+    "Qwen3.6-35B-A3B-eager": {
+      "total": 26,
+      "passed": 26,
+      "worker_replay_by_size": {},
+      "failed": []
+    },
+    "Qwen3.6-35B-A3B-graph": {
+      "total": 26,
+      "passed": 26,
+      "worker_replay_by_size": {
+        "1": 588,
+        "2": 6,
+        "4": 18,
+        "8": 6
+      },
+      "failed": []
+    }
+  },
+  "total": 104,
+  "passed": 104
+}

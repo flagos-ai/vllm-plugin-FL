@@ -1,0 +1,2 @@
+repository/vllm_fl/distributed/device_communicators/flagcx.py:361: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+repository/vllm_fl/distributed/device_communicators/flagcx.py:361: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
