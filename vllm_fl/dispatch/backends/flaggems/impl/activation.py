@@ -25,6 +25,12 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
+    if getattr(current_platform, "vendor_name", None) == "iluvatar":
+        from vllm_fl.dispatch.backends.vendor.iluvatar.activation import (
+            _iluvatar_gems_silu_and_mul,
+        )
+
+        return _iluvatar_gems_silu_and_mul(x)
     if (
         current_platform.device_type == "musa"
         and x.device.type == "musa"

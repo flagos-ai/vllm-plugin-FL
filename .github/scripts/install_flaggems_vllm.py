@@ -15,6 +15,10 @@ SOURCE_ARCHIVE = f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{C
 SOURCE_ARCHIVE_SHA256 = (
     "1b47e1eb7982acc606e2fc920561d169e2a17fac7c92ff65c5f11cafa6b8b16e"
 )
+if os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "iluvatar":
+    COMMIT = "90dd13cd721f2ff139e6f42ef36854518c0b2b95"
+    REPOSITORY = "https://github.com/luoyc123/FlagGems-vllm.git"
+    SOURCE_ARCHIVE = None
 RUNTIME_PACKAGES = ("torch", "flagtree", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
 
@@ -32,7 +36,7 @@ def release_is_installed():
         source = json.loads(text or "{}")
     except (PackageNotFoundError, ValueError):
         return False
-    if source.get("url") == SOURCE_ARCHIVE:
+    if SOURCE_ARCHIVE is not None and source.get("url") == SOURCE_ARCHIVE:
         return (
             source.get("archive_info", {}).get("hashes", {}).get("sha256")
             == SOURCE_ARCHIVE_SHA256
@@ -54,6 +58,8 @@ def main():
     args = parser.parse_args()
     provider = f"git+{REPOSITORY}@{COMMIT}"
     if args.source_archive:
+        if SOURCE_ARCHIVE is None:
+            parser.error("--source-archive is unavailable for the selected provider")
         provider = f"{SOURCE_ARCHIVE}#sha256={SOURCE_ARCHIVE_SHA256}"
 
     before = {name: package_version(name) for name in RUNTIME_PACKAGES}
