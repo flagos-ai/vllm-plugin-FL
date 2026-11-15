@@ -79,6 +79,9 @@ flagos_blacklist:
   # FlagGems 5.4 corrupts the first BF16 broadcast mul_ when tuning the
   # (4, 1900, 1152) vision position embeddings against (4, 1900, 1) weights.
   - mul_
+  # The FlagGems batched unit-lower solve corrupts the 35B GDN prefill
+  # when 65 tokens cross a 64-token chunk boundary (32 FP32 systems).
+  - linalg_solve_triangular
   # FlagGems conv1d faults in Qwen3.6-27B's GDN prefill process with
   # 5120 groups, T=15, K=4, padding=3. Keep conv2d enabled: the
   # native conv1d path passes text/image serving with that override active.

@@ -142,6 +142,24 @@ def test_default_ascend_inplace_mul_preserves_vision_interpolation():
     torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
 
 
+def test_default_ascend_triangular_solve_preserves_gdn_chunks():
+    generator = torch.Generator().manual_seed(703)
+    # Qwen3.6-35B-A3B TP2 prefill solves two 64-token chunks per local head.
+    system = torch.randn(1, 16, 2, 64, 64, generator=generator).tril(-1) / 64
+    rhs = torch.randn(1, 16, 2, 64, 128, generator=generator)
+    expected = torch.linalg.solve_triangular(
+        system, rhs, upper=False, unitriangular=True
+    )
+    system_npu, rhs_npu = system.to("npu"), rhs.to("npu")
+
+    with _enable("linalg_solve_triangular", native=True):
+        actual = torch.linalg.solve_triangular(
+            system_npu, rhs_npu, upper=False, unitriangular=True
+        )
+
+    _assert(actual, expected, torch.float32)
+
+
 def test_flaggems_acos_domain_and_strides_on_npu():
     for dtype in (torch.float32, torch.bfloat16):
         for layout in ("contiguous", "strided"):
