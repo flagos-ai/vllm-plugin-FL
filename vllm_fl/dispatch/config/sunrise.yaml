@@ -49,9 +49,10 @@ op_backends:
     - reference
 
 # FlagOS operator blacklist
-# Sunrise is CUDA-compatible, so most FlagGems ops should work
-# Blacklist only ops that are known to have issues
-flagos_blacklist: []
+# Route linear through torch-ptpu. The FlagGems BF16 path can change the
+# greedy result for Qwen3.6 vision requests on Sunrise.
+flagos_blacklist:
+  - linear
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
