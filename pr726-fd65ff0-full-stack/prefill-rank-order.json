@@ -1,0 +1,378 @@
+{
+  "0": {
+    "scheduled": 640,
+    "first_differing_boundary": "image.output.0",
+    "markers": {
+      "image.pixel_values": {
+        "shape": [
+          4096,
+          1536
+        ],
+        "equal_by_logical_rank": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "image.grid_thw": {
+        "shape": [
+          1,
+          3
+        ],
+        "equal_by_logical_rank": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "image.output.0": {
+        "shape": [
+          1024,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "merge.input_ids": {
+        "shape": [
+          640
+        ],
+        "equal_by_logical_rank": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "merge.mask": {
+        "shape": [
+          640
+        ],
+        "equal_by_logical_rank": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "merge.image.0": {
+        "shape": [
+          612,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "merge.output": {
+        "shape": [
+          640,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.input": {
+        "shape": [
+          640,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.positions": {
+        "shape": [
+          3,
+          640
+        ],
+        "equal_by_logical_rank": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.00.out": {
+        "shape": [
+          640,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.00.residual": {
+        "shape": [
+          640,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.01.out": {
+        "shape": [
+          640,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.01.residual": {
+        "shape": [
+          640,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      }
+    }
+  },
+  "640": {
+    "scheduled": 422,
+    "first_differing_boundary": "merge.image.0",
+    "markers": {
+      "merge.input_ids": {
+        "shape": [
+          422
+        ],
+        "equal_by_logical_rank": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "merge.mask": {
+        "shape": [
+          422
+        ],
+        "equal_by_logical_rank": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "merge.image.0": {
+        "shape": [
+          412,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "merge.output": {
+        "shape": [
+          422,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.input": {
+        "shape": [
+          422,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.positions": {
+        "shape": [
+          3,
+          422
+        ],
+        "equal_by_logical_rank": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.00.out": {
+        "shape": [
+          422,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.00.residual": {
+        "shape": [
+          422,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.01.out": {
+        "shape": [
+          422,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      },
+      "decoder.01.residual": {
+        "shape": [
+          422,
+          2048
+        ],
+        "equal_by_logical_rank": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "equal_across_ranks_within_order": {
+          "forward": true,
+          "reverse": true
+        }
+      }
+    }
+  }
+}
