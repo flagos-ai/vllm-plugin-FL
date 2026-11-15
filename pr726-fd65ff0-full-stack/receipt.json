@@ -980,6 +980,36 @@
       "serial_passed": 2,
       "serial_skipped": 20,
       "runner_command": "python tests/run.py --platform kunlunxin --device p800 --scope unit"
+    },
+    "original_adaptation_gate": {
+      "27b_graph": {
+        "passed": 26,
+        "total": 26,
+        "noc_idle_timeout_matches": 0
+      },
+      "35b_forward_tp_graph": {
+        "passed": 26,
+        "total": 26,
+        "noc_idle_timeout_matches": 0
+      },
+      "35b_forward_tp_eager": {
+        "passed": 26,
+        "total": 26,
+        "noc_idle_timeout_matches": 0
+      },
+      "35b_forward_local_to_pcie_bus_id": [
+        132,
+        156,
+        182,
+        187
+      ],
+      "35b_reverse_local_to_pcie_bus_id": [
+        187,
+        182,
+        156,
+        132
+      ],
+      "35b_reverse_tp_status": "running"
     }
   }
 }

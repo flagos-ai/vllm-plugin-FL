@@ -26,6 +26,8 @@ An FP32 all-reduce diagnostic at fd65ff0 also passed 26 of 26 forward and 25 of 
 
 At 8cd42a8 the original gate with reversed TP order passed 25 of 26 in eager and 25 of 26 in graph mode. Both runs failed only image-05, which returned HELLO without VLLM. The concurrent image and mixed scenarios passed in both modes. Across these two runs and the 27B eager run in the same matrix, server logs contained zero NoC idle timeout matches.
 
+At a8b5837, a separate graph run passed all 26 original 27B requests. On the spare TP4 group used for the earlier reversed run, a8b5837 also passed all 26 original 35B requests in graph mode and all 26 in eager mode with forward TP rank order. The same-head check with reverse order remains in progress.
+
 The separate native argmax change prevents an out-of-range ID when the projection has already produced NaNs. The P800 full-vocabulary reproducer returned 30 invalid IDs in 120 calls with FlagGems argmax and zero with native argmax. [FlagGems issue](https://github.com/flagos-ai/FlagGems/issues/9123)
 
 ## Shared schema registration after base sync
