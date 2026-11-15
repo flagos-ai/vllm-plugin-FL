@@ -117,6 +117,7 @@ RUN PIP_INDEX_URL="${INDEX_URL}" PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}" \
 # the plugin selects FlagCX purely from FLAGCX_PATH being set.
 RUN git clone https://github.com/flagos-ai/FlagCX.git /opt/FlagCX \
     && git -C /opt/FlagCX checkout "${FLAGCX_COMMIT}" \
+    && git -C /opt/FlagCX submodule update --init --depth 1 third-party/json \
     && cd /opt/FlagCX \
     && make USE_AMD=1 -j"$(nproc)" \
     && FLAGCX_ADAPTOR=amd USE_AMD=1 FLAGCX_HOME=/opt/FlagCX \
