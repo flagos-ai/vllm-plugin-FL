@@ -940,6 +940,46 @@
     },
     "synced_pr_head": "2f35f9f35b09768e5502a3f7f5f24a4fa6ec22fe",
     "synced_upstream_base": "0ccef39e9e0755c62576b99f4fcb69a61551f67e",
-    "synced_head_ci": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43724823795"
+    "synced_head_ci": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43724823795",
+    "gate_27b_graph_host_a_followup": {
+      "original_passed": 26,
+      "original_total": 26,
+      "additional_original_image_requests_passed": 9,
+      "additional_original_image_requests_total": 9,
+      "full_replays_logged_3_to_4": 15,
+      "per_worker_full_replay_markers": 80,
+      "noc_idle_timeout_matches": 0
+    },
+    "gate_35b_reverse_tp_host_a_spare_group": {
+      "eager": {
+        "passed": 25,
+        "total": 26,
+        "noc_idle_timeout_matches": 0
+      },
+      "graph": {
+        "passed": 25,
+        "total": 26,
+        "noc_idle_timeout_matches": 0
+      },
+      "failed_request": "image-05",
+      "failed_checks": [
+        "expected_semantics",
+        "expected_order"
+      ],
+      "observed_text": "HELLO"
+    }
+  },
+  "shared_native_schema_registration_followup": {
+    "pr_head": "a8b58378c76fb04b8d59acd9866d684d566293e9",
+    "ci": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43726209734",
+    "registry_matches_base": true,
+    "p800": {
+      "focused_passed": 15,
+      "parallel_passed": 1962,
+      "parallel_skipped": 175,
+      "serial_passed": 2,
+      "serial_skipped": 20,
+      "runner_command": "python tests/run.py --platform kunlunxin --device p800 --scope unit"
+    }
   }
 }

@@ -16,12 +16,18 @@ The full-model row trace recorded sequence lengths 205, 192, 204 and 0. On rank 
 
 A one-card test replayed the native 896-token paged attention with three active rows and one row whose sequence length was zero. The zero-length row retained a pre-seeded value of 1.90e38. The subsequent projection produced 15,360 NaNs in the three active rows. Zeroing the padding row during capture preserved the three active attention outputs and eliminated all 15,360 projection NaNs. [Single-card reproducer](reproduce_padding.py)
 
-The fix applies an in-place fill to zero-length rows in the Kunlunxin decode attention adapter during graph capture. Both hosts passed the unchanged 27B graph gate 26 of 26. Host B logged three actual 3-to-4 FULL replays. Both logs showed zero corrupted requests and the default graph sizes 1, 2, 4 and 8. A separate TP4 card group passed all 26 eager requests with the same fix. The adapter is identical at 8cd42a8 and at the base-synced PR head 2f35f9f. [PR #726](https://github.com/flagos-ai/vllm-plugin-FL/pull/726) · [Synced-head CI](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43724823795)
+The fix applies an in-place fill to zero-length rows in the Kunlunxin decode attention adapter during graph capture. Both hosts passed the unchanged 27B graph gate 26 of 26. Host B logged three actual 3-to-4 FULL replays. An additional Host A run passed the same 26 requests and nine targeted original image requests, with 15 such replays in the server metrics and 80 per-worker replay markers. Both logs showed zero corrupted requests and the default graph sizes 1, 2, 4 and 8. A separate TP4 card group passed all 26 eager requests with the same fix. The adapter is identical at 8cd42a8 and at the current PR head a8b5837. [PR #726](https://github.com/flagos-ai/vllm-plugin-FL/pull/726)
 
-## Qwen3.6-35B-A3B eager
+## Qwen3.6-35B-A3B eager and graph
 
 The forward TP rank order on the same set of four P800 devices returned HELLO and VLLM and passed 26 of 26. The reversed order returned HELLO and stopped, passing 25 of 26. At the decision after HELLO, the forward run assigned 19.75 to the newline and 19.50 to EOS. The reverse run assigned 19.375 to the newline and 19.625 to EOS. The forward run used b560e33 and the reverse run used fd65ff0, which adds the native argmax routing. The sampled IDs before that decision agree. Both runs recorded zero NaNs at the LM head and in the gathered logits. The listed token scores were finite.
 
 An FP32 all-reduce diagnostic at fd65ff0 also passed 26 of 26 forward and 25 of 26 in reverse. The reversed run with FP32 reduction returned VLLM alone. A reversed run routing aten::linear to native returned HELLO alone and passed 25 of 26.
 
+At 8cd42a8 the original gate with reversed TP order passed 25 of 26 in eager and 25 of 26 in graph mode. Both runs failed only image-05, which returned HELLO without VLLM. The concurrent image and mixed scenarios passed in both modes. Across these two runs and the 27B eager run in the same matrix, server logs contained zero NoC idle timeout matches.
+
 The separate native argmax change prevents an out-of-range ID when the projection has already produced NaNs. The P800 full-vocabulary reproducer returned 30 invalid IDs in 120 calls with FlagGems argmax and zero with native argmax. [FlagGems issue](https://github.com/flagos-ai/FlagGems/issues/9123)
+
+## Shared schema registration after base sync
+
+The CI at 2f35f9f reached the new native-ownership unit test and failed on P800, Iluvatar and T-Head because the PR's earlier registry workaround bypassed the native-ownership early return. Revision a8b5837 restores the base registry without changing the tests. On P800, the CI unit command passed 1,962 parallel tests and two serial tests, with 175 and 20 skipped respectively. The focused registry and Kunlunxin cache tests passed 15 of 15. [Previous CI](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43724823795) · [Current CI](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43726209734)
