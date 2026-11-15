@@ -1055,5 +1055,93 @@
         ]
       }
     }
+  },
+  "scoped_vision_ordered_reduction": {
+    "pr_head": "e8f9f3d2bd0557b4c5ee346665cac971ae9039b1",
+    "ci": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43739667792",
+    "scope": "eager weight-sharded Qwen MoE image encoder BF16 TP4",
+    "local_original_gate": [
+      {
+        "model": "Qwen3.6-27B",
+        "mode": "graph",
+        "rank_order": "forward",
+        "passed": 26,
+        "total": 26,
+        "image_05_ocr": "HELLO\nVLLM",
+        "noc_idle_timeout_matches": 0,
+        "full_replays_3_to_4": 3,
+        "all_full_replays": 160
+      },
+      {
+        "model": "Qwen3.6-27B",
+        "mode": "eager",
+        "rank_order": "forward",
+        "passed": 26,
+        "total": 26,
+        "image_05_ocr": "HELLO\nVLLM",
+        "noc_idle_timeout_matches": 0
+      },
+      {
+        "model": "Qwen3.6-35B-A3B",
+        "mode": "graph",
+        "rank_order": "reverse",
+        "passed": 26,
+        "total": 26,
+        "image_05_ocr": "HELLO\nVLLM",
+        "noc_idle_timeout_matches": 0,
+        "full_replays_3_to_4": 3,
+        "all_full_replays": 222
+      },
+      {
+        "model": "Qwen3.6-35B-A3B",
+        "mode": "eager",
+        "rank_order": "reverse",
+        "passed": 26,
+        "total": 26,
+        "image_05_ocr": "HELLO\nVLLM",
+        "noc_idle_timeout_matches": 0
+      }
+    ],
+    "local_unit": {
+      "focused_passed": 21,
+      "parallel_passed": 1963,
+      "parallel_skipped": 175,
+      "serial_passed": 2,
+      "serial_skipped": 20
+    },
+    "vision_data_mode_reverse_graph": {
+      "service_ready": false,
+      "readiness_deadline_s": 1800,
+      "requests_run": 0
+    }
+  },
+  "official_p800_serving_startup_failure": {
+    "pr_head": "a8b58378c76fb04b8d59acd9866d684d566293e9",
+    "job": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43726209734/job/132850709567",
+    "failed_model_mode_cases": 4,
+    "phase": "PyFlagcxCommunicator constructor, one-element FP32 all-reduce stream synchronization",
+    "rank_1_xre_status": 299,
+    "other_ranks_xre_status": 702,
+    "loaded_model_weights": false,
+    "driver": "5.0.21.47",
+    "xre": "5.37.1",
+    "local_model_free_probe": {
+      "pr_head": "e8f9f3d2bd0557b4c5ee346665cac971ae9039b1",
+      "verified_warmup_and_sum_ranks": {
+        "forward": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "reverse": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "noc_idle_timeout_matches": 0
+    }
   }
 }
