@@ -12,7 +12,11 @@ Routing only aten::linear to native passed 23 of 26 on both hosts. Routing both 
 
 A later run captured the rank 2 projection input and weight from the bad step. Both tensors had zero NaNs and zero infinities. The activation maximum had already reached 1.90e38 in BF16. Recomputing with the same tensors yielded finite outputs on CPU in FP32 and 20,480 NaNs on P800 in eager mode.
 
+The full-model row trace recorded sequence lengths 205, 192, 204 and 0. On rank 2, the native attention outputs had row-wise absolute maxima 2.28, 2.03, 1.64 and 2.61e38. After applying the gate, the corresponding maxima were 0.199, 0.453, 0.498 and 1.90e38. The preceding layer and the gate inputs stayed within their ordinary ranges. Rank 1 also retained a NaN in the zero-length attention row.
+
 A one-card test replayed the native 896-token paged attention with three active rows and one row whose sequence length was zero. The zero-length row retained a pre-seeded value of 1.90e38. The subsequent projection produced 15,360 NaNs in the three active rows. Zeroing the padding row during capture preserved the three active attention outputs and eliminated all 15,360 projection NaNs. [Single-card reproducer](reproduce_padding.py)
+
+A candidate applies an in-place fill to zero-length rows in the Kunlunxin decode attention adapter during graph capture. Host B passed the unchanged 27B graph gate 26 of 26 with three actual 3-to-4 FULL replays and zero corrupted requests. The selected graph sizes remained 1, 2, 4 and 8.
 
 ## Qwen3.6-35B-A3B eager
 

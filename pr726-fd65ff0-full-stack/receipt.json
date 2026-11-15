@@ -306,5 +306,626 @@
     "seeded_padded_output": 1.9007960339724297E+38,
     "active_rows": 3,
     "batch_size": 4
+  },
+  "first_failed_replay_rows": [
+    {
+      "rank": 0,
+      "captured_sequence_lengths": [
+        205,
+        192,
+        204,
+        0
+      ],
+      "phases": {
+        "06/linear_attention/layer_output/0": {
+          "abs_max": [
+            0.6796875,
+            1.8203125,
+            1.78125,
+            8.125
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/input_layernorm/0": {
+          "abs_max": [
+            84.0,
+            81.0,
+            80.0,
+            45.75
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/projected_qkv_gate/3": {
+          "abs_max": [
+            7.15625,
+            6.875,
+            7.75,
+            7.84375
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/attention_attn": {
+          "abs_max": [
+            2.875,
+            2.765625,
+            2.4375,
+            1.0301516967333098E+38
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/attention_output_proj_input": {
+          "abs_max": [
+            1.0078125,
+            0.70703125,
+            1.4765625,
+            2.1599954931504883E+36
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/all_reduce_0/input": {
+          "abs_max": [
+            0.0,
+            0.0,
+            0.0,
+            8.826904659509207E+35
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/all_reduce_0/output": {
+          "abs_max": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nans": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "rank": 1,
+      "captured_sequence_lengths": [
+        205,
+        192,
+        204,
+        0
+      ],
+      "phases": {
+        "06/linear_attention/layer_output/0": {
+          "abs_max": [
+            0.6796875,
+            1.8203125,
+            1.78125,
+            8.125
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/input_layernorm/0": {
+          "abs_max": [
+            84.0,
+            81.0,
+            80.0,
+            45.75
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/projected_qkv_gate/3": {
+          "abs_max": [
+            7.5625,
+            7.8125,
+            8.125,
+            8.8125
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/attention_attn": {
+          "abs_max": [
+            2.453125,
+            2.890625,
+            2.53125,
+            2.9508861506425132E+38
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/attention_output_proj_input": {
+          "abs_max": [
+            0.11572265625,
+            0.255859375,
+            0.279296875,
+            5.350142683034286E+37
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/all_reduce_0/input": {
+          "abs_max": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            5120
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/all_reduce_0/output": {
+          "abs_max": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nans": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "rank": 2,
+      "captured_sequence_lengths": [
+        205,
+        192,
+        204,
+        0
+      ],
+      "phases": {
+        "06/linear_attention/layer_output/0": {
+          "abs_max": [
+            0.6796875,
+            1.8203125,
+            1.78125,
+            8.125
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/input_layernorm/0": {
+          "abs_max": [
+            84.0,
+            81.0,
+            80.0,
+            45.75
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/projected_qkv_gate/3": {
+          "abs_max": [
+            9.875,
+            9.5625,
+            9.4375,
+            10.3125
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/attention_attn": {
+          "abs_max": [
+            2.28125,
+            2.03125,
+            1.640625,
+            2.605286871738435E+38
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/attention_output_proj_input": {
+          "abs_max": [
+            0.19921875,
+            0.453125,
+            0.498046875,
+            1.9007960339724297E+38
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/all_reduce_0/input": {
+          "abs_max": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nans": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/all_reduce_0/output": {
+          "abs_max": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nans": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "rank": 3,
+      "captured_sequence_lengths": [
+        205,
+        192,
+        204,
+        0
+      ],
+      "phases": {
+        "06/linear_attention/layer_output/0": {
+          "abs_max": [
+            0.6796875,
+            1.8203125,
+            1.78125,
+            8.125
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/input_layernorm/0": {
+          "abs_max": [
+            84.0,
+            81.0,
+            80.0,
+            45.75
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/projected_qkv_gate/3": {
+          "abs_max": [
+            7.15625,
+            6.46875,
+            6.59375,
+            8.1875
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/attention_attn": {
+          "abs_max": [
+            1.859375,
+            2.8125,
+            1.859375,
+            2.658455991569832E+36
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/attention_output_proj_input": {
+          "abs_max": [
+            0.2060546875,
+            1.8203125,
+            0.453125,
+            5.9192184187297035E+35
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/all_reduce_0/input": {
+          "abs_max": [
+            0.0,
+            0.0,
+            0.0,
+            4.4134523297546035E+34
+          ],
+          "nans": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "07/full_attention/all_reduce_0/output": {
+          "abs_max": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nans": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "infinities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    }
+  ],
+  "padding_mask_candidate": {
+    "revision": "8cd42a8c52ade434e437fde4f76138d7fcd4039d",
+    "active_path": "Kunlunxin graph decode only",
+    "gate_27b_graph_host_b": {
+      "passed": 26,
+      "total": 26,
+      "full_replays_3_to_4": 3,
+      "corrupted_requests": 0,
+      "noc_idle_timeout_matches": 0
+    },
+    "unit_tests": {
+      "passed": 11,
+      "source": "tests/unit_tests/attention/test_kunlunxin_cache.py"
+    }
   }
 }
