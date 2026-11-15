@@ -715,6 +715,7 @@ class KunlunxinPagedAttention(PagedAttention):
         if output is None:
             output = torch.empty_like(query)
         assert max_window_size == -1, "not support sliding window"
+        decode_output = output[:num_decode_tokens]
         xtorch_ops.decode_paged_attention(
             query[:num_decode_tokens],
             key_cache,
@@ -722,13 +723,18 @@ class KunlunxinPagedAttention(PagedAttention):
             seq_lens_host[:num_decode_tokens],
             seq_lens[:num_decode_tokens],
             block_tables,
-            output[:num_decode_tokens],
+            decode_output,
             alpha=scale,
             k_perchannel_scale=k_scale,
             v_perchannel_scale=v_scale,
             alibi_slopes=alibi_slopes,
             sink=None,
         )
+        if torch.cuda.is_current_stream_capturing():
+            # The native kernel skips zero-length rows. The projection still
+            # consumes every row in the captured batch.
+            padded_rows = seq_lens[:num_decode_tokens].eq(0).view(-1, 1, 1)
+            decode_output.masked_fill_(padded_rows, 0)
         return output
 
 class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):

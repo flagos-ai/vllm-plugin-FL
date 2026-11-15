@@ -12,6 +12,9 @@ from vllm.v1.kv_cache_layout import KVCacheLayout
 from vllm.v1.worker.block_table import BlockTable, SlotMappingMode
 from vllm.v1.worker.utils import AttentionGroup, KVBlockZeroer
 
+from vllm_fl.dispatch.backends.vendor.kunlunxin.impl import (
+    attention as kunlunxin_attention,
+)
 from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
     KunlunxinAttentionBackend,
     KunlunxinPagedAttention,
@@ -49,6 +52,49 @@ def test_cache_planes_match_native_hnd_layout(layout):
     assert torch.all(cache[1, 0] == 1)
     assert torch.all(cache[2, 1] == 2)
     assert torch.count_nonzero(cache[0]) == 0
+
+
+def test_graph_decode_clears_zero_length_output_rows(monkeypatch):
+    query = torch.arange(12, dtype=torch.bfloat16).reshape(4, 1, 3)
+    seq_lens = torch.tensor([2, 3, 0, 0], dtype=torch.int32)
+    cache = torch.empty((1, 1, 4, 3), dtype=query.dtype)
+    table = torch.zeros((4, 1), dtype=torch.int32)
+    scale = torch.tensor(1.0)
+    output = torch.empty_like(query)
+    output[2].fill_(torch.inf)
+    output[3].fill_(torch.nan)
+
+    def decode(query, _key, _value, _host_lens, _lens, _table, out, **_kwargs):
+        out[:2].copy_(query[:2])
+
+    monkeypatch.setattr(
+        kunlunxin_attention,
+        "xtorch_ops",
+        SimpleNamespace(decode_paged_attention=decode),
+        raising=False,
+    )
+    monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: True)
+
+    result = KunlunxinPagedAttention.forward_decode(
+        query,
+        cache,
+        cache,
+        table,
+        seq_lens,
+        seq_lens,
+        3,
+        4,
+        "auto",
+        1,
+        1.0,
+        None,
+        scale,
+        scale,
+        output=output,
+    )
+    assert result is output
+    torch.testing.assert_close(result[:2], query[:2])
+    torch.testing.assert_close(result[2:], torch.zeros_like(query[2:]))
 
 
 @pytest.fixture
