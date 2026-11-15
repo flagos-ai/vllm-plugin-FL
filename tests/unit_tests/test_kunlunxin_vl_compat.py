@@ -8,6 +8,7 @@ import types
 from unittest.mock import Mock
 
 import pytest
+import torch
 
 _MOD_NAME = "vllm.model_executor.models.qwen3_vl"
 _PARENTS = [
@@ -117,3 +118,51 @@ def test_module_not_installed_no_crash():
     # Set to None so the import raises ImportError (Python's behavior with None in sys.modules)
     sys.modules[_MOD_NAME] = None  # type: ignore[assignment]
     vc.apply_vl_compat()  # Must not raise
+
+
+def test_ordered_vision_reduce_stays_in_weight_sharded_scope(monkeypatch):
+    vc = _get_vc()
+    patches = types.ModuleType("vllm.model_executor.models.qwen3_5")
+    tensor = torch.ones((2, 3), dtype=torch.bfloat16)
+    communicator = types.SimpleNamespace(
+        world_size=4,
+        unique_name="tp:0",
+        pyflagcx_comm=types.SimpleNamespace(disabled=False),
+        all_gather=Mock(
+            return_value=torch.cat(
+                [torch.full_like(tensor, value) for value in (256, 1, -256, 1)]
+            )
+        ),
+    )
+
+    class QwenModel:
+        use_data_parallel = False
+
+        def _process_image_input(self, image_input):
+            if image_input is None:
+                raise RuntimeError("encoder failure")
+            return vc.maybe_reduce_vision_tp(communicator, image_input)
+
+    patches.Qwen3_5MoeForConditionalGeneration = QwenModel
+    monkeypatch.setitem(sys.modules, patches.__name__, patches)
+
+    vc.apply_vision_tp_scope()
+    installed = QwenModel._process_image_input
+    vc.apply_vision_tp_scope()
+    assert QwenModel._process_image_input is installed
+    assert vc.maybe_reduce_vision_tp(communicator, tensor) is None
+
+    model = QwenModel()
+    torch.testing.assert_close(model._process_image_input(tensor), tensor * 2)
+    communicator.all_gather.assert_called_once_with(tensor, dim=0)
+
+    communicator.unique_name = "dp:0"
+    assert model._process_image_input(tensor) is None
+    communicator.unique_name = "tp:0"
+    with pytest.raises(RuntimeError, match="encoder failure"):
+        model._process_image_input(None)
+    assert vc.maybe_reduce_vision_tp(communicator, tensor) is None
+
+    model.use_data_parallel = True
+    assert model._process_image_input(tensor) is None
+    communicator.all_gather.assert_called_once()

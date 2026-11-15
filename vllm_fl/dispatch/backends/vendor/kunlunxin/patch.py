@@ -134,9 +134,11 @@ def _apply_legacy_kunlunxin_patches():
     apply_topk_topp_compat()
 
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat import (
+        apply_vision_tp_scope,
         apply_vl_compat,
     )
     apply_vl_compat()
+    apply_vision_tp_scope()
 
     from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.buffer_utils_compat import (
         apply_buffer_utils_compat,
@@ -600,6 +602,9 @@ def patch_graph_all_reduce(replacements=None):
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
             _is_full_graph_runtime,
         )
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat import (
+            maybe_reduce_vision_tp,
+        )
         from vllm_fl.distributed.communicator import CommunicatorFL
 
         original_all_reduce = CommunicatorFL.all_reduce
@@ -619,11 +624,12 @@ def patch_graph_all_reduce(replacements=None):
             # boundaries (observed as a simultaneous cudaErrorIllegalAddress on
             # all 4 ranks at the first real prefill). Keep PIECEWISE on the
             # unmodified path, exactly as it behaved before this patch existed.
-            use_graph_collective = (
-                torch.cuda.is_current_stream_capturing()
-                and _is_full_graph_runtime()
-            )
-            if not use_graph_collective:
+            capturing = torch.cuda.is_current_stream_capturing()
+            if not capturing:
+                vision_output = maybe_reduce_vision_tp(self, input_)
+                if vision_output is not None:
+                    return vision_output
+            if not capturing or not _is_full_graph_runtime():
                 return original_all_reduce(self, input_)
 
             if (
