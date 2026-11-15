@@ -46,6 +46,13 @@
     "requests_per_model_and_mode": 26,
     "observed_failing_graph_batch": {"actual": 3, "captured": 4}
   },
+  "o_proj_dispatch_probe": {
+    "activation_shape": [4, 1536],
+    "weight_shape": [5120, 1536],
+    "live_cuda_registration": {"aten::linear": "FlagGems", "aten::mm": "FlagGems"},
+    "native_linear_cuda_registration": {"aten::linear": "PyTorch composite math", "aten::mm": "FlagGems"},
+    "native_linear_and_mm_cuda_registration": {"aten::linear": "PyTorch composite math", "aten::mm": "torch_xmlir native CUDA registration"}
+  },
   "official_ci": {
     "run": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969",
     "p800_functional": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969/job/132691988412",
