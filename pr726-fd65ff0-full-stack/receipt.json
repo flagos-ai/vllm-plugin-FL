@@ -1135,7 +1135,61 @@
         "image_05_ocr": "HELLO\nVLLM",
         "noc_idle_timeout_matches": 0
       }
-    ]
+    ],
+    "official_ci_conclusion": "success",
+    "official_unit_functional": "success",
+    "official_p800_e2e": {
+      "inference": {
+        "job": 132895904191,
+        "conclusion": "success",
+        "noc_idle_timeout_matches": 0,
+        "case_results": [
+          {
+            "case": "inference/qwen3_6/27b_tp4_eager",
+            "status": "PASS"
+          },
+          {
+            "case": "inference/qwen3_6/27b_tp4_graph",
+            "status": "PASS"
+          },
+          {
+            "case": "inference/qwen3_6/35b_a3b_tp4_eager",
+            "status": "PASS"
+          },
+          {
+            "case": "inference/qwen3_6/35b_a3b_tp4_graph",
+            "status": "PASS"
+          }
+        ],
+        "xre_status_299_matches": 0,
+        "url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43739667792/job/132895904191"
+      },
+      "serving": {
+        "job": 132895904231,
+        "conclusion": "success",
+        "noc_idle_timeout_matches": 0,
+        "xre_status_299_matches": 0,
+        "case_results": [
+          {
+            "case": "serving/qwen3_6/27b_tp4_eager",
+            "status": "PASS"
+          },
+          {
+            "case": "serving/qwen3_6/27b_tp4_graph",
+            "status": "PASS"
+          },
+          {
+            "case": "serving/qwen3_6/35b_a3b_tp4_eager",
+            "status": "PASS"
+          },
+          {
+            "case": "serving/qwen3_6/35b_a3b_tp4_graph",
+            "status": "PASS"
+          }
+        ],
+        "url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43739667792/job/132895904231"
+      }
+    }
   },
   "official_p800_serving_startup_failure": {
     "pr_head": "a8b58378c76fb04b8d59acd9866d684d566293e9",
