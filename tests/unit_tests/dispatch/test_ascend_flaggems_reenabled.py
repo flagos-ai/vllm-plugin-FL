@@ -128,6 +128,20 @@ def test_flaggems_arithmetic_on_npu(op):
             _assert(actual, expected, dtype)
 
 
+def test_default_ascend_inplace_mul_preserves_vision_interpolation():
+    position_shape = (4, 1900, 1152)
+    embeds = torch.linspace(-1, 1, position_shape[-1]).bfloat16()
+    npu_embeds = embeds.expand(position_shape).contiguous().to("npu")
+    weights = torch.linspace(0, 1, 4 * 1900).bfloat16().reshape(4, 1900, 1)
+    npu_weights = weights.to("npu")
+    expected = embeds * weights
+
+    with _enable("mul_", native=True):
+        actual = npu_embeds.mul_(npu_weights)
+        assert actual is npu_embeds
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+
+
 def test_flaggems_acos_domain_and_strides_on_npu():
     for dtype in (torch.float32, torch.bfloat16):
         for layout in ("contiguous", "strided"):

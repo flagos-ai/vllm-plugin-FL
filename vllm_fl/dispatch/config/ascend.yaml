@@ -76,6 +76,9 @@ flagos_blacklist:
   # FlagGems 5.4 corrupts the first row of the biased BF16 linear used
   # for Qwen3.6 vision patch projection (M=1900, K=1536, N=1152).
   - linear
+  # FlagGems 5.4 corrupts the first BF16 broadcast mul_ when tuning the
+  # (4, 1900, 1152) vision position embeddings against (4, 1900, 1) weights.
+  - mul_
   # FlagGems conv1d faults in Qwen3.6-27B's GDN prefill process with
   # 5120 groups, T=15, K=4, padding=3. Keep conv2d enabled: the
   # native conv1d path passes text/image serving with that override active.
