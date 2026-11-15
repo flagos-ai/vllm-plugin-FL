@@ -42,16 +42,39 @@
     "max_num_seqs": 256,
     "block_size_cli": 128,
     "gpu_memory_utilization": 0.7,
-    "full_graph_capture_sizes": [1, 2, 4, 8],
+    "full_graph_capture_sizes": [
+      1,
+      2,
+      4,
+      8
+    ],
     "requests_per_model_and_mode": 26,
-    "observed_failing_graph_batch": {"actual": 3, "captured": 4}
+    "observed_failing_graph_batch": {
+      "actual": 3,
+      "captured": 4
+    }
   },
   "o_proj_dispatch_probe": {
-    "activation_shape": [4, 1536],
-    "weight_shape": [5120, 1536],
-    "live_cuda_registration": {"aten::linear": "FlagGems", "aten::mm": "FlagGems"},
-    "native_linear_cuda_registration": {"aten::linear": "PyTorch composite math", "aten::mm": "FlagGems"},
-    "native_linear_and_mm_cuda_registration": {"aten::linear": "PyTorch composite math", "aten::mm": "torch_xmlir native CUDA registration"}
+    "activation_shape": [
+      4,
+      1536
+    ],
+    "weight_shape": [
+      5120,
+      1536
+    ],
+    "live_cuda_registration": {
+      "aten::linear": "FlagGems",
+      "aten::mm": "FlagGems"
+    },
+    "native_linear_cuda_registration": {
+      "aten::linear": "PyTorch composite math",
+      "aten::mm": "FlagGems"
+    },
+    "native_linear_and_mm_cuda_registration": {
+      "aten::linear": "PyTorch composite math",
+      "aten::mm": "torch_xmlir native CUDA registration"
+    }
   },
   "official_ci": {
     "run": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969",
@@ -59,5 +82,229 @@
     "p800_inference": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969/job/132693311102",
     "p800_serving": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969/job/132693311086",
     "conclusion": "success"
+  },
+  "saved_projection_replay": [
+    {
+      "active_requests": 3,
+      "tokens_already_computed": [
+        204,
+        191,
+        203
+      ],
+      "projection": {
+        "input": {
+          "shape": [
+            4,
+            1536
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 2.1599954931504883E+36
+        },
+        "weight": {
+          "shape": [
+            5120,
+            1536
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 1.3046875
+        },
+        "same_input_eager_cpu": {
+          "shape": [
+            4,
+            5120
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 8.820395273677035E+35
+        },
+        "same_input_eager_p800": {
+          "shape": [
+            4,
+            5120
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 8.826904659509207E+35
+        }
+      },
+      "rank": 0,
+      "actual_graph_nan_by_row": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "active_requests": 3,
+      "tokens_already_computed": [
+        204,
+        191,
+        203
+      ],
+      "projection": {
+        "input": {
+          "shape": [
+            4,
+            1536
+          ],
+          "nan": 1,
+          "inf": 0,
+          "finite_abs_max": 5.350142683034286E+37
+        },
+        "weight": {
+          "shape": [
+            5120,
+            1536
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 0.68359375
+        },
+        "same_input_eager_cpu": {
+          "shape": [
+            4,
+            5120
+          ],
+          "nan": 5120,
+          "inf": 0,
+          "finite_abs_max": 0.4747590124607086
+        },
+        "same_input_eager_p800": {
+          "shape": [
+            4,
+            5120
+          ],
+          "nan": 5120,
+          "inf": 0,
+          "finite_abs_max": 0.0
+        }
+      },
+      "rank": 1,
+      "actual_graph_nan_by_row": [
+        0,
+        0,
+        0,
+        5120
+      ]
+    },
+    {
+      "active_requests": 3,
+      "tokens_already_computed": [
+        204,
+        191,
+        203
+      ],
+      "projection": {
+        "input": {
+          "shape": [
+            4,
+            1536
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 1.9007960339724297E+38
+        },
+        "weight": {
+          "shape": [
+            5120,
+            1536
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 1.0078125
+        },
+        "same_input_eager_cpu": {
+          "shape": [
+            4,
+            5120
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 1.2195724159133733E+37
+        },
+        "same_input_eager_p800": {
+          "shape": [
+            4,
+            5120
+          ],
+          "nan": 20480,
+          "inf": 0,
+          "finite_abs_max": null
+        }
+      },
+      "rank": 2,
+      "actual_graph_nan_by_row": [
+        5120,
+        5120,
+        5120,
+        5120
+      ]
+    },
+    {
+      "active_requests": 3,
+      "tokens_already_computed": [
+        204,
+        191,
+        203
+      ],
+      "projection": {
+        "input": {
+          "shape": [
+            4,
+            1536
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 5.9192184187297035E+35
+        },
+        "weight": {
+          "shape": [
+            5120,
+            1536
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 0.5703125
+        },
+        "same_input_eager_cpu": {
+          "shape": [
+            4,
+            5120
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 4.416263939171828E+34
+        },
+        "same_input_eager_p800": {
+          "shape": [
+            4,
+            5120
+          ],
+          "nan": 0,
+          "inf": 0,
+          "finite_abs_max": 4.4134523297546035E+34
+        }
+      },
+      "rank": 3,
+      "actual_graph_nan_by_row": [
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "single_device_padding_replay": {
+    "unmasked_active_projection_nans": 15360,
+    "padded_length": 0,
+    "block_size": 896,
+    "active_attention_rows_equal": true,
+    "masked_active_projection_nans": 0,
+    "seeded_padded_output": 1.9007960339724297E+38,
+    "active_rows": 3,
+    "batch_size": 4
   }
 }

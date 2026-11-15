@@ -10,6 +10,10 @@ The reproducer runs the original text, image and mixed-traffic scenarios on P800
 
 Routing only aten::linear to native passed 23 of 26 on both hosts. Routing both aten::linear and aten::mm to native also passed 23 of 26 on Host A. The first rank 2 active-row NaNs remained at the same output-projection boundary. A separate dispatcher probe verified the aten::linear and aten::mm kernel registrations under each policy. A separate graph memory pool per capture size passed 26 of 26 on Host A and 23 of 26 on Host B. In a separate one-card probe, graph and eager paged attention for the 896-token interleaved cache layout agreed on all 20 active rows across the full-to-padded transition.
 
+A later run captured the rank 2 projection input and weight from the bad step. Both tensors had zero NaNs and zero infinities. The activation maximum had already reached 1.90e38 in BF16. Recomputing with the same tensors yielded finite outputs on CPU in FP32 and 20,480 NaNs on P800 in eager mode.
+
+A one-card test replayed the native 896-token paged attention with three active rows and one row whose sequence length was zero. The zero-length row retained a pre-seeded value of 1.90e38. The subsequent projection produced 15,360 NaNs in the three active rows. Zeroing the padding row during capture preserved the three active attention outputs and eliminated all 15,360 projection NaNs. [Single-card reproducer](reproduce_padding.py)
+
 ## Qwen3.6-35B-A3B eager
 
 The forward TP rank order on the same set of four P800 devices returned HELLO and VLLM and passed 26 of 26. The reversed order returned HELLO and stopped, passing 25 of 26. At the decision after HELLO, the forward run assigned 19.75 to the newline and 19.50 to EOS. The reverse run assigned 19.375 to the newline and 19.625 to EOS. The forward run used b560e33 and the reverse run used fd65ff0, which adds the native argmax routing. The sampled IDs before that decision agree. Both runs recorded zero NaNs at the LM head and in the gathered logits. The listed token scores were finite.
