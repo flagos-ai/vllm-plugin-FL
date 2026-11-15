@@ -1113,7 +1113,29 @@
       "service_ready": false,
       "readiness_deadline_s": 1800,
       "requests_run": 0
-    }
+    },
+    "additional_forward_35b_gate": [
+      {
+        "model": "Qwen3.6-35B-A3B",
+        "mode": "graph",
+        "rank_order": "forward",
+        "passed": 26,
+        "total": 26,
+        "image_05_ocr": "HELLO\nVLLM",
+        "noc_idle_timeout_matches": 0,
+        "full_replays_3_to_4": 3,
+        "all_full_replays": 311
+      },
+      {
+        "model": "Qwen3.6-35B-A3B",
+        "mode": "eager",
+        "rank_order": "forward",
+        "passed": 26,
+        "total": 26,
+        "image_05_ocr": "HELLO\nVLLM",
+        "noc_idle_timeout_matches": 0
+      }
+    ]
   },
   "official_p800_serving_startup_failure": {
     "pr_head": "a8b58378c76fb04b8d59acd9866d684d566293e9",

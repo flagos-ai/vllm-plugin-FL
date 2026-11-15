@@ -6292,6 +6292,358 @@
     ]
   },
   {
+    "run": "35b_graph_e8f9f3d_forward_matrix",
+    "source": "e8f9f3d",
+    "host": "host_a",
+    "model": "Qwen3.6-35B-A3B",
+    "mode": "graph",
+    "passed_count": 26,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "run": "35b_eager_e8f9f3d_forward_matrix",
+    "source": "e8f9f3d",
+    "host": "host_a",
+    "model": "Qwen3.6-35B-A3B",
+    "mode": "eager",
+    "passed_count": 26,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ]
+  },
+  {
     "run": "27b_graph_private_pool_host_a",
     "source": "fd65ff0+private-pool",
     "host": "host_a",
