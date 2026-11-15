@@ -1,0 +1,93 @@
+{
+  "commit": "5257d614511f2ba7752032564cbe556ffb15f0d5",
+  "groups": {
+    "Qwen3.6-27B-eager": {
+      "total": 26,
+      "passed": 26,
+      "worker_replay_by_size": {},
+      "failed": []
+    },
+    "Qwen3.6-27B-graph": {
+      "total": 26,
+      "passed": 26,
+      "worker_replay_by_size": {
+        "1": 400,
+        "2": 10,
+        "4": 16,
+        "8": 6
+      },
+      "failed": []
+    },
+    "Qwen3.6-35B-A3B-eager": {
+      "total": 26,
+      "passed": 22,
+      "worker_replay_by_size": {},
+      "failed": [
+        {
+          "scenario": "image_concurrent_8",
+          "request_id": "image-05",
+          "failed_checks": [
+            "expected_semantics",
+            "expected_order"
+          ]
+        },
+        {
+          "scenario": "image_single",
+          "request_id": "image-05",
+          "failed_checks": [
+            "expected_semantics",
+            "expected_order"
+          ]
+        },
+        {
+          "scenario": "mixed_concurrent_8",
+          "request_id": "image-02",
+          "failed_checks": [
+            "expected_semantics",
+            "expected_order"
+          ]
+        },
+        {
+          "scenario": "text_single",
+          "request_id": "text-llm-details",
+          "failed_checks": [
+            "non_empty",
+            "minimum_length",
+            "expected_semantics",
+            "expected_order"
+          ]
+        }
+      ]
+    },
+    "Qwen3.6-35B-A3B-graph": {
+      "total": 26,
+      "passed": 24,
+      "worker_replay_by_size": {
+        "1": 1302,
+        "2": 176,
+        "4": 18,
+        "8": 6
+      },
+      "failed": [
+        {
+          "scenario": "image_concurrent_8",
+          "request_id": "image-05",
+          "failed_checks": [
+            "expected_semantics",
+            "expected_order"
+          ]
+        },
+        {
+          "scenario": "text_single",
+          "request_id": "text-llm-details",
+          "failed_checks": [
+            "expected_semantics",
+            "expected_order"
+          ]
+        }
+      ]
+    }
+  },
+  "total": 104,
+  "passed": 98
+}
