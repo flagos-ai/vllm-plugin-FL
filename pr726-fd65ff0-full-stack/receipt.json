@@ -1009,7 +1009,24 @@
         156,
         132
       ],
-      "35b_reverse_tp_status": "running"
+      "35b_reverse_tp_graph": {
+        "passed": 25,
+        "total": 26,
+        "noc_idle_timeout_matches": 0
+      },
+      "35b_reverse_tp_eager": {
+        "passed": 25,
+        "total": 26,
+        "noc_idle_timeout_matches": 0
+      },
+      "35b_reverse_failed_request": {
+        "id": "image-05",
+        "failed_checks": [
+          "expected_semantics",
+          "expected_order"
+        ],
+        "observed_text": "HELLO"
+      }
     }
   }
 }

@@ -16,7 +16,7 @@ The full-model row trace recorded sequence lengths 205, 192, 204 and 0. On rank 
 
 A one-card test replayed the native 896-token paged attention with three active rows and one row whose sequence length was zero. The zero-length row retained a pre-seeded value of 1.90e38. The subsequent projection produced 15,360 NaNs in the three active rows. Zeroing the padding row during capture preserved the three active attention outputs and eliminated all 15,360 projection NaNs. [Single-card reproducer](reproduce_padding.py)
 
-The fix applies an in-place fill to zero-length rows in the Kunlunxin decode attention adapter during graph capture. Both hosts passed the unchanged 27B graph gate 26 of 26. Host B logged three actual 3-to-4 FULL replays. An additional Host A run passed the same 26 requests and nine targeted original image requests, with 15 such replays in the server metrics and 80 per-worker replay markers. Both logs showed zero corrupted requests and the default graph sizes 1, 2, 4 and 8. A separate TP4 card group passed all 26 eager requests with the same fix. The adapter is identical at 8cd42a8 and at the current PR head a8b5837. [PR #726](https://github.com/flagos-ai/vllm-plugin-FL/pull/726)
+The fix applies an in-place fill to zero-length rows in the Kunlunxin decode attention adapter during graph capture. Both hosts passed the unchanged 27B graph gate 26 of 26. Host B logged three actual 3-to-4 FULL replays. An additional Host A run passed the same 26 requests and nine targeted original image requests, with 15 such replays in the server metrics and 80 per-worker replay markers. Both logs showed zero corrupted requests and the default graph sizes 1, 2, 4 and 8. A separate TP4 card group passed all 26 eager requests with the same fix. The adapter is identical at 8cd42a8 and at the current PR head a8b5837, which also passed a separate run of all 26 original graph requests. [PR #726](https://github.com/flagos-ai/vllm-plugin-FL/pull/726)
 
 ## Qwen3.6-35B-A3B eager and graph
 
@@ -26,7 +26,7 @@ An FP32 all-reduce diagnostic at fd65ff0 also passed 26 of 26 forward and 25 of 
 
 At 8cd42a8 the original gate with reversed TP order passed 25 of 26 in eager and 25 of 26 in graph mode. Both runs failed only image-05, which returned HELLO without VLLM. The concurrent image and mixed scenarios passed in both modes. Across these two runs and the 27B eager run in the same matrix, server logs contained zero NoC idle timeout matches.
 
-At a8b5837, a separate graph run passed all 26 original 27B requests. On the spare TP4 group used for the earlier reversed run, a8b5837 also passed all 26 original 35B requests in graph mode and all 26 in eager mode with forward TP rank order. The same-head check with reverse order remains in progress.
+On the spare TP4 group used for the earlier reversed run, a8b5837 also passed all 26 original 35B requests in graph mode and all 26 in eager mode with forward TP rank order. With the same head, runtime, devices and gate requests, reversing TP rank order reduced both the graph and eager runs to 25 of 26. In each run only image-05 failed, returning HELLO without VLLM. The new forward and reverse server logs contained zero NoC idle timeout matches.
 
 The separate native argmax change prevents an out-of-range ID when the projection has already produced NaNs. The P800 full-vocabulary reproducer returned 30 invalid IDs in 120 calls with FlagGems argmax and zero with native argmax. [FlagGems issue](https://github.com/flagos-ai/FlagGems/issues/9123)
 
