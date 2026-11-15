@@ -561,6 +561,11 @@ class WorkerFL(WorkerBase):
                 GPUModelRunner as GPUModelRunnerV2,
             )
 
+            if getattr(current_platform, "vendor_name", None) == "iluvatar":
+                from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
+                    IluvatarGPUModelRunnerV2 as GPUModelRunnerV2,
+                )
+
             # HACK(woosuk): This is a temporary fix to avoid type errors.
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
                 self.vllm_config, self.device
@@ -1330,6 +1335,9 @@ class WorkerFL(WorkerBase):
             all_gather_group=get_tp_group(),
             all_gather_tensors=all_gather_tensors,
         )
+
+        if self.use_v2_model_runner and self.model_runner.is_pooling_model:
+            self.model_runner.pool()
 
         return None
 

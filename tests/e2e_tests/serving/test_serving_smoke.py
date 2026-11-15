@@ -25,6 +25,7 @@ import pytest
 import requests
 
 from tests.e2e_tests.serving.server_helper import _NO_PROXY, VllmServer
+from tests.utils.adaptation_gate import GATE_ROOT, SCENARIOS
 from tests.utils.model_config import ModelConfig
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,8 @@ def server():
 
     # Build extra_args from engine config + serve-specific overrides
     extra_args = [*_CFG.serve_args(**serve.extra_engine), *serve.extra_args]
+    if serve.adaptation_gate:
+        extra_args += ["--allowed-local-media-path", str(GATE_ROOT / "images")]
 
     with VllmServer(
         model=_CFG.model,
@@ -381,3 +384,30 @@ def test_endpoint(endpoint: str, server, base_url, headers):
         runner = _ENDPOINT_RUNNERS.get(endpoint)
         assert runner is not None, f"Unknown endpoint type: {endpoint}"
         runner(base_url, headers)
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not _CFG.serve.adaptation_gate, reason="Adaptation gate not configured"
+)
+@pytest.mark.parametrize(
+    "scenario",
+    SCENARIOS,
+)
+def test_adaptation_gate(scenario, server, monkeypatch):
+    """Run the original single/eight-way text, image and mixed requests."""
+    from pathlib import Path
+    from urllib.parse import urlsplit
+
+    from tests.utils.adaptation_gate import load_gate
+
+    monkeypatch.setenv("BASE_URL", server.base_url)
+    monkeypatch.setenv("PORT", str(urlsplit(server.base_url).port))
+    monkeypatch.setenv("MODEL_PATH", _CFG.model)
+    monkeypatch.setenv("SERVED_MODEL_NAME", _REQUEST_MODEL)
+    monkeypatch.setenv("API_KEY", _CFG.serve.api_key or "EMPTY")
+    monkeypatch.setenv(
+        "RESULTS_DIR", str(Path("ci-results/adaptation-gates") / _MODEL / _CASE)
+    )
+    with server.log_on_failure(f"Adaptation scenario '{scenario}' failed"):
+        load_gate().run_case(scenario)
