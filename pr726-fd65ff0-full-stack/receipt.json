@@ -1026,6 +1026,19 @@
           "expected_order"
         ],
         "observed_text": "HELLO"
+      },
+      "35b_reverse_tp_fixed_rank_sum_eager": {
+        "protocol": "FlagCX all-gather of TP partials, fixed logical-rank FP32 additions, cast back to BF16",
+        "active_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "passed": 26,
+        "total": 26,
+        "noc_idle_timeout_matches": 0,
+        "image_05_output": "HELLO\nVLLM"
       }
     }
   }

@@ -28,6 +28,8 @@ At 8cd42a8 the original gate with reversed TP order passed 25 of 26 in eager and
 
 On the spare TP4 group used for the earlier reversed run, a8b5837 also passed all 26 original 35B requests in graph mode and all 26 in eager mode with forward TP rank order. With the same head, runtime, devices and gate requests, reversing TP rank order reduced both the graph and eager runs to 25 of 26. In each run only image-05 failed, returning HELLO without VLLM. The new forward and reverse server logs contained zero NoC idle timeout matches.
 
+A worker-extension experiment on the same reversed four cards gathered BF16 tensor-parallel inputs through FlagCX, added the four slices in logical-rank order in FP32, and cast back to BF16. The alternative ran on all four ranks and passed 26 of 26 original eager requests, including image-05. Further work is checking the earliest prefill divergence, graph behavior and cost. [Eager diagnostic](reproduce_rank_order_reduce.py)
+
 The separate native argmax change prevents an out-of-range ID when the projection has already produced NaNs. The P800 full-vocabulary reproducer returned 30 invalid IDs in 120 calls with FlagGems argmax and zero with native argmax. [FlagGems issue](https://github.com/flagos-ai/FlagGems/issues/9123)
 
 ## Shared schema registration after base sync
