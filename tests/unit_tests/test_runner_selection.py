@@ -485,6 +485,7 @@ def test_ir_defaults_follow_kernel_availability(
         platform_module, "_vllm_c_available", lambda: cuda_kernels_available
     )
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
     config = SimpleNamespace(
         compilation_config=SimpleNamespace(
             backend="inductor", mode=CompilationMode.NONE
