@@ -1,0 +1,56 @@
+{
+  "commit": "fd65ff073b7e5ffee85d98ea5d551936195a87df",
+  "platform": "Kunlunxin P800 OAM",
+  "topology": "Single-host tensor parallelism with four P800 devices",
+  "host_driver": "5.0.21.47",
+  "xre": "5.37.1",
+  "python": "3.10.20",
+  "torch": "2.9.0+cu129",
+  "vllm": "0.32.0+flagos",
+  "runner": "V2 selected by the default; VLLM_USE_V2_MODEL_RUNNER was unset",
+  "flag_gems": {
+    "version": "5.4.0",
+    "distribution": "flag_gems",
+    "registration": "Plugin ATen dispatch with the checked-in Kunlunxin exclusions, plus the listed operator in each diagnostic configuration"
+  },
+  "flag_gems_vllm": {
+    "source_tag": "v0.2.0",
+    "source_commit": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19",
+    "distribution_version": "0.1.0",
+    "source_archive_sha256": "1b47e1eb7982acc606e2fc920561d169e2a17fac7c92ff65c5f11cafa6b8b16e",
+    "active_evidence": "FlagGems-vllm integration activated in all four workers"
+  },
+  "flag_tree": {
+    "distribution_version": "0.7.0+xpu3.6",
+    "active_triton_version": "3.6.0",
+    "active_triton_path": "/opt/flagtree/triton/__init__.py"
+  },
+  "flag_cx": {
+    "version": "0.14.1+xre5.37.1",
+    "active_evidence": "The worker logs reported backend=flagcx for ranks 0-3; XCCL loaded libbkcl.so"
+  },
+  "image_ids": {
+    "host_a": "sha256:d82423a03bf98d5d5d4c59dc7dbdc8346bb4de4c170e4a3093365fd5c59dea02",
+    "host_b": "sha256:9c8b2479f194641a877e28b32cd7115c2c597dc563d9b38a5130c40b99ac6df3"
+  },
+  "operator_env_overrides": "Whitelist and both blacklist override variables were unset after sourcing the image runtime",
+  "gate": {
+    "suite": "tools/adaptation-gate-cases/run_test.sh",
+    "dtype": "bfloat16",
+    "tensor_parallel_size": 4,
+    "max_model_len": 16384,
+    "max_num_seqs": 256,
+    "block_size_cli": 128,
+    "gpu_memory_utilization": 0.7,
+    "full_graph_capture_sizes": [1, 2, 4, 8],
+    "requests_per_model_and_mode": 26,
+    "observed_failing_graph_batch": {"actual": 3, "captured": 4}
+  },
+  "official_ci": {
+    "run": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969",
+    "p800_functional": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969/job/132691988412",
+    "p800_inference": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969/job/132693311102",
+    "p800_serving": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43674492969/job/132693311086",
+    "conclusion": "success"
+  }
+}

@@ -1,0 +1,3240 @@
+[
+  {
+    "run": "27b_graph_baseline_host_a",
+    "source": "fd65ff0",
+    "host": "host_a",
+    "model": "Qwen3.6-27B",
+    "mode": "graph",
+    "passed_count": 23,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 5,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Red, Green!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-02",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Blue, Yellow,!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-03",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Circle, Square!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ],
+    "first_nonfinite_attention": [
+      {
+        "rank": 0,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 1,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            5120
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 2,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 3,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "run": "27b_graph_baseline_host_b",
+    "source": "fd65ff0",
+    "host": "host_b",
+    "model": "Qwen3.6-27B",
+    "mode": "graph",
+    "passed_count": 23,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 5,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Red, Green!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-02",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Blue, Yellow,!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-03",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Circle, Square!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ],
+    "first_nonfinite_attention": [
+      {
+        "rank": 0,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 1,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            5120
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 2,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 3,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "run": "27b_graph_native_linear_host_a",
+    "source": "fd65ff0+linear",
+    "host": "host_a",
+    "model": "Qwen3.6-27B",
+    "mode": "graph",
+    "passed_count": 23,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 5,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Red, Green!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-02",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Blue, Yellow,!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-03",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Circle, Square!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ],
+    "first_nonfinite_attention": [
+      {
+        "rank": 0,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 1,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            5120
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 2,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 3,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "run": "27b_graph_native_linear_host_b",
+    "source": "fd65ff0+linear",
+    "host": "host_b",
+    "model": "Qwen3.6-27B",
+    "mode": "graph",
+    "passed_count": 23,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 5,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Red, Green!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-02",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Blue, Yellow,!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-03",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Circle, Square!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ],
+    "first_nonfinite_attention": [
+      {
+        "rank": 0,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 1,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            5120
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 2,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      },
+      {
+        "rank": 3,
+        "active_requests": 3,
+        "padded_rows": 4,
+        "tokens_already_computed": [
+          204,
+          191,
+          203
+        ],
+        "nan_values_per_row": {
+          "06/linear_attention/layer_output/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/input_layernorm/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_qkv_proj/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_q_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_k_norm": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/0": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_rotary_emb/1": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_attn": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/attention_output_proj_input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/input": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "07/full_attention/all_reduce_0/output": [
+            5120,
+            5120,
+            5120,
+            5120
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "run": "27b_graph_private_pool_host_a",
+    "source": "fd65ff0+private-pool",
+    "host": "host_a",
+    "model": "Qwen3.6-27B",
+    "mode": "graph",
+    "passed_count": 26,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "run": "27b_graph_private_pool_host_b",
+    "source": "fd65ff0+private-pool",
+    "host": "host_b",
+    "model": "Qwen3.6-27B",
+    "mode": "graph",
+    "passed_count": 23,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 5,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Red, Green!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-02",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Blue, Yellow,!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-03",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order",
+              "no_bang_triplet",
+              "no_long_character_run"
+            ],
+            "observed_text": "Circle, Square!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "run": "35b_eager_forward_tp",
+    "source": "b560e33",
+    "host": "host_a",
+    "model": "Qwen3.6-35B-A3B",
+    "mode": "eager",
+    "passed_count": 26,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ],
+    "ocr_decision": {
+      "computed_tokens": 1063,
+      "sampled_ids": [
+        [
+          198
+        ]
+      ],
+      "gathered_logits": [
+        [
+          198,
+          19.75
+        ],
+        [
+          248046,
+          19.5
+        ],
+        [
+          629,
+          18.25
+        ],
+        [
+          58191,
+          15.9375
+        ],
+        [
+          2228,
+          15.5625
+        ]
+      ],
+      "nan_values_in_hidden": 0
+    }
+  },
+  {
+    "run": "35b_eager_reverse_tp",
+    "source": "fd65ff0",
+    "host": "host_a",
+    "model": "Qwen3.6-35B-A3B",
+    "mode": "eager",
+    "passed_count": 25,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 0,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order"
+            ],
+            "observed_text": "HELLO"
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ],
+    "ocr_decision": {
+      "computed_tokens": 1063,
+      "sampled_ids": [
+        [
+          248046
+        ]
+      ],
+      "gathered_logits": [
+        [
+          248046,
+          19.625
+        ],
+        [
+          198,
+          19.375
+        ],
+        [
+          629,
+          17.625
+        ],
+        [
+          58191,
+          15.5625
+        ],
+        [
+          2228,
+          15.0
+        ]
+      ],
+      "nan_values_in_hidden": 0
+    }
+  },
+  {
+    "run": "35b_eager_forward_tp_fp32_reduce",
+    "source": "fd65ff0+fp32-all-reduce",
+    "host": "host_a",
+    "model": "Qwen3.6-35B-A3B",
+    "mode": "eager",
+    "passed_count": 26,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ],
+    "ocr_decision": {
+      "computed_tokens": 1063,
+      "sampled_ids": [
+        [
+          198
+        ]
+      ],
+      "gathered_logits": [
+        [
+          198,
+          19.875
+        ],
+        [
+          248046,
+          18.75
+        ],
+        [
+          629,
+          18.125
+        ],
+        [
+          2228,
+          15.9375
+        ],
+        [
+          271,
+          15.5
+        ]
+      ],
+      "nan_values_in_hidden": 0
+    }
+  },
+  {
+    "run": "35b_eager_reverse_tp_fp32_reduce",
+    "source": "fd65ff0+fp32-all-reduce",
+    "host": "host_a",
+    "model": "Qwen3.6-35B-A3B",
+    "mode": "eager",
+    "passed_count": 25,
+    "request_count": 26,
+    "scenarios": [
+      {
+        "scenario": "image_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "image_single",
+        "request_count": 1,
+        "passed_count": 0,
+        "requests": [
+          {
+            "id": "image-05",
+            "passed": false,
+            "failed_checks": [
+              "expected_semantics",
+              "expected_order"
+            ],
+            "observed_text": "VLLM"
+          }
+        ]
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "image-04",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "request_count": 8,
+        "passed_count": 8,
+        "requests": [
+          {
+            "id": "text-01",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-02",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-03",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-04",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-05",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-06",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-07",
+            "passed": true,
+            "failed_checks": []
+          },
+          {
+            "id": "text-08",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      },
+      {
+        "scenario": "text_single",
+        "request_count": 1,
+        "passed_count": 1,
+        "requests": [
+          {
+            "id": "text-llm-details",
+            "passed": true,
+            "failed_checks": []
+          }
+        ]
+      }
+    ],
+    "ocr_decision": {
+      "computed_tokens": 1063,
+      "sampled_ids": [
+        [
+          44
+        ]
+      ],
+      "gathered_logits": [
+        [
+          44,
+          20.875
+        ],
+        [
+          248046,
+          16.625
+        ],
+        [
+          45,
+          15.125
+        ],
+        [
+          380,
+          14.0625
+        ],
+        [
+          10673,
+          13.875
+        ]
+      ],
+      "nan_values_in_hidden": 0
+    }
+  }
+]
