@@ -10,6 +10,8 @@ Iluvatar uses a CUDA-compatible architecture.
 from __future__ import annotations
 
 import logging
+from functools import wraps
+from vllm.platforms import current_platform
 from typing import Optional, Union
 
 import torch
@@ -207,7 +209,7 @@ patch_triton_language_for_iluvatar()
 patch_triton_perf_model_for_iluvatar()
 
 
-def patch_sampler_compile_for_iluvatar() -> None:
+def patch_sampler_compile_for_iluvatar(*, strict: bool = False) -> None:
     # Disable torch.compile on vllm sampler ops for Iluvatar.
     # flagtree triton only supports Iluvatar backend, not cuda target.
     # TODO: Remove once flagtree triton supports cuda inductor target.
@@ -220,6 +222,8 @@ def patch_sampler_compile_for_iluvatar() -> None:
             _tts._iluvatar_compile_patched = True
             logger.info('patch_sampler_compile_for_iluvatar: unwrapped topk_topp_sampler.compiled_random_sample')
     except Exception as e:
+        if strict:
+            raise RuntimeError('Iluvatar topk/topp sampler patch failed') from e
         logger.warning('patch_sampler_compile_for_iluvatar (topk_topp): %s', e)
     try:
         import importlib
@@ -230,12 +234,14 @@ def patch_sampler_compile_for_iluvatar() -> None:
             _lp._iluvatar_compile_patched = True
             logger.info('patch_sampler_compile_for_iluvatar: unwrapped logprobs.batched_count_greater_than')
     except Exception as e:
+        if strict:
+            raise RuntimeError('Iluvatar logprobs sampler patch failed') from e
         logger.warning('patch_sampler_compile_for_iluvatar (logprobs): %s', e)
 
 patch_sampler_compile_for_iluvatar()
 
 
-def patch_torch_inductor_for_iluvatar() -> None:
+def patch_torch_inductor_for_iluvatar(*, strict: bool = False) -> None:
     """Patch torch._inductor GPUTarget to use the correct triton backend name.
 
     torch._inductor always passes device_type='cuda' to GPUTarget, but
@@ -255,6 +261,8 @@ def patch_torch_inductor_for_iluvatar() -> None:
         import triton.backends as _tb
         _registered = list(getattr(_tb, 'backends', {}).keys())
         # If 'cuda' is already registered as a backend name, no patch needed
+        if strict and not _registered:
+            raise RuntimeError('No Triton backend registered for Iluvatar')
         if 'cuda' in _registered or not _registered:
             logger.debug('patch_torch_inductor_for_iluvatar: triton has cuda backend or no backends, skipping')
             return
@@ -282,7 +290,9 @@ def patch_torch_inductor_for_iluvatar() -> None:
         except Exception:
             pass
         if not _target:
-            _target = 'corex'  # safe default for all known flagtree versions
+            if strict:
+                raise RuntimeError('No supported Iluvatar Triton target found')
+            _target = 'corex'  # import-time compatibility fallback
 
         # If the discovered target is already 'cuda', no remapping needed —
         # inductor naturally passes 'cuda' to GPUTarget.
@@ -293,7 +303,9 @@ def patch_torch_inductor_for_iluvatar() -> None:
                 _registered,
             )
             return
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise RuntimeError('Cannot inspect Iluvatar Triton backends') from exc
         logger.debug('patch_torch_inductor_for_iluvatar: cannot inspect triton backends, skipping')
         return
 
@@ -325,6 +337,8 @@ def patch_torch_inductor_for_iluvatar() -> None:
             _remap_target,
         )
     except Exception as e:
+        if strict:
+            raise RuntimeError("Iluvatar Inductor target patch failed") from e
         logger.warning(
             "Failed to patch torch._inductor for iluvatar triton backend: %s", e
         )
@@ -484,3 +498,68 @@ class IluvatarBackend(Backend):
         # triton < 3.3.  The kernel itself uses USE_TD=False at runtime, so
         # the stub is never called.
         return AttentionBackendEnum.TRITON_ATTN.get_path()
+
+
+def _release_benchmark_tensors(run):
+    if getattr(run, "_iluvatar_release_benchmark_tensors", False):
+        return run
+
+    @wraps(run)
+    def wrapped(self, *args, **kwargs):
+        try:
+            return run(self, *args, **kwargs)
+        finally:
+            # These are diagnostic replay arguments, not kernel/config caches.
+            # Generated per-shape tuners otherwise retain whole activations.
+            self._last_benchmark_args = ()
+            self._last_benchmark_meta = {}
+            self.nargs = None
+
+    wrapped._iluvatar_release_benchmark_tensors = True
+    return wrapped
+
+
+def patch_autotune_memory() -> None:
+    from flag_gems.utils.libentry import LibTuner
+
+    LibTuner.run = _release_benchmark_tensors(LibTuner.run)
+
+
+def _is_uva_available() -> bool:
+    return False
+
+
+def patch_v2_uva() -> None:
+    from vllm.platforms import current_platform
+
+    if getattr(current_platform, "vendor_name", "") != "iluvatar":
+        return
+
+    from vllm.v1.worker.gpu import buffer_utils
+
+    if buffer_utils.is_uva_available is _is_uva_available:
+        return
+    buffer_utils.is_uva_available = _is_uva_available
+    logger.info("Iluvatar V2 buffers use explicit host-to-device copies instead of UVA")
+
+
+def apply_worker_patches() -> None:
+    """Apply patches that must execute inside every worker process."""
+    if getattr(current_platform, "vendor_name", "") != "iluvatar":
+        return
+    from vllm_fl.dispatch.backends.vendor.iluvatar.moe_router import patch_moe_router
+
+    patch_moe_router()
+    from vllm_fl.dispatch.backends.vendor.iluvatar.vision_precision import (
+        patch_vision_precision,
+    )
+
+    patch_vision_precision()
+    patch_autotune_memory()
+    patch_v2_uva()
+    from vllm_fl.dispatch.backends.vendor.iluvatar.mrope import patch_mrope
+
+    patch_mrope()
+    # Required worker patches must fail startup, not silently degrade execution.
+    patch_torch_inductor_for_iluvatar(strict=True)
+    patch_sampler_compile_for_iluvatar(strict=True)
