@@ -96,6 +96,9 @@ flagos_blacklist:
   - zero_
   # The XPU nonzero kernel faults on the dense bool grammar mask at warmup.
   - nonzero
+  # FlagGems V2 greedy argmax can return an out-of-vocabulary ID on all-NaN
+  # full-vocabulary rows. The native P800 reduction returns an in-range ID.
+  - argmax
   # Vocabulary-wide sampling reaches an XPU radix-sort kernel launch failure.
   - sort
   - sort_stable

@@ -51,6 +51,7 @@ def test_kunlunxin_policy_keeps_only_known_kernel_exclusions():
         "zeros",
         "zero_",
         "nonzero",
+        "argmax",
         "sort",
         "sort_stable",
         "lt",
