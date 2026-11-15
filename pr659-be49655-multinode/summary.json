@@ -1,0 +1,316 @@
+{
+  "plugin_commit": "be496551412e20353bface934407daa37d7c5739",
+  "identical_release_image_id": "sha256:0fd7d28f6c5c4a2921c1056bfb2b69e43784c680470edd5524ec15bf39c11c6c",
+  "topology": "Two W7900D hosts, one gfx1100 GPU per host, TP2, PP1, DP1, native V2 eager",
+  "reported_transport": "FlagCX via RCCL Socket over the private bonded interface; Gloo collective control plane",
+  "request_settings": {
+    "model": "Qwen3.6-27B",
+    "max_model_len": 4096,
+    "kv_cache_memory_bytes_per_gpu": 4294967296,
+    "worker_ext": "Observer capturing first 3 native all-reduce and first 3 native all-gather calls only during the request",
+    "runner_env_unset": true,
+    "operator_allowlist_env_unset": true
+  },
+  "roce_attempt": {
+    "pass": false,
+    "both_ranks_exit_code": 1,
+    "socket_rendezvous_succeeded": true,
+    "rccl_error": "Call to ibv_reg_mr_iova2 failed with error Cannot allocate memory",
+    "flagcx_error": "FLAGCX error: Not implemented.",
+    "default_container_limit_memlock_kib": 8192,
+    "error_stage": "RCCL communicator initialization before payload"
+  },
+  "ranks": [
+    {
+      "rank": 0,
+      "amdgpu_driver": "6.16.13",
+      "direct_collective_rank_exit_code": 0,
+      "direct_collective": {
+        "payload_elements": 257,
+        "all_reduce": 3.0,
+        "all_gather": [
+          1.0,
+          2.0
+        ],
+        "native_flagcx": "/opt/FlagCX/build/lib/libflagcx.so",
+        "flagcx_version": "0.15.0.dev52+20261029.g591cfbf77e35eefb323b0c6ec6860afba25519ee",
+        "triton": "/opt/flagtree/triton/__init__.py",
+        "flag_gems": "/usr/local/lib/python3.12/dist-packages/flag_gems/__init__.py",
+        "flaggems_vllm": "/usr/local/lib/python3.12/dist-packages/flaggems_vllm/__init__.py"
+      },
+      "inference_transports": [
+        {
+          "from_rank": 0,
+          "to_rank": 1,
+          "rccl": "NET/Socket/0"
+        },
+        {
+          "from_rank": 1,
+          "to_rank": 0,
+          "rccl": "NET/Socket/0"
+        }
+      ],
+      "native_flagcx_calls_during_request": [
+        {
+          "rank": 0,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 0,
+          "operation": "all_reduce",
+          "shape": [
+            65,
+            5120
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 0,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 0,
+          "operation": "all_reduce",
+          "shape": [
+            65,
+            5120
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 0,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 0,
+          "operation": "all_reduce",
+          "shape": [
+            65,
+            5120
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 0,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 0,
+          "operation": "all_gather",
+          "shape": [
+            1,
+            124160
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 0,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 0,
+          "operation": "all_gather",
+          "shape": [
+            1,
+            124160
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 0,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 0,
+          "operation": "all_gather",
+          "shape": [
+            1,
+            124160
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        }
+      ],
+      "runner_v2_log_seen": true,
+      "inference_container_main_exit_code": 0,
+      "inference_worker_exact_exit_code": null,
+      "inference_teardown": {
+        "executor_reported_graceful": true,
+        "force_kill_log_seen": false,
+        "tcpstore_broken_pipe_seen": false
+      },
+      "request_receipt": {
+        "scenario": {
+          "scenario": "text_single",
+          "served_model_name": "pr659-multinode",
+          "concurrency": 1
+        },
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "latency_seconds": 39.23,
+        "oracle_checks": {
+          "non_empty": true,
+          "minimum_length": true,
+          "expected_semantics": true,
+          "expected_order": true,
+          "no_bang_triplet": true,
+          "no_mojibake": true,
+          "no_control_characters": true,
+          "no_long_character_run": true,
+          "no_repeated_word_run": true,
+          "no_repeated_phrase": true
+        },
+        "output_character_count": 1230,
+        "finish_reason": "stop",
+        "completion_tokens": 195,
+        "http_status": 200,
+        "test_client_exit_code": 0
+      }
+    },
+    {
+      "rank": 1,
+      "amdgpu_driver": "6.14.14",
+      "direct_collective_rank_exit_code": 0,
+      "direct_collective": {
+        "payload_elements": 257,
+        "all_reduce": 3.0,
+        "all_gather": [
+          1.0,
+          2.0
+        ],
+        "native_flagcx": "/opt/FlagCX/build/lib/libflagcx.so",
+        "flagcx_version": "0.15.0.dev52+20261029.g591cfbf77e35eefb323b0c6ec6860afba25519ee",
+        "triton": "/opt/flagtree/triton/__init__.py",
+        "flag_gems": "/usr/local/lib/python3.12/dist-packages/flag_gems/__init__.py",
+        "flaggems_vllm": "/usr/local/lib/python3.12/dist-packages/flaggems_vllm/__init__.py"
+      },
+      "inference_transports": [
+        {
+          "from_rank": 0,
+          "to_rank": 1,
+          "rccl": "NET/Socket/0"
+        },
+        {
+          "from_rank": 1,
+          "to_rank": 0,
+          "rccl": "NET/Socket/0"
+        }
+      ],
+      "native_flagcx_calls_during_request": [
+        {
+          "rank": 1,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 1,
+          "operation": "all_reduce",
+          "shape": [
+            65,
+            5120
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 1,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 1,
+          "operation": "all_reduce",
+          "shape": [
+            65,
+            5120
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 1,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 1,
+          "operation": "all_reduce",
+          "shape": [
+            65,
+            5120
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 1,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 1,
+          "operation": "all_gather",
+          "shape": [
+            1,
+            124160
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 1,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 1,
+          "operation": "all_gather",
+          "shape": [
+            1,
+            124160
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        },
+        {
+          "rank": 1,
+          "group_ranks": [
+            0,
+            1
+          ],
+          "flagcx_rank": 1,
+          "operation": "all_gather",
+          "shape": [
+            1,
+            124160
+          ],
+          "dtype": "torch.bfloat16",
+          "flagcx_library": "/opt/FlagCX/build/lib/libflagcx.so"
+        }
+      ],
+      "runner_v2_log_seen": true,
+      "inference_container_main_exit_code": 0,
+      "inference_worker_exact_exit_code": null,
+      "inference_teardown": {
+        "executor_reported_graceful": false,
+        "force_kill_log_seen": true,
+        "tcpstore_broken_pipe_seen": true
+      }
+    }
+  ]
+}
