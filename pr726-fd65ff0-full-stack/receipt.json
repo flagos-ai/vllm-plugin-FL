@@ -926,6 +926,20 @@
     "unit_tests": {
       "passed": 11,
       "source": "tests/unit_tests/attention/test_kunlunxin_cache.py"
-    }
+    },
+    "gate_27b_graph_host_a": {
+      "passed": 26,
+      "total": 26,
+      "corrupted_requests_logged": 0,
+      "noc_idle_timeout_matches": 0
+    },
+    "gate_27b_eager_host_a_spare_group": {
+      "passed": 26,
+      "total": 26,
+      "noc_idle_timeout_matches": 0
+    },
+    "synced_pr_head": "2f35f9f35b09768e5502a3f7f5f24a4fa6ec22fe",
+    "synced_upstream_base": "0ccef39e9e0755c62576b99f4fcb69a61551f67e",
+    "synced_head_ci": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43724823795"
   }
 }

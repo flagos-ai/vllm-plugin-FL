@@ -16,7 +16,7 @@ The full-model row trace recorded sequence lengths 205, 192, 204 and 0. On rank 
 
 A one-card test replayed the native 896-token paged attention with three active rows and one row whose sequence length was zero. The zero-length row retained a pre-seeded value of 1.90e38. The subsequent projection produced 15,360 NaNs in the three active rows. Zeroing the padding row during capture preserved the three active attention outputs and eliminated all 15,360 projection NaNs. [Single-card reproducer](reproduce_padding.py)
 
-A candidate applies an in-place fill to zero-length rows in the Kunlunxin decode attention adapter during graph capture. Host B passed the unchanged 27B graph gate 26 of 26 with three actual 3-to-4 FULL replays and zero corrupted requests. The selected graph sizes remained 1, 2, 4 and 8.
+The fix applies an in-place fill to zero-length rows in the Kunlunxin decode attention adapter during graph capture. Both hosts passed the unchanged 27B graph gate 26 of 26. Host B logged three actual 3-to-4 FULL replays. Both logs showed zero corrupted requests and the default graph sizes 1, 2, 4 and 8. A separate TP4 card group passed all 26 eager requests with the same fix. The adapter is identical at 8cd42a8 and at the base-synced PR head 2f35f9f. [PR #726](https://github.com/flagos-ai/vllm-plugin-FL/pull/726) · [Synced-head CI](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43724823795)
 
 ## Qwen3.6-35B-A3B eager
 
