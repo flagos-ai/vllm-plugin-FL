@@ -1,0 +1,280 @@
+{
+  "commit": "5257d614511f2ba7752032564cbe556ffb15f0d5",
+  "groups": {
+    "Qwen3.6-27B-eager": {
+      "scenarios": [
+        {
+          "scenario": "image_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "image_single",
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "mixed_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "text_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "text_single",
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        }
+      ],
+      "total": 26,
+      "passed": 26,
+      "worker_replay_records_by_size": {},
+      "initial_environment": {
+        "USE_FLAGGEMS": "1",
+        "VLLM_USE_V2_MODEL_RUNNER": null,
+        "VLLM_FL_FLAGOS_WHITELIST": null,
+        "VLLM_FL_FLAGOS_BLACKLIST": null,
+        "VLLM_FL_FLAGOS_BLACKLIST_APPEND": null
+      }
+    },
+    "Qwen3.6-27B-graph": {
+      "scenarios": [
+        {
+          "scenario": "image_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "image_single",
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "mixed_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "text_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "text_single",
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        }
+      ],
+      "total": 26,
+      "passed": 26,
+      "worker_replay_records_by_size": {
+        "1": 402,
+        "8": 6,
+        "4": 18,
+        "2": 6
+      },
+      "initial_environment": {
+        "USE_FLAGGEMS": "1",
+        "VLLM_USE_V2_MODEL_RUNNER": null,
+        "VLLM_FL_FLAGOS_WHITELIST": null,
+        "VLLM_FL_FLAGOS_BLACKLIST": null,
+        "VLLM_FL_FLAGOS_BLACKLIST_APPEND": null
+      }
+    },
+    "Qwen3.6-35B-A3B-eager": {
+      "scenarios": [
+        {
+          "scenario": "image_concurrent_8",
+          "request_count": 8,
+          "passed_count": 7,
+          "failed_count": 1,
+          "passed": false,
+          "failures": [
+            {
+              "id": "image-05",
+              "checks": [
+                "expected_semantics",
+                "expected_order"
+              ],
+              "preview": "```json\n[\n    {\n        \"image_content\": \"An image of a white background with black text. The text is arranged in two lines. The top line reads \\\"HELLO\\\" and the bottom line reads \\\"VLLM\\\". The font is a monospace font, similar to a typewriter font. "
+            }
+          ]
+        },
+        {
+          "scenario": "image_single",
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "mixed_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "text_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "text_single",
+          "request_count": 1,
+          "passed_count": 0,
+          "failed_count": 1,
+          "passed": false,
+          "failures": [
+            {
+              "id": "text-llm-details",
+              "checks": [
+                "expected_semantics",
+                "expected_order"
+              ],
+              "preview": "The phrase \"Introduce large models\" is a common instruction in programming and software development, often used to encourage developers to create or expand upon existing software systems. However, in the context of your query, it seems you are asking"
+            }
+          ]
+        }
+      ],
+      "total": 26,
+      "passed": 24,
+      "worker_replay_records_by_size": {},
+      "initial_environment": {
+        "USE_FLAGGEMS": "1",
+        "VLLM_USE_V2_MODEL_RUNNER": null,
+        "VLLM_FL_FLAGOS_WHITELIST": null,
+        "VLLM_FL_FLAGOS_BLACKLIST": null,
+        "VLLM_FL_FLAGOS_BLACKLIST_APPEND": null
+      }
+    },
+    "Qwen3.6-35B-A3B-graph": {
+      "scenarios": [
+        {
+          "scenario": "image_concurrent_8",
+          "request_count": 8,
+          "passed_count": 7,
+          "failed_count": 1,
+          "passed": false,
+          "failures": [
+            {
+              "id": "image-05",
+              "checks": [
+                "expected_semantics",
+                "expected_order"
+              ],
+              "preview": "But what if we could see the hidden architecture of thought — not just the words, but the spaces between them?\n\nThe “HELLO” above isn’t just a greeting. It’s a signal. A bridge.  \nAnd below it — “VLLM” — not an acronym, but a promise.\n\nYou’re not ask"
+            }
+          ]
+        },
+        {
+          "scenario": "image_single",
+          "request_count": 1,
+          "passed_count": 0,
+          "failed_count": 1,
+          "passed": false,
+          "failures": [
+            {
+              "id": "image-05",
+              "checks": [
+                "expected_semantics",
+                "expected_order"
+              ],
+              "preview": "Hello VLM"
+            }
+          ]
+        },
+        {
+          "scenario": "mixed_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "text_concurrent_8",
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true,
+          "failures": []
+        },
+        {
+          "scenario": "text_single",
+          "request_count": 1,
+          "passed_count": 0,
+          "failed_count": 1,
+          "passed": false,
+          "failures": [
+            {
+              "id": "text-llm-details",
+              "checks": [
+                "non_empty",
+                "minimum_length",
+                "expected_semantics",
+                "expected_order"
+              ],
+              "preview": ""
+            }
+          ]
+        }
+      ],
+      "total": 26,
+      "passed": 23,
+      "worker_replay_records_by_size": {
+        "8": 6,
+        "4": 226,
+        "1": 46,
+        "2": 242
+      },
+      "initial_environment": {
+        "USE_FLAGGEMS": "1",
+        "VLLM_USE_V2_MODEL_RUNNER": null,
+        "VLLM_FL_FLAGOS_WHITELIST": null,
+        "VLLM_FL_FLAGOS_BLACKLIST": null,
+        "VLLM_FL_FLAGOS_BLACKLIST_APPEND": null
+      }
+    }
+  },
+  "passed": 99,
+  "total": 104
+}
