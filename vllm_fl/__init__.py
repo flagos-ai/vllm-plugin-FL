@@ -375,11 +375,24 @@ def register_model():
         _register_gdn_packed_decode_patch()
 
     if vendor_name == "nvidia":
+        from vllm.model_executor.models import ModelRegistry
+
         from vllm_fl.patches.minicpmo_audio import patch_minicpmo_audio_budget
 
         # General plugins run before encoder budgets are built in the engine
         # frontend and spawned workers, for both upstream model runners.
         patch_minicpmo_audio_budget()
+        ModelRegistry.register_model(
+            "Qwen4ExpForCausalLM",
+            "vllm_fl.models.qwen4_exp.model:Qwen4ExpForCausalLM",
+        )
+        ModelRegistry.register_model(
+            "Qwen4ExpForConditionalGeneration",
+            "vllm_fl.models.qwen4_exp.model:Qwen4ExpForConditionalGeneration",
+        )
+        ModelRegistry.register_model(
+            "Qwen4ExpMTP", "vllm_fl.models.qwen4_exp.mtp:Qwen4ExpMTP"
+        )
 
     if vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
