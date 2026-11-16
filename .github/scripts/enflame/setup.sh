@@ -20,20 +20,17 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
-# The image supplies the vendor SDK, not necessarily the target vLLM release.
-# Install first, then enforce the same strict package gate as the Docker recipe.
-bash .github/scripts/enflame/install_vllm.sh
-python .github/scripts/enflame/verify_stack.py
-
-# Preserve the installed runtime when installing the PR checkout.
-python -m pip install --no-build-isolation --no-deps -e .
-python -m pip install --index-url "${PYPI_INDEX_URL:-https://pypi.org/simple}" "pytest-xdist>=3.0.0"
+# The v0.32 CI image supplies the vendor SDK and the validated vLLM/runtime
+# stack. Install only the checked-out plugin and test-only dependencies; do not
+# rebuild or replace the runtime on every CI job.
+unset PYTHONPATH
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  echo 'PYTHONPATH=' >> "${GITHUB_ENV}"
+fi
 
 python .github/scripts/install_flaggems_vllm.py
-
-# Verify pinned release files after all package installation steps.
-python docker/enflame/verify_compiler.py
-python docker/enflame/verify_index_fill.py
+python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install --index-url "${PYPI_INDEX_URL:-https://pypi.org/simple}" "pytest-xdist>=3.0.0"
 
 python - <<'PY'
 import flag_gems
