@@ -5,9 +5,11 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import ctypes
+import importlib.util
 import os
 import sys
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import torch
@@ -18,38 +20,106 @@ from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
 from vllm.utils.torch_utils import current_stream
 
+from vllm_fl.utils import _env_vendor_name
+
 logger = init_logger(__name__)
 _TXDA_ABORT_TIMEOUT_SECONDS = 5.0
 
-_flagcx_path = os.getenv('FLAGCX_PATH')
-if _flagcx_path and os.path.isdir(_flagcx_path):
-    sys.path.append(_flagcx_path)
+def _load_amd_flagcx_api(api_path: Path):
+    """Load the pinned source API without initializing the Torch ProcessGroup."""
+    name = f"{__name__}._amd_api"
+    spec = importlib.util.spec_from_file_location(name, api_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load FlagCX API from {api_path}")
+    api = importlib.util.module_from_spec(spec)
+    # The wrapper's dataclasses resolve their defining module by name.
+    sys.modules[name] = api
+    try:
+        spec.loader.exec_module(api)
+    except BaseException:
+        del sys.modules[name]
+        raise
+    return api
 
-def _flagcx_api():
-    if _flagcx_path:
+
+def _is_kunlunxin() -> bool:
+    vendor = _env_vendor_name()
+    if vendor:
+        return vendor == "kunlunxin"
+    try:
+        from vllm.platforms import current_platform
+    except ImportError:
+        return False
+    return getattr(current_platform, "vendor_name", None) == "kunlunxin"
+
+
+def _load_kunlunxin_flagcx_api(flagcx_path):
+    if flagcx_path:
+        if os.path.isdir(flagcx_path):
+            sys.path.append(flagcx_path)
         try:
             from plugin.interservice import flagcx_wrapper
-
-            return flagcx_wrapper
         except ImportError:
             pass
+        else:
+            return flagcx_wrapper
 
-    try:
-        from flagcx import api
+    from flagcx import api
 
-        return api
-    except (ImportError, OSError):
-        return None
+    return api
 
 
-_flagcx_module = _flagcx_api()
-FLAGCXLibrary = getattr(_flagcx_module, "FLAGCXLibrary", None)
-buffer_type = getattr(_flagcx_module, "buffer_type", None)
-flagcxComm_t = getattr(_flagcx_module, "flagcxComm_t", None)
-flagcxDataTypeEnum = getattr(_flagcx_module, "flagcxDataTypeEnum", None)
-flagcxUniqueId = getattr(_flagcx_module, "flagcxUniqueId", None)
-flagcxRedOpTypeEnum = getattr(_flagcx_module, "flagcxRedOpTypeEnum", None)
+_flagcx_path = os.getenv("FLAGCX_PATH")
+_flagcx_amd_source = False
+if _flagcx_path and torch.version.hip:
+    from vllm.platforms import current_platform
 
+    _flagcx_amd_source = getattr(current_platform, "vendor_name", None) == "amd"
+
+_flagcx_kunlunxin = not _flagcx_amd_source and _is_kunlunxin()
+_flagcx_packaged_library = False
+_flagcx_import_error = None
+try:
+    if _flagcx_amd_source or _flagcx_kunlunxin:
+        if _flagcx_amd_source:
+            _api_path = Path(_flagcx_path) / "src" / "flagcx" / "api.py"
+            _api = _load_amd_flagcx_api(_api_path)
+        else:
+            _api = _load_kunlunxin_flagcx_api(_flagcx_path)
+            _flagcx_packaged_library = _api.__name__ == "flagcx.api"
+        FLAGCXLibrary = _api.FLAGCXLibrary
+        buffer_type = _api.buffer_type
+        flagcxComm_t = _api.flagcxComm_t
+        flagcxDataTypeEnum = _api.flagcxDataTypeEnum
+        flagcxUniqueId = _api.flagcxUniqueId
+        flagcxRedOpTypeEnum = _api.flagcxRedOpTypeEnum
+    else:
+        if _flagcx_path and os.path.isdir(_flagcx_path):
+            sys.path.append(_flagcx_path)
+        from plugin.interservice.flagcx_wrapper import (
+            FLAGCXLibrary,
+            buffer_type,
+            flagcxComm_t,
+            flagcxDataTypeEnum,
+            flagcxRedOpTypeEnum,
+            flagcxUniqueId,
+        )
+    _flagcx_available = True
+except (ImportError, OSError, AttributeError) as exc:
+    if (
+        not _flagcx_amd_source
+        and not _flagcx_kunlunxin
+        and not isinstance(exc, ImportError)
+    ):
+        raise
+    _flagcx_available = False
+    _flagcx_import_error = exc
+    FLAGCXLibrary = None
+    buffer_type = None
+    flagcxComm_t = None
+    flagcxDataTypeEnum = None
+    flagcxUniqueId = None
+    flagcxRedOpTypeEnum = None
 
 _FAKE_TENSOR_CLS = ()
 try:  # FakeTensor lives in torch._subclasses; keep the import optional.
@@ -120,12 +190,13 @@ class PyFlagcxCommunicator:
             self.disabled = True
             return
         try:
-            if (
-                library_path is None
-                and _flagcx_module is not None
-                and _flagcx_module.__name__ != "flagcx.api"
-            ):
-                library_path = os.path.join(_flagcx_path, "build/lib/libflagcx.so")
+            if FLAGCXLibrary is None:
+                raise ImportError(
+                    "FlagCX Python bindings are unavailable"
+                ) from _flagcx_import_error
+            if library_path is None and not _flagcx_packaged_library:
+                flagcx_path = os.getenv("FLAGCX_PATH")
+                library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
             self.flagcx = FLAGCXLibrary(library_path)
         except Exception as exc:
             # disable because of missing NCCL library
@@ -198,8 +269,7 @@ class PyFlagcxCommunicator:
                 stream = self._current_stream()
                 # A small all_reduce for warmup.
                 data = torch.zeros(1, device=device)
-                # all_reduce returns a new output allocation. Keep it alive
-                # until the asynchronous native collective has completed.
+                # Keep the new output allocation alive through synchronization.
                 warmup_output = self.all_reduce(data)
                 stream.synchronize()
                 del data, warmup_output
@@ -283,6 +353,9 @@ class PyFlagcxCommunicator:
             # The upstream helper may cache the default stream while TXDA
             # graph preparation selects a side stream for model execution.
             return torch.txda.current_stream(self.device)
+        if _flagcx_amd_source:
+            # The vLLM stream cache may still point at the default stream.
+            return torch.cuda.current_stream(self.device)
         return current_stream()
 
     def _copy_flagcx_stream(self, stream):
@@ -521,13 +594,13 @@ class PyFlagcxCommunicator:
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def group_start(self):
-        if self.device.type == "npu":
+        if self.device.type == "npu" or _flagcx_amd_source:
             self.flagcx.flagcxGroupStart(self.comm)
         else:
             self.flagcx.flagcxGroupStart()
 
     def group_end(self):
-        if self.device.type == "npu":
+        if self.device.type == "npu" or _flagcx_amd_source:
             self.flagcx.flagcxGroupEnd(self.comm)
         else:
             self.flagcx.flagcxGroupEnd()
