@@ -46,23 +46,19 @@ def _non_owning_tensor_view(tensor: torch.Tensor) -> torch.Tensor:
     if tensor.numel() == 0:
         return tensor
 
+    # Borrow the storage base so a strided view retains its offset.
     storage = tensor.untyped_storage()
-    metadata = {
-        "nbytes": storage.nbytes(),
-        "data_ptr": storage.data_ptr(),
-        "size": tensor.shape,
-        "stride": tensor.stride(),
-        "dtype": tensor.dtype,
-        "device": tensor.device,
-        "storage_offset": tensor.storage_offset(),
-    }
-    # Use the storage base and preserve the view's offset. The graph owns the
-    # allocation; creating the alias must neither retain it nor install a deleter.
     borrowed = torch._C._construct_storage_from_data_pointer(
-        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+        storage.data_ptr(), tensor.device, storage.nbytes()
     )
     result = torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(
-        metadata, borrowed
+        {
+            "size": tensor.shape,
+            "stride": tensor.stride(),
+            "dtype": tensor.dtype,
+            "storage_offset": tensor.storage_offset(),
+        },
+        borrowed,
     )
     if tensor.is_conj():
         torch._C._set_conj(result, True)
