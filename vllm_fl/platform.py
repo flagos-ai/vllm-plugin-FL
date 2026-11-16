@@ -130,6 +130,7 @@ dist_backend_dict = {
     "cuda": "nccl",
     "musa": "mccl",
     "gcu": "eccl",
+    "txda": "tccl",
 }
 
 
@@ -195,7 +196,11 @@ class PlatformFL(Platform):
     )
     device_type = device_info.device_type
     # vLLM 0.24 routes small torch.compile helpers through this platform key.
-    simple_compile_backend = "eager" if device_type == "npu" else "inductor"
+    # TXDA also uses eager: inductor's triton autotuning benchmarks via
+    # torch.cuda.synchronize(), which is unavailable on the PrivateUse1 torch.
+    simple_compile_backend = (
+        "eager" if device_type in ("npu", "txda") else "inductor"
+    )
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
@@ -236,6 +241,26 @@ class PlatformFL(Platform):
         except Exception:
             return False
         return major >= 9
+
+    @classmethod
+    def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
+        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        from vllm.config.compilation import CompilationMode
+        from vllm.config.kernel import IrOpPriorityConfig
+
+        cc = vllm_config.compilation_config
+        using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
+        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        return IrOpPriorityConfig.with_default(
+            default,
+            rms_norm=default,
+            fused_add_rms_norm=default,
+            # gelu_and_mul_sparse has no vllm_c impl (only triton/native);
+            # keep it aligned with CUDA's v0.28.0 default to avoid the
+            # "All providers in priority must be registered" assertion on
+            # non-CUDA / empty builds.
+            gelu_and_mul_sparse=["triton", "native"],
+        )
 
     def is_musa(self) -> bool:
         return bool(hasattr(torch, "musa") and torch.musa.is_available())
@@ -315,6 +340,20 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
 
+        if cls.device_type == "txda":
+            # torch-level patches only (stream handling, device-guard
+            # neutralization). Model-level patches live in
+            # vendor/txda/register_ops.py to avoid circular imports while
+            # `import vllm` is still in progress.
+            try:
+                from vllm_fl.dispatch.backends.vendor.txda.patch import (
+                    apply_txda_patches,
+                )
+
+                apply_txda_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply TXDA patches: {e}")
+
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""
@@ -333,6 +372,52 @@ class PlatformFL(Platform):
         model_config = vllm_config.model_config
 
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+
+        if (
+            cls.device_type in {"npu", "txda"}
+            and vllm_config.use_v2_model_runner
+        ):
+            platform_name = "Ascend" if cls.device_type == "npu" else "Tsingmicro TXDA"
+            raise ValueError(
+                f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
+                "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
+            )
+
+        if cls.device_type == "txda":
+            if getattr(vllm_config, "speculative_config", None) is not None:
+                raise ValueError(
+                    "Tsingmicro TXDA does not support speculative decoding; "
+                    "the fused speculative Mamba state-copy path is unsupported. "
+                    "Remove --speculative-config to use the FL/V1 runner."
+                )
+            parallel_config.disable_custom_all_reduce = True
+            if any(
+                getattr(parallel_config, field, 1) > 1
+                for field in (
+                    "prefill_context_parallel_size",
+                    "decode_context_parallel_size",
+                )
+            ):
+                raise ValueError(
+                    "Tsingmicro TXDA does not support context parallelism; "
+                    "prefill_context_parallel_size and decode_context_parallel_size "
+                    "must both be 1."
+                )
+            world_size = getattr(parallel_config, "world_size_across_dp", None)
+            if world_size is None:
+                world_size = 1
+                for field in (
+                    "tensor_parallel_size",
+                    "pipeline_parallel_size",
+                    "data_parallel_size",
+                ):
+                    world_size *= getattr(parallel_config, field, 1)
+            if world_size > 1 and cls.dist_backend != "flagcx":
+                raise ValueError(
+                    "Tsingmicro TXDA multi-device execution requires FlagCX. "
+                    "Set FLAGCX_PATH to a valid TXDA FlagCX repository containing "
+                    "plugin/interservice/flagcx_wrapper.py and build/lib/libflagcx.so."
+                )
 
         cache_config = vllm_config.cache_config
         if cache_config and cache_config.block_size is None:
@@ -369,7 +454,7 @@ class PlatformFL(Platform):
             logger.info("Forcing kv cache block size to 64 for FlagOSMLA backend.")
 
         # lazy import to avoid circular import
-        from vllm.config import CUDAGraphMode
+        from vllm.config import CUDAGraphMode, CompilationMode
 
         compilation_config = vllm_config.compilation_config
         from vllm_fl.ops.activation import enable_fused_activations_for_compile
@@ -377,6 +462,22 @@ class PlatformFL(Platform):
         enable_fused_activations_for_compile(compilation_config)
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
+
+        if cls.device_type == "txda":
+            if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
+                raise ValueError(
+                    "Tsingmicro TXDA graph mode is not supported. Use --enforce-eager."
+                )
+            if compilation_config.mode != CompilationMode.NONE:
+                raise ValueError(
+                    "Tsingmicro TXDA supports eager execution only; compilation "
+                    "must be disabled. Use --enforce-eager."
+                )
+            # Inductor combo-kernel autotuning benchmarks kernels via
+            # torch.cuda.synchronize(), which is unavailable on the TXDA
+            # PrivateUse1 torch build. Disable horizontal fusion + autotuning.
+            compilation_config.inductor_compile_config["combo_kernels"] = False
+            compilation_config.inductor_compile_config["benchmark_combo_kernel"] = False
 
         if cls.device_type == "npu":
             _configure_ascend_compilation(vllm_config)
@@ -571,6 +672,10 @@ class PlatformFL(Platform):
             # TP 集合通信的拆分配置在 check_and_update_config 与
             # SPLITTING_OPS["ptpu"] 里。
             "sunrise",
+            # tsingmicro/TXDA: static graph capture is supported via
+            # torch.txda.TXDAGraph (see feat/txda-cudagraph-support); eager
+            # remains the recommended mode for the 0.32 adaptation.
+            "tsingmicro",
         ]
 
     @classmethod
@@ -695,7 +800,12 @@ class PlatformFL(Platform):
                 vllm_config.compilation_config.cudagraph_mode
                 != CUDAGraphMode.NONE
             )
-        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
+        # TXDA: retain the registered collective route used by eager execution.
+        return cls.device_type == "txda" or cls.vendor_name in (
+            "nvidia",
+            "thead",
+            "iluvatar",
+        )
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:

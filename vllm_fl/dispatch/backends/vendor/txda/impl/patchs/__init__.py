@@ -12,6 +12,7 @@ _logger = logging.getLogger(__name__)
 
 for _patch in (
     "apply_repetition_penalties",  # route sampler to pure-torch penalties
+    "mamba_memcpy",  # native tensor copies for mamba state maintenance
 ):
     try:
         __import__(f"{__name__}.{_patch}")

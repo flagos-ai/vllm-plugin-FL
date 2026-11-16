@@ -21,9 +21,34 @@ from vllm.model_executor.layers.fused_moe.utils import (
     _resize_cache,
     moe_kernel_quantize_input,
 )
-from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
-    FlashinferMoeBackend,
-)
+
+try:
+    from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
+        FlashinferMoeBackend,
+    )
+except ImportError:
+    # vLLM 0.28+ removed this enum (backend enums moved into
+    # fused_moe/oracle/* per quantisation type); the shim keeps the module
+    # importable on any backend. It is only reached when a user explicitly
+    # sets VLLM_FLASHINFER_MOE_BACKEND, a path never taken on non-NVIDIA
+    # platforms.
+    class FlashinferMoeBackend:  # type: ignore[no-redef]
+        CUTLASS = "cutlass"
+        TENSORRT_LLM = "trtllm"
+
+        def __init__(self, value):
+            self.value = str(value).strip().lower()
+
+        def __eq__(self, other):
+            o = str(getattr(other, "value", other)).strip().lower()
+            return self.value == o or o in self.value
+
+        def __hash__(self):
+            return hash(self.value)
+
+        def __str__(self):
+            return self.value
+
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl
 
@@ -416,6 +441,44 @@ class TritonExpertsFL(TritonExperts):
 
             output.copy_(
                 fused_ops.fused_experts_impl(
+                    hidden_states,
+                    w1,
+                    w2,
+                    topk_weights,
+                    topk_ids,
+                    inplace=False,
+                    activation=activation.value,
+                    apply_router_weight_on_input=apply_router_weight_on_input,
+                    use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                    use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                    use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                    use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                    per_channel_quant=self.per_act_token_quant,
+                    global_num_experts=global_num_experts,
+                    expert_map=expert_map,
+                    w1_scale=self.w1_scale,
+                    w2_scale=self.w2_scale,
+                    a1_scale=a1q_scale,
+                    a2_scale=a2_scale,
+                    block_shape=self.block_shape,
+                    w1_bias=self.w1_bias,
+                    w2_bias=self.w2_bias,
+                )
+            )
+            return
+
+        # TXDA (tsingmicro) fast path: single fused FlagGems call using the
+        # TX81-native compact-grouped MoE. The generic Triton fused_moe_kernel
+        # (tl.dot) produces wrong values on TXDA, so the dispatch reference
+        # fallback is unusable; route through FlagGems' TX81 fused_experts_impl
+        # which selects _moe_compact_grouped_gemm for bf16+silu.
+        if self._lora_context is None and current_platform.device_type == "txda":
+            from flag_gems.runtime.backend._tsingmicro.tx81.fused.fused_moe import (
+                fused_experts_impl as txda_fused_experts_impl,
+            )
+
+            output.copy_(
+                txda_fused_experts_impl(
                     hidden_states,
                     w1,
                     w2,

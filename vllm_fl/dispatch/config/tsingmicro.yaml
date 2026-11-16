@@ -1,0 +1,49 @@
+# vLLM-FL Dispatch Configuration for Tsingmicro TXDA (TX8110)
+# Continues the vLLM 0.24 TXDA enablement (537284eb, #460) and the 0.28
+# adaptation (#642), for vLLM 0.32 with flag_gems 5.5.0.dev0 /
+# flaggems_vllm 0.3.0.dev1 / triton 3.7.1.
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flagos        : Default FlagOS implementation
+#   - reference     : PyTorch reference implementation
+#   - vendor        : Any available vendor backend (auto-detected)
+#   - vendor:txda   : Txda-specific vendor backend
+op_backends:
+  # attention_backend: prioritize vendor.  The txda vendor backend returns
+  # AttentionFLBackend, whose forward calls flag_gems.flash_attn_varlen_func
+  # (the FlagGems tsingmicro attention kernel).  The flagos default instead
+  # returns vLLM's stock TritonAttentionBackend, which runs
+  # triton_unified_attention.unified_attention and never reaches the
+  # tsingmicro implementation.
+  attention_backend:
+    - vendor
+    - flagos
+    - reference
+
+  # invoke_fused_moe_triton_kernel: use vLLM upstream Triton kernel via
+  # vendor backend (delegates to vllm.model_executor.layers.fused_moe).
+  invoke_fused_moe_triton_kernel:
+    - flagos
+    - vendor
+    - reference
+
+  rms_norm:
+    - flagos
+    - vendor
+    - reference
+
+
+oot_blacklist:
+  - masked_fill
+  - masked_fill_

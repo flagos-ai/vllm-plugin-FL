@@ -7,7 +7,12 @@ import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
 # custom_ops.py patches _fused_moe_pkg.FusedMoE = FusedMoEFL at runtime,
 # so calling _fused_moe_pkg.FusedMoE() inside FusedMoEFL would recurse
 # infinitely.  Capturing it here breaks the cycle.
-_OrigFusedMoE = _fused_moe_pkg.FusedMoE
+# vLLM 0.28+ introduced `FusedMoEFactory` and removed the `FusedMoE` name
+# from the package exports; resolve through getattr so both the new factory
+# and the legacy (vLLM <= 0.24) alias work.
+_OrigFusedMoE = (
+    getattr(_fused_moe_pkg, "FusedMoEFactory", None) or _fused_moe_pkg.FusedMoE
+)
 from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (

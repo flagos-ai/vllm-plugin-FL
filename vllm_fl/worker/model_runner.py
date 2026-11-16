@@ -50,9 +50,23 @@ from vllm.distributed.parallel_state import (
     get_tp_group,
     GraphCaptureContext,
     is_global_first_rank,
-    prepare_communication_buffer_for_model,
 )
-from vllm.distributed.weight_transfer.base import SparseWeightPatch
+
+try:  # FL: userbuffer comm-GEMM overlap; vLLM >= 0.32 removed the symbol.
+    from vllm.distributed.parallel_state import (
+        prepare_communication_buffer_for_model as _prepare_comm_buffer,
+    )
+except ImportError:
+
+    def _prepare_comm_buffer(*args, **kwargs):
+        return None
+
+try:  # FL: SparseWeightPatch moved between vLLM versions.
+    from vllm.distributed.weight_transfer.sparse_nccl_engine import (
+        SparseWeightPatch,
+    )
+except ImportError:  # older vLLM
+    from vllm.distributed.weight_transfer.base import SparseWeightPatch
 from vllm.forward_context import (
     BatchDescriptor,
     set_forward_context,
@@ -69,8 +83,12 @@ from vllm.model_executor.layers.mamba.ops.ssu_dispatch import (
 )
 from vllm.model_executor.layers.rotary_embedding import (
     MRotaryEmbedding,
-    XDRotaryEmbedding,
 )
+
+try:  # FL: XD rotary removed in vLLM 0.32.
+    from vllm.model_executor.layers.rotary_embedding import XDRotaryEmbedding
+except ImportError:
+    XDRotaryEmbedding = None  # type: ignore[assignment]
 from vllm.model_executor.model_loader import get_model_loader
 from vllm.model_executor.model_loader.reload import (
     finalize_layerwise_reload,
@@ -81,15 +99,24 @@ from vllm.model_executor.models.interfaces import (
     MultiModalEmbeddings,
     SupportsMRoPE,
     SupportsMultiModal,
-    SupportsXDRoPE,
     is_mixture_of_experts,
     supports_eagle3,
     supports_mrope,
     supports_multimodal_pruning,
     supports_realtime,
     supports_transcription,
-    supports_xdrope,
 )
+
+try:  # FL: XD-RoPE interface removed in vLLM 0.32.
+    from vllm.model_executor.models.interfaces import (
+        SupportsXDRoPE,
+        supports_xdrope,
+    )
+except ImportError:
+    SupportsXDRoPE = object  # type: ignore[assignment,misc]
+
+    def supports_xdrope(model) -> bool:
+        return False
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling,
     is_pooling_model,
@@ -215,11 +242,24 @@ from vllm.v1.outputs import (
     LogprobsTensors,
     ModelRunnerOutput,
     PoolerOutput,
-    RoutedExpertsLists,
-    RoutedExpertsTensors,
     SamplerOutput,
     make_empty_encoder_model_runner_output,
 )
+
+try:  # FL: routed-expert outputs removed in vLLM 0.32.
+    from vllm.v1.outputs import RoutedExpertsLists, RoutedExpertsTensors
+except ImportError:
+
+    class RoutedExpertsLists:
+        def __init__(self, routing_data=None, slot_mapping=None):
+            self.routing_data = routing_data
+            self.slot_mapping = slot_mapping
+
+    class RoutedExpertsTensors:
+        def __init__(self, routing_data=None, slot_mapping=None):
+            self.routing_data = routing_data
+            self.slot_mapping = slot_mapping
+
 from vllm.v1.pool.metadata import PoolingMetadata, PoolingStates
 from vllm.v1.sample.logits_processor import LogitsProcessors, build_logitsprocs
 from vllm.v1.sample.logits_processor.interface import LogitsProcessor
@@ -248,12 +288,20 @@ from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
 from vllm.v1.worker import mamba_utils
 from vllm.v1.worker.cp_utils import (
     check_attention_cp_compatibility,
-    get_total_cp_world_size,
 )
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
-from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
-from vllm.v1.worker.gpu.pool.late_interaction_runner import LateInteractionRunner
+
+try:  # FL: CP world-size helper; vLLM >= 0.32 dropped the CP world size helper.
+    from vllm.v1.worker.cp_utils import get_total_cp_world_size
+except ImportError:
+
+    def get_total_cp_world_size(*args, **kwargs) -> int:
+        return 1
+
+
+from vllm_fl.compat import _reshape_attention_kv_cache
+from vllm.v1.pool.late_interaction_runner import LateInteractionRunner
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.utils.torch_utils import PIN_MEMORY
 
@@ -266,13 +314,22 @@ from vllm.v1.worker.ubatch_utils import (
     maybe_create_ubatch_slices,
     split_attn_metadata,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp
+try:  # FL: SP removed in vLLM 0.32.
+    from vllm.v1.worker.utils import is_residual_scattered_for_sp
+except ImportError:
+
+    def is_residual_scattered_for_sp(vllm_config, num_input_tokens) -> bool:
+        return False
+
 from vllm.v1.worker.workspace import lock_workspace
 
 from vllm.v1.worker.utils import (
     AttentionGroup,
     KVBlockZeroer,
     add_kv_sharing_layers_to_kv_cache_groups,
+    allocate_kv_cache,
+    customize_attention_spec,
+    bind_kv_cache,
     prepare_kernel_block_sizes,
     sanity_check_mm_encoder_outputs,
 )
@@ -554,7 +611,11 @@ class ModelRunnerFL(
         self.max_model_len = model_config.max_model_len
 
         # Always set to false after the first forward pass
-        self.calculate_kv_scales = self.cache_config.calculate_kv_scales
+        # FL: vLLM >= 0.28 removed CacheConfig.calculate_kv_scales
+        # (runtime kv-scale calibration dropped upstream); tolerate absence.
+        self.calculate_kv_scales = getattr(
+            self.cache_config, "calculate_kv_scales", False
+        )
         self.dcp_world_size = self.parallel_config.decode_context_parallel_size
         self.dcp_rank = 0 if self.dcp_world_size <= 1 else get_dcp_group().rank_in_group
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
@@ -581,10 +642,10 @@ class ModelRunnerFL(
         # Multi-modal data support
         self.mm_registry = MULTIMODAL_REGISTRY
         self.uses_mrope = model_config.uses_mrope
-        self.uses_xdrope_dim = model_config.uses_xdrope_dim
-        self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
-            model_config
-        )
+        self.uses_xdrope_dim = getattr(model_config, "uses_xdrope_dim", False)
+        # FL: vLLM 0.32 moved multimodal-input detection to a ModelConfig
+        # property (the registry helper is gone).
+        self.supports_mm_inputs = model_config.supports_multimodal_inputs
 
         if self.model_config.is_encoder_decoder:
             # Maximum length of the encoder input, only for encoder-decoder
@@ -751,6 +812,11 @@ class ModelRunnerFL(
         )
         self._init_block_sizes = [placeholder_block_size]
         self._init_kernel_block_sizes = [placeholder_block_size]
+        # FL: vLLM 0.32 removed the kernel_block_sizes InputBatch arg;
+        # block_sizes covers the per-group sizes now.
+        placeholder_max_num_blocks = cdiv(
+            max(self.max_model_len, self.max_encoder_len), placeholder_block_size
+        )
         self.input_batch = InputBatch(
             max_num_reqs=self.max_num_reqs,
             # We need to use the encoder length for encoder-decoder
@@ -760,7 +826,7 @@ class ModelRunnerFL(
             device=self.device,
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[placeholder_block_size],
-            kernel_block_sizes=[placeholder_block_size],
+            max_num_blocks_per_req=[placeholder_max_num_blocks],
             num_spec_tokens=self.num_spec_tokens,
             logitsprocs=build_logitsprocs(
                 self.vllm_config,
@@ -1101,6 +1167,17 @@ class ModelRunnerFL(
             with_numpy=numpy,
         )
 
+    def _get_mamba_state_copy_funcs(self):
+        """Return MambaStateCopyFuncsByType (dict keyed by backend enum).
+
+        vLLM 0.32's model exposes ``get_mamba_state_copy_func()`` (a bare
+        tuple) and ``get_mamba_state_copy_funcs(mamba_types)`` (the dict).
+        The mamba buffer/preprocess helpers require the dict form.
+        """
+        mamba_groups = mamba_utils.get_mamba_groups(self.kv_cache_config)
+        mamba_types = {spec.mamba_type for spec in mamba_groups}
+        return self.model.get_mamba_state_copy_funcs(mamba_types)
+
     def _get_mamba_bufs(self) -> mamba_utils.MambaBuffers:
         # Only reachable on the ``mamba_cache_mode == "align"`` path.
         # The postprocess sub-object is additionally gated on spec
@@ -1110,7 +1187,7 @@ class ModelRunnerFL(
             self._mamba_bufs = mamba_utils.MambaBuffers.create(
                 max_num_reqs=self.max_num_reqs,
                 kv_cache_config=self.kv_cache_config,
-                copy_funcs=self.model.get_mamba_state_copy_func(),
+                copy_funcs=self._get_mamba_state_copy_funcs(),
                 make_buffer=self._make_buffer,
                 device=self.device,
                 with_postprocess_align=(
@@ -1192,12 +1269,13 @@ class ModelRunnerFL(
         """
         self._kv_block_zeroer = KVBlockZeroer(
             self.device,
-            pin_memory=PIN_MEMORY,
             attn_groups_iter=self._kv_cache_spec_attn_group_iterator(),
             kernel_block_sizes=self._kernel_block_sizes,
-            cache_dtype=self.cache_config.cache_dtype,
             runner_only_attn_layers=self.runner_only_attn_layers,
             static_forward_context=self.compilation_config.static_forward_context,
+            # vLLM 0.32: KVBlockZeroer sizes zero tensors by block count,
+            # not by cache dtype.
+            num_blocks=self.kv_cache_config.num_blocks,
         )
 
     def _zero_block_ids(self, block_ids: list[int]) -> None:
@@ -1305,7 +1383,12 @@ class ModelRunnerFL(
                 sampling_params
                 and sampling_params.sampling_type == SamplingType.RANDOM_SEED
             ):
-                generator = torch.Generator(device=self.device)
+                # TXDA random kernels use the runtime's CPU fallback, whose
+                # generator state layout (MT19937) is incompatible with the
+                # FlagGems Philox seed/offset helper.
+                generator = torch.Generator(
+                    device="cpu" if self.device.type == "txda" else self.device
+                )
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
@@ -1627,7 +1710,7 @@ class ModelRunnerFL(
                 input_batch=self.input_batch,
                 kv_cache_config=self.kv_cache_config,
                 forward_context=self.compilation_config.static_forward_context,
-                mamba_state_copy_funcs=self.model.get_mamba_state_copy_func(),
+                mamba_state_copy_funcs=self._get_mamba_state_copy_funcs(),
             )
 
             assert self.num_accepted_tokens_event is not None
@@ -2461,12 +2544,9 @@ class ModelRunnerFL(
             query_start_loc=self.query_start_loc.gpu[: num_reqs_padded + 1],
             query_start_loc_cpu=self.query_start_loc.cpu[: num_reqs_padded + 1],
             seq_lens=self.seq_lens[:num_reqs_padded],
-            _seq_lens_cpu=seq_lens_cpu,
-            _num_computed_tokens_cpu=num_computed_tokens_cpu,
-            _num_computed_tokens_cache=(
-                self.num_computed_tokens[:num_reqs_padded]
-                if self.common_attention_metadata_graph is not None else None
-            ),
+            # FL: vLLM 0.32 removed the private _seq_lens_cpu /
+            # _num_computed_tokens_cpu fields; seq_lens_cpu_upper_bound
+            # covers the CPU-side bound.
             seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             num_reqs=num_reqs_padded,
             num_actual_tokens=num_tokens_padded,
@@ -2558,6 +2638,26 @@ class ModelRunnerFL(
                         self.mamba_prev_last_scheduled_idx.gpu[:num_reqs_padded]
                     )
 
+            # FL (txda-only): translate the scheduler-block block table into
+            # kernel blocks when the attention group splits blocks
+            # (kernel_block_size < block_size). Upstream does this inside
+            # AttentionGroup.build_metadata; this port called builder.build
+            # directly and missed it, so backends that view the cache in
+            # kernel-block pages (e.g. flash varlen) read the wrong pages.
+            # With hybrid align mode (Qwen3.5 GDN) the scheduler uses
+            # block_size=384 while the attention cache view is paged at 64
+            # tokens, and the un-translated table reads uninitialized pages
+            # (the pool starts as NaN) — logits collapse to token id 0 on
+            # batched requests. The translation is only applied on TXDA;
+            # other platforms keep the original block table unchanged.
+            _fl_bt = None
+            if current_platform.device_type == "txda" and getattr(
+                attn_group, "kernel_block_size", None
+            ) is not None:
+                _fl_bt = attn_group.map_to_kernel_block_table(
+                    common_attn_metadata.block_table_tensor, ubid or 0
+                )
+
             if for_cudagraph_capture:
                 attn_metadata_i = builder.build_for_cudagraph_capture(
                     common_attn_metadata
@@ -2568,13 +2668,21 @@ class ModelRunnerFL(
             ):
                 attn_metadata_i = builder.update_block_table(
                     cached_attn_metadata[cache_key],
-                    common_attn_metadata.block_table_tensor,
+                    (
+                        _fl_bt
+                        if _fl_bt is not None
+                        else common_attn_metadata.block_table_tensor
+                    ),
                     common_attn_metadata.slot_mapping,
                 )
             else:
                 attn_metadata_i = builder.build(
                     common_prefix_len=cascade_attn_prefix_len,
-                    common_attn_metadata=common_attn_metadata,
+                    common_attn_metadata=(
+                        replace(common_attn_metadata, block_table_tensor=_fl_bt)
+                        if _fl_bt is not None
+                        else common_attn_metadata
+                    ),
                     **extra_attn_metadata_args,
                 )
                 if builder.supports_update_block_table:
@@ -3564,7 +3672,7 @@ class ModelRunnerFL(
         # Pad tokens to multiple of tensor_parallel_size when
         # enabled collective fusion for SP
         tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-        if self.compilation_config.pass_config.enable_sp and tp_size > 1:
+        if getattr(self.compilation_config.pass_config, "enable_sp", False) and tp_size > 1:
             return round_up(num_scheduled_tokens, tp_size)
         return num_scheduled_tokens
 
@@ -4056,7 +4164,7 @@ class ModelRunnerFL(
 
         cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded)
         num_tokens_padded = batch_descriptor.num_tokens
-        if self.compilation_config.pass_config.enable_sp:
+        if getattr(self.compilation_config.pass_config, "enable_sp", False):
             assert (
                 batch_descriptor.num_tokens
                 % self.vllm_config.parallel_config.tensor_parallel_size
@@ -4449,7 +4557,7 @@ class ModelRunnerFL(
                     self.input_batch,
                     self.requests,
                     self.compilation_config.static_forward_context,
-                    self.model.get_mamba_state_copy_func(),
+                    self._get_mamba_state_copy_funcs(),
                     mamba_bufs.preprocess,
                 )
                 # preprocess_mamba resets num_accepted_tokens_cpu to 1
@@ -4866,7 +4974,6 @@ class ModelRunnerFL(
                 else None,
                 num_nans_in_logits=num_nans_in_logits,
                 cudagraph_stats=cudagraph_stats,
-                routed_experts=None,
             )
 
         # FL: Advance IO step after the full inference cycle
@@ -4917,7 +5024,6 @@ class ModelRunnerFL(
                 invalid_req_indices=invalid_req_indices,
                 async_output_copy_stream=self._get_or_create_async_output_copy_stream(),
                 vocab_size=self.input_batch.vocab_size,
-                routed_experts=routed_experts_snapshot,
             )
         with record_function_or_nullcontext(
             "gpu_model_runner: set_async_sampled_token_ids"
@@ -5505,13 +5611,13 @@ class ModelRunnerFL(
         prewarm_cached_ops()
 
         if not load_dummy_weights:
-            prepare_communication_buffer_for_model(self.model)
+            _prepare_comm_buffer(self.model)
             # FL: register IO dumper module hooks
             register_io_module_hooks(self.model)
             if (drafter := getattr(self, "drafter", None)) and (
                 drafter_model := getattr(drafter, "model", None)
             ):
-                prepare_communication_buffer_for_model(drafter_model)
+                _prepare_comm_buffer(drafter_model)
         mm_config = self.model_config.multimodal_config
         self.is_multimodal_pruning_enabled = (
             supports_multimodal_pruning(self.get_model())
@@ -7321,9 +7427,9 @@ class ModelRunnerFL(
             min_cg_support,
             min_cg_attn_backend,
             self.uniform_decode_query_len,
-            self.parallel_config.tensor_parallel_size,
-            self.kv_cache_config,
-            self.max_num_reqs,
+            use_v2_model_runner=False,
+            kv_cache_config=self.kv_cache_config,
+            max_num_reqs=self.max_num_reqs,
             is_profiling=is_profiling,
         )
 
@@ -7413,7 +7519,7 @@ class ModelRunnerFL(
                 device=self.device,
                 vocab_size=self.model_config.get_vocab_size(),
                 block_sizes=block_sizes,
-                kernel_block_sizes=kernel_block_sizes,
+                # FL: vLLM 0.32 removed the kernel_block_sizes InputBatch arg.
                 max_num_blocks_per_req=max_num_blocks,
                 num_spec_tokens=self.num_spec_tokens,
                 logitsprocs=self.input_batch.logitsprocs,
@@ -7430,6 +7536,15 @@ class ModelRunnerFL(
             f"InputBatch kernel_block_sizes {self._init_kernel_block_sizes} "
             f"!= kv_cache kernel_block_sizes {kernel_block_sizes}"
         )
+
+    def use_uniform_kv_cache(self, attn_groups) -> bool:
+        """Whether the uniform KV-cache layout can be used.
+
+        The uniform layout (a single shared KV cache across layers, used for
+        KV-connector / cross-layer transfers) is a newer vLLM feature not
+        present in v0.32.0. Always fall back to the general per-layer path.
+        """
+        return False
 
     def _allocate_kv_cache_tensors(
         self, kv_cache_config: KVCacheConfig
@@ -7464,7 +7579,7 @@ class ModelRunnerFL(
                 tensor = torch.zeros(
                     kv_cache_tensor.size, dtype=torch.int8, device=self.device
                 )
-            for layer_name in kv_cache_tensor.shared_by:
+            for layer_name in kv_cache_tensor.layers:
                 kv_cache_raw_tensors[layer_name] = tensor
 
         layer_names = set()
@@ -7511,7 +7626,7 @@ class ModelRunnerFL(
         layer_packing: dict[str, tuple[int, int]] = {}
         for kv_tensor in self.kv_cache_config.kv_cache_tensors:
             if kv_tensor.block_stride > 0:
-                for ln in kv_tensor.shared_by:
+                for ln in kv_tensor.layers:
                     layer_packing[ln] = (kv_tensor.offset, kv_tensor.block_stride)
         for group in self._kv_cache_spec_attn_group_iterator():
             kv_cache_spec = group.kv_cache_spec
@@ -7676,13 +7791,15 @@ class ModelRunnerFL(
             self.cross_layers_kv_cache = cross_layers_kv_cache
             self.cross_layers_attn_backend = attn_backend
         else:
-            # Fallback to the general case
-            # Initialize the memory buffer for KV cache
-            kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
-
-            # Change the memory buffer to the desired shape
-            kv_caches = self._reshape_kv_cache_tensors(
-                kv_cache_raw_tensors, kernel_block_sizes
+            # Fallback to the general case. vLLM 0.32 allocates and reshapes
+            # the KV cache in one step via allocate_kv_cache (replaces the
+            # older _allocate_kv_cache_tensors + _reshape_kv_cache_tensors
+            # flow).
+            kv_caches = allocate_kv_cache(
+                kv_cache_config,
+                self.device,
+                self.cache_config.get_resolved_kv_cache_layout(),
+                kernel_block_sizes,
             )
 
         # Set up cross-layer KV cache sharing
@@ -7807,7 +7924,8 @@ class ModelRunnerFL(
     def init_routed_experts_capturer(self):
         logger.info(
             "Initializing routed experts capturer, enable_return_routed_experts: %s",
-            self.model_config.enable_return_routed_experts,
+            # vLLM 0.32 moved the flag to VllmConfig.aux_output_config.
+            self.vllm_config.aux_output_config.enable_return_routed_experts,
         )
         self.routed_experts_capturer = RoutedExpertsCapturer(
             max_num_batched_tokens=self.scheduler_config.max_num_batched_tokens,
@@ -7916,12 +8034,14 @@ class ModelRunnerFL(
             # Skip modules that don't need KV cache (eg encoder-only attention)
             if spec := attn_module.get_kv_cache_spec(self.vllm_config):
                 if isinstance(spec, AttentionSpec):
-                    backend = attn_module.get_attn_backend()
-                    # indexes_kv_by_block_stride() -> get_kv_cache_stride_order()
-                    # -> get_kv_cache_layout() needs the current vLLM config.
+                    # vLLM 0.32: stride-order customization moved into
+                    # customize_attention_spec (replaces the older
+                    # indexes_kv_by_block_stride() + spec replacement flow).
+                    # The FL backend still needs the current config set.
                     with set_current_vllm_config(self.vllm_config):
-                        indexes = backend.indexes_kv_by_block_stride()
-                    spec = replace(spec, indexes_kv_by_block_stride=indexes)
+                        spec = customize_attention_spec(
+                            attn_module.get_attn_backend(), spec
+                        )
                 kv_cache_spec[layer_name] = spec
 
         if self.use_ascend_hybrid_cache:

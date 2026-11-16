@@ -228,3 +228,54 @@ class ReferenceBackend(Backend):
             block_shape=block_shape,
             B_bias=B_bias,
         )
+
+    def topk_softmax(
+        self,
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+        token_expert_indices: torch.Tensor,
+        gating_output: torch.Tensor,
+        renormalize: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """MoE router top-k + softmax (PyTorch reference)."""
+        num_tokens = gating_output.shape[0]
+        topk = topk_ids.shape[1]
+        topk_logits, topk_indices = torch.topk(gating_output, topk, dim=-1)
+        topk_weights.copy_(torch.softmax(topk_logits, dim=-1).to(topk_weights.dtype))
+        topk_ids.copy_(topk_indices.to(topk_ids.dtype))
+        token_expert_indices.copy_(
+            (
+                topk_indices.to(torch.int64) * num_tokens
+                + torch.arange(num_tokens, device=gating_output.device).unsqueeze(1)
+            ).to(token_expert_indices.dtype)
+        )
+        return topk_weights, topk_ids
+
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map: torch.Tensor | None = None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+        return_scatter_idx: bool = False,
+    ):
+        """Delegate to FlagGems' torch+triton MoE alignment (vLLM's pure-Python
+        version delegates to the missing ``_moe_C`` C++ op)."""
+        from flag_gems.fused.moe_align_block_size import moe_align_block_size
+
+        if return_scatter_idx:
+            raise NotImplementedError("return_scatter_idx is not supported on TXDA")
+
+        return moe_align_block_size(
+            topk_ids,
+            block_size,
+            num_experts,
+            expert_map,
+            pad_sorted_ids=pad_sorted_ids,
+        )
+
+    def moe_sum(self, input: torch.Tensor, output: torch.Tensor) -> None:
+        """Reduce (num_tokens, topk, K) -> (num_tokens, K) by summing topk."""
+        output.copy_(input.sum(dim=1).to(output.dtype))

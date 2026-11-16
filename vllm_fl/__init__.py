@@ -155,6 +155,19 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
+    # These backends use ModelRunnerFL; choose it before VllmConfig reads
+    # model defaults for the upstream V2 runner.
+    from vllm_fl.utils import DeviceInfo as _DeviceInfo
+
+    if _DeviceInfo().vendor_name in (
+        "ascend",
+        "mthreads",
+        "enflame",
+        "gcu",
+        "tsingmicro",
+    ):
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+
     return "vllm_fl.platform.PlatformFL"
 
 def register_quant_linear():

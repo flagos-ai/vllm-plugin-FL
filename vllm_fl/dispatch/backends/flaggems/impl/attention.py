@@ -14,8 +14,8 @@ from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vll
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
+from vllm import envs
 from vllm.model_executor.layers.attention.attention import Attention
-from vllm.model_executor.layers.batch_invariant import _batch_invariant_MODE as _bi_mode
 from vllm.platforms.interface import DeviceCapability
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import is_quantized_kv_cache
@@ -30,9 +30,8 @@ from vllm.v1.attention.backend import (
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
-    get_kv_cache_layout,
 )
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
+from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.kv_cache_interface import AttentionSpec
 
@@ -48,6 +47,19 @@ else:
 logger = init_logger(__name__)
 
 
+def _split_kv_cache(
+    kv_cache: torch.Tensor, head_size: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Expose strided K/V views without changing the upstream cache storage."""
+    if kv_cache.ndim == 4:
+        # vLLM 0.32 logical [B, H, N, K+V]. The physical stride order may be
+        # head-major or token-major; transpose/split preserve both layouts.
+        if kv_cache.shape[-1] != 2 * head_size:
+            raise ValueError("FlagGems attention requires equal K/V head sizes")
+        return kv_cache.transpose(1, 2).split(head_size, dim=-1)
+    raise ValueError(f"Unsupported FlagGems KV cache shape: {tuple(kv_cache.shape)}")
+
+
 class AttentionFLBackend(AttentionBackend):
     accept_output_buffer: bool = True
     # KV cache update is performed by vLLM via do_kv_cache_update() before
@@ -58,7 +70,10 @@ class AttentionFLBackend(AttentionBackend):
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
+    def get_supported_kernel_block_sizes(
+        kv_cache_spec: AttentionSpec | None = None,
+    ) -> list[int | MultipleOf]:
+        # FL: vLLM 0.32 passes the KVCacheSpec (vllm/v1/worker/utils.py).
         vllm_config = get_current_vllm_config()
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
@@ -127,7 +142,14 @@ class AttentionFLBackend(AttentionBackend):
     ) -> tuple[int, ...]:
         # `stride_order` indicates the permutation that gets
         # us from `get_kv_cache_shape` to the actual memory layout we want.
-        cache_layout = get_kv_cache_layout()
+        # FL: vLLM 0.32 stores the resolved layout on CacheConfig (the
+        # parameterless get_kv_cache_layout() helper is gone).
+        from vllm.config import get_current_vllm_config_or_none
+
+        _cfg = get_current_vllm_config_or_none()
+        cache_layout = (
+            _cfg.cache_config.get_resolved_kv_cache_layout().name if _cfg else "NHD"
+        )
         if cache_layout == "NHD" and include_num_layers_dimension:
             # (num_blocks, num_layers, 2, block_size, num_kv_heads, head_size)
             return (2, 0, 1, 3, 4, 5)
@@ -467,7 +489,8 @@ class AttentionFLImpl(AttentionImpl):
         self.attn_type = attn_type
         self.vllm_flash_attn_version = 2  # FlagGems only supports FA2
         # Cache the batch invariant result for use in forward passes
-        self.batch_invariant_enabled = _bi_mode
+        # FL: vLLM 0.32 removed the batch-invariant module; read the env.
+        self.batch_invariant_enabled = envs.VLLM_BATCH_INVARIANT
 
         if is_quantized_kv_cache(self.kv_cache_dtype):
             raise NotImplementedError(
@@ -497,8 +520,15 @@ class AttentionFLImpl(AttentionImpl):
         if self.attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
             return
 
-        key_cache, value_cache = kv_cache.unbind(0)
-        reshape_and_cache_flash(
+        key_cache, value_cache = _split_kv_cache(kv_cache, self.head_size)
+        # FlagGems 5.4.0's writer assumes contiguous [N,H,D] inside a page.
+        # Packed K/V views have larger token/head strides, so use vLLM's
+        # stride-aware Triton writer for the new cache layout (no CUDA C op).
+        from vllm.v1.attention.ops.triton_reshape_and_cache_flash import (
+            triton_reshape_and_cache_flash,
+        )
+
+        triton_reshape_and_cache_flash(
             key,
             value,
             key_cache,
@@ -576,7 +606,7 @@ class AttentionFLImpl(AttentionImpl):
         # For decoder and cross-attention, use KV cache as before.
         # NOTE: KV cache write is handled by do_kv_cache_update() which is
         # called separately by vLLM's unified_kv_cache_update custom op.
-        key_cache, value_cache = kv_cache.unbind(0)
+        key_cache, value_cache = _split_kv_cache(kv_cache, self.head_size)
 
         if not attn_metadata.use_cascade:
             cu_seqlens_q = attn_metadata.query_start_loc

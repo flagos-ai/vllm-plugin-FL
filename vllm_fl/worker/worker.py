@@ -62,7 +62,14 @@ from vllm.v1.engine import ReconfigureDistributedRequest, ReconfigureRankType
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import AsyncModelRunnerOutput, DraftTokenIds, ModelRunnerOutput
 from vllm.v1.utils import report_usage_stats
-from vllm.v1.worker.utils import is_residual_scattered_for_sp
+
+try:  # SP (sequence parallelism) removed in vLLM 0.32.
+    from vllm.v1.worker.utils import is_residual_scattered_for_sp
+except ImportError:
+
+    def is_residual_scattered_for_sp(vllm_config, num_input_tokens) -> bool:
+        return False
+
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 import vllm_fl.envs as fl_envs
@@ -571,12 +578,30 @@ class WorkerFL(WorkerBase):
             by adjusting the `gpu_memory_utilization` parameter.
         """
         if current_platform.device_type == "txda":
-            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
-            # e.g., 20 GiB or similar default cache memory size.
-            fallback_val = int(os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024))
-            logger.info("txda platform detected. Skipping memory profiling to avoid OOM. "
-                        f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB.")
-            return fallback_val
+            # TXDA cannot profile the peak allocation safely. Honor the vLLM
+            # byte budget first, retaining the legacy override/default when
+            # no explicit budget was supplied.
+            kv_cache_memory_bytes = self.cache_config.kv_cache_memory_bytes
+            if kv_cache_memory_bytes is None:
+                try:
+                    kv_cache_memory_bytes = int(
+                        os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * GiB_bytes)
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        "VLLM_TXDA_KV_CACHE_SIZE must be a positive integer in bytes."
+                    ) from exc
+            if kv_cache_memory_bytes <= 0:
+                raise ValueError(
+                    "TXDA KV cache memory must be positive; check "
+                    "kv_cache_memory_bytes or VLLM_TXDA_KV_CACHE_SIZE."
+                )
+            logger.info(
+                "txda platform detected. Skipping memory profiling to avoid "
+                f"OOM. Using KV cache memory size: "
+                f"{kv_cache_memory_bytes / GiB_bytes:.2f} GiB."
+            )
+            return kv_cache_memory_bytes
 
         GiB = lambda b: b / GiB_bytes
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
@@ -761,6 +786,11 @@ class WorkerFL(WorkerBase):
         # else:
         #     context = nullcontext()
         self.model_runner.initialize_kv_cache(kv_cache_config)
+
+        # vLLM 0.32 moved enable_return_routed_experts from ModelConfig to
+        # VllmConfig.aux_output_config (AuxOutputConfig).
+        if self.vllm_config.aux_output_config.enable_return_routed_experts:
+            self.model_runner.init_routed_experts_capturer()
 
     def compile_or_warm_up_model(self) -> CompilationTimes:
         warmup_sizes = []
@@ -980,7 +1010,7 @@ class WorkerFL(WorkerBase):
 
         if (
             parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
+            and getattr(compilation_config.pass_config, "enable_sp", False)
             and forward_pass
         ):
             num_scheduled_tokens_np = np.array(
@@ -1361,9 +1391,12 @@ def init_worker_distributed_environment(
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    try:  # batch invariance not present in this vLLM build
+        from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
-    init_batch_invariance()
+        init_batch_invariance()
+    except ImportError:
+        pass
 
     init_method = distributed_init_method or "env://"
     init_distributed_environment(

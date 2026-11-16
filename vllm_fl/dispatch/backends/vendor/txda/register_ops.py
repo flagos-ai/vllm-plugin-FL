@@ -1,9 +1,10 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-METAX backend operator registrations.
+TXDA backend operator registrations.
 
-This module registers all VENDOR (METAX) implementations.
+This module registers all vendor (TXDA) implementations and applies the
+txda model-level patches.
 """
 
 from __future__ import annotations
@@ -14,6 +15,14 @@ import logging
 from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
 
 logger = logging.getLogger(__name__)
+
+# Apply the txda model-level patches at backend registration time. This
+# module is imported by the dispatch system (builtin_ops), which runs only
+# after vllm is fully imported — the patchs modules import
+# vllm.model_executor / vllm._custom_ops and would hit circular imports if
+# pulled in earlier (e.g. from the package __init__, which PlatformFL's
+# import_kernels() touches via patch.py).
+from .impl import patchs  # noqa: F401,E402 — apply Txda patches
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -58,8 +67,9 @@ def register_builtins(registry) -> None:
             vendor="txda",
             priority=BackendPriority.VENDOR,
         ),
-        # RMS Norm — stub (raises NotImplementedError), so dispatch falls
-        # through to the next backend (reference) per tsingmicro.yaml config.
+        # RMS Norm — pure-torch fallback: the FlagGems Triton kernel exceeds
+        # the TXDA shared-memory limit, so impl/normalization.py computes it
+        # with native ops.
         OpImpl(
             op_name="rms_norm",
             impl_id="vendor.txda",

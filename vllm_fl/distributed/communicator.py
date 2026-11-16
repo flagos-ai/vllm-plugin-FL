@@ -19,8 +19,22 @@ class CommunicatorFL(DeviceCommunicatorBase):
         device: torch.device | None = None,
         device_group: ProcessGroup | None = None,
         unique_name: str = "",
+        global_ranks: list[int] | None = None,
+        global_world_size: int | None = None,
+        use_all2all: bool = False,
+        **kwargs,
     ):
-        super().__init__(cpu_group, device, device_group, unique_name)
+        # vLLM 0.32's GroupCoordinator passes the extra kwargs; accept and
+        # forward them so the class stays usable across 0.24-0.32.
+        super().__init__(
+            cpu_group,
+            device,
+            device_group,
+            unique_name,
+            global_ranks,
+            global_world_size,
+            use_all2all=use_all2all,
+        )
         self.pyflagcx_comm: Optional[PyFlagcxCommunicator] = None
         if self.world_size > 1:
             self.pyflagcx_comm = PyFlagcxCommunicator(

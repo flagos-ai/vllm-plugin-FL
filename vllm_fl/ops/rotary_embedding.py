@@ -47,6 +47,12 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         query: torch.Tensor,
         key: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # TXDA: prefer the upstream PyTorch-native RoPE path (matches
+        # tsingmicro.md "rotary uses reference implementations"). The native
+        # ApplyRotaryEmb path is the simpler, audited code path.
+        if current_platform.device_type == "txda":
+            return self.forward_native(positions, query, key)
+
         cos_sin_cache = self.cos_sin_cache.to(positions.device)
         # Follow upstream's compile-safe buffer handling, retaining FL's
         # device-only conversion and the existing cache dtype.
