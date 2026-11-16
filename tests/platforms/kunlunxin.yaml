@@ -77,6 +77,10 @@ env_defaults:
   CUDA_VISIBLE_DEVICES: "0,1,2,3"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "1800"
+  # Eager decoding of the 512-token Gate request can exceed the common 300s
+  # client budget on P800. Keep the request unchanged and allow a quality
+  # result to return instead of turning platform latency into a client error.
+  FL_ADAPTATION_GATE_REQUEST_TIMEOUT: "1800"
 
 p800:
   name: "p800"
@@ -89,7 +93,7 @@ p800:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
-        serving:
+        adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
@@ -102,7 +106,7 @@ p800:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
-        serving:
+        adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
@@ -115,7 +119,7 @@ p800:
     timeouts:
       e2e:
         inference: 180
-        serving: 180
+        adaptation_gate: 180
         concurrent: 180
     functional:
       include: "*"
