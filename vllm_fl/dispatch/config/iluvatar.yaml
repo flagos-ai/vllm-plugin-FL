@@ -28,7 +28,11 @@ strict: false
 #   - vendor      : Any available vendor backend (auto-detected)
 #   - vendor:iluvatar : Iluvatar-specific vendor backend
 op_backends:
-  # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
+  # The pinned generic provider attempts a cooperative TLE barrier unsupported
+  # by CoreX. This adapter uses the same provider's four-stage FlagGems kernel.
+  moe_align_block_size:
+    - vendor:iluvatar
+  # Other operators: prioritize FlagGems, fallback to vendor, then reference
   attention_backend:
     - flagos
     - vendor:iluvatar
@@ -49,7 +53,18 @@ op_backends:
 # FlagOS operator blacklist
 # Iluvatar is CUDA-compatible, so most FlagGems ops should work
 # Blacklist only ops that are known to have issues
-flagos_blacklist: []
+flagos_blacklist:
+  - zeros
+  - zero_
+  - linear
+  - native_layer_norm
+  - addmm
+  - mm
+  - slice
+  - mm_out
+  # Native SDPA redispatches through the inner flash entry: exclude both.
+  - _scaled_dot_product_flash_attention
+  - _flash_attention_forward
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

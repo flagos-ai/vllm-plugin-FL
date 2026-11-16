@@ -32,6 +32,8 @@ def _weak_ref_tensor(tensor: torch.Tensor) -> torch.Tensor:
 def _register_weak_ref_cuda_kernel() -> None:
     global _weak_ref_library
 
+    if _weak_ref_library is not None:
+        return
     # A native ROCm build provides this CUDA-key kernel in _C_stable_libtorch.
     # The EMPTY wheel only has a throwing Composite fallback.
     if torch._C._dispatch_has_kernel_for_dispatch_key("_C::weak_ref_tensor", "CUDA"):

@@ -386,7 +386,7 @@ class PolicyManager:
         Environment variables:
         - VLLM_FL_CONFIG: Path to YAML configuration file (complete override)
         - VLLM_FL_PREFER: Preference (flagos, vendor, reference)
-        - VLLM_FL_STRICT: Strict mode: 1 = fail immediately on error (no fallback), 0 = try fallback (default)
+        - VLLM_FL_STRICT: Strict mode: 1 = fail on error, 0 = try fallback; unset uses the platform policy
         - VLLM_FL_DENY_VENDORS: Comma-separated list of denied vendors
         - VLLM_FL_ALLOW_VENDORS: Comma-separated list of allowed vendors
         - VLLM_FL_PER_OP: Per-op order (format: op1=a|b|c;op2=x|y)
@@ -409,7 +409,7 @@ class PolicyManager:
         # Priority 2: Environment variables override platform config
         # Get values from environment variables
         env_prefer_str = os.environ.get("VLLM_FL_PREFER", "").strip().lower()
-        env_strict_str = os.environ.get("VLLM_FL_STRICT", "0").strip()
+        env_strict_str = os.environ.get("VLLM_FL_STRICT", "").strip()
         env_deny_str = os.environ.get("VLLM_FL_DENY_VENDORS", "").strip()
         env_allow_str = os.environ.get("VLLM_FL_ALLOW_VENDORS", "").strip()
         env_per_op_str = os.environ.get("VLLM_FL_PER_OP", "").strip()

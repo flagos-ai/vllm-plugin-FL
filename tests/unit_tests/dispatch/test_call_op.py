@@ -11,6 +11,7 @@ works correctly from call_op -> manager -> registry -> implementation.
 import importlib
 import os
 import weakref
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -82,6 +83,60 @@ class TestCallOp:
 
         with pytest.raises(RuntimeError, match="No available implementation"):
             call_op("nonexistent_op", 1)
+
+    @pytest.mark.parametrize("op_name", ["rms_norm", "rotary_embedding"])
+    @pytest.mark.parametrize("cached", [False, True])
+    def test_amd_default_policy_propagates_in_place_failure(
+        self, monkeypatch, op_name, cached
+    ):
+        from vllm_fl.dispatch import config, get_policy
+
+        monkeypatch.delenv("VLLM_FL_CONFIG", raising=False)
+        monkeypatch.delenv("VLLM_FL_STRICT", raising=False)
+        monkeypatch.setattr(
+            config,
+            "get_config_path",
+            lambda: Path(config.__file__).with_name("amd.yaml"),
+        )
+        manager = get_default_manager()
+        manager._state.initialized = True
+        manager._state.init_pid = os.getpid()
+        failure = RuntimeError("failure after writing the input")
+
+        def primary(value):
+            value.add_(1)
+            raise failure
+
+        def fallback(value):
+            value.add_(1)
+            return value
+
+        manager.registry.register_impl(
+            OpImpl(
+                op_name=op_name,
+                impl_id="default.amd-test",
+                kind=BackendImplKind.DEFAULT,
+                fn=primary,
+            )
+        )
+        manager.registry.register_impl(
+            OpImpl(
+                op_name=op_name,
+                impl_id="reference.amd-test",
+                kind=BackendImplKind.REFERENCE,
+                fn=fallback,
+            )
+        )
+        value = torch.zeros(1)
+        with pytest.raises(RuntimeError) as error:
+            if cached:
+                CachedOp(op_name)(value)
+            else:
+                call_op(op_name, value)
+
+        assert error.value is failure
+        assert get_policy().strict
+        torch.testing.assert_close(value, torch.ones_like(value))
 
     def test_cached_op_resolves_before_fullgraph_dynamo_trace(self):
         manager = get_default_manager()

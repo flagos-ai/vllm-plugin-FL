@@ -165,6 +165,7 @@ def _safe_device_type(device_info, vendor: str) -> str:
         logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
         return ""
 
+
 dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
@@ -431,7 +432,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -557,7 +566,11 @@ class PlatformFL(Platform):
                 # Revalidate after changing MLA/KV-head semantics so DCP and TP
                 # constraints are checked against the dense architecture.
                 model_config.verify_with_parallel_config(parallel_config)
-        parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+        parallel_config.worker_cls = (
+            "vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker.IluvatarWorkerFL"
+            if cls.vendor_name == "iluvatar"
+            else "vllm_fl.worker.worker.WorkerFL"
+        )
 
         scheduler_config = vllm_config.scheduler_config
         if (
@@ -648,14 +661,11 @@ class PlatformFL(Platform):
                 )
 
         if getattr(cls, "vendor_name", None) == "iluvatar":
-            compilation_config.cudagraph_mm_encoder = False
-            compilation_config.use_inductor_graph_partition = True
-            _pc = getattr(compilation_config, "pass_config", None)
-            if _pc is not None:
-                _pc.fuse_rope_kvcache_cat_mla = False
-            os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
-            # Iluvatar lacks is_cuda_alike(): the vLLM UVA helper is
-            # unavailable while Model Runner V2 needs UvaBuffer. Use V1.
+            from vllm_fl.dispatch.backends.vendor.iluvatar.compilation import (
+                configure_compilation,
+            )
+
+            configure_compilation(compilation_config, model_config)
 
         if cls.device_type == "npu":
             _configure_ascend_compilation(vllm_config)
@@ -796,6 +806,8 @@ class PlatformFL(Platform):
 
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
+        if cls.vendor_name == "amd" and use_sparse:
+            raise NotImplementedError("Sparse MLA is unsupported by the AMD backend")
 
         backend_path = call_op(
             "attention_backend", use_mla=use_mla, use_sparse=use_sparse
@@ -924,6 +936,11 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
+            if cls.device_type == "cuda" and cls.vendor_name == "iluvatar":
+                return (
+                    "vllm_fl.dispatch.backends.vendor.iluvatar.communicator."
+                    "IluvatarCommunicatorFL"
+                )
             if cls.vendor_name == "amd":
                 return "vllm_fl.distributed.cuda_flagcx_communicator.CudaFlagcxCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
@@ -1046,6 +1063,11 @@ class PlatformFL(Platform):
             )
 
             patch_triton_chained_or_for_iluvatar()
+            from vllm_fl.dispatch.backends.vendor.iluvatar.moe_router import (
+                patch_moe_router,
+            )
+
+            patch_moe_router()
 
         if cls.vendor_name == "amd":
             cls._disable_rocm_native_kernels()

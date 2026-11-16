@@ -5,6 +5,7 @@
 import ast
 import importlib.util
 import sys
+import weakref
 from pathlib import Path
 from types import ModuleType
 
@@ -34,6 +35,47 @@ def test_amd_rejects_sparse_mla_before_selecting_a_dense_backend(monkeypatch):
 
     with pytest.raises(NotImplementedError, match="Sparse MLA"):
         backend().attention_backend(use_mla=True, use_sparse=True)
+
+
+@pytest.mark.parametrize("has_native_kernel", [False, True])
+def test_weak_ref_registration_keeps_one_library(monkeypatch, has_native_kernel):
+    import logging
+
+    vllm_logger = ModuleType("vllm.logger")
+    vllm_logger.init_logger = logging.getLogger
+    monkeypatch.setitem(sys.modules, vllm_logger.__name__, vllm_logger)
+    spec = importlib.util.spec_from_file_location(
+        "_amd_weak_ref_test",
+        ROOT / "vllm_fl/dispatch/backends/vendor/amd/v2_runner_compat.py",
+    )
+    compat = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(compat)
+    registrations = []
+
+    class Library:
+        def __init__(self, namespace, kind, key):
+            assert (namespace, kind, key) == ("_C", "IMPL", "CUDA")
+            registrations.append(weakref.ref(self))
+
+        def impl(self, op_name, kernel):
+            assert op_name == "weak_ref_tensor"
+            assert kernel is compat._weak_ref_tensor
+
+    def has_kernel(op_name, key):
+        assert (op_name, key) == ("_C::weak_ref_tensor", "CUDA")
+        return has_native_kernel
+
+    monkeypatch.setattr(torch.library, "Library", Library)
+    monkeypatch.setattr(torch._C, "_dispatch_has_kernel_for_dispatch_key", has_kernel)
+
+    compat._register_weak_ref_cuda_kernel()
+    compat._register_weak_ref_cuda_kernel()
+
+    if has_native_kernel:
+        assert not registrations
+    else:
+        (library,) = registrations
+        assert library() is not None
 
 
 @pytest.mark.parametrize(
