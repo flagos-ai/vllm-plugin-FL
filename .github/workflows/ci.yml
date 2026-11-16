@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# PR CI Workflow
+# Pull request CI workflow
 #
 # Stage design (PR labels narrow the hardware stages; default is full):
 #   lint + build  — always run, no hardware required
