@@ -1,0 +1,24 @@
+{
+  "environment": {
+    "GEMS_VENDOR": "metax",
+    "VLLM_PLUGINS": "fl",
+    "MACA_VISIBLE_DEVICES": "4,5,6,7",
+    "FLAGGEMS_CACHE_DIR": "/root/.flaggems",
+    "VLLM_USE_V2_MODEL_RUNNER": null,
+    "VLLM_FL_FLAGOS_WHITELIST": null,
+    "FLAGCX_PATH": "/opt/FlagCX"
+  },
+  "launch": "vllm serve models/Qwen3.6-35B-A3B --served-model-name Qwen3.6-35B-A3B --host 127.0.0.1 --port 18973 --tensor-parallel-size 4 --max-model-len 32768 --allowed-local-media-path tools/adaptation-gate-cases/images --trust-remote-code --enforce-eager",
+  "runner": [
+    "MetaX V2 model runner: vllm.v1.worker.gpu.model_runner.GPUModelRunner"
+  ],
+  "staging_buffer": [
+    "MetaX V2 uses upstream NonUvaBuffer: no native mapped CPU-view kernel."
+  ],
+  "provider": [
+    "MetaX moe topk compat applied: vllm._custom_ops.topk_softmax/topk_sigmoid rebound to FlagGems-vllm public operators"
+  ],
+  "native_flagcx_worker_count": 4,
+  "graph_capture_completed": false,
+  "piecewise_replay_metrics": []
+}

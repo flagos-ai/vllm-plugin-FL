@@ -1,0 +1,62 @@
+{
+  "plugin_commit": "d35fe0f55e9918a28fbc61ca3f244053ad595d97",
+  "image_digest": "734c6f7d620e2ca3be4fa382a9e2cd6e1d345a310e2e502f11317b5521b886ae",
+  "flagcx_version": "0.13.0",
+  "flagcx_native_library_sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad",
+  "packages_and_paths": {
+    "flaggems": [
+      "5.5.0.dev0",
+      "/flagos/lib/python3.12/site-packages/flag_gems/__init__.py"
+    ],
+    "flaggems_vllm": [
+      "0.3.0.dev1",
+      "/flagos/lib/python3.12/site-packages/flaggems_vllm/__init__.py"
+    ],
+    "triton": [
+      "3.6.0",
+      "/opt/flagtree/triton/__init__.py"
+    ]
+  },
+  "exit": 0,
+  "focused_linux_tests": {
+    "passed": 43,
+    "skipped_requires_rocm": 8
+  },
+  "groups": {
+    "Qwen3.6-27B-eager": {
+      "passed": 26,
+      "total": 26,
+      "failures": [],
+      "native_flagcx_worker_count": 4,
+      "graph_capture_completed": false,
+      "piecewise_replay_count_sum": 0
+    },
+    "Qwen3.6-27B-graph": {
+      "passed": 26,
+      "total": 26,
+      "failures": [],
+      "native_flagcx_worker_count": 4,
+      "graph_capture_completed": true,
+      "piecewise_replay_count_sum": 344
+    },
+    "Qwen3.6-35B-A3B-eager": {
+      "passed": 26,
+      "total": 26,
+      "failures": [],
+      "native_flagcx_worker_count": 4,
+      "graph_capture_completed": false,
+      "piecewise_replay_count_sum": 0
+    },
+    "Qwen3.6-35B-A3B-graph": {
+      "passed": 26,
+      "total": 26,
+      "failures": [],
+      "native_flagcx_worker_count": 4,
+      "graph_capture_completed": true,
+      "piecewise_replay_count_sum": 278
+    }
+  },
+  "provider_commit": "e00557103e284db5b57168386db60faa051989ef",
+  "passed": 104,
+  "total": 104
+}

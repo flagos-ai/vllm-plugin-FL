@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "text_single",
+    "model_path": "models/Qwen3.6-35B-A3B",
+    "served_model_name": "Qwen3.6-35B-A3B",
+    "port": "18974",
+    "concurrency": 1
+  },
+  "started_at": "2026-11-16T08:43:52.731739+00:00",
+  "finished_at": "2026-11-16T08:44:04.857657+00:00",
+  "input": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Introduce large language models (LLMs) in detail. Explain what they are, how training and inference work, typical capabilities, limitations, and responsible use. Write a coherent response of at least 256 characters. Do not repeat words or phrases unnecessarily."
+        }
+      ],
+      "required_terms": [
+        "large language model",
+        "training",
+        "inference",
+        "limitations"
+      ],
+      "min_length": 256,
+      "max_tokens": 512
+    }
+  ],
+  "output": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "latency_seconds": 12.104,
+      "text": "Large language models (LLMs) are advanced artificial intelligence systems designed to understand, generate, and manipulate human language with remarkable fluency. These models are built upon deep learning architectures, primarily the transformer framework, which utilizes self-attention mechanisms to process sequential data efficiently. Training involves exposing the model to vast datasets comprising text from the internet, books, and code. During pre-training, the system learns statistical patterns and linguistic structures by predicting the next token in a sequence. Subsequent fine-tuning phases, often incorporating human feedback, align the model\u2019s outputs with specific tasks and ethical guidelines. Inference, the process of generating responses, relies on these learned patterns to produce coherent text based on user prompts. LLMs demonstrate impressive capabilities, including natural language translation, code generation, summarization, and creative writing. However, they are not without limitations. They may hallucinate facts, exhibit biases present in training data, and lack true understanding or consciousness. Responsible use requires careful oversight, ensuring transparency about the model\u2019s origins and limitations. Developers and users must prioritize safety, privacy, and fairness to mitigate potential harms. As this technology evolves, ongoing research aims to enhance reliability, reduce bias, and improve interpretability, fostering trust and beneficial integration into society.",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-35B-A3B",
+        "system_fingerprint": "vllm-0.32.0-tp4-c81900f0",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "message": {
+              "content": "Large language models (LLMs) are advanced artificial intelligence systems designed to understand, generate, and manipulate human language with remarkable fluency. These models are built upon deep learning architectures, primarily the transformer framework, which utilizes self-attention mechanisms to process sequential data efficiently. Training involves exposing the model to vast datasets comprising text from the internet, books, and code. During pre-training, the system learns statistical patterns and linguistic structures by predicting the next token in a sequence. Subsequent fine-tuning phases, often incorporating human feedback, align the model\u2019s outputs with specific tasks and ethical guidelines. Inference, the process of generating responses, relies on these learned patterns to produce coherent text based on user prompts. LLMs demonstrate impressive capabilities, including natural language translation, code generation, summarization, and creative writing. However, they are not without limitations. They may hallucinate facts, exhibit biases present in training data, and lack true understanding or consciousness. Responsible use requires careful oversight, ensuring transparency about the model\u2019s origins and limitations. Developers and users must prioritize safety, privacy, and fairness to mitigate potential harms. As this technology evolves, ongoing research aims to enhance reliability, reduce bias, and improve interpretability, fostering trust and beneficial integration into society.",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            }
+          }
+        ],
+        "usage": {
+          "completion_tokens": 251,
+          "prompt_tokens": 65,
+          "total_tokens": 316,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "passed": true
+  }
+}

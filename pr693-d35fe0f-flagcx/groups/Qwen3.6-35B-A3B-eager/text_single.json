@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "text_single",
+    "model_path": "models/Qwen3.6-35B-A3B",
+    "served_model_name": "Qwen3.6-35B-A3B",
+    "port": "18973",
+    "concurrency": 1
+  },
+  "started_at": "2026-11-16T08:19:47.912689+00:00",
+  "finished_at": "2026-11-16T08:21:49.205471+00:00",
+  "input": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Introduce large language models (LLMs) in detail. Explain what they are, how training and inference work, typical capabilities, limitations, and responsible use. Write a coherent response of at least 256 characters. Do not repeat words or phrases unnecessarily."
+        }
+      ],
+      "required_terms": [
+        "large language model",
+        "training",
+        "inference",
+        "limitations"
+      ],
+      "min_length": 256,
+      "max_tokens": 512
+    }
+  ],
+  "output": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "latency_seconds": 121.234,
+      "text": "Large language models (LLMs) are advanced artificial intelligence systems designed to understand, generate, and manipulate human language with remarkable fluency. These models are built upon deep learning architectures, primarily the transformer framework, which utilizes self-attention mechanisms to process sequential data efficiently. Training involves exposing the model to vast corpora of text from the internet, books, and code, allowing it to learn complex patterns, grammar, and factual knowledge through next-token prediction. During inference, the model generates responses by calculating probabilities for subsequent words based on the provided prompt, creating coherent and contextually relevant outputs. Typical capabilities include answering questions, writing creative content, translating languages, summarizing documents, and performing logical reasoning tasks. However, LLMs face significant limitations, such as hallucinations where they generate plausible but false information, biases inherited from training data, and a lack of true understanding or consciousness. They also struggle with real-time information access unless connected to external tools. Responsible use requires careful oversight, including human-in-the-loop validation, bias mitigation strategies, and transparent disclosure of AI involvement to ensure ethical deployment and maintain user trust.",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-35B-A3B",
+        "system_fingerprint": "vllm-0.32.0-tp4-97ce5477",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "message": {
+              "content": "Large language models (LLMs) are advanced artificial intelligence systems designed to understand, generate, and manipulate human language with remarkable fluency. These models are built upon deep learning architectures, primarily the transformer framework, which utilizes self-attention mechanisms to process sequential data efficiently. Training involves exposing the model to vast corpora of text from the internet, books, and code, allowing it to learn complex patterns, grammar, and factual knowledge through next-token prediction. During inference, the model generates responses by calculating probabilities for subsequent words based on the provided prompt, creating coherent and contextually relevant outputs. Typical capabilities include answering questions, writing creative content, translating languages, summarizing documents, and performing logical reasoning tasks. However, LLMs face significant limitations, such as hallucinations where they generate plausible but false information, biases inherited from training data, and a lack of true understanding or consciousness. They also struggle with real-time information access unless connected to external tools. Responsible use requires careful oversight, including human-in-the-loop validation, bias mitigation strategies, and transparent disclosure of AI involvement to ensure ethical deployment and maintain user trust.",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            }
+          }
+        ],
+        "usage": {
+          "completion_tokens": 223,
+          "prompt_tokens": 65,
+          "total_tokens": 288,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "passed": true
+  }
+}
