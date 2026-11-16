@@ -56,6 +56,7 @@ DEFAULT_TIMEOUT: dict[str, int] = {
     "inference": 60,
     "serving": 60,
     "concurrent": 60,
+    "adaptation_gate": 180,
 }
 
 
@@ -103,7 +104,7 @@ def build_e2e_matrix(
     ci_stage: str = "nightly",
     device_configs: dict[str, dict] | None = None,
 ) -> list[dict]:
-    """End-to-end model tests (inference, serving, concurrent).
+    """End-to-end model tests (inference, serving, concurrent, adaptation Gate).
 
     These are slow and require model files.  Entries are grouped by
     ``(task, device)`` so that all model/case combos for the same task
@@ -249,6 +250,7 @@ _FULL_RUN_PREFIXES: list[str] = [
     "tests/run.py",
     "tests/platforms/",
     "tests/conftest.py",
+    "tools/adaptation-gate-cases/",
     ".github/",
 ]
 

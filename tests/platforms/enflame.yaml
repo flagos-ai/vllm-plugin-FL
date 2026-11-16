@@ -52,20 +52,12 @@ s60:
   tests:
     e2e:
       pr:
-        inference:
-          qwen3_6:
-            - 27b_tp2_eager
-            - 35b_a3b_tp2_eager
-        serving:
+        adaptation_gate:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
       nightly:
-        inference:
-          qwen3_6:
-            - 27b_tp2_eager
-            - 35b_a3b_tp2_eager
-        serving:
+        adaptation_gate:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
@@ -75,8 +67,7 @@ s60:
             - 35b_a3b_tp2_eager
     timeouts:
       e2e:
-        inference: 90
-        serving: 120
+        adaptation_gate: 180
         concurrent: 120
     functional:
       include: "*"
