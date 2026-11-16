@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # Adapted from vLLM v0.32.0 for FL operator dispatch.
-"""Inference-only Qwen4Exp model."""
+"""Qwen4Exp constructors for FL layers and quantization.
 
-from collections.abc import Iterable
-from itertools import islice
+The upstream models own forward, weight loading and model interfaces.
+Initialize the FL layers directly because upstream constructors bind their
+own HC, PLE and attention classes.
+"""
 
 import torch
 from torch import nn
 from transformers import Qwen4ExpConfig, Qwen4ExpTextConfig
 
-from vllm import envs
 from vllm.config import VllmConfig
 from vllm.distributed import get_pp_group
-from vllm.forward_context import get_forward_context, is_forward_context_available
 from vllm.model_executor.layers.fused_moe.utils import (
     is_model_fused_shared_expert_compatible,
 )
@@ -22,190 +22,53 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
     QwenGatedDeltaNetAttention,
 )
-from vllm.model_executor.layers.mamba.mamba_utils import (
-    MambaStateCopyFunc,
-    MambaStateCopyFuncCalculator,
-    MambaStateCopyFuncsByType,
-    MambaStateDtypeCalculator,
-    MambaStateShapeCalculator,
-)
-from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead,
     VocabParallelEmbedding,
 )
-from vllm.model_executor.models.interfaces import (
-    HasInnerState,
-    IsHybrid,
-    MixtureOfExperts,
-    MultiModalEmbeddings,
-    SupportsHCSP,
-    SupportsLoRA,
-    SupportsMRoPE,
-    SupportsPP,
-    _require_is_multimodal,
-)
-from vllm.model_executor.models.qwen3_5 import (
-    Qwen3_5ForConditionalGeneration,
-    Qwen3_5Model,
-)
 from vllm.model_executor.models.qwen3_next import (
     Qwen3NextAttention,
-    Qwen3NextSparseMoeBlock,
 )
 from vllm.model_executor.models.qwen3_vl import (
     Qwen3_VisionTransformer,
-    Qwen3VLDummyInputsBuilder,
-    Qwen3VLMultiModalProcessor,
-    Qwen3VLProcessingInfo,
 )
 from vllm.model_executor.models.utils import (
-    AutoWeightsLoader,
     StageMissingLayer,
-    WeightsMapper,
-    _merge_multimodal_embeddings,
     extract_layer_index,
     make_empty_intermediate_tensors_factory,
     make_layers,
-    maybe_fuse_shared_experts,
     maybe_prefix,
 )
-from vllm.models.common.ops.sequence_parallel import (
-    sp_all_gather,
-    sp_padding_mask,
-    sp_reduce_scatter,
-    sp_shard,
+from vllm.models.qwen4_exp.nvidia import model as upstream
+from vllm.models.qwen4_exp.nvidia.low_latency_gemm import (
+    enable_qwen4_exp_low_latency_gemm,
 )
-from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.inputs import MultiModalFeatureSpec
-from vllm.sequence import IntermediateTensors
+from vllm.models.qwen4_exp.nvidia.model import (
+    _QSA_LAYER_TYPES,
+    Qwen4ExpMixtureOfExperts,
+    Qwen4ExpSparseMoeBlock,
+    is_hc_sequence_parallel_enabled,
+)
+from vllm.models.qwen4_exp.nvidia.ops.cute_dsl.hc_down_silu import (
+    request_hc_down_silu_warmup,
+)
+from vllm.models.qwen4_exp.nvidia.qsa import Qwen4ExpQSAAttention
+from vllm.platforms import current_platform
 from vllm.tokenizers.registry import cached_tokenizer_from_config
-from vllm.v1.attention.backends.registry import MambaAttentionBackendEnum
-from vllm.v1.kv_cache_interface import MambaSpec
 
 from .hyperconnection import GatedResidual, HyperConnectionConfig
-from vllm.models.qwen4_exp.nvidia.low_latency_gemm import enable_qwen4_exp_low_latency_gemm
-from vllm.models.qwen4_exp.nvidia.ops.cute_dsl.hc_down_silu import request_hc_down_silu_warmup
 from .ple_layer import Qwen4ExpPLELayer
 from .quantization import configure_bf16_weights
-from vllm.models.qwen4_exp.nvidia.model import Qwen4ExpQSAAttention
-from vllm.platforms import current_platform
-
-# Transformers v5.18 renamed `qwen_sparse_attention` to `indexed_attention`
-# TODO: Delete qwen_... once Transformers 5.18.0 is the minimum required version.
-_QSA_LAYER_TYPES = ("qwen_sparse_attention", "indexed_attention")
 
 
-def is_hc_sequence_parallel_enabled(vllm_config: VllmConfig) -> bool:
-    """Enable GR/PLE SP explicitly or automatically with sequence-parallel MoE."""
-    parallel_config = vllm_config.parallel_config
-    return parallel_config.tensor_parallel_size > 1 and (
-        parallel_config.enable_hc_sp or parallel_config.use_sequence_parallel_moe
-    )
-
-
-def without_modelopt_fp4(
-    quant_config: QuantizationConfig | None,
-) -> QuantizationConfig | None:
-    """Return ``None`` for weights excluded from Qwen4Exp ModelOpt-FP4."""
-    if quant_config is not None and quant_config.get_name() == "modelopt_fp4":
-        return None
-    return quant_config
-
-
-def _remap_qsa_cache_scale_name(
-    name: str,
-    qsa_layer_ids: frozenset[int],
-) -> str:
-    """Map serialized main-cache scales onto the merged QSA owner.
-
-    Regular attention keeps cache scales below its ``attn`` child. QSA owns
-    that cache directly, so only QSA layers need the final path component
-    moved to the owner's persistent ``_k_scale``/``_v_scale`` buffers.
-    """
-    scale_suffixes = {
-        "k_proj.k_scale": "_k_scale",
-        "k_proj.output_scale": "_k_scale",
-        "attn.k_scale": "_k_scale",
-        "attn._k_scale": "_k_scale",
-        "k_scale": "_k_scale",
-        "_k_scale": "_k_scale",
-        "v_proj.v_scale": "_v_scale",
-        "v_proj.output_scale": "_v_scale",
-        "attn.v_scale": "_v_scale",
-        "attn._v_scale": "_v_scale",
-        "v_scale": "_v_scale",
-        "_v_scale": "_v_scale",
-    }
-    for layer_id in qsa_layer_ids:
-        marker = f"layers.{layer_id}.self_attn."
-        marker_start = name.find(marker)
-        if marker_start < 0 or (marker_start > 0 and name[marker_start - 1] != "."):
-            continue
-        suffix = name[marker_start + len(marker) :]
-        mapped_suffix = scale_suffixes.get(suffix)
-        if mapped_suffix is not None:
-            return f"{name[: marker_start + len(marker)]}{mapped_suffix}"
-    return name
-
-
-_QWEN4_EXP_IGNORED_MISSING_SUFFIXES = [
-    ".bias",
-    "_bias",
-    ".k_scale",
-    "_k_scale",
-    ".v_scale",
-    "_v_scale",
-    "_weight_scale",
-    "_input_scale",
-]
-
-# The checkpoint stores these projections separately; runtime packs each group
-# into adjacent logical shards of a MergedColumnParallelLinear.
-_EXTRA_WEIGHTS_MAPPER = WeightsMapper(
-    orig_to_new_stacked={
-        "hyper_connection.input_mix_weight_down.weight": (
-            "hyper_connection.input_mix_weight_down_block_inject.weight",
-            0,
-        ),
-        "hyper_connection.block_inject_weight.weight": (
-            "hyper_connection.input_mix_weight_down_block_inject.weight",
-            1,
-        ),
-        "ple.key_proj": ("ple.kv_proj", 0),
-        "ple.value_proj": ("ple.kv_proj", 1),
-    }
-)
-
-
-class Qwen4ExpSparseMoeBlock(Qwen3NextSparseMoeBlock):
-    """Qwen3Next MoE with Qwen4Exp HC validation."""
-
-    def __init__(
-        self,
-        vllm_config: VllmConfig,
-        prefix: str = "",
-        reduce_results: bool = True,
-    ) -> None:
-        super().__init__(
-            vllm_config=vllm_config, prefix=prefix, reduce_results=reduce_results
-        )
-        if self.replicate_shared_expert and not self.is_sequence_parallel:
-            # Reduce routed outputs before adding replicated shared outputs.
-            # SP then slices the result to avoid summing shared outputs again via RS.
-            self.experts.moe_config.skip_final_all_reduce = False
-        config = vllm_config.model_config.hf_text_config
-        self.n_shared_experts = int(config.shared_expert_intermediate_size > 0)
-
-
-class Qwen4ExpDecoderLayer(nn.Module):
+class Qwen4ExpDecoderLayer(upstream.Qwen4ExpDecoderLayer):
     def __init__(
         self,
         vllm_config: VllmConfig,
         layer_type: str,
         prefix: str = "",
     ) -> None:
-        super().__init__()
+        nn.Module.__init__(self)
         config: Qwen4ExpTextConfig = vllm_config.model_config.hf_text_config
         quant_config = vllm_config.quant_config
 
@@ -293,137 +156,10 @@ class Qwen4ExpDecoderLayer(nn.Module):
             prefix=maybe_prefix(prefix, "mlp_hyper_connection"),
         )
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        prev_block_output: torch.Tensor | None,
-        prev_injection: torch.Tensor | None,
-        positions: torch.Tensor,
-        *,
-        input_ids: torch.Tensor | None,
-        query_start_loc: torch.Tensor | None,
-        ngram_context: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if prev_block_output is None:
-            assert prev_injection is None
-        attn_hc = self.attn_hyper_connection
-        if self.ple is not None:
-            # PLE adds directly to the multi-stream state, so pending HC state
-            # must be materialized before the addition.
-            if prev_block_output is not None:
-                hidden_states = attn_hc.combine(
-                    hidden_states, prev_block_output, prev_injection
-                )
-                prev_block_output = prev_injection = None
 
-            if input_ids is None or query_start_loc is None or ngram_context is None:
-                raise RuntimeError("PLE inputs were not prepared")
-            hidden_states = self.ple(
-                hidden_states,
-                input_ids,
-                query_start_loc,
-                ngram_context,
-            )
-
-        # Fuse a pending combine with this HC module's mix when possible.
-        if prev_block_output is not None:
-            hidden_states, block_input, injection = attn_hc.combine_and_mix(
-                hidden_states, prev_block_output, prev_injection
-            )
-        else:
-            hidden_states, block_input, injection = attn_hc.mix(hidden_states)
-
-        if self.use_hc_sequence_parallel:
-            # Positions retain the full token axis for both text and MRoPE inputs.
-            block_input = sp_all_gather(block_input)[: positions.shape[-1]]
-        if self.layer_type == "linear_attention":
-            attn_out = self.linear_attn(hidden_states=block_input)
-        elif self.layer_type in _QSA_LAYER_TYPES:
-            attn_out = self.self_attn(
-                hidden_states=block_input,
-                positions=positions,
-            )
-        else:
-            raise ValueError("Invalid layer_type")
-
-        mlp_hc = self.mlp_hyper_connection
-        if self.use_hc_sequence_parallel:
-            attn_out = sp_reduce_scatter(attn_out)
-        hidden_states, block_input, injection = mlp_hc.combine_and_mix(
-            hidden_states, attn_out, injection
-        )
-        if self.use_sequence_parallel:
-            # MoE consumes local tokens and returns complete local outputs.
-            mlp_out = self.mlp(block_input, already_sequence_parallel=True)
-        else:
-            if self.use_hc_sequence_parallel:
-                block_input = sp_all_gather(block_input)[: positions.shape[-1]]
-            mlp_out = self.mlp(block_input)
-            if self.use_hc_sequence_parallel:
-                assert isinstance(self.mlp, Qwen4ExpSparseMoeBlock)
-                reduce_output = self.mlp.experts.moe_config.skip_final_all_reduce
-                # Only sum partial outputs. Reduced outputs already include all ranks.
-                mlp_out = (
-                    sp_reduce_scatter(mlp_out) if reduce_output else sp_shard(mlp_out)
-                )
-        return hidden_states, mlp_out, injection
-
-
-class Qwen4ExpMixtureOfExperts(MixtureOfExperts):
-    """Expose Qwen4Exp routed experts through vLLM's EPLB protocol."""
-
-    def set_moe_parameters(self, layers: Iterable[nn.Module]) -> None:
-        self.moe_layers = []
-        self.moe_mlp_layers = []
-        example_moe = None
-        for layer in layers:
-            if isinstance(layer, Qwen4ExpDecoderLayer) and isinstance(
-                layer.mlp, Qwen4ExpSparseMoeBlock
-            ):
-                example_moe = layer.mlp
-                self.moe_mlp_layers.append(layer.mlp)
-                self.moe_layers.append(layer.mlp.experts)
-
-        self.num_moe_layers = len(self.moe_layers)
-        if example_moe is None:
-            self.num_expert_groups = 0
-            self.num_shared_experts = 0
-            self.num_logical_experts = 0
-            self.num_physical_experts = 0
-            self.num_local_physical_experts = 0
-            self.num_routed_experts = 0
-            self.num_redundant_experts = 0
-            return
-
-        self.num_expert_groups = 1
-        self.num_shared_experts = example_moe.n_shared_experts
-        self.num_logical_experts = example_moe.n_logical_experts
-        self.num_physical_experts = example_moe.n_physical_experts
-        self.num_local_physical_experts = example_moe.n_local_physical_experts
-        self.num_routed_experts = example_moe.n_routed_experts
-        self.num_redundant_experts = example_moe.n_redundant_experts
-
-    def update_physical_experts_metadata(
-        self,
-        num_physical_experts: int,
-        num_local_physical_experts: int,
-    ) -> None:
-        assert self.num_local_physical_experts == num_local_physical_experts
-        self.num_physical_experts = num_physical_experts
-        self.num_local_physical_experts = num_local_physical_experts
-        self.num_redundant_experts = num_physical_experts - self.num_logical_experts
-        for moe in self.moe_mlp_layers:
-            moe.n_physical_experts = num_physical_experts
-            moe.n_local_physical_experts = num_local_physical_experts
-            moe.n_redundant_experts = self.num_redundant_experts
-            moe.experts.update_expert_map()
-
-
-class Qwen4ExpModel(nn.Module):
-    hf_to_vllm_mapper = Qwen3_5Model.hf_to_vllm_mapper | _EXTRA_WEIGHTS_MAPPER
-
+class Qwen4ExpModel(upstream.Qwen4ExpModel):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
-        super().__init__()
+        nn.Module.__init__(self)
         config: Qwen4ExpTextConfig = vllm_config.model_config.hf_text_config
         self.config = config
         self.num_redundant_experts = (
@@ -502,231 +238,10 @@ class Qwen4ExpModel(nn.Module):
         else:
             self._mtp_hidden_buffer = None
 
-    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
-        return self.embed_tokens(input_ids)
 
-    @staticmethod
-    def _start_layer_ple_prefetch(
-        layer: nn.Module,
-        input_ids: torch.Tensor | None,
-        query_start_loc: torch.Tensor | None,
-        ngram_context: torch.Tensor | None,
-    ) -> None:
-        """Start a layer's PLE prefetch when the required inputs exist."""
-        ple: Qwen4ExpPLELayer | None = getattr(layer, "ple", None)
-        if ple is None:
-            return
-        if input_ids is None or query_start_loc is None or ngram_context is None:
-            raise RuntimeError("PLE inputs were not prepared")
-        ple.start_prefetch(input_ids, query_start_loc, ngram_context)
-
-    def forward(
-        self,
-        input_ids: torch.Tensor | None,
-        positions: torch.Tensor,
-        intermediate_tensors: IntermediateTensors | None = None,
-        inputs_embeds: torch.Tensor | None = None,
-        query_start_loc: torch.Tensor | None = None,
-        ngram_context: torch.Tensor | None = None,
-        deepstack_input_embeds: IntermediateTensors | None = None,
-    ) -> torch.Tensor | IntermediateTensors:
-        if get_pp_group().is_first_rank:
-            if inputs_embeds is not None:
-                hidden_states = inputs_embeds
-            else:
-                if input_ids is None:
-                    raise ValueError("input_ids or inputs_embeds is required")
-                hidden_states = self.embed_input_ids(input_ids)
-            if self.use_hc_sequence_parallel:
-                if (
-                    self.use_sequence_parallel
-                    and envs.VLLM_MOE_SKIP_PADDING
-                    and is_forward_context_available()
-                ):
-                    forward_context = get_forward_context()
-                    forward_context.is_padding = sp_padding_mask(
-                        forward_context.is_padding, hidden_states
-                    )
-                hidden_states = sp_shard(hidden_states)
-            # Expand only the local token rows when SP is enabled.
-            hidden_states = hidden_states.repeat(1, self.config.hc_count)
-        else:
-            if intermediate_tensors is None:
-                raise ValueError("pipeline stage requires intermediate tensors")
-            hidden_states = intermediate_tensors["hidden_states"]
-
-        full_num_tokens = positions.shape[-1]
-        block_output = None
-        injection = None
-        last_layer = None
-        if self.start_layer < self.end_layer:
-            self._start_layer_ple_prefetch(
-                self.layers[self.start_layer],
-                input_ids,
-                query_start_loc,
-                ngram_context,
-            )
-        for layer_idx, layer in islice(
-            enumerate(self.layers), self.start_layer, self.end_layer
-        ):
-            last_layer = layer
-            if layer_idx + 1 < self.end_layer:
-                self._start_layer_ple_prefetch(
-                    self.layers[layer_idx + 1],
-                    input_ids,
-                    query_start_loc,
-                    ngram_context,
-                )
-            hidden_states, block_output, injection = layer(
-                hidden_states=hidden_states,
-                prev_block_output=block_output,
-                prev_injection=injection,
-                positions=positions,
-                input_ids=input_ids,
-                query_start_loc=query_start_loc,
-                ngram_context=ngram_context,
-            )
-            if deepstack_input_embeds is not None and layer_idx < len(
-                deepstack_input_embeds
-            ):
-                deepstack_embed = deepstack_input_embeds[
-                    f"deepstack_input_embeds_{layer_idx}"
-                ]
-                if self.use_hc_sequence_parallel:
-                    deepstack_embed = sp_shard(deepstack_embed)
-                deepstack_embed = (
-                    deepstack_embed.unsqueeze(-2)
-                    .expand(
-                        *deepstack_embed.shape[:-1],
-                        self.config.hc_count,
-                        self.config.hidden_size,
-                    )
-                    .flatten(-2)
-                )
-                # Deepstack is an external addition to the materialized
-                # multi-stream state and therefore terminates delayed combine.
-                hidden_states = layer.mlp_hyper_connection.combine(
-                    hidden_states, block_output, injection
-                )
-                block_output = None
-                injection = None
-                hidden_states = hidden_states + deepstack_embed
-
-        if not get_pp_group().is_last_rank:
-            # PP transports one tensor, not the delayed HC tuple. Materialize
-            # with the HC module that produced the pending injection.
-            if last_layer is not None and block_output is not None:
-                hidden_states = last_layer.mlp_hyper_connection.combine(
-                    hidden_states, block_output, injection
-                )
-            return IntermediateTensors({"hidden_states": hidden_states})
-
-        # The final mixer consumes the last pending combine and returns both
-        # the sampled single stream and the materialized multi-stream state.
-        final_mixer = self.hyper_connection_mixer
-        assert final_mixer is not None
-        multi_hidden, sample_hidden_states, _ = final_mixer.combine_and_mix(
-            hidden_states, block_output, injection
-        )
-        if self.use_hc_sequence_parallel:
-            if self._mtp_hidden_buffer is not None:
-                # Gather LM-head and MTP states together when both are needed.
-                hidden_size = self.config.hidden_size
-                packed_hidden_states = torch.cat(
-                    [sample_hidden_states, multi_hidden], dim=-1
-                )
-                packed_hidden_states = sp_all_gather(packed_hidden_states)[
-                    :full_num_tokens
-                ]
-                sample_hidden_states, multi_hidden = packed_hidden_states.split(
-                    [hidden_size, self.config.hc_count * hidden_size], dim=-1
-                )
-                sample_hidden_states = sample_hidden_states.contiguous()
-            else:
-                sample_hidden_states = sp_all_gather(sample_hidden_states)[
-                    :full_num_tokens
-                ]
-        if self._mtp_hidden_buffer is not None:
-            # Capture the pre-final-mixer multi-stream hidden state
-            # [T, hc_count*H] for the MTP drafter (zero extra compute:
-            # this tensor is needed by the final mixer regardless).
-            num_tokens = multi_hidden.shape[0]
-            self._mtp_hidden_buffer[:num_tokens].copy_(multi_hidden)
-        return sample_hidden_states
-
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        weights = (
-            (
-                _remap_qsa_cache_scale_name(name, self._qsa_layer_ids),
-                weight,
-            )
-            for name, weight in weights
-        )
-        weights = maybe_fuse_shared_experts(
-            weights,
-            enabled=self.is_fused_shared_expert_enabled,
-            n_routed_experts=getattr(self.config, "num_experts", 0) or 0,
-            n_shared_experts=1,
-            ckpt_prefix="mlp.shared_expert",
-        )
-        # Non-persistent PLE state rebuilt in __init__; skip any ckpt
-        # column for them.
-        skip_substrs = (
-            "hashstats_",
-            "token_lookup",
-            "hyper_connection_mixer.block_inject_weight",
-        )
-        mapper = self.hf_to_vllm_mapper | WeightsMapper(
-            orig_to_new_substr={substr: None for substr in skip_substrs}
-        )
-        # The final HC mixer only exists on the last PP rank; earlier ranks
-        # must drop its checkpoint weights instead of failing to place them.
-        ignore_prefixes = (
-            None
-            if self.hyper_connection_mixer is not None
-            else ["hyper_connection_mixer."]
-        )
-        loader = AutoWeightsLoader(
-            self,
-            ignore_unexpected_prefixes=ignore_prefixes,
-            ignore_unexpected_suffixes=_QWEN4_EXP_IGNORED_MISSING_SUFFIXES.copy(),
-        )
-        loaded = loader.load_weights(
-            weights,
-            mapper=mapper,
-        )
-        return loaded
-
-
-class Qwen4ExpForCausalLM(
-    nn.Module,
-    HasInnerState,
-    SupportsHCSP,
-    SupportsLoRA,
-    SupportsMRoPE,
-    SupportsPP,
-    Qwen4ExpMixtureOfExperts,
-    IsHybrid,
-):
-    packed_modules_mapping = {
-        "qkv_proj": ["q_proj", "k_proj", "v_proj", "indexer.index_qk_proj"],
-        "gate_up_proj": ["gate_proj", "up_proj"],
-        "kv_proj": ["key_proj", "value_proj"],
-        "in_proj_qkvz": ["in_proj_qkv", "in_proj_z"],
-        "in_proj_ba": ["in_proj_b", "in_proj_a"],
-        "input_mix_weight_down_block_inject": [
-            "input_mix_weight_down",
-            "block_inject_weight",
-            "_input_mix_padding",
-        ],
-    }
-    hf_to_vllm_mapper = WeightsMapper(
-        orig_to_new_prefix={"model.language_model.": "model."}
-    )
-    requires_raw_input_tokens = True
-
+class Qwen4ExpForCausalLM(upstream.Qwen4ExpForCausalLM):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
-        super().__init__()
+        nn.Module.__init__(self)
         config: Qwen4ExpTextConfig = vllm_config.model_config.hf_text_config
         if vllm_config.lora_config is not None:
             # LoRA does not support the merged QKV/indexer projection, so its
@@ -765,217 +280,8 @@ class Qwen4ExpForCausalLM(
                 self.config.hidden_size * self.config.hc_count,
             )
 
-    @staticmethod
-    def get_model_state_cls():
-        from vllm.models.qwen4_exp.nvidia.model_state import Qwen4ExpModelState
 
-        return Qwen4ExpModelState
-
-    def forward(
-        self,
-        input_ids: torch.Tensor | None,
-        positions: torch.Tensor,
-        intermediate_tensors: IntermediateTensors | None = None,
-        inputs_embeds: torch.Tensor | None = None,
-        **kwargs: object,
-    ) -> torch.Tensor | IntermediateTensors:
-        # Forward kwargs unchanged so the runner's _maybe_add_ngram_kwargs
-        # path (query_start_loc / ngram_context) reaches Qwen4ExpModel.
-        return self.model(
-            input_ids,
-            positions,
-            intermediate_tensors,
-            inputs_embeds,
-            **kwargs,
-        )
-
-    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
-        return self.model.embed_input_ids(input_ids)
-
-    @classmethod
-    def get_ple_mamba_state_dtype_from_config(
-        cls,
-        vllm_config: VllmConfig,
-    ) -> tuple[torch.dtype, ...]:
-        return MambaStateDtypeCalculator.short_conv_state_dtype(
-            vllm_config.model_config.dtype,
-            vllm_config.cache_config.mamba_cache_dtype,
-        )
-
-    @classmethod
-    def get_ple_mamba_state_shape_from_config(
-        cls, vllm_config: VllmConfig
-    ) -> tuple[tuple[int, int]]:
-        hf_config = vllm_config.model_config.hf_text_config
-        conv_kernel_size = hf_config.ple_conv_kernel_size
-        short_conv_dilation = hf_config.ngram_size
-        conv_state_len = (conv_kernel_size - 1) * short_conv_dilation
-        num_spec = (
-            vllm_config.speculative_config.num_speculative_tokens
-            if vllm_config.speculative_config
-            else 0
-        )
-        hc_count = hf_config.hc_count
-        hc_hidden_size = hf_config.hidden_size * hc_count
-        return MambaStateShapeCalculator.short_conv_state_shape(
-            tp_world_size=1,
-            intermediate_size=hc_hidden_size,
-            conv_kernel=conv_state_len + 1,
-            num_spec=num_spec,
-        )
-
-    @classmethod
-    def get_gdn_mamba_state_dtype_from_config(
-        cls, vllm_config: VllmConfig
-    ) -> tuple[torch.dtype, torch.dtype]:
-        return MambaStateDtypeCalculator.gated_delta_net_state_dtype(
-            vllm_config.model_config.dtype,
-            vllm_config.cache_config.mamba_cache_dtype,
-            vllm_config.cache_config.mamba_ssm_cache_dtype,
-        )
-
-    @classmethod
-    def get_gdn_mamba_state_shape_from_config(
-        cls, vllm_config: VllmConfig
-    ) -> tuple[tuple[int, int], tuple[int, int]]:
-        parallel_config = vllm_config.parallel_config
-        hf_config = vllm_config.model_config.hf_text_config
-        tp_size = parallel_config.tensor_parallel_size
-        num_spec = (
-            vllm_config.speculative_config.num_speculative_tokens
-            if vllm_config.speculative_config
-            else 0
-        )
-        return MambaStateShapeCalculator.gated_delta_net_state_shape(
-            tp_size,
-            hf_config.linear_num_key_heads,
-            hf_config.linear_num_value_heads,
-            hf_config.linear_key_head_dim,
-            hf_config.linear_value_head_dim,
-            hf_config.linear_conv_kernel_dim,
-            num_spec,
-        )
-
-    @classmethod
-    def get_mamba_state_dtype_from_config(
-        cls,
-        vllm_config: VllmConfig,
-    ) -> tuple[torch.dtype, torch.dtype]:
-        return cls.get_gdn_mamba_state_dtype_from_config(vllm_config)
-
-    @classmethod
-    def get_mamba_state_shape_from_config(
-        cls, vllm_config: VllmConfig
-    ) -> tuple[tuple[int, int], tuple[int, int]]:
-        return cls.get_gdn_mamba_state_shape_from_config(vllm_config)
-
-    @classmethod
-    def get_mamba_state_copy_func(
-        cls,
-    ) -> tuple[MambaStateCopyFunc, MambaStateCopyFunc]:
-        return MambaStateCopyFuncCalculator.gated_delta_net_state_copy_func()
-
-    @classmethod
-    def get_mamba_state_copy_funcs(
-        cls,
-        mamba_types: set[MambaAttentionBackendEnum],
-    ) -> MambaStateCopyFuncsByType:
-        copy_funcs_by_type = {
-            MambaAttentionBackendEnum.GDN_ATTN: cls.get_mamba_state_copy_func(),
-            MambaAttentionBackendEnum.SHORT_CONV: (
-                MambaStateCopyFuncCalculator.short_conv_state_copy_func()
-            ),
-        }
-        missing_types = mamba_types - copy_funcs_by_type.keys()
-        assert not missing_types, f"missing state copy funcs for {missing_types}"
-        return {
-            mamba_type: copy_funcs_by_type[mamba_type] for mamba_type in mamba_types
-        }
-
-    @classmethod
-    def get_mamba_specs_from_config(
-        cls, vllm_config: VllmConfig
-    ) -> tuple[MambaSpec, ...]:
-        """Return all MambaSpecs for this model (GDN layers + PLE layer).
-
-        The PLE layer uses a separate short_conv MambaSpec whose page_size_bytes
-        may exceed the GDN spec; callers should take the maximum.
-        """
-        return (
-            MambaSpec(
-                shapes=cls.get_gdn_mamba_state_shape_from_config(vllm_config),
-                dtypes=cls.get_gdn_mamba_state_dtype_from_config(vllm_config),
-                block_size=-1,
-            ),
-            MambaSpec(
-                shapes=cls.get_ple_mamba_state_shape_from_config(vllm_config),
-                dtypes=cls.get_ple_mamba_state_dtype_from_config(vllm_config),
-                block_size=-1,
-                tp_replicated=True,
-            ),
-        )
-
-    def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor | None:
-        return self.logits_processor(self.lm_head, hidden_states)
-
-    def get_mtp_target_hidden_states(self) -> torch.Tensor | None:
-        return self.model._mtp_hidden_buffer
-
-    def get_mrope_input_positions(
-        self,
-        input_tokens: list[int],
-        mm_features: list[MultiModalFeatureSpec],
-    ) -> tuple[torch.Tensor, int]:
-        positions = torch.arange(len(input_tokens), dtype=torch.long)
-        return positions.unsqueeze(0).expand(3, -1), 0
-
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        mapper = self.hf_to_vllm_mapper | WeightsMapper(
-            orig_to_new_substr={"mtp.": None}
-        )
-        loader = AutoWeightsLoader(
-            self,
-            ignore_unexpected_suffixes=_QWEN4_EXP_IGNORED_MISSING_SUFFIXES.copy(),
-        )
-        return loader.load_weights(weights, mapper=mapper)
-
-
-class Qwen4ExpProcessingInfo(Qwen3VLProcessingInfo):
-    def get_hf_config(self) -> Qwen4ExpConfig:
-        return self.ctx.get_hf_config(Qwen4ExpConfig)
-
-
-@MULTIMODAL_REGISTRY.register_processor(
-    Qwen3VLMultiModalProcessor,
-    info=Qwen4ExpProcessingInfo,
-    dummy_inputs=Qwen3VLDummyInputsBuilder,
-)
-class Qwen4ExpForConditionalGeneration(
-    Qwen3_5ForConditionalGeneration,
-    HasInnerState,
-    SupportsHCSP,
-    Qwen4ExpMixtureOfExperts,
-):
-    """Qwen3-VL vision tower backed by the Qwen4Exp language model."""
-
-    requires_raw_input_tokens = True
-
-    packed_modules_mapping = Qwen3_5ForConditionalGeneration.packed_modules_mapping | {
-        "qkv_proj": Qwen4ExpForCausalLM.packed_modules_mapping["qkv_proj"],
-        "kv_proj": ["key_proj", "value_proj"],
-        "input_mix_weight_down_block_inject": [
-            "input_mix_weight_down",
-            "block_inject_weight",
-            "_input_mix_padding",
-        ],
-    }
-
-    @staticmethod
-    def get_model_state_cls():
-        from vllm.models.qwen4_exp.nvidia.model_state import Qwen4ExpModelState
-
-        return Qwen4ExpModelState
-
+class Qwen4ExpForConditionalGeneration(upstream.Qwen4ExpForConditionalGeneration):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "model") -> None:
         nn.Module.__init__(self)
         config: Qwen4ExpConfig = vllm_config.model_config.hf_config
@@ -1059,123 +365,6 @@ class Qwen4ExpForConditionalGeneration(
                 "len(deepstack_visual_indexes)"
             )
         self.set_moe_parameters(self.language_model.model.layers)
-
-    def embed_input_ids(
-        self,
-        input_ids: torch.Tensor,
-        multimodal_embeddings: MultiModalEmbeddings | None = None,
-        *,
-        is_multimodal: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        inputs_embeds = self._embed_text_input_ids(
-            input_ids,
-            self.language_model.embed_input_ids,
-            is_multimodal=is_multimodal,
-        )
-        if multimodal_embeddings is None or len(multimodal_embeddings) == 0:
-            return inputs_embeds
-        if self.language_model_only:
-            raise ValueError(
-                "Qwen4Exp language_model_only does not accept multimodal embeddings"
-            )
-
-        is_multimodal = _require_is_multimodal(is_multimodal)
-        if self.use_deepstack:
-            deepstack_input_embeds, multimodal_embeddings = (
-                self._compute_deepstack_embeds(
-                    inputs_embeds=inputs_embeds,
-                    multimodal_embeddings=multimodal_embeddings,
-                    is_multimodal=is_multimodal,
-                )
-            )
-        else:
-            deepstack_input_embeds = None
-
-        inputs_embeds = _merge_multimodal_embeddings(
-            inputs_embeds=inputs_embeds,
-            multimodal_embeddings=multimodal_embeddings,
-            is_multimodal=is_multimodal,
-        )
-        if deepstack_input_embeds is not None:
-            self._set_deepstack_input_embeds(deepstack_input_embeds)
-        return inputs_embeds
-
-    def get_mtp_target_hidden_states(self) -> torch.Tensor | None:
-        return self.language_model.get_mtp_target_hidden_states()
-
-    def forward(
-        self,
-        input_ids: torch.Tensor | None,
-        positions: torch.Tensor,
-        intermediate_tensors: IntermediateTensors | None = None,
-        inputs_embeds: torch.Tensor | None = None,
-        **kwargs: object,
-    ) -> torch.Tensor | IntermediateTensors:
-        if intermediate_tensors is not None:
-            inputs_embeds = None
-        if inputs_embeds is not None and get_pp_group().is_first_rank:
-            deepstack_input_embeds = self._get_deepstack_input_embeds(
-                inputs_embeds.size(0)
-            )
-        else:
-            deepstack_input_embeds = None
-
-        hidden_states = self.language_model.model(
-            input_ids=input_ids,
-            positions=positions,
-            intermediate_tensors=intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-            query_start_loc=kwargs.get("query_start_loc"),
-            ngram_context=kwargs.get("ngram_context"),
-            deepstack_input_embeds=deepstack_input_embeds,
-        )
-        if inputs_embeds is not None and get_pp_group().is_first_rank:
-            self._clear_deepstack_input_embeds(inputs_embeds.size(0))
-        return hidden_states
-
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        mapper = self.hf_to_vllm_mapper | WeightsMapper(
-            orig_to_new_substr={"mtp.": None},
-            orig_to_new_prefix={"visual.": None} if self.language_model_only else {},
-        )
-        loader = AutoWeightsLoader(
-            self,
-            ignore_unexpected_suffixes=_QWEN4_EXP_IGNORED_MISSING_SUFFIXES.copy(),
-        )
-        return loader.load_weights(weights, mapper=mapper)
-
-    @classmethod
-    def get_mamba_state_dtype_from_config(
-        cls,
-        vllm_config: VllmConfig,
-    ) -> tuple[torch.dtype, torch.dtype]:
-        return Qwen4ExpForCausalLM.get_mamba_state_dtype_from_config(vllm_config)
-
-    @classmethod
-    def get_mamba_state_shape_from_config(
-        cls,
-        vllm_config: VllmConfig,
-    ) -> tuple[tuple[int, int], tuple[int, int]]:
-        return Qwen4ExpForCausalLM.get_mamba_state_shape_from_config(vllm_config)
-
-    @classmethod
-    def get_mamba_state_copy_func(
-        cls,
-    ) -> tuple[MambaStateCopyFunc, MambaStateCopyFunc]:
-        return Qwen4ExpForCausalLM.get_mamba_state_copy_func()
-
-    @classmethod
-    def get_mamba_state_copy_funcs(
-        cls,
-        mamba_types: set[MambaAttentionBackendEnum],
-    ) -> MambaStateCopyFuncsByType:
-        return Qwen4ExpForCausalLM.get_mamba_state_copy_funcs(mamba_types)
-
-    @classmethod
-    def get_mamba_specs_from_config(
-        cls, vllm_config: VllmConfig
-    ) -> tuple[MambaSpec, ...]:
-        return Qwen4ExpForCausalLM.get_mamba_specs_from_config(vllm_config)
 
 
 __all__ = [

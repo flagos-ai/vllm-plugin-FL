@@ -4,135 +4,52 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
 from typing import ClassVar, cast
 
 import torch
 from torch import nn
 from transformers import Qwen4ExpTextConfig
+
 from vllm.compilation.breakable_cudagraph import eager_break_during_capture
 from vllm.config import VllmConfig
-from vllm.config.cache import CacheConfig, CacheDType
+from vllm.config.cache import CacheDType
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.attention.attention import (
     set_default_quant_scales,
 )
-from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm
 from vllm.model_executor.layers.linear import (
-    MergedColumnParallelLinear,
     QKVParallelLinear,
     RowParallelLinear,
 )
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
-from vllm.model_executor.models.qwen3_next import Qwen3NextAttention
 from vllm.model_executor.models.qwen3_vl import mrope_positions_factor
-from vllm.model_executor.models.utils import (
-    AutoWeightsLoader,
-    WeightsMapper,
-    extract_layer_index,
-)
 from vllm.models.qwen4_exp.common.qsa_cache import QSAForwardMetadata
+from vllm.models.qwen4_exp.nvidia.model import without_modelopt_fp4
+from vllm.models.qwen4_exp.nvidia.qsa import (
+    Qwen4ExpQSAAttention as VllmQSAAttention,
+    Qwen4ExpQSAQKVIndexerLinear,
+    qsa_kv_cache_dtype,
+)
 from vllm.platforms.interface import DeviceCapability
 from vllm.utils.torch_utils import (
     kv_cache_dtype_str_to_dtype,
 )
 from vllm.v1.attention.backend import (
-    AttentionBackend,
     AttentionCGSupport,
     AttentionType,
     MultipleOf,
 )
 from vllm.v1.attention.backends.flash_attn import FlashAttentionMetadata
-from vllm.v1.kv_cache_interface import (
-    FullAttentionSpec,
-    KVCacheSpec,
-    get_kv_quant_mode,
-)
 
+from .thead_indexer import QSAIndexer
 from vllm_fl.dispatch.backends.vendor.thead.impl.attention import (
     TheadFlashAttentionBackend,
     TheadFlashAttentionImpl,
     TheadFlashAttentionMetadataBuilder,
 )
-
-from . import model
-from .thead_indexer import QSAIndexer
-
-
-class Qwen4ExpQSAQKVIndexerLinear(MergedColumnParallelLinear):
-    """Pack sharded Q/gate, K, V and replicated indexer Q/K in one GEMM."""
-
-    def __init__(
-        self,
-        qkv_proj: QKVParallelLinear,
-        index_size: int,
-        quant_config: QuantizationConfig | None,
-    ) -> None:
-        self.num_kv_head_replicas = qkv_proj.num_kv_head_replicas
-        super().__init__(
-            input_size=qkv_proj.input_size,
-            output_sizes=[*qkv_proj.output_sizes, index_size * qkv_proj.tp_size],
-            bias=False,
-            params_dtype=qkv_proj.params_dtype,
-            quant_config=quant_config,
-            prefix=qkv_proj.prefix,
-        )
-
-    def _load_shard(
-        self,
-        loader: Callable[..., None],
-        param: nn.Parameter,
-        loaded_weight: torch.Tensor,
-        loaded_shard_id: int | tuple[int, ...] | None,
-    ) -> None:
-        tp_rank = self.tp_rank
-        param_tp_rank = getattr(param, "tp_rank", None)
-        if loaded_shard_id == 3:
-            shard_rank = 0
-        elif loaded_shard_id in (1, 2):
-            shard_rank = tp_rank // self.num_kv_head_replicas
-        else:
-            shard_rank = tp_rank
-        self.tp_rank = shard_rank
-        if param_tp_rank is not None:
-            param.tp_rank = shard_rank
-        try:
-            loader(param, loaded_weight, loaded_shard_id)
-        finally:
-            self.tp_rank = tp_rank
-            if param_tp_rank is not None:
-                param.tp_rank = param_tp_rank
-
-    def weight_loader(self, param, loaded_weight, loaded_shard_id=None) -> None:
-        self._load_shard(super().weight_loader, param, loaded_weight, loaded_shard_id)
-
-    def weight_loader_v2(self, param, loaded_weight, loaded_shard_id=None) -> None:
-        self._load_shard(
-            super().weight_loader_v2, param, loaded_weight, loaded_shard_id
-        )
-
-    def load_weights(
-        self, weights: Iterable[tuple[str, torch.Tensor]]
-    ) -> Iterable[str]:
-        def remap_shards():
-            for name, weight in weights:
-                shard_id = getattr(weight, "shard_id", None)
-                if isinstance(shard_id, str):
-                    weight = weight.detach()
-                    weight.shard_id = {"q": 0, "k": 1, "v": 2}[shard_id]
-                yield name, weight
-
-        return super().load_weights(remap_shards())
-
-
-def qsa_kv_cache_dtype(cache_config: CacheConfig, prefix: str) -> CacheDType:
-    """The layer's KV cache dtype, honoring ``--kv-cache-dtype-skip-layers``."""
-    if str(extract_layer_index(prefix)) in cache_config.kv_cache_dtype_skip_layers:
-        return "auto"
-    return cache_config.cache_dtype
 
 
 class Qwen4ExpQSAMetadataBuilder(TheadFlashAttentionMetadataBuilder):
@@ -241,7 +158,7 @@ class Qwen4ExpQSAFlashAttentionImpl(TheadFlashAttentionImpl):
         )
 
 
-class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
+class Qwen4ExpQSAAttention(VllmQSAAttention):
     """Merged Qwen full-attention owner with a QSA index side branch."""
 
     supports_dcp = False
@@ -319,7 +236,7 @@ class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             self.total_num_heads * (1 + self.attn_output_gate),
             self.total_num_kv_heads,
             bias=False,
-            quant_config=model.without_modelopt_fp4(quant_config),
+            quant_config=without_modelopt_fp4(quant_config),
             prefix=f"{prefix}.qkv_proj",
         )
         self.o_proj = RowParallelLinear(
@@ -377,7 +294,7 @@ class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             self.qkv_proj = Qwen4ExpQSAQKVIndexerLinear(
                 self.qkv_proj,
                 self.index_qk_size,
-                model.without_modelopt_fp4(quant_config),
+                without_modelopt_fp4(quant_config),
             )
             del self.indexer.index_qk_proj
 
@@ -401,29 +318,6 @@ class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         if self.layer_name in static_context:
             raise ValueError(f"Duplicate layer name: {self.layer_name}")
         static_context[self.layer_name] = self
-
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        mapper = None
-        if self.fuse_indexer_projection:
-            mapper = WeightsMapper(
-                orig_to_new_stacked={
-                    "indexer.index_qk_proj.": ("qkv_proj.", 3),
-                }
-            )
-        return AutoWeightsLoader(self).load_weights(weights, mapper=mapper)
-
-    def get_attn_backend(self) -> type[AttentionBackend]:
-        return self.attn_backend
-
-    def get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec:
-        return FullAttentionSpec(
-            block_size=vllm_config.cache_config.block_size,
-            num_kv_heads=self.num_kv_heads,
-            head_size=self.head_dim,
-            head_size_v=self.head_dim,
-            dtype=self.kv_cache_torch_dtype,
-            kv_quant_mode=get_kv_quant_mode(self.kv_cache_dtype),
-        )
 
     @eager_break_during_capture
     def _run_qsa(
