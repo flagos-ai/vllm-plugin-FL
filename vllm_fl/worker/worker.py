@@ -979,15 +979,19 @@ class WorkerFL(WorkerBase):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
         # vLLM 0.32 moved the flag to ``VllmConfig.aux_output_config``; the
-        # ModelConfig field only exists on older builds.
-        aux_output_config = getattr(self.vllm_config, "aux_output_config", None)
-        routed_experts_source = (
-            aux_output_config
-            if aux_output_config is not None
-            else self.model_config
-        )
-        if getattr(routed_experts_source, "enable_return_routed_experts", False):
-            self.model_runner.init_routed_experts_capturer()
+        # ModelConfig field only exists on older builds. Only ``ModelRunnerFL``
+        # has the capturer hook: the V2 runner owns routed-expert output through
+        # the AuxOutput connector it creates inside ``initialize_kv_cache`` and
+        # exposes no ``init_routed_experts_capturer``.
+        if not self.use_v2_model_runner:
+            aux_output_config = getattr(self.vllm_config, "aux_output_config", None)
+            routed_experts_source = (
+                aux_output_config
+                if aux_output_config is not None
+                else self.model_config
+            )
+            if getattr(routed_experts_source, "enable_return_routed_experts", False):
+                self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
