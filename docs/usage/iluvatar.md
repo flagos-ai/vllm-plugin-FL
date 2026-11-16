@@ -3,15 +3,17 @@
 This guide starts an OpenAI-compatible vLLM inference service on Iluvatar CoreX
 BI-V150 accelerators with the software stack validated by this repository. The
 recommended path uses the prebuilt CI image so that vLLM, FlagTree, Triton, and
-FlagGems stay on the tested versions.
+FlagGems stay on the tested versions. The image includes the pinned
+FlagGems-vLLM provider and its Python dependencies. Install the local FL plugin
+when testing a checkout.
 
 ## Validated software stack
 
 | Component | Validated version or configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci` |
-| Image digest | `sha256:e400f2a5da8d3020f86a0129463223d637401f9c7b3c0a7157f1c7f199d7adc6` |
-| Base image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci` |
+| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci-provider-90dd13c` |
+| Image digest | `sha256:9e4db0790c40797fed889d69987a13451ecd181de2b3e1464ef4175f2d8611a9` |
+| Base image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci@sha256:e400f2a5da8d3020f86a0129463223d637401f9c7b3c0a7157f1c7f199d7adc6` |
 | Chip | Iluvatar CoreX BI-V150 |
 | vLLM | `0.32.0+empty` (`VLLM_TARGET_DEVICE=empty`, no `vllm._C`) |
 | Python | `3.12` (the image ships a `cp312` vLLM wheel) |
@@ -21,6 +23,7 @@ FlagGems stay on the tested versions.
 | FlagTree | `0.7.0+iluvatar3.6`; provides the Triton runtime |
 | Triton | `3.6.0` with the `iluvatar` backend; provided by FlagTree, no standalone `triton` package is expected |
 | FlagGems | `5.5.0.dev0` |
+| FlagGems-vLLM | Baked from [`90dd13c`](https://github.com/luoyc123/FlagGems-vllm/commit/90dd13cd721f2ff139e6f42ef36854518c0b2b95) |
 | Dispatch policy | [`vllm_fl/dispatch/config/iluvatar.yaml`](../../vllm_fl/dispatch/config/iluvatar.yaml) |
 
 The Iluvatar dispatch policy is loaded automatically from
@@ -110,7 +113,7 @@ in scripts or shell history.
 ```bash
 docker login harbor.baai.ac.cn
 
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci-provider-90dd13c@sha256:9e4db0790c40797fed889d69987a13451ecd181de2b3e1464ef4175f2d8611a9
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 ```
@@ -121,9 +124,8 @@ software-stack table after confirming that the registry still exposes it.
 ## 4. Verify the image runtime
 
 This check confirms the CoreX stack inside the image before a service is started.
-The image was built against a `0.28.0+empty` vLLM wheel, so the build asserts
-below are the tested contract; a device must be visible for the accelerator check
-to pass.
+The image contains vLLM `0.32.0+empty` and the fixed provider revision.
+The accelerator check requires a visible CoreX device.
 
 ```bash
 docker run --rm \
@@ -142,16 +144,20 @@ docker run --rm \
 set -euo pipefail
 ixsmi || nvidia-smi || true
 python3 -c "
+import json
+from importlib.metadata import distribution
+
 import flag_gems
 import torch
 import triton
 import vllm
 import vllm_fl
 
-assert vllm.__version__.startswith(\"0.28\"), vllm.__version__
-assert \"empty\" in vllm.__version__, vllm.__version__
+assert vllm.__version__ == \"0.32.0+empty\", vllm.__version__
 assert torch.__version__.startswith(\"2.10\"), torch.__version__
-assert flag_gems.__version__.startswith(\"5.3\"), flag_gems.__version__
+assert flag_gems.__version__.startswith(\"5.5\"), flag_gems.__version__
+provider = json.loads(distribution(\"flaggems-vllm\").read_text(\"direct_url.json\"))
+assert provider[\"vcs_info\"][\"commit_id\"] == \"90dd13cd721f2ff139e6f42ef36854518c0b2b95\", provider
 assert triton.__version__.startswith(\"3.6.0\"), triton.__version__
 print(f\"vLLM={vllm.__version__}\")
 print(f\"PyTorch={torch.__version__}\")
