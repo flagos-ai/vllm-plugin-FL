@@ -10,3 +10,9 @@ The workflow archives baseline and combined coverage under
 `coverage-results/`, together with their scope metadata and test logs.
 Both measurements use the same checkout and coverage settings. The
 platform-effective report counts shared Python code and the CUDA backend.
+
+## Known gaps
+
+- Qwen3.8 MTP coverage is skipped on the vllm 0.24 image; restoring the 168
+  statements when the image ships vllm >= 0.33 is tracked in
+  [#760](https://github.com/flagos-ai/vllm-plugin-FL/issues/760).
