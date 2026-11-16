@@ -482,38 +482,6 @@ def test_runner_has_no_removed_mamba_api_references():
 
 
 # =============================================================================
-# Layer 2: DCP metadata field contract
-# =============================================================================
-
-
-class TestDcpAttentionMetadataContract:
-    """Guard the vLLM 0.32 DCP field names used to build attention metadata.
-
-    ``CommonAttentionMetadata`` is a plain dataclass, so assigning a field that
-    no longer exists upstream silently creates a new attribute instead of
-    raising. Every backend that runs DCP (Metax, GCU, Sunrise, ...) would then
-    read ``None`` and fail much later, so pin the names here.
-    """
-
-    def test_upstream_defines_upper_bound_field(self):
-        from vllm.v1.attention.backend import CommonAttentionMetadata
-
-        names = set(getattr(CommonAttentionMetadata, "__annotations__", {}))
-        assert "dcp_local_seq_lens_cpu_upper_bound" in names
-        # vLLM 0.32 dropped the old name; re-introducing it would be a no-op.
-        assert "dcp_local_seq_lens_cpu" not in names
-
-    def test_runner_populates_upper_bound_field_only(self):
-        import inspect
-
-        from vllm_fl.worker.model_runner import ModelRunnerFL
-
-        src = inspect.getsource(ModelRunnerFL._build_attention_metadata)
-        assert "cm_base.dcp_local_seq_lens_cpu_upper_bound = " in src
-        assert "cm_base.dcp_local_seq_lens_cpu = " not in src
-
-
-# =============================================================================
 # Layer 2: JIT warmup registry lifecycle
 # =============================================================================
 

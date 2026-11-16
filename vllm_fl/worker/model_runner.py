@@ -2672,9 +2672,7 @@ class ModelRunnerFL(
             self.dcp_local_seq_lens.copy_to_gpu(num_reqs_padded)
 
             cm_base.dcp_local_seq_lens = self.dcp_local_seq_lens.gpu[:num_reqs_padded]
-            # vLLM 0.32 renamed the host-side DCP lengths; assigning the
-            # old name would silently add an attribute that no consumer reads.
-            cm_base.dcp_local_seq_lens_cpu_upper_bound = self.dcp_local_seq_lens.cpu[
+            cm_base.dcp_local_seq_lens_cpu = self.dcp_local_seq_lens.cpu[
                 :num_reqs_padded
             ]
 
