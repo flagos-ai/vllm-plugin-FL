@@ -134,6 +134,7 @@ from vllm.model_executor.offloader import (
     get_offloader,
     set_offloader,
 )
+from vllm.model_executor.warmup.jit_warmup import JitWarmupRegistry
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.encoder_budget import MultiModalBudget
 from vllm.multimodal.inputs import (
@@ -156,7 +157,7 @@ from vllm.tracing import instrument
 from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.gpu_sync_debug import gpu_sync_allowed
 from vllm.utils.import_utils import resolve_obj_by_qualname
-from vllm.utils.math_utils import cdiv, round_up
+from vllm.utils.math_utils import cdiv
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.nvtx_pytorch_hooks import PytHooks
 from vllm.utils.platform_utils import num_compute_units
@@ -575,22 +576,16 @@ class ExecuteModelState(NamedTuple):
 class ModelRunnerFL(
     LoRAModelRunnerMixin, KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin
 ):
+    # vLLM >= 0.32 collects JIT warmup providers for the whole runner setup.
+    # Upstream applies this decorator to ``GPUModelRunner.__init__``; the fork
+    # does not inherit that class, so apply it here to get the same registry and
+    # the same guaranteed teardown when construction fails.
+    @JitWarmupRegistry.capture
     def __init__(
         self,
         vllm_config: VllmConfig,
         device: torch.device,
     ):
-        # vLLM >= 0.32 collects JIT warmup providers for the whole runner
-        # setup. Upstream does that through ``@JitWarmupRegistry.capture`` on
-        # ``GPUModelRunner.__init__``; this fork does not inherit that
-        # decorator, so create the registry here and keep it active until the
-        # end of ``__init__``.
-        from vllm.model_executor.warmup.jit_warmup import JitWarmupRegistry
-
-        self.jit_warmup_registry = JitWarmupRegistry(vllm_config)
-        self._jit_warmup_scope = self.jit_warmup_registry.activate()
-        self._jit_warmup_scope.__enter__()
-
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -1114,15 +1109,7 @@ class ModelRunnerFL(
         self.kv_connector_output: KVConnectorOutput | None = None
         self.mamba_state_idx: dict[str, int] = {}
         self._mamba_bufs: mamba_utils.MambaBuffers | None = None
-        self.mamba_prev_last_scheduled_idx: CpuGpuBuffer | None = None
-        if self.cache_config.mamba_cache_mode == "all" and self.num_spec_tokens > 0:
-            self.mamba_prev_last_scheduled_idx = self._make_buffer(
-                self.max_num_reqs, dtype=torch.int32
-            )
         self.layerwise_nvtx_hooks_registered = False
-
-        # Close the JIT warmup collection scope opened at the top of __init__.
-        self._jit_warmup_scope.__exit__(None, None, None)
 
     def update_max_model_len(self, max_model_len: int) -> None:
         self.max_model_len = max_model_len
@@ -1819,16 +1806,6 @@ class ModelRunnerFL(
             assert self.num_accepted_tokens_event is not None
             self.num_accepted_tokens_event.record()
 
-            if self.cache_config.mamba_cache_mode == "all":
-                mamba_utils.postprocess_mamba_all(
-                    scheduler_output,
-                    self.kv_cache_config,
-                    self.input_batch,
-                    self.requests,
-                    self.mamba_state_idx,
-                    self.num_spec_tokens,
-                    num_reqs,
-                )
 
     def _update_streaming_request(
         self, req_id: str, new_req_data: NewRequestData
@@ -2353,14 +2330,6 @@ class ModelRunnerFL(
             self.num_accepted_tokens.np.fill(1)
             self.num_accepted_tokens.gpu.fill_(1)
 
-        if self.mamba_prev_last_scheduled_idx is not None:
-            mamba_utils.preprocess_mamba_all_specdec(
-                scheduler_output,
-                self.input_batch,
-                self.mamba_state_idx,
-                num_reqs,
-                self.mamba_prev_last_scheduled_idx,
-            )
 
         # Update num_computed_tokens on GPU. In async spec decode,
         # CPU values are optimistic (all drafts accepted). The kernel
@@ -2760,13 +2729,6 @@ class ModelRunnerFL(
                         :num_reqs_padded
                     ],
                 )
-                if (
-                    isinstance(builder, Mamba2AttentionMetadataBuilder)
-                    and self.mamba_prev_last_scheduled_idx is not None
-                ):
-                    extra_attn_metadata_args["prev_last_scheduled_idx"] = (
-                        self.mamba_prev_last_scheduled_idx.gpu[:num_reqs_padded]
-                    )
 
             if for_cudagraph_capture:
                 attn_metadata_i = attn_group.build_metadata_for_cudagraph_capture(
@@ -3721,18 +3683,6 @@ class ModelRunnerFL(
             async_output_copy_stream=self._get_or_create_async_output_copy_stream(),
         )
 
-    def _pad_for_sequence_parallelism(self, num_scheduled_tokens: int) -> int:
-        # Pad tokens to multiple of tensor_parallel_size when
-        # enabled collective fusion for SP
-        tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-        # vLLM >= 0.32 removed PassConfig.enable_sp together with the SP passes.
-        enable_sp = getattr(
-            self.compilation_config.pass_config, "enable_sp", False
-        )
-        if enable_sp and tp_size > 1:
-            return round_up(num_scheduled_tokens, tp_size)
-        return num_scheduled_tokens
-
     def _pad_query_start_loc_for_fia(
         self,
         query_start_loc: CpuGpuBuffer,
@@ -4268,7 +4218,9 @@ class ModelRunnerFL(
         )
         has_lora = num_active_loras > 0 if force_has_lora is None else force_has_lora
 
-        num_tokens_padded = self._pad_for_sequence_parallelism(num_tokens)
+        # vLLM 0.32 removed the sequence-parallel passes, so no padding is
+        # applied on this path any more.
+        num_tokens_padded = num_tokens
 
         disable_full = disable_full or use_cascade_attn or has_encoder_output
 
@@ -4284,15 +4236,6 @@ class ModelRunnerFL(
 
         cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded)
         num_tokens_padded = batch_descriptor.num_tokens
-        if getattr(self.compilation_config.pass_config, "enable_sp", False):
-            assert (
-                batch_descriptor.num_tokens
-                % self.vllm_config.parallel_config.tensor_parallel_size
-                == 0
-            ), (
-                "Sequence parallelism requires num_tokens to be "
-                "a multiple of tensor parallel size"
-            )
 
         # Extra coordination when running data-parallel since we need to coordinate
         # across ranks
