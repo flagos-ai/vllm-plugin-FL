@@ -1,0 +1,29 @@
+Selected vLLM log lines. Process IDs omitted.
+Replay columns: Unpadded Tokens | Padded Tokens | Num Paddings | Runtime Mode | Count
+
+Worker INFO 11-15 13:55:48 [metax_v2.py:46] MetaX V2 uses upstream NonUvaBuffer: no native mapped CPU-view kernel.
+Worker INFO 11-15 13:55:48 [worker.py:572] MetaX V2 model runner: vllm.v1.worker.gpu.model_runner.GPUModelRunner
+Worker_TP3 INFO 11-15 14:13:52 [model_runner.py:1127] Graph capturing finished in 625 secs, took 0.37 GiB
+Worker_TP1 INFO 11-15 14:13:52 [model_runner.py:1127] Graph capturing finished in 626 secs, took 0.37 GiB
+Worker_TP2 INFO 11-15 14:13:52 [model_runner.py:1127] Graph capturing finished in 625 secs, took 0.18 GiB
+Worker_TP0 INFO 11-15 14:13:52 [model_runner.py:1127] Graph capturing finished in 625 secs, took 0.37 GiB
+Worker_TP2 INFO 11-15 14:14:19 [model_runner.py:1127] Graph capturing finished in 5 secs, took 0.05 GiB
+Worker_TP1 INFO 11-15 14:14:19 [model_runner.py:1127] Graph capturing finished in 5 secs, took 0.05 GiB
+Worker_TP0 INFO 11-15 14:14:19 [model_runner.py:1127] Graph capturing finished in 5 secs, took 0.05 GiB
+Worker_TP3 INFO 11-15 14:14:19 [model_runner.py:1127] Graph capturing finished in 5 secs, took 0.05 GiB
+INFO:     Application startup complete.
+APIServer INFO 11-15 14:17:18 [cuda_graph.py:123] | 1               | 1             | 0            | PIECEWISE    | 14    |
+APIServer INFO 11-15 14:17:18 [cuda_graph.py:123] | 65              | 128           | 63           | PIECEWISE    | 1     |
+APIServer INFO 11-15 14:17:28 [cuda_graph.py:123] | 1               | 1             | 0            | PIECEWISE    | 251   |
+APIServer INFO 11-15 14:17:38 [cuda_graph.py:123] | 1               | 1             | 0            | PIECEWISE    | 56    |
+APIServer INFO 11-15 14:17:38 [cuda_graph.py:123] | 8               | 8             | 0            | PIECEWISE    | 2     |
+APIServer INFO 11-15 14:17:38 [cuda_graph.py:123] | 203             | 256           | 53           | PIECEWISE    | 1     |
+APIServer INFO 11-15 14:17:38 [cuda_graph.py:123] | 4               | 4             | 0            | PIECEWISE    | 1     |
+APIServer INFO 11-15 14:27:58 [cuda_graph.py:123] | 1               | 1             | 0            | PIECEWISE    | 7     |
+APIServer INFO 11-15 14:28:08 [cuda_graph.py:123] | 201             | 256           | 55           | PIECEWISE    | 1     |
+APIServer INFO 11-15 14:28:08 [cuda_graph.py:123] | 1               | 1             | 0            | PIECEWISE    | 1     |
+APIServer INFO 11-15 14:30:48 [cuda_graph.py:123] | 3               | 4             | 1            | PIECEWISE    | 3     |
+APIServer INFO 11-15 14:30:48 [cuda_graph.py:123] | 1               | 1             | 0            | PIECEWISE    | 3     |
+APIServer INFO 11-15 14:30:48 [cuda_graph.py:123] | 8               | 8             | 0            | PIECEWISE    | 1     |
+APIServer INFO 11-15 14:30:48 [cuda_graph.py:123] | 4               | 4             | 0            | PIECEWISE    | 1     |
+APIServer INFO 11-15 14:30:48 [cuda_graph.py:123] | 27              | 32            | 5            | PIECEWISE    | 1     |

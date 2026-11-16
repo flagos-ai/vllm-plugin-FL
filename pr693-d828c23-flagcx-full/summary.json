@@ -1,0 +1,223 @@
+{
+  "plugin_commit": "d828c23d982f689acb4699599fd75fb3f76aebd1",
+  "provider_commit": "e00557103e284db5b57168386db60faa051989ef",
+  "image_digest": "734c6f7d620e2ca3be4fa382a9e2cd6e1d345a310e2e502f11317b5521b886ae",
+  "flagcx_native_library_sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad",
+  "packages_and_paths": {
+    "flaggems": [
+      "5.5.0.dev0",
+      "/flagos/lib/python3.12/site-packages/flag_gems/__init__.py"
+    ],
+    "flaggems_vllm": [
+      "0.3.0.dev1",
+      "/flagos/lib/python3.12/site-packages/flaggems_vllm/__init__.py"
+    ],
+    "triton": [
+      "3.6.0",
+      "/opt/flagtree/triton/__init__.py"
+    ]
+  },
+  "scenarios_executed": 20,
+  "scenarios_required": 20,
+  "requests_passed": 104,
+  "requests_executed": 104,
+  "requests_required": 104,
+  "groups": {
+    "Qwen3.6-27B-eager": {
+      "scenarios": {
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        }
+      },
+      "passed": 26,
+      "total": 26,
+      "native_runner_v2": true,
+      "server_revision_argument": null,
+      "graph_capture_finished": false,
+      "positive_piecewise_replay_rows": 0,
+      "piecewise_replay_count_sum": 0,
+      "exit": 0,
+      "flagcx_tp_ranks": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "provider_bridge_bound": true
+    },
+    "Qwen3.6-27B-graph": {
+      "scenarios": {
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        }
+      },
+      "passed": 26,
+      "total": 26,
+      "native_runner_v2": true,
+      "server_revision_argument": null,
+      "graph_capture_finished": true,
+      "positive_piecewise_replay_rows": 15,
+      "piecewise_replay_count_sum": 344,
+      "exit": 0,
+      "flagcx_tp_ranks": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "provider_bridge_bound": true
+    },
+    "Qwen3.6-35B-A3B-eager": {
+      "scenarios": {
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        }
+      },
+      "passed": 26,
+      "total": 26,
+      "native_runner_v2": true,
+      "server_revision_argument": null,
+      "graph_capture_finished": false,
+      "positive_piecewise_replay_rows": 0,
+      "piecewise_replay_count_sum": 0,
+      "exit": 0,
+      "flagcx_tp_ranks": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "provider_bridge_bound": true
+    },
+    "Qwen3.6-35B-A3B-graph": {
+      "scenarios": {
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        }
+      },
+      "passed": 26,
+      "total": 26,
+      "native_runner_v2": true,
+      "server_revision_argument": null,
+      "graph_capture_finished": true,
+      "positive_piecewise_replay_rows": 19,
+      "piecewise_replay_count_sum": 312,
+      "exit": 0,
+      "flagcx_tp_ranks": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "provider_bridge_bound": true
+    }
+  }
+}

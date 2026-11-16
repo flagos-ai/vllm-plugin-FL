@@ -1,0 +1,18 @@
+{
+  "Qwen3.6-27B": {
+    "model_revision": null,
+    "revision_source": "Unversioned local directory with no recorded upstream commit.",
+    "config_sha256": "69db4eb7196bc8190813231b3018ca05d8c2e3abc7b1af19d55c157af44a9d9c",
+    "weight_index_sha256": "a8ad2c26fb707ff8c245806315b03e3b4b74595528492423af5dae0ce39b4d9b",
+    "container_path": "/data/models/Qwen/Qwen3.6-27B",
+    "loader_revision_argument": null
+  },
+  "Qwen3.6-35B-A3B": {
+    "model_revision": "master",
+    "revision_source": "ModelScope .mv: Revision:master,CreatedAt:1776959235. No upstream commit recorded.",
+    "config_sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+    "weight_index_sha256": "41b9356101ebf8e7519e150dc811f80c4226e727301fbb032b890f006ed0be83",
+    "container_path": "/data/models/Qwen/Qwen3.6-35B-A3B",
+    "loader_revision_argument": null
+  }
+}

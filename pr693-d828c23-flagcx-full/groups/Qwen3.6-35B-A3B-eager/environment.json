@@ -1,0 +1,11 @@
+{
+  "initial_environment": {
+    "GEMS_VENDOR": "metax",
+    "VLLM_PLUGINS": "fl",
+    "MACA_VISIBLE_DEVICES": "4,5,6,7",
+    "FLAGGEMS_CACHE_DIR": "/root/.flaggems",
+    "VLLM_USE_V2_MODEL_RUNNER": null,
+    "VLLM_FL_FLAGOS_WHITELIST": null,
+    "FLAGCX_PATH": "/opt/FlagCX"
+  }
+}

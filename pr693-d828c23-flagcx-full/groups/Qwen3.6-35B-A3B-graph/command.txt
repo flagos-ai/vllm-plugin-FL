@@ -1,0 +1,1 @@
+vllm serve /data/models/Qwen/Qwen3.6-35B-A3B --served-model-name Qwen3.6-35B-A3B --host 127.0.0.1 --port 18974 --tensor-parallel-size 4 --max-model-len 32768 --allowed-local-media-path /qualification/src/tools/adaptation-gate-cases/images --trust-remote-code --cudagraph-metrics

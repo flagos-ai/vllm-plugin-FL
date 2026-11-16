@@ -1,0 +1,6 @@
+Selected vLLM log lines. Process IDs omitted.
+Replay columns: Unpadded Tokens | Padded Tokens | Num Paddings | Runtime Mode | Count
+
+Worker INFO 11-15 13:42:38 [metax_v2.py:46] MetaX V2 uses upstream NonUvaBuffer: no native mapped CPU-view kernel.
+Worker INFO 11-15 13:42:38 [worker.py:572] MetaX V2 model runner: vllm.v1.worker.gpu.model_runner.GPUModelRunner
+INFO:     Application startup complete.
