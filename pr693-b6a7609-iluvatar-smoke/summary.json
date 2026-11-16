@@ -1,0 +1,48 @@
+{
+  "exit": 0,
+  "runtime": {
+    "provider_commit": "90dd13cd721f2ff139e6f42ef36854518c0b2b95",
+    "archive_sha256": null,
+    "versions": {
+      "vllm": "0.32.0+empty",
+      "torch": "2.10.0+corex.4.5.0",
+      "flag-gems": "5.5.0.dev0",
+      "flagtree": "0.7.0+iluvatar3.6"
+    }
+  },
+  "accelerator": {
+    "device": "Iluvatar BI-V150",
+    "triton": "3.6.0",
+    "triton_path": "/usr/local/lib/python3.12/site-packages/triton/__init__.py"
+  },
+  "completion": {
+    "http": 200,
+    "answer": "4",
+    "completion_tokens": 2,
+    "finish_reason": "stop"
+  },
+  "application_shutdown_logged": true,
+  "plugin_runtime_tested": "9ae620d6ed896095751af15eec394b0e80ae3c88",
+  "plugin_ci_head": "b6a7609cb40a056bc0719778ed585aa830feb9da",
+  "applied_patch_origin": "870e037cae6ac198367444c8ebf6f58c20d555fc",
+  "changed_paths_after_tested_plugin": [
+    ".github/configs/iluvatar.yml",
+    "docs/usage/iluvatar.md"
+  ],
+  "image": "harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci-provider-90dd13c@sha256:9e4db0790c40797fed889d69987a13451ecd181de2b3e1464ef4175f2d8611a9",
+  "image_config": "sha256:395c019ccb11ad6c77dfc87e5470f1c9f6a1b7f905cca6459e4274669debc20b",
+  "container_network": "none",
+  "accelerator_count": 1,
+  "model": "Qwen3-4B",
+  "dtype": "bfloat16",
+  "tensor_parallel_size": 1,
+  "mode": "eager",
+  "requested_auto_runner_selection": true,
+  "plugin_install": "pip --no-index --no-deps --no-build-isolation",
+  "launch_device_mapping": "documented CoreX CI mounts and a one-device CUDA mask",
+  "prior_narrow_device_preflights": [
+    "zero Torch devices",
+    "CoreX initialization error 1001 before serving"
+  ],
+  "official_ci": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/43878739831"
+}
