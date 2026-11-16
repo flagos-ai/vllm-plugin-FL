@@ -5,9 +5,11 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import ctypes
+import importlib.util
 import os
 import sys
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional, Union
 
@@ -22,47 +24,80 @@ from vllm.utils.torch_utils import current_stream
 logger = init_logger(__name__)
 _TXDA_ABORT_TIMEOUT_SECONDS = 5.0
 
-_flagcx_path = os.getenv('FLAGCX_PATH')
-if _flagcx_path and os.path.isdir(_flagcx_path):
-    sys.path.append(_flagcx_path)
+def _load_amd_flagcx_api(api_path: Path):
+    """Load the pinned source API without initializing the Torch ProcessGroup."""
+    name = f"{__name__}._amd_api"
+    spec = importlib.util.spec_from_file_location(name, api_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load FlagCX API from {api_path}")
+    api = importlib.util.module_from_spec(spec)
+    # The wrapper's dataclasses resolve their defining module by name.
+    sys.modules[name] = api
+    try:
+        spec.loader.exec_module(api)
+    except BaseException:
+        del sys.modules[name]
+        raise
+    return api
+
+_flagcx_path = os.getenv("FLAGCX_PATH")
+_flagcx_amd_source = False
+if _flagcx_path and torch.version.hip:
+    from vllm.platforms import current_platform
+
+    _flagcx_amd_source = getattr(current_platform, "vendor_name", None) == "amd"
 
 _flagcx_wheel_api = False
+_flagcx_import_error = None
 try:
-    from plugin.interservice.flagcx_wrapper import (
-        FLAGCXLibrary,
-        buffer_type,
-        flagcxComm_t,
-        flagcxDataTypeEnum,
-        flagcxUniqueId,
-        flagcxRedOpTypeEnum,
-    )
-    _flagcx_available = True
-except (ImportError, ModuleNotFoundError):
-    try:
-        from vllm.platforms import current_platform
+    if _flagcx_amd_source:
+        _api_path = Path(_flagcx_path) / "src" / "flagcx" / "api.py"
+        _api = _load_amd_flagcx_api(_api_path)
+        FLAGCXLibrary = _api.FLAGCXLibrary
+        buffer_type = _api.buffer_type
+        flagcxComm_t = _api.flagcxComm_t
+        flagcxDataTypeEnum = _api.flagcxDataTypeEnum
+        flagcxUniqueId = _api.flagcxUniqueId
+        flagcxRedOpTypeEnum = _api.flagcxRedOpTypeEnum
+    else:
+        if _flagcx_path and os.path.isdir(_flagcx_path):
+            sys.path.append(_flagcx_path)
+        try:
+            from plugin.interservice.flagcx_wrapper import (
+                FLAGCXLibrary,
+                buffer_type,
+                flagcxComm_t,
+                flagcxDataTypeEnum,
+                flagcxRedOpTypeEnum,
+                flagcxUniqueId,
+            )
+        except ImportError:
+            from vllm.platforms import current_platform
 
-        if current_platform.device_type != "ptpu":
-            raise ImportError("FlagCX wheel fallback is enabled only for Sunrise")
-        # FlagCX 0.14 wheels ship the ctypes wrapper as flagcx.api, with
-        # native lookup of the matching lib/libflagcx.so. No checkout is needed.
-        from flagcx.api import (
-            FLAGCXLibrary,
-            buffer_type,
-            flagcxComm_t,
-            flagcxDataTypeEnum,
-            flagcxUniqueId,
-            flagcxRedOpTypeEnum,
-        )
-        _flagcx_available = True
-        _flagcx_wheel_api = True
-    except (ImportError, ModuleNotFoundError):
-        _flagcx_available = False
-        FLAGCXLibrary = None
-        buffer_type = None
-        flagcxComm_t = None
-        flagcxDataTypeEnum = None
-        flagcxUniqueId = None
-        flagcxRedOpTypeEnum = None
+            if current_platform.device_type != "ptpu":
+                raise
+            from flagcx.api import (
+                FLAGCXLibrary,
+                buffer_type,
+                flagcxComm_t,
+                flagcxDataTypeEnum,
+                flagcxRedOpTypeEnum,
+                flagcxUniqueId,
+            )
+
+            _flagcx_wheel_api = True
+    _flagcx_available = True
+except (ImportError, OSError, AttributeError) as exc:
+    if not _flagcx_amd_source and not isinstance(exc, ImportError):
+        raise
+    _flagcx_available = False
+    _flagcx_import_error = exc
+    FLAGCXLibrary = None
+    buffer_type = None
+    flagcxComm_t = None
+    flagcxDataTypeEnum = None
+    flagcxUniqueId = None
+    flagcxRedOpTypeEnum = None
 
 _FAKE_TENSOR_CLS = ()
 try:  # FakeTensor lives in torch._subclasses; keep the import optional.
@@ -133,7 +168,10 @@ class PyFlagcxCommunicator:
             self.disabled = True
             return
         try:
-            ### TODO(lms): simplify it
+            if FLAGCXLibrary is None:
+                raise ImportError(
+                    "FlagCX Python bindings are unavailable"
+                ) from _flagcx_import_error
             if library_path is None and not _flagcx_wheel_api:
                 flagcx_path = os.getenv('FLAGCX_PATH')
                 library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
@@ -211,9 +249,9 @@ class PyFlagcxCommunicator:
                 stream = self._current_stream()
                 # A small all_reduce for warmup.
                 data = torch.zeros(1, device=device)
-                self.all_reduce(data)
+                warmup_output = self.all_reduce(data)
                 stream.synchronize()
-                del data
+                del data, warmup_output
             except Exception:
                 # A returned native handle still needs cleanup if warmup fails.
                 # Other vendors retain their existing initialization behavior.
@@ -294,6 +332,9 @@ class PyFlagcxCommunicator:
             # The upstream helper may cache the default stream while TXDA
             # graph preparation selects a side stream for model execution.
             return torch.txda.current_stream(self.device)
+        if _flagcx_amd_source:
+            # The vLLM stream cache may still point at the default stream.
+            return torch.cuda.current_stream(self.device)
         return current_stream()
 
     def _copy_flagcx_stream(self, stream):
@@ -532,13 +573,13 @@ class PyFlagcxCommunicator:
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def group_start(self):
-        if self.device.type == "npu":
+        if self.device.type == "npu" or _flagcx_amd_source:
             self.flagcx.flagcxGroupStart(self.comm)
         else:
             self.flagcx.flagcxGroupStart()
 
     def group_end(self):
-        if self.device.type == "npu":
+        if self.device.type == "npu" or _flagcx_amd_source:
             self.flagcx.flagcxGroupEnd(self.comm)
         else:
             self.flagcx.flagcxGroupEnd()
