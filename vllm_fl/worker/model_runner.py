@@ -1129,11 +1129,6 @@ class ModelRunnerFL(
         self.mamba_state_idx: dict[str, int] = {}
         self._mamba_bufs: mamba_utils.MambaBuffers | None = None
         self._mamba_state_copy_funcs = None
-        self.mamba_prev_last_scheduled_idx: CpuGpuBuffer | None = None
-        if self.cache_config.mamba_cache_mode == "all" and self.num_spec_tokens > 0:
-            self.mamba_prev_last_scheduled_idx = self._make_buffer(
-                self.max_num_reqs, dtype=torch.int32
-            )
         self.layerwise_nvtx_hooks_registered = False
 
     def update_max_model_len(self, max_model_len: int) -> None:
@@ -1821,17 +1816,6 @@ class ModelRunnerFL(
             assert self.num_accepted_tokens_event is not None
             self.num_accepted_tokens_event.record()
 
-            if self.cache_config.mamba_cache_mode == "all":
-                mamba_utils.postprocess_mamba_all(
-                    scheduler_output,
-                    self.kv_cache_config,
-                    self.input_batch,
-                    self.requests,
-                    self.mamba_state_idx,
-                    self.num_spec_tokens,
-                    num_reqs,
-                )
-
     def _update_streaming_request(
         self, req_id: str, new_req_data: NewRequestData
     ) -> CachedRequestState:
@@ -2373,15 +2357,6 @@ class ModelRunnerFL(
             self.num_accepted_tokens.np.fill(1)
             self.num_accepted_tokens.gpu.fill_(1)
 
-        if self.mamba_prev_last_scheduled_idx is not None:
-            mamba_utils.preprocess_mamba_all_specdec(
-                scheduler_output,
-                self.input_batch,
-                self.mamba_state_idx,
-                num_reqs,
-                self.mamba_prev_last_scheduled_idx,
-            )
-
         # Update num_computed_tokens on GPU. In async spec decode,
         # CPU values are optimistic (all drafts accepted). The kernel
         # corrects on GPU using the previous step's
@@ -2795,13 +2770,6 @@ class ModelRunnerFL(
                         :num_reqs_padded
                     ],
                 )
-                if (
-                    isinstance(builder, Mamba2AttentionMetadataBuilder)
-                    and self.mamba_prev_last_scheduled_idx is not None
-                ):
-                    extra_attn_metadata_args["prev_last_scheduled_idx"] = (
-                        self.mamba_prev_last_scheduled_idx.gpu[:num_reqs_padded]
-                    )
 
             if for_cudagraph_capture:
                 attn_metadata_i = attn_group.build_metadata_for_cudagraph_capture(

@@ -191,30 +191,68 @@ def test_only_metax_flagcx_adds_opaque_collective_boundary(
 
 
 @pytest.mark.parametrize(
-    "vendor,backend,v2,expected",
+    "vendor,device,backend,v2,expected",
     [
         (
             "metax",
+            "cuda",
             "flagcx",
             True,
             "vllm_fl.distributed.metax_communicator.MetaxCommunicatorFL",
         ),
-        ("metax", "flagcx", False, "vllm_fl.distributed.communicator.CommunicatorFL"),
-        ("metax", "flagcx", None, "vllm_fl.distributed.communicator.CommunicatorFL"),
         (
             "metax",
+            "cuda",
+            "flagcx",
+            False,
+            "vllm_fl.distributed.communicator.CommunicatorFL",
+        ),
+        (
+            "metax",
+            "cuda",
+            "flagcx",
+            None,
+            "vllm_fl.distributed.communicator.CommunicatorFL",
+        ),
+        (
+            "metax",
+            "cuda",
             "nccl",
             True,
             "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator",
         ),
-        ("nvidia", "flagcx", True, "vllm_fl.distributed.communicator.CommunicatorFL"),
-        ("mthreads", "flagcx", True, "vllm_fl.distributed.communicator.CommunicatorFL"),
-        ("ascend", "flagcx", True, "vllm_fl.distributed.communicator.CommunicatorFL"),
-        ("iluvatar", "flagcx", True, "vllm_fl.distributed.communicator.CommunicatorFL"),
+        (
+            "nvidia",
+            "cuda",
+            "flagcx",
+            True,
+            "vllm_fl.distributed.communicator.CommunicatorFL",
+        ),
+        (
+            "mthreads",
+            "musa",
+            "flagcx",
+            True,
+            "vllm_fl.distributed.communicator.CommunicatorFL",
+        ),
+        (
+            "ascend",
+            "npu",
+            "flagcx",
+            True,
+            "vllm_fl.distributed.communicator.CommunicatorFL",
+        ),
+        (
+            "iluvatar",
+            "cuda",
+            "flagcx",
+            True,
+            "vllm_fl.dispatch.backends.vendor.iluvatar.communicator.IluvatarCommunicatorFL",
+        ),
     ],
 )
 def test_resolved_metax_v2_flagcx_selects_cuda_graph_bridge(
-    vendor, backend, v2, expected
+    vendor, device, backend, v2, expected
 ):
     path = ROOT / "vllm_fl/platform.py"
     cls = next(
@@ -232,5 +270,7 @@ def test_resolved_metax_v2_flagcx_selects_cuda_graph_bridge(
     namespace = _compile(
         [method], path, {"_metax_uses_v2_runner": lambda: v2, "logger": Mock()}
     )
-    platform = SimpleNamespace(vendor_name=vendor, dist_backend=backend)
+    platform = SimpleNamespace(
+        vendor_name=vendor, device_type=device, dist_backend=backend
+    )
     assert namespace[method.name](platform) == expected

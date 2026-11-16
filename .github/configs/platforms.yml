@@ -148,7 +148,7 @@ platforms:
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
   iluvatar:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/

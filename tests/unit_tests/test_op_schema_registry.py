@@ -34,6 +34,7 @@ def _load_registry(monkeypatch, schemas, *, native=False):
     # native _C registrations (the suite also runs inside vendor CI images).
     monkeypatch.setattr(module, "_is_metax_backend", lambda: False)
     monkeypatch.setattr(module, "_C_ops_present", lambda: False)
+    monkeypatch.setattr(module, "_is_metax_backend", lambda: False)
     return module
 
 
@@ -77,6 +78,13 @@ def test_native_extension_skips_all_fallback_registration(monkeypatch):
     registry = _load_registry(
         monkeypatch, [("_C_cache_ops", "invalid schema")], native=True
     )
+    registry.register_op_schemas()
+    assert not hasattr(registry.register_op_schemas, "_libs")
+
+
+def test_existing_native_ops_skip_fallback_registration(monkeypatch):
+    registry = _load_registry(monkeypatch, [("_C", "invalid schema")])
+    monkeypatch.setattr(registry, "_C_ops_present", lambda: True)
     registry.register_op_schemas()
     assert not hasattr(registry.register_op_schemas, "_libs")
 
