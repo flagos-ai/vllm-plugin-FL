@@ -7,6 +7,30 @@ from types import SimpleNamespace
 import pytest
 
 
+def test_amd_sparse_mla_rejected_before_dispatch(monkeypatch):
+    from vllm_fl import dispatch
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", "amd")
+
+    def fake_dispatch(op_name, *, use_mla, use_sparse):
+        assert (op_name, use_mla, use_sparse) == ("attention_backend", True, False)
+        return "dense_backend"
+
+    monkeypatch.setattr(dispatch, "call_op", fake_dispatch)
+    with pytest.raises(NotImplementedError, match="Sparse MLA"):
+        PlatformFL.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=True, use_sparse=True)
+        )
+
+    assert (
+        PlatformFL.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=True, use_sparse=False)
+        )
+        == "dense_backend"
+    )
+
+
 def _make_ascend_vllm_config(
     *, backend="eager", compilation_mode=None, cudagraph_mode=None, enforce_eager=False
 ):

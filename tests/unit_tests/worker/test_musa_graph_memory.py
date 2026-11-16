@@ -318,6 +318,7 @@ def test_exhausted_budget_diagnostics_preserve_accounting(
             "maybe_rocm_profiling_fallback": lambda _: None,
             "set_current_vllm_config": lambda _: nullcontext(),
             "memory_profiling": lambda *args, **kwargs: nullcontext(profile),
+            "nullcontext": nullcontext,
             "CUDAGraphMode": Mode,
             "envs": NS(VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=estimate_enabled),
             "logger": logger,
