@@ -33,9 +33,25 @@ Two properties of this hardware drive several choices below:
   rejected; Triton recovers by selecting a smaller configuration, which costs
   first-run time rather than correctness.
 
+## Pre-built image
+
+Pull the AMD release image that passed the W7900D Runner V2 gate
+for Qwen3.6-27B and 35B-A3B in eager and graph modes (104/104 requests).
+
+```bash
+AMD_IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-amd-pr659-5f3f669@sha256:6591ace360a56348d9e82e1649019b367d429ebf49be8f4e20a819a92fac2152
+docker pull "$AMD_IMAGE"
+```
+
+After checking the host in step 1, use `"$AMD_IMAGE"` as the image in
+[step 3](#3-create-the-container) and continue with
+[step 5](#5-verify-the-installed-stack). The release includes the empty vLLM
+0.32 wheel, the plugin at `5f3f669`, FlagGems, FlagGems-vllm v0.2.0,
+FlagTree and FlagCX.
+
 ## Build the image
 
-The quickest path is the AMD Dockerfile, which performs every step in section 4
+To build from source, use the AMD Dockerfile. It performs every step in section 4
 (FlagTree, the empty vLLM, FlagGems, FlagGems-vllm, FlagCX and the plugin) and
 fails the build if the resulting stack is not the validated one:
 
