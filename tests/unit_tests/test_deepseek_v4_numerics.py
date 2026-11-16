@@ -108,3 +108,238 @@ def test_tree_topk_graph_refresh(kernels):
         graph.replay()
         torch.cuda.synchronize()
         assert_topk(x, lengths, out, 512)
+
+
+@pytest.mark.parametrize(
+    "score,sink",
+    [
+        (100, 0),
+        (-100, -100),
+        (-100, 0),
+        (10000, 10000),
+        (-10000, -10000),
+        (2, float("inf")),
+        (2, -float("inf")),
+        (2, None),
+    ],
+)
+@pytest.mark.parametrize("empty", [False, True])
+def test_decode_reduce_stable_sink(kernels, score, sink, empty):
+    attention, _ = kernels
+    device = "cuda"
+    logits = torch.full((4,), score, dtype=torch.float64, device=device)
+    v = torch.linspace(-1, 1, 4 * 512, device=device).reshape(4, 512).double()
+    if empty:
+        pm = torch.full((1, 4, 16), -torch.inf, device=device)
+        ps = torch.zeros_like(pm)
+        pa = torch.zeros((1, 4, 16, 512), device=device)
+        expected = torch.zeros((512,), device=device)
+    else:
+        pm = logits.float()[None, :, None].expand(1, 4, 16).contiguous()
+        ps = torch.ones_like(pm)
+        pa = v.float()[None, :, None, :].expand(1, 4, 16, 512).contiguous()
+        if sink is None:
+            weights = logits.softmax(0)
+        elif sink == float("inf"):
+            weights = torch.zeros_like(logits)
+        else:
+            weights = torch.cat((logits, logits.new_tensor([sink]))).softmax(0)[:4]
+        expected = (weights[:, None] * v).sum(0).float()
+    s = torch.full((16,), sink or 0, device=device, dtype=torch.float32)
+    out = torch.full((1, 1, 16, 512), torch.nan, device=device, dtype=torch.bfloat16)
+    lse = torch.empty((1, 16, 1), device=device)
+    attention["decode"]._reduce_split_kernel[(16, 2)](
+        pm,
+        ps,
+        pa,
+        s,
+        out,
+        lse,
+        out.stride(0),
+        out.stride(1),
+        out.stride(2),
+        lse.stride(0),
+        lse.stride(1),
+        1,
+        16,
+        4,
+        sink is not None,
+        256,
+        num_warps=4,
+        num_stages=1,
+    )
+    assert torch.isfinite(out).all()
+    torch.testing.assert_close(
+        out[0, 0].float(), expected.expand(16, -1), rtol=0.004, atol=0.004
+    )
+    expected_lse = -torch.inf if empty else float(torch.logsumexp(logits, 0))
+    torch.testing.assert_close(
+        lse, torch.full_like(lse, expected_lse), rtol=1e-6, atol=1e-5
+    )
+
+
+def attention_reference(q, kv, ids, lens, sink):
+    result = torch.zeros((len(q), 8, 512), device=q.device, dtype=torch.float64)
+    for t in range(len(q)):
+        valid = ids[t, 0, : int(lens[t])].long()
+        valid = valid[(valid >= 0) & (valid < len(kv))]
+        if not len(valid):
+            continue
+        values = kv[valid, 0].double()
+        scores = q[t, :8].double() @ values.T
+        if sink is not None:
+            extra = sink[:8, None].double()
+            if torch.isposinf(extra).any():
+                finite = torch.where(torch.isposinf(extra), 0, extra)
+                p = torch.cat((scores, finite), 1).softmax(1)[:, :-1]
+                p = torch.where(torch.isposinf(extra), 0, p)
+            else:
+                p = torch.cat((scores, extra), 1).softmax(1)[:, :-1]
+        else:
+            p = scores.softmax(1)
+        result[t] = p @ values
+    return result.float()
+
+
+@pytest.mark.parametrize("variant", ["prefill", "staged"])
+@pytest.mark.parametrize(
+    "score,sink_value",
+    [
+        (100, 0),
+        (-100, -100),
+        (-100, 0),
+        (10000, 10000),
+        (-10000, -10000),
+        (2, float("inf")),
+        (2, -float("inf")),
+        (2, None),
+    ],
+)
+def test_prefill_sink_empty_blocks_and_graph(kernels, variant, score, sink_value):
+    attention, _ = kernels
+    q = torch.zeros((4, 16, 512), device="cuda", dtype=torch.bfloat16)
+    q[:, :, 0] = score
+    kv = torch.linspace(-1, 1, 40 * 512, device="cuda").reshape(40, 1, 512).bfloat16()
+    kv[:, :, 0] = 1
+    ids = torch.arange(33, device="cuda", dtype=torch.int32).repeat(4, 1, 1)
+    ids[1, :, :16] = -1
+    ids[2] = -1
+    lens = torch.tensor([33, 33, 33, 0], device="cuda", dtype=torch.int32)
+    sink = (
+        None
+        if sink_value is None
+        else torch.full((16,), sink_value, device="cuda", dtype=torch.float32)
+    )
+    out = torch.empty((4, 16, 512), device="cuda", dtype=torch.bfloat16)
+    ml = torch.empty((4, 16), device="cuda")
+    lse = torch.empty_like(ml)
+    work = attention["staged"].buffers(q, 33)
+
+    def call():
+        if variant == "staged":
+            attention["staged"].run(
+                q, kv, ids, sink, lens, out, ml, lse, work, sm_scale=1.0
+            )
+        else:
+            attention["prefill"].flash_mla_sparse_fwd(
+                q,
+                kv,
+                ids,
+                1.0,
+                attn_sink=sink,
+                topk_length=lens,
+                out=out,
+                max_logits_out=ml,
+                lse_out=lse,
+                real_num_heads=8,
+            )
+
+    call()
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        call()
+    for scale in (1, -1):
+        q[:, :, 0] = score * scale
+        lens.copy_(torch.tensor([33, 33, 33, 0], device="cuda"))
+        out.fill_(torch.nan)
+        ml.fill_(torch.nan)
+        lse.fill_(torch.nan)
+        graph.replay()
+        torch.cuda.synchronize()
+        expected = attention_reference(q, kv, ids, lens, sink)
+        assert torch.isfinite(out[:, :8]).all()
+        torch.testing.assert_close(out[:, :8].float(), expected, rtol=0.008, atol=0.008)
+        assert torch.isposinf(lse[2:]).all()
+
+
+@pytest.mark.parametrize("score", [100.0, -100.0])
+def test_decode_packed_cache_split_and_graph(kernels, score):
+    attention, _ = kernels
+    decode = attention["decode"]
+    q = torch.zeros((4, 1, 16, 512), device="cuda", dtype=torch.bfloat16)
+    q[:, :, :, 0] = score
+    values = torch.ones((256, 1, 512), device="cuda", dtype=torch.bfloat16)
+    # Independent byte packing: 448 FP8 NOPE bytes + 64 BF16 ROPE values per
+    # token, followed by the page's 8 exponent-scale bytes per token.
+    cache = torch.zeros((1, 256, 584), device="cuda", dtype=torch.uint8)
+    data = cache.flatten()[: 256 * 576].view(256, 576)
+    data[:, :448].copy_(
+        values[:, 0, :448].contiguous().to(torch.float8_e4m3fn).view(torch.uint8)
+    )
+    data[:, 448:].copy_(values[:, 0, 448:].contiguous().view(torch.uint8))
+    cache.flatten()[256 * 576 :].fill_(127)
+    ids = torch.arange(33, device="cuda", dtype=torch.int32).repeat(4, 1, 1)
+    ids[1, :, :16] = -1
+    ids[2] = -1
+    lens = torch.tensor([33, 33, 33, 0], device="cuda", dtype=torch.int32)
+    extra_ids = torch.zeros((4, 1, 1), device="cuda", dtype=torch.int32)
+    extra_lens = torch.tensor([1, 0, 0, 0], device="cuda", dtype=torch.int32)
+    sink = torch.zeros(16, device="cuda")
+    out = torch.empty_like(q)
+    lse = torch.empty((4, 16, 1), device="cuda")
+
+    def call():
+        assert decode._try_sparse_decode_model1_split(
+            q,
+            cache,
+            ids,
+            out,
+            lse,
+            sink,
+            lens,
+            cache,
+            extra_ids,
+            extra_lens,
+            4,
+            1,
+            16,
+            512,
+            512,
+            33,
+            256,
+            1.0,
+            real_num_heads=8,
+        )
+
+    call()
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        call()
+    all_ids = torch.cat((ids, extra_ids), -1)
+    # The reference concatenates only valid prefixes, rather than treating an
+    # unused extra slot as another token.
+    all_ids[1:, :, -1] = -1
+    reference_lens = torch.tensor([34, 34, 34, 0], device="cuda")
+    for updated_score in (score, -score):
+        q[:, :, :, 0] = updated_score
+        out.fill_(torch.nan)
+        lse.fill_(torch.nan)
+        graph.replay()
+        torch.cuda.synchronize()
+        expected = attention_reference(q[:, 0], values, all_ids, reference_lens, sink)
+        assert torch.isfinite(out[:, 0, :8]).all()
+        torch.testing.assert_close(
+            out[:, 0, :8].float(), expected, rtol=0.004, atol=0.004
+        )

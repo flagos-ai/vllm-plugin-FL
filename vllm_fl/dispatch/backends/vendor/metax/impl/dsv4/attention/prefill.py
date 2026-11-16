@@ -7,8 +7,10 @@ from typing import Optional, Tuple
 import torch
 import triton
 import triton.language as tl
+
 from . import staged as _staged
 from .launch import local_launch
+from .softmax import sink_factor
 
 _native = importlib.import_module("flaggems_vllm.ops.flashmla_sparse")
 triton_flash_mla_sparse_fwd = local_launch(
@@ -105,9 +107,10 @@ def triton_flash_mla_sparse_fwd_halfd_qkfold_blockdiag(
         qk *= sm_scale
         qk = tl.where(mask_ids[None, :], qk, float("-inf"))
         new_max = tl.maximum(max_log, tl.max(qk, axis=1))
-        exp_qk = tl.math.exp(qk - new_max[:, None])
+        safe_max = tl.where(new_max == float("-inf"), 0.0, new_max)
+        exp_qk = tl.math.exp(qk - safe_max[:, None])
         sum_qk = tl.sum(exp_qk, axis=1)
-        alpha = tl.math.exp(max_log - new_max)
+        alpha = tl.math.exp(max_log - safe_max)
         sum_exp = sum_exp * alpha + sum_qk
 
         prob = exp_qk.to(tl.bfloat16)
@@ -134,10 +137,9 @@ def triton_flash_mla_sparse_fwd_halfd_qkfold_blockdiag(
         # High virtual rows carry V[256:512] for the same real head and must
         # use the same sink normalization as rows 0..7.
         sink = tl.load(attn_sink_ptr + real_h)
-        sum_exp_new_lse = tl.math.exp(orig_lse) + tl.math.exp(sink)
-        factor = tl.math.exp(max_log) / sum_exp_new_lse
+        factor = sink_factor(max_log, sum_exp, sink)
     else:
-        factor = 1.0 / sum_exp
+        factor = 1.0 / tl.where(sum_exp > 0.0, sum_exp, 1.0)
     out_vals = tl.where(valid_mask[:, None], acc * factor[:, None], 0.0)
     v_half = (offs_h >= 8).to(tl.int64) * BDP
     o_ptr = o_base + real_h[:, None] * stride_oh + v_half[:, None] + offs_d[None, :]

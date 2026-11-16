@@ -7,8 +7,10 @@ from typing import Optional, Tuple
 import torch
 import triton
 import triton.language as tl
+
 from . import tuning as _tuning
-from .launch import local_launch, local_autotune
+from .launch import local_autotune, local_launch
+from .softmax import sink_factor
 
 _native = importlib.import_module("flaggems_vllm.ops.flash_mla_with_kvcache")
 FlashMLASchedMeta = _native.FlashMLASchedMeta
@@ -197,9 +199,10 @@ def _partial_model1_kernel_halfd_qkfold_blockdiag(
         qk *= sm_scale
         qk = tl.where(valid_ids[None, :], qk, float("-inf"))
         new_max = tl.maximum(max_log, tl.max(qk, axis=1))
-        exp_qk = tl.math.exp(qk - new_max[:, None])
+        safe_max = tl.where(new_max == float("-inf"), 0.0, new_max)
+        exp_qk = tl.math.exp(qk - safe_max[:, None])
         sum_qk = tl.sum(exp_qk, axis=1)
-        alpha = tl.math.exp(max_log - new_max)
+        alpha = tl.math.exp(max_log - safe_max)
         sum_exp = sum_exp * alpha + sum_qk
         prob = exp_qk.to(tl.bfloat16)
         zero_prob = tl.zeros([BHc, BKc], dtype=tl.bfloat16)
@@ -304,9 +307,10 @@ def _partial_model1_kernel_halfd_qkfold_blockdiag(
         qk *= sm_scale
         qk = tl.where(valid_ids[None, :], qk, float("-inf"))
         new_max = tl.maximum(max_log, tl.max(qk, axis=1))
-        exp_qk = tl.math.exp(qk - new_max[:, None])
+        safe_max = tl.where(new_max == float("-inf"), 0.0, new_max)
+        exp_qk = tl.math.exp(qk - safe_max[:, None])
         sum_qk = tl.sum(exp_qk, axis=1)
-        alpha = tl.math.exp(max_log - new_max)
+        alpha = tl.math.exp(max_log - safe_max)
         sum_exp = sum_exp * alpha + sum_qk
         prob = exp_qk.to(tl.bfloat16)
         zero_prob = tl.zeros([BHc, BKc], dtype=tl.bfloat16)
@@ -359,22 +363,23 @@ def _reduce_split_kernel(
     for s in range(SPLITS):
         v = tl.load(part_max + (b * SPLITS + s) * HQc + h)
         m = tl.maximum(m, v)
+    safe_m = tl.where(m == float("-inf"), 0.0, m)
     gsum = tl.full((), 0.0, dtype=tl.float32)
     acc = tl.zeros([D_BLOCK], dtype=tl.float32)
     for s in range(SPLITS):
         pm = tl.load(part_max + (b * SPLITS + s) * HQc + h)
         ps = tl.load(part_sum + (b * SPLITS + s) * HQc + h)
-        w = tl.math.exp(pm - m)
+        w = tl.math.exp(pm - safe_m)
         gsum += ps * w
         pa = tl.load(part_acc + (((b * SPLITS + s) * HQc + h) * 512) + d0)
         acc += pa * w
     orig_lse = m + tl.math.log(gsum)
     if HAVE_ATTN_SINK:
         sink = tl.load(attn_sink + h)
-        factor = tl.math.exp(m) / (tl.math.exp(orig_lse) + tl.math.exp(sink))
+        factor = sink_factor(m, gsum, sink)
     else:
-        factor = 1.0 / gsum
-    vals = acc * factor
+        factor = 1.0 / tl.where(gsum > 0.0, gsum, 1.0)
+    vals = tl.where(gsum > 0.0, acc * factor, 0.0)
     tl.store(
         out + b * stride_ob + 0 * stride_osq + h * stride_oh + d0, vals.to(tl.bfloat16)
     )

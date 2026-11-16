@@ -5,6 +5,8 @@ import torch
 import triton
 import triton.language as tl
 
+from .softmax import sink_factor
+
 
 @triton.jit
 def qk_states(
@@ -49,9 +51,10 @@ def qk_states(
         qk *= SCALE
         qk = tl.where(valid[None, :], qk, -float("inf"))
         new_max = tl.maximum(max_log, tl.max(qk, axis=1))
-        exp_qk = tl.math.exp(qk - new_max[:, None])
+        safe_max = tl.where(new_max == -float("inf"), 0.0, new_max)
+        exp_qk = tl.math.exp(qk - safe_max[:, None])
         sum_qk = tl.sum(exp_qk, axis=1)
-        alpha = tl.math.exp(max_log - new_max)
+        alpha = tl.math.exp(max_log - safe_max)
         sum_exp = sum_exp * alpha + sum_qk
         tl.store(
             P + ((t * NC + ck) * 16 + h[:, None]) * 16 + k[None, :],
@@ -65,9 +68,9 @@ def qk_states(
     lse_out = tl.where(valid_mask, orig_lse, float("inf"))
     if SINK_ON:
         sink = tl.load(SINK + h)
-        factor = tl.math.exp(max_log) / (tl.math.exp(orig_lse) + tl.math.exp(sink))
+        factor = sink_factor(max_log, sum_exp, sink)
     else:
-        factor = 1.0 / sum_exp
+        factor = 1.0 / tl.where(sum_exp > 0.0, sum_exp, 1.0)
     tl.store(F + t * 16 + h, factor)
     tl.store(MAX + t * 16 + h, max_log)
     tl.store(LSE + t * 16 + h, lse_out)
