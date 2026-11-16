@@ -343,3 +343,69 @@ def test_decode_packed_cache_split_and_graph(kernels, score):
         torch.testing.assert_close(
             out[:, 0, :8].float(), expected, rtol=0.004, atol=0.004
         )
+
+
+@pytest.mark.parametrize("setting", [None, False, True])
+def test_deepgemm_mode_selection(kernels, monkeypatch, setting):
+    import deep_gemm
+
+    module = importlib.import_module("_dsv4_numeric_test.indexer.deep_gemm")
+    monkeypatch.setattr(module, "_selected_backend", None)
+    module._backend.cache_clear()
+    try:
+        backend = module._backend(bool(setting))
+        module.configure(bool(setting))
+        assert module._selected_backend is backend
+        module.configure(bool(setting))
+        with pytest.raises(RuntimeError):
+            module.configure(not bool(setting))
+        if setting:
+            assert backend.func is module._eager_logits
+            assert (
+                backend.args[0] is not deep_gemm.bf16_attention.bf16_mqa_logits_kernel
+            )
+        else:
+            assert backend is deep_gemm.bf16_mqa_logits
+    finally:
+        module._backend.cache_clear()
+
+
+@pytest.mark.parametrize("rows,columns", [(31, 7), (3, 1025), (65, 17)])
+def test_deepgemm_eager_reference_and_replay(kernels, monkeypatch, rows, columns):
+    module = importlib.import_module("_dsv4_numeric_test.indexer.deep_gemm")
+    monkeypatch.setattr(module, "_selected_backend", None)
+    module._backend.cache_clear()
+    module.configure(True)
+    torch.manual_seed(541)
+    q = torch.randn((rows, 64, 128), device="cuda", dtype=torch.bfloat16)
+    kv = torch.randn((columns, 128), device="cuda", dtype=torch.bfloat16)
+    weights = torch.rand((rows, 64), device="cuda")
+    ks = torch.arange(rows, device="cuda", dtype=torch.int32) % columns
+    ke = torch.full_like(ks, columns)
+    ks[0] = columns  # Empty range; masked logits must be -inf.
+    call = lambda: module.bf16_mqa_logits(q, kv, weights, ks, ke)
+    call()
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        output = call()
+    try:
+        for scale in (0.5, -1.0):
+            q.mul_(scale)
+            ke[1] = 0
+            output.fill_(torch.nan)
+            graph.replay()
+            torch.cuda.synchronize()
+            expected = torch.zeros((rows, columns), device="cuda", dtype=torch.float64)
+            for head in range(64):
+                expected += (q[:, head].double() @ kv.double().T).relu() * weights[
+                    :, head, None
+                ].double()
+            ids = torch.arange(columns, device="cuda")
+            expected.masked_fill_(
+                (ids[None] < ks[:, None]) | (ids[None] >= ke[:, None]), -torch.inf
+            )
+            # BF16 inputs, FP32 dot/reduction; the reference accumulates in FP64.
+            torch.testing.assert_close(output.double(), expected, rtol=1e-5, atol=1e-4)
+    finally:
+        module._backend.cache_clear()

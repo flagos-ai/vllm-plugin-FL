@@ -49,6 +49,9 @@ def _prepare_compatibility(profile):
     assert asdict(attention_tuning.KernelPolicy()) == profile["kernels"]
     attention_tuning.configure(profile["kernels"])
     dsv4_config.configure(profile["framework"], profile["moe"])
+    from vllm_fl.dispatch.backends.vendor.metax.impl.dsv4.indexer import deep_gemm
+
+    deep_gemm.configure(profile["service"].get("enforce_eager", False))
     assert flaggems_vllm.current_work_registrar is None
     assert compiler.metax.translate_llvmir_to_mcfatbin is compiler_entry
     from .rms_policy import install as install_rms

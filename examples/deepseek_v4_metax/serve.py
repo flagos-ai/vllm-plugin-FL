@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 
 
-def make_config(model, cache, port=18001, thinking=False):
+def make_config(model, cache, port=18001, thinking=False, enforce_eager=False):
     config = json.loads((HERE / "config.json").read_text())
     policy = config["deepseek_v4_metax"]
     policy["service"]["model"] = str(Path(model).resolve())
@@ -28,6 +28,8 @@ def make_config(model, cache, port=18001, thinking=False):
         service["max_num_seqs"] = 32
         service["compilation_config"]["cudagraph_capture_sizes"] = [1, 2, 4, 8, 16, 32]
         service["compilation_config"]["max_cudagraph_capture_size"] = 32
+    if enforce_eager:
+        policy["service"]["enforce_eager"] = True
     return config
 
 
@@ -185,8 +187,11 @@ def main():
         action="store_true",
         help="Start vLLM; otherwise only print the command",
     )
+    parser.add_argument("--enforce-eager", action="store_true")
     args = parser.parse_args()
-    config = make_config(args.model, args.cache_dir, args.port, args.thinking)
+    config = make_config(
+        args.model, args.cache_dir, args.port, args.thinking, args.enforce_eager
+    )
     command = command_for(config)
     env = environment_for(config, args.cache_dir)
     print(shlex.join(command), flush=True)

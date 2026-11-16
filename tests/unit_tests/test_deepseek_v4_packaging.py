@@ -454,3 +454,13 @@ class PackagingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EagerGateSettingsTests(unittest.TestCase):
+    def test_eager_is_explicit_and_does_not_change_default(self):
+        base = serve.make_config("/model", "/cache")
+        eager = serve.make_config("/model", "/cache", enforce_eager=True)
+        self.assertNotIn("--enforce-eager", serve.command_for(base))
+        self.assertIn("--enforce-eager", serve.command_for(eager))
+        eager["deepseek_v4_metax"]["service"].pop("enforce_eager")
+        self.assertEqual(base, eager)
