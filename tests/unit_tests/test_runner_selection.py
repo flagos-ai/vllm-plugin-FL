@@ -558,10 +558,11 @@ def test_ascend_allows_layer_only_vllm_config(monkeypatch):
 @pytest.mark.parametrize("requested", [None, "0", "1"])
 def test_sunrise_preserves_upstream_v2_runner_selection(monkeypatch, requested):
     import os
+    from importlib import import_module
     from types import SimpleNamespace
 
-    import vllm_fl
-    import vllm_fl.utils
+    plugin = import_module("vllm_fl")
+    plugin_utils = import_module("vllm_fl.utils")
 
     if requested is None:
         monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
@@ -574,9 +575,9 @@ def test_sunrise_preserves_upstream_v2_runner_selection(monkeypatch, requested):
         "_patch_flash_attn_import",
         "_get_op_config",
     ):
-        monkeypatch.setattr(vllm_fl, name, lambda: None)
+        monkeypatch.setattr(plugin, name, lambda: None)
     monkeypatch.setattr(
-        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="sunrise")
+        plugin_utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="sunrise")
     )
-    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    assert plugin.register() == "vllm_fl.platform.PlatformFL"
     assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested
