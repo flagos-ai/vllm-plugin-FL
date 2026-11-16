@@ -10,8 +10,9 @@ works correctly from call_op -> manager -> registry -> implementation.
 
 import importlib
 import os
+import sys
 import weakref
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -506,6 +507,58 @@ class TestCallOpIntegration:
 
         # Fallback must not have been attempted
         assert call_sequence == ["failing"]
+
+    @pytest.mark.parametrize("op_name", ["rms_norm", "rotary_embedding"])
+    @pytest.mark.parametrize("cached", [False, True])
+    @pytest.mark.parametrize("strict_override", [None, "0"])
+    def test_amd_in_place_failure_is_never_retried(
+        self, monkeypatch, op_name, cached, strict_override
+    ):
+        monkeypatch.delenv("VLLM_FL_CONFIG", raising=False)
+        monkeypatch.delenv("VLLM_FL_STRICT", raising=False)
+        if strict_override is not None:
+            monkeypatch.setenv("VLLM_FL_STRICT", strict_override)
+        platforms = ModuleType("vllm.platforms")
+        platforms.current_platform = SimpleNamespace(vendor_name="amd")
+        monkeypatch.setitem(sys.modules, platforms.__name__, platforms)
+        manager = get_default_manager()
+        manager._state.initialized = True
+        manager._state.init_pid = os.getpid()
+        failure = RuntimeError("failure after writing the input")
+
+        def primary(value):
+            value.add_(1)
+            raise failure
+
+        def fallback(value):
+            value.add_(1)
+            return value
+
+        manager.registry.register_impl(
+            OpImpl(
+                op_name=op_name,
+                impl_id="default.amd-test",
+                kind=BackendImplKind.DEFAULT,
+                fn=primary,
+            )
+        )
+        manager.registry.register_impl(
+            OpImpl(
+                op_name=op_name,
+                impl_id="reference.amd-test",
+                kind=BackendImplKind.REFERENCE,
+                fn=fallback,
+            )
+        )
+        value = torch.zeros(1)
+        with pytest.raises(RuntimeError) as error:
+            if cached:
+                CachedOp(op_name)(value)
+            else:
+                call_op(op_name, value)
+
+        assert error.value is failure
+        torch.testing.assert_close(value, torch.ones_like(value))
 
     def test_vendor_filtering(self):
         """Test that vendor filtering works through call_op."""
