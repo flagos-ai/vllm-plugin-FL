@@ -193,9 +193,8 @@ else:
         )
 PATCH
 
-# The MetaX router uses the extended FlagGems-vllm top-k ABI. Install its
-# immutable source without resolving the wheel dependencies from PyPI.
-python .github/scripts/metax/install_flaggems_vllm.py
+# Verify the router pin. This also upgrades older CI images that predate it.
+python docker/metax/install_flaggems_vllm.py
 
 python - <<'PY'
 import flag_gems

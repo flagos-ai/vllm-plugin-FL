@@ -81,6 +81,17 @@ RUN curl --fail --location --retry 5 "${VLLM_SOURCE_URL}" -o /tmp/vllm-source.ta
     && python /opt/metax-stack/runtime_constraints.py verify \
         /opt/metax-stack --vllm-version "${VLLM_VERSION}"
 
+# Bake the plugin's Python dependencies and the router ABI into every target.
+ENV VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
+COPY install_flaggems_vllm.py /opt/metax-stack/install_flaggems_vllm.py
+RUN uv --config-file /opt/metax-stack/uv.toml pip install --python "$(command -v python)" --no-cache \
+        --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
+        decorator pyyaml sqlalchemy modelscope==1.35.3 \
+    && python /opt/metax-stack/install_flaggems_vllm.py \
+    && python /opt/metax-stack/runtime_constraints.py verify \
+        /opt/metax-stack --vllm-version "${VLLM_VERSION}"
+
 WORKDIR /workspace
 
 # ---------- dev stage ----------
@@ -98,19 +109,16 @@ RUN uv --config-file /opt/metax-stack/uv.toml pip install --python "$(command -v
 # ---------- ci stage ----------
 FROM dev AS ci
 
-# The base supplies FlagGems, FlagTree and FlagGems-vllm built for MACA.
-# setup.sh installs the checked-out FL plugin and the MetaX FlagGems-vllm pin.
-ARG INDEX_URL=https://pypi.org/simple
-ARG EXTRA_INDEX_URL
-
-RUN uv --config-file /opt/metax-stack/uv.toml pip install --python "$(command -v python)" --no-cache \
-        --index-url "${INDEX_URL:-https://pypi.org/simple}" \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        decorator pyyaml sqlalchemy 'modelscope>=1.18.1' \
-    && python /opt/metax-stack/runtime_constraints.py verify /opt/metax-stack
-
 # ---------- release stage ----------
 FROM runtime AS release
+
+# Replace the source and package labels inherited from the vendor base.
+LABEL org.opencontainers.image.source="https://github.com/flagos-ai/vllm-plugin-FL" \
+    org.opencontainers.image.version="${VLLM_VERSION}-metax-release" \
+    org.opencontainers.image.revision="" \
+    org.flagos.components.flaggems_vllm.commit="e00557103e284db5b57168386db60faa051989ef" \
+    org.flagos.components.vllm_plugin_fl="not-installed" \
+    flagos.plugin="not-installed"
 
 # Install the desired FL plugin checkout with --no-build-isolation --no-deps.
 WORKDIR /workspace

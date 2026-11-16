@@ -16,6 +16,7 @@ Its preinstalled vLLM is **0.24.0**; pulling the base alone does not install the
 
 | Component | Configuration |
 |---|---|
+| Published release image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-release@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7` |
 | Published CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-ci@sha256:734c6f7d620e2ca3be4fa382a9e2cd6e1d345a310e2e502f11317b5521b886ae` |
 | Base image | `harbor.baai.ac.cn/flagrelease-public/minicpm-ocr-1.0-metax-c550-gems5.5.0-pluginfl-0601420-vllm0.24.0-maca3.8.1.3:20261021` |
 | Base digest | `sha256:7c810404a21cb60d0a6d1f532baca82d1dea8ee428231f7fb066d609aacbadcf` |
@@ -23,7 +24,7 @@ Its preinstalled vLLM is **0.24.0**; pulling the base alone does not install the
 | PyTorch | `2.10.0+metax3.8.1.0`; `torch.version.git_version=f0eb8bf5e72d15327617097aa264c899b3581986` |
 | FlagGems | `5.5.0.dev0`; vendor distribution does not embed a Git SHA; package fingerprint `9bebc2d5c987466aefc61a4280b7e1cf9935626aa4c4e1f5c07319f582e8ad53` |
 | FlagTree / imported Triton | `0.7.0+metax3.6` / `3.6.0`; vendor distribution does not embed a Git SHA; package fingerprint `4028e7bc5821c15002a78ea1e02f242994bb8c260c51afe85c55978f8ecf3928` |
-| FlagGems-vllm | `0.3.0.dev1` installed by MetaX setup from [`e00557103e284db5b57168386db60faa051989ef`](https://github.com/flagos-ai/FlagGems-vllm/commit/e00557103e284db5b57168386db60faa051989ef) |
+| FlagGems-vllm | `0.3.0.dev1` from [`e00557103e284db5b57168386db60faa051989ef`](https://github.com/flagos-ai/FlagGems-vllm/commit/e00557103e284db5b57168386db60faa051989ef) |
 | vLLM | `0.32.0+empty`, built from [`5df63a7203cdb9328d824a27b682e77c7b9928be`](https://github.com/vllm-project/vllm/commit/5df63a7203cdb9328d824a27b682e77c7b9928be); no NVIDIA `vllm._C` |
 | MACA FlashAttention | `2.6.3+metax3.8.1.0torch2.10`; no embedded Git SHA; package fingerprint `8ed84bd3a348d70d534093b2612c35c0b44763e86ba91375fa48f3e3b781942d` |
 | Native FLA / FlashMLA / FlashInfer | `0.5.0+metax3.8.1.0torch2.10` / `1.0.1+metax3.8.1.0torch2.10` / `0.2.6+metax3.8.1.0torch2.10` |
@@ -43,23 +44,19 @@ source commit was not recorded. They are not inferred Git commits.
 The vendor API reference is the MetaX v0.32 development tree at
 [`440ec38e95083b8f143e03d7cc1f3c7ca1b8981e`](https://github.com/MetaX-MACA/vLLM-metax/commit/440ec38e95083b8f143e03d7cc1f3c7ca1b8981e).
 
-Pull the published 0.32 CI runtime:
+Pull the published 0.32 release runtime:
 
 ```bash
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-ci@sha256:734c6f7d620e2ca3be4fa382a9e2cd6e1d345a310e2e502f11317b5521b886ae
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-release@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7
 docker pull "$IMAGE"
 ```
 
-The published digest was verified against the tested local image and pulled
-successfully from Harbor. CI installs its checked-out FL plugin source into
-this dependency image.
-
-For a local build, use the repository's build script:
+To build the release target locally:
 
 ```bash
-bash docker/build.sh --platform metax --target ci \
-  --image-name vllm-plugin-fl --image-tag 0.32.0-metax-ci
-export IMAGE=vllm-plugin-fl:0.32.0-metax-ci
+bash docker/build.sh --platform metax --target release \
+  --image-name vllm-plugin-fl --image-tag v0.32.0-metax-release
+export IMAGE=vllm-plugin-fl:v0.32.0-metax-release
 ```
 
 The build installs vLLM non-editably in empty mode, retains the base's native
@@ -68,12 +65,10 @@ PyPI torch, Triton or NVIDIA vLLM wheel into this image.
 
 ## FlagGems and FlagTree requirements
 
-Use the recorded vendor packages to reproduce this configuration. The build's
-native-stack overrides preserve them. MetaX setup installs FlagGems-vllm
-`0.3.0.dev1` from the pinned commit for routed top-k with correction bias,
-padding and sigmoid scaling. The base image includes the same version string
-with an earlier API. Setup verifies the commit archive hash in the installed
-package metadata and preserves the other native packages.
+The release target includes the pinned FlagGems-vllm commit for routed top-k
+with correction bias, padding and sigmoid scaling. The build verifies its
+source archive hash from package metadata and preserves the other native
+packages. The same installer verifies or upgrades the pin in the CI image.
 
 The FlagGems-vllm 0.3 cache writer handles block gaps but assumes compact token
 and head strides. The plugin uses a stride-aware, C550-safe Triton writer for
@@ -112,7 +107,8 @@ require another FlagGems or FlagTree revision.
 
 Check `mx-smi` and select idle cards before starting. The host needs Docker,
 `/dev/dri` and `/dev/mxcd`. Set `MODEL_ROOT` to a directory containing complete
-checkpoints; the examples use `Qwen3.6-35B-A3B` directly under that directory.
+checkpoints. The examples use `Qwen3.5-4B` and `Qwen3.6-35B-A3B` directly under
+that directory.
 
 ```bash
 export MODEL_ROOT=/data/models
@@ -127,20 +123,27 @@ docker run -d --name "$CONTAINER" \
   -v "$PWD":/src \
   --entrypoint bash "$IMAGE" -lc 'sleep infinity'
 
-docker exec "$CONTAINER" bash -lc '
-  cd /src
-  bash .github/scripts/metax/setup.sh'
+docker exec "$CONTAINER" python -m pip install --no-index \
+  --no-build-isolation --no-deps /src
 ```
 
-The setup script installs the checked-out plugin and the MetaX FlagGems-vllm
-pin, verifies vLLM and the other native package versions, and removes legacy
-`zz_fl_*.pth` boot hooks.
+The release image only needs the plugin installation above. A fresh C550
+container with networking disabled served Qwen3.6-35B-A3B on four cards after
+this installation. For the CI image, run `bash .github/scripts/metax/setup.sh`
+from `/src` to install the plugin and test dependencies and to verify or
+upgrade the FlagGems-vllm pin.
 
 ## Run inference or serving
 
-Start with a small model and eager execution, then test TP and graph execution.
+Start `Qwen3.5-4B` on one C550 with the default `vllm serve` configuration:
+
+```bash
+docker exec "$CONTAINER" vllm serve /data/models/Qwen3.5-4B
+```
+
 Long-running remote commands, including installation, tests and serving, should
-run in a named `tmux` session.
+run in a named `tmux` session. Stop the default server before reusing port 8000
+for the following tuned example with four C550s and eager execution.
 
 ```bash
 docker exec "$CONTAINER" bash -lc '

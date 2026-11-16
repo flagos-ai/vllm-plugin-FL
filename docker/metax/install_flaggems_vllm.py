@@ -59,7 +59,7 @@ def main():
     if not installed_from_pin():
         raise RuntimeError(f"MetaX {PACKAGE} must come from commit {COMMIT}")
     verify_native_versions()
-    print(f"[metax-ci] {PACKAGE} {version(PACKAGE)} from commit {COMMIT}")
+    print(f"[metax] {PACKAGE} {version(PACKAGE)} from commit {COMMIT}")
 
 
 if __name__ == "__main__":
