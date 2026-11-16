@@ -231,7 +231,7 @@ VLLM_TARGET_DEVICE=empty VLLM_USE_PRECOMPILED=0 VLLM_USE_PRECOMPILED_RUST=0 \
 
 # Build from a writable copy of the checkout being validated.
 cp -a /workspace/vllm-plugin-FL /work/sources/vllm-plugin-FL
-GEMS_VENDOR=thead python -m pip install --no-build-isolation --no-deps /work/sources/vllm-plugin-FL
+VLLM_VENDOR= python -m pip install --no-build-isolation --no-deps /work/sources/vllm-plugin-FL
 ```
 
 Keep a record of your installed plugin revision and re-run the acceptance
