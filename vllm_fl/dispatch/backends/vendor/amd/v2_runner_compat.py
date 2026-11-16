@@ -7,7 +7,7 @@ import torch
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
-_weak_ref_library: torch.library.Library | None = None
+_weak_ref_libraries: list[torch.library.Library] = []
 
 
 def _weak_ref_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -30,9 +30,7 @@ def _weak_ref_tensor(tensor: torch.Tensor) -> torch.Tensor:
 
 
 def _register_weak_ref_cuda_kernel() -> None:
-    global _weak_ref_library
-
-    if _weak_ref_library is not None:
+    if _weak_ref_libraries:
         return
     # A native ROCm build provides this CUDA-key kernel in _C_stable_libtorch.
     # The EMPTY wheel only has a throwing Composite fallback.
@@ -41,7 +39,7 @@ def _register_weak_ref_cuda_kernel() -> None:
     library = torch.library.Library("_C", "IMPL", "CUDA")
     library.impl("weak_ref_tensor", _weak_ref_tensor)
     # A torch.library registration lives as long as its Library object.
-    _weak_ref_library = library
+    _weak_ref_libraries.append(library)
 
 
 def _no_uva() -> bool:
