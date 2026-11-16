@@ -141,3 +141,47 @@ def test_metax_without_mcoplib_registers_flagos_fallbacks(monkeypatch):
     finally:
         for lib in getattr(registry.register_op_schemas, "_libs", {}).values():
             lib._destroy()
+
+
+@pytest.mark.parametrize(
+    "vendor, native_cpu", [("metax", False), ("metax", True), ("amd", False)]
+)
+def test_cpu_view_registration_exposes_only_a_real_cpu_mapping(
+    monkeypatch, vendor, native_cpu
+):
+    name = "cpu_view_" + uuid.uuid4().hex
+    schema = f"{name}(Tensor input) -> Tensor"
+    registry = _load_registry(monkeypatch, [("_C", schema)])
+    monkeypatch.setattr(registry, "_CPU_VIEW_OP", name)
+    monkeypatch.setattr(registry, "_QUERY_OP_IMPLS", [])
+    monkeypatch.setattr(registry, "_CUDA_FALLBACK_IMPLS", [])
+    monkeypatch.setattr(registry, "_is_metax_backend", lambda: vendor == "metax")
+    monkeypatch.setattr(
+        registry, "_accelerator_view_from_cpu_tensor", lambda tensor: tensor + 2
+    )
+
+    native = torch.library.Library("_C", "FRAGMENT")
+    if native_cpu:
+        native.define(schema)
+        native.impl(name, lambda tensor: tensor + 1, "CPU")
+    try:
+        registry.register_op_schemas()
+        qualified = f"_C::{name}"
+        has_cpu_mapping = torch._C._dispatch_has_kernel_for_dispatch_key(
+            qualified, "CPU"
+        )
+        assert has_cpu_mapping is (native_cpu or vendor == "amd")
+
+        op = getattr(torch.ops._C, name)
+        tensor = torch.tensor([1.0])
+        if has_cpu_mapping:
+            torch.testing.assert_close(op(tensor), tensor + (1 if native_cpu else 2))
+        else:
+            with pytest.raises(
+                RuntimeError, match="empty builds do not provide a mapped CUDA view"
+            ):
+                op(tensor)
+    finally:
+        for lib in getattr(registry.register_op_schemas, "_libs", {}).values():
+            lib._destroy()
+        native._destroy()

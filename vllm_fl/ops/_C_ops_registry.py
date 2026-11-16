@@ -44,6 +44,9 @@ def _unavailable_cuda_view(tensor):
     )
 
 
+_CPU_VIEW_OP = "get_cuda_view_from_cpu_tensor"
+
+
 def _accelerator_view_from_cpu_tensor(tensor):
     """Dispatch ``_C::get_cuda_view_from_cpu_tensor`` to the vendor's mapping.
 
@@ -243,7 +246,12 @@ def register_op_schemas():
 
     c_lib = libs.get("_C")
     if c_lib is not None:
-        for name, fn in _QUERY_OP_IMPLS:
+        query_ops = _QUERY_OP_IMPLS
+        if is_metax:
+            # Runner V2 treats an explicit CPU kernel as native UVA support.
+            # The empty MetaX wheel only needs an error for callers that bypass it.
+            query_ops = [*query_ops, (_CPU_VIEW_OP, _unavailable_cuda_view)]
+        for name, fn in query_ops:
             if not hasattr(torch.ops._C, name):
                 continue
             # Native query/weak-reference kernels retain ownership even if a
@@ -257,15 +265,10 @@ def register_op_schemas():
             if not has_native:
                 c_lib.impl(name, fn, "CompositeImplicitAutograd")
 
-        # The accelerator view takes a *pinned CPU* tensor, so it dispatches on
-        # the CPU key rather than CompositeImplicitAutograd. Resolved here, not
-        # call time, so it works regardless of registration order.
-        with suppress(RuntimeError):
-            c_lib.impl(
-                "get_cuda_view_from_cpu_tensor",
-                _accelerator_view_from_cpu_tensor,
-                "CPU",
-            )
+        if not is_metax:
+            # A pinned CPU tensor dispatches to the AMD host-mapping fallback on CPU.
+            with suppress(RuntimeError):
+                c_lib.impl(_CPU_VIEW_OP, _accelerator_view_from_cpu_tensor, "CPU")
 
         for name, fn in _CUDA_FALLBACK_IMPLS:
             if not hasattr(torch.ops._C, name):
