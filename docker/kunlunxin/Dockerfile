@@ -39,7 +39,7 @@ RUN bash /opt/kunlunxin-build/install-vllm.sh
 
 # Register the vLLM FlagGems providers in every derived image.
 COPY .github/scripts/install_flaggems_vllm.py /opt/kunlunxin-build/install_flaggems_vllm.py
-RUN PIP_INDEX_URL="${INDEX_URL:-https://pypi.org/simple}" \
+RUN PIP_INDEX_URL="${INDEX_URL:-https://pypi.org/simple}" CI_FLAGGEMS_VLLM_VENDOR=kunlunxin \
     python /opt/kunlunxin-build/install_flaggems_vllm.py --source-archive
 
 COPY . /opt/vllm-plugin-FL

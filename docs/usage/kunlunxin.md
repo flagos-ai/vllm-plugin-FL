@@ -12,7 +12,7 @@
 | PyTorch | `2.9.0+cu129` from the application image |
 | FlagTree and Triton | FlagTree `0.7.0+xpu3.6`, Triton `3.6.0` |
 | FlagGems | `5.4.0` |
-| FlagGems-vLLM | Source tag `v0.2.0` at [`b5c2c224`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19) |
+| FlagGems-vLLM | [`8ae5c22`](https://github.com/flagos-ai/FlagGems-vllm/commit/8ae5c22f5af6d650216f881c329c4dff20c182e1) based on `v0.2.0`, with Kunlunxin Runner V2 sampling penalties and grammar masking |
 | FlagCX | `0.14.1+xre5.37.1` for tensor-parallel inference |
 
 The FlagOS wheel contains the vLLM Python runtime. The FlagOS P800 application

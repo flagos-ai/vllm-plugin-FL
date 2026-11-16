@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install the same FlagGems-vllm release in every platform's CI interpreter."""
+"""Install the FlagGems-vllm source pinned for the CI interpreter."""
 
 import argparse
 import json
@@ -19,6 +19,14 @@ if os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "iluvatar":
     COMMIT = "90dd13cd721f2ff139e6f42ef36854518c0b2b95"
     REPOSITORY = "https://github.com/luoyc123/FlagGems-vllm.git"
     SOURCE_ARCHIVE = None
+elif os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "kunlunxin":
+    COMMIT = "8ae5c22f5af6d650216f881c329c4dff20c182e1"
+    SOURCE_ARCHIVE = (
+        f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"
+    )
+    SOURCE_ARCHIVE_SHA256 = (
+        "eab3544a5a6a2efaf7b3465a04ea0f867f77cfbe144ed7f2b8ad20c7b28bb36c"
+    )
 RUNTIME_PACKAGES = ("torch", "flagtree", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
 
