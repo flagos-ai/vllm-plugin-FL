@@ -34,7 +34,7 @@ class PackagingTests(unittest.TestCase):
     def test_docker_build_uses_clean_source_and_package_paths(self):
         dockerfile = (EXAMPLE / "Dockerfile").read_text()
         ignores = (EXAMPLE / "Dockerfile.dockerignore").read_text()
-        self.assertIn("RUN test ! -e /opt/dsv4-fl-source", dockerfile)
+        self.assertIn("RUN test ! -e /opt/dsv4-plugin-source", dockerfile)
         self.assertIn("pip uninstall -y vllm-plugin-fl", dockerfile)
         self.assertIn("dsv4-base-leftovers", dockerfile)
         self.assertIn("build/", ignores)
@@ -61,17 +61,21 @@ class PackagingTests(unittest.TestCase):
 
     def test_reject_unpinned_install(self):
         dist = types.SimpleNamespace(read_text=lambda _: None)
-        with patch.object(serve.importlib.metadata, "distribution", return_value=dist):
-            with self.assertRaisesRegex(RuntimeError, "pinned Git requirement"):
-                serve.check_dependency_pins()
+        with (
+            patch.object(serve.importlib.metadata, "distribution", return_value=dist),
+            self.assertRaisesRegex(RuntimeError, "pinned Git requirement"),
+        ):
+            serve.check_dependency_pins()
 
     def test_reject_wrong_dependency_revision(self):
         dist = types.SimpleNamespace(
             read_text=lambda _: json.dumps({"vcs_info": {"commit_id": "0" * 40}})
         )
-        with patch.object(serve.importlib.metadata, "distribution", return_value=dist):
-            with self.assertRaisesRegex(RuntimeError, "expected"):
-                serve.check_dependency_pins()
+        with (
+            patch.object(serve.importlib.metadata, "distribution", return_value=dist),
+            self.assertRaisesRegex(RuntimeError, "expected"),
+        ):
+            serve.check_dependency_pins()
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -153,6 +157,14 @@ class PackagingTests(unittest.TestCase):
         result = subprocess.run(
             [
                 sys.executable,
+                "-I",
+                "-S",
+                "-c",
+                (
+                    "import runpy, sys; sys.argv = sys.argv[1:]; "
+                    "runpy.run_path(sys.argv[0], run_name='__main__'); "
+                    "assert 'torch' not in sys.modules"
+                ),
                 str(EXAMPLE / "serve.py"),
                 "--model",
                 "/not/a/model",
@@ -165,7 +177,6 @@ class PackagingTests(unittest.TestCase):
         )
         self.assertIn("FULL_DECODE_ONLY", result.stdout)
         self.assertFalse((self.root / "unused").exists())
-        self.assertNotIn("torch", sys.modules)
 
     def test_no_frozen_source_tree(self):
         self.assertFalse((EXAMPLE / "profile/src").exists())
@@ -291,7 +302,9 @@ class PackagingTests(unittest.TestCase):
             package = "vllm_fl.dispatch.backends." + backend.replace("/", ".")
             for enabled in (False, True):
                 root = types.ModuleType("vllm_fl")
-                root.dsv4_config = types.SimpleNamespace(is_enabled=lambda: enabled)
+                root.dsv4_config = types.SimpleNamespace(
+                    is_enabled=lambda enabled=enabled: enabled
+                )
                 generic = types.ModuleType(
                     package + (".flaggems" if kind == "flagos" else ".metax")
                 )

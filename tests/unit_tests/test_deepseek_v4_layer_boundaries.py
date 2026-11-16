@@ -32,9 +32,14 @@ class LayerBoundaryTests(unittest.TestCase):
         self.jit_type = JIT
         fake = types.ModuleType("triton")
         fake.runtime = types.SimpleNamespace(JITFunction=JIT)
-        fake.autotune = lambda **options: lambda fn: types.SimpleNamespace(
-            fn=fn, options=options
-        )
+
+        def autotune(**options):
+            def bind(fn):
+                return types.SimpleNamespace(fn=fn, options=options)
+
+            return bind
+
+        fake.autotune = autotune
         self.modules = patch.dict(
             sys.modules,
             {
@@ -91,7 +96,10 @@ class LayerBoundaryTests(unittest.TestCase):
                 name, {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
             )
         headpack = (ROOT / "vllm_fl/attention/deepseek_v4/headpack.py").read_text()
-        self.assertIn("vllm_fl.dispatch.backends.vendor.metax.impl.dsv4.attention import prefill", headpack)
+        self.assertIn(
+            "vllm_fl.dispatch.backends.vendor.metax.impl.dsv4.attention import prefill",
+            headpack,
+        )
         self.assertNotIn("flaggems_vllm.ops.flashmla_sparse", headpack)
 
     def test_tuning_has_no_mhc_or_compiler_policy(self):
@@ -180,10 +188,18 @@ class LayerBoundaryTests(unittest.TestCase):
                 else:
                     continue
                 for module in modules:
-                    self.assertFalse(module.startswith((
-                        "torch.distributed", "vllm.distributed",
-                        "vllm_fl.ops", "vllm_fl.attention", "vllm_fl.dsv4_config",
-                    )), (path, module))
+                    self.assertFalse(
+                        module.startswith(
+                            (
+                                "torch.distributed",
+                                "vllm.distributed",
+                                "vllm_fl.ops",
+                                "vllm_fl.attention",
+                                "vllm_fl.dsv4_config",
+                            )
+                        ),
+                        (path, module),
+                    )
                 self.assertFalse(
                     isinstance(node, ast.ImportFrom)
                     and node.module == "vllm_fl"
@@ -197,10 +213,14 @@ class LayerBoundaryTests(unittest.TestCase):
             tree = ast.parse(path.read_text())
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
-                    self.assertFalse(any(
-                        isinstance(d, ast.Attribute) and d.attr in {"jit", "autotune"}
-                        for d in node.decorator_list
-                    ), (path, node.name))
+                    self.assertFalse(
+                        any(
+                            isinstance(d, ast.Attribute)
+                            and d.attr in {"jit", "autotune"}
+                            for d in node.decorator_list
+                        ),
+                        (path, node.name),
+                    )
         for name in ("row_sharding.py", "query_sharding.py"):
             self.assertIn("dist.all_gather_into_tensor", (folder / name).read_text())
         row = (folder / "row_sharding.py").read_text()
@@ -218,9 +238,15 @@ class LayerBoundaryTests(unittest.TestCase):
 
     def test_old_ops_paths_and_loose_file_fallback_are_absent(self):
         retired = {
-            "batched_logits", "paged_indexer_logits", "tree_topk", "indexer_m84_score",
-            "indexer_query_sharding", "prefill_indexer_rowshard", "dsv4_headpack",
-            "dsv4_serial", "dsv4_validation",
+            "batched_logits",
+            "paged_indexer_logits",
+            "tree_topk",
+            "indexer_m84_score",
+            "indexer_query_sharding",
+            "prefill_indexer_rowshard",
+            "dsv4_headpack",
+            "dsv4_serial",
+            "dsv4_validation",
         }
         for name in retired:
             self.assertFalse((ROOT / "vllm_fl/ops" / (name + ".py")).exists())
@@ -235,12 +261,15 @@ class LayerBoundaryTests(unittest.TestCase):
         path = ROOT / "vllm_fl/patches/deepseek_v4_metax/validation.py"
         tree = ast.parse(path.read_text())
         target = "vllm_fl.ops.dsv4_embedding"
-        self.assertFalse(any(
-            isinstance(n, ast.ImportFrom) and n.module == target for n in tree.body
-        ))
-        self.assertTrue(any(
-            isinstance(n, ast.ImportFrom) and n.module == target for n in ast.walk(tree)
-        ))
+        self.assertFalse(
+            any(isinstance(n, ast.ImportFrom) and n.module == target for n in tree.body)
+        )
+        self.assertTrue(
+            any(
+                isinstance(n, ast.ImportFrom) and n.module == target
+                for n in ast.walk(tree)
+            )
+        )
 
     def test_all_python_sources_parse(self):
         for path in OPS.glob("*.py"):
