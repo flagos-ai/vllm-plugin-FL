@@ -3,6 +3,7 @@
 """Runner-selection contracts for vLLM 0.32.0."""
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 
