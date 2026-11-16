@@ -116,7 +116,9 @@ def _C_ops_present() -> bool:
     ops = getattr(torch.ops, "_C", None)
     if ops is None:
         return False
-    names = [name for name, _ in _QUERY_OP_IMPLS]
+    # The optional FL extension only supplies weak_ref_tensor. Its presence
+    # does not mean an empty vLLM wheel has the rest of the native schemas.
+    names = [name for name, _ in _QUERY_OP_IMPLS if name != "weak_ref_tensor"]
     names += [name for name, _ in _CUDA_FALLBACK_IMPLS]
     return any(hasattr(ops, name) for name in names)
 

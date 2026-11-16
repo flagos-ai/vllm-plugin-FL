@@ -55,6 +55,7 @@ from vllm.models.common.ops.sequence_parallel import (
 from vllm.sequence import IntermediateTensors
 
 from .hyperconnection import GatedResidual, HyperConnectionConfig
+from .quantization import configure_bf16_weights
 from vllm.models.qwen4_exp.nvidia.low_latency_gemm import enable_qwen4_exp_low_latency_gemm
 from .model import (
     _EXTRA_WEIGHTS_MAPPER,
@@ -167,6 +168,7 @@ def _make_draft_vllm_config(
     # VllmConfig post-init derives the target quant config, so restore the
     # independently resolved draft quant config after replacement.
     draft_vllm_config.quant_config = draft_quant_config
+    configure_bf16_weights(draft_vllm_config)
     return draft_vllm_config
 
 

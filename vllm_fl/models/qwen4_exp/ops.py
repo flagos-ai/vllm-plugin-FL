@@ -6,6 +6,7 @@ from functools import cache
 import torch
 from vllm.models.qwen4_exp.common.ops import ple
 from vllm.models.qwen4_exp.nvidia.ops import hc
+from vllm.platforms import current_platform
 from vllm.utils.torch_utils import direct_register_custom_op
 
 
@@ -100,6 +101,10 @@ def _ple_gate(
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     fusion = _fl_ple_fusion()
+    if fusion is not None and current_platform.vendor_name == "thead":
+        # The merged projection produces row-strided K and V views. The
+        # library kernel accepts dense rows.
+        key, value, hidden = key.contiguous(), value.contiguous(), hidden.contiguous()
     if fusion is not None and key.is_contiguous() and hidden.is_contiguous():
         can_use_ple_gate_norm_triton, ple_gate_norm = fusion
         groups = hidden.shape[-1] // value.shape[-1]

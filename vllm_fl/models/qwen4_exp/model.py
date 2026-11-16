@@ -87,7 +87,9 @@ from .hyperconnection import GatedResidual, HyperConnectionConfig
 from vllm.models.qwen4_exp.nvidia.low_latency_gemm import enable_qwen4_exp_low_latency_gemm
 from vllm.models.qwen4_exp.nvidia.ops.cute_dsl.hc_down_silu import request_hc_down_silu_warmup
 from .ple_layer import Qwen4ExpPLELayer
+from .quantization import configure_bf16_weights
 from vllm.models.qwen4_exp.nvidia.model import Qwen4ExpQSAAttention
+from vllm.platforms import current_platform
 
 # Transformers v5.18 renamed `qwen_sparse_attention` to `indexed_attention`
 # TODO: Delete qwen_... once Transformers 5.18.0 is the minimum required version.
@@ -252,7 +254,12 @@ class Qwen4ExpDecoderLayer(nn.Module):
                     reduce_results=not self.use_hc_sequence_parallel,
                 )
             else:
-                self.self_attn = Qwen4ExpQSAAttention(
+                qsa_cls = Qwen4ExpQSAAttention
+                if current_platform.vendor_name == "thead":
+                    from .thead_qsa import Qwen4ExpQSAAttention as TheadQSAAttention
+
+                    qsa_cls = TheadQSAAttention
+                self.self_attn = qsa_cls(
                     vllm_config=vllm_config,
                     config=config,
                     layer_id=self.layer_idx,
@@ -729,6 +736,7 @@ class Qwen4ExpForCausalLM(
             }
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
+        configure_bf16_weights(vllm_config)
         self.quant_config = vllm_config.quant_config
         self.config = config
         self.scheduler_config = vllm_config.scheduler_config
@@ -977,6 +985,7 @@ class Qwen4ExpForConditionalGeneration(
             self.packed_modules_mapping = self.packed_modules_mapping | {
                 "qkv_proj": ["q_proj", "k_proj", "v_proj"],
             }
+        configure_bf16_weights(vllm_config)
         quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
         if multimodal_config is None:

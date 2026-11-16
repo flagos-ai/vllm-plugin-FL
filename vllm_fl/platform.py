@@ -483,6 +483,14 @@ class PlatformFL(Platform):
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
+        if cls.vendor_name == "thead" and getattr(model_config, "architecture", None) in (
+            "Qwen4ExpForCausalLM",
+            "Qwen4ExpForConditionalGeneration",
+            "Qwen4ExpMTP",
+        ):
+            from vllm_fl.models.qwen4_exp.quantization import configure_bf16_cache
+
+            configure_bf16_cache(vllm_config)
         parallel_config = vllm_config.parallel_config
         if cls.device_type == "txda":
             if getattr(vllm_config, "speculative_config", None) is not None:
