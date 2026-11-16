@@ -23,7 +23,7 @@ parameters.  Every numeric expectation is derived in the test from plain
 torch over the same weights, ids and router weights.
 
 The image's upstream ``_get_config_quant_dtype`` rejects the keyword the
-plugin passes (SOURCE_BUGS S6): the helper binding is therefore replaced
+plugin passes (SOURCE_BUGS S6, #764): the helper binding is therefore replaced
 with the documented three-flag signature so the reachable normal branches can
 be exercised.  The failure itself is not asserted anywhere.
 """

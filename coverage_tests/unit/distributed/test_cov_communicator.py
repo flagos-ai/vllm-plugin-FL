@@ -90,13 +90,13 @@ def _collective_worker(rank: int, port: int, result_queue) -> None:
         # PyFlagcxCommunicator.reduce_scatter returns early (disabled) and
         # CommunicatorFL.reduce_scatter has no torch.distributed fallback,
         # so the output stays uninitialized (vllm_fl/distributed/communicator.py:91
-        # + device_communicators/flagcx.py:297-298; SOURCE_BUGS.md S3).
+        # + device_communicators/flagcx.py:297-298; SOURCE_BUGS.md S3, #763).
 
         # all_gatherv: NOT exercised here — vllm_fl/distributed/communicator.py:176
         # asserts pyflagcx_comm is not None and not disabled, i.e. the op has
         # no torch.distributed fallback and is unreachable on images without
-        # flagcx (handed to the plugin owners; would need an nccl fallback
-        # like all_reduce/send/recv have).
+        # flagcx (handed to the plugin owners, #763; would need an nccl
+        # fallback like all_reduce/send/recv have).
 
         # send/recv ring: rank 0 sends 7s forward, rank 1 sends 11s back.
         if rank == 0:
