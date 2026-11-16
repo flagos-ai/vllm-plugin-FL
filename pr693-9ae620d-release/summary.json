@@ -1,0 +1,78 @@
+{
+  "cases": {
+    "Qwen3.6-35B-A3B-tp4-eager": {
+      "served_model": "metax-moe",
+      "answer": "4",
+      "finish_reason": "stop",
+      "completion_tokens": 2,
+      "exit": 0,
+      "runner": [
+        "MetaX V2 model runner: vllm.v1.worker.gpu.model_runner.GPUModelRunner"
+      ],
+      "provider": [
+        "MetaX moe topk compat applied: vllm._custom_ops.topk_softmax/topk_sigmoid rebound to FlagGems-vllm public operators"
+      ],
+      "piecewise_capture": false
+    },
+    "Qwen3.5-4B-default": {
+      "served_model": "/data/models/Qwen3.5-4B",
+      "answer": "4",
+      "finish_reason": "stop",
+      "completion_tokens": 2,
+      "exit": 0,
+      "runner": [
+        "MetaX V2 model runner: vllm.v1.worker.gpu.model_runner.GPUModelRunner"
+      ],
+      "provider": [
+        "MetaX moe topk compat applied: vllm._custom_ops.topk_softmax/topk_sigmoid rebound to FlagGems-vllm public operators"
+      ],
+      "piecewise_capture": true
+    }
+  },
+  "installed_packages": {
+    "flaggems_vllm": [
+      "0.3.0.dev1",
+      "/flagos/lib/python3.12/site-packages/flaggems_vllm/__init__.py",
+      {
+        "archive_info": {
+          "hash": "sha256=2e19546b78a838c188b2e4e4f12b1a40b395a13fc75f24fbabb7229e63461656",
+          "hashes": {
+            "sha256": "2e19546b78a838c188b2e4e4f12b1a40b395a13fc75f24fbabb7229e63461656"
+          }
+        },
+        "url": "https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/e00557103e284db5b57168386db60faa051989ef"
+      }
+    ],
+    "flaggems": [
+      "5.5.0.dev0",
+      "/flagos/lib/python3.12/site-packages/flag_gems/__init__.py"
+    ],
+    "flagtree": [
+      "0.7.0+metax3.6",
+      "/opt/flagtree/triton/__init__.py"
+    ],
+    "plugin": [
+      "0.0.0+gd35fe0f55",
+      "/flagos/lib/python3.12/site-packages/vllm_fl/__init__.py"
+    ],
+    "vllm": "0.32.0+empty"
+  },
+  "image_metadata_rebuild": {
+    "old": "sha256:830bb26a46e29705f34b4a4329002abe7e02513bfdac55d9ddbbf18caaeb3ede",
+    "new": "sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7",
+    "rootfs_fingerprint": "4b9fb56442774e8e153c92becbaa9c04d6e8d01e085e0d33cd9a5c0ba6327d3c",
+    "runtime_config_fingerprint_excluding_labels": "0069517cc5fad4070f2029b80a6b610150436d4f2e2c20db47046e35851f5a3b",
+    "identical_rootfs": true,
+    "identical_runtime_config_excluding_labels": true
+  },
+  "qualified_plugin_commit": "d35fe0f55e9918a28fbc61ca3f244053ad595d97",
+  "pull_request_head": "9ae620d6ed896095751af15eec394b0e80ae3c88",
+  "runtime_code_diff": "git diff d35fe0f 9ae620d -- vllm_fl tests has no changes",
+  "release_image": "harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-release@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7",
+  "linux_amd64_manifest": "sha256:d6db03ed39a2adff55a01668c9500a7f59ff5b6e01b0175a396b49447b6e375d",
+  "config_digest": "sha256:e83341558b4a337917e7717ff5e4ba1ee852a9cd81d4cd404b56966d4a2acd58",
+  "container_network": "none",
+  "install": "python -m pip install --no-index --no-build-isolation --no-deps /tmp/plugin",
+  "v2_environment_override": null,
+  "dispatch_whitelist": null
+}
