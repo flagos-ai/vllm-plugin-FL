@@ -2,8 +2,8 @@
 
 ## vLLM 0.32.0 on `0.5.0-dev`
 
-Prepare the pinned 910C image and install the matching FL wheel using the
-[Ascend image recipe](../../docker/ascend/README.md#build). With the runner
+Pull the [published 910C release](../../docker/ascend/README.md#deploy-the-published-image)
+and install the matching FL wheel. With the runner
 variable unset, vLLM 0.32 selects V2 for supported configurations and can
 select V1 for features such as suffix speculative decoding. The pinned CI
 image and its setup explicitly use `VLLM_USE_V2_MODEL_RUNNER=1`.
@@ -15,6 +15,7 @@ cover eager execution and `FULL_DECODE_ONLY` with native HCCL.
 | Hardware and driver | Ascend 910C 64 GiB, AArch64, with host driver `25.5.0` on the validation host. The [base image release](https://flagos-ai.github.io/release-info/application/vllm0.24.0-ascend-cann9.0.0-910c/) lists `26.0.rc1` as its host prerequisite. |
 | SDK and native collectives | CANN `9.0.0`, including HCCL |
 | Base image | `harbor.baai.ac.cn/flagos-app/vllm0.24.0-ascend-cann9.0.0-910c:2.2.0-0.3.0@sha256:fc83d07a4fbecd090dc471e9caa5d978dc34715fcfcca537b7bbf720a298dd51` |
+| Deployment image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-release-20261116-gems622f5bf-89bccfcc5fbe@sha256:399c559414e6c38a42f0876794b2366077377440de54722e901af5a79fc03e27` |
 | CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-ci-20261104-v2-0b420101@sha256:eadc6f0fa34d2b8291db76c2ff24f4dddfadfb449b9f5c282147ef7c229a5ad5` |
 | Python and vLLM | Python `3.11.15`, vLLM `0.32.0+empty` from [`5df63a7`](https://github.com/vllm-project/vllm/commit/5df63a7203cdb9328d824a27b682e77c7b9928be) |
 | PyTorch and torch-npu | PyTorch `2.10.0+cpu`, torch-npu `2.10.0` |
@@ -57,13 +58,12 @@ PY
 ```
 
 Select two idle physical 910C NPUs and set `NPU_IDS` to their comma-separated
-IDs. Add these options to the container's device and driver mounts.
+IDs. Add these options when launching with the Ascend Docker runtime.
 
 ```bash
 -v "$FLAGCX_DIR:/opt/FlagCX:ro" \
 -e FLAGCX_PATH=/opt/FlagCX \
 -e ASCEND_VISIBLE_DEVICES="$NPU_IDS" \
--e ASCEND_RT_VISIBLE_DEVICES="$NPU_IDS" \
 -e VLLM_USE_V2_MODEL_RUNNER=1
 ```
 

@@ -85,6 +85,33 @@ unchanged package versions cannot hide a replaced entrypoint. A successful
 metadata check establishes package preservation; NPU imports and inference
 need a separate hardware check.
 
+## Deploy the published image
+
+The Ascend 910C release includes vLLM 0.32.0 and the FlagGems-vllm
+Ascend sampling backport at [`622f5bf`](https://github.com/flagos-ai/FlagGems-vllm/commit/622f5bf0e476dcdb861e50ea49cc94b0852c2619).
+The image preserves the CANN, PyTorch, FlagTree and FlagGems runtime from
+the validated CI image.
+
+```bash
+image=harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-release-20261116-gems622f5bf-89bccfcc5fbe@sha256:399c559414e6c38a42f0876794b2366077377440de54722e901af5a79fc03e27
+docker pull "$image"
+```
+
+Use the device and driver mounts in [Check the prepared image](#check-the-prepared-image).
+Mount a directory containing the matching FL wheel at `/plugin-wheels`.
+Inside the fresh container, install the wheel before serving.
+
+```bash
+PIP_NO_INDEX=1 python -m pip install --no-deps /plugin-wheels/vllm_plugin_fl-*.whl
+```
+
+Run one of the [inference commands](#inference-smoke-tests) using local model weights.
+
+The release passed a clean-container smoke on one Ascend 910C. With network
+access disabled, installing the FL wheel built from `aaf6dfb` was sufficient
+to serve Qwen3-0.6B BF16 with the default Ascend Runner V2 in eager mode.
+The completion endpoint returned HTTP 200.
+
 ## Build
 
 From the repository root on a Linux/aarch64 Docker host:
@@ -103,17 +130,8 @@ package overrides.
 
 The `dev`, `ci` and `release` stages share the empty-vLLM runtime. The CI stage
 adds the test dependencies.
-The image prepares the runtime; install the selected plugin checkout before
-running inference. Shared CI overlays its checkout using the Ascend setup
-script. A deployable installation should use an ordinary plugin wheel:
-
-```bash
-python .github/scripts/install_ascend_flaggems_vllm.py
-python -m pip wheel --no-build-isolation --no-deps \
-  --wheel-dir /tmp/vllm-fl-wheels .
-python -m pip install --no-deps --force-reinstall \
-  /tmp/vllm-fl-wheels/vllm_plugin_fl-*.whl
-```
+Shared CI overlays its checkout using the Ascend setup script.
+Use the [published release](#deploy-the-published-image) for deployment.
 
 Run remote image pulls, builds, installations and tests inside a named
 `tmux` session so an SSH disconnect does not interrupt them.
@@ -222,10 +240,10 @@ python /opt/ascend-stack/runtime_constraints.py verify /opt/ascend-stack \
 
 On a host with a compatible driver and assigned idle NPUs, mount the host
 Ascend driver and expose only the assigned devices. Follow the container
-runtime or explicit-device launch method on the image's release page. When
-using the Ascend runtime, pass both `ASCEND_VISIBLE_DEVICES` and
-`ASCEND_RT_VISIBLE_DEVICES` for the assigned physical NPU IDs at container
-launch. Then run inside the container:
+runtime or explicit-device launch method on the image's release page. With
+`--runtime=ascend`, set `ASCEND_VISIBLE_DEVICES` to the assigned physical NPU
+IDs. Leave `ASCEND_RT_VISIBLE_DEVICES` unset to use the runtime's in-container
+device mapping. Then run inside the container:
 
 ```bash
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
