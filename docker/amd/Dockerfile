@@ -34,7 +34,7 @@ SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 ARG PYTHON_VERSION=3.12
 ARG VLLM_VERSION=0.32.0
 ARG FLAGTREE_VERSION=0.7.0+amd3.6
-ARG FLAGGEMS_COMMIT=9a51bed1322bd17800e76cbaa39a7490230022bd
+ARG FLAGGEMS_COMMIT=292cec32414fbfea3745df5e5d640dd0fad210d7
 ARG FLAGCX_COMMIT=591cfbf
 ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
@@ -98,8 +98,8 @@ RUN python3 -m pip install --no-cache-dir \
 v = version("vllm"); print("vllm:", v); assert v.endswith("+empty"), v'
 
 # ---------- FlagGems, FlagGems-vllm and FlagCX ----------
-# FlagGems must come from main: the gfx1100 fix that sets
-# triton_extra_name="hip" for the _amd backend is not in the 5.4.0 release.
+# This official FlagGems revision contains the AMD HIP libdevice change and
+# the FakeTensor clone fix from #8893.
 RUN git clone https://github.com/flagos-ai/FlagGems.git /opt/FlagGems \
     && (git -C /opt/FlagGems checkout "${FLAGGEMS_COMMIT}" \
         || (git -C /opt/FlagGems fetch origin "${FLAGGEMS_COMMIT}" \

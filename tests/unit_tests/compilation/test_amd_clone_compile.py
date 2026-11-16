@@ -1,7 +1,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-Unit tests for AMD graph-mode clone fix (FlagGems PR #8893, commit 9a51bed).
+Unit tests for the AMD graph-mode clone fix in FlagGems PR #8893.
 
 These tests verify that flag_gems.ops.clone handles FakeTensor / meta inputs
 without attempting a Triton kernel launch, which would raise:
@@ -27,7 +27,7 @@ import pytest
 # ---------------------------------------------------------------------------
 pytest.importorskip(
     "flag_gems.ops.clone",
-    reason="flag_gems.ops.clone not found; install >= commit 9a51bed to run",
+    reason="FlagGems with the clone fix from PR #8893 is required",
 )
 
 
