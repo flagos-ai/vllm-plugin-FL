@@ -10,9 +10,9 @@ works correctly from call_op -> manager -> registry -> implementation.
 
 import importlib
 import os
+import sys
 import weakref
-from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -83,60 +83,6 @@ class TestCallOp:
 
         with pytest.raises(RuntimeError, match="No available implementation"):
             call_op("nonexistent_op", 1)
-
-    @pytest.mark.parametrize("op_name", ["rms_norm", "rotary_embedding"])
-    @pytest.mark.parametrize("cached", [False, True])
-    def test_amd_default_policy_propagates_in_place_failure(
-        self, monkeypatch, op_name, cached
-    ):
-        from vllm_fl.dispatch import config, get_policy
-
-        monkeypatch.delenv("VLLM_FL_CONFIG", raising=False)
-        monkeypatch.delenv("VLLM_FL_STRICT", raising=False)
-        monkeypatch.setattr(
-            config,
-            "get_config_path",
-            lambda: Path(config.__file__).with_name("amd.yaml"),
-        )
-        manager = get_default_manager()
-        manager._state.initialized = True
-        manager._state.init_pid = os.getpid()
-        failure = RuntimeError("failure after writing the input")
-
-        def primary(value):
-            value.add_(1)
-            raise failure
-
-        def fallback(value):
-            value.add_(1)
-            return value
-
-        manager.registry.register_impl(
-            OpImpl(
-                op_name=op_name,
-                impl_id="default.amd-test",
-                kind=BackendImplKind.DEFAULT,
-                fn=primary,
-            )
-        )
-        manager.registry.register_impl(
-            OpImpl(
-                op_name=op_name,
-                impl_id="reference.amd-test",
-                kind=BackendImplKind.REFERENCE,
-                fn=fallback,
-            )
-        )
-        value = torch.zeros(1)
-        with pytest.raises(RuntimeError) as error:
-            if cached:
-                CachedOp(op_name)(value)
-            else:
-                call_op(op_name, value)
-
-        assert error.value is failure
-        assert get_policy().strict
-        torch.testing.assert_close(value, torch.ones_like(value))
 
     def test_cached_op_resolves_before_fullgraph_dynamo_trace(self):
         manager = get_default_manager()
@@ -562,40 +508,57 @@ class TestCallOpIntegration:
         # Fallback must not have been attempted
         assert call_sequence == ["failing"]
 
-    def test_amd_inplace_dispatch_does_not_retry_after_a_write(self, monkeypatch):
-        from vllm_fl.dispatch.config.utils import get_config_path
-
-        monkeypatch.setenv("VLLM_FL_CONFIG", str(get_config_path("amd")))
+    @pytest.mark.parametrize("op_name", ["rms_norm", "rotary_embedding"])
+    @pytest.mark.parametrize("cached", [False, True])
+    @pytest.mark.parametrize("strict_override", [None, "0"])
+    def test_amd_in_place_failure_is_never_retried(
+        self, monkeypatch, op_name, cached, strict_override
+    ):
+        monkeypatch.delenv("VLLM_FL_CONFIG", raising=False)
         monkeypatch.delenv("VLLM_FL_STRICT", raising=False)
+        if strict_override is not None:
+            monkeypatch.setenv("VLLM_FL_STRICT", strict_override)
+        platforms = ModuleType("vllm.platforms")
+        platforms.current_platform = SimpleNamespace(vendor_name="amd")
+        monkeypatch.setitem(sys.modules, platforms.__name__, platforms)
         manager = get_default_manager()
         manager._state.initialized = True
         manager._state.init_pid = os.getpid()
+        failure = RuntimeError("failure after writing the input")
 
-        def failing_impl(tensor):
-            tensor.add_(1)
-            raise RuntimeError("Primary failed after a write")
+        def primary(value):
+            value.add_(1)
+            raise failure
+
+        def fallback(value):
+            value.add_(1)
+            return value
 
         manager.registry.register_impl(
             OpImpl(
-                op_name="rms_norm",
-                impl_id="default.partial_write",
+                op_name=op_name,
+                impl_id="default.amd-test",
                 kind=BackendImplKind.DEFAULT,
-                fn=failing_impl,
+                fn=primary,
             )
         )
         manager.registry.register_impl(
             OpImpl(
-                op_name="rms_norm",
-                impl_id="reference.retry",
+                op_name=op_name,
+                impl_id="reference.amd-test",
                 kind=BackendImplKind.REFERENCE,
-                fn=lambda tensor: tensor.add_(1),
+                fn=fallback,
             )
         )
+        value = torch.zeros(1)
+        with pytest.raises(RuntimeError) as error:
+            if cached:
+                CachedOp(op_name)(value)
+            else:
+                call_op(op_name, value)
 
-        tensor = torch.zeros(1)
-        with pytest.raises(RuntimeError, match="Primary failed after a write"):
-            CachedOp("rms_norm")(tensor)
-        torch.testing.assert_close(tensor, torch.ones(1))
+        assert error.value is failure
+        torch.testing.assert_close(value, torch.ones_like(value))
 
     def test_vendor_filtering(self):
         """Test that vendor filtering works through call_op."""

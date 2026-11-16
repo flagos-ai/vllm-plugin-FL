@@ -94,7 +94,12 @@ from .io_dumper import (
     is_dump_enabled,
 )
 from .logger_manager import get_logger, set_log_level
-from .manager import OpManager, get_default_manager, reset_default_manager
+from .manager import (
+    OpManager,
+    _can_retry_failed_op,
+    get_default_manager,
+    reset_default_manager,
+)
 from .ops import VLLMFLBackendBase
 from .policy import (
     PREFER_DEFAULT,
@@ -255,7 +260,7 @@ class CachedOp:
             return impl.fn(*args, **kwargs)
         except Exception:
             self._impl = None
-            if get_policy().strict:
+            if not _can_retry_failed_op(self._op_name):
                 raise
             mgr._mark_failed_impl(self._op_name, impl.impl_id)
             self._use_manager_call = True

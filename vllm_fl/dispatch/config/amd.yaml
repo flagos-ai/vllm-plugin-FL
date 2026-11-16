@@ -4,9 +4,9 @@
 # Preferred default backend type: flagos, vendor, reference
 prefer: flagos
 
-# Resolve an available backend before invocation. An in-place kernel may
-# already have modified its inputs when execution raises.
-strict: true
+# RMSNorm and RoPE select a backend before execution and never retry on error.
+# Other ops may use the normal fallback policy.
+strict: false
 
 # Vendor Whitelist (Optional, allows all if not set)
 # allow_vendors:
