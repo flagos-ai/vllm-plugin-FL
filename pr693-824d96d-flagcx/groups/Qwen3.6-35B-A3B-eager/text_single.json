@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "text_single",
+    "model_path": "models/Qwen3.6-35B-A3B",
+    "served_model_name": "Qwen3.6-35B-A3B",
+    "port": "18973",
+    "concurrency": 1
+  },
+  "started_at": "2026-11-16T03:02:32.018204+00:00",
+  "finished_at": "2026-11-16T03:05:57.372465+00:00",
+  "input": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Introduce large language models (LLMs) in detail. Explain what they are, how training and inference work, typical capabilities, limitations, and responsible use. Write a coherent response of at least 256 characters. Do not repeat words or phrases unnecessarily."
+        }
+      ],
+      "required_terms": [
+        "large language model",
+        "training",
+        "inference",
+        "limitations"
+      ],
+      "min_length": 256,
+      "max_tokens": 512
+    }
+  ],
+  "output": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "latency_seconds": 205.287,
+      "text": "Large language models (LLMs) represent a transformative class of artificial intelligence systems designed to understand, generate, and manipulate human language with remarkable fluency. At their core, these models are built upon the transformer architecture, which utilizes self-attention mechanisms to process sequential data efficiently. This structure allows the model to weigh the significance of different words within a context, capturing complex semantic relationships and long-range dependencies that earlier neural networks struggled to handle.\n\nThe development of an LLM typically involves two distinct phases: pre-training and fine-tuning. During pre-training, the model ingests vast quantities of text from diverse sources, such as books, articles, and code repositories. By predicting the next token in a sequence, the model learns statistical patterns, grammar, facts, and reasoning abilities without explicit supervision. Subsequently, fine-tuning aligns the model\u2019s outputs with human preferences and specific tasks, often using techniques like Reinforcement Learning from Human Feedback (RLHF) to ensure responses are helpful, harmless, and honest.\n\nInference, the process of generating responses, involves feeding input prompts into the trained model. The system calculates probabilities for potential next tokens, sampling from this distribution to create coherent text. This capability enables LLMs to perform a wide array of tasks, including translation, summarization, code generation, creative writing, and complex logical reasoning. They serve as versatile tools for developers, researchers, and everyday users seeking to automate information processing or augment human creativity.\n\nDespite their impressive abilities, LLMs possess inherent limitations. They can hallucinate, producing plausible-sounding but factually incorrect information. They lack true understanding or consciousness, relying instead on pattern recognition. Furthermore, they may perpetuate biases present in their training data, reflecting societal prejudices or inaccuracies. Ethical considerations are paramount; users must ensure responsible deployment by verifying facts, respecting privacy, and avoiding the generation of harmful content. As the technology evolves, ongoing research aims to improve accuracy, reduce bias, and enhance transparency, ensuring these powerful tools benefit society while minimizing potential risks.",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-35B-A3B",
+        "system_fingerprint": "vllm-0.32.0-tp4-97ce5477",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "message": {
+              "content": "Large language models (LLMs) represent a transformative class of artificial intelligence systems designed to understand, generate, and manipulate human language with remarkable fluency. At their core, these models are built upon the transformer architecture, which utilizes self-attention mechanisms to process sequential data efficiently. This structure allows the model to weigh the significance of different words within a context, capturing complex semantic relationships and long-range dependencies that earlier neural networks struggled to handle.\n\nThe development of an LLM typically involves two distinct phases: pre-training and fine-tuning. During pre-training, the model ingests vast quantities of text from diverse sources, such as books, articles, and code repositories. By predicting the next token in a sequence, the model learns statistical patterns, grammar, facts, and reasoning abilities without explicit supervision. Subsequently, fine-tuning aligns the model\u2019s outputs with human preferences and specific tasks, often using techniques like Reinforcement Learning from Human Feedback (RLHF) to ensure responses are helpful, harmless, and honest.\n\nInference, the process of generating responses, involves feeding input prompts into the trained model. The system calculates probabilities for potential next tokens, sampling from this distribution to create coherent text. This capability enables LLMs to perform a wide array of tasks, including translation, summarization, code generation, creative writing, and complex logical reasoning. They serve as versatile tools for developers, researchers, and everyday users seeking to automate information processing or augment human creativity.\n\nDespite their impressive abilities, LLMs possess inherent limitations. They can hallucinate, producing plausible-sounding but factually incorrect information. They lack true understanding or consciousness, relying instead on pattern recognition. Furthermore, they may perpetuate biases present in their training data, reflecting societal prejudices or inaccuracies. Ethical considerations are paramount; users must ensure responsible deployment by verifying facts, respecting privacy, and avoiding the generation of harmful content. As the technology evolves, ongoing research aims to improve accuracy, reduce bias, and enhance transparency, ensuring these powerful tools benefit society while minimizing potential risks.",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            }
+          }
+        ],
+        "usage": {
+          "completion_tokens": 412,
+          "prompt_tokens": 65,
+          "total_tokens": 477,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "passed": true
+  }
+}

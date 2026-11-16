@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "text_single",
+    "model_path": "models/Qwen3.6-27B",
+    "served_model_name": "Qwen3.6-27B",
+    "port": "18972",
+    "concurrency": 1
+  },
+  "started_at": "2026-11-16T03:29:35.934700+00:00",
+  "finished_at": "2026-11-16T03:29:53.531579+00:00",
+  "input": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Introduce large language models (LLMs) in detail. Explain what they are, how training and inference work, typical capabilities, limitations, and responsible use. Write a coherent response of at least 256 characters. Do not repeat words or phrases unnecessarily."
+        }
+      ],
+      "required_terms": [
+        "large language model",
+        "training",
+        "inference",
+        "limitations"
+      ],
+      "min_length": 256,
+      "max_tokens": 512
+    }
+  ],
+  "output": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "latency_seconds": 17.575,
+      "text": "Large language models are advanced artificial intelligence systems trained on vast datasets to understand and generate human-like text. They operate using deep learning architectures, primarily transformers, which allow them to process sequential data efficiently. During training, these models learn statistical patterns and relationships between words by predicting the next token in a sequence. This process requires immense computational power and diverse data sources to capture linguistic nuances, factual knowledge, and reasoning abilities.\n\nInference involves the model generating responses to user prompts based on its learned parameters. When a user inputs text, the model calculates probabilities for subsequent tokens, selecting the most likely continuation to form coherent output. Typical capabilities include natural language understanding, translation, summarization, coding assistance, and creative writing. These systems excel at pattern recognition and can adapt to various contexts without explicit reprogramming for each task.\n\nHowever, LLMs possess significant limitations. They may produce hallucinations, presenting false information as fact, and often lack true comprehension or consciousness. Bias present in training data can lead to unfair or harmful outputs. Furthermore, they struggle with real-time knowledge updates unless specifically designed for retrieval-augmented generation. Responsible use is critical to mitigate risks. Developers must implement robust safety filters, ensure transparency about AI origins, and continuously monitor for bias. Users should verify critical information and avoid relying on LLMs for high-stakes decisions without human oversight. Ethical deployment requires balancing innovation with accountability, ensuring these powerful tools benefit society while minimizing potential harm. By understanding both their strengths and weaknesses, stakeholders can harness LLMs effectively while maintaining trust and integrity in AI applications.",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "model": "Qwen3.6-27B",
+        "system_fingerprint": "vllm-0.32.0-tp4-375d73be",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "message": {
+              "content": "Large language models are advanced artificial intelligence systems trained on vast datasets to understand and generate human-like text. They operate using deep learning architectures, primarily transformers, which allow them to process sequential data efficiently. During training, these models learn statistical patterns and relationships between words by predicting the next token in a sequence. This process requires immense computational power and diverse data sources to capture linguistic nuances, factual knowledge, and reasoning abilities.\n\nInference involves the model generating responses to user prompts based on its learned parameters. When a user inputs text, the model calculates probabilities for subsequent tokens, selecting the most likely continuation to form coherent output. Typical capabilities include natural language understanding, translation, summarization, coding assistance, and creative writing. These systems excel at pattern recognition and can adapt to various contexts without explicit reprogramming for each task.\n\nHowever, LLMs possess significant limitations. They may produce hallucinations, presenting false information as fact, and often lack true comprehension or consciousness. Bias present in training data can lead to unfair or harmful outputs. Furthermore, they struggle with real-time knowledge updates unless specifically designed for retrieval-augmented generation. Responsible use is critical to mitigate risks. Developers must implement robust safety filters, ensure transparency about AI origins, and continuously monitor for bias. Users should verify critical information and avoid relying on LLMs for high-stakes decisions without human oversight. Ethical deployment requires balancing innovation with accountability, ensuring these powerful tools benefit society while minimizing potential harm. By understanding both their strengths and weaknesses, stakeholders can harness LLMs effectively while maintaining trust and integrity in AI applications.",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            }
+          }
+        ],
+        "usage": {
+          "completion_tokens": 317,
+          "prompt_tokens": 65,
+          "total_tokens": 382,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        }
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "passed": true
+  }
+}

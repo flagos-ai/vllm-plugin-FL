@@ -1,0 +1,112 @@
+{
+  "environment": {
+    "GEMS_VENDOR": "metax",
+    "VLLM_PLUGINS": "fl",
+    "MACA_VISIBLE_DEVICES": "0,1,2,3",
+    "FLAGGEMS_CACHE_DIR": "/root/.flaggems",
+    "VLLM_USE_V2_MODEL_RUNNER": null,
+    "VLLM_FL_FLAGOS_WHITELIST": null,
+    "FLAGCX_PATH": "/opt/FlagCX"
+  },
+  "launch": "vllm serve models/Qwen3.6-27B --served-model-name Qwen3.6-27B --host 127.0.0.1 --port 18972 --tensor-parallel-size 4 --max-model-len 32768 --allowed-local-media-path tools/adaptation-gate-cases/images --trust-remote-code --cudagraph-metrics",
+  "runner": [
+    "MetaX V2 model runner: vllm.v1.worker.gpu.model_runner.GPUModelRunner"
+  ],
+  "provider": [
+    "MetaX moe topk compat applied: vllm._custom_ops.topk_softmax/topk_sigmoid rebound to FlagGems-vllm public operators"
+  ],
+  "native_flagcx_worker_count": 4,
+  "graph_capture_completed": true,
+  "piecewise_replay_metrics": [
+    {
+      "tokens": 1,
+      "padded_tokens": 1,
+      "padding": 0,
+      "count": 62
+    },
+    {
+      "tokens": 65,
+      "padded_tokens": 128,
+      "padding": 63,
+      "count": 1
+    },
+    {
+      "tokens": 1,
+      "padded_tokens": 1,
+      "padding": 0,
+      "count": 249
+    },
+    {
+      "tokens": 1,
+      "padded_tokens": 1,
+      "padding": 0,
+      "count": 7
+    },
+    {
+      "tokens": 8,
+      "padded_tokens": 8,
+      "padding": 0,
+      "count": 2
+    },
+    {
+      "tokens": 203,
+      "padded_tokens": 256,
+      "padding": 53,
+      "count": 1
+    },
+    {
+      "tokens": 4,
+      "padded_tokens": 4,
+      "padding": 0,
+      "count": 1
+    },
+    {
+      "tokens": 1,
+      "padded_tokens": 1,
+      "padding": 0,
+      "count": 7
+    },
+    {
+      "tokens": 201,
+      "padded_tokens": 256,
+      "padding": 55,
+      "count": 1
+    },
+    {
+      "tokens": 1,
+      "padded_tokens": 1,
+      "padding": 0,
+      "count": 1
+    },
+    {
+      "tokens": 3,
+      "padded_tokens": 4,
+      "padding": 1,
+      "count": 3
+    },
+    {
+      "tokens": 1,
+      "padded_tokens": 1,
+      "padding": 0,
+      "count": 3
+    },
+    {
+      "tokens": 8,
+      "padded_tokens": 8,
+      "padding": 0,
+      "count": 1
+    },
+    {
+      "tokens": 4,
+      "padded_tokens": 4,
+      "padding": 0,
+      "count": 1
+    },
+    {
+      "tokens": 27,
+      "padded_tokens": 32,
+      "padding": 5,
+      "count": 1
+    }
+  ]
+}
