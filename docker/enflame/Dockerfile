@@ -107,8 +107,11 @@ RUN printf '%s --hash=sha256:%s\n' \
         "flagtree==${FLAGTREE_VERSION}" \
     && rm -rf /tmp/enflame-wheels /tmp/enflame-wheel-requirements.txt
 
-COPY install_flaggems.sh /tmp/enflame-install-flaggems.sh
-RUN bash /tmp/enflame-install-flaggems.sh && rm /tmp/enflame-install-flaggems.sh
+# Install FlagGems only while building the dependency image, never during CI
+# setup. Preserve PEP 517 isolation for this release's setuptools constraints.
+RUN python -m pip install --no-cache-dir --no-deps --force-reinstall \
+        --index-url "${PYPI_INDEX_URL}" \
+        "flag-gems @ git+https://github.com/flagos-ai/FlagGems.git@2bcfe2656dad0b654077fcfe7d66e6a93542afab"
 
 # Replace the vendor vLLM with the official empty-device build; the plugin
 # registers the GCU platform via the vLLM platform_plugins entry point.
