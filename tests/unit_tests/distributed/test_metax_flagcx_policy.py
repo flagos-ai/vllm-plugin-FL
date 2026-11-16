@@ -62,6 +62,8 @@ def test_optional_flagcx_preserves_process_group_policy(
         ("metax", "cuda", False, False),
         ("nvidia", "cuda", True, False),
         ("iluvatar", "cuda", True, False),
+        ("amd", "cuda", True, True),
+        ("amd", "cuda", False, False),
         ("ascend", "npu", True, True),
         ("ascend", "npu", False, False),
     ],
@@ -114,17 +116,19 @@ def test_requested_metax_flagcx_cannot_silently_fall_back(
     [("group_start", "flagcxGroupStart"), ("group_end", "flagcxGroupEnd")],
 )
 @pytest.mark.parametrize(
-    "device,legacy,with_comm",
+    "device,amd_source,legacy,with_comm",
     [
-        ("cuda", True, False),
-        ("cuda", False, True),
-        ("cuda", None, False),
-        ("npu", True, True),
-        ("npu", False, True),
+        ("cuda", False, True, False),
+        ("cuda", False, False, True),
+        ("cuda", False, None, False),
+        ("cuda", True, True, True),
+        ("cuda", True, False, True),
+        ("npu", False, True, True),
+        ("npu", False, False, True),
     ],
 )
 def test_flagcx_group_adapts_known_wrapper_abi(
-    method, native_name, device, legacy, with_comm
+    method, native_name, device, amd_source, legacy, with_comm
 ):
     path = ROOT / "vllm_fl/distributed/device_communicators/flagcx.py"
     cls = next(
@@ -137,7 +141,7 @@ def test_flagcx_group_adapts_known_wrapper_abi(
         for node in cls.body
         if isinstance(node, ast.FunctionDef) and node.name == method
     )
-    namespace = _compile([function], path, {})
+    namespace = _compile([function], path, {"_flagcx_amd_source": amd_source})
     native = Mock()
     handle = object()
     communicator = SimpleNamespace(

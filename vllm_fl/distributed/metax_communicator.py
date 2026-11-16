@@ -7,10 +7,10 @@ from torch._subclasses.fake_tensor import FakeTensor
 
 from vllm.platforms import current_platform
 
-from vllm_fl.distributed.nvidia_communicator import NvidiaCommunicatorFL
+from vllm_fl.distributed.cuda_flagcx_communicator import CudaFlagcxCommunicatorFL
 
 
-class MetaxCommunicatorFL(NvidiaCommunicatorFL):
+class MetaxCommunicatorFL(CudaFlagcxCommunicatorFL):
     """Reuse the FlagCX-only CUDA API bridge without initializing PyNCCL.
 
     MetaX Torch exposes the CUDA API. The native V2 graph coordinator requires
