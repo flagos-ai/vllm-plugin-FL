@@ -123,6 +123,28 @@ MODEL_PATH=/models/Qwen3.6-27B PORT=8000 \
     pytest -sv test_image.py::test_image_single
 ```
 
+## Iluvatar CI matrix
+
+The shared serving E2E runner selects four cases from
+`tests/platforms/iluvatar.yaml`: `27b_tp4_eager`, `35b_a3b_tp4_eager`,
+`27b_tp4_graph`, and `35b_a3b_tp4_graph`. Each case runs the complete
+five-scenario inventory above (26 requests), for 104 adaptation-gate requests
+in total. These requests run alongside the shared serving smoke tests.
+
+Both modes use TP4, a 4096-token model limit, and the explicit CUDA Graph
+capture sizes `[1, 2, 4, 8, 16, 32]`. Eager cases additionally pass
+`--enforce-eager`. Graph cases retain the configured capture sizes; there is
+no separate `graph-default` group or `GRAPH_COMPILATION_CONFIG` override.
+This matrix therefore does not establish coverage of default capture sizes.
+
+The shared test sets `RESULTS_DIR` to
+`ci-results/adaptation-gates/qwen3_6/CASE`, keeping request reports separate
+for each model and execution mode. Failed serving runs retain server logs
+under `test-results/logs/`. The shared E2E workflow uploads both directories
+with its test reports; a failed scenario fails its E2E case. The CI environment
+comes from the published Iluvatar image configured in
+`.github/configs/iluvatar.yml`.
+
 ## Results and quality checks
 
 Each pytest case writes one JSON file under
