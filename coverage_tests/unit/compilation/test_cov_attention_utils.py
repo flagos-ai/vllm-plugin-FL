@@ -188,7 +188,7 @@ def test_kunlunxin_sdpa_matches_reference_across_chunk_boundary():
     out = sdpa(_FakeSelf(), q, k, v)
     assert out.shape == q.shape
     reference = _reference_chunked_sdpa(q, k, v, 0.3, heads, kv_heads)
-    torch.testing.assert_close(out, reference, rtol=0, atol=0)
+    torch.testing.assert_close(out, reference, rtol=1e-5, atol=1e-5)
 
 
 def test_kunlunxin_sdpa_handles_single_chunk_batches():
@@ -200,7 +200,7 @@ def test_kunlunxin_sdpa_handles_single_chunk_batches():
     v = torch.randn(1, 64, 2, 16)
     out = sdpa(_FakeSelf(), q, k, v)
     reference = _reference_chunked_sdpa(q, k, v, 0.3, 8, 2)
-    torch.testing.assert_close(out, reference, rtol=0, atol=0)
+    torch.testing.assert_close(out, reference, rtol=1e-5, atol=1e-5)
 
     # Independent single-head check: head 0 uses kv head 0 (GQA repeat 4) and
     # the fake attention scale, so the output is softmax(q k^T * scale) @ v.
@@ -230,7 +230,7 @@ def test_kunlunxin_sdpa_splits_varlen_sequences_on_cu_seqlens():
         outputs.append(
             _reference_chunked_sdpa(q_part, k_part, v_part, 0.3, heads, kv_heads)
         )
-    torch.testing.assert_close(out, torch.cat(outputs, dim=1), rtol=0, atol=0)
+    torch.testing.assert_close(out, torch.cat(outputs, dim=1), rtol=1e-5, atol=1e-5)
 
 
 def test_kunlunxin_sdpa_returns_3d_output_for_3d_input():

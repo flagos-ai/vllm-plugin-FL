@@ -23,6 +23,8 @@ verified against the source and the nvidia.yaml platform config.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 import torch
 
@@ -56,14 +58,48 @@ def restore_identity(monkeypatch):
     ) = saved
 
 
+_EXPECTED_IDENTITY_BY_VENDOR = {
+    "nvidia": {
+        "vendor_name": "nvidia",
+        "device_name": "nvidia",
+        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+    },
+    "metax": {
+        "vendor_name": "metax",
+        "device_name": "metax",
+        "device_control_env_var": "VLLM_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER",
+    },
+}
+
+
+def _expected_vendor(request: pytest.FixtureRequest | None = None) -> str:
+    """Resolve expected vendor from the test runner target (default: nvidia)."""
+    raw = os.environ.get("VLLM_FL_EXPECTED_VENDOR", "").strip().lower()
+    if not raw and request is not None:
+        try:
+            opt = request.config.getoption("--platform")
+            if opt:
+                raw = str(opt).strip().lower()
+        except ValueError:
+            pass
+    if not raw:
+        raw = os.environ.get("FL_TEST_PLATFORM", "").strip().lower()
+    if not raw or raw == "cuda":
+        return "nvidia"
+    return raw
+
+
 class TestIdentityAttributes:
     """Class-level identity derived from the CUDA-shaped device probe."""
 
-    def test_cuda_identity_attributes(self):
-        """A CUDA probe yields the NVIDIA/NCCL identity vLLM expects."""
-        assert PlatformFL.vendor_name == "nvidia"
+    def test_cuda_identity_attributes(self, request):
+        """A CUDA probe yields the expected vendor/NCCL identity for vLLM."""
+        expected_vendor = _expected_vendor(request)
+        expected = _EXPECTED_IDENTITY_BY_VENDOR.get(expected_vendor)
+        assert expected is not None, f"Unsupported expected vendor: {expected_vendor!r}"
+        assert PlatformFL.vendor_name == expected["vendor_name"]
+        assert PlatformFL.device_name == expected["device_name"]
         assert PlatformFL.device_type == "cuda"
-        assert PlatformFL.device_name == "nvidia"
         assert PlatformFL.dispatch_key == "CUDA"
         assert PlatformFL.ray_device_key == "GPU"
 
@@ -72,9 +108,12 @@ class TestIdentityAttributes:
         assert PlatformFL.dist_backend == "nccl"
         assert PlatformFL.simple_compile_backend == "inductor"
 
-    def test_device_control_env_var_validated_for_nvidia(self):
-        """NVIDIA maps to the validated CUDA_VISIBLE_DEVICES control variable."""
-        assert PlatformFL.device_control_env_var == "CUDA_VISIBLE_DEVICES"
+    def test_device_control_env_var_validated_for_nvidia(self, request):
+        """Device control env var matches the target vendor contract."""
+        expected_vendor = _expected_vendor(request)
+        expected = _EXPECTED_IDENTITY_BY_VENDOR.get(expected_vendor)
+        assert expected is not None, f"Unsupported expected vendor: {expected_vendor!r}"
+        assert PlatformFL.device_control_env_var == expected["device_control_env_var"]
 
     def test_static_capability_and_wrapper_paths(self):
         """Static capability getters return their documented values."""

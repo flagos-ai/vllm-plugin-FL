@@ -22,6 +22,7 @@ are the CONTRACT R2 sanctioned boundaries used throughout.
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace as NS
 
 import pytest
@@ -157,16 +158,34 @@ class TestVendorDeviceMap:
         assert fl_utils.get_device_control_env_var("amd") == "MY_VISIBLE_DEVICES"
 
 
+def _expected_vendor(request: pytest.FixtureRequest | None = None) -> str:
+    """Resolve expected vendor from the test runner target (default: nvidia)."""
+    raw = os.environ.get("VLLM_FL_EXPECTED_VENDOR", "").strip().lower()
+    if not raw and request is not None:
+        try:
+            opt = request.config.getoption("--platform")
+            if opt:
+                raw = str(opt).strip().lower()
+        except ValueError:
+            pass
+    if not raw:
+        raw = os.environ.get("FL_TEST_PLATFORM", "").strip().lower()
+    if not raw or raw == "cuda":
+        return "nvidia"
+    return raw
+
+
 class TestDeviceInfoSurface:
     """DeviceInfo probe surface and capability helpers."""
 
-    def test_device_info_reports_probe_fields(self):
+    def test_device_info_reports_probe_fields(self, request):
         """DeviceInfo exposes the detector's vendor/device/dispatch fields."""
+        expected_vendor = _expected_vendor(request)
         info = fl_utils.DeviceInfo()
-        assert info.vendor_name == "nvidia"
+        assert info.vendor_name == expected_vendor
+        assert expected_vendor in info.supported_device
         assert info.device_type == "cuda"
         assert info.dispatch_key == "CUDA"
-        assert "nvidia" in info.supported_device
 
     def test_get_supported_device_accepts_registered_vendors(self):
         """A registered vendor passes the supported-device check."""

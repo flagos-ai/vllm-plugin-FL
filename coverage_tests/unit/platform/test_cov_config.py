@@ -43,6 +43,7 @@ def _make_vllm_config():
         cache_config=NS(block_size=None),
         parallel_config=NS(all2all_backend=None, data_parallel_size=1),
         compilation_config=CompilationConfig(),
+        attention_config=None,
     )
 
 
