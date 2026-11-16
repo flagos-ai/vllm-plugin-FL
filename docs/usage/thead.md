@@ -217,10 +217,10 @@ environment, the actual imported `triton.__file__` and `triton.__version__`
 determine which compiler is used.
 
 Build vLLM with the empty target from the pinned source, using the build
-prerequisites already prepared for the vendor runtime. Install the desired
-plugin checkout without a CUDA extension build. A CUDA-oriented
-`VLLM_VENDOR=cuda` command from the NVIDIA guide is not the validated PPU
-installation.
+prerequisites already prepared for the vendor runtime. The plugin wheel
+built with `GEMS_VENDOR=thead` includes the host-side C++ weak-reference
+operator used by graph capture. It registers on PyTorch's CUDA dispatch key
+and builds with the C++ toolchain in the T-Head image.
 
 ```bash
 mkdir -p /work/sources
@@ -231,7 +231,7 @@ VLLM_TARGET_DEVICE=empty VLLM_USE_PRECOMPILED=0 VLLM_USE_PRECOMPILED_RUST=0 \
 
 # Build from a writable copy of the checkout being validated.
 cp -a /workspace/vllm-plugin-FL /work/sources/vllm-plugin-FL
-VLLM_VENDOR= python -m pip install --no-build-isolation --no-deps /work/sources/vllm-plugin-FL
+GEMS_VENDOR=thead python -m pip install --no-build-isolation --no-deps /work/sources/vllm-plugin-FL
 ```
 
 Keep a record of your installed plugin revision and re-run the acceptance

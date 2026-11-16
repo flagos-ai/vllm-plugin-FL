@@ -84,10 +84,16 @@ chmod +x "$WORK/env/bin/vllm"
   --no-index --no-deps --no-build-isolation --wheel-dir "$WORK/wheels" "$REPO"
 "$PY" -I -S -B - "$WORK/wheels" <<'PY' > "$WORK/plugin-wheel.txt"
 import sys
+from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
+from zipfile import ZipFile
+
 wheels = list(Path(sys.argv[1]).glob("vllm_plugin_fl-*.whl"))
 if len(wheels) != 1:
     raise RuntimeError("Expected one newly built plugin wheel")
+with ZipFile(wheels[0]) as wheel:
+    if not any(f"vllm_fl/_C{suffix}" in wheel.namelist() for suffix in EXTENSION_SUFFIXES):
+        raise RuntimeError("T-Head plugin wheel must include the weak_ref_tensor extension")
 print(wheels[0])
 PY
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
