@@ -8,7 +8,7 @@ import pytest
 
 
 def test_amd_sparse_mla_rejected_before_dispatch(monkeypatch):
-    from vllm_fl import dispatch
+    import vllm_fl.dispatch
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "vendor_name", "amd")
@@ -17,7 +17,7 @@ def test_amd_sparse_mla_rejected_before_dispatch(monkeypatch):
         assert (op_name, use_mla, use_sparse) == ("attention_backend", True, False)
         return "dense_backend"
 
-    monkeypatch.setattr(dispatch, "call_op", fake_dispatch)
+    monkeypatch.setattr(vllm_fl.dispatch, "call_op", fake_dispatch)
     with pytest.raises(NotImplementedError, match="Sparse MLA"):
         PlatformFL.get_attn_backend_cls(
             None, SimpleNamespace(use_mla=True, use_sparse=True)

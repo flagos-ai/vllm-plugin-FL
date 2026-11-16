@@ -15,53 +15,51 @@
 | FlagGems-vLLM | [`8ae5c22`](https://github.com/flagos-ai/FlagGems-vllm/commit/8ae5c22f5af6d650216f881c329c4dff20c182e1) based on `v0.2.0`, with Kunlunxin Runner V2 sampling penalties and grammar masking |
 | FlagCX | `0.14.1+xre5.37.1` for tensor-parallel inference |
 
-The FlagOS wheel contains the vLLM Python runtime. The FlagOS P800 application
-image below provides PyTorch, Triton, the driver libraries and the FlagCX
-adaptor. The image's Python is in `/flagos/bin`. See the
+The prebuilt runtime includes the versions in the table and the dependencies
+needed to install the plugin from your checkout. The image's Python is in
+`/flagos/bin`. Its base comes from the
 [FlagOS application release](https://flagos-ai.github.io/release-info/application/vllm0.24.0-kunlunxin-xre5.37.1/).
 
-```text
-harbor.baai.ac.cn/flagos-app/vllm0.24.0-kunlunxin-xre5.37.1:2.3.0-0.3.0@sha256:db1cceff13d438142abfd695500ac0820ebfe6ae13d909017a2ce073ac607b17
-```
-
-The P800 image build applies the [Python 3.10 compatibility patch](../../docker/kunlunxin/python310_compat.py)
-to the pinned FlagOS wheel. A source build of
-[upstream vLLM 0.32.0](https://github.com/vllm-project/vllm/blob/v0.32.0/pyproject.toml)
-in empty mode is also accepted by CI when the vendor runtime uses Python
-3.11–3.13.
-
-## Install
-
-From the repository root, build the CI image with the Python 3.10 compatibility
-patch applied.
+## Pull the runtime image
 
 ```sh
-bash docker/build.sh --platform kunlunxin --target ci \
-  --image-name vllm-plugin-fl --image-tag kunlunxin-0.32.0-ci
+KUNLUNXIN_IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-kunlunxin-pr726-runtime-7c7329e@sha256:93caedbfc36d665c2e7d9f70a38bbb2501a860c9389be660888b0b6d66bc4402
+docker pull "$KUNLUNXIN_IMAGE"
 ```
 
-The P800 CI jobs start from the published application image and run the
-same runtime installer during setup. The derived CI image can also be
-built locally for reproducing those jobs.
+The runtime build applies the [Python 3.10 compatibility patch](../../docker/kunlunxin/python310_compat.py)
+to the pinned vLLM wheel. To rebuild the runtime from this checkout, use
+`docker build --target runtime -f docker/kunlunxin/Dockerfile -t kunlunxin-vllm:0.32.0 .`.
+The P800 CI jobs start from the published application base and use the same vLLM installer.
+A source build of [upstream vLLM 0.32.0](https://github.com/vllm-project/vllm/blob/v0.32.0/pyproject.toml)
+in empty mode is also accepted by CI on Python 3.11–3.13.
 
 ## Start a service
 
-Select four available cards and mount the model directory read-only.
+From the plugin checkout, archive the commit you want to run. Select four
+available cards and mount the model directory read-only.
 
 ```sh
+PLUGIN_ARCHIVE=$(mktemp --suffix=.tar.gz)
+git archive --format=tar.gz -o "$PLUGIN_ARCHIVE" HEAD
 docker run --rm -it --ipc=host \
   --device /dev/xpuctrl --device /dev/xpu0 --device /dev/xpu1 \
   --device /dev/xpu2 --device /dev/xpu3 \
   -p 127.0.0.1:8000:8000 -v /data/models:/data/models:ro \
-  --entrypoint /bin/bash vllm-plugin-fl:kunlunxin-0.32.0-ci
+  -v "$PLUGIN_ARCHIVE:/tmp/vllm-plugin-fl.tar.gz:ro" \
+  --entrypoint /bin/bash "$KUNLUNXIN_IMAGE"
 ```
 
-In the container, load the vendor library paths. Then clear the base image's
-operator whitelist and the Bash hook that would restore it in child shells.
+In the container, load the vendor library paths and install the plugin using the
+preinstalled dependencies.
 
 ```sh
 source /etc/bash_env.sh
-unset VLLM_FL_FLAGOS_WHITELIST BASH_ENV
+unset BASH_ENV FLAGCX_PATH VLLM_FL_FLAGOS_WHITELIST
+PLUGIN_SOURCE=$(mktemp -d)
+tar -xzf /tmp/vllm-plugin-fl.tar.gz -C "$PLUGIN_SOURCE"
+SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.dev0 python -m pip install \
+  --no-index --no-deps --no-build-isolation "$PLUGIN_SOURCE"
 export GEMS_VENDOR=kunlunxin
 export VLLM_PLUGINS=fl
 export USE_FLAGGEMS=1
@@ -89,6 +87,11 @@ Tensor parallelism uses the FlagCX package installed in the application image.
 Set `FLAGCX_PATH` only when supplying a FlagCX source build.
 
 ## Validation
+
+A clean container from the published digest served Qwen3.6-35B-A3B with BF16,
+FlagCX TP4 and the default Runner V2 in eager mode. Installing the plugin
+with the command above left the preinstalled package versions unchanged.
+The chat request returned HTTP 200 with Paris as the answer.
 
 Run the [P800 device check](../../.github/scripts/kunlunxin/check.sh) first.
 The CI setup script checks Python and vLLM package metadata before installing

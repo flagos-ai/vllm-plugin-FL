@@ -16,7 +16,7 @@
 # Latest Kunlunxin vLLM application image on the FlagOS release page.
 # https://flagos-ai.github.io/release-info/application/vllm0.24.0-kunlunxin-xre5.37.1/
 ARG KUNLUNXIN_BASE_IMAGE=harbor.baai.ac.cn/flagos-app/vllm0.24.0-kunlunxin-xre5.37.1:2.3.0-0.3.0@sha256:db1cceff13d438142abfd695500ac0820ebfe6ae13d909017a2ce073ac607b17
-FROM ${KUNLUNXIN_BASE_IMAGE} AS base
+FROM ${KUNLUNXIN_BASE_IMAGE} AS dependencies
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG INDEX_URL
@@ -42,6 +42,12 @@ COPY .github/scripts/install_flaggems_vllm.py /opt/kunlunxin-build/install_flagg
 RUN PIP_INDEX_URL="${INDEX_URL:-https://pypi.org/simple}" CI_FLAGGEMS_VLLM_VENDOR=kunlunxin \
     python /opt/kunlunxin-build/install_flaggems_vllm.py --source-archive
 
+FROM dependencies AS runtime
+RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+        "modelscope==1.35.3" \
+    && python -m pip uninstall -y vllm-plugin-fl
+
+FROM dependencies AS base
 COPY . /opt/vllm-plugin-FL
 RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.dev0 \
         python -m pip install --no-build-isolation --no-deps /opt/vllm-plugin-FL \
