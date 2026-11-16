@@ -25,6 +25,24 @@ import triton.language as tl
 
 
 @triton.jit
+def _threshold_selection(vals, valid, thresh, K: tl.constexpr, BC: tl.constexpr):
+    above = valid & (vals > thresh)
+    equal = valid & (vals == thresh)
+    remaining = K - tl.sum(above.to(tl.int32), 0)
+    # Pack two counters into one scan. Each low counter is at most BC, so
+    # BASE=2*BC prevents carries into the strict-score count.
+    BASE: tl.constexpr = 2 * BC
+    prefix = tl.cumsum(above.to(tl.int32) * BASE + equal.to(tl.int32), 0)
+    above_prefix = prefix // BASE
+    equal_prefix = prefix % BASE
+    chosen = above | (equal & (equal_prefix <= remaining))
+    # Preserve the original candidate order while reserving enough slots for
+    # every strictly higher score, including those after the threshold ties.
+    pos = above_prefix + tl.minimum(equal_prefix, remaining) - 1
+    return chosen, pos
+
+
+@triton.jit
 def _row_local_topk(
     logits_ptr,
     valid_ptr,
@@ -55,8 +73,8 @@ def _row_local_topk(
     )
     tv = tl.topk(vals, K)
     thresh = tl.min(tv, axis=0)
-    chosen = (g < valid_len) & (vals >= thresh)
-    pos = tl.cumsum(chosen.to(tl.int32), 0) - 1
+    valid = g < valid_len
+    chosen, pos = _threshold_selection(vals, valid, thresh, K, BC)
     base = (row * NB_MAX + blk) * K
     tl.store(cand_vals_ptr + base + pos, vals, mask=chosen & (pos < K))
     tl.store(cand_idx_ptr + base + pos, g.to(tl.int32), mask=chosen & (pos < K))
@@ -82,8 +100,8 @@ def _row_reduce_pair(
     idx = tl.load(in_idx_ptr + in_base, mask=valid, other=-1)
     tv = tl.topk(vals, K)
     thresh = tl.min(tv, axis=0)
-    chosen = valid & (vals >= thresh)
-    pos = tl.cumsum(chosen.to(tl.int32), 0) - 1
+    valid = valid & (idx >= 0)
+    chosen, pos = _threshold_selection(vals, valid, thresh, K, BC)
     out_base = (row * NB_OUT + pid) * K
     tl.store(out_vals_ptr + out_base + pos, vals, mask=chosen & (pos < K))
     tl.store(out_idx_ptr + out_base + pos, idx, mask=chosen & (pos < K))
