@@ -52,6 +52,8 @@ def _uses_ple(runner):
 
 def install_qwen38_runner_hooks(runner_cls):
     """One idempotent, model-guarded preparation hook for ModelRunnerFL/MRV1."""
+    if not is_metax():
+        return
     if runner_cls.__dict__.get("_qwen38_ple_hooks_installed", False):
         return
     original_init = runner_cls.__init__

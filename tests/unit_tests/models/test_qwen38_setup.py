@@ -101,15 +101,18 @@ def test_native_serving_rejects_unsupported_modes(native_verifier, monkeypatch, 
 
 
 @pytest.mark.parametrize(
-    "qwen,method,expected",
+    "vendor,qwen,method,expected",
     [
-        (False, "mtp", ["original"]),
-        (True, None, ["original"]),
-        (True, "mtp", ["install", "original"]),
+        ("metax", False, "mtp", ["original"]),
+        ("metax", True, None, ["original"]),
+        ("metax", True, "mtp", ["install", "original"]),
+        ("enflame", True, "mtp", ["original"]),
+        ("nvidia", True, "mtp", ["original"]),
+        ("kunlunxin", True, "mtp", ["original"]),
     ],
 )
 def test_worker_constructor_is_scoped_and_installs_before_native_init(
-    monkeypatch, qwen, method, expected
+    monkeypatch, vendor, qwen, method, expected
 ):
     from _qwen38_cpu import worker
 
@@ -127,7 +130,7 @@ def test_worker_constructor_is_scoped_and_installs_before_native_init(
     ].install_qwen38_mtp_runtime_compat = lambda: events.append("install")
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.setattr(worker, "is_metax", lambda: True)
+    monkeypatch.setattr(worker, "is_metax", lambda: vendor == "metax")
 
     class Runner:
         def __init__(self, vllm_config):
@@ -143,7 +146,19 @@ def test_worker_constructor_is_scoped_and_installs_before_native_init(
         def _build_attention_metadata(self, **kwargs):
             return kwargs
 
+    originals = {
+        name: Runner.__dict__[name]
+        for name in (
+            "__init__",
+            "_init_model_kwargs",
+            "_dummy_run",
+            "_build_attention_metadata",
+        )
+    }
     worker.install_qwen38_runner_hooks(Runner)
+    if vendor != "metax":
+        assert not hasattr(Runner, "_qwen38_ple_hooks_installed")
+        assert all(Runner.__dict__[name] is fn for name, fn in originals.items())
     installed = Runner.__init__
     worker.install_qwen38_runner_hooks(Runner)
     assert Runner.__init__ is installed
@@ -219,17 +234,18 @@ def test_registry_sequence_and_staticmethod_descriptor_are_restored():
             return value
 
     original = Config.__dict__["override"]
-    with (
-        pytest.raises(RuntimeError),
-        installation_install.InstallationTransaction() as transaction,
-    ):
-        transaction.mapping(mapping)
-        transaction.sequence(sequence)
-        transaction.attribute(Config, "override")
-        mapping["new"] = 2
-        sequence.append("new")
-        Config.override = staticmethod(lambda value: None)
-        raise RuntimeError("injected after registry update")
+
+    def update_then_fail():
+        with installation_install.InstallationTransaction() as transaction:
+            transaction.mapping(mapping)
+            transaction.sequence(sequence)
+            transaction.attribute(Config, "override")
+            mapping["new"] = 2
+            sequence.append("new")
+            Config.override = staticmethod(lambda value: None)
+            raise RuntimeError("injected after registry update")
+
+    pytest.raises(RuntimeError, update_then_fail)
     assert mapping == {"old": 1} and sequence == ["old"]
     assert Config.__dict__["override"] is original
     assert Config.override(4) == 4
@@ -253,16 +269,17 @@ def test_scoped_rollback_preserves_other_model_registration():
     registry = {"other": object()}
     unrelated = object()
     ops = ["other_op"]
-    with (
-        pytest.raises(RuntimeError),
-        installation_install.InstallationTransaction() as transaction,
-    ):
-        transaction.mapping(registry, ("qwen",))
-        transaction.sequence_additions(ops, ("qwen_op",))
-        registry["qwen"] = object()
-        registry["new_other"] = unrelated
-        ops.extend(["qwen_op", "new_other_op"])
-        raise RuntimeError("failure after another model registered")
+
+    def register_then_fail():
+        with installation_install.InstallationTransaction() as transaction:
+            transaction.mapping(registry, ("qwen",))
+            transaction.sequence_additions(ops, ("qwen_op",))
+            registry["qwen"] = object()
+            registry["new_other"] = unrelated
+            ops.extend(["qwen_op", "new_other_op"])
+            raise RuntimeError("failure after another model registered")
+
+    pytest.raises(RuntimeError, register_then_fail)
     assert "qwen" not in registry and registry["new_other"] is unrelated
     assert ops == ["other_op", "new_other_op"]
 
@@ -515,3 +532,86 @@ def test_disabled_skips_construction_and_preserves_stricter_levels(
 def test_invalid_value_rejected(value, fg_logger):
     with pytest.raises(ValueError):
         policy.configure_oplist_recording({"flaggems_record_ops": value}, 0)
+
+
+@pytest.mark.parametrize(
+    "mode,rank,fail_shard",
+    [
+        (mode, rank, False)
+        for mode in ("uva_broadcast", "uva_sharded", "uva_auto")
+        for rank in (0, 1)
+    ]
+    + [("uva_auto", 1, True)],
+)
+def test_uva_loading_registers_exact_ranges_and_cleans_failed_shard(
+    monkeypatch, mode, rank, fail_shard
+):
+    from _qwen38_cpu import declarations
+
+    module = declarations(
+        ROOT / "vllm_fl/models/qwen3_8_flash_next/gpu/uva_ngram.py",
+        "qwen_uva_loading_contract",
+        names={"UvaNgramLookup"},
+    )
+    calls = []
+    shared = NS(tensor=torch.arange(51).reshape(17, 3))
+
+    def register(**kwargs):
+        calls.append(("shared", kwargs))
+        start, end = kwargs.get("row_start", 0), kwargs.get("row_end", 17)
+        shared.view = shared.tensor[start:end]
+
+    def register_shard(value):
+        calls.append(("shard", value.shape))
+        if fail_shard:
+            raise OSError("injected mapping failure")
+        return value
+
+    shared.register = register
+    shared._collect_errors = lambda error: [error]
+    shared.close = lambda: calls.append(("close",))
+    monkeypatch.setitem(
+        sys.modules,
+        "vllm_fl.dispatch.backends.vendor.metax.host_memory",
+        NS(register_host_tensor=register_shard),
+    )
+    lookup = module.UvaNgramLookup.__new__(module.UvaNgramLookup)
+    lookup.initialized, lookup.mode = False, mode
+    lookup.group = NS(rank_in_group=rank)
+    lookup.first_head, lookup.local_heads = rank * 2, 2
+    lookup.device, lookup.shared = "cpu", shared
+    sizes = torch.tensor([2, 5, 4, 6])
+    offsets = torch.tensor([0, 2, 7, 11])
+    multipliers = torch.tensor([13, 17, 19, 23])
+    if fail_shard:
+        with pytest.raises(RuntimeError, match="shard registration failed"):
+            lookup.finish_loading(multipliers, sizes, offsets)
+        assert not lookup.initialized and lookup.local_view is None
+        assert calls == [
+            ("shared", {"on_all_ranks": False}),
+            ("shard", torch.Size([10, 3])),
+            ("close",),
+        ]
+        return
+    lookup.finish_loading(multipliers, sizes, offsets)
+    start, end = [(0, 7), (7, 17)][rank]
+    expected = {"on_all_ranks": False}
+    if mode == "uva_sharded":
+        expected = {"on_all_ranks": True, "row_start": start, "row_end": end}
+    assert calls[0] == ("shared", expected)
+    assert len(calls) == (2 if mode == "uva_auto" and rank else 1)
+    if mode == "uva_broadcast":
+        assert not hasattr(lookup, "local_view")
+    else:
+        torch.testing.assert_close(lookup.local_view, shared.tensor[start:end])
+    assert lookup.initialized
+    for name, value in (
+        ("multipliers", multipliers),
+        ("sizes", sizes),
+        ("offsets", offsets),
+    ):
+        assert getattr(lookup, name) is value
+    before = list(calls)
+    with pytest.raises(RuntimeError, match="exactly once"):
+        lookup.finish_loading(multipliers, sizes, offsets)
+    assert calls == before

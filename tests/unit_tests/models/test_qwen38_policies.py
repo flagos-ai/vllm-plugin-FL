@@ -5,6 +5,7 @@
 
 import ast
 import importlib.util
+import subprocess
 import sys
 import weakref
 from bisect import bisect_right
@@ -191,17 +192,31 @@ def test_native_rng_context_restores_after_an_exception():
 
 
 def test_runner_import_resolves_real_ple_state_without_gpu_initialization():
-    package = ModuleType("qwen_review_worker_package")
-    package.__path__ = [str(ROOT / "vllm_fl/worker")]
-    sys.modules[package.__name__] = package
-    from importlib import import_module
+    # Other tests may have initialized an accelerator in this pytest worker.
+    # Check the import contract in a fresh interpreter instead of process order.
+    code = f"""
+import sys
+from importlib import import_module
+from types import ModuleType
+import torch
 
-    module = import_module(package.__name__ + ".qwen3_8_flash_next")
-    assert module._mrv1_prepare.__module__.endswith("qwen3_8_flash_next_ple")
-    assert module.install_sampling_contract.__module__.endswith(
-        "qwen3_8_flash_next_sampling"
+assert not torch.cuda.is_initialized()
+package = ModuleType("qwen_review_worker_package")
+package.__path__ = [{str(ROOT / "vllm_fl/worker")!r}]
+sys.modules[package.__name__] = package
+module = import_module(package.__name__ + ".qwen3_8_flash_next")
+assert module._mrv1_prepare.__module__.endswith("qwen3_8_flash_next_ple")
+assert module.install_sampling_contract.__module__.endswith(
+    "qwen3_8_flash_next_sampling"
+)
+assert not torch.cuda.is_initialized()
+"""
+    subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        timeout=60,
+        cwd=ROOT,
     )
-    assert not torch.cuda.is_initialized()
 
 
 def buffers_config():
@@ -577,12 +592,14 @@ def test_workspace_shared_only_in_same_metadata_scope():
     with native_packing.qsa_metadata_build_scope():
         fresh = native_workspace.prepare_native_qsa_workspace(17, torch.device("cpu"))
         assert fresh["query"].data_ptr() != one["query"].data_ptr()
-    with (
-        pytest.raises(RuntimeError, match="scope failure"),
-        native_packing.qsa_metadata_build_scope(),
-    ):
-        native_packing._QSA_PACK_ROWS_CACHE.set({"probe": object()})
-        raise RuntimeError("scope failure")
+
+    def fail_in_scope():
+        with native_packing.qsa_metadata_build_scope():
+            native_packing._QSA_PACK_ROWS_CACHE.set({"probe": object()})
+            raise RuntimeError("scope failure")
+
+    failure = pytest.raises(RuntimeError, fail_in_scope)
+    assert str(failure.value) == "scope failure"
     assert native_packing._QSA_PACK_ROWS_CACHE.get() is None
 
 

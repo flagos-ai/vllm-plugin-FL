@@ -4,18 +4,31 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 
 from vllm_fl.dispatch.backends.flaggems.impl import qwen3_8_flash_next as dispatch_ops
-from vllm_fl.dispatch.backends.vendor.metax.impl import (
-    qwen3_8_flash_next as dispatch_metax,
+
+# Load the actual adapter package without importing the MetaX backend bootstrap.
+# Its CUDA runtime patches must not execute on other vendors during collection.
+_metax_path = (
+    Path(__file__).resolve().parents[3]
+    / "vllm_fl/dispatch/backends/vendor/metax/impl/qwen3_8_flash_next"
 )
-from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next import (
-    qsa_policy as dispatch_qsa_policy,
+_metax_spec = importlib.util.spec_from_file_location(
+    "qwen38_metax_contracts",
+    _metax_path / "__init__.py",
+    submodule_search_locations=[str(_metax_path)],
 )
+dispatch_metax = importlib.util.module_from_spec(_metax_spec)
+sys.modules[_metax_spec.name] = dispatch_metax
+_metax_spec.loader.exec_module(dispatch_metax)
+dispatch_qsa_policy = sys.modules[_metax_spec.name + ".qsa_policy"]
 
 
 def dispatch_expansion_oracle(blocks, positions, lengths, requests, ratio, budget):

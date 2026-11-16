@@ -67,18 +67,19 @@ class UvaNgramLookup:
     def finish_loading(self, multipliers, sizes, offsets):
         if self.initialized:
             raise RuntimeError("PLE UVA table must be initialized exactly once")
-        if self.mode in {"uva_sharded", "uva_auto"}:
+        if self.mode == "uva_broadcast":
+            self.shared.register(on_all_ranks=False)
+        else:
             self.row_start = int(offsets[self.first_head])
             last = self.first_head + self.local_heads - 1
             row_end = int(offsets[last] + sizes[last])
-        if self.mode == "uva_sharded":
-            self.shared.register(
-                on_all_ranks=True, row_start=self.row_start, row_end=row_end
-            )
-            self.local_view = self.shared.view
-        else:
-            self.shared.register(on_all_ranks=False)
-            if self.mode == "uva_auto":
+            if self.mode == "uva_sharded":
+                self.shared.register(
+                    on_all_ranks=True, row_start=self.row_start, row_end=row_end
+                )
+                self.local_view = self.shared.view
+            else:
+                self.shared.register(on_all_ranks=False)
                 error = None
                 try:
                     if self.group.rank_in_group == 0:
