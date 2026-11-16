@@ -102,7 +102,7 @@ def helper_and_backend():
         "current_platform": SimpleNamespace(torch_device_fn=backend),
     }
     function_module = ast.Module(body=functions, type_ignores=[])
-    exec(
+    exec(  # noqa: S102 - execute the repository function against CPU stream doubles
         compile(
             function_module,
             str(source),

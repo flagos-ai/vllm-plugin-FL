@@ -85,7 +85,7 @@ def get_backend() -> str:
         runtime = _gcu_runtime()
         return "enflame" if runtime is not None and runtime.is_available() else "cpu"
     if _BACKEND:
-        return "tsingmicro" if _BACKEND == "txda" else _BACKEND
+        return {"txda": "tsingmicro", "iluvatar": "tianshu"}.get(_BACKEND, _BACKEND)
     if _is_metax_backend():
         return "metax"
     # Check TXDA before CUDA: transfer_to_txda may expose CUDA-style aliases.
@@ -98,17 +98,15 @@ def get_backend() -> str:
     if runtime is not None and runtime.is_available():
         return "enflame"
     if torch.cuda.is_available():
-        # Hygon HIP, T-Head PPU and MUSA expose Torch CUDA APIs, but remain
-        # distinct test backends so NVIDIA-only cases cannot run through those
-        # aliases.
+        # CUDA API aliases remain distinct hardware test backends.
         vendor = os.environ.get("GEMS_VENDOR", "").lower()
-        if vendor == "hygon":
-            return "hygon"
-        if vendor == "thead":
-            return "thead"
-        if vendor == "mthreads":
-            return "musa"
-        return "nvidia"
+        return {
+            "hygon": "hygon",
+            "iluvatar": "tianshu",
+            "tianshu": "tianshu",
+            "thead": "thead",
+            "mthreads": "musa",
+        }.get(vendor, "nvidia")
     try:
         import torch_npu  # noqa: F401
 

@@ -9,24 +9,24 @@ FlagGems stay on the tested versions.
 
 | Component | Validated version or configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci` |
-| Image digest | `sha256:eb904d40a92e9769f358f4d81c8043acfbc30b1b077f0a31210be6316ec0cf18` |
-| Base image | `harbor.baai.ac.cn/plugin/iluvatar-corex4.5.0-flagtree0.6.0-triton3.6.0-cxnone-vllm_fl0.24.0:20260909` |
+| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci` |
+| Image digest | `sha256:e400f2a5da8d3020f86a0129463223d637401f9c7b3c0a7157f1c7f199d7adc6` |
+| Base image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci` |
 | Chip | Iluvatar CoreX BI-V150 |
-| vLLM | `0.28.0+empty` (`VLLM_TARGET_DEVICE=empty`, no `vllm._C`) |
+| vLLM | `0.32.0+empty` (`VLLM_TARGET_DEVICE=empty`, no `vllm._C`) |
 | Python | `3.12` (the image ships a `cp312` vLLM wheel) |
 | PyTorch | `2.10.0+corex.4.5.0` |
 | Driver | `4.5.0` |
 | IX-ML | `4.4.0` |
-| FlagTree | provides the Triton runtime; the base image tag records `flagtree0.6.0` |
+| FlagTree | `0.7.0+iluvatar3.6`; provides the Triton runtime |
 | Triton | `3.6.0` with the `iluvatar` backend; provided by FlagTree, no standalone `triton` package is expected |
-| FlagGems | `5.3.5` |
+| FlagGems | `5.5.0.dev0` |
 | Dispatch policy | [`vllm_fl/dispatch/config/iluvatar.yaml`](../../vllm_fl/dispatch/config/iluvatar.yaml) |
 
 The Iluvatar dispatch policy is loaded automatically from
 [`vllm_fl/dispatch/config/iluvatar.yaml`](../../vllm_fl/dispatch/config/iluvatar.yaml).
-It keeps `prefer: flagos` and an empty `flagos_blacklist`, so FlagGems handles the
-listed operators with `vendor:iluvatar` and then `reference` as fallbacks. Keep
+It keeps `prefer: flagos` with the operator exclusions recorded in that file.
+The listed operator routes use `vendor:iluvatar` and then `reference` as fallbacks. Keep
 that file and the plugin source from the same revision; the policy is part of the
 validated configuration.
 
