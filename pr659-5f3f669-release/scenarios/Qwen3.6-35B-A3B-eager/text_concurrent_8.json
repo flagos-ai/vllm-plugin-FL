@@ -1,0 +1,164 @@
+{
+  "scenario": "text_concurrent_8",
+  "concurrency": 8,
+  "summary": {
+    "request_count": 8,
+    "passed_count": 8,
+    "failed_count": 0,
+    "passed": true
+  },
+  "request_results": [
+    {
+      "id": "text-01",
+      "kind": "text",
+      "latency_seconds": 3.155,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "text-02",
+      "kind": "text",
+      "latency_seconds": 2.968,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "text-03",
+      "kind": "text",
+      "latency_seconds": 2.969,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "text-04",
+      "kind": "text",
+      "latency_seconds": 2.937,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "text-05",
+      "kind": "text",
+      "latency_seconds": 3.331,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "text-06",
+      "kind": "text",
+      "latency_seconds": 3.122,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "text-07",
+      "kind": "text",
+      "latency_seconds": 3.121,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "text-08",
+      "kind": "text",
+      "latency_seconds": 2.936,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    }
+  ]
+}

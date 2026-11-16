@@ -1,0 +1,218 @@
+{
+  "stack": {
+    "packages": {
+      "vllm": "0.32.0+empty",
+      "flag-gems": "5.5.0.dev1+g292cec324",
+      "flaggems-vllm": "0.1.0",
+      "flagtree": "0.7.0+amd3.6",
+      "flagcx": "0.15.0.dev52+20261029.g591cfbf77e35eefb323b0c6ec6860afba25519ee"
+    },
+    "torch": "2.13.0+git733fca1",
+    "hip": "7.2.53211",
+    "python": "3.12.15",
+    "triton": "3.6.0",
+    "triton_path": "/opt/flagtree/triton/__init__.py",
+    "flaggems_vllm_commit": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
+  },
+  "accelerator": "8 \u00d7 AMD Radeon PRO W7900D (gfx1100)",
+  "amdgpu_driver": "6.16.13",
+  "vllm_runner": "Upstream Runner V2 selected by default",
+  "flaggems_bundle_sha256": "6f7b16e2caf193c5a4761b61f360606e342cbed074030988807c2c06b5e37300",
+  "base_image": "sha256:0fd7d28f6c5c4a2921c1056bfb2b69e43784c680470edd5524ec15bf39c11c6c",
+  "flaggems_verified_files": {
+    "ops/clone.py": "336af1988e6e4dac13ba9c627d1b08d300c77007265337c5912f27764e69ce9d",
+    "runtime/backend/_amd/__init__.py": "a562497f2c7752eae113494b12a56d7e38ee6d45cd46470b2711c66620e4ff3a"
+  },
+  "groups": {
+    "Qwen3.6-27B-eager": {
+      "default_flagos_operations": [
+        "dynamic_per_token_quant_int8",
+        "gelu_and_mul",
+        "grouped_topk",
+        "invoke_fused_moe_triton_kernel",
+        "moe_align_block_size",
+        "moe_sum",
+        "rms_norm",
+        "rotary_embedding",
+        "silu_and_mul",
+        "topk_softmax"
+      ],
+      "full_replay_rows": [],
+      "processes_with_both_native_libraries": 10,
+      "worker_marker": "AMD V2 uses explicit-copy input buffers.",
+      "process_group_transport": "RCCL",
+      "tensor_parallel_size": 8,
+      "native_library_names": [
+        "libflagcx.so",
+        "librccl.so"
+      ]
+    },
+    "Qwen3.6-27B-graph": {
+      "default_flagos_operations": [
+        "dynamic_per_token_quant_int8",
+        "gelu_and_mul",
+        "grouped_topk",
+        "invoke_fused_moe_triton_kernel",
+        "moe_align_block_size",
+        "moe_sum",
+        "rms_norm",
+        "rotary_embedding",
+        "silu_and_mul",
+        "topk_softmax"
+      ],
+      "full_replay_rows": [
+        {
+          "unpadded_tokens": 1,
+          "padded_tokens": 1,
+          "padding_tokens": 0,
+          "count": 121
+        },
+        {
+          "unpadded_tokens": 1,
+          "padded_tokens": 1,
+          "padding_tokens": 0,
+          "count": 94
+        },
+        {
+          "unpadded_tokens": 7,
+          "padded_tokens": 8,
+          "padding_tokens": 1,
+          "count": 1
+        },
+        {
+          "unpadded_tokens": 4,
+          "padded_tokens": 4,
+          "padding_tokens": 0,
+          "count": 1
+        },
+        {
+          "unpadded_tokens": 3,
+          "padded_tokens": 4,
+          "padding_tokens": 1,
+          "count": 1
+        }
+      ],
+      "processes_with_both_native_libraries": 10,
+      "worker_marker": "AMD V2 uses explicit-copy input buffers.",
+      "process_group_transport": "RCCL",
+      "tensor_parallel_size": 8,
+      "native_library_names": [
+        "libflagcx.so",
+        "librccl.so"
+      ]
+    },
+    "Qwen3.6-35B-A3B-eager": {
+      "default_flagos_operations": [
+        "dynamic_per_token_quant_int8",
+        "gelu_and_mul",
+        "grouped_topk",
+        "invoke_fused_moe_triton_kernel",
+        "moe_align_block_size",
+        "moe_sum",
+        "rms_norm",
+        "rotary_embedding",
+        "silu_and_mul",
+        "topk_softmax"
+      ],
+      "full_replay_rows": [],
+      "processes_with_both_native_libraries": 10,
+      "worker_marker": "AMD V2 uses explicit-copy input buffers.",
+      "process_group_transport": "RCCL",
+      "tensor_parallel_size": 8,
+      "native_library_names": [
+        "libflagcx.so",
+        "librccl.so"
+      ]
+    },
+    "Qwen3.6-35B-A3B-graph": {
+      "default_flagos_operations": [
+        "dynamic_per_token_quant_int8",
+        "gelu_and_mul",
+        "grouped_topk",
+        "invoke_fused_moe_triton_kernel",
+        "moe_align_block_size",
+        "moe_sum",
+        "rms_norm",
+        "rotary_embedding",
+        "silu_and_mul",
+        "topk_softmax"
+      ],
+      "full_replay_rows": [
+        {
+          "unpadded_tokens": 1,
+          "padded_tokens": 1,
+          "padding_tokens": 0,
+          "count": 211
+        },
+        {
+          "unpadded_tokens": 7,
+          "padded_tokens": 8,
+          "padding_tokens": 1,
+          "count": 1
+        },
+        {
+          "unpadded_tokens": 5,
+          "padded_tokens": 8,
+          "padding_tokens": 3,
+          "count": 1
+        },
+        {
+          "unpadded_tokens": 4,
+          "padded_tokens": 4,
+          "padding_tokens": 0,
+          "count": 1
+        },
+        {
+          "unpadded_tokens": 1,
+          "padded_tokens": 1,
+          "padding_tokens": 0,
+          "count": 1
+        },
+        {
+          "unpadded_tokens": 1,
+          "padded_tokens": 1,
+          "padding_tokens": 0,
+          "count": 7
+        },
+        {
+          "unpadded_tokens": 1,
+          "padded_tokens": 1,
+          "padding_tokens": 0,
+          "count": 1
+        },
+        {
+          "unpadded_tokens": 4,
+          "padded_tokens": 4,
+          "padding_tokens": 0,
+          "count": 2
+        },
+        {
+          "unpadded_tokens": 3,
+          "padded_tokens": 4,
+          "padding_tokens": 1,
+          "count": 2
+        },
+        {
+          "unpadded_tokens": 1,
+          "padded_tokens": 1,
+          "padding_tokens": 0,
+          "count": 2
+        },
+        {
+          "unpadded_tokens": 8,
+          "padded_tokens": 8,
+          "padding_tokens": 0,
+          "count": 1
+        }
+      ],
+      "processes_with_both_native_libraries": 10,
+      "worker_marker": "AMD V2 uses explicit-copy input buffers.",
+      "process_group_transport": "RCCL",
+      "tensor_parallel_size": 8,
+      "native_library_names": [
+        "libflagcx.so",
+        "librccl.so"
+      ]
+    }
+  }
+}

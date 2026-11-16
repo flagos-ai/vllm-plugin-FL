@@ -1,0 +1,171 @@
+{
+  "candidate": "5f3f669516e71a177416f72e1690c8c8bf79bb9a",
+  "source_archive_sha256": "9cbeafc40f2763eeeaf23b6e3ae27973786658de06508cf52a82092953c29458",
+  "dependency_image": "sha256:6591ace360a56348d9e82e1649019b367d429ebf49be8f4e20a819a92fac2152",
+  "gate_exit": 0,
+  "requests": 104,
+  "passed": 104,
+  "scenarios": 20,
+  "groups": {
+    "Qwen3.6-27B-eager": {
+      "exit": 0,
+      "receipts": {
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        }
+      },
+      "requests": 26,
+      "passed": 26,
+      "full_replays": 0,
+      "v2_worker": true,
+      "rccl_bootstrap": true,
+      "eight_rank_native_libs_snapshot": true
+    },
+    "Qwen3.6-27B-graph": {
+      "exit": 0,
+      "receipts": {
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        }
+      },
+      "requests": 26,
+      "passed": 26,
+      "full_replays": 218,
+      "v2_worker": true,
+      "rccl_bootstrap": true,
+      "eight_rank_native_libs_snapshot": true
+    },
+    "Qwen3.6-35B-A3B-eager": {
+      "exit": 0,
+      "receipts": {
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        }
+      },
+      "requests": 26,
+      "passed": 26,
+      "full_replays": 0,
+      "v2_worker": true,
+      "rccl_bootstrap": true,
+      "eight_rank_native_libs_snapshot": true
+    },
+    "Qwen3.6-35B-A3B-graph": {
+      "exit": 0,
+      "receipts": {
+        "image_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "image_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        },
+        "mixed_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 8,
+          "passed": true
+        },
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 1,
+          "passed": true
+        }
+      },
+      "requests": 26,
+      "passed": 26,
+      "full_replays": 230,
+      "v2_worker": true,
+      "rccl_bootstrap": true,
+      "eight_rank_native_libs_snapshot": true
+    }
+  },
+  "model_fingerprints": {
+    "Qwen3.6-27B": {
+      "config.json": "69db4eb7196bc8190813231b3018ca05d8c2e3abc7b1af19d55c157af44a9d9c",
+      "model.safetensors.index.json": "a8ad2c26fb707ff8c245806315b03e3b4b74595528492423af5dae0ce39b4d9b"
+    },
+    "Qwen3.6-35B-A3B": {
+      "config.json": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+      "model.safetensors.index.json": "41b9356101ebf8e7519e150dc811f80c4226e727301fbb032b890f006ed0be83"
+    }
+  },
+  "source_base": "0ccef39e9e0755c62576b99f4fcb69a61551f67e",
+  "flaggems_commit": "292cec32414fbfea3745df5e5d640dd0fad210d7",
+  "targeted_tests": {
+    "passed": 31,
+    "skipped": 0
+  }
+}

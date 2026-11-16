@@ -1,0 +1,164 @@
+{
+  "scenario": "image_concurrent_8",
+  "concurrency": 8,
+  "summary": {
+    "request_count": 8,
+    "passed_count": 8,
+    "failed_count": 0,
+    "passed": true
+  },
+  "request_results": [
+    {
+      "id": "image-01",
+      "kind": "image",
+      "latency_seconds": 13.034,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "image-02",
+      "kind": "image",
+      "latency_seconds": 13.032,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "image-03",
+      "kind": "image",
+      "latency_seconds": 12.639,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "image-04",
+      "kind": "image",
+      "latency_seconds": 9.526,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "image-05",
+      "kind": "image",
+      "latency_seconds": 12.45,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "image-06",
+      "kind": "image",
+      "latency_seconds": 9.525,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "image-07",
+      "kind": "image",
+      "latency_seconds": 9.525,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "image-08",
+      "kind": "image",
+      "latency_seconds": 9.525,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    }
+  ]
+}

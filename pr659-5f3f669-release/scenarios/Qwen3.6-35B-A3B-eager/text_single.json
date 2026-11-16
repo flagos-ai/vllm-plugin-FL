@@ -1,0 +1,31 @@
+{
+  "scenario": "text_single",
+  "concurrency": 1,
+  "summary": {
+    "request_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "passed": true
+  },
+  "request_results": [
+    {
+      "id": "text-llm-details",
+      "kind": "text",
+      "latency_seconds": 39.424,
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "finish_reason": "stop"
+    }
+  ]
+}
