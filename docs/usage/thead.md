@@ -217,10 +217,10 @@ environment, the actual imported `triton.__file__` and `triton.__version__`
 determine which compiler is used.
 
 Build vLLM with the empty target from the pinned source, using the build
-prerequisites already prepared for the vendor runtime. The plugin wheel
-built with `GEMS_VENDOR=thead` includes the host-side C++ weak-reference
-operator used by graph capture. It registers on PyTorch's CUDA dispatch key
-and builds with the C++ toolchain in the T-Head image.
+prerequisites already prepared for the vendor runtime. Leave `VLLM_VENDOR`
+empty when building the plugin wheel. The T-Head plugin registers a
+`weak_ref_tensor` fallback on PyTorch's CUDA dispatch key and borrows graph
+allocations through the PPU PyTorch runtime's storage and tensor bindings.
 
 ```bash
 mkdir -p /work/sources

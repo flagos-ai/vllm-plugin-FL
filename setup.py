@@ -4,8 +4,7 @@
 #
 # This setup script builds the vllm_fl._C C++/CUDA extension via CMake.
 # It supports vendor-specific compilation (currently CUDA only) controlled by
-# the VLLM_VENDOR environment variable, with a default for T-Head PPU.
-# The build pipeline:
+# the VLLM_VENDOR environment variable. The build pipeline:
 #   1. Detects available tooling (cmake, ninja, sccache/ccache)
 #   2. Configures and compiles the C++/CUDA sources under csrc/
 #   3. Copies the resulting shared library (.so/.pyd) to the package directory
@@ -28,10 +27,6 @@ ROOT_DIR = Path(__file__).parent.resolve()
 logger = logging.getLogger(__name__)
 
 VLLM_VENDOR = os.environ.get("VLLM_VENDOR", "").lower()
-if not VLLM_VENDOR and os.environ.get("GEMS_VENDOR", "").lower() == "thead":
-    # PPU tensors use the CUDA dispatch key. The extension needs only a C++
-    # compiler for weak_ref_tensor, which is used by graph capture.
-    VLLM_VENDOR = "cuda"
 MAX_JOBS = os.environ.get("MAX_JOBS")
 NVCC_THREADS = os.environ.get("NVCC_THREADS")
 CMAKE_BUILD_TYPE = os.environ.get("CMAKE_BUILD_TYPE")
@@ -133,7 +128,7 @@ class CMakeBuildExt(build_ext):
         except (OSError, subprocess.CalledProcessError) as exc:
             raise RuntimeError(
                 "CMake is required to build vllm_fl._C. "
-                "Install cmake and rebuild the wheel."
+                "Install cmake and run with VLLM_VENDOR=cuda."
             ) from exc
 
         os.makedirs(self.build_temp, exist_ok=True)
