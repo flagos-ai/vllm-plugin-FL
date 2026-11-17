@@ -4,30 +4,24 @@ Run an OpenAI-compatible service with the pinned image below. The image contains
 ordinary installed vLLM, FlagGems, and plugin packages; no source checkout or
 editable installation is required. The recipe uses two Hygon BW1000 64 GiB DCUs.
 
-> The current CI image is `v0.32.0-hygon-ci` on the FlagOS 2.2 base; see
-> [vLLM 0.32 experimental path](#vllm-032-experimental-path). The 0.28 recipe
-> below remains valid for the previously published image.
+> This guide targets the `v0.32.0-hygon-ci` image on the FlagOS 2.2 base. The
+> 0.28 image and recipe were superseded; see
+> [vLLM 0.32 implementation notes](#vllm-0.32-implementation-notes) for what
+> changed with the move.
 
 ## Deployment stack
 
 | Component | Version or configuration |
 |---|---|
-| Image (Linux AMD64) | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci@sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d` |
-| Vendor base | DTK 26.04 / Ubuntu 22.04 / Python 3.10.12 |
-| vLLM | Distribution `0.28.0+empty`; runtime `0.28.0` |
-| PyTorch | Distribution `2.10.0+das.opt1.dtk2604.20260325.g6b060a`; runtime `2.10.0` |
-| FlagGems distribution | `0.1.0` |
-| FlagGems source commit | [e12a220a0d54b40d90d0549ff83ffabedb01f6dd](https://github.com/flagos-ai/FlagGems/commit/e12a220a0d54b40d90d0549ff83ffabedb01f6dd) |
-| FlagTree distribution | `0.6.0+hcu3.6` |
-| FlagTree wheel SHA256 | `0fd81f0e691486dfaf85f6a196f9f09d66118b7d2064b4f8c70b6c8bfdb4d52c` |
-| Triton distribution | `3.6.0+gitc73250c4.staging`, coexists with FlagTree |
-| Model runner | `ModelRunnerFL` (v1); selected by the plugin at startup, see below |
+| Image (Linux AMD64) | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-hygon-ci@sha256:558066eb6677cd33d60bc97010d0b91c991941eb05631c9a9265372c8e319f84` |
+| Vendor base | DTK 26.04 / Ubuntu 24.04 / Python 3.10.20 |
+| vLLM | Distribution `0.32.0+empty`; runtime `0.32.0` |
+| PyTorch | Distribution `2.9.0+das.opt1.dtk2604`; runtime `2.9.0` |
+| FlagGems distribution | `5.4.0` |
+| FlagTree distribution | `0.7.0+hcu3.6` |
+| Triton distribution | `3.6.0`, coexists with FlagTree |
+| Model runner | Upstream `GPUModelRunner` (v2) by default; `ModelRunnerFL` (v1) with `VLLM_USE_V2_MODEL_RUNNER=0` |
 | Communication | Vendor HIP/RCCL, TP2; `FLAGCX_PATH` unset |
-
-The FlagGems commit identifies matching installed source content (1,944 files,
-with CRLF/LF differences), not a VCS revision recorded in package metadata.
-FlagTree's full Git commit was not recorded; its wheel hash identifies the
-artifact. The Triton Git suffix is not a FlagTree commit.
 
 Keep the image's vendor Torch, FlagTree/Triton, and
 [Hygon dispatch policy](../../vllm_fl/dispatch/config/hygon.yaml) together.
@@ -67,7 +61,7 @@ must contain the original model configuration, tokenizer, and all checkpoint
 shards. Set `MODEL_ROOT` to the parent directory containing these models.
 
 ```bash
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci@sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-hygon-ci@sha256:558066eb6677cd33d60bc97010d0b91c991941eb05631c9a9265372c8e319f84
 export MODEL_ROOT=/public-flash/models
 export MODEL_NAME=Qwen3.6-27B
 export SERVED_MODEL=hygon-qwen36
@@ -79,7 +73,7 @@ test -f "$MODEL_ROOT/$MODEL_NAME/config.json"
 ```
 
 For the MoE model, set `MODEL_NAME=Qwen3.6-35B-A3B` before creating the container.
-The 0.24 vendor base image alone does not contain the 0.28 deployment stack.
+The 0.24 vendor base image alone does not contain the 0.32 deployment stack.
 
 ## 3. Create a container for the selected pair
 
@@ -117,10 +111,10 @@ import vllm_fl
 import flag_gems
 
 expected = {
-    "torch": "2.10.0+das.opt1.dtk2604.20260325.g6b060a",
-    "vllm": "0.28.0+empty",
-    "flag-gems": "0.1.0",
-    "flagtree": "0.6.0+hcu3.6",
+    "torch": "2.9.0+das.opt1.dtk2604",
+    "vllm": "0.32.0+empty",
+    "flag-gems": "5.4.0",
+    "flagtree": "0.7.0+hcu3.6",
 }
 for name, version in expected.items():
     actual = metadata.version(name)
@@ -131,8 +125,8 @@ for name in ("vllm", "flag-gems", "vllm-plugin-fl"):
     direct_url = json.loads(dist.read_text("direct_url.json") or "{}")
     assert not direct_url.get("dir_info", {}).get("editable", False), name
     print(f"{name}: {dist.version}, installed at {dist.locate_file('')}")
-assert torch.__version__ == "2.10.0"
-assert vllm.__version__ == "0.28.0"
+assert torch.__version__ == "2.9.0"
+assert vllm.__version__ == "0.32.0"
 assert torch.cuda.is_available() and torch.cuda.device_count() == 2
 assert "FLAGCX_PATH" not in os.environ
 print("Torch:", torch.__file__)
@@ -144,8 +138,8 @@ PY
 ```
 
 Distribution versions and imported module versions are both checked because
-`0.28.0+empty` imports as `0.28.0`, and the vendor PyTorch distribution imports
-as `2.10.0`. An older global vLLM installation must not shadow the image's wheel.
+`0.32.0+empty` imports as `0.32.0`, and the vendor PyTorch distribution imports
+as `2.9.0`. An older global vLLM installation must not shadow the image's wheel.
 FlagCX is optional for this deployment. Leave `FLAGCX_PATH` unset to use the
 validated vendor RCCL route; setting it to an empty string still selects FlagCX.
 
@@ -236,7 +230,7 @@ Leave these variables unset to build vLLM from the official Git source.
 The existing Hygon CI runner label is `hg-cicd-vllm-plugin-0240`; its name is
 an infrastructure label and does not specify the vLLM version inside the image.
 
-## vLLM 0.32 experimental path
+## vLLM 0.32 implementation notes
 
 The 0.32 line moves upstream to Python `>=3.11` and a newer Torch, while the
 FlagOS 2.2 Hygon release image ships Python 3.10 / Torch 2.9 / DTK 26.04. The
@@ -252,7 +246,7 @@ plugin is ported to 0.32 on top of that image; the validated stack is:
 | FlashAttention | `2.8.3+das.opt1.dtk2604.torch290` |
 | FlagGems-vllm | `0.2.0` (`v0.2.0` tag; metadata reports `0.1.0`) |
 
-Steps that differ from the 0.28 recipe:
+Steps that differ from the legacy 0.28 recipe:
 
 1. **Make vLLM 0.32 importable on Python 3.10.** The image build runs
    `.github/scripts/hygon/patch_vllm_py310.py`, which rewrites the 3.11-only
@@ -351,7 +345,7 @@ or performance.
 
 ## Troubleshooting
 
-- **Imported vLLM is still 0.24:** use the image's Python environment and check
+- **Imported vLLM is an older release:** use the image's Python environment and check
   `vllm.__file__`. Remove conflicting `PYTHONPATH` or source mounts; verify both
   distribution and runtime versions with the check above.
 - **No DCUs or the wrong pair:** recheck host render-node mapping, permissions,
