@@ -18,7 +18,7 @@ dispatch/
 ├── config/                  # Platform-specific configurations
 │   ├── __init__.py          # Config loader module
 │   ├── ascend.yaml          # Ascend NPU default configuration
-│   └── cuda.yaml            # CUDA default configuration
+│   └── nvidia.yaml          # CUDA default configuration
 └── backends/                # Backend implementations
     ├── base.py              # Backend abstract base class
     ├── flaggems/            # FlagGems backend (DEFAULT, priority 150)
@@ -211,7 +211,7 @@ The dispatch system supports multiple ways to configure backend selection:
 ├─────────────────────────────────────────────────────────────────┤
 │  1. VLLM_FL_CONFIG        │ User config file, complete override │
 │  2. Environment Variables │ Override specific items              │
-│  3. Platform Config File  │ ascend.yaml / cuda.yaml defaults     │
+│  3. Platform Config File  │ ascend.yaml / nvidia.yaml defaults   │
 │  4. Built-in Defaults     │ Code-defined default values          │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -228,12 +228,12 @@ The system automatically detects hardware and loads the corresponding configurat
 | Platform | Config File | Auto-Detection |
 |----------|-------------|----------------|
 | Ascend NPU | `config/ascend.yaml` | `torch.npu.is_available()` |
-| NVIDIA GPU | `config/cuda.yaml` | `torch.cuda.is_available()` |
+| NVIDIA GPU | `config/nvidia.yaml` | `torch.cuda.is_available()` |
 
 You can force a specific platform using `VLLM_FL_PLATFORM` environment variable:
 ```bash
 export VLLM_FL_PLATFORM=ascend  # Force Ascend config
-export VLLM_FL_PLATFORM=cuda    # Force CUDA config
+export VLLM_FL_PLATFORM=nvidia  # Force NVIDIA config
 ```
 
 ### User-Specified Configuration File (YAML)
@@ -314,7 +314,7 @@ Environment variables can override specific items from platform config. If not s
 |----------|---------|-------------|
 | `VLLM_FL_PREFER_ENABLED` | `true` | Global switch. Set `false` to disable all dispatch features |
 | `VLLM_FL_CONFIG` | (none) | Path to YAML config file (complete override) |
-| `VLLM_FL_PLATFORM` | (auto) | Force platform: `ascend`, `cuda` |
+| `VLLM_FL_PLATFORM` | (auto) | Force platform: `ascend`, `nvidia` |
 
 #### Backend Selection
 
