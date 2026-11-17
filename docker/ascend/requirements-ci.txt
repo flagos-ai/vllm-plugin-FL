@@ -1,0 +1,16 @@
+# Copyright 2026 FlagOS Contributors
+# vLLM 0.32 Ascend CI/development additions; core Runtime pins are in constraints.txt.
+setuptools==80.10.2
+wheel==0.48.0
+build==1.6.1
+scikit-build-core==0.11.0
+pytest==9.1.1
+pytest-xdist==3.8.0
+pytest-cov==7.1.0
+pytest-timeout==2.4.0
+pytest-json-report==1.5.0
+pytest-metadata==3.1.1
+coverage==7.16.1
+decorator==5.2.1
+# Match the plugin's declared runtime dependency.
+modelscope==1.35.3
