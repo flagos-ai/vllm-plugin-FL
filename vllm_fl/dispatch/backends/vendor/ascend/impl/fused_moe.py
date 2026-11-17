@@ -92,6 +92,8 @@ def bf16_grouped_experts(
         activated = F.silu(gate_up)
     elif activation == "gelu_no_mul":
         activated = F.gelu(gate_up)
+    else:
+        raise NotImplementedError(f"Unsupported Ascend MoE activation: {activation}")
     return torch_npu.npu_grouped_matmul(
         x=[activated],
         weight=[w2.transpose(1, 2)],
