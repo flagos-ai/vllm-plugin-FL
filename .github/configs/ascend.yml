@@ -45,6 +45,7 @@ container_options: >-
   --env VLLM_PLUGINS=fl
   --env VLLM_FL_PLATFORM=ascend
   --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
+  --env ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
   --device /dev/davinci0
   --device /dev/davinci1
   --device /dev/davinci2

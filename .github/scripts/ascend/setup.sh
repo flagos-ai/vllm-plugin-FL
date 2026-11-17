@@ -35,7 +35,21 @@ if not callable(getattr(triton, "jit", None)):
     raise RuntimeError("Ascend CI requires FlagTree's working triton.jit")
 for package in ("vllm", "torch", "torch-npu", "flagtree", "flag-gems"):
     print(f"{package}: {version(package)}")
-print(f"Ascend devices: {torch.npu.device_count()}")
+
+# npu-smi and the mapped /dev nodes are not enough: the image ships an empty
+# ASCEND_RT_VISIBLE_DEVICES, which hides every device from the runtime. Fail
+# here (with the count) instead of letting device-dependent tests no-op later.
+device_count = torch.npu.device_count()
+print(f"Ascend devices: {device_count}")
+if device_count < 2:
+    raise RuntimeError(
+        "Ascend CI requires at least 2 visible NPU devices, found "
+        f"{device_count}; check ASCEND_RT_VISIBLE_DEVICES"
+    )
+smoke = (torch.ones(2, 2) * 2).npu().sum()
+torch.npu.synchronize()
+if smoke.cpu().item() != 8.0:
+    raise RuntimeError("Ascend NPU smoke computation returned an unexpected result")
 
 expected = "1.26.4"
 if numpy.__version__ != expected:
