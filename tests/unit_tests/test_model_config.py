@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
 
 import pytest
@@ -155,3 +156,83 @@ def test_kunlunxin_ci_uses_validated_batch_capacity(case):
     assert cfg.engine["enforce_eager"] is case.endswith("_eager")
     assert ("--enforce-eager" in args) is case.endswith("_eager")
     assert "--compilation-config" not in args
+
+
+def test_case_overrides_extend_shared_device_overrides(tmp_path, monkeypatch):
+    models_dir = tmp_path / "models"
+    platforms_dir = tmp_path / "platforms"
+    monkeypatch.setattr(platform_config, "_PLATFORMS_DIR", platforms_dir)
+
+    _write(
+        models_dir / "qwen3_6" / "27b_tp2_graph.yaml",
+        """
+        llm:
+          model: "/data/models/Qwen/Qwen3.6-27B"
+          tensor_parallel_size: 2
+          enforce_eager: false
+        generate:
+          prompts:
+            - "Where is the capital of France"
+        """,
+    )
+    _write(
+        platforms_dir / "demo.yaml",
+        """
+        platform: demo
+        vendor: test
+        device_types:
+          demo_card:
+            memory_gb: 80
+        tolerance: {}
+        device_overrides:
+          demo_card:
+            cases:
+              - qwen3_6/27b_tp2_graph
+            llm:
+              max_model_len: 4096
+            case_overrides:
+              qwen3_6/27b_tp2_graph:
+                llm:
+                  compilation_config:
+                    cudagraph_mode: FULL_DECODE_ONLY
+        demo_card:
+          name: "demo_card"
+          tests: {}
+        """,
+    )
+
+    cfg = ModelConfig.load(
+        "qwen3_6",
+        "27b_tp2_graph",
+        models_dir=models_dir,
+        platform="demo",
+        device="demo_card",
+    )
+
+    assert cfg.engine["max_model_len"] == 4096
+    assert cfg.engine["compilation_config"] == {"cudagraph_mode": "FULL_DECODE_ONLY"}
+    args = cfg.serve_args()
+    index = args.index("--compilation-config")
+    assert json.loads(args[index + 1]) == {"cudagraph_mode": "FULL_DECODE_ONLY"}
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["27b_tp2_eager", "27b_tp2_graph", "35b_a3b_tp2_eager", "35b_a3b_tp2_graph"],
+)
+def test_ascend_ci_requests_supported_cudagraph_mode(case):
+    """Ascend accepts only NONE or FULL_DECODE_ONLY for non-eager runs."""
+    cfg = ModelConfig.load("qwen3_6", case, platform="ascend", device="910c")
+    graph_case = case.endswith("_graph")
+
+    assert cfg.engine["enforce_eager"] is not graph_case
+    assert ("compilation_config" in cfg.engine) is graph_case
+    if graph_case:
+        assert cfg.engine["compilation_config"] == {
+            "cudagraph_mode": "FULL_DECODE_ONLY"
+        }
+    args = cfg.serve_args()
+    assert ("--compilation-config" in args) is graph_case
+    if graph_case:
+        index = args.index("--compilation-config")
+        assert json.loads(args[index + 1]) == {"cudagraph_mode": "FULL_DECODE_ONLY"}

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import copy
 import itertools
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -90,7 +91,12 @@ def _apply_device_case_overrides(
         active_platform,
         active_device or None,
     )
-    return _deep_merge(config, platform_config.get_device_case_overrides(model, case))
+    overrides = platform_config.get_device_case_overrides(model, case)
+    overrides = _deep_merge(
+        overrides,
+        platform_config.get_device_case_specific_overrides(model, case),
+    )
+    return _deep_merge(config, overrides)
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +415,10 @@ class ModelConfig:
             if isinstance(value, bool):
                 if value:
                     args.append(flag)
+            elif isinstance(value, (dict, list)):
+                # Structured engine options (e.g. compilation_config) are
+                # JSON on the CLI; str() would emit invalid Python literals.
+                args.extend([flag, json.dumps(value)])
             else:
                 args.extend([flag, str(value)])
 

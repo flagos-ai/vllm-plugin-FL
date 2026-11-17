@@ -329,9 +329,18 @@ class PlatformConfig:
                   - model_name/e2e_test_case_name
                 llm:
                   gpu_memory_utilization: 0.9
+                case_overrides:
+                  model_name/another_case:
+                    llm:
+                      compilation_config:
+                        cudagraph_mode: FULL_DECODE_ONLY
 
-        The ``tolerance`` key under the same device remains reserved for
-        numerical tolerance overrides and is not treated as a model override.
+        ``cases`` lists the cases the shared ``llm``/``serve`` overrides apply
+        to. ``case_overrides`` adds overrides for one specific case on top of
+        them, so a platform can differentiate cases that share everything else
+        (for example eager vs graph variants). The ``tolerance`` key under the
+        same device remains reserved for numerical tolerance overrides and is
+        not treated as a model override.
         """
         dev_override = self.device_overrides.get(self.device, {})
         if not isinstance(dev_override, dict):
@@ -348,8 +357,34 @@ class PlatformConfig:
         return {
             key: value
             for key, value in dev_override.items()
-            if key not in {"cases", "tolerance"}
+            if key not in {"cases", "tolerance", "case_overrides"}
         }
+
+    def get_device_case_specific_overrides(
+        self, model: str, case: str
+    ) -> dict[str, Any]:
+        """Return ``device_overrides.<device>.case_overrides.<model/case>``.
+
+        Applies to cases listed in ``cases`` and to cases that only appear in
+        ``case_overrides``.
+        """
+        dev_override = self.device_overrides.get(self.device, {})
+        if not isinstance(dev_override, dict):
+            return {}
+
+        case_overrides = dev_override.get("case_overrides", {}) or {}
+        if not isinstance(case_overrides, dict):
+            raise TypeError(
+                f"device_overrides.{self.device}.case_overrides must be a mapping"
+            )
+
+        specific = case_overrides.get(f"{model}/{case}", {}) or {}
+        if not isinstance(specific, dict):
+            raise TypeError(
+                f"device_overrides.{self.device}.case_overrides."
+                f"{model}/{case} must be a mapping"
+            )
+        return specific
 
     def get_e2e_tests(self) -> E2eTestConfig:
         """Return e2e test configuration for the active device."""
