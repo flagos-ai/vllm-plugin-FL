@@ -90,9 +90,12 @@ unsupported_features: []
 env_defaults:
   # This image's FlagTree Triton cannot run every FlagGems kernel: gelu_tanh
   # misses pow(float32, int32) in its extern table, and the ArgMax kernel is
-  # rejected by libentry ("Invalid Runtime Function"). Keep both on the native
-  # path, as this platform already does for silu and silu_and_mul.
-  VLLM_FL_FLAGOS_BLACKLIST_APPEND: gelu,argmax
+  # rejected by libentry ("Invalid Runtime Function"). FlagGems'
+  # index_copy_ also validates its indices with a host synchronisation, which
+  # graph capture forbids ("Not allow to synchronize captured-stream"). Keep
+  # these on the native path, as this platform already does for silu and
+  # silu_and_mul.
+  VLLM_FL_FLAGOS_BLACKLIST_APPEND: gelu,argmax,index_copy_
 
 # ---- Device-specific test configurations ------------------------------------
 910c:
