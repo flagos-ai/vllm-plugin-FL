@@ -128,6 +128,9 @@ def test_get_flag_gems_whitelist_blacklist_neither_set(monkeypatch):
     """When neither env is set, returns (None, None)."""
     monkeypatch.delenv("VLLM_FL_FLAGOS_WHITELIST", raising=False)
     monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST", raising=False)
+    # Deployment-level appends (set by some platforms, e.g. Ascend) are a third
+    # input to the resolution; clear them so this case tests the env-only path.
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST_APPEND", raising=False)
 
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
     assert whitelist is None
@@ -157,6 +160,7 @@ def test_get_flag_gems_whitelist_blacklist_whitelist_strips_spaces(monkeypatch):
 def test_get_flag_gems_whitelist_blacklist_blacklist_only(monkeypatch):
     """When only blacklist is set, returns (None, list)."""
     monkeypatch.delenv("VLLM_FL_FLAGOS_WHITELIST", raising=False)
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST_APPEND", raising=False)
     monkeypatch.setenv("VLLM_FL_FLAGOS_BLACKLIST", "index,index_put_")
 
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
@@ -219,6 +223,7 @@ def test_get_flag_gems_whitelist_blacklist_empty_strings(monkeypatch):
     """Empty or whitespace-only env values yield None / empty list handling."""
     monkeypatch.setenv("VLLM_FL_FLAGOS_WHITELIST", "")
     monkeypatch.setenv("VLLM_FL_FLAGOS_BLACKLIST", "")
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST_APPEND", raising=False)
 
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
     assert whitelist is None
