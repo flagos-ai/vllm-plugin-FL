@@ -61,5 +61,20 @@
       "native_stack_samples": 0
     },
     "interpretation": "The headless worker stayed in its RPC receive loop after launcher TERM and across the first 20 seconds of the grace period. The Python samples precede the fallback SIGTERM. They cannot establish whether native teardown subsequently completed. A launcher exit of zero does not establish a clean headless worker exit."
+  },
+  "cpu_only_rpc_control": {
+    "installed_vllm": "0.32.0+empty",
+    "message_queue_source_sha256": "8b122fa8a8ae05a489c2a15069e67d17b626da5d9939524f088cda2ef3c1d75b",
+    "message_queue_method_lines": {
+      "shutdown": 710,
+      "dequeue": 961,
+      "recv": 994
+    },
+    "fixture": "Production MessageQueue methods backed by a real in-process ZeroMQ socket in the release image, with no accelerator or FlagCX",
+    "remote_poll_started_before_queue_shutdown": true,
+    "shutdown_flag_set": true,
+    "remote_poll_woke_within_750_ms_without_rpc": false,
+    "remote_poll_woke_on_controlled_rpc": true,
+    "probe_exit_code": 0
   }
 }
