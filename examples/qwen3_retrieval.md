@@ -29,3 +29,9 @@ curl http://127.0.0.1:8001/score -H 'Content-Type: application/json' \
 ```
 
 The embedding response contains finite approximately unit-normalized 4096-dimensional vectors. The scoring response contains finite per-document scores in [0, 1]; the relevant document should rank first. The embedding service also supports a single image and mixed image/text; the reranker is text-only. These commands use eager execution.
+
+For PIECEWISE graph execution, remove `--enforce-eager` from either command
+and add `--compilation-config '{"cudagraph_mode":"PIECEWISE"}'`.
+Set `VLLM_USE_BREAKABLE_CUDAGRAPH=0` before launch to use FL's graph lifecycle.
+Leave capture sizes unset so the framework selects them automatically. Keep
+all model-specific arguments, including the reranker template and overrides.
