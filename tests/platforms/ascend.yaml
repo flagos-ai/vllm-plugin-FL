@@ -70,14 +70,18 @@ device_overrides:
       stream: true
       max_tokens: 1024
     # The platform accepts only NONE or FULL_DECODE_ONLY, so graph variants
-    # must request the decode-only mode instead of vLLM's default.
+    # must request the decode-only mode instead of vLLM's default. Graph
+    # capture also needs headroom beyond the KV cache sized at 0.8, so the
+    # graph variants reserve the device at a lower utilisation.
     case_overrides:
       qwen3_6/27b_tp2_graph:
         llm:
+          gpu_memory_utilization: 0.7
           compilation_config:
             cudagraph_mode: FULL_DECODE_ONLY
       qwen3_6/35b_a3b_tp2_graph:
         llm:
+          gpu_memory_utilization: 0.7
           compilation_config:
             cudagraph_mode: FULL_DECODE_ONLY
 
