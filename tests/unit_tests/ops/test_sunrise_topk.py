@@ -15,7 +15,7 @@ def router(monkeypatch):
     # Execute the actual functions without importing accelerator-only modules.
     path = Path(__file__).resolve().parents[3] / "vllm_fl/ops/fused_moe/router.py"
     tree = ast.parse(path.read_text())
-    names = {"fused_topk", "_is_sunrise_ptpu_tensor"}
+    names = {"fused_topk", "_is_sunrise_ptpu_tensor", "_is_ascend_npu_tensor"}
     source = ast.Module(
         body=[
             node

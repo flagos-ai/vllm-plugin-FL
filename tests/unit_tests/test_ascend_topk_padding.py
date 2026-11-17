@@ -15,14 +15,15 @@ _ASCEND_MOE_MODULE = "vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe"
 
 def _load_fused_topk(source):
     tree = ast.parse(source.read_text(encoding="utf-8"))
-    function = next(
+    names = {"fused_topk", "_is_ascend_npu_tensor", "_is_sunrise_ptpu_tensor"}
+    functions = [
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "fused_topk"
-    )
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
     namespace = {"torch": torch}
     exec(
-        compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"),
+        compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"),
         namespace,
     )
     return namespace
