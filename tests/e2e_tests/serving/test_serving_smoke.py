@@ -180,14 +180,32 @@ def _run_chat(base_url: str, headers: dict) -> None:
             assert is_correct, f"Chat case '{case_name}' is missing expected: {missing}"
 
 
+def _label_font(size: int):
+    """Return a font large enough for the vision tower to resolve the label.
+
+    The default bitmap font draws the label a few pixels high - well below one
+    patch of the vision tower - so whether a backend reports the exact text
+    depends on its numeric precision rather than on multimodal serving.
+    """
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
+    except OSError:
+        try:
+            return ImageFont.load_default(size=size)
+        except TypeError:
+            return ImageFont.load_default()
+
+
 def _generated_image_messages(prompt: str) -> list[dict]:
     """Create the local image payload used by the Qwen multimodal smoke case."""
     from PIL import Image, ImageDraw
 
     image = Image.new("RGB", (800, 600), color="white")
     draw = ImageDraw.Draw(image)
-    draw.rectangle((50, 50, 250, 150), fill="blue")
-    draw.text((90, 80), "Hello VLM", fill="yellow")
+    draw.rectangle((50, 50, 450, 200), fill="blue")
+    draw.text((75, 95), "Hello VLM", fill="yellow", font=_label_font(64))
 
     buffer = BytesIO()
     image.save(buffer, format="JPEG")
