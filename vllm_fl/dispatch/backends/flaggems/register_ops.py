@@ -383,3 +383,23 @@ def register_builtins(registry) -> None:
 
     filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
     registry.register_many(filtered)
+
+    # The generic backend stays intact. These library adapters are opt-in to the
+    # sealed DS profile and still obey the common per-op selection/blacklist.
+    from vllm_fl import dsv4_config
+
+    if dsv4_config.is_enabled():
+        from .impl.deepseek_v4 import operator_impls
+
+        registry.register_many([
+            OpImpl(
+                op_name=name,
+                impl_id="default.flagos.dsv4",
+                kind=BackendImplKind.DEFAULT,
+                fn=_bind_is_available(fn, is_avail),
+                vendor=None,
+                priority=BackendPriority.DEFAULT + 10,
+            )
+            for name, fn in operator_impls().items()
+            if use_flaggems_op(name)
+        ])

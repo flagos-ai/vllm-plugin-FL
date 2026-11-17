@@ -18,6 +18,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
+| DeepSeek V4 Flash W8A8/INT8 (MetaX C550, TP8) | Supported | [example](./examples/deepseek_v4_metax/) · [usage](./docs/usage/deepseek-v4-metax.md) |
 
 ### Supported Chips
 
@@ -25,7 +26,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 |-------------|--------|-----------|
 | NVIDIA | Supported | - |
 | Ascend | Supported | - |
-| MetaX | Supported | - |
+| MetaX | Supported | [DeepSeek V4 example](./examples/deepseek_v4_metax/) |
 | T-Head | Supported | - |
 | Iluvatar | Supported | - |
 | Tsingmicro | Supported | - |

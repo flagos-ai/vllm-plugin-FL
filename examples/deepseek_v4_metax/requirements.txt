@@ -1,0 +1,3 @@
+# Immutable deployment sources. See dependency-lock.json and linked operator PRs.
+flag_gems @ git+https://github.com/cshujie131-bot/FlagGems.git@0ebb95bd47c902de9909e653f318fc57a5e315cf
+flaggems_vllm @ git+https://github.com/cshujie131-bot/FlagGems-vllm.git@9ae5b26e286a91c1dc1de50662373eef0715308a

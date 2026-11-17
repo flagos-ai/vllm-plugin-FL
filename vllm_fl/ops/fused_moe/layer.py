@@ -37,8 +37,10 @@ from .fused_moe_utils import select_unquantized_moe_backend_oot
 from .mxfp4_selector import select_fixed_mxfp4_method
 from vllm_fl.quantization.mxfp4.mxfp4_marlin import MarlinExpertsFL
 
+
 class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
     """OOT replacement for UnquantizedFusedMoEMethod that routes computation through flaggems."""
+
     def __init__(self, moe: FusedMoEConfig):
         super().__init__(moe)
         self.unquantized_backend, self.experts_cls = select_unquantized_moe_backend_oot(
@@ -77,12 +79,16 @@ class FusedMoEFL(FusedMoE):
         self._routed_scaling_factor = routed_scaling_factor
         self._apply_routed_scale_to_output = apply_routed_scale_to_output
         # Replace quant_method with FL version that properly handles OOT backend
-        if isinstance(self.quant_method, UnquantizedFusedMoEMethod) and not isinstance(self.quant_method, UnquantizedFusedMoEMethodFL):
+        if isinstance(self.quant_method, UnquantizedFusedMoEMethod) and not isinstance(
+            self.quant_method, UnquantizedFusedMoEMethodFL
+        ):
             self.quant_method = UnquantizedFusedMoEMethodFL(self.moe_config)
             self.base_quant_method = self.quant_method
         else:
             from vllm.model_executor.layers.quantization.mxfp4 import Mxfp4MoEMethod
-            from vllm.model_executor.layers.fused_moe.fused_marlin_moe import MarlinExperts
+            from vllm.model_executor.layers.fused_moe.fused_marlin_moe import (
+                MarlinExperts,
+            )
 
             if isinstance(self.quant_method, Mxfp4MoEMethod):
                 self.quant_method = select_fixed_mxfp4_method(
@@ -142,6 +148,7 @@ class FusedMoEFL(FusedMoE):
                 routed_scaling_factor=router.routed_scaling_factor,
                 enable_eplb=router.enable_eplb,
                 indices_type_getter=router.indices_type_getter,
+                hash_indices_table=router._hash_indices_table,
             )
         elif isinstance(router, FusedTopKRouter):
             self.router = FusedTopKRouterFL(

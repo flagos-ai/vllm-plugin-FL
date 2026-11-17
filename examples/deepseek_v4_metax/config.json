@@ -1,0 +1,173 @@
+{
+  "prefer": "flagos",
+  "strict": false,
+  "op_backends": {
+    "attention_backend": [
+      "vendor:metax"
+    ],
+    "silu_and_mul": [
+      "flagos",
+      "reference"
+    ],
+    "rms_norm": [
+      "reference"
+    ],
+    "rotary_embedding": [
+      "flagos",
+      "reference"
+    ],
+    "topk_softmax": [
+      "flagos",
+      "reference"
+    ],
+    "flash_mla_with_kvcache": [
+      "impl:vendor.metax.dsv4"
+    ],
+    "flash_mla_sparse_fwd": [
+      "impl:vendor.metax.dsv4"
+    ],
+    "silu_and_mul_with_clamp": [
+      "impl:default.flagos.dsv4"
+    ],
+    "combine_topk_swa_indices": [
+      "impl:default.flagos.dsv4"
+    ],
+    "dequantize_and_gather_k_cache": [
+      "impl:default.flagos.dsv4"
+    ],
+    "fused_q_kv_rmsnorm": [
+      "impl:default.flagos.dsv4"
+    ],
+    "mhc_pre": [
+      "impl:default.flagos.dsv4"
+    ],
+    "mhc_post": [
+      "impl:default.flagos.dsv4"
+    ],
+    "hc_head_fused_kernel": [
+      "impl:default.flagos.dsv4"
+    ]
+  },
+  "flagos_blacklist": [
+    "topk",
+    "masked_fill",
+    "masked_fill_"
+  ],
+  "oot_blacklist": [
+    "masked_fill",
+    "masked_fill_"
+  ],
+  "deepseek_v4_metax": {
+    "schema_version": 1,
+    "release": "dsv4-capability-dispatch-20261023-r1",
+    "framework": {
+      "decode_hq16": true,
+      "real_query_heads": 8,
+      "prefill_headpack": true,
+      "indexer_graphsafe": true,
+      "indexer_paged_logits": true,
+      "indexer_row_sharding": true,
+      "indexer_query_shards": 4,
+      "indexer_min_keys": 4096,
+      "single_stream": true
+    },
+    "kernels": {
+      "decode_splits": 4,
+      "decode_block_k": 16,
+      "decode_block_h": 16,
+      "decode_warps": 4,
+      "decode_stages": 1,
+      "decode_max_batch": 64
+    },
+    "moe": {
+      "use_mctlass": true,
+      "python_api": true,
+      "chunk_size": 16384,
+      "hidden_size": 4096,
+      "tuned_config_folder": "tuned_configs"
+    },
+    "service": {
+      "served_model_name": "deepseek-v4-flash-w8a8-int8",
+      "port": 18001,
+      "tensor_parallel_size": 8,
+      "kv_cache_dtype": "fp8",
+      "block_size": 256,
+      "max_model_len": 66560,
+      "max_num_seqs": 64,
+      "max_num_batched_tokens": 4096,
+      "long_prefill_token_threshold": 0,
+      "gpu_memory_utilization": 0.85,
+      "disable_custom_all_reduce": true,
+      "compilation_config": {
+        "cudagraph_mode": "FULL_DECODE_ONLY",
+        "custom_ops": [
+          "all"
+        ],
+        "cudagraph_capture_sizes": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64
+        ],
+        "max_cudagraph_capture_size": 64,
+        "cudagraph_num_of_warmups": 0
+      }
+    },
+    "rms": {
+      "rank_warps": {
+        "attention": [
+          8,
+          8,
+          8,
+          8,
+          4,
+          4,
+          4,
+          4
+        ],
+        "shared_moe": [
+          8,
+          8,
+          8,
+          8,
+          8,
+          8,
+          8,
+          8
+        ],
+        "output": [
+          8,
+          8,
+          8,
+          8,
+          8,
+          8,
+          8,
+          8
+        ]
+      },
+      "xblock": 1,
+      "rblock": 2048,
+      "stages": 1,
+      "body_fingerprints": {
+        "b9e6087ae37955cc773c20ab0689263a5a423bcf0c23bd5ce53d21200413992e": "attention",
+        "4023e8885007223cfb264bb2c869be6568cebf3fa40aa964043879abe31ffade": "shared_moe",
+        "6c5259efe8fca8eca771edcd6a5d34f6c6a08400a67dac2e08068a18665feb5c": "output"
+      }
+    },
+    "infrastructure_env": {
+      "GEMS_VENDOR": "metax",
+      "VLLM_PLUGINS": "fl",
+      "VLLM_NO_USAGE_STATS": "1",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD": "0",
+      "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE": "1"
+    },
+    "compatibility": {
+      "multi_stream_source_sha256": "e1c2ec3fcf031d95ca5e115142e2f0be9707085d654b4d1666d63bc0354c9178"
+    }
+  }
+}
