@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install the pinned FlagGems-vllm source in the current CI interpreter."""
+"""Install the same FlagGems-vllm release in every platform's CI interpreter."""
 
 import argparse
 import json
@@ -26,12 +26,15 @@ def package_version(name):
         return None
 
 
-def release_is_installed(commit=COMMIT):
+def release_is_installed(commit=COMMIT, source_archive=None, archive_sha256=None):
     try:
         text = distribution("flaggems-vllm").read_text("direct_url.json")
         source = json.loads(text or "{}")
     except (PackageNotFoundError, ValueError):
         return False
+    if source_archive is not None:
+        digest = source.get("archive_info", {}).get("hashes", {}).get("sha256")
+        return source.get("url") == source_archive and digest == archive_sha256
     return (
         source.get("url", "").removesuffix(".git") == REPOSITORY.removesuffix(".git")
         and source.get("vcs_info", {}).get("commit_id") == commit
@@ -43,7 +46,37 @@ def pip_install(*args):
     subprocess.run([sys.executable, "-m", "pip", "install", *args], env=env, check=True)
 
 
-def main():
+def main(*, commit=COMMIT, source_archive=None, archive_sha256=None):
+    source = (
+        f"{source_archive}#sha256={archive_sha256}"
+        if source_archive is not None
+        else f"git+{REPOSITORY}@{commit}"
+    )
+    before = {name: package_version(name) for name in RUNTIME_PACKAGES}
+    missing = [name for name in PACKAGE_DEPENDENCIES if package_version(name) is None]
+    if missing:
+        pip_install(*missing)
+    if not release_is_installed(commit, source_archive, archive_sha256):
+        # Metadata still says 0.1.0; force replacement of another 0.1.0 source.
+        # Reuse the build tools already used by this platform's plugin setup.
+        pip_install(
+            "--no-deps",
+            "--no-build-isolation",
+            "--force-reinstall",
+            f"flaggems-vllm @ {source}",
+        )
+    if not release_is_installed(commit, source_archive, archive_sha256):
+        raise RuntimeError(f"FlagGems-vllm must come from source commit {commit}")
+    after = {name: package_version(name) for name in RUNTIME_PACKAGES}
+    if after != before:
+        raise RuntimeError(f"CI runtime dependencies changed: {before} -> {after}")
+    print(
+        f"FlagGems-vllm: source commit {commit}, "
+        f"package metadata {package_version('flaggems-vllm')}"
+    )
+
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sunrise", action="store_true")
     parser.add_argument("--print-commit", action="store_true")
@@ -51,31 +84,5 @@ def main():
     commit = SUNRISE_COMMIT if args.sunrise else COMMIT
     if args.print_commit:
         print(commit)
-        return
-
-    before = {name: package_version(name) for name in RUNTIME_PACKAGES}
-    missing = [name for name in PACKAGE_DEPENDENCIES if package_version(name) is None]
-    if missing:
-        pip_install(*missing)
-    if not release_is_installed(commit):
-        # Metadata still says 0.1.0; force replacement of another 0.1.0 source.
-        # Reuse the build tools already used by this platform's plugin setup.
-        pip_install(
-            "--no-deps",
-            "--no-build-isolation",
-            "--force-reinstall",
-            f"flaggems-vllm @ git+{REPOSITORY}@{commit}",
-        )
-    if not release_is_installed(commit):
-        raise RuntimeError(f"FlagGems-vllm must come from {REPOSITORY} at {commit}")
-    after = {name: package_version(name) for name in RUNTIME_PACKAGES}
-    if after != before:
-        raise RuntimeError(f"CI runtime dependencies changed: {before} -> {after}")
-    print(
-        f"FlagGems-vllm: commit {commit}, "
-        f"package metadata {package_version('flaggems-vllm')}"
-    )
-
-
-if __name__ == "__main__":
-    main()
+    else:
+        main(commit=commit)

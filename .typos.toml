@@ -23,6 +23,9 @@ extend-ignore-re = [
     '\bchatcmpl-[0-9a-fA-F]{16,}\b',
 ]
 
+[default.extend-identifiers]
+constant_pad_nd = "constant_pad_nd"
+
 [default.extend-words]
 # ML / deep-learning terminology
 arange = "arange"

@@ -89,6 +89,22 @@ def fused_topk(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
+    if _is_ascend_npu_tensor(gating_output):
+        from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe import (
+            fused_topk as ascend_fused_topk,
+        )
+
+        # vLLM 0.32 supplies an is_padding tensor by default, including eager
+        # batches with no padding. Its native padded router is CUDA-only.
+        return ascend_fused_topk(
+            gating_output,
+            topk,
+            renormalize,
+            indices_type,
+            scoring_func,
+            _get_padding_mask(hidden_states.shape[0]),
+        )
+
     M, _ = hidden_states.size()
     padding_mask = _get_padding_mask(M) if scoring_func == "softmax" else None
     sunrise_padding = padding_mask is not None and _is_sunrise_ptpu_tensor(
