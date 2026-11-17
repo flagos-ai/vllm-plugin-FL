@@ -20,6 +20,7 @@ def metax_runtime():
     import flag_gems
 
     from vllm_fl.minimax_m3_config import is_enabled
+
     if not is_enabled():
         pytest.skip("requires the explicit MiniMax M3 profile")
     from vllm_fl.patches.minimax_m3_metax.bootstrap import initialize
