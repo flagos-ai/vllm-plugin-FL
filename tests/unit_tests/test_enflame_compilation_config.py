@@ -58,6 +58,7 @@ def test_enflame_inductor_disables_combo_without_disabling_graphs(monkeypatch, v
     assert compilation.inductor_compile_config is options
     assert options == {
         **original_options,
+        "post_grad_custom_post_pass": options["post_grad_custom_post_pass"],
         "combo_kernels": False,
         "benchmark_combo_kernel": False,
     }
@@ -119,13 +120,14 @@ def test_codegen_version_invalidates_cache_preserving_user_config(monkeypatch, v
     config.additional_config = user
     simulate_platform(monkeypatch, vendor)
     PlatformFL.check_and_update_config(config)
-    assert config.additional_config == {
-        "customer_option": [1, 3],
-        "fl_gcu_codegen": "preserve_dtype_v1",
-    }
+    assert config.additional_config is user
     assert user == {"customer_option": [1, 3]}
+    first_hash = config.compilation_config.compute_hash()
     PlatformFL.check_and_update_config(config)
-    assert len(config.additional_config) == 2
+    assert config.compilation_config.compute_hash() == first_hash
+    monkeypatch.setenv("FL_GCU_PRESERVE_DTYPE_CODEGEN", "0")
+    PlatformFL.check_and_update_config(config)
+    assert config.compilation_config.compute_hash() != first_hash
 
 
 def test_other_vendor_does_not_change_additional_config(monkeypatch):
@@ -141,15 +143,17 @@ def test_codegen_cache_salt_respects_disabled_adapter(monkeypatch):
     config = config_for_platform()
     simulate_platform(monkeypatch, "enflame")
     PlatformFL.check_and_update_config(config)
-    assert config.additional_config["fl_gcu_codegen"] == "vendor_v1"
+    salt = config.compilation_config.inductor_compile_config[
+        "post_grad_custom_post_pass"
+    ]
+    assert salt.uuid()[:2] == ("fl_gcu_codegen", "vendor_v1")
 
 
-def test_codegen_cache_key_conflict_is_explicit(monkeypatch):
+def test_user_codegen_key_is_not_reserved(monkeypatch):
     config = config_for_platform()
     config.additional_config = {"fl_gcu_codegen": "customer"}
     simulate_platform(monkeypatch, "enflame")
-    with pytest.raises(ValueError, match="reserved"):
-        PlatformFL.check_and_update_config(config)
+    PlatformFL.check_and_update_config(config)
     assert config.additional_config == {"fl_gcu_codegen": "customer"}
 
 
@@ -170,3 +174,22 @@ def test_ir_provider_merge_preserves_device_and_build_guards(
         expected = ["vllm_c", "native"]
     assert priority.rms_norm == expected
     assert priority.fused_add_rms_norm == expected
+
+
+def test_codegen_cache_preserves_existing_callable_pass(monkeypatch):
+    config = config_for_platform()
+    calls = []
+
+    def user_pass(graph):
+        calls.append(graph)
+
+    options = config.compilation_config.inductor_compile_config
+    options["post_grad_custom_post_pass"] = user_pass
+    simulate_platform(monkeypatch, "enflame")
+    PlatformFL.check_and_update_config(config)
+    initial_hash = config.compilation_config.compute_hash()
+    graph = object()
+    options["post_grad_custom_post_pass"](graph)
+    assert calls == [graph]
+    PlatformFL.check_and_update_config(config)
+    assert config.compilation_config.compute_hash() == initial_hash

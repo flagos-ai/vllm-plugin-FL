@@ -471,22 +471,11 @@ class PlatformFL(Platform):
         if cls.vendor_name in ("gcu", "enflame"):
             # vLLM may load a compiled artifact before invoking Inductor, so
             # invalidate its cache as well as Torch's dtype-corrupted artifacts.
-            additional = getattr(vllm_config, "additional_config", {})
-            if not isinstance(additional, dict):
-                raise TypeError("Enflame additional_config must be a dictionary")
-            from vllm_fl.dispatch.backends.vendor.gcu.impl.inductor import (
-                gcu_codegen_mode,
+            from vllm_fl.dispatch.backends.vendor.gcu.compilation_config import (
+                configure_codegen_cache,
             )
 
-            mode = gcu_codegen_mode()
-            if "fl_gcu_codegen" in additional and additional["fl_gcu_codegen"] != mode:
-                raise ValueError(
-                    "additional_config.fl_gcu_codegen is reserved for the GCU backend"
-                )
-            vllm_config.additional_config = {
-                **additional,
-                "fl_gcu_codegen": mode,
-            }
+            configure_codegen_cache(vllm_config.compilation_config)
             from vllm_fl.attention.utils import patch_mm_encoder_attention
 
             # Install before CustomOp caches even a disabled encoder's native
@@ -1131,7 +1120,7 @@ class PlatformFL(Platform):
         # Retain the registered collective routes for TXDA and native MCCL.
         return (
             cls.device_type == "txda"
-            or cls.vendor_name in ("nvidia", "thead", "iluvatar", "enflame", "gcu")
+            or cls.vendor_name in ("nvidia", "thead", "iluvatar", "enflame")
             or (cls.device_type == "musa" and cls.dist_backend == "mccl")
             # Keep FlagCX ctypes calls out of Dynamo's tracing.
             or (cls.vendor_name == "amd" and cls.dist_backend == "flagcx")

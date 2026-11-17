@@ -277,9 +277,9 @@ and original Gate for the exact revision you deploy.
   the S60 `0.94` budget is applied. Changing context length, concurrency,
   precision, or tensor parallelism requires separate validation of that new
   configuration; it is not a passing result for the original Gate.
-- **Runner or speculative-decoding error:** Enflame uses `ModelRunnerFL` for
-  eager and graph execution. Explicit `VLLM_USE_V2_MODEL_RUNNER=1` and V2-only
-  features are unsupported. Hybrid models with speculative decoding and
+- **Runner or speculative-decoding error:** Enflame uses `ModelRunnerFL` by
+  default and provides `GPUModelRunnerFLV2` when `VLLM_USE_V2_MODEL_RUNNER=1`.
+  Validate the selected runner and execution mode on hardware. Hybrid models with speculative decoding and
   `mamba_cache_mode=align` are rejected because the fused Mamba state-copy path
   does not yet translate its indirect pointers to GCU addresses. Other
   speculative/cache combinations still need their own hardware validation.

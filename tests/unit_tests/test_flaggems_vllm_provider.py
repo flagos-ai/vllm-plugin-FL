@@ -40,7 +40,21 @@ def test_enflame_setup_selects_installer_pin(monkeypatch):
         for line in (root / ".github/scripts/enflame/setup.sh").read_text().splitlines()
         if line.startswith("python .github/scripts/install_flaggems_vllm.py")
     ]
-    assert len(commands) == 1
+    assert commands == []
+    setup = (root / ".github/scripts/enflame/setup.sh").read_text()
+    assert "python -m pip install --no-build-isolation --no-deps -e ." in setup
+
+
+def test_enflame_installer_pin_when_explicitly_invoked(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "installer_under_test", root / ".github/scripts/install_flaggems_vllm.py"
+    )
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
     installed = []
     checked = []
     monkeypatch.setattr(installer, "package_version", lambda name: "test-version")
@@ -51,7 +65,7 @@ def test_enflame_setup_selects_installer_pin(monkeypatch):
 
     monkeypatch.setattr(installer, "release_is_installed", release_is_installed)
     monkeypatch.setattr(installer, "pip_install", lambda *args: installed.append(args))
-    installer.main(commands[0][2:])
+    installer.main(["--platform", "enflame"])
     assert checked == [installer.ENFLAME_COMMIT, installer.ENFLAME_COMMIT]
     assert installed == [
         (

@@ -1,10 +1,10 @@
 """GCU vocabulary masking without unsupported bool-to-int64 arithmetic."""
 
+import dataclasses
+import functools
 import inspect
 
 import torch
-
-from vllm.triton_utils import tl, triton
 
 _PARAMETERS = (
     "input_",
@@ -16,28 +16,17 @@ _PARAMETERS = (
 )
 
 
-@triton.jit
-def _mask_kernel(
-    INPUT,
-    OUTPUT,
-    MASK,
-    COUNT: tl.constexpr,
-    START: tl.constexpr,
-    END: tl.constexpr,
-    PADDING: tl.constexpr,
-    ADDED_START: tl.constexpr,
-    ADDED_END: tl.constexpr,
-    BLOCK: tl.constexpr,
-):
-    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
-    values = tl.load(INPUT + offsets, offsets < COUNT, other=0).to(tl.int64)
-    original = (values >= START) & (values < END)
-    added = (values >= ADDED_START) & (values < ADDED_END)
-    added_offset = ADDED_START - (END - START) - PADDING
-    offset = tl.where(original, START, 0) + tl.where(added, added_offset, 0)
-    valid = original | added
-    tl.store(OUTPUT + offsets, tl.where(valid, values - offset, 0), offsets < COUNT)
-    tl.store(MASK + offsets, ~valid, offsets < COUNT)
+@functools.lru_cache(maxsize=1)
+def _get_kernel():
+    from triton.backends.enflame.compiler import GCUOptions
+
+    if "enable_i64" not in {field.name for field in dataclasses.fields(GCUOptions)}:
+        raise RuntimeError(
+            "GCU vocabulary masking requires compiler enable_i64 support"
+        )
+    from .vocab_mask_kernel import _mask_kernel
+
+    return _mask_kernel
 
 
 def get_masked_input_and_mask(
@@ -54,7 +43,7 @@ def get_masked_input_and_mask(
     mask = torch.empty_like(input_, dtype=torch.bool)
     count = input_.numel()
     if count:
-        _mask_kernel[(triton.cdiv(count, 256),)](
+        _get_kernel()[((count + 255) // 256,)](
             input_,
             output,
             mask,

@@ -5,6 +5,7 @@
 import inspect
 import logging
 import os
+import re
 import sys
 from collections.abc import Mapping
 from functools import wraps
@@ -81,13 +82,15 @@ def _install_gcu_resource_errors(heuristics) -> None:
             if first_line == [_REGISTER_ERROR]:
                 logger.warning("Rejecting GCU autotune candidate %s: %s", cfg, error)
                 raise resource_error("unknown", "unknown", "GCU registers") from error
-            linker_errors = {
-                f"ld.lld: error: relocation R_DTU_ADDR16_{part}_ICALL cannot be "
-                "used against symbol tops_truncf_v2_fp32_to_v1_bf16; "
-                "recompile with -fPIC"
-                for part in ("LO", "HI")
-            }
-            if first_line and first_line[0] in linker_errors:
+            # The symbol and preceding diagnostic context vary by kernel.
+            # Only reject the known ICALL relocation/PIC failure; other linker
+            # errors must still propagate instead of hiding compiler defects.
+            linker_failure = re.search(
+                r"ld\.lld: error: relocation R_DTU_ADDR16_(?:LO|HI)_ICALL "
+                r"cannot be used against symbol [^;\n]+; recompile with -fPIC",
+                str(error),
+            )
+            if linker_failure is not None:
                 logger.warning("Rejecting GCU autotune candidate %s: %s", cfg, error)
                 raise compiler_error(str(error)) from error
             raise

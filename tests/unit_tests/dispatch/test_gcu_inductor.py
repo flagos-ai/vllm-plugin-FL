@@ -494,15 +494,17 @@ def test_gcu_internal_i64_enabled_with_i32_argument_signature():
 
 
 @pytest.mark.parametrize("part", ["LO", "HI"])
-def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(part):
+@pytest.mark.parametrize("symbol", ["tops_truncf_v2_fp32_to_v1_bf16", "other_symbol"])
+@pytest.mark.parametrize("context", ["", "compiler context\n"])
+def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(part, symbol, context):
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
     _, heuristics, _, _, _ = make_provider()
     inductor._install_gcu_resource_errors(heuristics)
     autotuner = heuristics.CachingAutotuner("gcu")
     failure = Exception(
-        f"ld.lld: error: relocation R_DTU_ADDR16_{part}_ICALL cannot be "
-        "used against symbol tops_truncf_v2_fp32_to_v1_bf16; recompile with -fPIC"
+        context + f"ld.lld: error: relocation R_DTU_ADDR16_{part}_ICALL cannot be "
+        f"used against symbol {symbol}; recompile with -fPIC"
     )
     first, last = object(), object()
     autotuner.compile_results = []
@@ -521,7 +523,7 @@ def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(part):
 
 
 @pytest.mark.parametrize("device", ["gcu", "cpu", "cuda"])
-@pytest.mark.parametrize("variant", ["other_symbol", "context", "runtime", "exact"])
+@pytest.mark.parametrize("variant", ["other_symbol", "context", "runtime", "exact", "relocation", "no_pic"])
 def test_gcu_linker_adapter_preserves_unrelated_failures(device, variant):
     _, heuristics, _, _, _ = make_provider()
     inductor._install_gcu_resource_errors(heuristics)
@@ -533,8 +535,15 @@ def test_gcu_linker_adapter_preserves_unrelated_failures(device, variant):
         message = message.replace("tops_truncf_v2_fp32_to_v1_bf16", "other_symbol")
     if variant == "context":
         message = "context\n" + message
+    if variant == "relocation":
+        message = message.replace("ADDR16_LO_ICALL", "ADDR32")
+    if variant == "no_pic":
+        message = message.replace("; recompile with -fPIC", "")
     failure = RuntimeError(message) if variant == "runtime" else Exception(message)
-    if variant == "exact" and device == "gcu":
+    if device == "gcu" and variant in ("exact", "context", "other_symbol"):
+        with pytest.raises(heuristics.PTXASError) as caught:
+            heuristics.CachingAutotuner(device)._precompile_config(failure)
+        assert caught.value.__cause__ is failure
         return
     with pytest.raises(type(failure)) as caught:
         heuristics.CachingAutotuner(device)._precompile_config(failure)
