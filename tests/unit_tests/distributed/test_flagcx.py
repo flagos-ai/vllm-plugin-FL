@@ -41,6 +41,7 @@ class _Group:
 
 @pytest.fixture
 def load_flagcx(monkeypatch):
+    monkeypatch.setenv("GEMS_VENDOR", "ascend")
     monkeypatch.setitem(
         sys.modules,
         "vllm.distributed.utils",
