@@ -180,7 +180,38 @@ reproducible native-vLLM and plugin comparison workflow on vLLM 0.28.0.
 
 If there are multiple plugins in the current environment, you can specify use vllm-plugin-fl via VLLM_PLUGINS='fl'.
 
-For Ascend 910C, see the [Ascend deployment guide](./docs/usage/ascend.md) for the vLLM 0.32 image and launch commands.
+### Additional Steps for Ascend
+
+For native decode graph execution with vLLM 0.28, see the
+[Ascend graph guide](./docs/ascend-vllm028-graph.md).
+
+1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
+   and FlagGems revisions
+
+    ```sh
+    python3 -m pip uninstall -y triton triton-ascend flagtree flag-gems
+    python3 -m pip install --no-deps flagtree===0.6.2a1+ascend3.5 \
+      --index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+    python3 -m pip install --no-deps cann-shmem==1.6.0 \
+      --index-url=https://ascend.devcloud.huaweicloud.com/cann/pypi/simple/
+
+    git clone --branch qwen-vllm_for_ascend https://github.com/flagos-ai/FlagGems.git
+    cd FlagGems
+    git checkout 3b406c36212744b98b9720bf6d0a5387c09fe96b
+    python3 -m pip install --no-build-isolation --no-deps .
+    ```
+
+    This FlagTree wheel supplies Triton 3.5.1. See the
+    [Ascend image guide](./docker/ascend/README.md) for the complete CANN,
+    PyTorch, vLLM empty-package, and dependency constraints.
+
+2. Select eager or full-decode graph execution
+
+    For eager execution, add `enforce_eager=True` to the `LLM` constructor or
+    pass `--enforce-eager` on the command line. For native NPU graph capture and
+    replay, use `FULL_DECODE_ONLY` with `USE_FLAGGEMS=0` and the component versions
+    and serving arguments in the [Ascend graph guide](./docs/ascend-vllm028-graph.md).
+
 
 ### Run a Task
 
