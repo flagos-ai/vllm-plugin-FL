@@ -96,10 +96,22 @@ def registered_clamp(monkeypatch):
 
 
 def construct(controls, alpha=1.0, beta=0.0):
-    from vllm.config import VllmConfig
+    from vllm.config import (
+        CompilationConfig,
+        CompilationMode,
+        CUDAGraphMode,
+        VllmConfig,
+    )
     from vllm.model_executor.layers.activation import SiluAndMulWithClamp
 
-    config = VllmConfig()
+    # These cases assert activation selection only. Pin the compilation mode so
+    # hosts whose platform rejects the default graph mode (Ascend accepts only
+    # NONE or FULL_DECODE_ONLY) still build the config instead of raising.
+    config = VllmConfig(
+        compilation_config=CompilationConfig(
+            mode=CompilationMode.NONE, cudagraph_mode=CUDAGraphMode.NONE
+        )
+    )
     config.compilation_config.custom_ops = controls
     return config, lambda: SiluAndMulWithClamp(2.0, alpha, beta, compile_native=False)
 
@@ -192,6 +204,16 @@ def test_compile_selection_preserves_controls(monkeypatch):
     monkeypatch.setenv(
         "VLLM_FL_OOT_WHITELIST", "silu_and_mul,gelu_and_mul,silu_and_mul_with_clamp"
     )
+    # Platform defaults decide FlagGems eligibility; Ascend blacklists
+    # silu_and_mul for performance, which would drop it from this selection
+    # test on that host. Pin the whitelist and clear any conflicting blacklist
+    # so the asserted selection does not depend on the runner's platform.
+    monkeypatch.setenv(
+        "VLLM_FL_FLAGOS_WHITELIST",
+        "silu_and_mul,gelu_and_mul,silu_and_mul_with_clamp",
+    )
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST", raising=False)
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST_APPEND", raising=False)
     config = SimpleNamespace(custom_ops=["none", "-GeluAndMul"])
     enable_fused_activations_for_compile(config)
     enable_fused_activations_for_compile(config)

@@ -319,9 +319,23 @@ def test_portable_model_clamp_propagates_unsupported_without_reference(
         for p in hooks._mhc_patches("clamp-test")
         if p.owner.__name__ == "SiluAndMulWithClamp"
     )
-    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.config import (
+        CompilationConfig,
+        CompilationMode,
+        CUDAGraphMode,
+        VllmConfig,
+        set_current_vllm_config,
+    )
 
-    with set_current_vllm_config(VllmConfig()):
+    # CPU-only construction: pin a compilation mode every platform accepts.
+    # Ascend rejects the default cudagraph mode with NotImplementedError.
+    with set_current_vllm_config(
+        VllmConfig(
+            compilation_config=CompilationConfig(
+                mode=CompilationMode.NONE, cudagraph_mode=CUDAGraphMode.NONE
+            )
+        )
+    ):
         op = SiluAndMulWithClamp(2.0)
     with policy_context(SelectionPolicy(strict=strict)):
         for _ in range(2):
