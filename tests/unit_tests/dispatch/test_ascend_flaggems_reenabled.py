@@ -128,6 +128,38 @@ def test_flaggems_arithmetic_on_npu(op):
             _assert(actual, expected, dtype)
 
 
+def test_default_ascend_inplace_mul_preserves_vision_interpolation():
+    position_shape = (4, 1900, 1152)
+    embeds = torch.linspace(-1, 1, position_shape[-1]).bfloat16()
+    npu_embeds = embeds.expand(position_shape).contiguous().to("npu")
+    weights = torch.linspace(0, 1, 4 * 1900).bfloat16().reshape(4, 1900, 1)
+    npu_weights = weights.to("npu")
+    expected = embeds * weights
+
+    with _enable("mul_", native=True):
+        actual = npu_embeds.mul_(npu_weights)
+        assert actual is npu_embeds
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+
+
+def test_default_ascend_triangular_solve_preserves_gdn_chunks():
+    generator = torch.Generator().manual_seed(703)
+    # Qwen3.6-35B-A3B TP2 prefill solves two 64-token chunks per local head.
+    system = torch.randn(1, 16, 2, 64, 64, generator=generator).tril(-1) / 64
+    rhs = torch.randn(1, 16, 2, 64, 128, generator=generator)
+    expected = torch.linalg.solve_triangular(
+        system, rhs, upper=False, unitriangular=True
+    )
+    system_npu, rhs_npu = system.to("npu"), rhs.to("npu")
+
+    with _enable("linalg_solve_triangular", native=True):
+        actual = torch.linalg.solve_triangular(
+            system_npu, rhs_npu, upper=False, unitriangular=True
+        )
+
+    _assert(actual, expected, torch.float32)
+
+
 def test_flaggems_acos_domain_and_strides_on_npu():
     for dtype in (torch.float32, torch.bfloat16):
         for layout in ("contiguous", "strided"):
@@ -307,11 +339,37 @@ def test_flaggems_mm_on_npu():
             _assert(actual, expected, dtype, reduction=True)
 
 
+def test_default_ascend_biased_vision_linear_preserves_each_row():
+    generator = torch.Generator().manual_seed(703)
+    weight = (torch.randn(1152, 1536, generator=generator) * 0.04).bfloat16()
+    bias = (torch.randn(1152, generator=generator) * 0.10).bfloat16()
+    # Qwen3.6's vision patch projection shape. Zero input makes the
+    # exact expected output independent of GEMM accumulation precision.
+    x = torch.zeros((1900, 1536), dtype=torch.bfloat16, device="npu")
+    device_weight, device_bias = weight.to("npu"), bias.to("npu")
+
+    with _enable("linear", native=True):
+        actual = F.linear(x, device_weight, device_bias)
+
+    expected = bias.expand(x.shape[0], -1)
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+
+
+@pytest.fixture
+def _full_precision_conv():
+    # This is a torch_npu dynamic option, not a normal Python attribute.
+    # monkeypatch.undo() attempts delattr and cannot restore the native option.
+    previous = torch.npu.conv.allow_hf32
+    try:
+        torch.npu.conv.allow_hf32 = False
+        yield
+    finally:
+        torch.npu.conv.allow_hf32 = previous
+
+
 @pytest.mark.parametrize("op", ["conv1d", "conv2d"])
-def test_default_ascend_convolution_on_npu(op, monkeypatch):
-    # torch_npu enables HF32 convolution by default. Validate the FP32 CPU
-    # reference in full precision without relaxing its original tolerance.
-    monkeypatch.setattr(torch.npu.conv, "allow_hf32", False)
+def test_default_ascend_convolution_on_npu(op, _full_precision_conv):
+    # Validate the FP32 CPU reference in full precision, keeping its tolerance.
     generator = torch.Generator().manual_seed(19)
     for dtype in (torch.float32, torch.bfloat16):
         for groups in (1, 2):
@@ -525,3 +583,18 @@ def test_silu_and_mul_flaggems_fallback_on_npu(dtype, layout):
         actual = silu_and_mul_flaggems(None, npu)
         torch.npu.synchronize()
     _assert(actual, expected, dtype)
+
+
+@pytest.mark.parametrize("scalar", [False, True])
+def test_default_ascend_ne_inplace_preserves_strided_values(scalar):
+    cpu, npu = _inputs(torch.float32, "strided")
+    other = 0.25 if scalar else cpu.flip(-1).contiguous()
+    expected = cpu.clone().ne_(other)
+    npu_other = other if scalar else other.to("npu")
+    storage = npu.data_ptr()
+    with _enable("ne_scalar_" if scalar else "ne_", native=not scalar):
+        registered = set(flag_gems.all_registered_ops())
+        assert not {"not_equal_scalar_", "not_equal_"} & registered
+        actual = npu.ne_(npu_other)
+        assert actual is npu and actual.data_ptr() == storage
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)

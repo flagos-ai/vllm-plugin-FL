@@ -1,56 +1,18 @@
 #!/bin/bash
-# Copyright (c) 2025 BAAI. All rights reserved.
-# Setup script for Ascend NPU CI environment.
+# Copyright (c) 2026 BAAI. All rights reserved.
+# Use the dependency image built by docker/ascend/Dockerfile.
 set -euo pipefail
 
+export VLLM_USE_V2_MODEL_RUNNER=1
+
 git config --global --add safe.directory "$(pwd)"
+python docker/ascend/runtime_constraints.py verify /opt/ascend-stack \
+    --vllm-version 0.32.0 --check-imports
 
-pip install \
-    --no-build-isolation \
-    --no-deps \
-    -e .
-pip install "pytest-xdist>=3.0.0"
-
-python .github/scripts/install_flaggems_vllm.py
-
-python - <<'PY'
-from importlib.metadata import PackageNotFoundError, version
-
-import numpy
-
-for package, expected_version in {
-    "vllm": "0.28.0+empty",
-    "torch": "2.10.0+cpu",
-    "torch-npu": "2.10.0",
-    "flagtree": "0.6.2a1+ascend3.5",
-    "cann-shmem": "1.6.0",
-    "pytest": "8.3.2",
-    "coverage": "7.16.1",
-    "pytest-cov": "7.1.0",
-    "pytest-json-report": "1.5.0",
-    "pytest-metadata": "3.1.1",
-    "pytest-timeout": "2.4.0",
-}.items():
-    actual = version(package)
-    if actual != expected_version:
-        raise RuntimeError(
-            f"Unexpected {package} version: {actual}; expected {expected_version}. "
-            "Rebuild the Ascend 0.28.0 image before running CI."
-        )
-    print(f"{package}: {actual}")
-
-# FlagTree owns the triton module. Another distribution can overwrite it.
-for package in ("triton", "triton-ascend"):
-    try:
-        installed = version(package)
-    except PackageNotFoundError:
-        continue
-    raise RuntimeError(f"Remove standalone {package}=={installed}; use FlagTree")
-
-expected = "1.26.4"
-if numpy.__version__ != expected:
-    raise RuntimeError(
-        f"Unexpected NumPy version: {numpy.__version__}; expected {expected}"
-    )
-print(f"NumPy version: {numpy.__version__}")
-PY
+python -m pip install --no-build-isolation --no-deps -e .
+# Resolve test tools with the captured NPU stack overrides as well.
+uv --config-file /opt/ascend-stack/uv.toml pip install \
+    --python "$(command -v python)" 'pytest-xdist>=3.0.0'
+python .github/scripts/install_ascend_flaggems_vllm.py
+python docker/ascend/runtime_constraints.py verify /opt/ascend-stack \
+    --vllm-version 0.32.0 --check-imports
