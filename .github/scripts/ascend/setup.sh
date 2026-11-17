@@ -23,6 +23,9 @@ python - <<'PY'
 from importlib.metadata import version
 
 import numpy
+# Load torch-npu before Triton; its backend imports torch during initialization.
+import torch
+import torch_npu  # noqa: F401
 import triton
 
 expected_vllm = "0.24.0+flagos"
@@ -32,6 +35,7 @@ if not callable(getattr(triton, "jit", None)):
     raise RuntimeError("Ascend CI requires FlagTree's working triton.jit")
 for package in ("vllm", "torch", "torch-npu", "flagtree", "flag-gems"):
     print(f"{package}: {version(package)}")
+print(f"Ascend devices: {torch.npu.device_count()}")
 
 expected = "1.26.4"
 if numpy.__version__ != expected:
