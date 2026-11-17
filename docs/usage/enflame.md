@@ -156,10 +156,10 @@ bash .github/scripts/enflame/setup.sh 2>&1 | tee /logs/setup.log
 ```
 
 `check.sh` requires at least two visible GCUs and creates a small GCU tensor.
-The image supplies vLLM and the vendor runtime. `setup.sh` installs the selected
-plugin checkout with `--no-build-isolation --no-deps -e .`, installs test-only
-dependencies, and checks imports and device availability. It does not rebuild
-vLLM or reinstall the image's vendor stack.
+The image supplies vLLM, flaggems-vllm, the vendor runtime, and test dependencies.
+`setup.sh` reinstalls only the selected plugin checkout with
+`--no-build-isolation --no-deps -e .`, then checks imports and device availability.
+It reuses the image's installed dependencies without reinstalling them.
 
 Do not resolve runtime dependencies again with a generic `pip install -U`: a
 dependency can overwrite FlagTree's Triton files while leaving its metadata

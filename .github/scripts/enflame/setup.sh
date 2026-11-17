@@ -20,17 +20,15 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
-# The v0.32 CI image supplies the vendor SDK and the validated vLLM/runtime
-# stack. Install only the checked-out plugin and test-only dependencies; do not
-# rebuild or replace the runtime on every CI job.
+# The v0.32 CI image supplies the vendor SDK, vLLM, flaggems-vllm, and test
+# dependencies. Reinstall only the checked-out plugin without resolving or
+# replacing any image dependencies.
 unset PYTHONPATH
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo 'PYTHONPATH=' >> "${GITHUB_ENV}"
 fi
 
-python .github/scripts/install_flaggems_vllm.py --platform enflame
 python -m pip install --no-build-isolation --no-deps -e .
-python -m pip install --index-url "${PYPI_INDEX_URL:-https://pypi.org/simple}" "pytest-xdist>=3.0.0"
 
 python - <<'PY'
 import flag_gems
