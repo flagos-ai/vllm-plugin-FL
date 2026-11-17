@@ -51,3 +51,31 @@ def test_vocab_install_rejects_unknown_abi():
         vocab_mask._install_vocab_mask(
             SimpleNamespace(get_masked_input_and_mask=lambda x: x)
         )
+
+
+def test_backend_setup_checks_compiler_before_model_import(monkeypatch):
+    platform = SimpleNamespace(current_platform=SimpleNamespace(vendor_name="enflame"))
+    monkeypatch.setitem(sys.modules, "vllm.platforms", platform)
+
+    def unsupported():
+        raise RuntimeError(
+            "GCU vocabulary masking requires compiler enable_i64 support"
+        )
+
+    monkeypatch.setattr(vocab_mask, "_get_kernel", unsupported)
+    with pytest.raises(RuntimeError, match="enable_i64"):
+        vocab_mask.apply_vocab_mask_gcu_patch()
+
+
+def test_other_backend_setup_needs_no_compiler(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "vllm.platforms",
+        SimpleNamespace(current_platform=SimpleNamespace(vendor_name="cuda")),
+    )
+
+    def forbidden():
+        raise AssertionError("other platform must not load GCU compiler")
+
+    monkeypatch.setattr(vocab_mask, "_get_kernel", forbidden)
+    vocab_mask.apply_vocab_mask_gcu_patch()

@@ -72,6 +72,10 @@ def apply_vocab_mask_gcu_patch() -> None:
 
     if getattr(current_platform, "vendor_name", None) != "enflame":
         return
+    # Validate compiler options and create the lazy JIT function during backend
+    # setup, before model loading. Importing this module on another backend still
+    # does not import the vendor compiler or Triton kernel.
+    _get_kernel()
     from vllm.model_executor.layers import vocab_parallel_embedding
 
     _install_vocab_mask(vocab_parallel_embedding)
