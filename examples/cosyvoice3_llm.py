@@ -10,10 +10,62 @@ Pass --prompt-embeds with a torch.save-serialized floating-point tensor of shape
 896] containing speech-LLM conditioning embeddings. Without it, random embeddings
 provide a backend smoke test. Output is speech token IDs, not synthesized audio.
 
-Usage: python examples/cosyvoice3_llm.py --model MODEL --prompt-embeds EMBEDS.pt
+Download the complete official model repository first, then export its speech LLM:
+python examples/cosyvoice3_llm.py --export-from ORIGINAL_MODEL --model BF16_MODEL
+Run: python examples/cosyvoice3_llm.py --model BF16_MODEL --prompt-embeds EMBEDS.pt
 """
 
 import argparse
+
+
+def export_bf16(source, destination):
+    """Convert the official 2512 speech-LLM state dict to a Qwen2 checkpoint."""
+    import json
+    from pathlib import Path
+
+    import torch
+    from safetensors.torch import save_file
+    from transformers import Qwen2Config
+
+    source, destination = Path(source), Path(destination)
+    if destination.exists():
+        raise FileExistsError(f"Export destination already exists: {destination}")
+    config = Qwen2Config.from_pretrained(
+        source / "CosyVoice-BlankEN", local_files_only=True
+    )
+    if config.hidden_size != 896 or config.num_hidden_layers != 24:
+        raise ValueError("Expected the Fun-CosyVoice3-0.5B-2512 Qwen2 configuration")
+    state = torch.load(
+        source / "llm.pt", map_location="cpu", weights_only=True, mmap=True
+    )
+    weights = {
+        name.removeprefix("llm.model."): tensor.to(torch.bfloat16).contiguous()
+        for name, tensor in state.items()
+        if name.startswith(("llm.model.model.layers.", "llm.model.model.norm."))
+    }
+    weights["model.embed_tokens.weight"] = (
+        state["speech_embedding.weight"].to(torch.bfloat16).contiguous()
+    )
+    weights["lm_head.weight"] = (
+        state["llm_decoder.weight"].to(torch.bfloat16).contiguous()
+    )
+    if len(weights) != 291 or any(
+        weights[name].shape != (6761, 896)
+        for name in ("model.embed_tokens.weight", "lm_head.weight")
+    ):
+        raise ValueError("Unexpected Fun-CosyVoice3-0.5B-2512 speech-LLM weights")
+    config.architectures = ["Qwen2ForCausalLM"]
+    config.vocab_size = 6761
+    config.tie_word_embeddings = False
+    config.dtype = torch.bfloat16
+    config.bos_token_id = config.pad_token_id = None
+    config.eos_token_id = 6562
+    destination.mkdir(parents=True)
+    config.save_pretrained(destination)
+    (destination / "generation_config.json").write_text(
+        json.dumps({"eos_token_id": 6562})
+    )
+    save_file(weights, destination / "model.safetensors")
 
 
 def main():
@@ -21,12 +73,21 @@ def main():
     parser.add_argument(
         "--model", required=True, help="BF16 Qwen2-format speech-LLM export"
     )
+    parser.add_argument(
+        "--export-from", help="Official 2512 model directory; export BF16 and exit"
+    )
     parser.add_argument("--eager", action="store_true", help="Use eager execution")
     parser.add_argument(
         "--prompt-embeds",
         help="torch.save file containing BF16/FP32 [tokens, 896] embeddings",
     )
     args = parser.parse_args()
+
+    if args.export_from:
+        if args.eager or args.prompt_embeds:
+            parser.error("--export-from cannot be combined with inference options")
+        export_bf16(args.export_from, args.model)
+        return
 
     import torch
 
