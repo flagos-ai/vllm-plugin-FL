@@ -75,6 +75,8 @@ bw1000:
   tests:
     e2e:
       pr:
+        inference:
+          qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
         adaptation_gate:
           qwen3_6:
             - "27b_tp2_eager"
@@ -82,6 +84,8 @@ bw1000:
             - "35b_a3b_tp2_eager"
             - "35b_a3b_tp2_graph"
       nightly:
+        inference:
+          qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
         adaptation_gate:
           qwen3_6:
             - "27b_tp2_eager"

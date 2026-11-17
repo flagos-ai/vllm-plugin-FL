@@ -71,6 +71,91 @@ def append_loopback_no_proxy(value: str | None) -> str:
     return ",".join(dict.fromkeys([*entries, "127.0.0.1", "localhost"]))
 
 
+def resolve_request_timeout(environment: Mapping[str, str]) -> str:
+    """Resolve the Gate client timeout while keeping the case source unchanged."""
+    value = environment.get(
+        "FL_ADAPTATION_GATE_REQUEST_TIMEOUT",
+        environment.get("REQUEST_TIMEOUT", "300"),
+    )
+    try:
+        if float(value) <= 0:
+            raise ValueError
+    except ValueError as error:
+        raise ValueError(
+            "adaptation Gate request timeout must be a positive number"
+        ) from error
+    return value
+
+
+def summarize_gate_progress(
+    results_dir: Path, scenario: str | None = None
+) -> dict[str, int | bool]:
+    """Return non-asserting counts suitable for live CI progress logs."""
+    selected = SCENARIOS
+    if scenario is not None:
+        selected = tuple(item for item in SCENARIOS if item[0] == scenario)
+        if not selected:
+            raise ValueError(f"Unknown adaptation Gate scenario: {scenario}")
+
+    expected_scenarios = len(selected)
+    expected_requests = sum(count for _, count in selected)
+    expected_checks = expected_requests * len(QUALITY_CHECKS)
+    documents = []
+    for name, _ in selected:
+        path = results_dir / f"{name}.json"
+        if path.is_file():
+            documents.append(json.loads(path.read_text(encoding="utf-8")))
+
+    outputs = [
+        output
+        for document in documents
+        for output in document.get("output", [])
+        if isinstance(output, dict)
+    ]
+    checks = [
+        passed for output in outputs for passed in (output.get("checks") or {}).values()
+    ]
+    checks_have_valid_shape = all(
+        isinstance(output.get("checks"), dict)
+        and set(output["checks"]) == QUALITY_CHECKS
+        and all(type(value) is bool for value in output["checks"].values())
+        for output in outputs
+    )
+    passed_requests = sum(output.get("passed") is True for output in outputs)
+    passed_checks = sum(passed is True for passed in checks)
+    return {
+        "expected_scenarios": expected_scenarios,
+        "observed_scenarios": len(documents),
+        "expected_requests": expected_requests,
+        "observed_requests": len(outputs),
+        "passed_requests": passed_requests,
+        "expected_checks": expected_checks,
+        "observed_checks": len(checks),
+        "passed_checks": passed_checks,
+        "passed": (
+            len(documents) == expected_scenarios
+            and len(outputs) == expected_requests
+            and passed_requests == expected_requests
+            and len(checks) == expected_checks
+            and passed_checks == expected_checks
+            and checks_have_valid_shape
+        ),
+    }
+
+
+def format_gate_progress(label: str, summary: Mapping[str, int | bool]) -> str:
+    """Format Gate counts as one grep-friendly CI log line."""
+    status = "PASS" if summary["passed"] else "FAIL"
+    return (
+        f"[Gate] {label}: {status}; "
+        f"scenarios={summary['observed_scenarios']}/{summary['expected_scenarios']}; "
+        f"requests={summary['passed_requests']}/{summary['expected_requests']} passed "
+        f"({summary['observed_requests']} observed); "
+        f"checks={summary['passed_checks']}/{summary['expected_checks']} passed "
+        f"({summary['observed_checks']} observed)"
+    )
+
+
 @contextmanager
 def temporary_environment(updates: Mapping[str, str]) -> Iterator[None]:
     """Apply environment updates and exactly restore the previous state."""

@@ -52,6 +52,12 @@ c550:
   tests:
     e2e:
       pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
         adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
@@ -59,6 +65,12 @@ c550:
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
       nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
         adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager

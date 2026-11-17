@@ -140,6 +140,8 @@ h20:
         - test_musa_accelerator_patch.py
     e2e:
       pr:
+        inference:
+          qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
         adaptation_gate:
           qwen3_6:
             - "27b_tp2_eager"
@@ -147,6 +149,8 @@ h20:
             - "35b_a3b_tp2_eager"
             - "35b_a3b_tp2_graph"
       nightly:
+        inference:
+          qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
         adaptation_gate:
           qwen3_6:
             - "27b_tp2_eager"

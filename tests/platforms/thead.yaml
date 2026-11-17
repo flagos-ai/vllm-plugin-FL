@@ -75,6 +75,12 @@ zw810e:
   tests:
     e2e:
       pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
         adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
@@ -82,6 +88,12 @@ zw810e:
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
       nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
         adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
@@ -94,6 +106,7 @@ zw810e:
             - 35b_a3b_tp4_graph
     timeouts:
       e2e:
+        inference: 120
         adaptation_gate: 180
         concurrent: 180
     functional:

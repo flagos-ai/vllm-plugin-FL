@@ -16,7 +16,10 @@ from tests.e2e_tests.adaptation_gate.gate_contract import (
     SCENARIOS,
     append_loopback_no_proxy,
     build_server_args,
+    format_gate_progress,
     gate_results_root,
+    resolve_request_timeout,
+    summarize_gate_progress,
     temporary_environment,
     validate_gate_documents,
 )
@@ -57,6 +60,7 @@ _CASE_UTILS = _load_case_utils()
 @dataclass(frozen=True)
 class GateServer:
     server: VllmServer
+    document_dir: Path
 
     def ensure_alive(self) -> None:
         process = self.server._process
@@ -107,14 +111,20 @@ def gate_server():
             "BASE_URL": server.base_url,
             "API_KEY": serve.api_key or "EMPTY",
             "RESULTS_DIR": str(results_root),
-            "REQUEST_TIMEOUT": "300",
+            "REQUEST_TIMEOUT": resolve_request_timeout(os.environ),
             "NO_PROXY": append_loopback_no_proxy(os.environ.get("NO_PROXY")),
             "no_proxy": append_loopback_no_proxy(os.environ.get("no_proxy")),
         }
         with temporary_environment(updates):
             try:
-                yield GateServer(server=server)
+                yield GateServer(server=server, document_dir=document_dir)
             finally:
+                print(
+                    format_gate_progress(
+                        "total", summarize_gate_progress(document_dir)
+                    ),
+                    flush=True,
+                )
                 with server.log_on_failure(
                     "Adaptation Gate 26-request contract validation failed"
                 ):
@@ -129,4 +139,13 @@ def test_adaptation_gate_scenario(scenario: str, gate_server: GateServer) -> Non
     with gate_server.server.log_on_failure(
         f"Adaptation Gate scenario '{scenario}' failed"
     ):
-        _CASE_UTILS.run_case(scenario)
+        try:
+            _CASE_UTILS.run_case(scenario)
+        finally:
+            print(
+                format_gate_progress(
+                    scenario,
+                    summarize_gate_progress(gate_server.document_dir, scenario),
+                ),
+                flush=True,
+            )

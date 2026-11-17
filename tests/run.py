@@ -331,6 +331,11 @@ class TestRunner:
 
         results: list[TestResult] = []
         results_lock = threading.Lock()
+        # A sharded Gate job has exactly one case, so there is no competing
+        # subprocess output to interleave. Stream it live instead of hiding up
+        # to hours of scenario progress in the parallel runner's capture
+        # buffer. Multi-case jobs keep prefixed buffering as before.
+        capture_case_output = len(cases) > 1
 
         def _ts() -> str:
             return time.strftime("%H:%M:%S")
@@ -346,9 +351,15 @@ class TestRunner:
             # the inherited mask names (identical when no mask is set).
             ids = [device_ids[s] for s in slots]
             visible = ",".join(str(d) for d in ids)
+            output_mode = (
+                "stdout buffered until done"
+                if capture_case_output
+                else "stdout streaming live"
+            )
             print(
                 f"[run] [{_ts()}] START  {tc.name}  "
-                f"{visible_env_var}={visible}  (devices={tc.num_devices}, stdout buffered until done)",
+                f"{visible_env_var}={visible}  "
+                f"(devices={tc.num_devices}, {output_mode})",
                 flush=True,
             )
             status = "FAIL"
@@ -367,7 +378,7 @@ class TestRunner:
                 result = self._run_single(
                     tc,
                     extra_env_override=device_env,
-                    _quiet=True,
+                    _quiet=capture_case_output,
                     device_slots=slots,
                     device_ids=ids,
                 )

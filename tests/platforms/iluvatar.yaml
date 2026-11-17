@@ -52,6 +52,10 @@ bi_v150:
   tests:
     e2e:
       pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
         adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
@@ -59,6 +63,10 @@ bi_v150:
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
       nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
         adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
@@ -71,6 +79,7 @@ bi_v150:
             - 35b_a3b_tp4_eager
     timeouts:
       e2e:
+        inference: 180
         adaptation_gate: 180
         concurrent: 180
     functional:

@@ -106,17 +106,20 @@ def build_e2e_matrix(
 ) -> list[dict]:
     """End-to-end model tests (inference, serving, concurrent, adaptation Gate).
 
-    These are slow and require model files.  Entries are grouped by
-    ``(task, device)`` so that all model/case combos for the same task
-    run inside a single job, avoiding repeated container startup and
-    project installation.
+    These are slow and require model files.  Most entries are grouped by
+    ``(task, device)`` so all model/case combos for the same task run inside
+    one job.  Adaptation Gate entries are deliberately sharded per model/case:
+    a Gate case can consume every visible device for a long model lifetime,
+    so grouping four TP4 cases would serialize them behind one job timeout and
+    discard the cross-runner parallelism of the old inference/serving jobs.
 
     The ``e2e`` block in each device's YAML is keyed by CI stage
     (``pr`` / ``nightly`` / ``weekly``).  In ``weekly`` stage, falls back
     to ``nightly`` if no ``weekly`` key is defined.
     """
-    # Collect per-(task, device) groups
-    groups: dict[tuple[str, str], list[dict]] = {}
+    # Collect normal tasks per (task, device).  The optional third key shards
+    # adaptation Gate cases into independent matrix jobs.
+    groups: dict[tuple[str, str, str], list[dict]] = {}
     for device in devices:
         section = config[device]
         e2e = section.get("tests", {}).get("e2e", {})
@@ -144,14 +147,15 @@ def build_e2e_matrix(
                 if not isinstance(cases, list):
                     cases = [cases]
 
-                key = (task_dir, device)
-                groups.setdefault(key, [])
                 for case in cases:
+                    shard = f"{model}/{case}" if task_dir == "adaptation_gate" else ""
+                    key = (task_dir, device, shard)
+                    groups.setdefault(key, [])
                     groups[key].append({"model": model, "case": str(case)})
 
-    # Build one matrix entry per (task, device) group
+    # Build one matrix entry per normal group or adaptation Gate shard.
     entries = []
-    for (task_dir, device), case_list in groups.items():
+    for (task_dir, device, _shard), case_list in groups.items():
         timeout = resolve_e2e_timeout(config, device, task_dir)
         entry = {
             "task": task_dir,
