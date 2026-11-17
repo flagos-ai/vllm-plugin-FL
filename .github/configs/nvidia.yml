@@ -37,6 +37,18 @@ device_runner_labels:
     - X64
     - flagcicd-h20
 
+# H20 runners share a host. Give each test container its own IPC resources.
+device_container_options:
+  h20: >-
+    --privileged
+    --gpus all
+    --env VLLM_FL_USE_FLAGGEMS_VLLM=1
+    --ipc=private
+    --shm-size=16g
+    --hostname vllm-plugin-fl
+    --user root
+    --ulimit nofile=65535:65535
+
 # Runner labels for this hardware (Platform hosted)
 # runner_labels:
 #   - ci-vllm-plugin-fl

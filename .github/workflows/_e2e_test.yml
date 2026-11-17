@@ -76,6 +76,12 @@ jobs:
     name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
+    # Both H20 runner registrations use the same eight GPUs. P800 shares
+    # its reservation with functional and benchmark jobs across workflows.
+    concurrency:
+      group: ${{ inputs.platform == 'nvidia' && inputs.device == 'h20' && 'vllm-fl-h20' || inputs.platform == 'kunlunxin' && 'vllm-fl-kunlunxin' || format('vllm-fl-e2e-{0}-{1}-{2}-{3}', github.run_id, inputs.platform, inputs.device, inputs.task) }}
+      cancel-in-progress: false
+      queue: max
     container:
       image: ${{ inputs.ci_image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}

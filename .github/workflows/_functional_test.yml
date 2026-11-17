@@ -65,6 +65,11 @@ jobs:
     name: "Functional (${{ inputs.platform }})"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
+    # Share the P800 hardware reservation with its E2E and benchmark jobs.
+    concurrency:
+      group: ${{ inputs.platform == 'kunlunxin' && 'vllm-fl-kunlunxin' || format('vllm-fl-functional-{0}-{1}', github.run_id, inputs.platform) }}
+      cancel-in-progress: false
+      queue: max
     container:
       image: ${{ inputs.ci_image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
