@@ -152,6 +152,26 @@ RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
     && python -m pip install --no-cache-dir --no-deps \
         "python-multipart==0.0.20"
 
+# FlagGems-vLLM provider, preinstalled at the same pinned commit the CI setup
+# script enforces (.github/scripts/install_flaggems_vllm.py). --no-deps keeps
+# the vendor stack (torch / torch_musa / flagtree / flag-gems / vllm) untouched;
+# packaging and sqlalchemy are build deps not covered above (pybind11 is already
+# installed, PyYAML comes from req032.txt). Override FLAGGEMS_VLLM_REPO_URL with
+# an internal mirror when the build host cannot reach github.com.
+ARG FLAGGEMS_VLLM_COMMIT=b5c2c2249319277ccda4d41aa0f65164bd9b2a19
+ARG FLAGGEMS_VLLM_REPO_URL=https://github.com/flagos-ai/FlagGems-vllm.git
+
+RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
+    if [ -n "${EXTRA_INDEX_URL}" ]; then export PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL}"; fi; \
+    python -m pip install --no-cache-dir packaging sqlalchemy \
+    && python -m pip install --no-cache-dir --no-deps --no-build-isolation \
+        "flaggems-vllm @ git+${FLAGGEMS_VLLM_REPO_URL}@${FLAGGEMS_VLLM_COMMIT}" \
+    && FLAGGEMS_VLLM_COMMIT="${FLAGGEMS_VLLM_COMMIT}" python -c 'import json, os; \
+from importlib.metadata import distribution; \
+src = json.loads(distribution("flaggems-vllm").read_text("direct_url.json") or "{}"); \
+assert src.get("vcs_info", {}).get("commit_id") == os.environ["FLAGGEMS_VLLM_COMMIT"], src; \
+print("FlagGems-vLLM pinned at", src.get("vcs_info", {}).get("commit_id")[:7])'
+
 # Must run before any vLLM import: py3.10 back-fills for the 0.32 stack.
 COPY vllm_fl_py310_compat.py zz_vllm_fl_py310_compat.pth /tmp/compat/
 

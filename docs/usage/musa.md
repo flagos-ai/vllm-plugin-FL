@@ -1,4 +1,4 @@
-﻿# MUSA deployment
+﻿﻿# MUSA deployment
 
 vLLM-Plugin-FL supports vLLM **0.32.0** on Moore Threads MUSA with the upstream
 V2 model runner by default (as on NVIDIA), native MCCL communication and
@@ -26,8 +26,9 @@ harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-musa-ci
 ```
 
 The image is published to the `plugin` project. It contains the vendor runtime,
-the vLLM 0.32.0 empty wheel and the test tooling; the plugin itself and
-`flaggems-vllm` are installed from the checkout at job time by
+the vLLM 0.32.0 empty wheel, the shared `flaggems-vllm` provider preinstalled at
+the pinned commit `b5c2c2249319277ccda4d41aa0f65164bd9b2a19`, and the test
+tooling; only the plugin itself is installed from the checkout at job time by
 [`.github/scripts/musa/setup.sh`](../../.github/scripts/musa/setup.sh). The
 0.32.0 adaptation was additionally validated on the FlagOS 2.2 runtime image
 `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-mthreads-musa4.3.6:2.2.0`
@@ -155,10 +156,11 @@ env -u VLLM_VENDOR "$PYTHON" -m pip install \
 "$PYTHON" .github/scripts/install_flaggems_vllm.py
 ```
 
-The last command is **required**: it installs the shared FlagGems-vllm provider
-from the repository's pinned upstream commit
-`f775b37f3066e2935742d26c7592a5dd55499159`, unless that exact source is already
-installed. It checks that the existing runtime package versions remain unchanged.
+The last command is a **verification**: the image ships the shared FlagGems-vllm
+provider preinstalled from the repository's pinned upstream commit
+`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`; the script skips installation when
+that exact source is already installed and otherwise installs it, then checks
+that the existing runtime package versions remain unchanged.
 This provider is separate from the corrected FlagGems wheel already in the image.
 Do not install generic PyPI Torch/CUDA packages or replace the image's dependencies.
 
