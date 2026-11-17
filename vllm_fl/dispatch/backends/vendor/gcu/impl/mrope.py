@@ -72,10 +72,17 @@ def _triton_mrope_forward_gcu(
         # ``cos_offsets % 3`` masks blow the GCU300 register allocator; read the
         # t/h/w selection from a tiny precomputed LUT instead (masks derived from
         # loaded data are safe on this backend).
-        sv = tl.load(sel_ptr + cos_offsets, mask=cos_offsets < half_rd, other=0)
-        t_mask = sv == 0
-        h_mask = sv == 1
-        w_mask = sv == 2
+        valid = cos_offsets < half_rd
+        sv = tl.load(sel_ptr + cos_offsets, mask=valid, other=0)
+        # other=0 makes every padding lane look like the t-section, so the
+        # selection must be intersected with cos_offsets < half_rd.  Without it
+        # the loads below run past the end of the [num_tokens, half_rd] cos/sin
+        # buffer: for head_dim=256 / rotary_dim=64 the tile has pad_hd//2 == 128
+        # lanes but only 32 are real, and with a single token the buffer holds
+        # 3 * 32 = 96 elements while the t-load reaches offset 127.
+        t_mask = valid & (sv == 0)
+        h_mask = valid & (sv == 1)
+        w_mask = valid & (sv == 2)
     else:
         lt_t = cos_offsets < mrope_section_t
         lt_h = cos_offsets < (mrope_section_t + mrope_section_h)

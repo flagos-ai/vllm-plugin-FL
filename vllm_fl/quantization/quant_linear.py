@@ -73,6 +73,20 @@ def add_oot_quant_kernel() -> None:
             0, FlagGemsFp8BlockScaledMMLinearKernel
         )
 
+    # GCU: ``torch._scaled_mm`` is implemented by the vendor backend, but the
+    # platform reports a capability far below Ada, so upstream's >= 89 gate in
+    # ``TorchFP8ScaledMMLinearKernel.is_supported`` rejects every non-block FP8
+    # layer.  Relax it here (not only in ``apply_gcu_patches``) because this
+    # function runs in *every* process -- including EngineCore/worker, where the
+    # GCU patch pass may execute before ``vllm.model_executor.kernels.linear``
+    # is importable, silently skipping the patch.
+    if current_platform.device_type == "gcu":
+        from vllm_fl.dispatch.backends.vendor.gcu.impl.fp8_scaled_mm import (
+            apply_fp8_scaled_mm_gcu_patch,
+        )
+
+        apply_fp8_scaled_mm_gcu_patch()
+
     # Quantization hooks are self-gated on backend/kernel availability.
     from .compressed_tensors import register_compressed_tensors_oot
     from .wna16.linear import register_fl_wna16_linear_kernel

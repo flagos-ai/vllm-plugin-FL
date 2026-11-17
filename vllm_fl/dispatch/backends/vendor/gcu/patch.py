@@ -7,6 +7,8 @@ import torch
 
 from .impl.apply_moe_activation_gcu import apply_moe_activation_gcu_patch
 from .impl.fp8_config import apply_fp8_config_gcu_patch
+from .impl.fp8_quant_ops import apply_fp8_quant_ops_gcu_patch
+from .impl.fp8_scaled_mm import apply_fp8_scaled_mm_gcu_patch
 from .impl.bilinear_pos_embed import apply_bilinear_pos_embed_gcu_patch
 from .impl.causal_conv1d import apply_causal_conv1d_gcu_patch
 from .impl.chunk_delta_h import apply_chunk_delta_h_gcu_patch
@@ -124,6 +126,8 @@ def apply_gcu_patches() -> None:
     apply_moe_sum_gcu_patch()
     apply_per_token_group_quant_fp8_gcu_patch()
     apply_fp8_config_gcu_patch()
+    apply_fp8_quant_ops_gcu_patch()
+    apply_fp8_scaled_mm_gcu_patch()
     apply_quant_fp8_gcu_patch()
     apply_fused_moe_triton_kernel_gcu_patch()
     apply_fused_moe_config_gcu_patch()
