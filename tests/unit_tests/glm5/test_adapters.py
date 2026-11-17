@@ -656,6 +656,8 @@ def test_mhc_post_reference_retains_signal_below_tf32_precision(
 @pytest.mark.parametrize("name", ["mhc_pre", "mhc_post", "mhc_fused_post_pre", "clamp"])
 @pytest.mark.parametrize("backend", ["flagos", "vendor:cuda"])
 def test_opaque_glm_ops_inductor_and_refreshed_graph(name, backend):
+    if not torch.cuda.is_available():
+        pytest.skip("Inductor and CUDA graph replay are unavailable without CUDA")
     if backend == "vendor:cuda" and not patch.use_nvidia_reference():
         pytest.skip("This parameter validates vLLM's native NVIDIA kernels")
     from vllm_fl.models.glm5 import compile_ops
@@ -1007,6 +1009,8 @@ def test_kda_fullgraph_reads_current_layer_and_request_metadata(monkeypatch):
 
 @pytest.mark.gpu
 def test_fwht_public_abi_survives_compile_and_graph_replay():
+    if not torch.cuda.is_available():
+        pytest.skip("Inductor and CUDA graph replay are unavailable without CUDA")
     from flaggems_vllm import fwht128_quant_fp8, hadamard128
 
     from vllm.platforms import current_platform
@@ -1410,6 +1414,8 @@ def test_private_vision_adapter_preserves_public_fa(monkeypatch, fused_mode):
 def test_private_vision_attention_eager_and_replay(
     monkeypatch, dtype, fused_mode, math_backend
 ):
+    if not torch.cuda.is_available():
+        pytest.skip("This vision attention contract allocates CUDA tensors")
     from vllm_fl.models.glm5 import vision_attention as vision
 
     monkeypatch.setattr(vision, "_BINDING", None)

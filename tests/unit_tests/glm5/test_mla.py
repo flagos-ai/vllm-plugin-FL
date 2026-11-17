@@ -669,6 +669,8 @@ def test_failure_after_cache_write_propagates_without_second_impl(monkeypatch):
 def test_real_decode_uses_pool_capacity_and_preserves_token_selection(
     monkeypatch, pool, max_tokens, force_bf16
 ):
+    if not torch.cuda.is_available():
+        pytest.skip("This decode contract allocates CUDA tensors")
     from vllm_fl.models.glm5 import sparse_indexer
 
     use_fp8 = indexer_backend.current_platform.supports_fp8() and not force_bf16
