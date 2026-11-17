@@ -216,6 +216,10 @@ def _normalize_process_group_backend(backend: str) -> str:
         # CommunicatorFL uses FlagCX for tensor-parallel collectives; torch
         # process groups still use the NPU's native backend.
         return "hccl"
+    if backend == "flagcx" and getattr(current_platform, "vendor_name", None) == "amd":
+        # Keep Torch process groups on RCCL. CommunicatorFL submits TP
+        # collectives to FlagCX directly, including during HIP graph capture.
+        return "nccl"
     return backend
 
 
@@ -641,20 +645,35 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            vendor_name = getattr(current_platform, "vendor_name", "")
-            if vendor_name == "thead":
-                # Platform-side adaptations for the upstream V2 runner; see
-                # vllm_fl/dispatch/backends/vendor/thead/patches/.
-                from vllm_fl.dispatch.backends.vendor.thead.patches import (
-                    v2_runner_compat,
+            if current_platform.device_type == "npu":
+                from vllm_fl.dispatch.backends.vendor.ascend.patches import (
+                    ascend_v2_device,
                 )
 
-                v2_runner_compat.install_v2_runner_compat()
-            elif current_platform.device_type == "musa":
-                _install_v2_runner_compat()
-            from vllm.v1.worker.gpu.model_runner import (
-                GPUModelRunner as GPUModelRunnerV2,
-            )
+                ascend_v2_device.install_ascend_v2_device_shims()
+                from vllm_fl.dispatch.backends.vendor.ascend.worker.model_runner_v2 import (
+                    GPUModelRunnerFLV2 as GPUModelRunnerV2,
+                )
+            else:
+                if getattr(current_platform, "vendor_name", "") == "amd":
+                    from vllm_fl.dispatch.backends.vendor.amd.v2_runner_compat import (
+                        install_v2_runner_compat,
+                    )
+
+                    install_v2_runner_compat()
+                elif getattr(current_platform, "vendor_name", "") == "thead":
+                    # Platform-side adaptations for the upstream V2 runner; see
+                    # vllm_fl/dispatch/backends/vendor/thead/patches/.
+                    from vllm_fl.dispatch.backends.vendor.thead.patches import (
+                        v2_runner_compat,
+                    )
+
+                    v2_runner_compat.install_v2_runner_compat()
+                elif current_platform.device_type == "musa":
+                    _install_v2_runner_compat()
+                from vllm.v1.worker.gpu.model_runner import (
+                    GPUModelRunner as GPUModelRunnerV2,
+                )
 
             if getattr(current_platform, "vendor_name", None) == "iluvatar":
                 from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
@@ -696,6 +715,10 @@ class WorkerFL(WorkerBase):
                 self.device,
                 self.model_runner.get_model(),
             )
+
+        if self.device.type == "npu":
+            # Keep the Dynamo thread guard stable from graph warmup to serving.
+            set_torch_threads_for_runtime()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
@@ -744,10 +767,25 @@ class WorkerFL(WorkerBase):
 
         maybe_apply_startup_plan(self)
 
+        is_amd = getattr(current_platform, "vendor_name", None) == "amd"
+        if is_amd:
+            # The upstream V2 runner can compile during either profile_run.
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops(amd_compile=True)
+
+        # The first compile uses the active config to select the graph wrapper
+        # whose registry the upstream V2 graph profiler manages.
+        profile_config = (
+            set_current_vllm_config(self.vllm_config)
+            if is_amd and self.use_v2_model_runner
+            else nullcontext()
+        )
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
             # max_num_batched_tokens
-            self.model_runner.profile_run()
+            with profile_config:
+                self.model_runner.profile_run()
 
             msg = (
                 f"Initial free memory {format_gib(self.init_snapshot.free_memory)} "
@@ -770,10 +808,13 @@ class WorkerFL(WorkerBase):
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
-        with memory_profiling(
-            self.init_snapshot,
-            weights_memory=int(self.model_runner.model_memory_usage),
-        ) as profile_result:
+        with (
+            memory_profiling(
+                self.init_snapshot,
+                weights_memory=int(self.model_runner.model_memory_usage),
+            ) as profile_result,
+            profile_config,
+        ):
             self.model_runner.profile_run()
 
         # Profile CUDA graph memory if graphs will be captured.
@@ -952,6 +993,12 @@ class WorkerFL(WorkerBase):
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
+
+    def get_supported_kv_cache_layouts(self) -> list[str]:
+        # This RPC is outside WorkerWrapperBase's init/load contexts. Ascend
+        # selects planar or dense hybrid layouts from the current model config.
+        with set_current_vllm_config(self.vllm_config):
+            return super().get_supported_kv_cache_layouts()
 
     def update_max_model_len(self, max_model_len: int) -> None:
         """Update max_model_len after auto-fit to GPU memory.
@@ -1185,10 +1232,16 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        activate_jit_monitor(
-            mode=self.observability_config.jit_monitor_mode,
-            verbose=self.observability_config.jit_monitor_verbose,
-        )
+        # Eager execution permits runtime JIT compilation. Match the 0.32
+        # worker and monitor only when kernel warmup was enabled.
+        if (
+            self.device.type != "npu"
+            or self.vllm_config.kernel_config.enable_jit_warmup
+        ):
+            activate_jit_monitor(
+                mode=self.observability_config.jit_monitor_mode,
+                verbose=self.observability_config.jit_monitor_verbose,
+            )
 
         # Freeze the worker heap so the GC won't scan static objects
         # (model weights, KV caches, CUDA graphs) during inference.
@@ -1199,9 +1252,8 @@ class WorkerFL(WorkerBase):
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
 
-        # Startup is done; steady-state serving gets no benefit from torch
-        # intra-op parallelism.
-        set_torch_threads_for_runtime()
+        if self.device.type != "npu":
+            set_torch_threads_for_runtime()
 
         return CompilationTimes(
             language_model=self.compilation_config.compilation_time,

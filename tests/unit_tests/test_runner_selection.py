@@ -2,10 +2,33 @@
 
 """Runner-selection contracts for vLLM 0.32.0."""
 
-import logging
 from types import SimpleNamespace
 
 import pytest
+
+
+def test_amd_sparse_mla_rejected_before_dispatch(monkeypatch):
+    from vllm_fl import dispatch
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", "amd")
+
+    def fake_dispatch(op_name, *, use_mla, use_sparse):
+        assert (op_name, use_mla, use_sparse) == ("attention_backend", True, False)
+        return "dense_backend"
+
+    monkeypatch.setattr(dispatch, "call_op", fake_dispatch)
+    with pytest.raises(NotImplementedError, match="Sparse MLA"):
+        PlatformFL.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=True, use_sparse=True)
+        )
+
+    assert (
+        PlatformFL.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=True, use_sparse=False)
+        )
+        == "dense_backend"
+    )
 
 
 def _make_ascend_vllm_config(
@@ -60,9 +83,7 @@ def _make_ascend_vllm_config(
 
 @pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu", "tsingmicro"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
-def test_accelerator_defaults_to_fl_runner(
-    monkeypatch, caplog, vendor, requested, expected
-):
+def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
     import os
     from types import SimpleNamespace
 
@@ -82,20 +103,13 @@ def test_accelerator_defaults_to_fl_runner(
         vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name=vendor)
     )
 
-    with caplog.at_level(logging.WARNING, logger="vllm_fl"):
-        assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
-    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
-
-    # The V1 default must be announced, and only when the user did not choose.
-    announced = [
-        record
-        for record in caplog.records
-        if "cannot execute the upstream V2 model runner" in record.getMessage()
-    ]
-    assert len(announced) == (1 if requested is None else 0)
+    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    if vendor == "ascend":
+        expected = requested
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == expected
 
 
-def test_musa_keeps_the_upstream_v2_default(monkeypatch, caplog):
+def test_musa_keeps_the_upstream_v2_default(monkeypatch):
     """MUSA runs V2 through the torch.cuda -> torch.musa shim, so it must not
     rewrite VLLM_USE_V2_MODEL_RUNNER at registration time."""
     import os
@@ -114,20 +128,13 @@ def test_musa_keeps_the_upstream_v2_default(monkeypatch, caplog):
         vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="mthreads")
     )
 
-    with caplog.at_level(logging.WARNING, logger="vllm_fl"):
-        assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
     assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
-    assert not [
-        record
-        for record in caplog.records
-        if "cannot execute the upstream V2 model runner" in record.getMessage()
-    ]
 
 
 @pytest.mark.parametrize(
     "device_type,vendor,error_pattern",
     [
-        ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
@@ -271,7 +278,8 @@ def test_enflame_rejects_only_hybrid_speculative_align_cache(
     assert config.cache_config.mamba_cache_mode == mamba_cache_mode
 
 
-def test_ascend_preserves_full_decode_graphs(monkeypatch):
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_ascend_preserves_full_decode_graphs(monkeypatch, use_v2):
     from vllm.config import CUDAGraphMode
 
     from vllm_fl.platform import PlatformFL
@@ -279,10 +287,16 @@ def test_ascend_preserves_full_decode_graphs(monkeypatch):
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
     monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY)
+    config.use_v2_model_runner = use_v2
 
     PlatformFL.check_and_update_config(config)
 
     assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+    from vllm.config.compilation import CompilationMode
+
+    assert config.compilation_config.mode is (
+        CompilationMode.NONE if use_v2 else CompilationMode.VLLM_COMPILE
+    )
     assert config.compilation_config.backend == "eager"
     assert config.compilation_config.compile_sizes == []
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.FULL_DECODE_ONLY
@@ -515,6 +529,7 @@ def test_ir_defaults_follow_kernel_availability(
         platform_module, "_vllm_c_available", lambda: cuda_kernels_available
     )
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
     config = SimpleNamespace(
         compilation_config=SimpleNamespace(
             backend="inductor", mode=CompilationMode.NONE

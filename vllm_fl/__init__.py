@@ -194,6 +194,17 @@ def _init_vendor_device():
 
         _patch_xpu_get_device()
 
+    if vendor_name == "amd":
+        # vLLM's bundled triton_kernels import AMD architecture predicates that
+        # FlagTree's target_info does not define. Without them every path that
+        # touches those kernels fails to import, which takes out MoE models
+        # while dense ones still serve. Must precede the model layer imports.
+        from vllm_fl.patches.flagtree_target_info import (
+            apply_flagtree_target_info,
+        )
+
+        apply_flagtree_target_info()
+
 
 def _install_metax_compat():
     """Apply the MetaX vLLM 0.28 compatibility shims before any kernel runs.
@@ -266,28 +277,9 @@ def register():
     if vendor_name == "kunlunxin":
         _install_kunlunxin_fla_alias()
 
-    # These backends cannot execute the upstream V2 runner: it drives raw
-    # CUDA/UVA streams and allocations the vendor runtime does not provide,
-    # so they stay on ModelRunnerFL (V1). Mirror vLLM's own handling of a
-    # known-unsupported configuration -- fall back to V1 but say why,
-    # instead of rewriting the environment silently. An explicit
-    # VLLM_USE_V2_MODEL_RUNNER is never overridden; platform.py rejects
-    # "=1" with the same reasoning.
-    #
-    # MUSA is not listed: it runs the upstream V2 runner through the
-    # torch.cuda -> torch.musa shim in worker.py.
-    if (
-        vendor_name in ("ascend", "enflame", "gcu", "tsingmicro")
-        and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") is None
-    ):
-        os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
-        logger.warning(
-            "[vllm_fl] %s cannot execute the upstream V2 model runner "
-            "(it requires CUDA/UVA streams and allocations the vendor "
-            "runtime does not provide); defaulting "
-            "VLLM_USE_V2_MODEL_RUNNER=0 to ModelRunnerFL (V1).",
-            vendor_name,
-        )
+    if vendor_name in ("enflame", "gcu", "tsingmicro"):
+        # Choose the legacy runner before VllmConfig reads model defaults.
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
 

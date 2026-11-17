@@ -13,6 +13,7 @@ from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
     AscendAttentionBackendImpl,
     AscendAttentionMetadataBuilder,
     AscendAttentionState,
+    AscendCommonAttentionMetadata,
     AscendMetadata,
 )
 
@@ -42,7 +43,8 @@ def test_upstream_creates_ascend_metadata_builder():
     )
     config = SimpleNamespace(
         model_config=SimpleNamespace(max_model_len=2048),
-        scheduler_config=SimpleNamespace(enable_chunked_prefill=False),
+        scheduler_config=SimpleNamespace(enable_chunked_prefill=False, max_num_seqs=4),
+        parallel_config=SimpleNamespace(decode_context_parallel_size=1),
         speculative_config=None,
     )
     group = AttentionGroup(AscendAttentionBackend, ["attention"], spec, 0)
@@ -52,6 +54,40 @@ def test_upstream_creates_ascend_metadata_builder():
     assert builder.kv_cache_spec.block_size == 128
     assert builder.layer_names == ["attention"]
     assert not builder.supports_update_block_table
+    assert group.kernel_block_table.shape == (1, 4, 16)
+    assert group.kernel_block_offsets.tolist() == [0, 1]
+
+
+def test_ascend_phase_survives_upstream_kernel_metadata_mapping():
+    from dataclasses import replace
+
+    import torch
+
+    metadata = AscendCommonAttentionMetadata(
+        query_start_loc=torch.tensor([0, 1, 3]),
+        query_start_loc_cpu=torch.tensor([0, 1, 3]),
+        seq_lens=torch.tensor([5, 8]),
+        num_reqs=2,
+        num_actual_tokens=3,
+        max_query_len=2,
+        max_seq_len=8,
+        block_table_tensor=torch.tensor([[1], [2]], dtype=torch.int32),
+        slot_mapping=torch.tensor([128, 256, 257]),
+        attn_state=AscendAttentionState.ChunkedPrefill,
+        _seq_lens_cpu=torch.tensor([5, 8]),
+        _num_computed_tokens_cpu=torch.tensor([4, 6]),
+    )
+    # vLLM 0.32 AttentionGroup replaces the common metadata when virtual
+    # kernel blocks need a mapped block table. Dynamic attributes are lost.
+    mapped = replace(metadata, block_table_tensor=metadata.block_table_tensor * 2)
+    assert mapped.attn_state is AscendAttentionState.ChunkedPrefill
+    assert mapped._seq_lens_cpu is metadata._seq_lens_cpu
+    unpadded = mapped.unpadded(num_actual_tokens=1, num_actual_reqs=1)
+    assert unpadded.attn_state is AscendAttentionState.ChunkedPrefill
+    assert unpadded.num_reqs == unpadded.num_actual_tokens == 1
+    assert unpadded._seq_lens_cpu.tolist() == [5]
+    assert unpadded._num_computed_tokens_cpu.tolist() == [4]
+    assert unpadded.block_table_tensor.tolist() == [[2]]
 
 
 @pytest.mark.parametrize("block_size", [16, 32, 64])
@@ -62,8 +98,22 @@ def test_rejects_blocks_smaller_than_ascend_kernel(block_size):
 
 @pytest.mark.parametrize("manager_block_size", [128, 256, 384])
 def test_hybrid_blocks_use_128_token_kernel_blocks(manager_block_size):
+    import torch
+
+    from vllm.v1.kv_cache_interface import FullAttentionSpec
+
+    spec = FullAttentionSpec(
+        block_size=manager_block_size,
+        num_kv_heads=8,
+        head_size=128,
+        dtype=torch.bfloat16,
+    )
     assert AscendAttentionBackend.supports_block_size(manager_block_size)
-    assert select_common_block_size(manager_block_size, [AscendAttentionBackend]) == 128
+    assert AscendAttentionBackend.get_supported_kernel_block_sizes(spec) == [128]
+    assert (
+        select_common_block_size(manager_block_size, [AscendAttentionBackend], [spec])
+        == 128
+    )
 
 
 @pytest.mark.parametrize("state", list(AscendAttentionState))
@@ -197,3 +247,47 @@ def test_interleaved_kv_cache_graph_replays_shared_storage(dtype, slot_dtype):
                 expected[block, 0, offset] = cpu_key[token]
                 expected[block, 1, offset] = -cpu_key[token]
         torch.testing.assert_close(backing.cpu(), expected, rtol=0, atol=0)
+
+
+@pytest.mark.gpu
+def test_native_planar_graph_padding_never_writes_dummy_cache():
+    """Negative write slots stay inactive even when null block zero is nonzero."""
+    import torch
+
+    impl = object.__new__(AscendAttentionBackendImpl)
+    impl.key_cache = impl.value_cache = None
+    cache = torch.full((2, 3, 128, 2, 128), 7, dtype=torch.bfloat16, device="npu")
+    assert cache[0].is_contiguous() and cache[1].is_contiguous()
+    key = torch.zeros(4, 2, 128, dtype=torch.bfloat16, device="npu")
+    value = torch.zeros_like(key)
+    metadata = AscendMetadata(
+        num_actual_tokens=4,
+        slot_mapping=torch.full((4,), -1, dtype=torch.int64, device="npu"),
+    )
+    impl.reshape_and_cache(key, value, cache, metadata)
+    torch.npu.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        impl.reshape_and_cache(key, value, cache, metadata)
+    expected = torch.full(cache.shape, 7, dtype=cache.dtype)
+    for step, slots in enumerate(
+        ([128, 129, 130, -1], [256, 257, -1, -1], [131, -1, -1, -1], [-1] * 4)
+    ):
+        cpu_key = torch.arange(4 * 2 * 128).view(4, 2, 128).to(cache.dtype) + step
+        # Inactive queries deliberately carry unrelated values. Their slots,
+        # rather than zero-valued query/cache contents, suppress cache writes.
+        cpu_key[-1].fill_(1000 + step)
+        key.copy_(cpu_key)
+        value.copy_(-cpu_key)
+        metadata.slot_mapping.copy_(torch.tensor(slots, dtype=torch.int64))
+        graph.replay()
+        torch.npu.synchronize()
+        for token, slot in enumerate(slots):
+            if slot >= 0:
+                block, offset = divmod(slot, 128)
+                expected[0, block, offset] = cpu_key[token]
+                expected[1, block, offset] = -cpu_key[token]
+        torch.testing.assert_close(cache.cpu(), expected, rtol=0, atol=0)
+        assert torch.all(cache[:, 0].cpu() == 7)
+        assert metadata.num_actual_tokens == 4
+        assert metadata.slot_mapping.cpu().tolist() == slots
