@@ -49,8 +49,8 @@ device_overrides:
         cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32]
     serve:
       # Cold-cache 35B graph startup approaches the default 20-minute limit.
-      # Allow 30 minutes at the server helper's 10-second polling interval.
-      startup_retries: 180
+      # Preserve the existing 40-minute budget at 10-second polling intervals.
+      startup_retries: 240
 
 env_defaults:
   VLLM_PLUGINS: "fl"
@@ -70,21 +70,28 @@ s60:
         inference:
           qwen3_6:
             - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
             - 27b_tp2_graph
         serving:
           qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
             - 35b_a3b_tp2_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
             - 27b_tp2_graph
         serving:
           qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
             - 35b_a3b_tp2_graph
         concurrent:
           qwen3_6:
             - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
     timeouts:
       e2e:
         inference: 120

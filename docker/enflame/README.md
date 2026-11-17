@@ -26,11 +26,10 @@ and [Enflame installation guide](https://github.com/flagos-ai/FlagTree/wiki/User
 select this FlagTree version. FlagGems v5.4.0's own older backend matrix
 selects 0.6.1+enflame3.6; the newer combination is validated below.
 
-Enflame uses `ModelRunnerFL` by default for eager and graph execution.
-Older vLLM releases can otherwise select its upstream V2 runner automatically for
-ordinary dense models, reaching sampler kernels that the current GCU stack
-does not support. Explicit `VLLM_USE_V2_MODEL_RUNNER=1` requests fail during
-configuration; V2-only features are unavailable on this backend.
+Enflame supports the vLLM 0.32 V1 and V2 runner selection contract. V1 uses
+`ModelRunnerFL`; V2 uses the GCU runner with device buffer, stream and sampling
+compatibility patches. Runner selection alone does not establish hardware
+acceptance for every model or feature.
 
 Hybrid models with speculative decoding and `mamba_cache_mode="align"`
 are rejected during configuration. Older vLLM releases use fused speculative Mamba
@@ -61,7 +60,7 @@ An anonymous manifest lookup confirmed that both names identify the same content
 Its registry manifest digest is
 `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`.
 Authenticated and anonymous pulls by this digest both resolved to the local
-image ID above. CI uses the canonical tag with this digest and installs the tested plugin checkout
+image ID above. Historical 0.28 CI used the canonical tag with this digest and installed the tested plugin checkout
 with `--no-deps`; the dependency image does not bake in that checkout.
 
 See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
@@ -82,7 +81,7 @@ The default generated tag includes the selected stage, such as
 the branch defaults from `docker/build.sh`. Pass the explicit candidate tag
 above when building 0.32. This command does not push.
 `.github/configs/enflame.yml` references the published vLLM 0.32.0 dependency
-image by tag; the deployment guide pins its observed manifest digest.
+image by its observed manifest digest, matching the deployment guide.
 Enflame is enabled in `platforms.yml`; the existing
 configuration retains the `enflame-s60` runner label, devices `2,3` and
 `/data:/data` mount. The current image tag is available in the registry; the

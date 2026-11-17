@@ -415,10 +415,7 @@ class ModelConfig:
             elif isinstance(value, (dict, list)):
                 args.extend([flag, json.dumps(value)])
             else:
-                serialized = (
-                    json.dumps(value) if isinstance(value, dict) else str(value)
-                )
-                args.extend([flag, serialized])
+                args.extend([flag, str(value)])
 
         return args
 

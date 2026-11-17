@@ -23,6 +23,7 @@ from vllm.utils.torch_utils import current_stream
 logger = init_logger(__name__)
 _TXDA_ABORT_TIMEOUT_SECONDS = 5.0
 
+
 def _load_amd_flagcx_api(api_path: Path):
     """Load the pinned source API without initializing the Torch ProcessGroup."""
     name = f"{__name__}._amd_api"

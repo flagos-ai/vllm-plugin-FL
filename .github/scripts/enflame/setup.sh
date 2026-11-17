@@ -28,7 +28,7 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo 'PYTHONPATH=' >> "${GITHUB_ENV}"
 fi
 
-python .github/scripts/install_flaggems_vllm.py
+python .github/scripts/install_flaggems_vllm.py --platform enflame
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip install --index-url "${PYPI_INDEX_URL:-https://pypi.org/simple}" "pytest-xdist>=3.0.0"
 
