@@ -1,8 +1,8 @@
-# Tsingmicro TXDA with vLLM 0.28.0
+# Tsingmicro TXDA with vLLM 0.32.0
 
 This backend targets TX8110/TXDA 81 devices with the vendor `torch_txda`, Triton,
-FlagGems and FlagCX stack. The plugin base is `0.4.0-dev`; install a checkout
-containing the TXDA 0.28 adaptation described here.
+FlagGems and FlagCX stack. The plugin base is `0.5.0-dev`; install a checkout
+containing the TXDA 0.32 adaptation described here.
 
 ## Execution scope
 
@@ -13,12 +13,18 @@ containing the TXDA 0.28 adaptation described here.
 - Prefill and decode context parallel sizes must both be 1.
 - Speculative decoding is unsupported because the fused speculative Mamba
   state-copy path is not available on TXDA. Omit `--speculative-config`.
-- Generic FlagGems ATen replacement is limited to add/mul; four additional
-  selectors retain the required MoE implementations. Normalization, rotary and
-  SiLU use reference implementations. This conservative configuration can be
-  slow and does not establish a throughput guarantee.
-- The TXDA SDPA backend uses the paged KV cache with reference attention.
-  MLA and sparse attention are unsupported.
+- Attention runs through the FlagGems TSINGMIC attention kernel
+  (`AttentionFLBackend`, `flag_gems.flash_attn_varlen_func`); MLA uses
+  `MLAFLBackend`. Sparse attention is unsupported.
+- Normalization (`rms_norm`) uses a pure-torch fallback
+  (`vendor/txda/impl/normalization.py`): the FlagGems Triton kernel exceeds
+  the TXDA shared-memory limit.
+- MoE uses the FlagGems TX81-native compact-grouped MoE fast path in
+  `TritonExpertsFL`; the generic Triton `fused_moe_kernel` (tl.dot) produces
+  wrong values on TXDA.
+- Memory-movement ops (copy/cat/index_select/...) are kept on TXDA-native
+  kernels via `flagos_blacklist` in `tsingmicro.yaml`; compute ops
+  (mm/rms_norm/attention/rotary/moe) go through FlagGems.
 - Validation covers Qwen3.6-27B and Qwen3.6-35B-A3B at TP8. The command
   examples below use bounded smoke-test settings, not recommended production
   capacity limits.
@@ -40,7 +46,7 @@ harbor.baai.ac.cn/plugin/tsingmicro001-gems5.4.0-treenone-triton3.6.0-cx0.1.0-pl
 | Triton | 3.6.0.post2026090316+git841474ad |
 | FlagGems | 5.4.0.dev708+gd3a272b8a.d20260825 |
 | FlagCX | 0.1.0, TXDA vendor build |
-| Target vLLM | 0.28.0, empty build |
+| Target vLLM | 0.32.0, empty build |
 
 Keep the image's vendor PyTorch, `torch_txda`, Triton, FlagGems and FlagCX
 packages when installing the target vLLM and plugin. The standard CUDA wheels do
@@ -80,10 +86,10 @@ Save this as `$task_root/setup.sh` on the host:
 #!/usr/bin/env bash
 set -euo pipefail
 cd /work/task
-git clone --depth 1 --branch v0.28.0 https://github.com/vllm-project/vllm.git vllm-0.28.0
+git clone --depth 1 --branch v0.32.0 https://github.com/vllm-project/vllm.git vllm-0.32.0
 VLLM_TARGET_DEVICE=empty python -m pip install \
-  --no-build-isolation --no-deps ./vllm-0.28.0
-# Align the vLLM 0.28 Python requirements missing from this exact base image.
+  --no-build-isolation --no-deps ./vllm-0.32.0
+# Align the vLLM 0.32 Python requirements missing from this exact base image.
 python -m pip install --no-deps \
   compressed-tensors==0.17.0 llguidance==1.7.6 fastapi==0.136.3
 cd /work/vllm-plugin-FL
@@ -95,7 +101,7 @@ python -m pip show vllm vllm-plugin-fl torch torch-txda triton flag-gems flaggem
 Launch it on the host:
 
 ```bash
-tmux new-session -d -s txda-028-setup \
+tmux new-session -d -s txda-032-setup \
   "docker exec codex-tsingmicro-028 bash -lc 'bash /work/task/setup.sh' >'$task_root/outputs/setup.log' 2>&1"
 tmux capture-pane -t txda-028-setup -p
 tail -n 80 "$task_root/outputs/setup.log"

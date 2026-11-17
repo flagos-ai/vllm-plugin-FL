@@ -1473,10 +1473,12 @@ class ModelRunnerFL(
                 sampling_params
                 and sampling_params.sampling_type == SamplingType.RANDOM_SEED
             ):
-                # TXDA random kernels use the runtime's CPU fallback.
-                generator = torch.Generator(
-                    device="cpu" if self.device.type == "txda" else self.device
-                )
+                # NOTE(2026-11-17): must use device=self.device, NOT "cpu".
+                # flag_gems tsingmicro philox_backend_seed_offset expects a
+                # TXDA generator (2×uint64 state); a CPU MT19937 state (632
+                # int64) makes `c0, c1 = state_copy.view(torch.int64)`
+                # unpack-fail.
+                generator = torch.Generator(device=self.device)
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
@@ -6623,9 +6625,7 @@ class ModelRunnerFL(
                         dummy_metadata,
                         generators={
                             0: torch.Generator(
-                                device="cpu"
-                                if self.device.type == "txda"
-                                else self.device
+                                device=self.device
                             ).manual_seed(0)
                         },
                     ),

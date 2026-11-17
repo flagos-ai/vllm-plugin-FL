@@ -14,3 +14,7 @@ coverage.xml
 # Reports
 report*.json
 test-results-*
+
+# TXDA Triton backend writes this log relative to the working directory
+# during `import triton.backends.tsingmicro`.
+tsingmicro_launch.log

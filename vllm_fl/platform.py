@@ -197,7 +197,11 @@ class PlatformFL(Platform):
         else device_type
     )
     # Keep small torch.compile helpers on the native NPU execution path.
-    simple_compile_backend = "eager" if device_type == "npu" else "inductor"
+    # TXDA also uses eager: inductor's triton autotuning benchmarks via
+    # torch.cuda.synchronize(), which is unavailable on the PrivateUse1 torch.
+    simple_compile_backend = (
+        "eager" if device_type in ("npu", "txda") else "inductor"
+    )
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
@@ -357,6 +361,20 @@ class PlatformFL(Platform):
                 apply_musa_patches()
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
+
+        if cls.device_type == "txda":
+            # torch-level patches only (stream handling, device-guard
+            # neutralization). Model-level patches live in
+            # vendor/txda/register_ops.py to avoid circular imports while
+            # `import vllm` is still in progress.
+            try:
+                from vllm_fl.dispatch.backends.vendor.txda.patch import (
+                    apply_txda_patches,
+                )
+
+                apply_txda_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply TXDA patches: {e}")
 
     @classmethod
     def import_ir_kernels(cls) -> None:

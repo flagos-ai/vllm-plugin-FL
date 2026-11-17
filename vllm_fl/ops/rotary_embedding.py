@@ -50,6 +50,12 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         if key is None:
             return self.forward_native(positions, query, key)
 
+        # TXDA: prefer the upstream PyTorch-native RoPE path (matches
+        # tsingmicro.md "rotary uses reference implementations"). The native
+        # ApplyRotaryEmb path is the simpler, audited code path.
+        if current_platform.device_type == "txda":
+            return self.forward_native(positions, query, key)
+
         cos_sin_cache = self._match_cos_sin_cache_dtype(query)
         positions = positions.flatten()
         num_tokens = positions.shape[0]

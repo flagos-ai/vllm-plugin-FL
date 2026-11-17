@@ -1,33 +1,75 @@
-# vLLM-FL Dispatch Configuration for TSINGMICRO (TX8110 / TSM Runtime)
-# Ported from the vLLM 0.24 TXDA enablement (537284eb, #460) for vLLM 0.28.
+# vLLM-FL Dispatch Configuration for Tsingmicro TXDA (TX8110)
+# Continues the vLLM 0.24 TXDA enablement (537284eb, #460) and the 0.28
+# adaptation (#642), for vLLM 0.32 with flag_gems 5.5.0.dev0 /
+# flaggems_vllm 0.3.0.dev1 / triton 3.7.1.
+
+# Preferred default backend type: flagos, vendor, reference
 prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
 strict: false
 
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flagos        : Default FlagOS implementation
+#   - reference     : PyTorch reference implementation
+#   - vendor        : Any available vendor backend (auto-detected)
+#   - vendor:txda   : Txda-specific vendor backend
 op_backends:
-  # TX8110 FlagGems attention produces incorrect values without raising.
-  # Select SDPA directly; exception fallback cannot detect incorrect numerics.
+  # attention_backend: prioritize vendor.  The txda vendor backend returns
+  # AttentionFLBackend, whose forward calls flag_gems.flash_attn_varlen_func
+  # (the FlagGems tsingmicro attention kernel).  The flagos default instead
+  # returns vLLM's stock TritonAttentionBackend, which runs
+  # triton_unified_attention.unified_attention and never reaches the
+  # tsingmicro implementation.
   attention_backend:
     - vendor
-  # FlagGems normalization and rotary also produce incorrect values on TX8110.
-  rms_norm:
-    - reference
-  rotary_embedding:
-    - reference
-  silu_and_mul:
+    - flagos
     - reference
 
-# The reference runtime has failed multi-request inference with broad ATen
-# replacement. Limit generic registration to the audited add/mul kernels.
-# Copies, reductions, GEMM and CPU-generator exponential_ stay native.
-# The additional names enable required plugin MoE dispatch implementations;
-# they do not add generic ATen registrations in the reference FlagGems build.
-flagos_whitelist:
-  - add
-  - mul
-  - topk_softmax
-  - moe_align_block_size
-  - invoke_fused_moe_triton_kernel
-  - moe_sum
+  # invoke_fused_moe_triton_kernel: use vLLM upstream Triton kernel via
+  # vendor backend (delegates to vllm.model_executor.layers.fused_moe).
+  invoke_fused_moe_triton_kernel:
+    - flagos
+    - vendor
+    - reference
+
+  rms_norm:
+    - flagos
+    - vendor
+    - reference
+
+
+# FlagGems ATen-replacement blacklist. GDN (Qwen3.5 linear attention) does a
+# lot of memory-movement ops (copy_/cat/index_select/index_put/...) per layer;
+# with flag_gems.enable() those are all routed through tx81 Triton kernels,
+# which are far slower than TXDA native device copies. Excluding them keeps
+# the compute ops (mm/rms_norm/attention/rotary/moe) on FlagGems while memory
+# movement runs natively.
+flagos_blacklist:
+  - copy
+  - copy_
+  - cat
+  - stack
+  - hstack
+  - index_select
+  - index_put
+  - index_put_
+  - index_add
+  - index_add_
+  - as_strided_copy
+  - select_scatter
+  - repeat
+  - tile
+  - flip
+  - embedding
+  - slice_backward
+  - diagonal_copy
+
 
 oot_blacklist:
   - masked_fill

@@ -463,6 +463,44 @@ class TritonExpertsFL(TritonExperts):
             )
             return
 
+        # TXDA (<PII:company_4:公司名称>) fast path: single fused FlagGems call using the
+        # TX81-native compact-grouped MoE. The generic Triton fused_moe_kernel
+        # (tl.dot) produces wrong values on TXDA, so the dispatch reference
+        # fallback is unusable; route through FlagGems' <PII:product_4:硬件型号编码> fused_experts_impl
+        # which selects _moe_compact_grouped_gemm for bf16+silu.
+        if self._lora_context is None and current_platform.device_type == "txda":
+            from flag_gems.runtime.backend._tsingmicro.tx81.fused.fused_moe import (
+                fused_experts_impl as txda_fused_experts_impl,
+            )
+
+            output.copy_(
+                txda_fused_experts_impl(
+                    hidden_states,
+                    w1,
+                    w2,
+                    topk_weights,
+                    topk_ids,
+                    inplace=False,
+                    activation=activation.value,
+                    apply_router_weight_on_input=apply_router_weight_on_input,
+                    use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                    use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                    use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                    use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                    per_channel_quant=self.per_act_token_quant,
+                    global_num_experts=global_num_experts,
+                    expert_map=expert_map,
+                    w1_scale=self.w1_scale,
+                    w2_scale=self.w2_scale,
+                    a1_scale=a1q_scale,
+                    a2_scale=a2_scale,
+                    block_shape=self.block_shape,
+                    w1_bias=self.w1_bias,
+                    w2_bias=self.w2_bias,
+                )
+            )
+            return
+
         # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
         # adapters can be injected between GEMM1/activation/GEMM2.
         # Check constraints.

@@ -30,6 +30,16 @@ def txda_modules(monkeypatch):
     monkeypatch.setitem(sys.modules, package.__name__, package)
     load("vllm_fl.dispatch.backends.base", ROOT / "vllm_fl/dispatch/backends/base.py")
     load("vllm_fl.dispatch.types", ROOT / "vllm_fl/dispatch/types.py")
+
+    # register_ops imports `.impl.patchs` at module load; the patchs package
+    # imports vllm.model_executor, which is not available in this shell. Give
+    # it an empty package so registration itself stays under test.
+    patchs = ModuleType(package.__name__ + ".impl.patchs")
+    monkeypatch.setitem(sys.modules, patchs.__name__, patchs)
+    impl_pkg = ModuleType(package.__name__ + ".impl")
+    impl_pkg.__path__ = [str(TXDA / "impl")]
+    monkeypatch.setitem(sys.modules, impl_pkg.__name__, impl_pkg)
+
     backend = load(package.__name__ + ".txda", TXDA / "txda.py")
     register = load(package.__name__ + ".register_ops", TXDA / "register_ops.py")
     return backend, register
@@ -40,13 +50,18 @@ def test_backend_import_and_unavailable_registration(txda_modules, monkeypatch):
     monkeypatch.setitem(sys.modules, "torch_txda", None)
     impls = []
     register.register_builtins(SimpleNamespace(register_many=impls.extend))
-    assert len(impls) == 1
-    assert impls[0].op_name == "attention_backend"
-    assert impls[0].impl_id == "vendor.txda"
-    assert not impls[0].is_available()
+    assert len(impls) == 3
+    op_names = [impl.op_name for impl in impls]
+    assert op_names == [
+        "attention_backend",
+        "invoke_fused_moe_triton_kernel",
+        "rms_norm",
+    ]
+    assert all(impl.impl_id == "vendor.txda" for impl in impls)
+    assert not any(impl.is_available() for impl in impls)
 
 
-def test_available_registration_uses_v028_selector(txda_modules, monkeypatch):
+def test_available_registration_selects_flaggems_attention(txda_modules, monkeypatch):
     backend, register = txda_modules
     monkeypatch.setitem(sys.modules, "torch_txda", ModuleType("torch_txda"))
     monkeypatch.setattr(
@@ -57,41 +72,59 @@ def test_available_registration_uses_v028_selector(txda_modules, monkeypatch):
     )
     impls = []
     register.register_builtins(SimpleNamespace(register_many=impls.extend))
-    assert impls[0].is_available()
-    assert (
-        impls[0]
-        .fn(use_mla=False, use_sparse=False)
-        .endswith("TxdaSDPAAttentionBackend")
-    )
-    for flags in [dict(use_mla=True), dict(use_sparse=True)]:
-        with pytest.raises(NotImplementedError, match="MLA or sparse"):
-            impls[0].fn(**flags)
+    attn = impls[0]
+    assert attn.is_available()
+    # 0.32: the vendor backend routes attention through FlagGems
+    # (flash_attn_varlen_func), validated on TX8110 with flaggems_vllm
+    # 0.3.0.dev1 + triton 3.7.1. The 0.28 SDPA fallback is gone.
+    assert attn.fn(use_mla=False, use_sparse=False).endswith("AttentionFLBackend")
+    assert attn.fn(use_mla=True).endswith("MLAFLBackend")
+    with pytest.raises(ValueError, match="sparse"):
+        attn.fn(use_mla=False, use_sparse=True)
 
 
-def test_dispatch_config_cannot_fall_back_to_known_bad_kernels():
+def test_dispatch_config_routes_txda_kernels():
     config = yaml.safe_load(
         (ROOT / "vllm_fl/dispatch/config/tsingmicro.yaml").read_text()
     )
-    assert config["op_backends"]["attention_backend"] == ["vendor"]
-    assert config["op_backends"]["rms_norm"] == ["reference"]
-    assert config["op_backends"]["rotary_embedding"] == ["reference"]
-    assert config["op_backends"]["silu_and_mul"] == ["reference"]
-    allowed = set(config["flagos_whitelist"])
-    assert not {"copy", "copy_", "to_copy", "linear", "mm", "mm_out"} & allowed
-    # A bare add/mul list lets Dense run but leaves MoE routing unregistered.
-    assert {
-        "topk_softmax",
-        "moe_align_block_size",
-        "invoke_fused_moe_triton_kernel",
-        "moe_sum",
-    } <= allowed
-    assert not config.get("flagos_blacklist")
-
-
-def test_seeded_sampling_keeps_native_exponential_fallback():
-    # TXDA's native CPU fallback accepts CPU generators. FlagGems attempts to
-    # unpack their MT19937 state as two Philox words and crashes during warmup.
-    config = yaml.safe_load(
-        (ROOT / "vllm_fl/dispatch/config/tsingmicro.yaml").read_text()
-    )
-    assert "exponential_" not in config["flagos_whitelist"]
+    # 0.32: attention goes through the FlagGems TX81 flash kernel (vendor),
+    # not the stock TritonAttentionBackend (flagos) — keep vendor first.
+    assert config["op_backends"]["attention_backend"] == [
+        "vendor",
+        "flagos",
+        "reference",
+    ]
+    # rms_norm falls back across all three; the vendor impl is pure-torch
+    # (FlagGems Triton kernel exceeds the TXDA shared-memory limit).
+    assert config["op_backends"]["rms_norm"] == ["flagos", "vendor", "reference"]
+    assert config["op_backends"]["invoke_fused_moe_triton_kernel"] == [
+        "flagos",
+        "vendor",
+        "reference",
+    ]
+    # The 0.28 flagos_whitelist (add/mul + MoE selectors) was dropped: the
+    # dispatch backend registration now scopes the FlagGems ATen replacement
+    # itself, so no whitelist is needed. Instead the txda config keeps the
+    # memory-movement ops on TXDA-native kernels (FlagGems Triton copies are
+    # far slower) via flagos_blacklist.
+    assert "flagos_whitelist" not in config
+    assert set(config.get("flagos_blacklist", [])) == {
+        "copy",
+        "copy_",
+        "cat",
+        "stack",
+        "hstack",
+        "index_select",
+        "index_put",
+        "index_put_",
+        "index_add",
+        "index_add_",
+        "as_strided_copy",
+        "select_scatter",
+        "repeat",
+        "tile",
+        "flip",
+        "embedding",
+        "slice_backward",
+        "diagonal_copy",
+    }
