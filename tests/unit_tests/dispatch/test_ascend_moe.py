@@ -218,3 +218,90 @@ def test_grouped_experts_with_no_local_routes():
         apply_router_weight_on_input=False,
     )
     torch.testing.assert_close(output.cpu(), torch.zeros(3, 128, dtype=x.dtype))
+
+
+@pytest.mark.gpu
+def test_native_grouped_experts_drop_padded_routes():
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.grouped_moe import grouped_experts
+
+    generator = torch.Generator().manual_seed(32)
+    x = (torch.randn(4, 128, generator=generator) * 0.1).bfloat16()
+    w1 = (torch.randn(8, 128, 128, generator=generator) * 0.1).bfloat16()
+    w2 = (torch.randn(8, 128, 64, generator=generator) * 0.1).bfloat16()
+    ids = torch.tensor([[1, 2], [-1, -1], [3, 5], [-1, -1]], dtype=torch.int32)
+    weights = torch.tensor([[0.25, 0.75], [0.0, 0.0], [0.4, 0.6], [0.0, 0.0]])
+    valid_rows = [0, 2]
+    expected_routes = torch.zeros(2, 2, 128, dtype=torch.float32)
+    for compact_row, row in enumerate(valid_rows):
+        for slot in range(2):
+            expert = int(ids[row, slot])
+            gate, up = (
+                F.linear(x[row].float(), w1[expert].float()).bfloat16().float().chunk(2)
+            )
+            act = (F.silu(gate) * up).bfloat16().float()
+            # The second GMM also produces BF16 before unpermute applies
+            # FP32 router weights and accumulates the selected experts.
+            down = F.linear(act, w2[expert].float()).bfloat16().float()
+            expected_routes[compact_row, slot] = down * weights[row, slot]
+    expected = expected_routes.sum(dim=1).bfloat16()
+    x_npu, w1_npu, w2_npu = x.npu(), w1.npu(), w2.npu()
+    weights_npu, ids_npu = weights.npu(), ids.npu()
+    output = grouped_experts(
+        x_npu,
+        w1_npu,
+        w2_npu,
+        weights_npu,
+        ids_npu,
+        activation="silu",
+        expert_map=None,
+        apply_router_weight_on_input=False,
+    ).cpu()
+    # Assert the padding contract before any numerical-reference assertion,
+    # so a valid-row precision failure cannot hide a padding corruption.
+    assert torch.count_nonzero(output[[1, 3]]) == 0
+    compact = grouped_experts(
+        x_npu[valid_rows],
+        w1_npu,
+        w2_npu,
+        weights_npu[valid_rows],
+        ids_npu[valid_rows],
+        activation="silu",
+        expert_map=None,
+        apply_router_weight_on_input=False,
+    ).cpu()
+    # Both native calls evaluate exactly the same valid expert rows. This
+    # comparison isolates invalid-route handling from CPU/NPU BF16 rounding.
+    torch.testing.assert_close(output[valid_rows], compact, rtol=0, atol=0)
+    torch.testing.assert_close(compact, expected, rtol=0.03, atol=0.006)
+
+
+@pytest.mark.gpu
+def test_native_grouped_experts_drop_partial_invalid_routes():
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.grouped_moe import grouped_experts
+
+    generator = torch.Generator().manual_seed(132)
+    x = (torch.randn(4, 128, generator=generator) * 0.1).bfloat16()
+    x[[1, 3]] = float("nan")
+    w1 = (torch.randn(8, 128, 128, generator=generator) * 0.1).bfloat16().npu()
+    w2 = (torch.randn(8, 128, 64, generator=generator) * 0.1).bfloat16().npu()
+    ids = torch.tensor([[1, -1], [-1, -1], [99, 3], [-1, -1]], dtype=torch.int32).npu()
+    # Invalid slots must be ignored independently of their unused probabilities.
+    weights = torch.tensor(
+        [[0.25, float("nan")], [4.0, 5.0], [7.0, 0.6], [9.0, 11.0]]
+    ).npu()
+    x = x.npu()
+    kwargs = dict(
+        activation="silu", expert_map=None, apply_router_weight_on_input=False
+    )
+    output = grouped_experts(x, w1, w2, weights, ids, **kwargs).cpu()
+    assert torch.count_nonzero(output[[1, 3]]) == 0
+    assert torch.isfinite(output).all()
+    compact = grouped_experts(
+        x[[0, 2]],
+        w1,
+        w2,
+        torch.tensor([[0.25], [0.6]], device="npu"),
+        torch.tensor([[1], [3]], dtype=torch.int32, device="npu"),
+        **kwargs,
+    ).cpu()
+    torch.testing.assert_close(output[[0, 2]], compact, rtol=0, atol=0)
