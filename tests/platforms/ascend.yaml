@@ -101,6 +101,12 @@ env_defaults:
   # silu_and_mul.
   VLLM_FL_FLAGOS_BLACKLIST_APPEND: gelu,argmax,index_copy_
 
+# Diagnostics in progress: run e2e without FlagGems to check whether the
+# vision tower's degraded output comes from a FlagGems kernel on this image.
+e2e_variants:
+  - env:
+      USE_FLAGGEMS: "0"
+
 # ---- Device-specific test configurations ------------------------------------
 910c:
   name: "910c"
