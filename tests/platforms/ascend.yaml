@@ -88,11 +88,11 @@ unsupported_features: []
 
 # Default environment variables for this platform (applied by run.py before tests start)
 env_defaults:
-  # The FlagTree Triton build cannot lower FlagGems' gelu_tanh pointwise
-  # kernel (pow(float32, int32) is missing from its extern table), so keep the
-  # FlagGems gelu override off and run the native gelu, as this platform
-  # already does for silu and silu_and_mul.
-  VLLM_FL_FLAGOS_BLACKLIST_APPEND: gelu
+  # This image's FlagTree Triton cannot run every FlagGems kernel: gelu_tanh
+  # misses pow(float32, int32) in its extern table, and the ArgMax kernel is
+  # rejected by libentry ("Invalid Runtime Function"). Keep both on the native
+  # path, as this platform already does for silu and silu_and_mul.
+  VLLM_FL_FLAGOS_BLACKLIST_APPEND: gelu,argmax
 
 # ---- Device-specific test configurations ------------------------------------
 910c:
