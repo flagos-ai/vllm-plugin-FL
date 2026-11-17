@@ -8016,7 +8016,7 @@ class ModelRunnerFL(
             2 if self.model_config.hf_config.model_type == "longcat_flash" else 1
         )
         attn_groups = [group for groups in self.attn_groups for group in groups]
-        if self.speculative_config:
+        if self.speculative_config and get_pp_group().is_last_rank:
             attn_groups += getattr(self.drafter, "draft_attn_groups", [])
         kernel_kv_caches = map_kv_caches_to_kernel_blocks(kv_caches, attn_groups)
         bind_kv_cache(

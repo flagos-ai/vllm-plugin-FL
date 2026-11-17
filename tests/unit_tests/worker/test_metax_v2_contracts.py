@@ -314,7 +314,7 @@ def test_worker_prepares_compatibility_before_official_v2_constructor(runtime):
         and any(
             isinstance(child, ast.ImportFrom)
             and child.module == "vllm.v1.worker.gpu.model_runner"
-            for child in node.body
+            for child in ast.walk(node)
         )
     )
     calls = []
@@ -414,6 +414,7 @@ def test_worker_warms_cached_dispatch_after_model_load_only_when_needed(
         scope,
     )
     worker = scope["WorkerFL"]()
+    worker.device = torch.device("cpu")
     worker.use_v2_model_runner = v2
     worker.vllm_config = SimpleNamespace(
         weight_transfer_config=None,

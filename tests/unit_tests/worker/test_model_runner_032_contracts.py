@@ -86,6 +86,7 @@ def test_allocator_binds_kernel_views_and_preserves_shared_manager_views():
         allocate_kv_cache=allocate,
         map_kv_caches_to_kernel_blocks=map_kernel_views,
         bind_kv_cache=bind,
+        get_pp_group=lambda: SimpleNamespace(is_last_rank=True),
         logger=Mock(),
     )()
     runner.device = torch.device("cpu")

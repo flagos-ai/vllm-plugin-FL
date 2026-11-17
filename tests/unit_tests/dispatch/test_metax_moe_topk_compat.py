@@ -200,11 +200,12 @@ def _fl_router(monkeypatch, compat, vendor, padding, upstream, cached):
     monkeypatch.setitem(sys.modules, bridge_name, compat)
     path = _PATCHES.parents[4] / "ops/fused_moe/router.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    function = next(
+    functions = [
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "fused_topk"
-    )
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_is_ascend_npu_tensor", "fused_topk"}
+    ]
     namespace = {
         "torch": torch,
         "_get_padding_mask": lambda _: padding,
@@ -213,7 +214,7 @@ def _fl_router(monkeypatch, compat, vendor, padding, upstream, cached):
         "_topk_softmax": cached,
     }
     exec(
-        compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"),
+        compile(ast.Module(body=functions, type_ignores=[]), str(path), "exec"),
         namespace,
     )
     return namespace["fused_topk"]

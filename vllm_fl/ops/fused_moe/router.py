@@ -85,10 +85,21 @@ def fused_topk(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
+    padding_mask = _get_padding_mask(hidden_states.shape[0])
+    if _is_ascend_npu_tensor(gating_output):
+        from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe import (
+            fused_topk as ascend_fused_topk,
+        )
+
+        # vLLM 0.32 supplies is_padding even for eager batches without padding.
+        # Ascend needs its own implementation of the padded CUDA-only router.
+        return ascend_fused_topk(
+            gating_output, topk, renormalize, indices_type, scoring_func, padding_mask
+        )
+
     # The FL kernel implements unpadded softmax. MetaX's extended routes need
     # a stable bridge callable: vLLM can overwrite an early _custom_ops patch
     # while its module body finishes importing, leaving schema-only ops live.
-    padding_mask = _get_padding_mask(hidden_states.shape[0])
     metax_topk = None
     if scoring_func != "softmax" or padding_mask is not None:
         from vllm.platforms import current_platform

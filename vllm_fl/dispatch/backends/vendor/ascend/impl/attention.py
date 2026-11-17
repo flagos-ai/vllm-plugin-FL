@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -35,6 +35,7 @@ import torch.nn as nn
 from vllm.config import CUDAGraphMode, VllmConfig, get_current_vllm_config
 from vllm.forward_context import get_forward_context
 from vllm.utils.math_utils import cdiv
+from vllm.utils.torch_utils import get_dtype_size
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionCGSupport,
@@ -42,6 +43,7 @@ from vllm.v1.attention.backend import (
     AttentionLayer,
     AttentionMetadataBuilder,
     AttentionType,
+    CommonAttentionMetadata,
 )
 from vllm.v1.attention.backends.registry import (
     AttentionBackendEnum,
@@ -116,6 +118,29 @@ class AscendAttentionState(Enum):
     SpecDecoding = 4
 
 
+@dataclass
+class AscendCommonAttentionMetadata(CommonAttentionMetadata):
+    """Keep Ascend's phase and exact host lengths through kernel-block mapping."""
+
+    attn_state: AscendAttentionState | None = None
+    _seq_lens_cpu: torch.Tensor | None = None
+    _num_computed_tokens_cpu: torch.Tensor | None = None
+
+    def unpadded(self, num_actual_tokens: int, num_actual_reqs: int):
+        common = super().unpadded(num_actual_tokens, num_actual_reqs)
+        values = {field.name: getattr(common, field.name) for field in fields(common)}
+        return type(self)(
+            **values,
+            attn_state=self.attn_state,
+            _seq_lens_cpu=self._seq_lens_cpu[:num_actual_reqs]
+            if self._seq_lens_cpu is not None
+            else None,
+            _num_computed_tokens_cpu=self._num_computed_tokens_cpu[:num_actual_reqs]
+            if self._num_computed_tokens_cpu is not None
+            else None,
+        )
+
+
 def classify_ascend_attention_state(
     num_computed_tokens: Sequence[int],
     num_scheduled_tokens: Sequence[int],
@@ -149,6 +174,72 @@ def classify_ascend_attention_state(
     if enable_chunked_prefill:
         return AscendAttentionState.ChunkedPrefill
     return AscendAttentionState.PrefillCacheHit
+
+
+def get_ascend_v2_attention_state(
+    common_attn_metadata,
+    seq_lens_cpu: torch.Tensor,
+    enable_chunked_prefill: bool,
+    speculative_method: str | None,
+) -> AscendAttentionState:
+    """Classify V2's exact device lengths, never its optimistic CPU bound.
+
+    V2 updates computed-token counts asynchronously, so its CPU sequence
+    lengths can be ahead of the actual GPU batch. Native FIA must use the
+    actual lengths for both its KV reads and phase selection.
+    """
+    num_reqs = common_attn_metadata.num_reqs
+    query_lens = common_attn_metadata.query_start_loc_cpu[: num_reqs + 1].diff()
+    # V2 pads a three-request decode to a four-request graph with a repeated
+    # query prefix sum and seq_len=0. Those rows own no queries; including
+    # their scheduled=0 would misclassify a uniform decode as cached prefill.
+    # Keep the original metadata buffers intact for native task updates.
+    active = query_lens != 0
+    active_query_lens = query_lens[active]
+    computed = (seq_lens_cpu[:num_reqs][active] - active_query_lens).clamp_min(0)
+    scheduled = active_query_lens.tolist()
+    return classify_ascend_attention_state(
+        computed.tolist(),
+        scheduled,
+        scheduled,
+        enable_chunked_prefill,
+        speculative_method,
+    )
+
+
+def pad_ascend_v2_decode_metadata(
+    common_attn_metadata,
+    query_start_loc_cpu: torch.Tensor,
+    seq_lens_cpu: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Give native fixed-size decode graphs one safe query per padded row.
+
+    V2's shared buffers represent inactive rows with zero queries and KV
+    length zero. Native attention's captured TND shape includes those padded
+    query tokens. Use private metadata with one-token null-block rows while
+    preserving upstream buffers, GDN indices and negative cache-write slots.
+    """
+    num_reqs = common_attn_metadata.num_reqs
+    query_start_loc_cpu = query_start_loc_cpu[: num_reqs + 1]
+    missing_queries = common_attn_metadata.num_actual_tokens - int(
+        query_start_loc_cpu[-1]
+    )
+    if missing_queries <= 0:
+        return query_start_loc_cpu, seq_lens_cpu
+    query_lens = query_start_loc_cpu.diff()
+    active_reqs = int((query_lens != 0).sum())
+    if (
+        missing_queries != num_reqs - active_reqs
+        or not torch.all(query_lens[:active_reqs] == 1)
+        or not torch.all(query_lens[active_reqs:] == 0)
+    ):
+        raise ValueError("Ascend V2 decode padding requires trailing empty requests")
+    padded_query_start_loc = torch.arange(
+        num_reqs + 1, dtype=query_start_loc_cpu.dtype, device=query_start_loc_cpu.device
+    )
+    padded_seq_lens = seq_lens_cpu.clone()
+    padded_seq_lens[active_reqs:] = 1
+    return padded_query_start_loc, padded_seq_lens
 
 
 def get_ascend_dummy_attention_state(
@@ -330,7 +421,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         # async/spec paths may leave the public compatibility field unset.
         if getattr(common_attn_metadata, "_seq_lens_cpu", None) is not None:
             seq_lens = common_attn_metadata._seq_lens_cpu[:num_reqs]
-        elif common_attn_metadata.seq_lens_cpu is not None:
+        elif getattr(common_attn_metadata, "seq_lens_cpu", None) is not None:
             seq_lens = common_attn_metadata.seq_lens_cpu[:num_reqs]
         else:
             seq_lens = common_attn_metadata.seq_lens[:num_reqs].to("cpu")
@@ -338,8 +429,24 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
 
         # rc1's runner owns the phase: batch composition alone cannot tell
         # initial prefill from a later chunk or a prefix-cache hit.
-        attn_state = common_attn_metadata.attn_state
+        attn_state = getattr(common_attn_metadata, "attn_state", None)
+        if attn_state is None and getattr(
+            self.vllm_config, "use_v2_model_runner", False
+        ):
+            attn_state = get_ascend_v2_attention_state(
+                common_attn_metadata,
+                seq_lens,
+                self.chunked_prefill_enabled,
+                getattr(self.speculative_config, "method", None),
+            )
         assert attn_state is not None, "Ascend metadata requires an attention state"
+        if (
+            getattr(self.vllm_config, "use_v2_model_runner", False)
+            and attn_state == AscendAttentionState.DecodeOnly
+        ):
+            query_start_loc_cpu, seq_lens = pad_ascend_v2_decode_metadata(
+                common_attn_metadata, query_start_loc_cpu, seq_lens
+            )
 
         # Create attention mask based on state
         attn_mask = self._make_attention_mask(attn_state)
@@ -520,8 +627,33 @@ class AscendAttentionBackend(AttentionBackend):
             value_caches[dst_indices] = value_caches[src_indices]
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[int]:
+    def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[int]:
         return [128]
+
+    @classmethod
+    def customize_spec(cls, spec):
+        # Keep K/V as separate planes. The manager still owns B-first views;
+        # Ascend's native kernels consume planar [2, B, N, Hkv, D] views.
+        return replace(
+            spec,
+            num_head_slots=2,
+            state_content_bytes=spec.num_kv_heads
+            * spec.head_size
+            * get_dtype_size(spec.dtype),
+        )
+
+    @classmethod
+    def supported_kv_cache_layouts(cls):
+        from vllm.v1.kv_cache_layout import KVCacheLayout
+
+        from vllm_fl.kv_cache.ascend.hybrid import uses_dense_hybrid_cache
+
+        config = get_current_vllm_config()
+        if uses_dense_hybrid_cache(config.model_config):
+            # Dense hybrid pools use page-sized layer regions; their actual
+            # convolution/SSM/K/V block planes are bound by the Ascend allocator.
+            return (KVCacheLayout.LBNHC,)
+        return (KVCacheLayout.LHBNC,)
 
 
 class AscendAttentionBackendImpl(AttentionImpl):

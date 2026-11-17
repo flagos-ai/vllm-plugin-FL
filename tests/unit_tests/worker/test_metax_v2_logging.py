@@ -173,6 +173,14 @@ def _logging_contract(logger_path, worker_path, helper_path, vendor, use_v2):
     def selected_import(name, *args, **kwargs):
         if name == "vllm_fl.worker.metax_v2":
             return SimpleNamespace(prepare_metax_v2_runtime=prepare_cpu)
+        if name == "vllm_fl.dispatch.backends.vendor.ascend.patches":
+            return SimpleNamespace(
+                ascend_v2_device=SimpleNamespace(
+                    install_ascend_v2_device_shims=lambda: events.append("ascend-shims")
+                )
+            )
+        if name == "vllm_fl.dispatch.backends.vendor.ascend.worker.model_runner_v2":
+            return SimpleNamespace(GPUModelRunnerFLV2=official)
         if name == "vllm.v1.worker.gpu.model_runner":
             return SimpleNamespace(GPUModelRunner=official)
         if name == "vllm_fl.worker.model_runner":
@@ -195,7 +203,7 @@ def _logging_contract(logger_path, worker_path, helper_path, vendor, use_v2):
         and any(
             isinstance(child, ast.ImportFrom)
             and child.module == "vllm.v1.worker.gpu.model_runner"
-            for child in node.body
+            for child in ast.walk(node)
         )
     )
     state = SimpleNamespace(
@@ -203,7 +211,9 @@ def _logging_contract(logger_path, worker_path, helper_path, vendor, use_v2):
     )
     namespace = {
         "self": state,
-        "current_platform": SimpleNamespace(vendor_name=vendor),
+        "current_platform": SimpleNamespace(
+            vendor_name=vendor, device_type="npu" if vendor == "ascend" else "cuda"
+        ),
         "init_logger": init_logger,
         "logger": old_logger,
         "__builtins__": {**vars(builtins), "__import__": selected_import},
@@ -223,7 +233,10 @@ def _logging_contract(logger_path, worker_path, helper_path, vendor, use_v2):
     should_log = vendor == "metax" and use_v2
     assert (expected in output) is should_log
     assert ("MetaX V2 uses upstream NonUvaBuffer" in output) is should_log
-    assert events == (["prepare", "construct"] if should_log else ["construct"])
+    setup_events = ["prepare"] if should_log else []
+    if vendor == "ascend" and use_v2:
+        setup_events.append("ascend-shims")
+    assert events == setup_events + ["construct"]
     assert old_logger.getEffectiveLevel() == logging.WARNING and not old_logger.handlers
     assert "old_actual.Object" not in output
     assert "GPUModelRunner" not in expected  # A hard-coded type marker would fail.

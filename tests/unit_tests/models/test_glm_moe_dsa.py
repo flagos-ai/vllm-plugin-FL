@@ -6,8 +6,8 @@ from vllm.model_executor.models.deepseek_v2 import (
     GlmMoeDsaForCausalLM as VllmGlmMoeDsaForCausalLM,
 )
 
+from vllm_fl.dispatch.backends.vendor.ascend.patches import ascend_glm_dsa
 from vllm_fl.models import glm_moe_dsa
-from vllm_fl.patches import ascend_glm_dsa
 
 
 def test_dense_fallback_updates_only_glm_arch_for_short_context():
@@ -164,7 +164,7 @@ def test_glm_wrapper_hides_index_topk_only_while_upstream_builds(monkeypatch):
     events = []
 
     monkeypatch.setattr(
-        glm_moe_dsa,
+        ascend_glm_dsa,
         "prepare_glm_dsa_dense_fallback",
         lambda config: events.append(("prepare", config)),
     )
