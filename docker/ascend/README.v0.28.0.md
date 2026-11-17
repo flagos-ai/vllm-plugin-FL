@@ -42,9 +42,6 @@ optional dependency conflicts.
 
 ## Build and CI
 
-Run the build below from the historical [`927d74f` checkout](https://github.com/flagos-ai/vllm-plugin-FL/tree/927d74fe4a40531ea64e956776bddaee05c094b5).
-The current branch uses the vLLM 0.32 Ascend recipe and CI image.
-
 Build the image from the repository root:
 
 ```bash
@@ -54,7 +51,7 @@ docker/build.sh \
   --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
 ```
 
-The legacy CI used the published
+The shared CI currently uses the published
 `ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` image. Build and publish a
 replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
 changing the configuration does not publish it.

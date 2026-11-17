@@ -29,7 +29,7 @@ ENV UV_PYTHON=/flagos/bin/python \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_HTTP_TIMEOUT=600
 
-COPY docker/ascend/constraints.txt docker/ascend/requirements-ci.txt /opt/fl-ci/
+COPY docker/ascend/constraints.txt /opt/fl-ci/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /flagos/bin/python \
         --index "${FLAGOS_INDEX_URL}" \
@@ -37,7 +37,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --default-index "${INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}" \
         --index-strategy unsafe-first-match \
         --constraint /opt/fl-ci/constraints.txt \
-        -r /opt/fl-ci/requirements-ci.txt 'vllm==0.32.0+flagos' \
+        'setuptools==80.10.2' 'wheel==0.48.0' 'build==1.6.1' 'scikit-build-core==0.11.0' \
+        'pytest==9.1.1' 'pytest-xdist==3.8.0' 'pytest-cov==7.1.0' 'pytest-timeout==2.4.0' \
+        'pytest-json-report==1.5.0' 'pytest-metadata==3.1.1' 'coverage==7.16.1' 'decorator==5.2.1' \
+        'modelscope==1.35.3' \
+        'vllm==0.32.0+flagos' \
     && uv cache clean
 
 COPY .github/scripts/install_flaggems_vllm.py .github/scripts/install_ascend_flaggems_vllm.py /opt/fl-ci/
@@ -50,6 +54,7 @@ RUN bash -euo pipefail -c "python -B /opt/fl-ci/stack.py --build-only"
 
 COPY . /workspace/vllm-plugin-FL
 WORKDIR /workspace/vllm-plugin-FL
+# Plugin source revision for the runtime-ci build context: 814b6d3e5ce7de251f9b503ff212bf3fd7cf3a48
 ARG PLUGIN_SOURCE_SHA
 ARG PLUGIN_SOURCE_VERSION=0.5.0.dev0
 LABEL org.opencontainers.image.revision="${PLUGIN_SOURCE_SHA}"
