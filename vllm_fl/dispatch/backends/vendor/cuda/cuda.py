@@ -276,6 +276,7 @@ class CudaBackend(Backend):
         routed_scaling_factor,
         bias,
         scoring_func=0,
+        is_padding=None,
     ):
         from .impl.fused_moe import grouped_topk_cuda
 
