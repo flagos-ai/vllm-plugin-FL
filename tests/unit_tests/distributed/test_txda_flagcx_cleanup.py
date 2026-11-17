@@ -94,6 +94,7 @@ def loaded():
         "ReduceOp": SimpleNamespace(SUM="sum"),
         "FLAGCXLibrary": Mock(),
         "flagcxComm_t": ctypes.c_void_p,
+        "_flagcx_wheel_library": None,
         "logger": logging.getLogger("test.txda.flagcx.cleanup"),
         "_TXDA_ABORT_TIMEOUT_SECONDS": 0.03,
     }

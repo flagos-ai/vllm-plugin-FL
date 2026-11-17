@@ -84,12 +84,11 @@ platforms:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
-  # Enablement follows the 0.5.0-dev line's own registry (the per-line
-  # compatibility matrix is the line's state, not main's): NVIDIA first for
-  # the vLLM 0.32 rollout, other backends re-enabled after their runtime
-  # and CI adaptations are ready.
+  # Enablement follows the 0.5.0-dev line's own compatibility matrix.
+  # NVIDIA and Ascend have completed their vLLM 0.32 runtime and CI
+  # adaptations; other backends remain disabled until theirs are ready.
   ascend:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/ascend.yaml
       - tests/platforms/ascend.yaml

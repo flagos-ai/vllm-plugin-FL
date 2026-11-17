@@ -553,23 +553,33 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            if getattr(current_platform, "vendor_name", "") == "amd":
-                from vllm_fl.dispatch.backends.vendor.amd.v2_runner_compat import (
-                    install_v2_runner_compat,
+            if current_platform.device_type == "npu":
+                from vllm_fl.dispatch.backends.vendor.ascend.patches import (
+                    ascend_v2_device,
                 )
 
-                install_v2_runner_compat()
-            if getattr(current_platform, "vendor_name", "") == "thead":
-                # Platform-side adaptations for the upstream V2 runner; see
-                # vllm_fl/dispatch/backends/vendor/thead/patches/.
-                from vllm_fl.dispatch.backends.vendor.thead.patches import (
-                    v2_runner_compat,
+                ascend_v2_device.install_ascend_v2_device_shims()
+                from vllm_fl.dispatch.backends.vendor.ascend.worker.model_runner_v2 import (
+                    GPUModelRunnerFLV2 as GPUModelRunnerV2,
                 )
+            else:
+                if getattr(current_platform, "vendor_name", "") == "amd":
+                    from vllm_fl.dispatch.backends.vendor.amd.v2_runner_compat import (
+                        install_v2_runner_compat,
+                    )
 
-                v2_runner_compat.install_v2_runner_compat()
-            from vllm.v1.worker.gpu.model_runner import (
-                GPUModelRunner as GPUModelRunnerV2,
-            )
+                    install_v2_runner_compat()
+                elif getattr(current_platform, "vendor_name", "") == "thead":
+                    # Platform-side adaptations for the upstream V2 runner; see
+                    # vllm_fl/dispatch/backends/vendor/thead/patches/.
+                    from vllm_fl.dispatch.backends.vendor.thead.patches import (
+                        v2_runner_compat,
+                    )
+
+                    v2_runner_compat.install_v2_runner_compat()
+                from vllm.v1.worker.gpu.model_runner import (
+                    GPUModelRunner as GPUModelRunnerV2,
+                )
 
             if getattr(current_platform, "vendor_name", None) == "iluvatar":
                 from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
@@ -611,6 +621,10 @@ class WorkerFL(WorkerBase):
                 self.device,
                 self.model_runner.get_model(),
             )
+
+        if self.device.type == "npu":
+            # Keep the Dynamo thread guard stable from graph warmup to serving.
+            set_torch_threads_for_runtime()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
@@ -886,6 +900,12 @@ class WorkerFL(WorkerBase):
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
 
+    def get_supported_kv_cache_layouts(self) -> list[str]:
+        # This RPC is outside WorkerWrapperBase's init/load contexts. Ascend
+        # selects planar or dense hybrid layouts from the current model config.
+        with set_current_vllm_config(self.vllm_config):
+            return super().get_supported_kv_cache_layouts()
+
     def update_max_model_len(self, max_model_len: int) -> None:
         """Update max_model_len after auto-fit to GPU memory.
         This is called when max_model_len=-1 is used and the engine
@@ -1109,8 +1129,13 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
+        # Ascend and Kunlunxin allow runtime JIT when kernel warmup is disabled.
+        jit_monitor_requires_warmup = (
+            self.device.type == "npu"
+            or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+        )
         if (
-            getattr(current_platform, "vendor_name", None) != "kunlunxin"
+            not jit_monitor_requires_warmup
             or self.vllm_config.kernel_config.enable_jit_warmup
         ):
             activate_jit_monitor(
@@ -1127,9 +1152,8 @@ class WorkerFL(WorkerBase):
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
 
-        # Startup is done; steady-state serving gets no benefit from torch
-        # intra-op parallelism.
-        set_torch_threads_for_runtime()
+        if self.device.type != "npu":
+            set_torch_threads_for_runtime()
 
         return CompilationTimes(
             language_model=self.compilation_config.compilation_time,
