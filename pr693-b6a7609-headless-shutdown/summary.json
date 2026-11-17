@@ -1,0 +1,65 @@
+{
+  "plugin_commit": "b6a7609cb40a056bc0719778ed585aa830feb9da",
+  "release_image": "harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-release@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7",
+  "topology": "two physical MetaX C550 hosts, one accelerator each, TP2 and the multiprocessing executor",
+  "runner": "vllm.v1.worker.gpu.model_runner.GPUModelRunner",
+  "runner_override": null,
+  "operator_whitelist": null,
+  "model": "Qwen3.5-4B",
+  "mode": "eager",
+  "flagcx": {
+    "version": "v0.13.0",
+    "native_library_sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad",
+    "library_mapped_in_both_workers": true,
+    "returned_wrapper_calls_per_rank_after_communicator_init_at_post_request_snapshot": {
+      "flagcxAllReduce": 512,
+      "flagcxAllGather": 8
+    }
+  },
+  "request": {
+    "http_ok": true,
+    "temperature": 0,
+    "answer": "4",
+    "completion_tokens": 2
+  },
+  "shutdown": {
+    "engine_grace_seconds": 90,
+    "worker_grace_seconds": 60,
+    "launcher_term_utc_both_roles": "2026-11-17T02:32:33+00:00",
+    "leader": {
+      "launcher_exit_code": 0,
+      "rank": 0,
+      "worker_kernel_wait_status": 0,
+      "worker_exit_code": 0,
+      "executor_reported_all_workers_exited_gracefully_utc": "2026-11-17T02:32:45+00:00"
+    },
+    "headless": {
+      "launcher_exit_code": 0,
+      "rank": 1,
+      "worker_kernel_wait_status": null,
+      "worker_exit_code": null,
+      "worker_wait_status_observation": "process reaped before wait-status sample",
+      "executor_reported_wait_started_utc": "2026-11-17T02:32:33+00:00",
+      "executor_reported_sigterm_fallback_utc": "2026-11-17T02:33:33+00:00",
+      "executor_reported_sigkill_fallback_utc": "2026-11-17T02:33:37+00:00",
+      "connection_warning": "MCCL socketStartConnect warning emitted in the fallback interval",
+      "py_spy_version": "0.4.3",
+      "same_python_stack_samples_utc": [
+        "2026-11-17T02:32:33+00:00",
+        "2026-11-17T02:32:43+00:00",
+        "2026-11-17T02:32:53+00:00"
+      ],
+      "main_thread_stack_oldest_first": [
+        "WorkerProc.worker_main (vllm/v1/executor/multiproc_executor.py:944)",
+        "WorkerProc.worker_busy_loop (vllm/v1/executor/multiproc_executor.py:1041)",
+        "MessageQueue.dequeue (vllm/distributed/device_communicators/shm_broadcast.py:988)",
+        "MessageQueue.recv (vllm/distributed/device_communicators/shm_broadcast.py:997)",
+        "Socket.poll (zmq/sugar/socket.py:1106)",
+        "Poller.poll (zmq/sugar/poll.py:106)"
+      ],
+      "worker_async_output_thread_in_all_samples": "queue.Queue.get",
+      "native_stack_samples": 0
+    },
+    "interpretation": "The headless worker stayed in its RPC receive loop after launcher TERM and across the first 20 seconds of the grace period. The Python samples precede the fallback SIGTERM. They cannot establish whether native teardown subsequently completed. A launcher exit of zero does not establish a clean headless worker exit."
+  }
+}
