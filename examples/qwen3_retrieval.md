@@ -5,19 +5,24 @@ Use vLLM 0.24.0 with the matching FL checkout and an Ascend torch-npu/CANN envir
 Set `EMBED_MODEL` and `RERANK_MODEL` to the respective Qwen3-VL-Embedding-8B and Qwen3-Reranker-8B checkpoints. Set `VLLM_SOURCE` to a vLLM 0.24.0 checkout containing the original classifier chat template. Run the two services on separate visible devices or sequentially:
 
 ```bash
-VLLM_PLUGINS=fl USE_FLAGGEMS=0 vllm serve "$EMBED_MODEL" \
+pip install 'flag_gems @ git+https://github.com/flagos-ai/FlagGems.git@eecc900af170774baa309aa625e5d1533a7cfbd1'
+export VLLM_FL_FLAGOS_WHITELIST=true_divide,sigmoid
+
+VLLM_PLUGINS=fl USE_FLAGGEMS=1 vllm serve "$EMBED_MODEL" \
   --served-model-name qwen3-vl-embedding --port 8000 --runner pooling --enforce-eager \
   --max-model-len 8192 --max-num-seqs 8 --max-num-batched-tokens 1024 \
   --gpu-memory-utilization 0.65 --enable-prefix-caching \
   --limit-mm-per-prompt '{"image":1,"video":0}' \
   --mm-processor-kwargs '{"max_pixels":262144}'
-VLLM_PLUGINS=fl USE_FLAGGEMS=0 vllm serve "$RERANK_MODEL" \
+VLLM_PLUGINS=fl USE_FLAGGEMS=1 vllm serve "$RERANK_MODEL" \
   --served-model-name qwen3-reranker --port 8001 --runner pooling --enforce-eager \
   --max-model-len 8192 --max-num-seqs 8 --max-num-batched-tokens 1024 \
   --gpu-memory-utilization 0.65 --enable-prefix-caching \
   --hf-overrides '{"architectures":["Qwen3ForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}' \
   --chat-template "$VLLM_SOURCE/examples/pooling/score/template/qwen3_reranker.jinja"
 ```
+
+The whitelist enables official FlagGems division for embedding normalization and sigmoid for reranker scores. Other operators retain the existing FL dispatch policy. Rank 0 records operator entries in `/tmp/flaggems_enable_oplist.txt`.
 
 Query the embedding and text scoring interfaces separately:
 
