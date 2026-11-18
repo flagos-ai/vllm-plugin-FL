@@ -33,6 +33,8 @@ done
 [[ -n $model && -n $master_addr && -n $cache && -n $net_interface && -n $ib_hca ]] || { usage >&2; exit 2; }
 [[ $node_rank == [0-3] ]] || die "node-rank must be 0, 1, 2 or 3"
 [[ -z ${FLAGCX_PATH:-} ]] || die "This configuration uses MCCL; unset FLAGCX_PATH."
+# PlatformFL selects FlagCX by key presence, including an exported empty value.
+unset FLAGCX_PATH
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 cache=$(realpath -m -- "$cache")
@@ -68,6 +70,7 @@ command=(
 )
 if [[ $node_rank != 0 ]]; then command+=(--headless); fi
 if ((dry_run)); then
+    printf '%s\n' 'unset FLAGCX_PATH'
     printf 'export %q\n' "${environment[@]}"
     printf 'exec '; printf '%q ' "${command[@]}"; printf '\n'
     exit 0

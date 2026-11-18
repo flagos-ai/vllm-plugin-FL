@@ -51,6 +51,48 @@ def dry_run(rank, cache="/tmp/k3-test/node", model="/models/Kimi-K3"):
 
 
 class LauncherTests(unittest.TestCase):
+    def test_child_transport_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            child = root / "python3"
+            child.write_text('#!/bin/sh\ntest -z "${FLAGCX_PATH+x}"\n')
+            child.chmod(0o755)
+            args = [
+                str(LAUNCHER),
+                "--model",
+                "model",
+                "--master-addr",
+                "127.0.0.1",
+                "--node-rank",
+                "0",
+                "--cache",
+                str(root / "cache"),
+                "--net-interface",
+                "inbond1",
+                "--ib-hca",
+                "ib0:1",
+            ]
+            for value in (None, "", "/configured/flagcx"):
+                with self.subTest(value=value):
+                    env = dict(
+                        os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"]
+                    )
+                    env.pop("FLAGCX_PATH", None)
+                    if value is not None:
+                        env["FLAGCX_PATH"] = value
+                    direct = subprocess.run(
+                        args, env=env, text=True, capture_output=True
+                    )
+                    dry = subprocess.run(
+                        [*args, "--dry-run"], env=env, text=True, capture_output=True
+                    )
+                    self.assertEqual(direct.returncode, 2 if value else 0)
+                    self.assertEqual(dry.returncode, direct.returncode)
+                    if value:
+                        self.assertIn("unset FLAGCX_PATH", direct.stderr)
+                    else:
+                        subprocess.run(["bash", "-c", dry.stdout], env=env, check=True)
+
     def test_native_root_parser_preserves_disabled_prefix_cache(self):
         import yaml
 
