@@ -265,4 +265,4 @@ def test_enflame_ci_does_not_mask_known_failures_or_expand_defaults():
         for families in tasks.values():
             assert {"27b_tp2_eager", "35b_a3b_tp2_eager"} <= set(families["qwen3_6"])
         assert "27b_tp2_graph" in tasks["inference"]["qwen3_6"]
-        assert "35b_a3b_tp2_graph" in tasks["serving"]["qwen3_6"]
+        assert "35b_a3b_tp2_graph" in tasks["adaptation_gate"]["qwen3_6"]

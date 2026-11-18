@@ -59,14 +59,14 @@ def test_enflame_installer_pin_when_explicitly_invoked(monkeypatch):
     checked = []
     monkeypatch.setattr(installer, "package_version", lambda name: "test-version")
 
-    def release_is_installed(commit):
-        checked.append(commit)
+    def release_is_installed(commit, source_archive, archive_sha256):
+        checked.append((commit, source_archive, archive_sha256))
         return bool(installed)
 
     monkeypatch.setattr(installer, "release_is_installed", release_is_installed)
     monkeypatch.setattr(installer, "pip_install", lambda *args: installed.append(args))
     installer.main(["--platform", "enflame"])
-    assert checked == [installer.ENFLAME_COMMIT, installer.ENFLAME_COMMIT]
+    assert checked == [(installer.ENFLAME_COMMIT, None, None)] * 2
     assert installed == [
         (
             "--no-deps",
@@ -91,7 +91,9 @@ def test_default_installer_keeps_shared_pin(monkeypatch):
     monkeypatch.setitem(
         main.__globals__,
         "release_is_installed",
-        lambda commit: checked.append(commit) or True,
+        lambda commit, source_archive, archive_sha256: (
+            checked.append((commit, source_archive, archive_sha256)) or True
+        ),
     )
     main([])
-    assert checked == [namespace["COMMIT"], namespace["COMMIT"]]
+    assert checked == [(namespace["COMMIT"], None, None)] * 2
