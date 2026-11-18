@@ -41,7 +41,7 @@ Scope of this recipe and of the validation behind it:
 | Cards per run | 2 (TP2) | 2 of 8 (TP2, host cards 6 and 7) |
 | Card memory | 65520 MiB usable, reported by `hy-smi --showmeminfo vram` | BW1101 144 GiB, 800 W power cap; eight cards on `renderD128`-`renderD135` |
 | Host | CI runner `hg-cicd-vllm-plugin-0240` | `bm-srwl-sh-zone9-d-bw1100-144g-1-80`, kernel `6.8.0-87-generic` |
-| Verified by | CI unit, functional, inference and serving e2e | four-group adaptation gate, eager and graph |
+| Verified by | CI unit, functional, inference and the four-group adaptation gate | four-group adaptation gate, eager and graph |
 | Driver / RCCL | same image and driver series | `hycu 6.4.0-V1.7.0c`, HyHAL `6.3.3-V1.7.0c`, RCCL `2.22.3` |
 
 The 64 GiB memory figure comes from `--showmeminfo vram`, which reports usable
