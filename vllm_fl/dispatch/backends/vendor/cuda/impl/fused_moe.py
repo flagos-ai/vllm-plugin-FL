@@ -82,7 +82,12 @@ def grouped_topk_cuda(
     routed_scaling_factor,
     bias,
     scoring_func=0,
+    is_padding=None,
 ):
+    if is_padding is not None:
+        raise NotImplementedError(
+            "vLLM 0.32 CUDA8 grouped_topk cannot consume is_padding; select FlagGems"
+        )
     from vllm._custom_ops import grouped_topk
 
     return grouped_topk(
