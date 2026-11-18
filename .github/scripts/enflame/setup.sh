@@ -20,9 +20,12 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
-# The v0.32 CI image supplies the vendor SDK, vLLM, flaggems-vllm, and test
-# dependencies. Reinstall only the checked-out plugin without resolving or
-# replacing any image dependencies.
+# Preserve the image's vendor SDK, vLLM and flaggems-vllm. Older CI image
+# digests lack xdist, which tests/run.py and session-finish probes require.
+# Resolve only this test tool (and execnet), never the project's runtime extras.
+python -m pip install 'pytest-xdist>=3.0.0,<4'
+
+# Reinstall only the checked-out plugin without resolving image dependencies.
 unset PYTHONPATH
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo 'PYTHONPATH=' >> "${GITHUB_ENV}"

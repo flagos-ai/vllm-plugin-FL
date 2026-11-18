@@ -219,6 +219,7 @@ FROM base AS dev
 
 RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" \
         pytest==8.4.1 \
+        "pytest-xdist>=3.0.0,<4" \
         pytest-cov \
         pytest-json-report \
         ruff \
