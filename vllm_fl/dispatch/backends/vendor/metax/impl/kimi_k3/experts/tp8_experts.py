@@ -6,12 +6,13 @@ and the existing top16 reduction remain unchanged.
 
 import torch
 import triton
+from flaggems_vllm.ops.situ_and_mul import situ_and_mul
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.marlin_mxfp4 import pack_matrix
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.expert_gemm import _paired_arithmetic_mm, meta
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.decode_experts import (
     _paired_scheduled_mm,
 )
-from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.grouped_moe import _alignment, _situ, _weighted_sum
+from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.grouped_moe import _alignment, _weighted_sum
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.small_alignment import align_small
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.tp8_expert_g1 import _tp8_g1_situ
 
@@ -142,9 +143,7 @@ def run(x, packed, weights, ids, prepared, record=None, *, workspace=None):
             num_stages=2,
         )
     if not fused_g1:
-        _situ[(triton.cdiv(r * 384, 256),)](
-            gu, act, r * 384, 384, 4.0, 25.0, 256, num_warps=4, enable_fp_fusion=False
-        )
+        situ_and_mul(act, gu, beta=4.0, linear_beta=25.0)
     if bounded:
         slice_meta = []
         for start in range(0, 3584, down_width):
