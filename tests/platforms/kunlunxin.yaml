@@ -118,8 +118,6 @@ p800:
         - compilation/test_graph_capture.py
     unit:
       include: "*"
-      exclude:
-        - dispatch/test_flaggems_quantization.py
     benchmark:
       pr:
         enabled: true
