@@ -2,18 +2,17 @@
 
 import logging
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
-_patches_applied = False
-_patches_applying = False
+_patch_state = SimpleNamespace(applied=False, applying=False)
 
 
 def apply_ascend_patches():
     """Apply all Ascend-specific patches without caching an incomplete install."""
-    global _patches_applied, _patches_applying
-    if _patches_applied or _patches_applying:
+    if _patch_state.applied or _patch_state.applying:
         return
-    _patches_applying = True
+    _patch_state.applying = True
     try:
         with _mtp_patch_transaction():
             patch_rejection_sampling()
@@ -28,9 +27,9 @@ def apply_ascend_patches():
             from .patches.patch_mamba_utils import apply_mamba_copy_patch
 
             apply_mamba_copy_patch()
-        _patches_applied = True
+        _patch_state.applied = True
     finally:
-        _patches_applying = False
+        _patch_state.applying = False
 
 
 @contextmanager

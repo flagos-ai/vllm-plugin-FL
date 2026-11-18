@@ -250,24 +250,25 @@ def test_mtp_transaction_restores_objects_and_allows_retry(
 
     def fail_once(obj, name, value):
         calls.append((obj, name))
-        if fault == "setattr" and len(calls) == 2:
+        if len(calls) == 2:
             raise RuntimeError("injected assignment failure")
         real_setattr(obj, name, value)
 
-    with (
-        pytest.raises(RuntimeError, match="injected"),
-        vendor._mtp_patch_transaction(),
-        monkeypatch.context() as patch,
-    ):
-        patch.setattr(builtins, "setattr", fail_once)
-        for key, name in (
-            ("sample", "sample_recovered_tokens_kernel"),
-            ("utils", "eagle_prepare_next_token_padded_kernel"),
-        ):
-            setattr(modules[key], name, Kernel())
-        registry["QwenGatedDeltaNetAttention"] = gdn
-        gdn.name = "QwenGatedDeltaNetAttention"
-        raise RuntimeError("injected post-registration failure")
+    with pytest.raises(RuntimeError, match="injected"), vendor._mtp_patch_transaction():
+        if fault == "setattr":
+            with monkeypatch.context() as patch:
+                patch.setattr(builtins, "setattr", fail_once)
+                for key, name in (
+                    ("sample", "sample_recovered_tokens_kernel"),
+                    ("utils", "eagle_prepare_next_token_padded_kernel"),
+                ):
+                    setattr(modules[key], name, Kernel())
+        else:
+            modules["sample"].sample_recovered_tokens_kernel = Kernel()
+            modules["utils"].eagle_prepare_next_token_padded_kernel = Kernel()
+            registry["QwenGatedDeltaNetAttention"] = gdn
+            gdn.name = "QwenGatedDeltaNetAttention"
+            raise RuntimeError("injected post-registration failure")
     for key, module in modules.items():
         assert vars(module) == snapshots[key]
     assert modules["sample"].sample_recovered_tokens_kernel is wrapper
@@ -307,11 +308,11 @@ def test_mtp_apply_flags_reset_after_failure_and_retry(monkeypatch, mtp_transact
     monkeypatch.setattr(vendor, "patch_gdn", fail)
     with pytest.raises(RuntimeError, match="later patch failure"):
         vendor.apply_ascend_patches()
-    assert not vendor._patches_applied
-    assert not vendor._patches_applying
+    assert not vendor._patch_state.applied
+    assert not vendor._patch_state.applying
     assert modules["sample"].sample_recovered_tokens_kernel is original
     monkeypatch.setattr(vendor, "patch_gdn", lambda: None)
     vendor.apply_ascend_patches()
-    assert vendor._patches_applied
-    assert not vendor._patches_applying
+    assert vendor._patch_state.applied
+    assert not vendor._patch_state.applying
     vendor.apply_ascend_patches()
