@@ -175,6 +175,8 @@ _lock = threading.Lock()
 # Collects per-op metadata across all steps for the final summary.json.
 # op_name → {dispatch_keys: [...], call_count: int}
 _op_summary: Dict[str, Dict[str, Any]] = {}
+_flaggems_registrar_id: Optional[int] = None
+_flaggems_registered_aten_ops: Set[str] = set()
 
 # ── Async I/O state ──
 # Background executor for stats computation and file writes.
@@ -1231,13 +1233,18 @@ def _record_op_summary(
 def _is_flaggems_op(op_name: str, dispatch_keys: str) -> bool:
     """Check if the op is backed by FlagGems.
 
-    Two detection paths:
+    Detection paths:
     1. Dispatch table: the dispatch_keys string contains "FlagGems"
        (ATen ops that FlagGems registered a kernel for).
-    2. OpManager: the resolved implementation is a flagos backend
+    2. FlagGems registrar: the ATen op is in current_work_registrar keys.
+       This covers torch.library registrations whose dispatch table source
+       location does not reliably include the flag_gems package path.
+    3. OpManager: the resolved implementation is a flagos backend
        (dispatch-managed ops like rms_norm, silu_and_mul, rotary_embedding).
     """
     if "FlagGems" in dispatch_keys:
+        return True
+    if op_name in _get_flaggems_registered_aten_ops():
         return True
     # Fallback: check OpManager for dispatch-managed ops
     try:
@@ -1253,6 +1260,39 @@ def _is_flaggems_op(op_name: str, dispatch_keys: str) -> bool:
     except Exception:
         pass
     return False
+
+
+def _get_flaggems_registered_aten_ops() -> Set[str]:
+    """Return ATen op names currently registered by FlagGems.
+
+    FlagGems registers ATen kernels through torch.library. In some torch
+    versions/devices, ``_dispatch_dump_table`` reports the registration site as
+    torch internals rather than the FlagGems Python file, so path-based backend
+    inference misses these ops. The registrar is the authoritative in-process
+    list of enabled FlagGems ATen keys.
+    """
+    global _flaggems_registrar_id, _flaggems_registered_aten_ops
+
+    try:
+        import sys
+
+        flag_gems = sys.modules.get("flag_gems")
+        registrar = getattr(flag_gems, "current_work_registrar", None)
+        if registrar is None:
+            return set()
+
+        registrar_id = id(registrar)
+        if registrar_id == _flaggems_registrar_id:
+            return _flaggems_registered_aten_ops
+
+        keys = registrar.get_all_keys()
+        _flaggems_registered_aten_ops = {
+            f"aten.{key}" for key in keys if isinstance(key, str)
+        }
+        _flaggems_registrar_id = registrar_id
+        return _flaggems_registered_aten_ops
+    except Exception:
+        return set()
 
 
 def _write_summary() -> None:
