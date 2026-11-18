@@ -35,11 +35,14 @@ source patch, source snapshot or patch installer is required at installation.
 | Package | Pinned source | Review |
 | --- | --- | --- |
 | vLLM | [1240e674](https://github.com/cshujie131-bot/vllm/commit/1240e6740799454e2d384bde4b117bfd3fab85b3) | Default-preserving component/runner interfaces; explicit non-CUDA CUSTOM MLA validation; no scheduler algorithm change; native top-p scratch synchronization fix |
-| FlagGems | [6efd6dab](https://github.com/cshujie131-bot/FlagGems/commit/6efd6dab4a4a8a78167262d0841ff0d728a2d1d3) | [Argmax #7300](https://github.com/flagos-ai/FlagGems/pull/7300); [addmm compatibility Draft #7302](https://github.com/flagos-ai/FlagGems/pull/7302) |
+| FlagGems | [6efd6dab](https://github.com/cshujie131-bot/FlagGems/commit/6efd6dab4a4a8a78167262d0841ff0d728a2d1d3) | [Argmax #7300](https://github.com/flagos-ai/FlagGems/pull/7300); [historical addmm compatibility #7302](https://github.com/flagos-ai/FlagGems/pull/7302) (closed; superseded upstream by [#6796](https://github.com/flagos-ai/FlagGems/pull/6796) and [#6807](https://github.com/flagos-ai/FlagGems/pull/6807)) |
 | FlagGems-vllm | [1d4b69b3](https://github.com/cshujie131-bot/FlagGems-vllm/commit/1d4b69b355a8a42deb0edd485ef9d9a94b2477b8) | [TopK #950](https://github.com/flagos-ai/FlagGems-vllm/pull/950), [SiTU #951](https://github.com/flagos-ai/FlagGems-vllm/pull/951), [alignment #952](https://github.com/flagos-ai/FlagGems-vllm/pull/952), [MLA interface #953](https://github.com/flagos-ai/FlagGems-vllm/pull/953) |
 
-The reviews are unmerged at publication time. The integration commits backport
-onto the validated bases, rather than upgrading unrelated operators. Each fork
+The active operator reviews remain unmerged. The closed addmm review is historical:
+the validated pin still contains that compatibility code, while current upstream
+provides the replacement. Closing the review does not change the pinned runtime.
+The integration commits backport onto the validated bases rather than upgrading
+unrelated operators. Each fork
 contains `K3_INTEGRATION.md`. Argmax/addmm are correctness or compatibility work;
 the MLA callable is an interface change. Only the three qualified operator
 optimizations claim standalone gains against their corresponding native boundary.
@@ -47,7 +50,8 @@ optimizations claim standalone gains against their corresponding native boundary
 TopK explicitly selects FP32 sigmoid → input-dtype materialization before bias
 and selection; default FGV tanh-based sigmoid is not numerically interchangeable.
 Alignment keeps FL's compact-buffer policy and imports the library's compact
-kernel. SiTU uses the library math under the original FL shape guards. Small,
+kernel. Qualified shared FFN and unfused TP8 routed-expert calls use FGV's public
+`situ_and_mul` entry. Shared output storage uses the existing materialized path. Small,
 unqualified and non-normal-scale fallbacks remain available where previously used.
 
 ## Environment

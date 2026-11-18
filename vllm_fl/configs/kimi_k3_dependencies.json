@@ -27,7 +27,13 @@
     "addmm_compat": {
       "url": "https://github.com/flagos-ai/FlagGems/pull/7302",
       "merged_at_lock_time": false,
-      "draft_at_lock_time": true
+      "draft_at_lock_time": true,
+      "current_status": "closed_superseded",
+      "superseded_by": [
+        "https://github.com/flagos-ai/FlagGems/pull/6796",
+        "https://github.com/flagos-ai/FlagGems/pull/6807"
+      ],
+      "note": "Historical compatibility retained in the validated pin; not a pending upstream dependency. Current upstream replacement requires separate K3 integration qualification."
     },
     "alignment": {
       "url": "https://github.com/flagos-ai/FlagGems-vllm/pull/952",

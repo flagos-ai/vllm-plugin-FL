@@ -33,6 +33,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
 | DeepSeek-V4-Flash (ModelSlim W8A8, Ascend TP8) | Supported | [Ascend guide](./docker/ascend/README.md) |
+| Kimi K3 (MXFP4/E8M0, MetaX TP8/PP4) | Merging | [MetaX example](./examples/kimi_k3_metax/) |
 
 ### Supported Chips
 

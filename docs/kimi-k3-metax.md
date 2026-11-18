@@ -74,6 +74,7 @@ Paths are repository-relative. Empty package `__init__.py` files establish names
 | File | Responsibility | Source / nature |
 |---|---|---|
 | `vllm_fl/distributed/kimi_k3_pp.py` | Host-packed sampled-token feedback and native queue/invalidation order. | vLLM PPHandler + custom FL packets; PyTorch/Gloo feedback |
+| `vllm_fl/distributed/kimi_k3_rpc.py` | Scope cancellation to the remote scheduler input of one K3 worker. The group’s queue factory is restored after construction. | FL worker lifecycle compatibility |
 | `vllm_fl/worker/kimi_k3.py` |Runner-owned workspace and release of consumed PP input references. Preserve native Graph replay and its accepted MCCL stream boundary. Reserve the accepted workspace inside KV memory budgeting.| vLLM inheritance + custom FL differences |
 | `vllm_fl/worker/pipeline_input.py` | Preserve receive ownership and release-after-copy. | FL PP lifetime adapter |
 

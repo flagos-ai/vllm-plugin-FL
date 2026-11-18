@@ -5,7 +5,7 @@ image contains an ordinary (non-editable) vLLM 0.28 empty wheel, FlagGems and
 the MACA user-space stack; the plugin is the only thing installed on top. The
 validated recipe uses four C550 cards (64 GiB each) for tensor parallelism.
 
-## Deployment stack
+## Generic TP4 deployment stack
 
 | Component | Version or configuration |
 |---|---|
@@ -157,3 +157,34 @@ python -m pytest tests/e2e_tests/serving/test_serving_smoke.py -v -s
   (`vllm_fl.register`) and are gated on the MetaX runtime, not on
   `VLLM_PLUGINS`. `FL_BOOT_SHIMS_PATCH=0` disables the whole set; individual
   `FL_METAX_*_PATCH=0` switches disable one shim at a time.
+
+
+## Kimi K3 on four C550 nodes
+
+K3 uses four nodes with eight C550 devices each, MetaX Torch 2.10, MACA 3.8.1.3,
+and a K3-specific vLLM source pin. See the [K3 example](../../examples/kimi_k3_metax/)
+for the exact package versions, source commits and installation commands.
+The generic TP4 image in this guide uses a different software stack.
+
+The public base used by the tested K3 runtime is
+`harbor.baai.ac.cn/flagos-base/flagos-base-metax-maca3.8.1.3@sha256:c5100d65b6af8ff4d1e6e90fdf14d041597702bbc2e4d9c372d77d3d2d93adc9`.
+It supplies the starting layers. The complete tested image with the K3 Python,
+operator and RDMA dependencies has no public pull URI in this PR.
+
+Use the same prepared image on each node. From the plugin checkout, set
+`NODE_RANK` to 0 through 3 and `CACHE_DIR` to a private local directory:
+
+```bash
+docker run --rm --name "kimi-k3-node-${NODE_RANK}" \
+  --network host --ipc host --stop-timeout 180 \
+  --device /dev/dri --device /dev/mxcd --device /dev/infiniband \
+  --ulimit memlock=-1 \
+  -v "$MODEL_DIR:/models/Kimi-K3:ro" -v "$CACHE_DIR:/cache" \
+  -v "$PWD:/src:ro" -w /src --entrypoint bash "$IMAGE" \
+  examples/kimi_k3_metax/launch.sh --model /models/Kimi-K3 \
+  --node-rank "$NODE_RANK" --master-addr "$MASTER_ADDR" \
+  --master-port 29864 --host 0.0.0.0 --port 8000 --cache /cache \
+  --net-interface "$NET_INTERFACE" --ib-hca "$IB_HCA" --gid-index 3
+```
+
+The K3 profile uses eager prefill, FULL decode Graph and MCCL for GPU communication.
