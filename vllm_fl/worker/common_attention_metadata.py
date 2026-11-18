@@ -18,23 +18,6 @@ from vllm_fl.compilation.graph import Graph
 
 logger = init_logger(__name__)
 
-_LAYOUT_ATTR = "_vllm_fl_common_attention_metadata_layout"
-
-
-@dataclass(frozen=True)
-class _CommonAttentionMetadataLayout:
-    """Fixed-address tensors used by the multi-group Triton launch."""
-
-    block_table_ptrs: torch.Tensor
-    block_table_strides: torch.Tensor
-    block_sizes: torch.Tensor
-    slot_mapping_ptrs: torch.Tensor
-    num_groups: int
-    max_num_batched_tokens: int
-    total_cp_world_size: int
-    total_cp_rank: int
-    cp_kv_cache_interleave_size: int
-
 
 def common_attention_metadata_enabled() -> bool:
     """Keep the original producer on platforms without kernel validation.
@@ -54,6 +37,25 @@ def supports_accelerator_graph() -> bool:
     )
 
 
+_LAYOUT_ATTR = "_vllm_fl_common_attention_metadata_layout"
+
+
+@dataclass(frozen=True)
+class _CommonAttentionMetadataLayout:
+    """Fixed-address tensors used by the multi-group Triton launch."""
+
+    block_table_ptrs: torch.Tensor
+    block_table_strides: torch.Tensor
+    block_table_widths: torch.Tensor
+    block_sizes: torch.Tensor
+    slot_mapping_ptrs: torch.Tensor
+    num_groups: int
+    max_num_batched_tokens: int
+    total_cp_world_size: int
+    total_cp_rank: int
+    cp_kv_cache_interleave_size: int
+
+
 # Backported from vLLM's multi-group BlockTables slot-mapping kernel. The
 # padding boundary is read from query_start_loc on device so one captured graph
 # can replay with different request lengths without a host-derived argument.
@@ -64,6 +66,7 @@ def _compute_slot_mapping_graph_kernel(
     positions_ptr,
     block_table_ptrs,
     block_table_strides,
+    block_table_widths,
     block_sizes,
     slot_mapping_ptrs,
     TOTAL_CP_WORLD_SIZE: tl.constexpr,
@@ -71,6 +74,7 @@ def _compute_slot_mapping_graph_kernel(
     CP_KV_CACHE_INTERLEAVE_SIZE: tl.constexpr,
     NULL_BLOCK_ID: tl.constexpr,
     PAD_ID: tl.constexpr,
+    SAFE_MASKED_ADDRESS: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
 ):
     group_idx = tl.program_id(0)
@@ -80,6 +84,7 @@ def _compute_slot_mapping_graph_kernel(
     )
     block_table_ptr = tl.multiple_of(block_table_ptr, 16)
     block_table_stride = tl.load(block_table_strides + group_idx)
+    block_table_width = tl.load(block_table_widths + group_idx)
     block_size = tl.load(block_sizes + group_idx)
     slot_mapping_ptr = tl.load(slot_mapping_ptrs + group_idx).to(
         tl.pointer_type(tl.int64)
@@ -87,14 +92,15 @@ def _compute_slot_mapping_graph_kernel(
     slot_mapping_ptr = tl.multiple_of(slot_mapping_ptr, 16)
 
     if req_idx == tl.num_programs(1) - 1:
-        actual_num_tokens = tl.load(query_start_loc_ptr + req_idx).to(tl.int64)
-        for i in range(actual_num_tokens, max_num_tokens, BLOCK_SIZE):
-            offsets = i + tl.arange(0, BLOCK_SIZE)
-            tl.store(
-                slot_mapping_ptr + offsets,
-                PAD_ID,
-                mask=offsets < max_num_tokens,
-            )
+        if not SAFE_MASKED_ADDRESS:
+            actual_num_tokens = tl.load(query_start_loc_ptr + req_idx).to(tl.int64)
+            for i in range(actual_num_tokens, max_num_tokens, BLOCK_SIZE):
+                offsets = i + tl.arange(0, BLOCK_SIZE)
+                tl.store(
+                    slot_mapping_ptr + offsets,
+                    PAD_ID,
+                    mask=offsets < max_num_tokens,
+                )
         return
 
     start_idx = tl.load(query_start_loc_ptr + req_idx).to(tl.int64)
@@ -109,12 +115,16 @@ def _compute_slot_mapping_graph_kernel(
     # the predicate: valid scheduler rows can transiently carry seq_len == 0.
     if start_idx == end_idx:
         row_offset = req_idx * block_table_stride
-        for i in range(0, block_table_stride, BLOCK_SIZE):
+        for i in range(0, block_table_width, BLOCK_SIZE):
             offsets = i + tl.arange(0, BLOCK_SIZE)
+            if SAFE_MASKED_ADDRESS:
+                safe_offsets = tl.minimum(offsets, block_table_width - 1)
+            else:
+                safe_offsets = offsets
             tl.store(
-                block_table_ptr + row_offset + offsets,
+                block_table_ptr + row_offset + safe_offsets,
                 NULL_BLOCK_ID,
-                mask=offsets < block_table_stride,
+                mask=offsets < block_table_width,
             )
 
     virtual_block_size = block_size * TOTAL_CP_WORLD_SIZE
@@ -141,6 +151,89 @@ def _compute_slot_mapping_graph_kernel(
         slot_ids = block_numbers * block_size + local_block_offsets
         slot_ids = tl.where(is_local, slot_ids, PAD_ID)
         tl.store(slot_mapping_ptr + offsets, slot_ids, mask=mask)
+
+
+@triton.jit(do_not_specialize=["max_num_tokens"])
+def _compute_slot_mapping_kunlun_cp_kernel(
+    max_num_tokens,
+    query_start_loc_ptr,
+    positions_ptr,
+    block_table_ptrs,
+    block_table_strides,
+    block_table_widths,
+    block_sizes,
+    slot_mapping_ptrs,
+    TOTAL_CP_WORLD_SIZE: tl.constexpr,
+    TOTAL_CP_RANK: tl.constexpr,
+    CP_KV_CACHE_INTERLEAVE_SIZE: tl.constexpr,
+    NULL_BLOCK_ID: tl.constexpr,
+    PAD_ID: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
+):
+    group_idx = tl.program_id(0)
+    req_idx = tl.program_id(1)
+    chunk_start = tl.program_id(2) * BLOCK_SIZE
+    start_idx = tl.load(query_start_loc_ptr + req_idx).to(tl.int64)
+    end_idx = tl.load(query_start_loc_ptr + req_idx + 1).to(tl.int64)
+    width = tl.load(block_table_widths + group_idx)
+    table = tl.load(block_table_ptrs + group_idx).to(tl.pointer_type(tl.int32))
+    stride = tl.load(block_table_strides + group_idx)
+    row_offset = req_idx * stride
+
+    if start_idx == end_idx and chunk_start < width:
+        offsets = chunk_start + tl.arange(0, BLOCK_SIZE)
+        safe_offsets = tl.minimum(offsets, width - 1)
+        tl.store(table + row_offset + safe_offsets, NULL_BLOCK_ID, offsets < width)
+    elif start_idx + chunk_start < end_idx:
+        offsets = start_idx + chunk_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < end_idx
+        safe_offsets = tl.minimum(offsets, max_num_tokens - 1)
+        pos = tl.load(positions_ptr + safe_offsets, mask=mask, other=0)
+        block_size = tl.load(block_sizes + group_idx)
+        virtual_block_size = block_size * TOTAL_CP_WORLD_SIZE
+        block_indices = pos // virtual_block_size
+        block_numbers = tl.load(table + row_offset + block_indices).to(tl.int64)
+        virtual_offsets = pos - block_indices * virtual_block_size
+        is_local = (
+            virtual_offsets // CP_KV_CACHE_INTERLEAVE_SIZE
+        ) % TOTAL_CP_WORLD_SIZE == TOTAL_CP_RANK
+        local_offsets = (
+            virtual_offsets // (TOTAL_CP_WORLD_SIZE * CP_KV_CACHE_INTERLEAVE_SIZE)
+        ) * CP_KV_CACHE_INTERLEAVE_SIZE + (
+            virtual_offsets % CP_KV_CACHE_INTERLEAVE_SIZE
+        )
+        slots = tl.where(is_local, block_numbers * block_size + local_offsets, PAD_ID)
+        slot_mapping = tl.load(slot_mapping_ptrs + group_idx).to(
+            tl.pointer_type(tl.int64)
+        )
+        tl.store(slot_mapping + safe_offsets, slots, mask=mask)
+
+
+@triton.jit(do_not_specialize=["max_num_tokens"])
+def _pad_slot_mapping_safe_kernel(
+    max_num_tokens,
+    query_start_loc_ptr,
+    slot_mapping_ptrs,
+    NUM_REQS: tl.constexpr,
+    PAD_ID: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
+):
+    group_idx = tl.program_id(0)
+    actual_num_tokens = tl.load(query_start_loc_ptr + NUM_REQS).to(tl.int64)
+    block_start = actual_num_tokens + tl.program_id(1) * BLOCK_SIZE
+    if block_start < max_num_tokens:
+        slot_mapping_ptr = tl.load(slot_mapping_ptrs + group_idx).to(
+            tl.pointer_type(tl.int64)
+        )
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        # Keep masked lanes inside the allocation on Kunlunxin. The final
+        # slot is padding whenever this branch executes.
+        safe_offsets = tl.minimum(offsets, max_num_tokens - 1)
+        tl.store(
+            slot_mapping_ptr + safe_offsets,
+            PAD_ID,
+            mask=offsets < max_num_tokens,
+        )
 
 
 @triton.jit
@@ -214,6 +307,11 @@ def _create_common_attention_metadata_layout(
             dtype=torch.int64,
             device=device,
         ),
+        block_table_widths=torch.tensor(
+            [table.block_table.gpu.shape[1] for table in tables],
+            dtype=torch.int64,
+            device=device,
+        ),
         block_sizes=torch.tensor(
             [table.block_size for table in tables],
             dtype=torch.int32,
@@ -251,14 +349,20 @@ def compute_common_attention_metadata(
     """Populate fixed-address metadata buffers consumed by attention backends."""
     if block_table.block_tables:
         layout = _get_common_attention_metadata_layout(block_table)
-        _compute_slot_mapping_graph_kernel[(layout.num_groups, num_reqs + 1)](
+        safe_masked_address = (
+            getattr(current_platform, "vendor_name", None) == "kunlunxin"
+        )
+        kernel_args = (
             layout.max_num_batched_tokens,
             query_start_loc,
             positions,
             layout.block_table_ptrs,
             layout.block_table_strides,
+            layout.block_table_widths,
             layout.block_sizes,
             layout.slot_mapping_ptrs,
+        )
+        kernel_kwargs = dict(
             TOTAL_CP_WORLD_SIZE=layout.total_cp_world_size,
             TOTAL_CP_RANK=layout.total_cp_rank,
             CP_KV_CACHE_INTERLEAVE_SIZE=layout.cp_kv_cache_interleave_size,
@@ -266,6 +370,31 @@ def compute_common_attention_metadata(
             PAD_ID=PAD_SLOT_ID,
             BLOCK_SIZE=1024,
         )
+        if safe_masked_address and layout.total_cp_world_size > 1 and num_reqs:
+            # The Kunlunxin compiler fails to lower CP arithmetic inside the
+            # dynamic request loop; a fixed grid handles each chunk separately.
+            max_width = max(
+                table.block_table.gpu.shape[1] for table in block_table.block_tables
+            )
+            chunks = triton.cdiv(max(layout.max_num_batched_tokens, max_width), 1024)
+            _compute_slot_mapping_kunlun_cp_kernel[
+                (layout.num_groups, num_reqs, chunks)
+            ](*kernel_args, **kernel_kwargs)
+        else:
+            _compute_slot_mapping_graph_kernel[(layout.num_groups, num_reqs + 1)](
+                *kernel_args, **kernel_kwargs, SAFE_MASKED_ADDRESS=safe_masked_address
+            )
+        if safe_masked_address and layout.max_num_batched_tokens:
+            _pad_slot_mapping_safe_kernel[
+                (layout.num_groups, triton.cdiv(layout.max_num_batched_tokens, 1024))
+            ](
+                layout.max_num_batched_tokens,
+                query_start_loc,
+                layout.slot_mapping_ptrs,
+                NUM_REQS=num_reqs,
+                PAD_ID=PAD_SLOT_ID,
+                BLOCK_SIZE=1024,
+            )
     _compute_num_computed_tokens_kernel[(triton.cdiv(num_reqs, 256),)](
         query_start_loc,
         seq_lens,
@@ -276,18 +405,27 @@ def compute_common_attention_metadata(
 
 
 class CommonAttentionMetadataGraphRunner:
-    """Capture and replay common attention metadata on accelerator graphs."""
+    """Own metadata graphs and their buffers for one InputBatch.
+
+    Synchronize and clear() before replacing buffers or block/CP geometry.
+    """
 
     def __init__(self) -> None:
-        self.graphs: dict[tuple[int, int], Any] = {}
-        self.graph_pool = current_platform.get_global_graph_pool()
-        self._missing_graph_keys: set[tuple[int, int]] = set()
+        self.graphs: dict[int, Any] = {}
+        self._buffers: dict[int, tuple] = {}
+        self.block_table: Any = None
         self._graph_capture_supported = supports_accelerator_graph()
+        self.graph_pool = None
+        self._missing_graph_keys: set[int] = set()
         self._warned_graph_unavailable = False
 
     def clear(self) -> None:
+        if self.block_table is not None and hasattr(self.block_table, _LAYOUT_ATTR):
+            delattr(self.block_table, _LAYOUT_ATTR)
         self.graphs.clear()
+        self._buffers.clear()
         self._missing_graph_keys.clear()
+        self.block_table = None
 
     def run(
         self,
@@ -299,96 +437,46 @@ class CommonAttentionMetadataGraphRunner:
         num_computed_tokens: torch.Tensor,
         *,
         use_graph: bool,
-        capture: bool,
-        compute: Callable[
-            [
-                Any,
-                int,
-                torch.Tensor,
-                torch.Tensor,
-                torch.Tensor,
-                torch.Tensor,
-            ],
-            None,
-        ] = compute_common_attention_metadata,
+        capture: bool = False,
+        compute: Callable = compute_common_attention_metadata,
     ) -> bool:
+        if self.block_table is not block_table:
+            self.clear()
+            self.block_table = block_table
+        tensors = (query_start_loc, positions, seq_lens, num_computed_tokens)
         if use_graph and not self._graph_capture_supported:
             if not self._warned_graph_unavailable:
                 logger.warning(
-                    "Accelerator graph capture is unavailable on %s; falling "
-                    "back to eager common attention metadata generation.",
-                    current_platform.device_type,
+                    "Platform graph API unavailable; using eager metadata producer"
                 )
                 self._warned_graph_unavailable = True
             use_graph = False
 
-        if not use_graph:
-            compute(
-                block_table,
-                num_reqs,
-                query_start_loc,
-                positions,
-                seq_lens,
-                num_computed_tokens,
-            )
-            return False
-
-        key = (id(block_table), num_reqs)
-        graph = self.graphs.get(key)
-        if capture:
-            if graph is not None:
-                graph.replay()
-                return True
-
-            # Materialize the pointer/stride tensors before entering capture.
-            # Allocating them inside the graph would make replay unsafe.
-            if (
-                compute is compute_common_attention_metadata
-                and block_table.block_tables
-            ):
-                _get_common_attention_metadata_layout(block_table)
-
-            # Compile outside capture even when model graph warmups are zero.
-            compute(
-                block_table,
-                num_reqs,
-                query_start_loc,
-                positions,
-                seq_lens,
-                num_computed_tokens,
-            )
+        graph = self.graphs.get(num_reqs) if use_graph else None
+        if use_graph and capture and graph is None:
+            if self.graph_pool is None:
+                self.graph_pool = current_platform.get_global_graph_pool()
+            # Compile and materialize pointer tables before capture.
+            compute(block_table, num_reqs, *tensors)
             graph = Graph.graph()
             with current_platform.torch_device_fn.graph(graph, pool=self.graph_pool):
-                compute(
-                    block_table,
-                    num_reqs,
-                    query_start_loc,
-                    positions,
-                    seq_lens,
-                    num_computed_tokens,
-                )
-            self.graphs[key] = graph
-            # Capture records work; callers immediately consume these outputs.
+                compute(block_table, num_reqs, *tensors)
+            self.graphs[num_reqs] = graph
+            self._buffers[num_reqs] = tensors + tuple(
+                tensor
+                for table in block_table.block_tables
+                for tensor in (table.block_table.gpu, table.slot_mapping.gpu)
+            )
+
+        if graph is not None:
+            # Capture records work; the first caller also consumes the output.
             graph.replay()
             return True
-
-        if graph is None:
-            if key not in self._missing_graph_keys:
-                logger.warning(
-                    "Common attention metadata graph for %d requests was not "
-                    "captured; falling back to eager execution.",
-                    num_reqs,
-                )
-                self._missing_graph_keys.add(key)
-            compute(
-                block_table,
+        if use_graph and num_reqs not in self._missing_graph_keys:
+            logger.warning(
+                "Metadata graph for %d requests missing; using eager producer",
                 num_reqs,
-                query_start_loc,
-                positions,
-                seq_lens,
-                num_computed_tokens,
             )
-            return False
-
-        graph.replay()
-        return True
+            self._missing_graph_keys.add(num_reqs)
+        compute(block_table, num_reqs, *tensors)
+        return False

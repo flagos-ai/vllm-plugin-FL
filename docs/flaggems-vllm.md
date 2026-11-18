@@ -23,12 +23,6 @@ library main and the merged
 the merged public `concat_mla_q` and graph-safe paged MQA logits APIs required
 by HY4, which are absent from v0.2.0, plus the portable math shim fix needed
 to import the package when a backend's core math lacks `pow` or `tanh`.
-It also contains public Hadamard reuse and mHC pre/post timing corrections for
-Kunlunxin, compile-time HC4 pre reduction dimensions, and optional FlagTree API
-handling for stock Triton. Kunlunxin QSA/cache row stores use a scalar
-validity guard so invalid slots perform no vector memory operation. HC4 pre
-tile pruning follows the hidden size on Kunlunxin; other vendor defaults and the
-original model-size candidate order are preserved.
 The source commit is fixed for reproducible installs; CI verifies pip's
 `direct_url.json` rather than accepting another checkout with the same version.
 
