@@ -81,7 +81,7 @@ zw810e:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
-        serving:
+        adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
@@ -94,7 +94,7 @@ zw810e:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
-        serving:
+        adaptation_gate:
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
@@ -106,12 +106,8 @@ zw810e:
             - 35b_a3b_tp4_graph
     timeouts:
       e2e:
-        # Inference serializes (every case is TP4 over the only 4 visible
-        # cards). Measured with the 9-size capture table: 27B eager 8.4 min,
-        # 35B eager 6.7 min, 35B graph 26.4 min (~42 min total). The added 27B
-        # graph case keeps the job near 70 min. 120 covers it with headroom.
         inference: 120
-        serving: 180
+        adaptation_gate: 180
         concurrent: 180
     functional:
       include: "*"
