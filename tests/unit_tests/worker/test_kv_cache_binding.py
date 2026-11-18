@@ -11,11 +11,11 @@ from vllm.v1.worker import utils as upstream_utils
 from vllm_fl.worker import kv_cache_utils
 
 
-@pytest.fixture
-def iluvatar(monkeypatch):
+@pytest.fixture(params=[("iluvatar", "cuda"), ("ascend", "npu")])
+def multi_cache_platform(monkeypatch, request):
     platform = SimpleNamespace(
-        vendor_name="iluvatar",
-        device_type="cuda",
+        vendor_name=request.param[0],
+        device_type=request.param[1],
         is_cuda_alike=lambda: False,
         is_xpu=lambda: False,
         is_cpu=lambda: False,
@@ -24,8 +24,10 @@ def iluvatar(monkeypatch):
     return platform
 
 
-def test_upstream_rejection_is_limited_to_cache_binding(iluvatar, monkeypatch):
-    monkeypatch.setattr(upstream_utils, "current_platform", iluvatar)
+def test_upstream_rejection_is_limited_to_cache_binding(
+    multi_cache_platform, monkeypatch
+):
+    monkeypatch.setattr(upstream_utils, "current_platform", multi_cache_platform)
     caches = {
         "model.layers.0.main_attn": torch.empty(1),
         "model.layers.0.index_attn": torch.empty(1),
@@ -40,10 +42,10 @@ def test_upstream_rejection_is_limited_to_cache_binding(iluvatar, monkeypatch):
     assert result is None
     assert len(runner_caches) == 2
     assert all(context[name].kv_cache is tensor for name, tensor in caches.items())
-    assert not iluvatar.is_cuda_alike()
+    assert not multi_cache_platform.is_cuda_alike()
 
 
-def test_multiple_caches_keep_layer_order_and_tensor_identity(iluvatar):
+def test_multiple_caches_keep_layer_order_and_tensor_identity(multi_cache_platform):
     caches = {
         "model.layers.10.main_attn": torch.empty(2, 3),
         "model.layers.2.index_attn": torch.empty(3, 2).t(),
@@ -69,7 +71,23 @@ def test_multiple_caches_keep_layer_order_and_tensor_identity(iluvatar):
     assert not caches["model.layers.2.index_attn"].is_contiguous()
 
 
-def test_shared_cache_aliases_are_preserved(iluvatar):
+def test_target_and_draft_same_layer_index(multi_cache_platform):
+    caches = {
+        "model.layers.0.self_attn": torch.empty(1),
+        "draft_model.layers.0.self_attn": torch.empty(1),
+    }
+    context = {name: SimpleNamespace(kv_cache=None) for name in caches}
+    runner_caches = []
+
+    kv_cache_utils.bind_kv_cache(caches, context, runner_caches)
+
+    assert len(runner_caches) == 2
+    for tensor, (name, original) in zip(runner_caches, caches.items()):
+        assert tensor is original
+        assert context[name].kv_cache is original
+
+
+def test_shared_cache_aliases_are_preserved(multi_cache_platform):
     shared = torch.empty(2, 3)
     caches = {"model.layers.0.main_attn": shared, "model.layers.1.main_attn": shared}
     context = {name: SimpleNamespace() for name in caches}
@@ -83,7 +101,7 @@ def test_shared_cache_aliases_are_preserved(iluvatar):
 
 
 @pytest.mark.parametrize("positional", [False, True])
-def test_multiple_attention_module_indices(iluvatar, positional):
+def test_multiple_attention_module_indices(multi_cache_platform, positional):
     caches = {
         "model.layers.1.attn.0": torch.empty(1),
         "model.layers.0.attn.1": torch.empty(1),
@@ -106,12 +124,12 @@ def test_multiple_attention_module_indices(iluvatar, positional):
         assert context[name].kv_cache is caches[name]
 
 
-def test_existing_runner_cache_is_rejected(iluvatar):
+def test_existing_runner_cache_is_rejected(multi_cache_platform):
     with pytest.raises(AssertionError):
         kv_cache_utils.bind_kv_cache({}, {}, [torch.empty(1)])
 
 
-def test_empty_cache_binding(iluvatar):
+def test_empty_cache_binding(multi_cache_platform):
     runner_caches = []
     kv_cache_utils.bind_kv_cache({}, {}, runner_caches)
     assert runner_caches == []
@@ -123,7 +141,8 @@ def test_empty_cache_binding(iluvatar):
         ("nvidia", "cuda"),
         ("metax", "cuda"),
         ("hygon", "cuda"),
-        ("ascend", "npu"),
+        ("ascend", "cuda"),
+        ("iluvatar", "npu"),
         ("mthreads", "musa"),
         ("iluvatar", "cpu"),
         (None, "cpu"),
@@ -137,7 +156,7 @@ def test_other_platforms_delegate_to_upstream(
     monkeypatch.setattr(kv_cache_utils, "current_platform", platform)
     upstream = Mock(return_value=None)
     monkeypatch.setattr(kv_cache_utils, "upstream_bind_kv_cache", upstream)
-    extract = Mock(side_effect=AssertionError("Iluvatar binding must not run"))
+    extract = Mock(side_effect=AssertionError("Ordered binding must not run"))
     monkeypatch.setattr(kv_cache_utils, "extract_layer_index", extract)
     caches = {"model.layers.0.attn": torch.empty(1)}
     context = {name: SimpleNamespace(kv_cache=None) for name in caches}
@@ -183,7 +202,7 @@ def test_upstream_failure_after_mutation_propagates_without_retry(
         raise error
 
     upstream = Mock(side_effect=fail_after_mutation)
-    extract = Mock(side_effect=AssertionError("Iluvatar binding must not run"))
+    extract = Mock(side_effect=AssertionError("Ordered binding must not run"))
     monkeypatch.setattr(kv_cache_utils, "upstream_bind_kv_cache", upstream)
     monkeypatch.setattr(kv_cache_utils, "extract_layer_index", extract)
 

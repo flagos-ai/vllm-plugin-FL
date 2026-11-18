@@ -307,6 +307,9 @@ def _runtime(monkeypatch, calls):
     _module(
         monkeypatch,
         "vllm_fl.compilation.graph_params",
+        get_graph_params=lambda: NS(
+            clear_shape=lambda n: calls.append(("clear-shape", n))
+        ),
         prepare_graph_params=lambda n: calls.append(("prepare", n)),
         weak_ref_workspace=lambda n: calls.append(("weak-ref", n)),
         clear_graph_params=lambda: calls.append("clear"),
@@ -356,6 +359,7 @@ def test_failed_capture_and_replay_restore_state(monkeypatch):
         RuntimeError, fail_in_scope, controller.capture_scope(context), "capture failed"
     ).match("capture failed")
     assert not context.capturing and not controller._active
+    assert calls == [("prepare", 4), ("clear-shape", 4)]
     calls.clear()
     pytest.raises(
         RuntimeError, fail_in_scope, controller.replay_scope(context), "replay failed"
@@ -802,3 +806,274 @@ def test_memory_shim_detects_modified_installation():
     accelerator.empty_cache = lambda: None
     with pytest.raises(RuntimeError, match="modified after installation"):
         patch()
+
+
+def _mtp_graph_contracts():
+    tree = ast.parse(
+        (ROOT / "dispatch/backends/vendor/ascend/impl/attention.py").read_text()
+    )
+    names = {
+        "supports_mtp_target_full",
+        "_require_mtp_graph_batch",
+        "get_ascend_dummy_attention_state",
+        "AscendAttentionState",
+    }
+    nodes = [node for node in tree.body if getattr(node, "name", None) in names]
+    for cls in tree.body:
+        if isinstance(cls, ast.ClassDef) and cls.name in (
+            "AscendAttentionMetadataBuilder",
+            "AscendAttentionBackendImpl",
+        ):
+            for method in cls.body:
+                if isinstance(method, ast.FunctionDef) and method.name in (
+                    "build_for_cudagraph_capture",
+                    "build_for_graph_capture",
+                    "_require_regular_graph_capture",
+                    "update_graph_params",
+                ):
+                    method.decorator_list = []
+                    nodes.append(method)
+    future = ast.ImportFrom(
+        module="__future__", names=[ast.alias(name="annotations")], level=0
+    )
+    mode = NS(FULL="full", FULL_DECODE_ONLY="decode-only", NONE="none")
+    namespace = {"Enum": Enum, "CUDAGraphMode": mode, "torch": NS(bfloat16="bf16")}
+    exec(
+        compile(
+            ast.fix_missing_locations(
+                ast.Module(body=[future, *nodes], type_ignores=[])
+            ),
+            "mtp-graph-contracts",
+            "exec",
+        ),
+        namespace,
+    )
+    return NS(**namespace), namespace
+
+
+def _mtp_graph_config():
+    return NS(
+        speculative_config=NS(method="mtp", num_speculative_tokens=1),
+        parallel_config=NS(pipeline_parallel_size=1, use_ubatching=False),
+        compilation_config=NS(cudagraph_mode="decode-only"),
+        model_config=NS(dtype="bf16", use_mla=False),
+        quant_config=None,
+        lora_config=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("speculative_config", None),
+        ("method", "eagle3"),
+        ("num_speculative_tokens", 2),
+        ("pipeline_parallel_size", 2),
+        ("use_ubatching", True),
+        ("lora_config", "lora"),
+        ("cudagraph_mode", "full"),
+        ("dtype", "fp16"),
+        ("use_mla", True),
+        ("quant_config", "quantized"),
+    ],
+)
+def test_mtp_full_scope_rejects_unsupported_contracts(field, value):
+    helpers, _ = _mtp_graph_contracts()
+    config = _mtp_graph_config()
+    assert helpers.supports_mtp_target_full(config)
+    owner = next(
+        part
+        for part in (
+            config,
+            config.speculative_config,
+            config.parallel_config,
+            config.compilation_config,
+            config.model_config,
+        )
+        if hasattr(part, field)
+    )
+    setattr(owner, field, value)
+    assert not helpers.supports_mtp_target_full(config)
+
+
+@pytest.mark.parametrize(
+    "speculative,phase", [(True, "ChunkedPrefill"), (False, "DecodeOnly")]
+)
+def test_mtp_graph_builder_preserves_canonical_dummy_phase(speculative, phase):
+    helpers, _ = _mtp_graph_contracts()
+    config = _mtp_graph_config()
+    if not speculative:
+        config.speculative_config = None
+    common = NS(attn_state="input-phase")
+    builder = NS(
+        vllm_config=config,
+        model_config=config.model_config,
+        speculative_config=config.speculative_config,
+        build=lambda **kwargs: NS(source=kwargs["common_attn_metadata"]),
+    )
+    builder.build_for_graph_capture = lambda metadata, **kwargs: (
+        helpers.build_for_graph_capture(builder, metadata, **kwargs)
+    )
+    result = helpers.build_for_cudagraph_capture(builder, common)
+    assert result.source is common
+    assert result.attn_state == getattr(helpers.AscendAttentionState, phase)
+
+
+@pytest.mark.parametrize(
+    "bad_phase", ["DecodeOnly", "ChunkedPrefill", "PrefillNoCache"]
+)
+def test_mtp_update_prechecks_every_layer_before_mutation(monkeypatch, bad_phase):
+    helpers, namespace = _mtp_graph_contracts()
+    calls = []
+    param_type = type("FIAParam", (), {})
+    params = [param_type(), param_type()]
+    for param, name in zip(params, ("first", "second")):
+        param.layer_name = name
+    state = helpers.AscendAttentionState
+    metadata = {
+        "first": NS(
+            attn_state=state.SpecDecoding,
+            max_query_len=2,
+            num_prefills=0,
+            actual_seq_lengths_q=[2, 4],
+        ),
+        "second": NS(
+            attn_state=getattr(state, bad_phase),
+            max_query_len=2,
+            num_prefills=0,
+            actual_seq_lengths_q=[2, 4],
+        ),
+    }
+    registry = NS(
+        require_shape=lambda size: None,
+        attn_params={4: params},
+        handles={4: [object(), object()]},
+        events={4: [object(), object()]},
+        workspaces={4: object()},
+    )
+    module = ModuleType("vllm_fl.compilation.graph_params")
+    module.get_graph_params = lambda: registry
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    namespace.update(
+        FusedInferAttentionGraphParam=param_type,
+        PagedAttentionGraphParam=type("PAParam", (), {}),
+    )
+
+    # Entering the update stream would mean validation had begun mutation.
+    def enter_stream(stream):
+        calls.append("stream")
+        raise AssertionError("task update must not begin")
+
+    namespace["torch"].npu = NS(stream=enter_stream)
+    with pytest.raises(NotImplementedError, match="uniform verification"):
+        helpers.update_graph_params(
+            object(), NS(attn_metadata=metadata), 4, _mtp_graph_config()
+        )
+    assert calls == []
+
+
+def test_regular_q1_capture_remains_supported_and_mtp_rejects_prefill():
+    helpers, namespace = _mtp_graph_contracts()
+    state = helpers.AscendAttentionState
+    config = _mtp_graph_config()
+    config.speculative_config = None
+    impl = NS(vllm_config=config, sinks=None)
+    metadata = NS(
+        attn_state=state.DecodeOnly,
+        max_query_len=1,
+        num_prefills=0,
+        actual_seq_lengths_q=[1],
+    )
+    assert (
+        helpers._require_regular_graph_capture(impl, metadata, NS(layer_name="regular"))
+        == "regular"
+    )
+    config.speculative_config = NS(method="mtp", num_speculative_tokens=1)
+    namespace["get_forward_context"] = lambda: NS(
+        cudagraph_runtime_mode="full", batch_descriptor=NS(uniform=True, num_tokens=2)
+    )
+    metadata.attn_state = state.PrefillNoCache
+    metadata.max_query_len = 2
+    metadata.actual_seq_lengths_q = [2]
+    with pytest.raises(NotImplementedError, match="uniform verification"):
+        helpers._require_regular_graph_capture(impl, metadata, NS(layer_name="target"))
+    metadata.attn_state = state.ChunkedPrefill
+    assert (
+        helpers._require_regular_graph_capture(impl, metadata, NS(layer_name="target"))
+        == "target"
+    )
+
+
+@pytest.mark.parametrize(
+    "method,phase,width,computed,prompt,expected,spec_tokens",
+    [
+        ("mtp", "SpecDecoding", 2, [5, 6], [5, 5], False, 1),
+        ("mtp", "SpecDecoding", 2, [4, 6], [5, 5], True, 1),
+        ("mtp", "PrefillNoCache", 2, [0, 0], [2, 2], True, 1),
+        ("mtp", "ChunkedPrefill", 2, [5, 6], [5, 5], True, 1),
+        ("mtp", "SpecDecoding", 1, [5, 6], [5, 5], True, 1),
+        (None, "DecodeOnly", 1, [5, 6], [5, 5], False, 1),
+        (None, "PrefillNoCache", 1, [0, 0], [1, 1], True, 1),
+        ("eagle3", "DecodeOnly", 1, [5, 6], [5, 5], True, 1),
+        ("mtp", "SpecDecoding", 4, [5, 6], [5, 5], False, 3),
+        ("mtp", "SpecDecoding", 2, [5, 6], [5, 5], True, 3),
+    ],
+)
+def test_mtp_runner_gate_keeps_true_prefills_eager(
+    method, phase, width, computed, prompt, expected, spec_tokens
+):
+    import numpy as np
+
+    helpers, _ = _mtp_graph_contracts()
+    tree = ast.parse((ROOT / "worker/model_runner.py").read_text())
+    gates = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Attribute)
+        and node.test.attr == "use_ascend_attention"
+        and any(
+            isinstance(child, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "mtp_verification"
+                for target in child.targets
+            )
+            for child in node.body
+        )
+    )
+    assignments = [node for node in gates.body if isinstance(node, ast.Assign)]
+    config = _mtp_graph_config()
+    if method is None:
+        config.speculative_config = None
+    else:
+        config.speculative_config.method = method
+        config.speculative_config.num_speculative_tokens = spec_tokens
+    runner = NS(
+        num_spec_tokens=spec_tokens,
+        vllm_config=config,
+        speculative_config=config.speculative_config,
+        _ascend_attn_state=getattr(helpers.AscendAttentionState, phase),
+        input_batch=NS(
+            num_computed_tokens_cpu=np.array(computed),
+            num_prompt_tokens=np.array(prompt),
+        ),
+        _is_uniform_decode=lambda maximum, uniform, tokens, requests: (
+            maximum == uniform and tokens == maximum * requests
+        ),
+    )
+    namespace = dict(
+        self=runner,
+        AscendAttentionState=helpers.AscendAttentionState,
+        supports_mtp_target_full=helpers.supports_mtp_target_full,
+        np=np,
+        max_num_scheduled_tokens=width,
+        num_tokens_unpadded=width * 2,
+        num_reqs=2,
+    )
+    exec(
+        compile(
+            ast.Module(body=assignments, type_ignores=[]), "mtp-runner-gate", "exec"
+        ),
+        namespace,
+    )
+    assert namespace["disable_full"] == expected

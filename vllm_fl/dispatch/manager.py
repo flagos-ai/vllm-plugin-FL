@@ -575,6 +575,9 @@ class OpManager:
                 return result
 
             except Exception as e:
+                # A state update or asynchronous launch may already have begun.
+                if not impl.allow_execution_fallback:
+                    raise
                 last_error = e
                 # Mark this implementation as failed
                 self._mark_failed_impl(op_name, impl.impl_id)

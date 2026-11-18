@@ -17,6 +17,7 @@ class KernelLaunchMetaProxy:
         self._kernel = kernel
         # Keep a plain dict on this hot path. The public property returns a copy.
         self._launch_overrides = dict(launch_overrides)
+        self._argument_names = tuple(getattr(kernel, "arg_names", ()))
 
     @property
     def launch_overrides(self) -> dict[str, Any]:
@@ -26,7 +27,11 @@ class KernelLaunchMetaProxy:
         launch = self._kernel[grid]
 
         def launch_with_overrides(*args: Any, **kwargs: Any) -> Any:
+            args = list(args)
             kwargs.update(self._launch_overrides)
+            for index, name in enumerate(self._argument_names[: len(args)]):
+                if name in self._launch_overrides:
+                    args[index] = kwargs.pop(name)
             return launch(*args, **kwargs)
 
         return launch_with_overrides
