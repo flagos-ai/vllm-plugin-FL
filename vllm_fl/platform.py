@@ -364,6 +364,10 @@ class PlatformFL(Platform):
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 
+        from vllm_fl.attention.mla_prefill import configure_mla_prefill
+
+        configure_mla_prefill(vllm_config)
+
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         cache_config = vllm_config.cache_config
@@ -511,6 +515,14 @@ class PlatformFL(Platform):
 
         plan = get_active_plan()
         if use_mla and plan is not None and plan.attention_backend is not None:
+            if cls.vendor_name == "thead" and plan.name == "glm5_next":
+                from vllm.config import get_current_vllm_config_or_none
+                from vllm_fl.attention.mla_prefill import configure_mla_prefill
+
+                # Plan-only backend queries need no active runtime config.
+                config = get_current_vllm_config_or_none()
+                if config is not None:
+                    configure_mla_prefill(config)
             override = plan.attention_backend(use_mla=use_mla, use_sparse=use_sparse)
             if override:
                 return override

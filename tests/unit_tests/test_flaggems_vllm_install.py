@@ -64,7 +64,7 @@ def test_rejects_wrong_source_after_install(installer):
         patch.object(installer, "package_version", return_value="1.0"),
         patch.object(installer, "source_is_installed", return_value=False),
         patch.object(installer, "pip_install"),
-        pytest.raises(RuntimeError, match="must come from upstream commit"),
+        pytest.raises(RuntimeError, match="must come from pinned public commit"),
     ):
         installer.main()
 
@@ -109,3 +109,18 @@ def test_source_requires_matching_repository_and_commit(installer):
         assert installer.source_is_installed()
         source["vcs_info"]["commit_id"] = "bad"
         assert not installer.source_is_installed()
+
+
+def test_glm_extra_and_ci_installer_pin_the_same_public_source(installer):
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+
+    project = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    with project.open("rb") as handle:
+        extras = tomllib.load(handle)["project"]["optional-dependencies"]["glm5"]
+    fused = [value for value in extras if value.startswith("flaggems_vllm @")]
+    assert fused == [f"flaggems_vllm @ git+{installer.REPOSITORY}@{installer.COMMIT}"]
+    assert len(installer.COMMIT) == 40
+    assert all(char in "0123456789abcdef" for char in installer.COMMIT)
