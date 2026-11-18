@@ -135,22 +135,17 @@ def register_builtins(registry: OpRegistry) -> None:
         registry: Registry to register into
     """
     # Register FlagGems (DEFAULT) implementations
-    try:
-        from .backends.flaggems.register_ops import register_builtins as register_flaggems
+    from .backends.flaggems.register_ops import register_builtins as register_flaggems
 
-        register_flaggems(registry)
-        logger.debug("Registered FlagGems operators")
-    except Exception as e:
-        logger.warning(f"Failed to register FlagGems operators: {e}")
+    register_flaggems(registry)
+    logger.info("Registered FlagGems operators")
+
 
     # Register PyTorch (REFERENCE) implementations
-    try:
-        from .backends.reference.register_ops import register_builtins as register_reference
+    from .backends.reference.register_ops import register_builtins as register_reference
 
-        register_reference(registry)
-        logger.debug("Registered Reference operators")
-    except Exception as e:
-        logger.warning(f"Failed to register Reference operators: {e}")
+    register_reference(registry)
+    logger.info("Registered Reference operators")
 
     # Auto-discover and register VENDOR implementations
     _register_vendor_backends(registry)
