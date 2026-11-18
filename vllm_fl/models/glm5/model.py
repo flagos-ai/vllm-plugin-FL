@@ -611,7 +611,7 @@ class Glm5NextMLAAttention(DeepseekV2MLAAttention):
         from vllm_fl.activation import PendingPatch, temporary_patches
 
         construction_patches = []
-        if current_platform.is_cuda() and not use_nvidia_reference():
+        if current_platform.device_type == "cuda" and not use_nvidia_reference():
             from vllm.model_executor.layers import sparse_attn_indexer
             from vllm.model_executor.layers.attention import mla_attention
 
