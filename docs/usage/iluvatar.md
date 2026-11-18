@@ -110,7 +110,7 @@ in scripts or shell history.
 ```bash
 docker login harbor.baai.ac.cn
 
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 ```
@@ -121,7 +121,7 @@ software-stack table after confirming that the registry still exposes it.
 ## 4. Verify the image runtime
 
 This check confirms the CoreX stack inside the image before a service is started.
-The image was built against a `0.28.0+empty` vLLM wheel, so the build asserts
+The image was built against a `0.32.0+empty` vLLM wheel, so the build asserts
 below are the tested contract; a device must be visible for the accelerator check
 to pass.
 
@@ -140,34 +140,25 @@ docker run --rm \
   --entrypoint /bin/bash \
   "$IMAGE" -lc '
 set -euo pipefail
+unset PYTHONPATH
 ixsmi || nvidia-smi || true
 python3 -c "
 import flag_gems
 import torch
 import triton
 import vllm
-import vllm_fl
 
-assert vllm.__version__.startswith(\"0.28\"), vllm.__version__
+assert vllm.__version__.startswith(\"0.32.0\"), vllm.__version__
 assert \"empty\" in vllm.__version__, vllm.__version__
 assert torch.__version__.startswith(\"2.10\"), torch.__version__
-assert flag_gems.__version__.startswith(\"5.3\"), flag_gems.__version__
+assert flag_gems.__version__.startswith(\"5.5.0\"), flag_gems.__version__
 assert triton.__version__.startswith(\"3.6.0\"), triton.__version__
 print(f\"vLLM={vllm.__version__}\")
 print(f\"PyTorch={torch.__version__}\")
 print(f\"Triton={triton.__version__} (FlagTree iluvatar backend)\")
 print(f\"FlagGems={flag_gems.__version__}\")
-print(f\"vLLM-FL={vllm_fl.__file__}\")
 "
-python3 -c "
-import torch
-from vllm.platforms import current_platform
-
-assert torch.cuda.is_available(), \"Iluvatar accelerator is unavailable\"
-assert current_platform.vendor_name == \"iluvatar\", current_platform.vendor_name
-print(f\"Devices={torch.cuda.device_count()}\")
-print(f\"Platform={current_platform}\")
-"
+python3 -c "import torch; assert torch.cuda.is_available(); print(torch.cuda.device_count())"
 '
 ```
 
@@ -206,11 +197,13 @@ docker run --rm -d \
   --entrypoint /bin/bash \
   "$IMAGE" -lc '
 set -euo pipefail
+unset PYTHONPATH
 cd /workspace/vllm-plugin-FL
 python3 -m pip install \
   --no-build-isolation \
   --no-deps \
   -e .
+python3 -c "from vllm.platforms import current_platform; assert current_platform.vendor_name == \"iluvatar\", current_platform"
 exec vllm serve "$MODEL" \
   --served-model-name "$MODEL_NAME" \
   --host 0.0.0.0 \
@@ -307,28 +300,26 @@ Stop the example service with:
 docker stop vllm-fl-iluvatar
 ```
 
-## 7. Build the same stack from the base image
+## 7. CI dependency reuse and image maintenance
 
-Use this path only when the prebuilt Harbor image is unavailable. The base image
-already provides the CoreX 4.5 stack with FlagTree and Triton, so no separate
-`triton` install is required. The build needs the `0.28.0+empty` vLLM wheel in
-the build context.
+The `0.28.0` base-image entry above records image ancestry only. It is **not**
+the deployment tag or a supported runtime version for this checkout. Deploy
+`v0.32.0-iluvatar-ci`; do not use an old 0.28 wheel to rebuild this environment.
 
-```bash
-mkdir -p docker/iluvatar/wheels
-cp /path/to/vllm-0.28.0+empty-*.whl docker/iluvatar/wheels/
+CI compares the installed FlagGems-vllm source with the expected repository and
+commit in [the installer](../../.github/scripts/install_flaggems_vllm.py).
+A matching Git install or local Git checkout is reused; an absent, unknown, or
+mismatching revision is replaced with `--no-deps --no-build-isolation`. Package
+version alone is not source-revision evidence. CI also reuses pytest-xdist >=3
+and installs it only if missing or too old. The checked-out plugin is always
+installed with `--no-deps --no-build-isolation -e .`.
 
-docker build \
-  --target ci \
-  -t my-registry/vllm-plugin-fl:v0.28.0-iluvatar-ci \
-  -f docker/iluvatar/Dockerfile docker/iluvatar
-```
-
-The `ci` stage asserts the tested contract while building: vLLM `0.28` with
-`empty` in the version, PyTorch `2.10`, and FlagGems `5.3`. Run the runtime
-verification from step 4 before starting a service. Moving to a new FlagTree,
-FlagGems, or CoreX revision requires re-running the operator tests and real dense
-and MoE model inference before calling the environment supported.
+The image must already supply the CoreX runtime, empty vLLM, FlagTree/Triton,
+FlagGems, FlagGems-vllm, build tools, and test dependencies. Image metadata alone
+does not prove that these are present: run steps 4–6 in a newly created container
+and retain its package inventory, source revisions, installation log, and real
+inference response. Installing additional dependencies during that check means
+it did not establish the plugin-only installation contract.
 
 ## Troubleshooting
 

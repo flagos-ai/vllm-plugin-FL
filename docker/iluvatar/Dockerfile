@@ -12,21 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# vLLM 0.28 CI image for Iluvatar BI-V150.
-# Base is the validated CoreX 4.5 stack (registry name still contains 0.24.0).
-# Build context must include:
-#   docker/iluvatar/wheels/vllm-0.28.0+empty-cp312-cp312-linux_x86_64.whl
-# Example:
-#   mkdir -p docker/iluvatar/wheels
-#   cp /path/to/vllm-0.28.0+empty-*.whl docker/iluvatar/wheels/
-#   docker build --target ci -t harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci -f docker/iluvatar/Dockerfile docker/iluvatar
-ARG ILUVATAR_BASE_IMAGE=harbor.baai.ac.cn/plugin/iluvatar-corex4.5.0-flagtree0.6.0-triton3.6.0-cxnone-vllm_fl0.24.0:20260909
+# Extend the published 0.32 CoreX stack without replacing its runtime packages.
+# This Dockerfile is not the recipe that originally produced the published image.
+ARG ILUVATAR_BASE_IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci
 
 # ---------- base stage ----------
 FROM ${ILUVATAR_BASE_IMAGE} AS base
 
 ARG ILUVATAR_BASE_IMAGE
-ARG VLLM_VERSION=0.28.0
+ARG VLLM_VERSION=0.32.0
 ARG TORCH_VERSION=2.10.0
 ARG DRIVER_VERSION=4.5.0
 ARG BUILD_DATE=unknown
@@ -36,7 +30,7 @@ ARG IMAGE_STAGE=dev
 ARG SOURCE_URL=https://github.com/flagos-ai/vllm-plugin-FL
 
 LABEL org.opencontainers.image.title="vllm-plugin-fl" \
-      org.opencontainers.image.description="Iluvatar BI-V150 image for vllm-plugin-FL (vLLM 0.28)" \
+      org.opencontainers.image.description="Iluvatar BI-V150 image for vllm-plugin-FL (vLLM 0.32)" \
       org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
@@ -52,10 +46,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VLLM_PLUGINS=fl \
     GEMS_VENDOR=iluvatar
 
-COPY wheels/ /tmp/vllm-empty-wheels/
-RUN python -m pip install --no-cache-dir --force-reinstall --no-deps /tmp/vllm-empty-wheels/vllm-0.28.0+empty-*.whl \
- && rm -rf /tmp/vllm-empty-wheels \
- && python - <<'PY'
+RUN env -u PYTHONPATH python - <<'PY'
 from importlib.metadata import PackageNotFoundError, version
 
 def dist(*names):
@@ -70,10 +61,10 @@ vllm = dist("vllm")
 torch = dist("torch")
 flag_gems = dist("flag-gems", "flag_gems")
 
-assert vllm.startswith("0.28"), vllm
+assert vllm.startswith("0.32.0"), vllm
 assert "empty" in vllm, vllm
 assert torch.startswith("2.10"), torch
-assert flag_gems.startswith("5.3"), flag_gems
+assert flag_gems.startswith("5.5.0"), flag_gems
 print(f"vLLM {vllm} / torch {torch} / FlagGems {flag_gems} - base stack OK")
 PY
 
@@ -95,6 +86,7 @@ WORKDIR /workspace
 FROM dev AS ci
 
 RUN python -m pip install --no-cache-dir \
+        "pytest-xdist>=3.0.0" \
         pytest-timeout \
         pytest-metadata \
         requests \

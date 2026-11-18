@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, distribution, version
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 RELEASE = "v0.2.0"
 COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
@@ -24,6 +26,41 @@ def package_version(name):
         return None
 
 
+def _repository_matches(url):
+    return url.rstrip("/").removesuffix(".git") == REPOSITORY.rstrip("/").removesuffix(
+        ".git"
+    )
+
+
+def _editable_commit(source):
+    parsed = urlparse(source.get("url", ""))
+    if parsed.scheme != "file" or not source.get("dir_info", {}).get("editable"):
+        return None
+    path = Path(unquote(parsed.path))
+    try:
+        remote = subprocess.check_output(
+            ["git", "-C", str(path), "remote", "get-url", "origin"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        head = subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    try:
+        dirty = subprocess.check_output(
+            ["git", "-C", str(path), "status", "--porcelain", "--untracked-files=no"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return head if _repository_matches(remote) and not dirty else None
+
+
 def release_is_installed(commit=COMMIT, source_archive=None, archive_sha256=None):
     try:
         text = distribution("flaggems-vllm").read_text("direct_url.json")
@@ -33,10 +70,12 @@ def release_is_installed(commit=COMMIT, source_archive=None, archive_sha256=None
     if source_archive is not None:
         digest = source.get("archive_info", {}).get("hashes", {}).get("sha256")
         return source.get("url") == source_archive and digest == archive_sha256
-    return (
-        source.get("url", "").removesuffix(".git") == REPOSITORY.removesuffix(".git")
+    if (
+        _repository_matches(source.get("url", ""))
         and source.get("vcs_info", {}).get("commit_id") == commit
-    )
+    ):
+        return True
+    return _editable_commit(source) == commit
 
 
 def pip_install(*args):

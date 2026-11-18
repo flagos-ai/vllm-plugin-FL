@@ -25,6 +25,18 @@ fi
 CI_FLAGGEMS_VLLM_VENDOR=iluvatar python .github/scripts/install_flaggems_vllm.py
 python -m pip install --no-build-isolation --no-deps -e .
 
-# The shared unit and functional runners pass -n to pytest. Older CI images
-# preinstall the other pytest plugins but do not include xdist.
-python -m pip install --break-system-packages "pytest-xdist>=3.0.0"
+# The shared unit and functional runners pass -n to pytest. Reuse the image's
+# dependency when it satisfies CI; install only when it is absent or too old.
+python - <<'PY'
+from importlib.metadata import PackageNotFoundError, version
+from packaging.version import Version
+try:
+    installed = Version(version("pytest-xdist"))
+except (PackageNotFoundError, ValueError):
+    installed = None
+if installed is None or installed < Version("3.0.0"):
+    import subprocess, sys
+    subprocess.run([sys.executable, "-m", "pip", "install", "--break-system-packages", "pytest-xdist>=3.0.0"], check=True)
+else:
+    print(f"Reusing preinstalled pytest-xdist {installed}")
+PY
