@@ -496,7 +496,9 @@ def test_gcu_internal_i64_enabled_with_i32_argument_signature():
 @pytest.mark.parametrize("part", ["LO", "HI"])
 @pytest.mark.parametrize("symbol", ["tops_truncf_v2_fp32_to_v1_bf16", "other_symbol"])
 @pytest.mark.parametrize("context", ["", "compiler context\n"])
-def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(part, symbol, context):
+def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(
+    part, symbol, context
+):
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
     _, heuristics, _, _, _ = make_provider()
@@ -523,7 +525,9 @@ def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(part, symbol, 
 
 
 @pytest.mark.parametrize("device", ["gcu", "cpu", "cuda"])
-@pytest.mark.parametrize("variant", ["other_symbol", "context", "runtime", "exact", "relocation", "no_pic"])
+@pytest.mark.parametrize(
+    "variant", ["other_symbol", "context", "runtime", "exact", "relocation", "no_pic"]
+)
 def test_gcu_linker_adapter_preserves_unrelated_failures(device, variant):
     _, heuristics, _, _, _ = make_provider()
     inductor._install_gcu_resource_errors(heuristics)
