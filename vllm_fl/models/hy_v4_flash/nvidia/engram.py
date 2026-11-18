@@ -24,6 +24,8 @@ from vllm.triton_utils import triton
 from vllm.utils.platform_utils import is_uva_available
 from vllm.utils.torch_utils import get_accelerator_view_from_cpu_tensor
 
+from vllm_fl.ops import hy4_flash_engram as engram_ops
+
 logger = init_logger(__name__)
 
 
@@ -327,16 +329,18 @@ class FlashEmbedding(nn.Module):
         rows = torch.empty(
             shape, dtype=self.embedding.weight.dtype, device=hashes.device
         )
-        if indices.numel() == 0:
-            return rows.float()
-        self._lookup(self.embedding.weight, indices, rows)
-        if self.fp8:
-            scales = torch.empty(
-                indices.shape, dtype=torch.bfloat16, device=hashes.device
-            )
-            self._lookup(self.embedding.weight_scale_inv, indices, scales, scale=True)
-            return rows.float() * scales.float().unsqueeze(-1)
-        return rows.float()
+        scales = (
+            torch.empty(indices.shape, dtype=torch.bfloat16, device=hashes.device)
+            if self.fp8
+            else None
+        )
+        if indices.numel():
+            self._lookup(self.embedding.weight, indices, rows)
+            if scales is not None:
+                self._lookup(
+                    self.embedding.weight_scale_inv, indices, scales, scale=True
+                )
+        return rows, scales
 
 
 class FlashEngram(nn.Module):
@@ -407,41 +411,31 @@ class FlashEngram(nn.Module):
         )
 
     def forward(self, hidden, hashes):
-        rows = self.multi_head_embedding(hashes)
-        eps = torch.finfo(torch.float32).eps
-        gamma = torch.stack(
-            [norm.weight for norm in self.lookup_per_head_norms]
-        ).float()
+        rows, row_scales = self.multi_head_embedding(hashes)
+        gamma = torch.stack([norm.weight for norm in self.lookup_per_head_norms])
         local = self.multi_head_embedding
         local_hashes = hashes[:, local.head_start : local.head_end]
-        x = rows.masked_fill(local_hashes.unsqueeze(-1) < 0, 0)
-        x = (x * (x.square().mean(-1, keepdim=True) + eps).rsqrt() * gamma).to(
-            hidden.dtype
-        )
-        x = x.flatten(1)
+        x = engram_ops.lookup_norm(
+            rows, row_scales, gamma, local_hashes, hidden.dtype
+        ).flatten(1)
         gates = []
         for channel in range(self.hc_mult):
             key = self.key_projs[channel](x)
             if local.tp_size > 1:
                 key = tensor_model_parallel_all_reduce(key)
-            gate = (
-                self.norm_key[channel](key)
-                * self.norm_query[channel](hidden[:, channel])
-            ).sum(-1)
-            gate = gate * self.hidden_size**-0.5
-            gates.append((gate.abs().clamp_min(1e-6).sqrt() * gate.sign()).sigmoid())
+            gates.append(
+                engram_ops.gate(
+                    self.norm_key[channel](key),
+                    self.norm_query[channel](hidden[:, channel]),
+                )
+            )
         gate = torch.stack(gates, dim=1)
         value = self.value_proj(x)
         if local.tp_size > 1:
             value = tensor_model_parallel_all_reduce(value)
-        value = value.float()
-        signal = (
-            self.unified_pre_gamma.float()
-            * value
-            * (value.square().mean(-1, keepdim=True) + eps).rsqrt()
+        scales = torch.stack(list(self.unified_per_hc_scales))
+        # Which whole token rows may contribute is hash metadata, not math.
+        valid_rows = (hashes >= 0).any(-1)
+        return engram_ops.residual(
+            hidden, value, gate, self.unified_pre_gamma, scales, valid_rows
         )
-        scales = torch.stack(list(self.unified_per_hc_scales)).float()
-        result = ((gate.float().unsqueeze(-1) + scales) * signal.unsqueeze(1)).to(
-            hidden.dtype
-        )
-        return hidden + result.masked_fill((hashes < 0).all(-1)[:, None, None], 0)

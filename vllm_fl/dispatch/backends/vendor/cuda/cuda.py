@@ -289,4 +289,5 @@ class CudaBackend(Backend):
             routed_scaling_factor,
             bias,
             scoring_func,
+            is_padding=is_padding,
         )

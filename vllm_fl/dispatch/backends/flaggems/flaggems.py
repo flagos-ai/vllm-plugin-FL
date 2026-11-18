@@ -300,6 +300,25 @@ class FlagGemsBackend(Backend):
             is_padding=is_padding,
         )
 
+    def hy4_flash_engram_gate(self, key, query):
+        from flaggems_vllm import hy4_flash_engram_gate
+
+        return hy4_flash_engram_gate(key, query)
+
+    def hy4_flash_engram_lookup_norm(
+        self, rows, row_scale, gamma, local_hashes, out_dtype
+    ):
+        from flaggems_vllm import hy4_flash_engram_lookup_norm
+
+        return hy4_flash_engram_lookup_norm(
+            rows, row_scale, gamma, local_hashes, out_dtype
+        )
+
+    def hy4_flash_engram_residual(self, hidden, value, gate, gamma, scales, valid_rows):
+        from flaggems_vllm import hy4_flash_engram_residual
+
+        return hy4_flash_engram_residual(hidden, value, gate, gamma, scales, valid_rows)
+
     def hy4_flash_fwht_quant_fp8(self, vectors):
         from flaggems_vllm import hy4_flash_fwht_quant_fp8
 
@@ -320,20 +339,15 @@ class FlagGemsBackend(Backend):
 
         return hy4_flash_select_groups(*args, **kwargs)
 
-    def hy4_flash_expand_groups(self, *args, **kwargs):
-        from flaggems_vllm import hy4_flash_expand_groups
-
-        return hy4_flash_expand_groups(*args, **kwargs)
-
     def hy4_flash_write_pool(self, *args, **kwargs):
         from flaggems_vllm import hy4_flash_write_pool
 
         return hy4_flash_write_pool(*args, **kwargs)
 
-    def hy4_flash_prepare_groups(self, *args, **kwargs):
-        from flaggems_vllm import hy4_flash_prepare_groups
+    def hy4_flash_gather_groups(self, *args, **kwargs):
+        from flaggems_vllm import hy4_flash_gather_groups
 
-        return hy4_flash_prepare_groups(*args, **kwargs)
+        return hy4_flash_gather_groups(*args, **kwargs)
 
     def hy4_flash_write_tails(self, *args, **kwargs):
         from flaggems_vllm import hy4_flash_write_tails

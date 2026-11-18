@@ -9,7 +9,7 @@ model="${1:?Usage: bash examples/hy4_flash/serve.sh MODEL_PATH_OR_ID}"
 export VLLM_PLUGINS=fl
 export VLLM_USE_V2_MODEL_RUNNER=1
 export VLLM_FL_CONFIG="$example_dir/dispatch.yaml"
-export VLLM_FL_FLAGOS_WHITELIST="grouped_topk,hy4_flash_fwht_quant_fp8,hy4_flash_gated_pool,hy4_flash_rotate_indexer,hy4_flash_select_groups,hy4_flash_expand_groups,hy4_flash_write_pool,hy4_flash_prepare_groups,hy4_flash_write_tails"
+export VLLM_FL_FLAGOS_WHITELIST="grouped_topk,hy4_flash_fwht_quant_fp8,hy4_flash_gated_pool,hy4_flash_rotate_indexer,hy4_flash_select_groups,hy4_flash_write_pool,hy4_flash_gather_groups,hy4_flash_write_tails,hy4_flash_engram_lookup_norm,hy4_flash_engram_gate,hy4_flash_engram_residual"
 export FLASH_MODE="${FLASH_MODE:-load}"
 
 exec vllm serve "$model" \

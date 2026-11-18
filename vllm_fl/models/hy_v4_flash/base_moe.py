@@ -116,11 +116,7 @@ class HYV4MoEFused(HYV4MoEFused32):
             _get_padding_mask,
         )
 
-        from vllm_fl.models.hy_v4_flash_routing import native_grouped_topk
-
-        self._native_grouped_topk = native_grouped_topk
         self._flash_padding_mask = _get_padding_mask
-        self._native_routing_logged = False
         vllm_config = get_current_vllm_config()
         eplb_config = vllm_config.parallel_config.eplb_config
         self.enable_eplb = enable_eplb
@@ -200,25 +196,9 @@ class HYV4MoEFused(HYV4MoEFused32):
             )
 
     def _flash_routing(self, hidden_states, gating_output, topk, renormalize):
-        mask = self._flash_padding_mask(hidden_states.shape[0])
-        if mask is None and gating_output.shape[0] > 0:
-            if not self._native_routing_logged:
-                logger.info(
-                    "Flash grouped_topk hit: native vLLM0.32 ABI8 with absent mask"
-                )
-                self._native_routing_logged = True
-            return self._native_grouped_topk(
-                gating_output,
-                1,
-                1,
-                topk,
-                renormalize,
-                self._flash_scaling_factor,
-                self.expert_bias,
-                1,
-            )
-        from vllm_fl.models.hy_v4_flash_routing import grouped_topk
+        from vllm_fl.dispatch.grouped_topk import grouped_topk
 
+        mask = self._flash_padding_mask(hidden_states.shape[0])
         return grouped_topk(
             gating_output,
             1,

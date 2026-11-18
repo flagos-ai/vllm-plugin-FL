@@ -29,13 +29,6 @@ def select_groups(*args, **kwargs):
     return _select_groups(*args, **kwargs)
 
 
-_expand_groups = CachedOp("hy4_flash_expand_groups")
-
-
-def expand_groups(*args, **kwargs):
-    return _expand_groups(*args, **kwargs)
-
-
 _write_pool = CachedOp("hy4_flash_write_pool")
 
 
@@ -43,11 +36,11 @@ def write_pool(*args, **kwargs):
     return _write_pool(*args, **kwargs)
 
 
-_prepare_groups = CachedOp("hy4_flash_prepare_groups")
+_gather_groups = CachedOp("hy4_flash_gather_groups")
 
 
-def prepare_groups(*args, **kwargs):
-    return _prepare_groups(*args, **kwargs)
+def gather_groups(*args, **kwargs):
+    return _gather_groups(*args, **kwargs)
 
 
 _write_tails = CachedOp("hy4_flash_write_tails")

@@ -19,12 +19,18 @@ from vllm.utils.deep_gemm import (
 from vllm.utils.math_utils import cdiv
 from vllm.utils.platform_utils import num_compute_units
 
-from .indexpool_cache import POOL_PAGE_SIZE, IndexPoolCache, IndexPoolMetadata
+from .indexpool_cache import (
+    POOL_PAGE_SIZE,
+    IndexPoolCache,
+    IndexPoolMetadata,
+    tail_ring_size,
+)
+from .indexpool_metadata import expand_groups, prepare_indexpool_metadata
+from .indexpool_workspace import profile_peak_bytes, scoring_chunk_rows
 from vllm_fl.ops.hy4_flash_indexpool import (
-    expand_groups,
     fwht_quantize,
     gated_pool,
-    prepare_groups,
+    gather_groups,
     rotate_indexer,
     select_groups,
     write_pool,
@@ -98,13 +104,46 @@ class FlashCompressedIndexer(nn.Module):
             tail=True,
         )
         self.num_sms = num_compute_units()
+        self.max_batch_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+        self.max_batch_requests = vllm_config.scheduler_config.max_num_seqs
+        self.tail_ring = tail_ring_size(self.ratio, vllm_config.num_speculative_tokens)
+        self.max_scoring_width = self._scoring_width(self.max_model_len)
+        if not 1 <= self.group_budget <= 2048:
+            raise ValueError("IndexPool requires a selection budget of 1..2048")
+        # Reject a globally invalid setting before any cache can be written.
+        scoring_chunk_rows(self.logits_budget, self.max_scoring_width)
         self.varlen = current_platform.is_device_capability_family(100)
+        self.profile_workspace_bytes = profile_peak_bytes(
+            tokens=self.max_batch_tokens,
+            batch=self.max_batch_requests,
+            ratio=self.ratio,
+            tail_ring=self.tail_ring,
+            heads=self.num_heads,
+            budget=self.group_budget,
+            max_width=self.max_scoring_width,
+            page_size=POOL_PAGE_SIZE,
+            logits_elems=self.logits_budget,
+            num_sms=self.num_sms,
+        )
+
+    def _scoring_width(self, max_seq_len):
+        return max(
+            POOL_PAGE_SIZE,
+            cdiv(max_seq_len, self.ratio * POOL_PAGE_SIZE) * POOL_PAGE_SIZE,
+        )
+
+    def _profile(self, device):
+        # V2 profiles with skip_attn=True before binding the KV caches.
+        # Account for peak transients, not a permanent per-layer buffer.
+        torch.empty(self.profile_workspace_bytes, dtype=torch.uint8, device=device)
 
     def forward(self, hidden_states, q_c, positions, rope=None):
         output = self.topk_indices_buffer[: hidden_states.shape[0]]
         output.fill_(-1)
-        metadata = get_forward_context().attn_metadata
+        context = get_forward_context()
+        metadata = context.attn_metadata
         if metadata is None:
+            self._profile(hidden_states.device)
             return output
         if not isinstance(metadata, dict):
             raise TypeError("IndexPool requires per-layer metadata")
@@ -117,51 +156,54 @@ class FlashCompressedIndexer(nn.Module):
         tokens = km.num_actual_tokens
         if tokens == 0 or km.seq_lens.numel() == 0:
             return output
+        width = self._scoring_width(
+            self.max_model_len
+            if context.cudagraph_runtime_mode == CUDAGraphMode.FULL
+            else km.max_seq_len
+        )
+        if width > self.max_scoring_width:
+            raise ValueError("IndexPool metadata exceeds the configured context limit")
+        chunk = scoring_chunk_rows(self.logits_budget, width)
         keys = self.token_key_norm(
             self.token_key_projection(hidden_states)[0]
         ).bfloat16()
         cache, tail = self.k_cache.kv_cache, self.tail_cache.kv_cache
-        (
-            raw,
-            group_positions,
-            group_owner,
-            groups,
-            group_live,
-            owner,
-            logical,
-            upper,
-            live,
-        ) = prepare_groups(
-            keys,
+        plan = prepare_indexpool_metadata(
             positions,
             tail,
+            cache,
+            km.block_table,
             tm.block_table,
             km.query_start_loc,
             km.seq_lens,
             tokens,
             self.ratio,
         )
+        raw = gather_groups(keys, tail, plan.gather_key_rows, plan.gather_tail_slots)
         if raw.shape[0]:
-            values = self.key_value_projection(raw.float())
-            gates = self.key_gate_projection(raw.float())
+            raw_fp32 = raw.float()
+            values = self.key_value_projection(raw_fp32)
+            gates = self.key_gate_projection(raw_fp32)
+            del raw_fp32
             pooled = gated_pool(
                 values, gates, self.intra_group_ape, self.key_norm.weight, self.eps
             ).bfloat16()
+            del values, gates
             quant, scales = fwht_quantize(
                 rotate_indexer(
                     pooled,
-                    group_positions,
+                    plan.group_positions,
                     self.rope_dim,
                     self.rope_parameters,
                     self.rotary_inv_freq,
                 )
             )
-            write_pool(
-                cache, km.block_table, group_owner, groups, group_live, quant, scales
-            )
-        write_tails(
-            keys, positions, tail, tm.block_table, km.query_start_loc, km.seq_lens
-        )
+            write_pool(cache, plan.pool_slots, quant, scales)
+            del pooled, quant, scales
+        del raw
+        write_tails(keys, positions, tail, plan.tail_key_rows, plan.tail_slots)
+        owner, logical, upper, live = plan.owner, plan.logical, plan.upper, plan.live
+        del plan, keys
         query = self.query_projection(q_c)[0][:tokens].reshape(
             tokens, self.num_heads, 128
         )
@@ -187,18 +229,6 @@ class FlashCompressedIndexer(nn.Module):
         quant_q = quant_q[:, None]
         # Native non-SM100 semantics return (q_scale, weights) unchanged.
         mx_scales = None
-        max_seq_len = (
-            self.max_model_len
-            if get_forward_context().cudagraph_runtime_mode == CUDAGraphMode.FULL
-            else km.max_seq_len
-        )
-        width = max(
-            POOL_PAGE_SIZE,
-            cdiv(max_seq_len, self.ratio * POOL_PAGE_SIZE) * POOL_PAGE_SIZE,
-        )
-        if self.logits_budget < width:
-            raise ValueError("IndexPool logits budget cannot hold a single scoring row")
-        chunk = max(1, self.logits_budget // width)
         for begin in range(0, tokens, chunk):
             end = min(tokens, begin + chunk)
             bounds = upper[begin:end]
@@ -207,7 +237,7 @@ class FlashCompressedIndexer(nn.Module):
             schedule = get_paged_mqa_logits_metadata(
                 lengths, POOL_PAGE_SIZE, self.num_sms, indices=indices
             )
-            table = km.block_table[owner[begin:end]]
+            table = km.block_table[owner[begin:end], : cdiv(width, POOL_PAGE_SIZE)]
             logits = fp8_fp4_paged_mqa_logits(
                 (
                     quant_q[begin:end],
@@ -223,6 +253,7 @@ class FlashCompressedIndexer(nn.Module):
                 indices=indices,
             )
             recalled = select_groups(logits, bounds, self.group_budget)
+            del logits
             output[begin:end].copy_(
                 expand_groups(
                     recalled,
@@ -231,4 +262,5 @@ class FlashCompressedIndexer(nn.Module):
                     active=live[begin:end],
                 )
             )
+            del recalled, table, schedule, lengths, indices, bounds
         return output
