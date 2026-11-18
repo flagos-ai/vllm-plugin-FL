@@ -114,7 +114,7 @@ def test_partial_compilation_metadata_preserves_platform_config_contract(monkeyp
 
 
 @pytest.mark.parametrize("vendor", ["enflame", "gcu"])
-def test_codegen_version_invalidates_cache_preserving_user_config(monkeypatch, vendor):
+def test_codegen_version_invalidates_cache_without_mutating_user_config(monkeypatch, vendor):
     config = config_for_platform()
     user = {"customer_option": [1, 3]}
     config.additional_config = user
