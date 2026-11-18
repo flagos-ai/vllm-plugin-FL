@@ -219,11 +219,11 @@ class VllmFunctionalW8A8Experts(TritonExperts):
 
 
 class FlagGemsW8A8Experts(TritonExperts):
-    """Keep inputs floating-point and let FlagGems own the full W8A8 pipeline.
+    """Keep inputs floating-point for the explicitly selected fused provider.
 
     The checkpoint contract is ``w1=[E,2I,K]``, ``w2=[E,K,I]`` with
-    per-channel scales ``[E,2I,1]`` and ``[E,K,1]``. FlagGems produces the
-    two dynamic activation scales internally as ``[M,1]`` and
+    per-channel scales ``[E,2I,1]`` and ``[E,K,1]``. The provider produces
+    the two dynamic activation scales internally as ``[M,1]`` and
     ``[M*top_k,1]``.
     """
 

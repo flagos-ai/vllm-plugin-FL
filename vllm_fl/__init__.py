@@ -328,3 +328,11 @@ def register_model():
         # glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+
+    from vllm.reasoning import ReasoningParserManager
+
+    ReasoningParserManager.register_lazy_module(
+        "hy_v4",
+        "vllm_fl.reasoning.hy_v4_reasoning",
+        "HYV4ReasoningParser",
+    )

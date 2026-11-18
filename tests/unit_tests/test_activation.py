@@ -83,17 +83,30 @@ def test_activate_for_model_same_model_is_idempotent():
     assert activate_for_model("glm") is plan
 
 
-def test_activate_invalidates_cached_policy(monkeypatch):
+@pytest.mark.parametrize("platform_order", [None, ["flagos", "vendor", "reference"]])
+def test_activate_invalidates_cached_policy(monkeypatch, tmp_path, platform_order):
     """Finding 2: cached policy must observe the plan's defaults."""
     monkeypatch.delenv("VLLM_FL_CONFIG", raising=False)
     monkeypatch.delenv("VLLM_FL_PER_OP", raising=False)
 
+    from vllm_fl.dispatch import config, policy
     from vllm_fl.dispatch.policy import PolicyManager
+
+    platform_config = tmp_path / "platform.yaml"
+    platform_config.write_text(
+        "{}"
+        if platform_order is None
+        else "op_backends:\n  moe_align_block_size: [flagos, vendor, reference]\n"
+    )
+    monkeypatch.setattr(config, "get_config_path", lambda: platform_config)
+    monkeypatch.setattr(policy, "get_op_config", lambda: None)
 
     manager = PolicyManager.get_instance()
     manager.reset_global_policy()
     before_epoch = manager.get_policy_epoch()
-    assert manager.get_policy().get_per_op_order("moe_align_block_size") is None
+    assert (
+        manager.get_policy().get_per_op_order("moe_align_block_size") == platform_order
+    )
 
     activate(
         ActivationPlan(
