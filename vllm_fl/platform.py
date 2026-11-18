@@ -437,24 +437,13 @@ class PlatformFL(Platform):
                     "speculative decoding for this configuration."
                 )
         if cls.vendor_name in ("gcu", "enflame"):
-            # vLLM may load a compiled artifact before invoking Inductor, so
-            # invalidate its cache as well as Torch's dtype-corrupted artifacts.
-            additional = getattr(vllm_config, "additional_config", {})
-            if not isinstance(additional, dict):
-                raise TypeError("Enflame additional_config must be a dictionary")
-            from vllm_fl.dispatch.backends.vendor.gcu.impl.inductor import (
-                gcu_codegen_mode,
+            # Version the Inductor cache through its supported pass UUID rather
+            # than mutating vLLM's user-facing additional_config.
+            from vllm_fl.dispatch.backends.vendor.gcu.compilation_config import (
+                configure_codegen_cache,
             )
 
-            mode = gcu_codegen_mode()
-            if "fl_gcu_codegen" in additional and additional["fl_gcu_codegen"] != mode:
-                raise ValueError(
-                    "additional_config.fl_gcu_codegen is reserved for the GCU backend"
-                )
-            vllm_config.additional_config = {
-                **additional,
-                "fl_gcu_codegen": mode,
-            }
+            configure_codegen_cache(vllm_config.compilation_config)
             from vllm_fl.attention.utils import patch_mm_encoder_attention
 
             # Install before CustomOp caches even a disabled encoder's native

@@ -56,10 +56,12 @@ def test_enflame_inductor_disables_combo_without_disabling_graphs(monkeypatch, v
     PlatformFL.check_and_update_config(config)
 
     assert compilation.inductor_compile_config is options
-    assert options == {
-        **original_options,
-        "combo_kernels": False,
-        "benchmark_combo_kernel": False,
+    assert options["combo_kernels"] is False
+    assert options["benchmark_combo_kernel"] is False
+    assert options["epilogue_fusion"] is False
+    assert set(options) == {
+        *original_options,
+        "post_grad_custom_post_pass",
     }
     assert (
         compilation.mode,
@@ -113,19 +115,23 @@ def test_partial_compilation_metadata_preserves_platform_config_contract(monkeyp
 
 
 @pytest.mark.parametrize("vendor", ["enflame", "gcu"])
-def test_codegen_version_invalidates_cache_preserving_user_config(monkeypatch, vendor):
+def test_codegen_version_invalidates_cache_without_mutating_user_config(monkeypatch, vendor):
     config = config_for_platform()
     user = {"customer_option": [1, 3]}
     config.additional_config = user
     simulate_platform(monkeypatch, vendor)
     PlatformFL.check_and_update_config(config)
-    assert config.additional_config == {
-        "customer_option": [1, 3],
-        "fl_gcu_codegen": "preserve_dtype_v1",
-    }
-    assert user == {"customer_option": [1, 3]}
+    assert config.additional_config is user
+    assert config.additional_config == {"customer_option": [1, 3]}
+    codegen_pass = config.compilation_config.inductor_compile_config[
+        "post_grad_custom_post_pass"
+    ]
+    assert codegen_pass.uuid() == ("fl_gcu_codegen", "preserve_dtype_v1", None)
     PlatformFL.check_and_update_config(config)
-    assert len(config.additional_config) == 2
+    assert config.additional_config == {"customer_option": [1, 3]}
+    assert config.compilation_config.inductor_compile_config[
+        "post_grad_custom_post_pass"
+    ].uuid() == ("fl_gcu_codegen", "preserve_dtype_v1", None)
 
 
 def test_other_vendor_does_not_change_additional_config(monkeypatch):
@@ -141,13 +147,6 @@ def test_codegen_cache_salt_respects_disabled_adapter(monkeypatch):
     config = config_for_platform()
     simulate_platform(monkeypatch, "enflame")
     PlatformFL.check_and_update_config(config)
-    assert config.additional_config["fl_gcu_codegen"] == "vendor_v1"
-
-
-def test_codegen_cache_key_conflict_is_explicit(monkeypatch):
-    config = config_for_platform()
-    config.additional_config = {"fl_gcu_codegen": "customer"}
-    simulate_platform(monkeypatch, "enflame")
-    with pytest.raises(ValueError, match="reserved"):
-        PlatformFL.check_and_update_config(config)
-    assert config.additional_config == {"fl_gcu_codegen": "customer"}
+    assert config.compilation_config.inductor_compile_config[
+        "post_grad_custom_post_pass"
+    ].uuid() == ("fl_gcu_codegen", "vendor_v1", None)
