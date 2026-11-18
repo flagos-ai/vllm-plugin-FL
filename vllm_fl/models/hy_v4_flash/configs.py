@@ -138,6 +138,10 @@ class HYV4FlashConfig(HYV4Config):
         if nested:
             rope.pop("mrope_section", None)
             rope.pop("mrope_interleaved", None)
+            # transformers >= 5.x 会在 __post_init__ 里把默认平铺 rope 参数
+            # （如 rope_theta=10000.0）塞回 rope_parameters；per-layer 配置下应丢弃。
+            for flat_key in ("rope_theta", "rope_type", "partial_rotary_factor"):
+                rope.pop(flat_key, None)
             if any(not isinstance(value, dict) for value in rope.values()):
                 raise ValueError("Per-layer RoPE cannot contain flat RoPE parameters")
         self.rope_parameters = rope

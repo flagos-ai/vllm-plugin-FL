@@ -70,7 +70,9 @@ class HYV4FlashAttention(HYV4MLAAttention):
         self.learnable_sink = config.learnable_sink
         self.use_hpc_gated_mla = False
         capability = current_platform.get_device_capability()
-        if capability is None or capability.major not in (9, 10):
+        if current_platform.device_name != "metax" and (
+            capability is None or capability.major not in (9, 10)
+        ):
             raise NotImplementedError(
                 "Flash MLA requires Hopper or Blackwell data-center GPUs"
             )

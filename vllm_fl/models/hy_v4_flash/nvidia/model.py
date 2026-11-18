@@ -47,8 +47,8 @@ def validate_runtime(vllm_config: VllmConfig) -> None:
             raise ValueError(f"HYV4 Flash requires {field}=1; only TP+EP is supported")
     if parallel.enable_eplb or parallel.enable_dbo:
         raise ValueError("HYV4 Flash does not support EPLB or dual batch overlap")
-    if not current_platform.is_cuda():
-        raise NotImplementedError("HYV4 Flash requires NVIDIA CUDA")
+    if not (current_platform.is_cuda() or current_platform.device_name == "metax"):
+        raise NotImplementedError("HYV4 Flash requires NVIDIA CUDA or MetaX MACA")
     if vllm_config.model_config.dtype != torch.bfloat16:
         raise ValueError("HYV4 Flash requires bfloat16 compute")
     if not vllm_config.use_v2_model_runner:
@@ -72,11 +72,14 @@ def validate_runtime(vllm_config: VllmConfig) -> None:
             raise ValueError(f"{field} must be divisible by tensor_parallel_size")
     quantization = vllm_config.model_config.quantization
     if quantization == "compressed-tensors":
-        from vllm.models.hy_v4.dfly_config import _validate_block_fp8_config
+        # vLLM 0.32 移除了 vllm.models.hy_v4.dfly_config；且本权重是 INT8 W8A8
+        # (compressed-tensors int-quantized)，FP8 block 校验不适用。metax 下跳过。
+        if current_platform.device_name != "metax":
+            from vllm.models.hy_v4.dfly_config import _validate_block_fp8_config
 
-        _validate_block_fp8_config(
-            vllm_config.model_config.model_arch_config.quantization_config
-        )
+            _validate_block_fp8_config(
+                vllm_config.model_config.model_arch_config.quantization_config
+            )
     elif quantization == "fp8":
         fp8_quant = vllm_config.quant_config
         if list(getattr(fp8_quant, "weight_block_size", None) or []) != [128, 128]:

@@ -35,12 +35,13 @@ from vllm_fl.ops.hy4_flash_indexpool import (
 class FlashCompressedIndexer(nn.Module):
     def __init__(self, vllm_config, config, topk_indices_buffer, prefix):
         super().__init__()
-        if not current_platform.is_device_capability_family(90):
-            raise NotImplementedError(
-                "This Flash plugin backport supports H100 SM90 FP8 scales only"
-            )
-        if not has_deep_gemm():
-            raise RuntimeError("Flash IndexPool requires DeepGEMM paged MQA")
+        if current_platform.device_name != "metax":
+            if not current_platform.is_device_capability_family(90):
+                raise NotImplementedError(
+                    "This Flash plugin backport supports H100 SM90 FP8 scales only"
+                )
+            if not has_deep_gemm():
+                raise RuntimeError("Flash IndexPool requires DeepGEMM paged MQA")
         self.ratio = config.compressed_indexer_compress_ratio
         self.group_budget = config.compressed_indexer_group_topk - 1
         self.num_heads = config.compressed_indexer_num_attention_heads

@@ -45,6 +45,10 @@ def install() -> bool:
     # before vllm's triton_utils imports triton.experimental.gluon.
     from . import _fl_triton_experimental_stub  # noqa: F401
 
+    from . import _fl_metax_empty_vllm_ops  # noqa: F401
+    from . import _fl_metax_uva  # noqa: F401
+    from . import _fl_metax_int8_quant_ops  # noqa: F401
+
     from . import (  # noqa: F401
         _fl_metax_annassign_compat,
         _fl_metax_boolchain_compat,
