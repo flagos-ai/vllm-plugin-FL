@@ -61,7 +61,7 @@ _moe_align_block_size = CachedOp("moe_align_block_size")
 _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
 _moe_sum = CachedOp("moe_sum")
 
-logger = init_logger(__name__)
+logger = init_logger("vllm.fl.fused_moe")
 
 
 def _should_use_fl_triton_experts() -> bool:
@@ -431,8 +431,19 @@ class TritonExpertsFL(TritonExperts):
             )
             return
 
-        # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
-        if self._lora_context is None and current_platform.is_cuda():
+        # The monolithic FlagGems API has no activation_config parameter.
+        # Preserve configured clamp and specialized SITU/SwiGLU-OAI semantics
+        # through the modular pipeline, which calls apply_moe_activation below.
+        # Plain SiLU/GELU keep the existing optimized FlagGems path.
+        monolithic_activation_supported = (
+            activation in (MoEActivation.SILU, MoEActivation.GELU)
+            and self.activation_config.clamp_limit is None
+        )
+        if (
+            self._lora_context is None
+            and current_platform.is_cuda()
+            and monolithic_activation_supported
+        ):
             from flaggems_vllm import fused_experts_impl
 
             output.copy_(
@@ -461,10 +472,16 @@ class TritonExpertsFL(TritonExperts):
                     w2_bias=self.w2_bias,
                 )
             )
+            logger.info_once(
+                "FL_FUSED_MOE_EXECUTED provider=flaggems_vllm.fused_experts_impl "
+                "dtype=%s shape=%s weight_dtype=%s activation=%s capture=%s",
+                hidden_states.dtype, tuple(hidden_states.shape), w1.dtype,
+                activation.value, torch.cuda.is_current_stream_capturing(),
+            )
             return
 
-        # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
-        # adapters can be injected between GEMM1/activation/GEMM2.
+        # Modular pipeline preserves configured activations and permits LoRA
+        # adapters between GEMM1/activation/GEMM2.
         # Check constraints.
         if self.quant_config.use_int4_w4a16:
             assert hidden_states.size(-1) // 2 == w1.size(2), "Hidden size mismatch"

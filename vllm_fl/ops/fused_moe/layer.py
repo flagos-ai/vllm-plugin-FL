@@ -63,6 +63,10 @@ def FusedMoEFactoryFL(*args, **kwargs) -> MoERunner:
     """
     runner: MoERunner = _OrigFusedMoEFactory(*args, **kwargs)
 
+    from .mxfp4_marlin import maybe_install_mxfp4_marlin
+
+    maybe_install_mxfp4_marlin(runner)
+
     # Quantized models must keep the quantization method chosen upstream.
     if isinstance(
         runner.routed_experts.quant_method,

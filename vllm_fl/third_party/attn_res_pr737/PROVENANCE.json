@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/flagos-ai/FlagGems-vllm",
+  "pull_request": 737,
+  "source_commit": "5b5329338f0275c021e647971e421330880c8981",
+  "merge_commit": "db220e684094896c0e4a038bb2a44ab6e8c95aea",
+  "source_file": "src/flaggems_vllm/ops/attn_res.py",
+  "source_file_sha256": "4b0ebdfb665621e9625919735076b7fe0d0193c05c0efa65362114f348785df9",
+  "license": "Apache-2.0; algorithm adapted via vLLM from MIT flash-linear-attention",
+  "local_changes": [
+    "Remove unused runtime import",
+    "Replace runtime.get_tuned_config with local conversion of the same 16 PR YAML configs; kernel and launch logic unchanged",
+    "Forward-only validation rejects requires_grad inputs only while autograd is enabled; permits Parameters under no_grad/inference_mode. Kernel math and launch logic are unchanged."
+  ],
+  "required_fixed_dependency": "flaggems-vllm@b5c2c2249319277ccda4d41aa0f65164bd9b2a19 (v0.2.0)",
+  "runtime_changes": "none; reuses existing Torch, FlagTree and vLLM"
+}
