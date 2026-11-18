@@ -52,7 +52,6 @@ def rms_norm_gcu(
         and obj.weight.numel() == x.shape[-1]
         and (variance_size is None or 0 < variance_size <= x.shape[-1])
         and 0 < x.shape[-1] <= 8192
-        and x.numel() // x.shape[-1] >= 256
     ):
         output, summed = _rms_op(
             x,

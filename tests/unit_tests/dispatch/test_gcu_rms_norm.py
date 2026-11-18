@@ -37,6 +37,25 @@ def test_rms_reference_rounding(residual, weight_enabled, variance):
     torch.testing.assert_close(actual, expected.to(x.dtype), rtol=0, atol=0)
 
 
+def test_gcu_custom_op_is_eligible_for_decode_rows(monkeypatch):
+    """Decode-shaped graphs must not fall back to native fused RMSNorm."""
+    if not hasattr(torch, "gcu") or not torch.gcu.is_available():
+        pytest.skip("GCU runtime is unavailable")
+
+    monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
+    x = torch.randn(1, 8, device="gcu", dtype=torch.bfloat16)
+    weight = torch.ones(8, device="gcu", dtype=torch.bfloat16)
+    obj = SimpleNamespace(
+        weight=weight,
+        variance_epsilon=1e-6,
+        variance_size_override=None,
+        pass_weight=True,
+    )
+    actual = rms_norm_gcu(obj, x)
+    assert actual.shape == x.shape
+    assert actual.device == x.device
+
+
 def test_rms_fake_outputs_are_distinct_and_match_metadata():
     from torch._subclasses.fake_tensor import FakeTensorMode
 
