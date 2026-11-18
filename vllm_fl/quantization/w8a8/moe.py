@@ -13,8 +13,17 @@
 """Route vLLM 0.24 W8A8 INT8 MoE by hardware backend."""
 
 from importlib import import_module
+from inspect import signature
+from threading import RLock
+
+import torch
 
 from vllm.logger import init_logger
+from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 import (  # noqa: E501
+    CompressedTensorsW8A8Int8MoEMethod,
+)
+
+from vllm_fl.dispatch import CachedOp
 
 _ADAPTER_MARKER = "_vllm_fl_w8a8_int8_moe_adapter"
 _CONFIG_BUILDER_MARKER = "_vllm_fl_dynamic_w8a8_config"
@@ -27,9 +36,64 @@ _SCHEME_MODULE = (
 # blacklists/whitelists keep governing the whole FL MoE pipeline.
 FLAGGEMS_W8A8_MOE_OP = "fused_moe"
 logger = init_logger(__name__)
+_INSTALL_LOCK = RLock()
 
 
 def install_fl_w8a8_moe_selector() -> bool:
+    """Install dependent MoE hooks atomically, retaining existing wrappers."""
+    with _INSTALL_LOCK:
+        oracle = import_module(_ORACLE_MODULE)
+        scheme = import_module(_SCHEME_MODULE)
+        from vllm.platforms import current_platform
+
+        targets = [
+            (scheme, "make_int8_moe_quant_config"),
+            (oracle, "select_int8_moe_backend"),
+            (scheme, "select_int8_moe_backend"),
+        ]
+        token = object()
+        signature(scheme.make_int8_moe_quant_config).bind(
+            w1_scale=token,
+            w2_scale=token,
+            a1_scale=None,
+            a2_scale=None,
+            w1_bias=None,
+            w2_bias=None,
+            per_act_token_quant=True,
+        )
+        for owner in (oracle, scheme):
+            signature(owner.select_int8_moe_backend).bind(
+                token, weight_key=None, activation_key=None
+            )
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+        ):
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import (
+                CompressedTensorsMoEMethod,
+            )
+
+            signature(CompressedTensorsMoEMethod.get_moe_method).bind(
+                token, token, token
+            )
+            targets.append((CompressedTensorsMoEMethod, "get_moe_method"))
+        missing = object()
+        originals = [
+            (owner, name, vars(owner).get(name, missing)) for owner, name in targets
+        ]
+        try:
+            return _install_fl_w8a8_moe_selector()
+        except Exception:
+            for owner, name, original in reversed(originals):
+                if original is missing:
+                    if name in vars(owner):
+                        delattr(owner, name)
+                else:
+                    setattr(owner, name, original)
+            raise
+
+
+def _install_fl_w8a8_moe_selector() -> bool:
     """Prefer FlagGems W8A8 MoE and retain the native NVIDIA fallback."""
     oracle_module = import_module(_ORACLE_MODULE)
     scheme_module = import_module(_SCHEME_MODULE)
@@ -81,6 +145,8 @@ def install_fl_w8a8_moe_selector() -> bool:
         )
         scheme_module.make_int8_moe_quant_config = make_int8_moe_quant_config_fl
 
+    _install_ascend_moe_method_factory()
+
     current_selector = oracle_module.select_int8_moe_backend
     if getattr(current_selector, _ADAPTER_MARKER, False):
         scheme_module.select_int8_moe_backend = current_selector
@@ -106,6 +172,29 @@ def install_fl_w8a8_moe_selector() -> bool:
             None,
             kInt8StaticChannelSym,
         ) and activation_key in (None, kInt8DynamicTokenSym)
+
+        # Ascend owns the dynamic quantization inside its native experts on
+        # either FlagGems setting. Other OOT vendors retain the common policy.
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+        ):
+            from vllm_fl.quantization.w8a8.moe_experts import (
+                AscendW8A8DynamicExperts,
+            )
+
+            AscendW8A8DynamicExperts.validate_config(config)
+            supported, reason = AscendW8A8DynamicExperts.is_supported_config(
+                AscendW8A8DynamicExperts,
+                config,
+                weight_key or kInt8StaticChannelSym,
+                activation_key or kInt8DynamicTokenSym,
+                AscendW8A8DynamicExperts.activation_format(),
+            )
+            if not supported:
+                raise NotImplementedError(f"Unsupported Ascend W8A8 MoE: {reason}")
+            logger.info_once("Using native Ascend dynamic W8A8 MoE experts.")
+            return oracle_module.Int8MoeBackend.TRITON, AscendW8A8DynamicExperts
 
         use_fl = (
             canonical_w8a8
@@ -202,7 +291,117 @@ def install_fl_w8a8_moe_selector() -> bool:
     return True
 
 
+_METHOD_FACTORY_MARKER = "_fl_ascend_w8a8_method_factory"
+
+
+def _install_ascend_moe_method_factory():
+    from vllm.platforms import current_platform
+
+    if (
+        getattr(current_platform, "vendor_name", None) != "ascend"
+        or current_platform.device_type != "npu"
+    ):
+        return
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import (
+        CompressedTensorsMoEMethod,
+    )
+
+    current = CompressedTensorsMoEMethod.get_moe_method
+    if getattr(current, _METHOD_FACTORY_MARKER, False):
+        return
+
+    def get_moe_method(config, layer, layer_name):
+        # The framework still parses and matches the checkpoint scheme. Only
+        # the selected native INT8 method needs a different post-load contract.
+        method = current(config, layer, layer_name)
+        from vllm.platforms import current_platform
+
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+            and type(method) is CompressedTensorsW8A8Int8MoEMethod
+        ):
+            return AscendW8A8DynamicMoEMethod(
+                method.weight_quant,
+                method.input_quant,
+                layer.moe_config,
+                layer_name=layer_name,
+            )
+        return method
+
+    setattr(get_moe_method, _METHOD_FACTORY_MARKER, True)
+    CompressedTensorsMoEMethod.get_moe_method = staticmethod(get_moe_method)
+
+
+_prepare = CachedOp("w8a8_prepare_experts")
+
+
+class AscendW8A8DynamicMoEMethod(CompressedTensorsW8A8Int8MoEMethod):
+    """Reuse upstream loading and modular lifecycle with native Ascend math."""
+
+    def __init__(self, weight_quant, input_quant, moe, layer_name=None):
+        # Also support direct component construction outside platform startup.
+        # One idempotent installer owns both selector and dynamic-config seams.
+        install_fl_w8a8_moe_selector()
+        from vllm_fl.quantization.w8a8.moe_experts import (
+            AscendW8A8DynamicExperts,
+        )
+
+        AscendW8A8DynamicExperts.validate_config(moe)
+        super().__init__(weight_quant, input_quant, moe, layer_name)
+
+    def create_weights(
+        self,
+        layer,
+        num_experts,
+        hidden_size,
+        intermediate_size_per_partition,
+        params_dtype,
+        **extra_weight_attrs,
+    ):
+        if params_dtype not in (torch.bfloat16, torch.float16):
+            raise NotImplementedError("Dynamic W8A8 experts require BF16/FP16")
+        # The upstream allocator replaces params_dtype with INT8. Preparation
+        # still needs the original activation dtype to select GMM scale dtype.
+        self._activation_dtype = params_dtype
+        super().create_weights(
+            layer,
+            num_experts,
+            hidden_size,
+            intermediate_size_per_partition,
+            params_dtype,
+            **extra_weight_attrs,
+        )
+
+    def process_weights_after_loading(self, layer):
+        for prefix in ("w13", "w2"):
+            weight = getattr(layer, f"{prefix}_weight")
+            scale = getattr(layer, f"{prefix}_weight_scale")
+            if weight.dtype != torch.int8 or weight.ndim != 3:
+                raise ValueError("Expected W8A8 INT8 [experts, output, input] weights")
+            if scale.shape != (*weight.shape[:2], 1):
+                raise ValueError("Expected W8A8 per-channel expert scales")
+        prepared = _prepare(
+            layer.w13_weight.data,
+            layer.w2_weight.data,
+            layer.w13_weight_scale.data,
+            layer.w2_weight_scale.data,
+            output_dtype=self._activation_dtype,
+        )
+        for name, tensor in zip(
+            ("w13_weight", "w2_weight", "w13_weight_scale", "w2_weight_scale"), prepared
+        ):
+            getattr(layer, name).data = tensor
+        super().process_weights_after_loading(layer)
+
+    def get_fused_moe_quant_config(self, layer):
+        config = super().get_fused_moe_quant_config(layer)
+        config.gemm1_clamp_limit = self.moe.swiglu_limit
+        return config
+
+
 __all__ = [
+    "AscendW8A8DynamicMoEMethod",
     "FLAGGEMS_W8A8_MOE_OP",
     "install_fl_w8a8_moe_selector",
 ]

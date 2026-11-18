@@ -8,8 +8,6 @@ This backend provides operator implementations for Huawei Ascend NPUs.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -23,7 +21,7 @@ class AscendBackend(Backend):
     operator implementations for Huawei Ascend NPUs.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     def __init__(self) -> None:
         super().__init__()
@@ -33,7 +31,7 @@ class AscendBackend(Backend):
         return "ascend"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "ascend"
 
     def is_available(self) -> bool:
@@ -47,6 +45,31 @@ class AscendBackend(Backend):
         return AscendBackend._available
 
     # ==================== Operator Implementations ====================
+    def deepseek_v4_index_quant(self, *args, **kwargs):
+        from .impl.quantization import deepseek_v4_index_quant
+
+        return deepseek_v4_index_quant(*args, **kwargs)
+
+    def w8a8_prepare_experts(self, *args, **kwargs):
+        from .impl.w8a8_moe import w8a8_prepare_experts
+
+        return w8a8_prepare_experts(*args, **kwargs)
+
+    def w8a8_experts(self, *args, **kwargs):
+        from .impl.w8a8_moe import w8a8_experts
+
+        return w8a8_experts(*args, **kwargs)
+
+    def w8a8_prepare_weight(self, *args, **kwargs):
+        from .impl.quantization import w8a8_prepare_weight
+
+        return w8a8_prepare_weight(*args, **kwargs)
+
+    def w8a8_dynamic_linear(self, *args, **kwargs):
+        from .impl.quantization import w8a8_dynamic_linear
+
+        return w8a8_dynamic_linear(*args, **kwargs)
+
     def gdn_decode(self, *args, **kwargs):
         from .impl.gdn_reference import gdn_decode
 
@@ -92,8 +115,8 @@ class AscendBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 

@@ -24,6 +24,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 | Model | Status | Reference |
 |-------|--------|-----------|
+| DeepSeek-V4-Flash (FlagOS-Compressor dynamic W8A8) | Merging (Ascend A3; compressed-tensors checkpoint) | [example](./examples/deepseek_v4_flagos_w8a8.md) |
 | Qwen3.5-397B-A17B | Supported | [example](./examples/qwen3_5_offline_inference.py) |
 | Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
 | Qwen3.8-Flash-Next / Qwen4Exp | Supported | [implementation](./vllm_fl/models/qwen3_8_flash_next/) |

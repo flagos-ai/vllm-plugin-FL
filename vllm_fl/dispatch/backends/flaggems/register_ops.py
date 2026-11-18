@@ -4,7 +4,8 @@
 FlagGems backend operator registrations.
 
 This module registers all DEFAULT (FlagGems) implementations.
-Only impls for which use_flaggems_op(op_name) is True are passed to the registry.
+Optional ATen implementations follow use_flaggems_op(op_name).
+Explicit model operator APIs are registered separately with capability checks.
 """
 
 from __future__ import annotations
@@ -38,6 +39,10 @@ def register_builtins(registry) -> None:
     Args:
         registry: Registry to register into
     """
+    from .impl.deepseek_v4 import register_deepseek_v4_operators
+
+    register_deepseek_v4_operators(registry)
+
     from .flaggems import FlagGemsBackend
 
     if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
