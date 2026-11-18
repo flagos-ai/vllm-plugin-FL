@@ -28,7 +28,7 @@ class GraphRuntimeController:
 
     def prepare_rswa_graph(self, device: Any) -> int:
         """Reserve the R-SWA graph buffers before the worker sizes its KV cache."""
-        from vllm_fl.models.unlimited_ocr import get_ocr_rswa_window
+        from vllm_fl.models.ocr_runtime import get_ocr_rswa_window
 
         config = self.vllm_config
         if (

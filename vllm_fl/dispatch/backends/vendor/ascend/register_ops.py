@@ -10,8 +10,25 @@ from __future__ import annotations
 
 import functools
 
+import torch
+
+from vllm_fl.dispatch.capabilities import has_device_kernel
 from vllm_fl.dispatch.registry import OpRegistry
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
+
+
+def has_npu_operator(name: str, *parameters: str) -> bool:
+    import torch_npu
+
+    if not callable(getattr(torch_npu, name, None)):
+        return False
+    try:
+        schema = getattr(torch.ops.npu, name).default._schema
+    except AttributeError:
+        return False
+    return {arg.name for arg in schema.arguments}.issuperset(
+        parameters
+    ) and has_device_kernel(f"npu::{name}", "npu")
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -33,7 +50,6 @@ def register_builtins(registry: OpRegistry) -> None:
         registry: Registry to register into
     """
     from .ascend import AscendBackend
-    from .impl.capabilities import has_npu_operator
     from .impl.rotary import rotary_embedding_torch_npu
     from .impl.vision_attention import (
         scaled_dot_product_attention_ascend,

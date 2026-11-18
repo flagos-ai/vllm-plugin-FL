@@ -28,6 +28,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from itertools import accumulate
 from typing import Any, ClassVar, List, Optional, Tuple, Type
 
 import torch
@@ -50,7 +51,7 @@ from vllm.v1.attention.backends.registry import (
 )
 
 from vllm_fl.compilation.graph_params import RswaGraphBuffers
-from vllm_fl.models.unlimited_ocr import get_ocr_rswa_window, is_unlimited_ocr
+from vllm_fl.models.ocr_runtime import get_ocr_rswa_window, is_unlimited_ocr
 
 from .attention_mask import AttentionMaskBuilder
 
@@ -149,11 +150,8 @@ def _build_grouped_rswa_masks(
     groups = []
     token_start = 0
     for start, end in ((0, num_decodes), (num_decodes, count)):
-        cumulative = []
-        total = 0
-        for length in lengths[start:end]:
-            total += length
-            cumulative.append(total)
+        cumulative = list(accumulate(lengths[start:end]))
+        token_end = token_start + cumulative[-1]
         mask = builder.get_rswa_attn_mask(
             prefix_lens=prefix_lens[start:end],
             seq_lens=seq_lens[start:end],
@@ -164,62 +162,11 @@ def _build_grouped_rswa_masks(
         )
         groups.append(
             RswaAttentionGroup(
-                start,
-                end,
-                token_start,
-                token_start + total,
-                cumulative,
-                mask,
+                start, end, token_start, token_end, cumulative, mask
             )
         )
-        token_start += total
+        token_start = token_end
     return tuple(groups)
-
-
-def _run_grouped_rswa_fia(
-    fia,
-    groups,
-    query,
-    key,
-    value,
-    block_table,
-    actual_seq_lengths_kv,
-    block_size,
-    num_heads,
-    num_kv_heads,
-    head_size,
-    scale,
-    output,
-):
-    """Use shared paged KV and disjoint query/output intervals for both groups."""
-    for group in groups:
-        result, _ = fia(
-            query=query[group.token_start : group.token_end],
-            key=key,
-            value=value,
-            block_table=block_table[
-                group.request_start : group.request_end
-            ].contiguous(),
-            input_layout="TND",
-            block_size=block_size,
-            actual_seq_lengths=group.actual_seq_lengths_q,
-            actual_seq_lengths_kv=actual_seq_lengths_kv[
-                group.request_start : group.request_end
-            ],
-            num_key_value_heads=num_kv_heads,
-            num_heads=num_heads,
-            scale=scale,
-            sparse_mode=0,
-            atten_mask=group.attn_mask,
-            pre_tokens=_SWA_INT_MAX,
-            next_tokens=_SWA_INT_MAX,
-        )
-        output[group.token_start : group.token_end] = result.view(
-            group.token_end - group.token_start,
-            num_heads,
-            head_size,
-        )
-    return output
 
 
 def _rswa_mask_request_lengths(
@@ -231,20 +178,14 @@ def _rswa_mask_request_lengths(
     if num_actual_reqs is None:
         return prefix_lens, query_lens
     num_reqs = query_lens.numel()
-    if (
-        not isinstance(num_actual_reqs, int)
-        or isinstance(num_actual_reqs, bool)
-        or not 0 <= num_actual_reqs <= num_reqs
-    ):
+    if type(num_actual_reqs) is not int or not 0 <= num_actual_reqs <= num_reqs:
         raise ValueError(
             f"R-SWA actual request count must be in [0, {num_reqs}], "
             f"got {num_actual_reqs!r}"
         )
     if num_actual_reqs == num_reqs:
         return prefix_lens, query_lens
-    # FULL decode buckets give dummy rows a query extent, even though their
-    # sequence length is zero. They must produce no valid mask queries. Use
-    # the explicit real-request boundary; a real zero-prefix row is not padding.
+    # FULL decode padding has query extents but must not expose any keys.
     prefix_lens = prefix_lens.clone()
     query_lens = query_lens.clone()
     prefix_lens[num_actual_reqs:] = 0
@@ -522,41 +463,19 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         rswa_groups = None
         if rswa_window is not None:
             rswa_prefix_lens = getattr(common_attn_metadata, "rswa_prefix_lens", None)
-            if (
-                not isinstance(rswa_window, int)
-                or isinstance(rswa_window, bool)
-                or rswa_window <= 0
-            ):
-                raise ValueError(
-                    f"rswa_window must be a positive integer, got {rswa_window!r}"
-                )
-            if rswa_window > self.model_config.max_model_len:
-                raise ValueError(
-                    f"rswa_window {rswa_window} exceeds max_model_len {self.model_config.max_model_len}"
-                )
+            max_kv_len = self.model_config.max_model_len
+            if type(rswa_window) is not int or not 0 < rswa_window <= max_kv_len:
+                raise ValueError("R-SWA window must be within the model context length")
             if not getattr(common_attn_metadata, "causal", True):
                 raise ValueError("R-SWA requires causal attention")
-            if rswa_prefix_lens is None:
-                raise RuntimeError(
-                    "R-SWA is enabled but prompt lengths are missing; "
-                    "the model runner must propagate prompt_lens/num_prompt_tokens"
-                )
-            if not isinstance(rswa_prefix_lens, torch.Tensor):
-                raise TypeError(
-                    f"R-SWA prompt lengths must be a torch.Tensor, got {type(rswa_prefix_lens).__name__}"
-                )
-            if rswa_prefix_lens.numel() < num_reqs:
-                raise RuntimeError(
-                    f"R-SWA prompt lengths are shorter than the request batch: {rswa_prefix_lens.numel()} < {num_reqs}"
-                )
-
-            quant_config = self.vllm_config.quant_config
-            if quant_config is not None and getattr(
-                quant_config, "enable_c8_quant", False
+            if (
+                not isinstance(rswa_prefix_lens, torch.Tensor)
+                or rswa_prefix_lens.numel() < num_reqs
             ):
+                raise RuntimeError("R-SWA requires a prompt length for each request")
+            if getattr(self.vllm_config.quant_config, "enable_c8_quant", False):
                 raise NotImplementedError(
-                    "R-SWA is not supported with C8 KV-cache quantization on Ascend; "
-                    "disable C8 quantization or unset rswa_window"
+                    "R-SWA does not support C8 KV-cache quantization"
                 )
 
             rswa_prefix_lens = rswa_prefix_lens[:num_reqs_fia]
@@ -566,15 +485,12 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
                     [rswa_prefix_lens, rswa_prefix_lens.new_zeros(padding_len)]
                 )
             query_lens = query_start_loc_cpu[1:] - query_start_loc_cpu[:-1]
-            num_actual_reqs = getattr(common_attn_metadata, "rswa_num_actual_reqs", None)
+            num_actual_reqs = getattr(
+                common_attn_metadata, "rswa_num_actual_reqs", None
+            )
             rswa_prefix_lens, rswa_query_lens = _rswa_mask_request_lengths(
                 rswa_prefix_lens, query_lens, num_actual_reqs
             )
-            # CANN FIA sparse_mode=0 validates the explicit R-SWA mask S2
-            # against the configured maximum model length, so keep the mask
-            # width fixed at max_model_len and rely on seq_lens to mask unused
-            # KV positions for each request.
-            max_kv_len = self.model_config.max_model_len
             grouped = os.environ.get("VLLM_FL_RSWA_GROUPED_MASK", "1")
             if grouped not in ("0", "1"):
                 raise ValueError("VLLM_FL_RSWA_GROUPED_MASK must be 0 or 1")
@@ -887,11 +803,11 @@ class AscendAttentionBackendImpl(AttentionImpl):
         if getattr(forward_context, "capturing", False):
             # A reduced model length may use a narrower, contiguous view of
             # the original reservation. Replay uses the exact views captured here.
-            mask = buffers.attn_mask.view(-1)[: num_tokens * kv_width].view(
-                num_tokens, 1, 1, kv_width
+            mask = buffers.attn_mask.view(-1)[: live.attn_mask.numel()].view_as(
+                live.attn_mask
             )
-            table = buffers.block_table.view(-1)[: num_tokens * table_width].view(
-                num_tokens, table_width
+            table = buffers.block_table.view(-1)[: live.block_tables.numel()].view_as(
+                live.block_tables
             )
             forward_context.rswa_graph_inputs = (mask, table)
         else:
@@ -1127,28 +1043,6 @@ class AscendAttentionBackendImpl(AttentionImpl):
         num_tokens = attn_metadata.actual_seq_lengths_q[-1]
         query = query[:num_tokens]
 
-        if attn_metadata.rswa_groups is not None:
-            if (
-                block_table is None
-                or attn_metadata.attn_state != AscendAttentionState.ChunkedPrefill
-            ):
-                raise RuntimeError("Grouped R-SWA requires cache-backed ChunkedPrefill")
-            return _run_grouped_rswa_fia(
-                torch_npu.npu_fused_infer_attention_score,
-                attn_metadata.rswa_groups,
-                query,
-                key,
-                value,
-                block_table,
-                actual_seq_lengths_kv,
-                block_size,
-                self.num_heads,
-                self.num_kv_heads,
-                self.head_size,
-                self.scale,
-                output,
-            )
-
         if attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
             key = key[:num_tokens]
             value = value[:num_tokens]
@@ -1166,24 +1060,46 @@ class AscendAttentionBackendImpl(AttentionImpl):
             mask_args["atten_mask"] = attn_metadata.attn_mask
             if self.sliding_window is not None:
                 mask_args.update(pre_tokens=self.sliding_window, next_tokens=0)
-        attn_output, _ = torch_npu.npu_fused_infer_attention_score(
-            query=query,
+        fia_args = dict(
             key=key,
             value=value,
-            block_table=block_table,
             input_layout="TND",
             block_size=block_size,
-            actual_seq_lengths=attn_metadata.actual_seq_lengths_q,
-            actual_seq_lengths_kv=actual_seq_lengths_kv,
             num_key_value_heads=self.num_kv_heads,
             num_heads=self.num_heads,
             scale=self.scale,
             sparse_mode=sparse_mode,
             **mask_args,
         )
-
-        attn_output = attn_output.view(num_tokens, self.num_heads, self.head_size)
-        output[:num_tokens] = attn_output[:num_tokens]
+        if attn_metadata.rswa_groups is not None:
+            if (
+                block_table is None
+                or attn_metadata.attn_state != AscendAttentionState.ChunkedPrefill
+            ):
+                raise RuntimeError("Grouped R-SWA requires cache-backed ChunkedPrefill")
+            for group in attn_metadata.rswa_groups:
+                requests = slice(group.request_start, group.request_end)
+                tokens = slice(group.token_start, group.token_end)
+                fia_args["atten_mask"] = group.attn_mask
+                result, _ = torch_npu.npu_fused_infer_attention_score(
+                    query=query[tokens],
+                    block_table=block_table[requests].contiguous(),
+                    actual_seq_lengths=group.actual_seq_lengths_q,
+                    actual_seq_lengths_kv=actual_seq_lengths_kv[requests],
+                    **fia_args,
+                )
+                output[tokens] = result.view(-1, self.num_heads, self.head_size)
+        else:
+            result, _ = torch_npu.npu_fused_infer_attention_score(
+                query=query,
+                block_table=block_table,
+                actual_seq_lengths=attn_metadata.actual_seq_lengths_q,
+                actual_seq_lengths_kv=actual_seq_lengths_kv,
+                **fia_args,
+            )
+            output[:num_tokens] = result.view(
+                num_tokens, self.num_heads, self.head_size
+            )
         return output
 
     def _require_regular_graph_capture(

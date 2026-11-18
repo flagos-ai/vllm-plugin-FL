@@ -41,12 +41,11 @@ from vllm.transformers_utils.processors.deepseek_ocr import (
     CROP_MODE,
     IMAGE_SIZE,
     DeepseekOCRProcessor,
-    count_tiles,
     dynamic_preprocess,
 )
 
-from .registration import UnlimitedOCRConfig
-from vllm_fl.ops.attention import scaled_dot_product_attention
+from vllm_fl.dispatch.ops import scaled_dot_product_attention
+from vllm_fl.models.unlimited_ocr import UnlimitedOCRConfig
 
 logger = init_logger(__name__)
 _UNLIMITED_OCR_MAX_CROPS = 32
@@ -212,33 +211,6 @@ class UnlimitedOCRProcessingInfo(DeepseekOCRProcessingInfo):
             **{**defaults, **self.ctx.get_merged_mm_kwargs(kwargs)},
         )
 
-    def get_num_image_tokens(
-        self,
-        *,
-        image_width: int,
-        image_height: int,
-        cropping: bool | None = None,
-        image_size: int | None = None,
-        base_size: int | None = None,
-        max_crops: int | None = None,
-    ) -> int:
-        if cropping is None:
-            cropping = bool(
-                self.ctx.get_merged_mm_kwargs({}).get("crop_mode", CROP_MODE)
-            )
-        if image_size is None or base_size is None or max_crops is None:
-            processor = self.get_hf_processor()
-            image_size = processor.image_size if image_size is None else image_size
-            base_size = processor.base_size if base_size is None else base_size
-            max_crops = processor.max_crops if max_crops is None else max_crops
-
-        width_tiles = height_tiles = 1
-        if cropping and (image_width > image_size or image_height > image_size):
-            width_tiles, height_tiles = count_tiles(
-                image_width, image_height, max_num=max_crops, image_size=image_size
-            )
-        return image_token_count(base_size, image_size, width_tiles, height_tiles)
-
     def get_image_size_with_most_features(self) -> ImageSize:
         processor = self.get_hf_processor()
         cropping = self.ctx.get_merged_mm_kwargs({}).get("crop_mode", CROP_MODE)
@@ -267,16 +239,13 @@ class UnlimitedOCRMultiModalProcessor(DeepseekOCRMultiModalProcessor):
             if isinstance(images, ImageEmbeddingItems):
                 count = images.get_feature_size(item_idx)
             else:
-                size = images.get_image_size(item_idx)
-                settings = self.info.ctx.get_merged_mm_kwargs(hf_processor_mm_kwargs)
-                count = self.info.get_num_image_tokens(
-                    image_width=size.width,
-                    image_height=size.height,
-                    cropping=len(images) == 1
-                    and bool(settings.get("crop_mode", CROP_MODE)),
-                    image_size=hf_processor.image_size,
-                    base_size=hf_processor.base_size,
-                    max_crops=hf_processor.max_crops,
+                grid = out_mm_kwargs["image"][item_idx]["images_spatial_crop"].data
+                width_tiles, height_tiles = grid.tolist()
+                count = image_token_count(
+                    hf_processor.base_size,
+                    hf_processor.image_size,
+                    width_tiles,
+                    height_tiles,
                 )
             return [image_token_id] * count
 

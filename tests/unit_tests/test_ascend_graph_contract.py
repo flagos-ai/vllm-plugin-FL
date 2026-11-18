@@ -370,69 +370,6 @@ def test_failed_capture_and_replay_restore_state(monkeypatch):
     assert not controller._active
 
 
-def test_rswa_capture_failure_discards_only_failed_bucket(monkeypatch):
-    runtime, _ = _runtime(monkeypatch, [])
-    registry = _graph_params(monkeypatch)
-    controller = runtime.GraphRuntimeController(vllm_config="config")
-    params = registry.GraphParams(
-        rswa_buffers=NS(workspace=object(), capture_sizes={2, 4})
-    )
-    controller._rswa_params = params
-    context = NS(batch_descriptor=NS(num_tokens=4), capturing=False)
-
-    def stage(context, num_tokens):
-        assert context.rswa_graph_params is params
-        context.rswa_graph_inputs = object()
-
-    controller.attention_impls = (NS(stage_rswa_graph_inputs=stage),)
-    params.prepare_shape(2)
-    with (
-        pytest.raises(RuntimeError, match="capture failed"),
-        controller.capture_scope(context),
-    ):
-        assert params.workspaces[4] is params.rswa_buffers.workspace
-        params.events[4].append(object())
-        params.attn_params[4].append(object())
-        raise RuntimeError("capture failed")
-
-    assert not hasattr(context, "rswa_graph_params")
-    assert not hasattr(context, "rswa_graph_inputs")
-    assert not context.capturing
-    assert set(params.workspaces) == {2}
-    assert set(params.attn_params) == {2}
-    assert set(params.handles) == {2}
-    assert set(params.events) == {2}
-    with controller.capture_scope(context):
-        assert params.workspaces[4] is params.rswa_buffers.workspace
-
-
-def test_rswa_stage_failure_precedes_replay(monkeypatch):
-    calls = []
-    runtime, _ = _runtime(monkeypatch, calls)
-    controller = runtime.GraphRuntimeController(vllm_config="config")
-    controller._rswa_params = object()
-    context = NS(batch_descriptor=NS(num_tokens=4))
-
-    def stage(context, num_tokens):
-        calls.append(("stage", num_tokens))
-        raise ValueError("block table changed")
-
-    controller.attention_impls = (
-        NS(
-            stage_rswa_graph_inputs=stage,
-            update_graph_params=lambda *args: calls.append("update"),
-        ),
-    )
-    with (
-        pytest.raises(ValueError, match="block table changed"),
-        controller.replay_scope(context),
-    ):
-        calls.append("replay")
-    assert calls == [("stage", 4)]
-    assert not controller._active
-    assert not hasattr(context, "rswa_graph_params")
-
-
 def test_selected_backends_are_bound_once(monkeypatch):
     runtime, _ = _runtime(monkeypatch, [])
     base = type("AttentionBackend", (), {"get_impl_cls": staticmethod(lambda: None)})
@@ -623,7 +560,7 @@ def test_runtime_has_no_accelerator_import_side_effects():
     )
 
 
-def _rotary_class(monkeypatch, device_type, calls, impl_id="vendor.ascend"):
+def _rotary_class(monkeypatch, device_type, calls):
     from typing import Optional
 
     import torch
@@ -660,7 +597,7 @@ def _rotary_class(monkeypatch, device_type, calls, impl_id="vendor.ascend"):
         "current_platform": NS(device_type=device_type),
         "_rotary_embedding": rotary,
         "get_default_manager": lambda: NS(
-            resolve_candidates=lambda op: [NS(impl_id=impl_id)]
+            resolve_candidates=lambda op: [NS(impl_id="vendor.ascend")]
         ),
     }
     exec(compile(ast.Module(body=[cls], type_ignores=[]), "rotary", "exec"), namespace)
@@ -688,21 +625,6 @@ def test_rotary_cache_write_and_initialization_contract(
     assert obj.cos_sin_cache is cache
     assert calls[-2:] == [("dispatch", torch.float64, False, True)] * 2
     assert calls.count("initialize") == (1 if device_type == "npu" else 0)
-
-
-@pytest.mark.parametrize("impl_id", ["vendor.ascend.torch_npu", "reference.torch"])
-def test_rotary_dispatch_functional_paths_skip_atb_setup(monkeypatch, impl_id):
-    import torch
-
-    calls = []
-    cls = _rotary_class(monkeypatch, "npu", calls, impl_id)
-    monkeypatch.setattr(torch.compiler, "is_compiling", lambda: False)
-    obj = cls(4, 2, 8, 10000.0, False, torch.float32)
-    query = torch.ones(2, 4)
-    actual, key = obj.forward_oot(torch.tensor([0, 1]), query)
-    assert key is None
-    assert torch.equal(query, actual)
-    assert calls == [("dispatch", torch.float32, True, False)]
 
 
 def test_rotary_vendor_initialization_calls_registration_without_kernel(monkeypatch):

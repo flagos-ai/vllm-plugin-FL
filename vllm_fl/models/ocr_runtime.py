@@ -8,9 +8,24 @@ import sys
 
 import torch
 
-from vllm_fl.models.unlimited_ocr import get_ocr_rswa_window, is_unlimited_ocr
-
+ARCHITECTURE = "UnlimitedOCRForCausalLM"
+MODEL_TYPE = "unlimited-ocr"
+CHECKPOINT_MODEL_TYPE = "unlimited_ocr"
 _REQUIRED_OOT = frozenset(("rms_norm", "silu_and_mul", "rotary_embedding", "fused_moe"))
+
+
+def is_unlimited_ocr(model_config) -> bool:
+    config = getattr(model_config, "hf_config", None)
+    return getattr(config, "model_type", None) in (
+        MODEL_TYPE,
+        CHECKPOINT_MODEL_TYPE,
+    ) and ARCHITECTURE in (getattr(config, "architectures", None) or ())
+
+
+def get_ocr_rswa_window(model_config) -> int | None:
+    if not is_unlimited_ocr(model_config):
+        return None
+    return getattr(model_config.hf_config, "rswa_window", None)
 
 
 def validate_ocr_config(config, *, device_type, vendor):

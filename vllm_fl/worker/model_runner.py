@@ -610,7 +610,7 @@ class ModelRunnerFL(
         self.use_async_scheduling = self.scheduler_config.async_scheduling
 
         # Sampler
-        from vllm_fl.models.unlimited_ocr import get_ocr_rswa_window
+        from vllm_fl.models.ocr_runtime import get_ocr_rswa_window
 
         self.ocr_rswa_window = get_ocr_rswa_window(self.model_config)
         self.sampler = Sampler(
@@ -7006,6 +7006,17 @@ class ModelRunnerFL(
 
         return int(total_estimate)
 
+    @contextmanager
+    def _decoder_capture_scope(self):
+        set_cudagraph_capturing_enabled(True)
+        try:
+            yield
+        except BaseException:
+            _clear_decoder_graphs(self.graph_runtime)
+            raise
+        finally:
+            set_cudagraph_capturing_enabled(False)
+
     @instrument(span_name="Capture model")
     def capture_model(self) -> int:
         if self.compilation_config.cudagraph_mode == CUDAGraphMode.NONE:
@@ -7027,36 +7038,28 @@ class ModelRunnerFL(
         # Trigger CUDA graph capture for specific shapes.
         # Capture the large shapes first so that the smaller shapes
         # can reuse the memory pool allocated for the large shapes.
-        set_cudagraph_capturing_enabled(True)
-        try:
-            with self._freeze_gc(), graph_capture(device=self.device):
+        with self._decoder_capture_scope(), self._freeze_gc(), graph_capture(device=self.device):
+            _accelerator_synchronize()
+            torch.accelerator.empty_cache()
+            start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
+
+            for (
+                runtime_mode,
+                batch_descs,
+            ) in self.cudagraph_dispatcher.get_capture_descs():
+                self._capture_cudagraphs(
+                    batch_descriptors=batch_descs,
+                    cudagraph_runtime_mode=runtime_mode,
+                )
                 _accelerator_synchronize()
-                torch.accelerator.empty_cache()
-                start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
 
-                for (
-                    runtime_mode,
-                    batch_descs,
-                ) in self.cudagraph_dispatcher.get_capture_descs():
-                    self._capture_cudagraphs(
-                        batch_descriptors=batch_descs,
-                        cudagraph_runtime_mode=runtime_mode,
-                    )
-                    _accelerator_synchronize()
+            # Capture encoder CUDA graphs if enabled
+            if self.encoder_cudagraph_manager is not None:
+                encoder_graph_pool = current_platform.graph_pool_handle()
+                self.encoder_cudagraph_manager.capture(graph_pool=encoder_graph_pool)
 
-                # Capture encoder CUDA graphs if enabled
-                if self.encoder_cudagraph_manager is not None:
-                    encoder_graph_pool = current_platform.graph_pool_handle()
-                    self.encoder_cudagraph_manager.capture(graph_pool=encoder_graph_pool)
-
-                _accelerator_synchronize()
-                end_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
-
-        except BaseException:
-            _clear_decoder_graphs(self.graph_runtime)
-            raise
-        finally:
-            set_cudagraph_capturing_enabled(False)
+            _accelerator_synchronize()
+            end_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
 
         _accelerator_synchronize()
         torch.accelerator.empty_cache()

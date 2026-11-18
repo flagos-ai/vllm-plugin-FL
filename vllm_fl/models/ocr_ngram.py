@@ -1,12 +1,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 # CPU scan adapted from vLLM deepseek_ocr.py; copyright contributors to vLLM.
-"""Opt-in batch masking for OCR's existing per-request NGram processor.
-
-Only mask submission is batched. Request lifecycle and the CPU tuple scan retain
-the core implementation's semantics (including its ngram_size=1 behavior).
-No audit I/O is performed here: apply may run during compilation/capture.
-"""
+"""Batch token exclusions for the upstream per-request NGram processor."""
 
 import os
 from functools import partial

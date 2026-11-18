@@ -270,7 +270,7 @@ def register_model():
         current_platform.device_type == "npu"
         and getattr(current_platform, "vendor_name", None) == "ascend"
     ):
-        from vllm_fl.models.unlimited_ocr.registration import register_unlimited_ocr_support
+        from vllm_fl.models.unlimited_ocr import register_unlimited_ocr_support
 
         register_unlimited_ocr_support()
 
