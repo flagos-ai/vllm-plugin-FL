@@ -141,22 +141,31 @@ def select_unquantized_moe_backend_oot(
         # modular AgRs path then gathers/scatters on EP, followed by the model's
         # TP gather. This is independent of compiler-level sequence parallelism.
         if parallel.is_sequence_parallel and not (
-            parallel.use_ep and parallel.dp_size > 1
+            parallel.use_ep
+            and parallel.dp_size > 1
             and parallel.all2all_backend == "allgather_reducescatter"
         ):
-            raise NotImplementedError("Ascend MoE token splitting requires DP EP AllGather")
+            raise NotImplementedError(
+                "Ascend MoE token splitting requires DP EP AllGather"
+            )
         if parallel.use_ep:
             from vllm.config import get_current_vllm_config
 
             vllm_config = get_current_vllm_config()
             config = vllm_config.parallel_config
             if vllm_config.compilation_config.pass_config.enable_sp:
-                raise NotImplementedError("Ascend native EP does not support compiler SP")
-            if (runtime_platform.dist_backend != "hccl"
-                    or config.expert_placement_strategy != "linear"
-                    or moe_config.num_experts % parallel.ep_size != 0
-                    or (parallel.dp_size > 1
-                        and parallel.all2all_backend != "allgather_reducescatter")):
+                raise NotImplementedError(
+                    "Ascend native EP does not support compiler SP"
+                )
+            if (
+                runtime_platform.dist_backend != "hccl"
+                or config.expert_placement_strategy != "linear"
+                or moe_config.num_experts % parallel.ep_size != 0
+                or (
+                    parallel.dp_size > 1
+                    and parallel.all2all_backend != "allgather_reducescatter"
+                )
+            ):
                 raise NotImplementedError(
                     "Ascend EP requires HCCL AllGather and evenly partitioned linear experts"
                 )
@@ -495,10 +504,19 @@ class TritonExpertsFL(TritonExperts):
             )
             return
 
-        # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
+        # Fast path (no LoRA): NVIDIA, or PPU with FlagGems-vllm enabled.
+        # FlagGems currently only supports the standard SiLU gated activation.
+        # Models such as MiniMax-M3 use SWIGLUOAI and must fall back to the
+        # generic Triton pipeline below, whose activation dispatch supports it.
         if (
             self._lora_context is None
-            and runtime_platform.is_cuda()
+            and (
+                runtime_platform.is_cuda()
+                or (
+                    getattr(runtime_platform, "vendor_name", None) == "thead"
+                    and fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM
+                )
+            )
             and activation == MoEActivation.SILU
             and self.quant_config.gemm1_clamp_limit is None
         ):

@@ -19,6 +19,12 @@ def patch_mm_encoder_attention():
     from vllm.platforms import current_platform
     from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
+    if getattr(current_platform, "vendor_name", None) == "thead":
+        # Keep selection and execution consistent without importing a CUDA FA
+        # provider. The existing SDPA implementation handles non-causal vision
+        # attention; this does not enable vision encoder graph capture.
+        mm_mod.MMEncoderAttention.forward_oot = mm_mod.MMEncoderAttention.forward_native
+
     if getattr(current_platform, "vendor_name", None) == "kunlunxin":
         import torch
         import torch.nn.functional as F
@@ -110,10 +116,9 @@ def patch_mm_encoder_attention():
     # bind MMEncoderAttention to forward_oot -> forward_native (Torch SDPA).
     # NVIDIA must keep vLLM's CUDA dispatch so the selected FLASH_ATTN backend
     # is actually used during multimodal profiling and inference.
-    if (
-        current_platform.is_cuda()
-        and getattr(current_platform, "vendor_name", None) != "kunlunxin"
-    ):
+    if current_platform.is_cuda() and getattr(
+        current_platform, "vendor_name", None
+    ) not in ("kunlunxin", "thead"):
         mm_mod.MMEncoderAttention.forward_oot = mm_mod.MMEncoderAttention.forward_cuda
 
     def _patched_maybe_get_vit_flash_attn_backend(attn_backend):
