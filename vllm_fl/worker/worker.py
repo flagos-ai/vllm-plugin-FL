@@ -237,6 +237,7 @@ class WorkerFL(WorkerBase):
         for k, v in sorted(os.environ.items()):
             logger.debug("%s=%r", k, v)
 
+        self._preserve_musa_custom_ops_for_compile()
         register_oot_ops()
 
         if fl_envs.USE_FLAGGEMS:
@@ -271,6 +272,28 @@ class WorkerFL(WorkerBase):
                 flag_gems.enable(
                     record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
                 )
+
+    def _preserve_musa_custom_ops_for_compile(self) -> None:
+        """Keep FL OOT custom ops enabled for MUSA compile/cudagraph mode."""
+        from vllm.platforms import current_platform
+
+        if current_platform.device_type != "musa":
+            return
+
+        custom_ops = self.vllm_config.compilation_config.custom_ops
+        if "all" in custom_ops:
+            return
+
+        if "none" in custom_ops:
+            custom_ops.remove("none")
+
+        custom_ops.append("all")
+        print(
+            "[FL_MUSA_CUSTOM_OPS] enabled custom_ops=all to preserve "
+            "FL OOT dispatch under compile/cudagraph mode.",
+            flush=True,
+        )
+
 
     # def sleep(self, level: int = 1) -> None:
     #     TODO(lms): rewrite CuMemAllocator
