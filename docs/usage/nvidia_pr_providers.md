@@ -161,6 +161,16 @@ uses it for ordinary BF16/FP16 experts. Its monolithic API has no
 variants use the modular FlagGems GEMM pipeline with native activation instead.
 Quantized experts are not automatically covered by this unquantized path.
 
+PR3340 separates GEMM1/GEMM2 launch defaults, selects tiles using routed-token
+density and dtype, pairs gate/up projections into a wider dot in eligible
+fused-SiLU GEMM1 calls, and permits atomic GEMM2 accumulation into the final
+output to avoid a separate top-k sum. The large half-precision fast paths
+generally require a chunk with at least 4096 rows, suitable alignment and no
+overriding YAML configuration; direct accumulation additionally excludes
+expert maps and input-side router weighting. Small decode batches usually do
+not meet those thresholds. Request input length is not kernel row count:
+the tested services chunk prefill at 4096 tokens.
+
 MiniMax-M3's configured SwiGLU-OAI path has partial PR3340 kernel coverage:
 the shared low-level kernel still omits N-index modulo and output-store
 boundary masks for divisible output tiles. It uses vLLM's configuration for
@@ -192,14 +202,57 @@ performance on other architectures. At 64K, mean TPOT improves by 43.89%,
 while TTFT increases by 26.21% and output throughput falls by 18.58%; a faster
 individual metric cannot be presented as an end-to-end gain.
 
-An isolated common four-stage alignment configuration also completes Hy3
-TP16 graph capture on all ranks and three semantic requests in both ablation
-arms at max length 67584. Its new paired throughput campaign is running;
-this common repair is not yet included in the production PR. Qwen3.6 remains
-unqualified: a launch-blocking diagnostic locates an illegal access in the
-four-stage aligner's stage4, followed by a graph-cleanup collective that hides
-the first exception. Successful random-input operator checks do not qualify
-that model's actual routing and execution context.
+Identical launch arguments did not yield identical effective KV capacity:
+pre3340 reports 268928 tokens (3.98 maximum-length requests), versus 185472
+(2.74) in the optimized arm, while both report 50.41 GiB model allocation per
+rank. This capacity difference can affect scheduling. Synthetic routed GEMM
+checks at the model's TP16 local dimensions match numerically and show mostly
+small warmed-kernel improvements; they do not explain the entire model-level
+regression. A fixed-capacity counterfactual has not been measured.
+
+Qwen3.8-Flash-Next TP8 has valid 1K/4K paired means of 1420.88→1443.64
+(+1.60%) and 996.49→1012.39 (+1.60%) output tok/s. These small observed changes
+are not established stable speedups. Both arms fail the 16K/64K groups;
+their failed rounds are preserved and excluded from throughput comparisons.
+
+A common four-stage alignment configuration completes Hy3 TP16 graph capture
+on all ranks and three semantic requests in both ablation arms at max length
+67584. Its new paired throughput campaign is running. Qwen3.6 additionally
+requires the metadata-padding repair below; both exact-ablation arms now pass
+full graph capture and three semantic requests at the original full context
+configuration. Its distinct fixed-source throughput comparison is starting.
+The earlier failed cases and every measured round remain unchanged.
+
+### CUDA graph padding compatibility
+
+The NVIDIA worker selects the pinned dependency's existing no-TLE four-stage
+aligner before model construction. This avoids the speculative TLE alignment
+path that invalidated graph capture in this stack. Changing the aligner alone
+did not qualify Qwen3.6: a launch-blocking diagnostic located its initial
+illegal access in alignment stage4, then a graph-cleanup collective obscured
+that first exception.
+
+Actual route snapshots identify native metadata-marked padding rows whose
+expert IDs are all -1 while their normalized weights remain nonzero. Before
+the monolithic FlagGems call, only rows marked by vLLM's padding mask receive
+finite zero hidden states, zero weights and a safe dummy expert ID. The final
+output is explicitly zeroed on those rows, including NaN/Inf dummy-expert
+results. Active rows and their routes are preserved. The no-mask path retains
+the original input aliases; no Python tensor-value reads are introduced.
+
+Validation includes 95 CPU contracts, 24 old/new GPU numerical and changed-mask
+graph checks, and 12 GPU cases from the public reproducer. The exact public
+runtime, with all private ablation code removed, independently completes full
+TP2 graph capture and three semantic requests for Qwen3.6-35B-A3B, BF16,
+max length 67584. These checks establish the tested functional contract, not
+dataset accuracy or throughput. Other model qualifications above retain their
+own frozen sources and must not be described as reruns of this combined patch.
+
+On an available NVIDIA GPU, run the public operator check from the repository:
+
+```bash
+PYTHONPATH=. python tests/manual/check_moe_padding_gpu.py
+```
 
 ## MiniMax indexer compatibility
 

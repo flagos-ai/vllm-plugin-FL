@@ -445,14 +445,22 @@ class TritonExpertsFL(TritonExperts):
             and monolithic_activation_supported
         ):
             from flaggems_vllm import fused_experts_impl
+            from vllm.model_executor.layers.fused_moe.router.fused_topk_router import (
+                _get_padding_mask,
+            )
+            from .padding import prepare_padded_moe_inputs, zero_padded_moe_rows
 
+            padding_mask = _get_padding_mask(hidden_states.shape[0])
+            moe_hidden, moe_weights, moe_ids = prepare_padded_moe_inputs(
+                hidden_states, topk_weights, topk_ids, padding_mask,
+            )
             output.copy_(
                 fused_experts_impl(
-                    hidden_states,
+                    moe_hidden,
                     w1,
                     w2,
-                    topk_weights,
-                    topk_ids,
+                    moe_weights,
+                    moe_ids,
                     inplace=False,
                     activation=activation.value,
                     apply_router_weight_on_input=apply_router_weight_on_input,
@@ -472,6 +480,7 @@ class TritonExpertsFL(TritonExperts):
                     w2_bias=self.w2_bias,
                 )
             )
+            zero_padded_moe_rows(output, padding_mask)
             logger.info_once(
                 "FL_FUSED_MOE_EXECUTED provider=flaggems_vllm.fused_experts_impl "
                 "dtype=%s shape=%s weight_dtype=%s activation=%s capture=%s",

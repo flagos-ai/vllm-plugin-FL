@@ -84,6 +84,12 @@ class NvidiaWorkerFL(NativeGPUWorker):
         patch_kimi_mean_grid(self.model_config, enabled=USE_FLAGGEMS)
         _initialize_fl_runtime(self.rank)
 
+        if USE_FLAGGEMS:
+            from vllm_fl.ops.fused_moe.padding import install_no_tle_moe_alignment
+
+            if install_no_tle_moe_alignment():
+                logger.info("FL_MOE_NO_TLE_ALIGNMENT_INSTALLED")
+
         from vllm_fl.patches.allreduce_rms_provider import (
             apply_allreduce_rms_provider_patch,
         )
