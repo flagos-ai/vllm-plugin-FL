@@ -104,6 +104,16 @@ def register():
     # Model-specific platform patches
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
     glm5_platform()
+    from vllm_fl.patches.minicpm_opt import apply_minicpm_optimizations
+    apply_minicpm_optimizations()
+
+    # Trigger FlagGems high-precision fused kernels registration
+    try:
+        import flag_gems
+        if hasattr(flag_gems, "enable"):
+            flag_gems.enable()
+    except Exception as exc:
+        logger.debug("FlagGems enable skipped or deferred: %s", exc)
 
     # Note: FlagCX connector registration is deferred to register_model()
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
