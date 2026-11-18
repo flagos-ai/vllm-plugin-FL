@@ -394,6 +394,18 @@ class HostNGramEmbedding(nn.Module):
             raise ValueError("PLE forward exceeds its prepared token capacity")
         return self.prepared_embeddings[:count]
 
+    def _required_embedding_shards(self) -> set[int]:
+        # Shared consumers advertise the full range even with empty storage.
+        embedding = self.ngram_embedding
+        size = (
+            embedding.org_vocab_size + self.split_ngram_parts - 1
+        ) // self.split_ngram_parts
+        start = embedding.shard_indices.org_vocab_start_index
+        end = min(embedding.shard_indices.org_vocab_end_index, embedding.org_vocab_size)
+        return (
+            set(range(start // size, (end - 1) // size + 1)) if start < end else set()
+        )
+
     def _finish_host_lookup_loading(self):
         state = self._ple_embedding_load_state
         expected = set(_PLE_HASH_BUFFER_NAMES)
@@ -416,8 +428,8 @@ class HostNGramEmbedding(nn.Module):
             name: getattr(self, name) for name in _PLE_HASH_BUFFER_NAMES
         }
         loaded: set[str] = set()
-        state = getattr(self, "_ple_embedding_load_state", None)
-        seen_shards = state["shards"] if state is not None else set()
+        state = self._ple_embedding_load_state
+        seen_shards = state["shards"]
         regular_weights: list[tuple[str, torch.Tensor]] = []
         shard_prefix = "ngram_embedding.shard_"
 
@@ -434,8 +446,7 @@ class HostNGramEmbedding(nn.Module):
                     )
                 buffer.copy_(loaded_weight.to(device=buffer.device, dtype=buffer.dtype))
                 loaded.add(name)
-                if state is not None:
-                    state["buffers"].add(name)
+                state["buffers"].add(name)
                 continue
             if name.startswith(shard_prefix) and name.endswith(".weight"):
                 shard_text = name[len(shard_prefix) : -len(".weight")]
@@ -461,7 +472,6 @@ class HostNGramEmbedding(nn.Module):
                 ) and self.tp_rank != 0:
                     # Consumers validate checkpoint shape/name completeness but
                     # keep no duplicate full table and touch no table payload.
-                    loaded.add("ngram_embedding.weight")
                     continue
                 copy_ple_embedding_shard_(
                     embedding.weight.data,
@@ -470,10 +480,11 @@ class HostNGramEmbedding(nn.Module):
                     tp_start=embedding.shard_indices.org_vocab_start_index,
                     tp_end=embedding.shard_indices.org_vocab_end_index,
                 )
-                loaded.add("ngram_embedding.weight")
                 continue
             regular_weights.append((name, loaded_weight))
 
+        if seen_shards and self._required_embedding_shards() <= seen_shards:
+            loaded.add("ngram_embedding.weight")
         if regular_weights:
             loaded.update(AutoWeightsLoader(self).load_weights(regular_weights))
         return loaded

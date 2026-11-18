@@ -67,8 +67,8 @@ def test_hash_is_chunk_invariant():
     assert torch.equal(torch.cat((first, second)), whole)
 
 
-def hash_make_model(monkeypatch, rank):
-    monkeypatch.setattr(ngram, "get_tensor_model_parallel_world_size", lambda: 2)
+def hash_make_model(monkeypatch, rank, *, tp_size=2):
+    monkeypatch.setattr(ngram, "get_tensor_model_parallel_world_size", lambda: tp_size)
     monkeypatch.setattr(ngram, "get_tensor_model_parallel_rank", lambda: rank)
     monkeypatch.setattr(ngram, "tensor_model_parallel_all_reduce", lambda value: value)
     cfg = SimpleNamespace(
@@ -744,3 +744,140 @@ def test_checkpoint_cache_release_failure_closes_files(tmp_path, monkeypatch, fa
         with pytest.raises(OSError):
             os.fstat(opened[0])
     assert (root / "a.safetensors").read_bytes() == b"unchanged"
+
+
+class _HostPLELoadingModel(torch.nn.Module):
+    def __init__(self, embedding):
+        super().__init__()
+        self.ple = embedding
+        self.gap = torch.nn.Linear(1, 1, bias=False)
+
+    @ngram.validate_ple_embedding_weights
+    def load_weights(self, weights):
+        from vllm.model_executor.models.utils import AutoWeightsLoader
+
+        return AutoWeightsLoader(self).load_weights(weights)
+
+
+def _host_ple_loading_case(monkeypatch, mode, tp_size, rank, parts=4):
+    host = hash_make_model(monkeypatch, rank, tp_size=tp_size)
+    host.split_ngram_parts = parts
+    if mode == "shared_buffer":
+        host.host_lookup_mode = mode
+        host._shared_lookup = object()
+        host.ngram_embedding = ngram.HostVocabEmbedding(
+            40,
+            4,
+            tp_rank=0,
+            tp_size=1,
+            dtype=torch.bfloat16,
+            allocate=rank == 0,
+        )
+    with torch.no_grad():
+        host.ngram_embedding.weight.fill_(-123)
+    full = torch.arange(160).reshape(40, 4).to(torch.bfloat16)
+    calls = []
+    original_load = host.load_weights
+
+    def observe(weights):
+        loaded = original_load(weights)
+        calls.append(set(loaded))
+        return loaded
+
+    monkeypatch.setattr(host, "load_weights", observe)
+    return _HostPLELoadingModel(host), full, calls
+
+
+def _host_ple_loading_weights(full, shards, parts=4):
+    rows = (40 + parts - 1) // parts
+    for offset, index in enumerate(shards):
+        yield (
+            f"ple.ngram_embedding.shard_{index}.weight",
+            full[index * rows : min((index + 1) * rows, 40)],
+        )
+        if offset == 0:
+            # A different prefix forces AutoWeightsLoader to call PLE again.
+            yield "gap.weight", torch.tensor([[42.0]])
+
+
+@pytest.mark.parametrize(
+    "mode,tp_size,rank,parts,missing",
+    [
+        ("sharded", 1, 0, 4, 3),
+        ("sharded", 2, 0, 4, 1),
+        ("sharded", 2, 1, 4, 3),
+        ("shared_buffer", 2, 0, 4, 3),
+        ("shared_buffer", 2, 1, 4, 3),
+        ("sharded", 2, 1, 3, 2),
+    ],
+)
+def test_host_ple_loading_rejects_missing_shards_at_outer_boundary(
+    monkeypatch, mode, tp_size, rank, parts, missing
+):
+    model, full, calls = _host_ple_loading_case(monkeypatch, mode, tp_size, rank, parts)
+    with pytest.raises(ValueError, match="Missing PLE embedding shards"):
+        model.load_weights(
+            _host_ple_loading_weights(
+                full, [i for i in range(parts) if i != missing], parts
+            )
+        )
+    assert all("ngram_embedding.weight" not in loaded for loaded in calls)
+    assert not hasattr(model.ple, "_ple_embedding_load_state")
+    calls.clear()
+    loaded = model.load_weights(_host_ple_loading_weights(full, range(parts), parts))
+    assert loaded == {"ple.ngram_embedding.weight", "gap.weight"}
+    assert calls[0] == set() and calls[-1] == {"ngram_embedding.weight"}
+    assert not hasattr(model.ple, "_ple_embedding_load_state")
+    if mode == "shared_buffer" and rank:
+        assert model.ple.ngram_embedding.weight.numel() == 0
+    else:
+        expected = (
+            full
+            if mode == "shared_buffer" or tp_size == 1
+            else full[rank * 20 : (rank + 1) * 20]
+        )
+        torch.testing.assert_close(
+            model.ple.ngram_embedding.weight, expected, rtol=0, atol=0
+        )
+
+
+@pytest.mark.parametrize(
+    "rank,parts,shards",
+    [(0, 4, [0, 1]), (1, 4, [2, 3]), (0, 3, [0, 1]), (1, 3, [1, 2])],
+)
+def test_host_ple_loading_accepts_only_locally_required_shards(
+    monkeypatch, rank, parts, shards
+):
+    model, full, calls = _host_ple_loading_case(monkeypatch, "sharded", 2, rank, parts)
+    loaded = model.load_weights(_host_ple_loading_weights(full, shards, parts))
+    assert loaded == {"ple.ngram_embedding.weight", "gap.weight"}
+    assert calls[0] == set() and calls[-1] == {"ngram_embedding.weight"}
+    torch.testing.assert_close(
+        model.ple.ngram_embedding.weight,
+        full[rank * 20 : (rank + 1) * 20],
+        rtol=0,
+        atol=0,
+    )
+    assert not hasattr(model.ple, "_ple_embedding_load_state")
+
+
+@pytest.mark.parametrize("mode,rank", [("sharded", 0), ("shared_buffer", 1)])
+def test_host_ple_loading_rejects_duplicate_streamed_shards(monkeypatch, mode, rank):
+    model, full, _ = _host_ple_loading_case(monkeypatch, mode, 2, rank)
+    with pytest.raises(ValueError, match="Duplicate PLE checkpoint shard"):
+        model.load_weights(_host_ple_loading_weights(full, [0, 0, 1, 2, 3]))
+    assert not hasattr(model.ple, "_ple_embedding_load_state")
+
+
+def test_host_ple_loading_direct_call_requires_all_rows(monkeypatch):
+    host = hash_make_model(monkeypatch, 0, tp_size=1)
+    with pytest.raises(ValueError, match="Missing PLE embedding shards"):
+        host.load_weights(
+            [
+                (
+                    "ngram_embedding.shard_0.weight",
+                    torch.ones(10, 4, dtype=torch.bfloat16),
+                )
+            ]
+        )
+    assert not hasattr(host, "_ple_embedding_load_state")
