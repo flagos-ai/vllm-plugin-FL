@@ -20,7 +20,9 @@ def test_existing_image_setup_installs_xdist_without_runtime_extras():
     ]
     dependency_installs = [cmd for cmd in commands if "-e" not in cmd]
     assert len(dependency_installs) == 1
-    requirements = [Requirement(arg) for arg in dependency_installs[0][4:]]
+    install = dependency_installs[0]
+    assert install[4:6] == ["--index-url", "https://mirrors.aliyun.com/pypi/simple"]
+    requirements = [Requirement(arg) for arg in install[6:]]
     assert [r.name for r in requirements] == ["pytest-xdist"]
     assert "3.8.0" in requirements[0].specifier
     assert "4.0.0" not in requirements[0].specifier

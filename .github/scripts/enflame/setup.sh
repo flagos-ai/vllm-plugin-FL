@@ -23,7 +23,8 @@ fi
 # Preserve the image's vendor SDK, vLLM and flaggems-vllm. Older CI image
 # digests lack xdist, which tests/run.py and session-finish probes require.
 # Resolve only this test tool (and execnet), never the project's runtime extras.
-python -m pip install 'pytest-xdist>=3.0.0,<4'
+# The SDK's private pip index lacks xdist; override it for this command only.
+python -m pip install --index-url https://mirrors.aliyun.com/pypi/simple 'pytest-xdist>=3.0.0,<4'
 
 # Reinstall only the checked-out plugin without resolving image dependencies.
 unset PYTHONPATH
