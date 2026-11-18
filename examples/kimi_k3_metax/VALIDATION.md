@@ -45,3 +45,35 @@ and stride-safe MLA fallbacks are part of the accepted numerical contract.
 Full quality scores and serving measurements belong to their recorded version;
 a cleanup does not rerun or update those results. Detailed run evidence is
 maintained with the PR and project reports.
+
+## Results for plugin revision `d66a186`
+
+The TP4 compatibility gate used MetaX Torch 2.8 / MACA 3.7 and the installed
+plugin at `d66a18634b9efd2d81c6a184917f6b24e4d3a4b6`. The image used FGV
+`f775b37f3066e2935742d26c7592a5dd55499159` for these Qwen models. Each row
+covers single text, single image, eight text, eight image and eight mixed
+requests, in that order.
+
+| Model | Mode | Content checks by scenario | Unique completions |
+| --- | --- | --- | ---: |
+| Qwen3.6-27B | eager | 1/1, 1/1, 8/8, 8/8, 8/8 | 26 |
+| Qwen3.6-27B | Graph | 1/1, 1/1, 8/8, 8/8, 8/8 | 26 |
+| Qwen3.6-35B-A3B | eager | 1/1, 1/1, 8/8, 8/8, 8/8 | 26 |
+| Qwen3.6-35B-A3B | Graph | 1/1, 1/1, 8/8, 8/8, 8/8 | 26 |
+| Kimi K3 | eager | 1/1, 1/1, 8/8, 8/8, 8/8 | 26 |
+| Kimi K3 | decode Graph | 1/1, 0/1, 8/8, 8/8, 8/8 | 26 |
+
+For the Qwen rows, serve each checkpoint with TP4, model length 32768,
+`--disable-custom-all-reduce --trust-remote-code`, and
+`--allowed-local-media-path` pointing to the gate images. Add
+`--enforce-eager` for eager mode. Set the client model, served name and endpoint
+to match, and run `tools/adaptation-gate-cases/run_test.sh` once per row.
+
+K3 used the pinned Torch 2.10 / MACA 3.8 stack and TP8 × PP4. Its 118 integration
+tests passed. The model gate counted 6,350 prompt tokens per mode, 728 output
+tokens in eager and 745 in Graph. All 32 workers shut down gracefully in each
+run. In Graph, single-image OCR case `image-05` returned `VLLM` with finish
+reason `stop` and omitted `HELLO`. Both word regions influenced the vision
+processor tensor. The cause of the omission during generation is unresolved.
+The GPQA and ERQA results in the example refer to the previously evaluated
+model revision; these gate requests did not rerun either quality benchmark.
