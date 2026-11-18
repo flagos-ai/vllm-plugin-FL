@@ -67,7 +67,7 @@ jobs:
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
     concurrency:
-      group: ${{ inputs.platform == 'kunlunxin' && 'vllm-fl-kunlunxin' || format('vllm-fl-benchmark-{0}-{1}', github.run_id, inputs.platform) }}
+      group: ${{ inputs.platform == 'kunlunxin' && 'vllm-fl-kunlunxin' || inputs.platform == 'ascend' && 'vllm-fl-ascend' || inputs.platform == 'hygon' && 'vllm-fl-hygon' || format('vllm-fl-benchmark-{0}-{1}', github.run_id, inputs.platform) }}
       cancel-in-progress: false
       queue: max
     container:

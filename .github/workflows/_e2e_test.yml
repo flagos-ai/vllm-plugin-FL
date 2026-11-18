@@ -76,10 +76,11 @@ jobs:
     name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
-    # Both H20 runner registrations use the same eight GPUs. P800 shares
-    # its reservation with functional and benchmark jobs across workflows.
+    # Both H20 runner registrations use the same eight GPUs. P800, Ascend and
+    # Hygon registrations sit on hosts shared between workflow runs, so their
+    # E2E, functional and benchmark jobs must queue on one device-scoped group.
     concurrency:
-      group: ${{ inputs.platform == 'nvidia' && inputs.device == 'h20' && 'vllm-fl-h20' || inputs.platform == 'kunlunxin' && 'vllm-fl-kunlunxin' || format('vllm-fl-e2e-{0}-{1}-{2}-{3}', github.run_id, inputs.platform, inputs.device, inputs.task) }}
+      group: ${{ inputs.platform == 'nvidia' && inputs.device == 'h20' && 'vllm-fl-h20' || inputs.platform == 'kunlunxin' && 'vllm-fl-kunlunxin' || inputs.platform == 'ascend' && 'vllm-fl-ascend' || inputs.platform == 'hygon' && 'vllm-fl-hygon' || format('vllm-fl-e2e-{0}-{1}-{2}-{3}', github.run_id, inputs.platform, inputs.device, inputs.task) }}
       cancel-in-progress: false
       queue: max
     container:
