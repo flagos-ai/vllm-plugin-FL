@@ -168,6 +168,39 @@ both GEMMs and keeps native activation plus separate top-k reduction, so the
 PR's stage-specific tuning, fused SiLU/pair-gate-up and direct-sum fast paths
 are not enabled. This coverage does not establish a throughput gain.
 
+### Independent PR3340 ablation results
+
+A separate frozen investigation reverts exactly the seven function definitions
+changed by PR3340 while retaining the rest of the pinned FL stack. This is
+an independent old-versus-optimized comparison; the ablation instrumentation
+is not part of this PR. It does not switch the entire MoE backend to native.
+
+MiniMax-M3 BF16/TP16 completes all 24 official benchmark rounds. All detailed
+JSON files pass the 256-request and fixed input/output-length checks. Means
+use original rounds 2/3 under the protocol documented below:
+
+| Input tokens | Pre3340 output tok/s | Optimized output tok/s | Change |
+| --- | ---: | ---: | ---: |
+| 1024 | 1247.21 | 1245.66 | -0.12% |
+| 4096 | 816.76 | 680.215 | -16.72% |
+| 16384 | 332.275 | 283.045 | -14.82% |
+| 65536 | 97.78 | 79.615 | -18.58% |
+
+This result covers only the shared low-level GEMM change described above.
+It does not measure all of PR3340's monolithic fast paths or establish their
+performance on other architectures. At 64K, mean TPOT improves by 43.89%,
+while TTFT increases by 26.21% and output throughput falls by 18.58%; a faster
+individual metric cannot be presented as an end-to-end gain.
+
+An isolated common four-stage alignment configuration also completes Hy3
+TP16 graph capture on all ranks and three semantic requests in both ablation
+arms at max length 67584. Its new paired throughput campaign is running;
+this common repair is not yet included in the production PR. Qwen3.6 remains
+unqualified: a launch-blocking diagnostic locates an illegal access in the
+four-stage aligner's stage4, followed by a graph-cleanup collective that hides
+the first exception. Successful random-input operator checks do not qualify
+that model's actual routing and execution context.
+
 ## MiniMax indexer compatibility
 
 The pinned FlagTree AABS analyzer incorrectly associates the native MiniMax
@@ -356,24 +389,27 @@ failed rounds. The short requests therefore did not qualify the official
 load. All original failures are preserved; no AllReduceRMSNorm end-to-end
 speedup is established.
 
-### Two-host MXFP4 qualification and partial results
+### Two-host MXFP4 results and capacity limits
 
 The larger Pro TP16 service configuration with max model length 67584 failed
 KV-capacity initialization in both arms, before any throughput client ran.
 The adapter's I192 storage reduction does not qualify this context length.
 These startup failures remain separate from the 8192-token functional result.
 
-DeepSeek-V4.1 DP16/EP16 completed all 12 native rounds. Nine adapter rounds
-have completed; the 65536-input group remains in progress. Audited completed
-groups use the same original rounds 2/3 and per-request checks as Flash:
+DeepSeek-V4.1 DP16/EP16 completed all 24 native/adapter rounds successfully.
+Source/configuration/provider execution and per-request JSON were audited.
+The following means use the same original rounds 2/3 as Flash:
 
 | Input tokens | Native output tok/s | Adapter output tok/s | Change |
 | --- | ---: | ---: | ---: |
 | 1024 | 2202.73 | 155.32 | -92.95% |
 | 4096 | 1942.31 | 151.11 | -92.22% |
 | 16384 | 1285.73 | 150.14 | -88.32% |
+| 65536 | 786.48 | 288.09 | -63.37% |
 
-Retained-round adapter spreads are 12.07%, 28.01% and 56.28%, respectively.
+Retained-round adapter spreads are 12.07%, 28.01%, 56.28% and 83.53%,
+respectively. These highly variable two-round means do not establish stable
+effect estimates.
 Live process stacks show real Marlin autotuning and Triton compilation during
 this run; shared-memory broadcast warnings alone do not establish deadlock.
 Foreign-route work described above is a concrete optimization candidate,
