@@ -5,11 +5,12 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
 import torch
+
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.distributed.utils import get_distributed_timeout_or_none
 from vllm.v1.worker.gpu.pp_utils import (
-    PPHandler,
     PendingRecv,
+    PPHandler,
     compute_need_sampled_mask,
 )
 
@@ -20,16 +21,31 @@ class HostPendingRecv(PendingRecv):
     host_packet: torch.Tensor | None = None
 
 
+class FeedbackDrainError(RuntimeError):
+    """Retain all transport failures without raising the Python version floor."""
+
+    def __init__(self, errors):
+        self.errors = tuple(errors)
+        details = "; ".join(f"{type(error).__name__}: {error}" for error in self.errors)
+        super().__init__(f"K3 PP feedback drain failed: {details}")
+
+
 class HostPackedPPHandler(PPHandler):
     def _init_broadcast_transport(self) -> None:
         # Run at the original constructor position, without an unused GPU group.
         self.feedback_mode = "host_packed"
-        self.feedback_cpu_group = _make_feedback_cpu_group()
-        self.feedback_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="k3-pp-feedback"
-        )
+        self.feedback_cpu_group = None
+        self.feedback_executor = None
         self.feedback_send_futures = deque()
         self.feedback_recv_futures = deque()
+        try:
+            self.feedback_cpu_group = _make_feedback_cpu_group()
+            self.feedback_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="k3-pp-feedback"
+            )
+        except BaseException:
+            self.destroy_feedback()
+            raise
 
     def _wait_for_recv(self, slot: HostPendingRecv) -> None:
         if slot.completion is not None:
@@ -118,35 +134,66 @@ class HostPackedPPHandler(PPHandler):
             self.feedback_send_futures.popleft().result()
 
     def drain_feedback(self):
-        """Complete transport work without destroying resources or threads."""
+        """Wait for every submitted transfer, including failed/invalidated slots."""
+        errors = []
         if self.feedback_executor is not None:
-            for future in self.feedback_send_futures:
-                future.result()
-            # Include transfers whose request slots were invalidated meanwhile.
-            for future in self.feedback_recv_futures:
-                future.result()
-        self.broadcast_stream.synchronize()
+            for future in (*self.feedback_send_futures, *self.feedback_recv_futures):
+                try:
+                    future.result()
+                except Exception as error:
+                    errors.append(error)
+        try:
+            self.broadcast_stream.synchronize()
+        except Exception as error:
+            errors.append(error)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise FeedbackDrainError(errors) from errors[0]
 
     def destroy_feedback(self):
-        """Only after the caller has globally drained peers; never time teardown."""
-        if self.feedback_executor is not None:
-            self.feedback_executor.shutdown(wait=True)
-        if self.feedback_cpu_group is not None:
-            torch.distributed.destroy_process_group(self.feedback_cpu_group)
+        """Destroy only this handler's executor and owned CPU subgroup."""
+        try:
+            if self.feedback_executor is not None:
+                self.feedback_executor.shutdown(wait=True)
+                self.feedback_executor = None
+        finally:
+            try:
+                if self.feedback_cpu_group is not None:
+                    torch.distributed.destroy_process_group(self.feedback_cpu_group)
+                    self.feedback_cpu_group = None
+            finally:
+                self.feedback_send_futures.clear()
+                self.feedback_recv_futures.clear()
+                self.queue.clear()
+
+    def close(self):
+        """Drain peers before destroying transport; allow repeated shutdown."""
+        if self.feedback_executor is None and self.feedback_cpu_group is None:
+            return
+        try:
+            self.drain_feedback()
+        finally:
+            self.destroy_feedback()
 
 
 def _make_feedback_cpu_group():
     pp = get_pp_group()
     own = None
-    for ranks in pp.group_ranks:
-        pg = torch.distributed.new_group(
-            ranks,
-            backend="gloo",
-            timeout=get_distributed_timeout_or_none(),
-            group_desc="k3_pp_sample_feedback_cpu",
-        )
-        if pp.rank in ranks:
-            own = pg
+    try:
+        for ranks in pp.group_ranks:
+            pg = torch.distributed.new_group(
+                ranks,
+                backend="gloo",
+                timeout=get_distributed_timeout_or_none(),
+                group_desc="k3_pp_sample_feedback_cpu",
+            )
+            if pp.rank in ranks:
+                own = pg
+    except BaseException:
+        if own is not None:
+            torch.distributed.destroy_process_group(own)
+        raise
     assert own is not None
     return own
 
