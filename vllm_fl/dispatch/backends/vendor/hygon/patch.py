@@ -3,32 +3,74 @@
 """Hygon (HCU/DCU) patches for vLLM 0.32 compatibility."""
 
 import logging
+from collections.abc import Callable
 from functools import lru_cache
 
 logger = logging.getLogger(__name__)
+
+_MISSING = object()
+
+
+def _noop() -> None:
+    """Rollback for a patch that found its work already done."""
+
+
+def _snapshot(owner, name: str):
+    """Record the value of ``owner.name`` before this patch changes it."""
+    return getattr(owner, name, _MISSING)
+
+
+def _apply(owner, name: str, value, applied: list) -> None:
+    """Snapshot ``owner.name`` and then set it, recording the undo entry."""
+    applied.append((owner, name, _snapshot(owner, name)))
+    setattr(owner, name, value)
+
+
+def _restore_all(applied: list) -> None:
+    """Undo every recorded entry in reverse order."""
+    for owner, name, original in reversed(applied):
+        try:
+            if original is _MISSING:
+                if hasattr(owner, name):
+                    delattr(owner, name)
+            else:
+                setattr(owner, name, original)
+        except Exception as exc:  # pragma: no cover - rollback is best effort
+            logger.warning(
+                "Failed to roll back %s.%s: %s",
+                getattr(owner, "__name__", owner),
+                name,
+                exc,
+            )
 
 
 @lru_cache(maxsize=1)
 def apply_hygon_patches():
     """Apply Hygon patches that must run before model construction.
 
-    Cached so the patches run once per process. ``lru_cache`` does not cache
-    exceptions, so a failed call can be retried: every patch is attempted
-    (a failing patch does not block the others) and any failure raises.
+    Cached so the patches run once per process. Every patch snapshots what it
+    is about to change and returns a rollback callable; when one fails, the
+    changes already applied are reverted before the error is raised, so the
+    process is never left with a half-installed patch set. ``lru_cache`` does
+    not cache exceptions, so the next call retries from that clean state.
     """
-    results = {
-        "torch.accelerator attrs": patch_accelerator_missing_attrs(),
-        "UVA unavailable": patch_uva_unavailable(),
-    }
-    failed = [name for name, ok in results.items() if not ok]
-    if failed:
-        raise RuntimeError(
-            "Hygon patches failed and will be retried on the next call: "
-            + ", ".join(failed)
-        )
+    applied: list[Callable[[], None]] = []
+    for name, install in (
+        ("torch.accelerator attrs", _install_accelerator_missing_attrs),
+        ("UVA unavailable", _install_uva_unavailable),
+    ):
+        try:
+            applied.append(install())
+        except Exception as exc:
+            logger.warning("Hygon patch %r failed: %s", name, exc)
+            for rollback in reversed(applied):
+                rollback()
+            raise RuntimeError(
+                "Hygon patches failed and will be retried on the next call: " + name
+            ) from exc
 
 
-def patch_uva_unavailable() -> bool:
+def _install_uva_unavailable() -> Callable[[], None]:
     """Report UVA as unavailable so Model Runner V2 uses its copy fallback.
 
     vLLM 0.32 derives UVA support from pinned memory alone
@@ -41,39 +83,48 @@ def patch_uva_unavailable() -> bool:
 
     Remove once DTK provides an HCU ``get_cuda_view_from_cpu_tensor``.
     """
-    try:
-        import sys
+    import sys
 
-        import vllm.utils.platform_utils as platform_utils
+    import vllm.utils.platform_utils as platform_utils
 
-        if getattr(platform_utils, "_hcu_uva_patched", False):
-            return True
+    if getattr(platform_utils, "_hcu_uva_patched", False):
+        return _noop
 
-        def _uva_unavailable() -> bool:
-            return False
-
-        platform_utils.is_uva_available = _uva_unavailable
-        # ``from ... import is_uva_available`` copies the callable, so rebind it
-        # in vLLM modules that were imported before this patch ran.
-        for name, module in list(sys.modules.items()):
-            if not name.startswith("vllm.") or module is None:
-                continue
-            if getattr(module, "is_uva_available", None) is not None:
-                module.is_uva_available = _uva_unavailable
-
-        platform_utils._hcu_uva_patched = True
-        logger.info(
-            "Reported UVA as unavailable for Hygon: HCU has no "
-            "get_cuda_view_from_cpu_tensor, Model Runner V2 uses the "
-            "explicit-copy buffer fallback"
-        )
-        return True
-    except Exception as exc:  # pragma: no cover - never block registration
-        logger.warning("Failed to disable UVA for Hygon: %s", exc)
+    def _uva_unavailable() -> bool:
         return False
 
+    # Collect every binding before changing any of them: ``from ... import
+    # is_uva_available`` copies the callable, so modules imported before this
+    # patch ran keep the original name too.
+    targets = [platform_utils]
+    for module_name, module in list(sys.modules.items()):
+        if (
+            not module_name.startswith("vllm.")
+            or module is None
+            or module is platform_utils
+        ):
+            continue
+        if getattr(module, "is_uva_available", None) is not None:
+            targets.append(module)
 
-def patch_accelerator_missing_attrs() -> bool:
+    applied: list = []
+    try:
+        for owner in targets:
+            _apply(owner, "is_uva_available", _uva_unavailable, applied)
+        _apply(platform_utils, "_hcu_uva_patched", True, applied)
+    except Exception:
+        _restore_all(applied)
+        raise
+
+    logger.info(
+        "Reported UVA as unavailable for Hygon: HCU has no "
+        "get_cuda_view_from_cpu_tensor, Model Runner V2 uses the "
+        "explicit-copy buffer fallback"
+    )
+    return lambda: _restore_all(applied)
+
+
+def _install_accelerator_missing_attrs() -> Callable[[], None]:
     """Fill in ``torch.accelerator.get_memory_info``, which DTK's Torch 2.9 lacks.
 
     vLLM 0.32 targets Torch 2.13, whose ``torch.accelerator`` namespace exposes
@@ -89,32 +140,35 @@ def patch_accelerator_missing_attrs() -> bool:
     ``device_count``), and 0.32 guards its only ``empty_host_cache`` call site
     with ``try/except AttributeError``.
 
-    Return True when the accelerator namespace is complete afterwards.
+    Returns a rollback callable that restores the namespace as it was.
     """
+    import torch
+
+    if getattr(torch.accelerator, "_hcu_attrs_patched", False):
+        return _noop
+
+    # Only fill in the attribute if the installed Torch does not provide it, so
+    # a newer DTK that ships the real implementation keeps it instead of being
+    # shadowed by the CUDA-shaped fallback below.
+    bindings = {}
+    if not hasattr(torch.accelerator, "get_memory_info"):
+
+        def get_memory_info(device_index=None):
+            return torch.cuda.mem_get_info(device_index)
+
+        bindings["get_memory_info"] = get_memory_info
+
+    applied: list = []
     try:
-        import torch
-
-        if getattr(torch.accelerator, "_hcu_attrs_patched", False):
-            return True
-
-        # Only fill in the attribute if the installed Torch does not provide
-        # it, so a newer DTK that ships the real implementation keeps it
-        # instead of being shadowed by the CUDA-shaped fallback below.
-        bindings = {}
-        if not hasattr(torch.accelerator, "get_memory_info"):
-            bindings["get_memory_info"] = (
-                lambda device_index=None: torch.cuda.mem_get_info(device_index)
-            )
-
         for name, fn in bindings.items():
-            setattr(torch.accelerator, name, fn)
+            _apply(torch.accelerator, name, fn, applied)
+        _apply(torch.accelerator, "_hcu_attrs_patched", True, applied)
+    except Exception:
+        _restore_all(applied)
+        raise
 
-        torch.accelerator._hcu_attrs_patched = True
-        logger.info(
-            "Patched torch.accelerator APIs for Hygon DTK Torch: %s",
-            sorted(bindings),
-        )
-        return True
-    except Exception as exc:  # pragma: no cover - never block registration
-        logger.warning("Failed to patch torch.accelerator attrs for Hygon: %s", exc)
-        return False
+    logger.info(
+        "Patched torch.accelerator APIs for Hygon DTK Torch: %s",
+        sorted(bindings),
+    )
+    return lambda: _restore_all(applied)

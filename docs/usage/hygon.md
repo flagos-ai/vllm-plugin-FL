@@ -14,14 +14,42 @@ editable installation is required. The recipe uses two Hygon BW1000 64 GiB DCUs.
 | Component | Version or configuration |
 |---|---|
 | Image (Linux AMD64) | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-hygon-ci@sha256:558066eb6677cd33d60bc97010d0b91c991941eb05631c9a9265372c8e319f84` |
-| Vendor base | DTK 26.04 / Ubuntu 24.04 / Python 3.10.20 |
+| Vendor base | DTK 26.04 (`/opt/dtk-26.04`) / Ubuntu 24.04 / Python 3.10.20 |
+| Host kernel driver | `hycu` kernel module `6.4.0-V1.7.0c` (vermagic `6.8.0-87-generic`) |
+| HyHAL | `6.3.3-V1.7.0c` (20260630-175451), installed at `/opt/hyhal` |
+| RCCL | `2.22.3` (`/opt/dtk/lib/librccl.so.1`, reported by `ncclGetVersion`) |
+| HIP runtime | `6.3.26045` (`torch.version.hip`); `hipcc` from DTK `dcc 25.10.0`, clang 17.0.0 |
 | vLLM | Distribution `0.32.0+empty`; runtime `0.32.0` |
 | PyTorch | Distribution `2.9.0+das.opt1.dtk2604`; runtime `2.9.0` |
 | FlagGems distribution | `5.4.0` |
 | FlagTree distribution | `0.7.0+hcu3.6` |
 | Triton distribution | `3.6.0`, coexists with FlagTree |
 | Model runner | Upstream `GPUModelRunner` (v2) by default; `ModelRunnerFL` (v1) with `VLLM_USE_V2_MODEL_RUNNER=0` |
-| Communication | Vendor HIP/RCCL, TP2; `FLAGCX_PATH` unset |
+| Communication | Vendor HIP/RCCL `2.22.3`, TP2; `FLAGCX_PATH` unset |
+
+The rows above were read from the pinned image's exact digest
+(`558066eb...`) on the validation host: DTK from `/opt/dtk-26.04/.info/version-dev`,
+HyHAL from `/opt/hyhal/.info/version`, RCCL from the version string in
+`librccl.so.1`, and the kernel module from `modinfo hycu`. The same package set
+ships in every `v0.32.0-hygon-ci` rebuild, because they all derive from the
+FlagOS 2.2 base image.
+
+Scope of this recipe and of the validation behind it:
+
+| Item | BW1000 64 GiB (this recipe) | BW1101 144 GiB (gate validation) |
+|---|---|---|
+| Cards per run | 2 (TP2) | 2 of 8 (TP2, host cards 6 and 7) |
+| Card memory | 65520 MiB usable, reported by `hy-smi --showmeminfo vram` | BW1101 144 GiB, 800 W power cap; eight cards on `renderD128`-`renderD135` |
+| Host | CI runner `hg-cicd-vllm-plugin-0240` | `bm-srwl-sh-zone9-d-bw1100-144g-1-80`, kernel `6.8.0-87-generic` |
+| Verified by | CI unit, functional, inference and serving e2e | four-group adaptation gate, eager and graph |
+| Driver / RCCL | same image and driver series | `hycu 6.4.0-V1.7.0c`, HyHAL `6.3.3-V1.7.0c`, RCCL `2.22.3` |
+
+The 64 GiB memory figure comes from `--showmeminfo vram`, which reports usable
+device memory rather than the marketing capacity. The bandwidth, capacity and
+power numbers of the two hosts differ, so a passing run on one does not by
+itself certify the other; the graph-memory headroom is therefore configurable
+(see [vLLM 0.32 implementation notes](#vllm-0.32-implementation-notes)) instead
+of being hard-coded for one card size.
 
 Keep the image's vendor Torch, FlagTree/Triton, and
 [Hygon dispatch policy](../../vllm_fl/dispatch/config/hygon.yaml) together.
@@ -35,12 +63,22 @@ fallback instead of selecting `ModelRunnerFL`.
 
 ## 1. Check the host and select two idle DCUs
 
-The host needs the Hygon driver compatible with DTK 26.04, Docker, `/opt/hyhal`,
-`/dev/kfd`, `/dev/mkfd`, and the render nodes for two available DCUs. Check
-current utilization, memory, and KFD processes with the host's `hy-smi` or DTK
-`rocm-smi`, and confirm its reported devices against the render-node mapping.
-A small driver memory reservation can remain on an idle card; verify that no
-workload owns either selected device before starting a container.
+The validated host combination is the `hycu` kernel module `6.4.0-V1.7.0c` with
+HyHAL `6.3.3-V1.7.0c` (20260630-175451) and RCCL `2.22.3`; both numbers are the
+values the image itself reports, so mismatched host and container HyHAL is the
+first thing to rule out when a device is not visible. The host also needs
+`/opt/hyhal`, `/dev/kfd`, `/dev/mkfd`, and the render nodes for two available
+DCUs. Check current utilization, memory, and KFD processes with the host's
+`hy-smi` or DTK `rocm-smi`, and confirm its reported devices against the
+render-node mapping. A small driver memory reservation can remain on an idle
+card; verify that no workload owns either selected device before starting a
+container.
+
+```bash
+modinfo hycu | grep -E '^version|^vermagic'
+head -1 /opt/hyhal/.info/version
+uname -r
+```
 
 The example below uses host physical DCUs **2 and 3**, whose render nodes were
 `renderD130` and `renderD131` on the validated host. Resolve the device mapping
@@ -93,14 +131,15 @@ docker run --detach --name "$CONTAINER" \
   --entrypoint /bin/bash "$IMAGE" -lc 'exec sleep infinity'
 ```
 
-The image places `/opt/vllm-fl/venv/bin` first on `PATH`; the commands below
-use `/opt/vllm-fl/venv/bin/python`. Do not mount a plugin
+The image keeps the vendor virtualenv at `/flagos` (`VIRTUAL_ENV=/flagos`) and
+puts `/flagos/bin` first on `PATH`; the commands below use
+`/flagos/bin/python`. Do not mount a plugin
 checkout over its installed packages or run `pip install -e .` in this container.
 
 ## 4. Verify the installed stack
 
 ```bash
-docker exec -i "$CONTAINER" /opt/vllm-fl/venv/bin/python -I -B - <<'PY'
+docker exec -i "$CONTAINER" /flagos/bin/python -I -B - <<'PY'
 import json
 import os
 from importlib import metadata
@@ -126,7 +165,9 @@ for name in ("vllm", "flag-gems", "vllm-plugin-fl"):
     assert not direct_url.get("dir_info", {}).get("editable", False), name
     print(f"{name}: {dist.version}, installed at {dist.locate_file('')}")
 assert torch.__version__ == "2.9.0"
-assert vllm.__version__ == "0.32.0"
+# The wheel is built as 0.32.0+empty, so vllm.__version__ keeps the local
+# suffix; compare the base version, as the CI image self-check does.
+assert vllm.__version__.split("+")[0] == "0.32.0"
 assert torch.cuda.is_available() and torch.cuda.device_count() == 2
 assert "FLAGCX_PATH" not in os.environ
 print("Torch:", torch.__file__)
@@ -137,19 +178,23 @@ print("DCUs:", [torch.cuda.get_device_name(i) for i in range(2)])
 PY
 ```
 
-Distribution versions and imported module versions are both checked because
-`0.32.0+empty` imports as `0.32.0`, and the vendor PyTorch distribution imports
-as `2.9.0`. An older global vLLM installation must not shadow the image's wheel.
+Distribution versions and imported module versions are both checked because the
+imported `vllm.__version__` carries the wheel's local suffix while the
+distribution check pins the exact `0.32.0+empty`, and the vendor PyTorch
+distribution imports as `2.9.0`. An older global vLLM installation must not
+shadow the image's wheel.
 FlagCX is optional for this deployment. Leave `FLAGCX_PATH` unset to use the
 validated vendor RCCL route; setting it to an empty string still selects FlagCX.
 
 ## 5. Start the TP2 service
 
-The following graph configuration matches the validated short-context runs.
+The following graph configuration is the one the Hygon CI matrix runs
+(`tests/platforms/hygon.yaml`, `device_overrides.bw1000.llm`), so a local run
+and a CI run start from the same engine settings.
 
 ```bash
 docker exec --detach "$CONTAINER" /bin/bash -lc '
-  exec /opt/vllm-fl/venv/bin/python -I -B -m vllm.entrypoints.cli.main serve "$MODEL_PATH" \
+  exec /flagos/bin/python -I -B -m vllm.entrypoints.cli.main serve "$MODEL_PATH" \
     --served-model-name "$SERVED_MODEL" --host 0.0.0.0 --port "$PORT" \
     --tensor-parallel-size 2 --max-model-len 4096 \
     --max-num-seqs 8 --max-num-batched-tokens 8192 \
@@ -166,6 +211,32 @@ Wait for model loading and graph capture to finish before sending requests.
 For an eager run, replace the three graph-related options
 (`--compilation-config`, `--cudagraph-capture-sizes`, and
 `--max-cudagraph-capture-size`) with `--enforce-eager`.
+
+### Why each non-default flag is set
+
+The flags below are the only overrides; everything else stays at the vLLM
+default. They fall into two groups: values the DCU forces, and values that
+reproduce the measured gate workload. Remove or relax the second group when
+you are not reproducing the gate.
+
+| Flag | Applies to | Why it is set | Effect of changing it |
+|---|---|---|---|
+| `--tensor-parallel-size 2` | both models | Two DCUs, TP2 over vendor RCCL. The 35B MoE weights in bf16 exceed a single 64 GiB card, and the 27B leaves no usable KV space on one card. | Requires re-running with a matching card count; collectives must stay on RCCL. |
+| `--gpu-memory-utilization 0.85` | both models | Keeps a 15% device margin for the host driver reservation and capture growth. This matters on this platform because `is_cuda_alike()` is `False`, so upstream's cudagraph memory estimator never runs and the KV cache would otherwise take the entire budget; the plugin also subtracts an explicit headroom of its own through `VLLM_FL_HYGON_GRAPH_HEADROOM_GB` (default 4 GiB, capped at 30% of one card). 0.85 is the value the recorded runs used; the headroom, not the ratio, is the part the platform requires. | Raising it shrinks the margin below the recorded footprint and risks a HIP OOM during the first capture, which leaves DCU memory unreclaimable; lowering it cuts KV blocks and therefore the maximum context that fits. |
+| `--cudagraph-capture-sizes 1 2 4 8` and `--max-cudagraph-capture-size 8` | graph runs only | Device constraint. vLLM 0.32 pre-fills a 51-entry table (up to 512 tokens) before the platform hook runs, and every captured size costs DCU memory on top of the KV cache. Eight entries cover the concurrency this recipe allows, so larger sizes are never dispatched. The plugin additionally caps the pre-filled table through `VLLM_FL_HYGON_CUDAGRAPH_CAPTURE_CAP` (default 64); the CLI value here is the tighter, per-deployment limit. | A larger table increases the capture footprint and can OOM during startup; a smaller one re-uses a bigger graph for small batches, which costs latency but not correctness. |
+| `--max-model-len 4096` | both models | Gate workload constraint. The adaptation gate sends short text and image prompts, and 4096 was the limit used for the recorded results on two 64 GiB cards. | Longer limits consume more KV blocks per sequence and change the measured memory profile; re-measure before publishing numbers. |
+| `--max-num-seqs 8` | both models | Gate workload constraint. The gate's concurrency scenario sends eight simultaneous requests, so eight sequences bound both the scheduler batch and the KV peak for the reported run. | Larger values raise concurrency and KV pressure; the `1 2 4 8` capture table then no longer covers every batch size. |
+| `--max-num-batched-tokens 8192` | both models | Gate workload constraint. Caps one prefill step at 8192 tokens so a long prompt cannot spike activation memory beyond the budget the capture table assumes. | Raising it allows larger prefills at higher peak memory; lowering it splits prefills into more steps. |
+| `--no-enable-prefix-caching` | both models | Gate workload constraint. The gate requests are independent, so caching would let later requests reuse blocks from earlier ones and shift both latency and memory numbers away from the recorded baseline. It also keeps the hybrid MoE case consistent with the V1 run, which must use `--mamba-cache-mode none`. | For a production workload with repeated prefixes, enabling it is the expected default; only the gate numbers assume it is off. |
+| `--compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE"}'` | graph runs only | Both capture modes are exercised: piecewise graphs for prefill and decode, plus full graphs where the scheduler can replay a whole batch. This is the mode the recorded `PIECEWISE`/`FULL` capture counts refer to. | Other modes change which batches are replayed and therefore both latency and the capture footprint. |
+
+Two rows are worth calling out because they are often mistaken for tuning. The
+capture-size pair is what makes graph mode fit in DCU memory, together with the
+plugin's graph headroom; `--gpu-memory-utilization 0.85` is the additional
+device margin the recorded runs used and should be re-measured rather than
+copied blindly. `--max-model-len`, `--max-num-seqs`,
+`--max-num-batched-tokens` and `--no-enable-prefix-caching` exist only to
+reproduce the gate workload and can be relaxed for real traffic.
 
 ## 6. Send a real chat request
 
@@ -338,10 +409,14 @@ Not supported / not verified on this stack:
 
 ## Validation scope
 
-See [PR #576](https://github.com/flagos-ai/vllm-plugin-FL/pull/576) for CI status
-and validation details. Results apply to the recorded source and image
-artifacts; they do not establish complete operator/collective ABI coverage
-or performance.
+The 0.32 line is validated by the `vllm-plugin-FL` CI on the Hygon runner and by
+the four-group adaptation gate described above; see
+[PR #711](https://github.com/flagos-ai/vllm-plugin-FL/pull/711) for the run
+identifiers, per-scenario reports and the exact source and image digests.
+[PR #576](https://github.com/flagos-ai/vllm-plugin-FL/pull/576) covers the
+superseded 0.28 line and is kept only as history. Results apply to the recorded
+source and image artifacts; they do not establish complete
+operator/collective ABI coverage or performance.
 
 ## Troubleshooting
 
@@ -352,8 +427,9 @@ or performance.
   and current ownership. Confirm that the isolated container sees exactly two
   logical devices before serving.
 - **HIP compiler or shared-library errors:** preserve the image's DTK paths and
-  the host `/opt/hyhal` mount. The validated clang path is
-  `/opt/rocm/aillvm/bin/clang-18`; installing CUDA wheels does not fix this stack.
+  the host `/opt/hyhal` mount. The image compiles with DTK `dcc 25.10.0`
+  (`clang version 17.0.0` under `/opt/dtk/bin`); installing CUDA wheels does not
+  fix this stack.
 - **Text works but visual answers are wrong:** use the plugin revision containing
   the Hygon vision SDPA fix. That fix makes Q/K/V contiguous after transpose and
   pads head dimension 72 to 128 while preserving the original attention scale.
