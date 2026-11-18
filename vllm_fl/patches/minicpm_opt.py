@@ -57,15 +57,20 @@ def apply_minicpm_optimizations():
                 
             model_input = orig_prepare(self, seq_group_metadata_list, *args, **kwargs)
             
-            # Metadata caching for slot_mapping
-            if enable_metadata_cache and hasattr(model_input, "slot_mapping") and model_input.slot_mapping is not None:
-                cached_slot = MetadataCachePool.get_tensor(
-                    model_input.slot_mapping.shape,
-                    model_input.slot_mapping.dtype,
-                    model_input.slot_mapping.device
-                )
-                cached_slot.copy_(model_input.slot_mapping, non_blocking=True)
-                model_input.slot_mapping = cached_slot
+            # Metadata caching for slot_mapping (safe against NamedTuple / attn_metadata)
+            if enable_metadata_cache:
+                try:
+                    target = getattr(model_input, "attn_metadata", model_input)
+                    if hasattr(target, "slot_mapping") and target.slot_mapping is not None:
+                        cached_slot = MetadataCachePool.get_tensor(
+                            target.slot_mapping.shape,
+                            target.slot_mapping.dtype,
+                            target.slot_mapping.device
+                        )
+                        cached_slot.copy_(target.slot_mapping, non_blocking=True)
+                        target.slot_mapping = cached_slot
+                except Exception:
+                    pass
                 
             return model_input
             
