@@ -232,6 +232,8 @@ def _peer_rowwise_oneshot_allreduce_rms_norm_kernel(
     RANK: tl.constexpr,
     WORLD_SIZE: tl.constexpr,
     CAPACITY: tl.constexpr,
+    SCATTER_RANK_CAPACITY: tl.constexpr,
+    STAGE_CAPACITY: tl.constexpr,
     GRID_SIZE: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
     FP32_ACC: tl.constexpr,
@@ -257,6 +259,7 @@ def _peer_rowwise_oneshot_allreduce_rms_norm_kernel(
     # its arrival. Program 0 advances the slot only after all programs arrive.
     slot = tl.load(state + 1)
     previous_numel = tl.load(state + 2)
+    previous_strategy = tl.load(state + 3)
     tl.atomic_add(state, 1, sem="release", scope="gpu")
 
     slot_stride = WORLD_SIZE * CAPACITY
@@ -288,40 +291,22 @@ def _peer_rowwise_oneshot_allreduce_rms_norm_kernel(
             )
         token += GRID_SIZE
 
-    # Clear the slot used by the preceding launch. The previous payload size is
-    # dynamic, so one max-sized workspace can alternate between M=6 and M=138.
-    sentinel = tl.full((BLOCK_SIZE,), 0x8000, tl.uint16).to(
-        local_communication_buffer.dtype.element_ty, bitcast=True
+    # Clear according to the preceding launch's actual communication layout.
+    _clear_previous_protocol_slot(
+        local_communication_buffer,
+        clear_slot_base,
+        previous_numel,
+        previous_strategy,
+        columns,
+        pid,
+        H,
+        WORLD_SIZE,
+        CAPACITY,
+        SCATTER_RANK_CAPACITY,
+        STAGE_CAPACITY,
+        GRID_SIZE,
+        BLOCK_SIZE,
     )
-    clear_offset = pid * BLOCK_SIZE
-    clear_stride = GRID_SIZE * BLOCK_SIZE
-    if previous_numel == CAPACITY:
-        # Exact-capacity payloads make all rank slices contiguous. Flattening
-        # them lets every resident program share the clear work.
-        total_clear_numel = WORLD_SIZE * previous_numel
-        while clear_offset < total_clear_numel:
-            clear_indices = clear_offset + columns
-            clear_mask = clear_indices < total_clear_numel
-            tl.store(
-                local_communication_buffer + clear_slot_base + clear_indices,
-                sentinel,
-                mask=clear_mask,
-            )
-            clear_offset += clear_stride
-    else:
-        while clear_offset < previous_numel:
-            clear_indices = clear_offset + columns
-            clear_mask = clear_indices < previous_numel
-            for peer_rank in tl.static_range(0, WORLD_SIZE):
-                tl.store(
-                    local_communication_buffer
-                    + clear_slot_base
-                    + peer_rank * CAPACITY
-                    + clear_indices,
-                    sentinel,
-                    mask=clear_mask,
-                )
-            clear_offset += clear_stride
 
     # Poll the local symmetric allocation. Peer writes target this allocation
     # directly; volatile loads prevent a cached sentinel from stalling progress.
@@ -378,6 +363,7 @@ def _peer_rowwise_oneshot_allreduce_rms_norm_kernel(
             arrived = tl.load(state, volatile=True)
         tl.store(state + 1, (slot + 1) % 3)
         tl.store(state + 2, M * H)
+        tl.store(state + 3, 0)
         tl.atomic_xchg(state, 0, sem="release", scope="gpu")
 
     if USE_PDL and (CHAIN_QUANT or TRIGGER_COMPLETION_AT_END):
@@ -403,6 +389,8 @@ def _peer_tiled_oneshot_allreduce_rms_norm_kernel(
     RANK: tl.constexpr,
     WORLD_SIZE: tl.constexpr,
     CAPACITY: tl.constexpr,
+    SCATTER_RANK_CAPACITY: tl.constexpr,
+    STAGE_CAPACITY: tl.constexpr,
     PARTIAL_SUM_SLOT_CAPACITY: tl.constexpr,
     GRID_SIZE: tl.constexpr,
     TILES_PER_ROW: tl.constexpr,
@@ -425,6 +413,7 @@ def _peer_tiled_oneshot_allreduce_rms_norm_kernel(
 
     slot = tl.load(state + 1)
     previous_numel = tl.load(state + 2)
+    previous_strategy = tl.load(state + 3)
     tl.atomic_add(state, 1, sem="release", scope="gpu")
 
     slot_capacity = WORLD_SIZE * CAPACITY
@@ -456,25 +445,22 @@ def _peer_tiled_oneshot_allreduce_rms_norm_kernel(
             )
         work_index += GRID_SIZE
 
-    # Clear only the payload used by the launch two generations ago.
-    sentinel = tl.full((BLOCK_SIZE,), 0x8000, tl.uint16).to(
-        local_communication_buffer.dtype.element_ty, bitcast=True
+    # Clear according to the preceding launch's actual communication layout.
+    _clear_previous_protocol_slot(
+        local_communication_buffer,
+        clear_slot_base,
+        previous_numel,
+        previous_strategy,
+        lanes,
+        pid,
+        H,
+        WORLD_SIZE,
+        CAPACITY,
+        SCATTER_RANK_CAPACITY,
+        STAGE_CAPACITY,
+        GRID_SIZE,
+        BLOCK_SIZE,
     )
-    clear_offset = pid * BLOCK_SIZE
-    clear_stride = GRID_SIZE * BLOCK_SIZE
-    while clear_offset < previous_numel:
-        clear_indices = clear_offset + lanes
-        clear_mask = clear_indices < previous_numel
-        for source_rank in tl.static_range(0, WORLD_SIZE):
-            tl.store(
-                local_communication_buffer
-                + clear_slot_base
-                + source_rank * CAPACITY
-                + clear_indices,
-                sentinel,
-                mask=clear_mask,
-            )
-        clear_offset += clear_stride
 
     # Reduce each tile and publish its partial square sum for row-wide RMSNorm.
     work_index = pid
@@ -1694,6 +1680,8 @@ def _launch_fused_allreduce_rms_norm(
         "RANK": workspace.rank,
         "WORLD_SIZE": workspace.world_size,
         "CAPACITY": workspace.capacity,
+        "SCATTER_RANK_CAPACITY": workspace.scatter_rank_capacity,
+        "STAGE_CAPACITY": workspace.stage_capacity,
         "GRID_SIZE": grid_size,
         "BLOCK_SIZE": block_size,
         "FP32_ACC": fp32_acc,
@@ -1806,6 +1794,8 @@ def _launch_fused_allreduce_rms_norm(
             RANK=workspace.rank,
             WORLD_SIZE=workspace.world_size,
             CAPACITY=workspace.capacity,
+            SCATTER_RANK_CAPACITY=workspace.scatter_rank_capacity,
+            STAGE_CAPACITY=workspace.stage_capacity,
             PARTIAL_SUM_SLOT_CAPACITY=workspace.partial_sum_slot_capacity,
             GRID_SIZE=peer_tile_count,
             TILES_PER_ROW=peer_tiles_per_row,

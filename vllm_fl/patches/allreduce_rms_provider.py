@@ -24,7 +24,7 @@ from functools import wraps
 from threading import RLock
 from types import SimpleNamespace
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vllm.fl.allreduce_rms_provider")
 _ENV = "VLLM_FL_FUSED_ALLREDUCE_RMS_PROVIDER"
 _OFF = ("", "0", "off", "native")
 _LOCK = RLock()

@@ -49,6 +49,27 @@ returns the arithmetic and GPU-explanation responses plus a separate short
 sequence response. The original 96-token sequence response is retained as
 truncated, rather than counted as a correct next-number answer.
 
+The peer backend also retires slots using the preceding launch's strategy.
+A partial two-shot prefill uses a compact scatter layout that differs from
+one-shot rank slices. With TP2, hidden size 5120 and workspace size 4096,
+a 3500-token two-shot call followed by a 64-token rowwise or 1-token tiled
+one-shot left 1525760 elements uncleared in the previous implementation.
+The rowwise path also retained the two-shot strategy tag. Both one-shot paths
+now use the existing strategy-aware clearing helper, and the rowwise path
+publishes its own strategy. The same probes leave zero uncleared elements.
+
+The manual regression `tests/manual/check_allreduce_rms_strategy_gpu.py`
+checks those invariants and 360 mixed-shape calls with PDL on/off, including
+144 graph replays with changed inputs. Numerical comparisons sample up to
+128 rows per call against an independent reference. This qualification is
+peer TP2/BF16; it does not qualify other topologies, dtypes or a concurrent
+model workload. The repaired dense TP2 service passes full graph capture,
+three semantic requests and serial 1K/4K/16K/64K-input-token requests, but
+its subsequent 64-choice, 512-output-token functional request timed out.
+No throughput gain or complete large-load repair follows from the operator
+regression. Provider dispatch/workspace diagnostics use the vLLM logger
+namespace so they remain visible under the vLLM CLI logging configuration.
+
 H100 peer qualification covers TP2/TP8 operator correctness and the TP2 dense
 model control above. TP8 checks exercise BF16/FP8, explicit/in-place outputs and
 changing-input graph replay; they do not establish a TP8 whole-model result.
