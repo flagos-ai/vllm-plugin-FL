@@ -93,9 +93,21 @@ class K3ModelRunner(GPUModelRunner):
         )
         if not callable(getattr(GPUModelRunner, "_prepare_intermediate_tensors", None)):
             raise RuntimeError("K3 runner requires the explicit PP input-copy hook")
+        if getattr(vllm_config, "weight_transfer_config", None) is not None:
+            raise NotImplementedError(
+                "K3 MXFP4 weight updates are unsupported; restart the worker "
+                "to load a new checkpoint"
+            )
         super().__init__(vllm_config, device)
         self._runtime_diagnostics = diagnostics
         self._tp8_prefill_workspace = None
+
+    def reload_weights(self, *args, **kwargs):
+        """Reject reload before vLLM restores raw checkpoint parameter layouts."""
+        raise NotImplementedError(
+            "K3 MXFP4 checkpoint reload is unsupported; restart the worker "
+            "to load a new checkpoint"
+        )
 
     def profile_run(self):
         # Worker memory_profiling encloses this call. Reserve before both vision

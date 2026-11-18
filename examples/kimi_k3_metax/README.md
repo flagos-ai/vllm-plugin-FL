@@ -118,6 +118,13 @@ prefix caching off (the YAML uses the explicit `no-enable-prefix-caching` flag).
 Containers require `/dev/dri`, `/dev/mxcd`,
 `/dev/infiniband`, host networking, sufficient shared memory and unlimited memlock.
 
+## Weight lifecycle
+
+Load the checkpoint once per worker. In-place weight-transfer sessions and
+checkpoint reload are not supported by the packed MXFP4 / Graph combination;
+restart the worker to load another checkpoint. These operations are rejected
+before vLLM restores or overwrites the prepared parameters.
+
 ## Validation
 
 Current ownership checks and installation smoke are described in
