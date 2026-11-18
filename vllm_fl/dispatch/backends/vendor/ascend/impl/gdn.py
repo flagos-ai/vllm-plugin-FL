@@ -2,21 +2,45 @@
 # Copyright 2026 FlagOS Contributors
 
 """Adapt upstream GDN metadata to FL-dispatched numerical operators."""
+from torch import nn
+
 from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
     QwenGatedDeltaNetAttention,
 )
 from vllm.model_executor.layers.mamba.mamba_utils import is_conv_state_dim_first
+
 from vllm_fl.dispatch import CachedOp
 
 _gdn_decode = CachedOp("gdn_decode")
 _gdn_prefill = CachedOp("gdn_prefill")
+_gdn_chunk = CachedOp("gdn_chunk_prefill")
+
+
+class _DispatchedGDNChunk(nn.Module):
+    """Preserve the upstream chunk-layer call without selecting a backend here."""
+
+    def forward(self, *args, **kwargs):
+        return _gdn_chunk(*args, **kwargs)
 
 
 class AscendQwenGatedDeltaNetAttention(QwenGatedDeltaNetAttention):
-    """Non-speculative reference path, sharing eager and captured math."""
+    """Use upstream speculative state handling and dispatched ordinary GDN."""
+
+    def __init__(self, config, vllm_config, prefix="", gqa_interleaved_layout=False):
+        super().__init__(config, vllm_config, prefix, gqa_interleaved_layout)
+        self._use_speculative_core = vllm_config.speculative_config is not None
+        if self._use_speculative_core:
+            from vllm_fl.dispatch import get_default_manager
+
+            get_default_manager().resolve("causal_conv1d_update")
+            get_default_manager().resolve("gdn_chunk_prefill")
+            self.chunk_gated_delta_rule = _DispatchedGDNChunk()
+            self.enable_packed_recurrent_decode = False
 
     def _warmup_prefill_kernels(self, *args, **kwargs):
+        if self._use_speculative_core:
+            return super()._warmup_prefill_kernels(*args, **kwargs)
         # There are no Triton prefill kernels in this reference implementation.
         return
 
@@ -31,6 +55,8 @@ class AscendQwenGatedDeltaNetAttention(QwenGatedDeltaNetAttention):
         )
 
     def _forward_core(self, mixed_qkv, b, a, core_attn_out):
+        if self._use_speculative_core:
+            return super()._forward_core(mixed_qkv, b, a, core_attn_out)
         metadata = get_forward_context().attn_metadata
         if metadata is None:
             return

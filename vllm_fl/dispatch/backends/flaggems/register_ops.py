@@ -38,6 +38,10 @@ def register_builtins(registry) -> None:
     Args:
         registry: Registry to register into
     """
+    from .impl.mamba import register_causal_conv1d_operator, register_gdn_chunk_operator
+
+    register_causal_conv1d_operator(registry)
+    register_gdn_chunk_operator(registry)
     from .flaggems import FlagGemsBackend
 
     if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:

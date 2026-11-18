@@ -223,6 +223,16 @@ If there are multiple plugins in the current environment, you can specify use vl
     FlagGems/FlagTree installation when setting `USE_FLAGGEMS=1`.
 
 
+For Qwen3.6-27B BF16 on Ascend, set the speculative method to `mtp` and
+`num_speculative_tokens` to `1` or `3`. With `FULL_DECODE_ONLY`, uniform
+verification batches use target graphs while the draft model and prompt
+prefill run eagerly. This route requires PP1 and excludes MLA, quantization,
+LoRA, and microbatching.
+
+The Ascend GDN prefill API must accept FP32 beta with BF16 projections.
+The validated public FlagGems-vllm revision is
+[`f92d570`](https://github.com/xiemingda-1002/FlagGems-vllm/commit/f92d570d667a70256da56fabb01e2a0b1c49496b).
+
 ### HY4 on NVIDIA
 
 HY4 is paired with this branch's vLLM 0.24.0 environment and the shared

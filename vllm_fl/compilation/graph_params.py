@@ -47,6 +47,12 @@ class GraphParams:
                 f"Graph task parameters were not prepared for capture size {num_tokens}"
             )
 
+    def clear_shape(self, num_tokens: int) -> None:
+        self.events.pop(num_tokens, None)
+        self.workspaces.pop(num_tokens, None)
+        self.handles.pop(num_tokens, None)
+        self.attn_params.pop(num_tokens, None)
+
     def clear(self) -> None:
         self.events.clear()
         self.workspaces.clear()

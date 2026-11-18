@@ -101,4 +101,19 @@ def register_builtins(registry: OpRegistry) -> None:
         vendor="ascend",
         priority=BackendPriority.VENDOR,
     ))
+    from vllm_fl.dispatch.backends.flaggems.impl.mamba import (
+        uses_speculative_convolution,
+    )
+    from .impl.causal_conv1d import causal_conv1d_update_npu
+
+    def ordinary_convolution_available():
+        return is_avail() and not uses_speculative_convolution()
+
+    impls.append(OpImpl(
+        op_name="causal_conv1d_update", impl_id="vendor.ascend",
+        kind=BackendImplKind.VENDOR,
+        fn=_bind_is_available(causal_conv1d_update_npu, ordinary_convolution_available),
+        vendor="ascend", priority=BackendPriority.VENDOR,
+        allow_execution_fallback=False,
+    ))
     registry.register_many(impls)

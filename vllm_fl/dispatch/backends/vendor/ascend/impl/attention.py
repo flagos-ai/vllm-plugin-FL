@@ -83,6 +83,43 @@ _FIA_TND_LARGE_HEAD_FALLBACK_HEAD_SIZE = 512
 _SWA_INT_MAX = 2147483647
 
 
+def supports_mtp_target_full(vllm_config: VllmConfig) -> bool:
+    """Check whether regular BF16 MTP target verification can use FULL graphs."""
+    spec = vllm_config.speculative_config
+    return (
+        spec is not None
+        and spec.method == "mtp"
+        and spec.num_speculative_tokens in (1, 3)
+        and vllm_config.parallel_config.pipeline_parallel_size == 1
+        and not vllm_config.parallel_config.use_ubatching
+        and vllm_config.lora_config is None
+        and vllm_config.compilation_config.cudagraph_mode
+        == CUDAGraphMode.FULL_DECODE_ONLY
+        and vllm_config.model_config.dtype == torch.bfloat16
+        and not vllm_config.model_config.use_mla
+        and vllm_config.quant_config is None
+    )
+
+
+def _require_mtp_graph_batch(metadata, num_tokens, phase, query_len):
+    lengths = metadata.actual_seq_lengths_q
+    if (
+        metadata.attn_state != phase
+        or metadata.max_query_len != query_len
+        or metadata.num_prefills != 0
+        or not lengths
+        or lengths[-1] != num_tokens
+    ):
+        raise NotImplementedError("MTP FULL graphs require uniform verification batches")
+    previous = 0
+    for index, end in enumerate(lengths):
+        width = end - previous
+        is_partial_tail = index == len(lengths) - 1 and 0 < width < query_len
+        if width != query_len and not is_partial_tail:
+            raise NotImplementedError("MTP FULL graphs require the configured verification width")
+        previous = end
+
+
 def using_paged_attention(
     runtime_shape: int,
     vllm_config: VllmConfig,
@@ -423,9 +460,15 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         model: Optional[nn.Module] = None,
     ):
         """Build metadata for CUDA graph capture (ACL graph on Ascend)."""
+        state = get_ascend_dummy_attention_state(
+            speculative_method=(
+                self.speculative_config.method if self.speculative_config else None
+            ),
+            use_mla=self.model_config.use_mla,
+        )
         return self.build_for_graph_capture(
             common_attn_metadata,
-            attn_state=AscendAttentionState.DecodeOnly,
+            attn_state=state,
             model=model,
         )
 
@@ -436,14 +479,17 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         model: Optional[nn.Module] = None,
     ):
         """Build metadata for graph capture."""
-        if attn_state == AscendAttentionState.DecodeOnly:
+        if attn_state == AscendAttentionState.DecodeOnly or (
+            supports_mtp_target_full(self.vllm_config)
+            and attn_state == AscendAttentionState.ChunkedPrefill
+        ):
             attn_metadata = self.build(
                 common_prefix_len=0,
                 common_attn_metadata=common_attn_metadata,
             )
         else:
             raise NotImplementedError(
-                "Currently only support building dummy metadata for DecodeOnly state"
+                "Unsupported Ascend attention state for FULL graph capture"
             )
 
         attn_metadata.attn_state = attn_state
@@ -625,19 +671,37 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 f"Unknown Ascend attention task parameters (graph size {num_tokens})"
             )
 
+        speculative = vllm_config.speculative_config is not None
+        if speculative and not supports_mtp_target_full(vllm_config):
+            raise NotImplementedError("Unsupported speculative Ascend FULL graph update")
+        # Validate every layer before beginning any mutable task update.
+        for param in params:
+            if param.layer_name not in metadata:
+                raise RuntimeError(
+                    "Live Ascend attention metadata is missing captured layer "
+                    f"{param.layer_name!r}"
+                )
+            live = metadata[param.layer_name]
+            if speculative:
+                if not isinstance(param, FusedInferAttentionGraphParam):
+                    raise NotImplementedError("Speculative FULL graphs require FIA tasks")
+                _require_mtp_graph_batch(
+                    live, num_tokens, AscendAttentionState.SpecDecoding,
+                    vllm_config.speculative_config.num_speculative_tokens + 1,
+                )
+            elif live.attn_state != AscendAttentionState.DecodeOnly:
+                raise NotImplementedError(
+                    "Ascend FULL graph task update requires DecodeOnly attention"
+                )
+            if (
+                isinstance(param, FusedInferAttentionGraphParam)
+                and graph_params.workspaces[num_tokens] is None
+            ):
+                raise RuntimeError(f"Missing FIA workspace for graph size {num_tokens}")
+
         with torch.npu.stream(update_stream):
             for param, handle, event in zip(params, handles, events):
-                if param.layer_name not in metadata:
-                    raise RuntimeError(
-                        "Live Ascend attention metadata is missing captured layer "
-                        f"{param.layer_name!r}"
-                    )
                 live = metadata[param.layer_name]
-                if live.attn_state != AscendAttentionState.DecodeOnly:
-                    raise NotImplementedError(
-                        "Ascend FULL graph task update currently supports only "
-                        "regular DecodeOnly attention"
-                    )
                 if isinstance(param, PagedAttentionGraphParam):
                     workspace = torch_npu._npu_paged_attention_get_workspace(
                         query=param.query,
@@ -819,10 +883,20 @@ class AscendAttentionBackendImpl(AttentionImpl):
         attn_metadata: AscendMetadata,
         layer: AttentionLayer | None,
     ) -> str:
-        if self.vllm_config.speculative_config is not None:
-            raise NotImplementedError(
-                "Ascend FULL graph task capture does not yet support "
-                "speculative attention in FL"
+        speculative = self.vllm_config.speculative_config is not None
+        if speculative:
+            if not supports_mtp_target_full(self.vllm_config):
+                raise NotImplementedError("Unsupported speculative Ascend FULL graph capture")
+            context = get_forward_context()
+            if (
+                context.cudagraph_runtime_mode != CUDAGraphMode.FULL
+                or not context.batch_descriptor.uniform
+            ):
+                raise NotImplementedError("MTP capture requires a uniform target FULL graph")
+            _require_mtp_graph_batch(
+                attn_metadata, context.batch_descriptor.num_tokens,
+                AscendAttentionState.ChunkedPrefill,
+                self.vllm_config.speculative_config.num_speculative_tokens + 1,
             )
         if self.vllm_config.quant_config is not None:
             raise NotImplementedError(
@@ -834,7 +908,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 "Ascend FULL graph task capture currently supports regular "
                 "attention without sinks"
             )
-        if attn_metadata.attn_state != AscendAttentionState.DecodeOnly:
+        if not speculative and attn_metadata.attn_state != AscendAttentionState.DecodeOnly:
             raise NotImplementedError(
                 "Ascend FULL graph task capture currently supports only "
                 "regular DecodeOnly attention"
