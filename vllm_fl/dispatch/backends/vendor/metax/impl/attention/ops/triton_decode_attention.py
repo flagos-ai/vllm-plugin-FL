@@ -684,6 +684,9 @@ def decode_attention_fwd(
     sm_scale,
     page_size=1,
     logit_cap=0.0,
+    k_scale=None,
+    v_scale=None,
+    is_mla=False,
 ):
     assert num_kv_splits == attn_logits.shape[2]
     kv_group_num = q.shape[1] // v_buffer.shape[-2]
