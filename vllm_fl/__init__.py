@@ -277,9 +277,9 @@ def register():
     if vendor_name == "kunlunxin":
         _install_kunlunxin_fla_alias()
 
-    if vendor_name in ("ascend", "mthreads", "tsingmicro"):
-        # These backends use ModelRunnerFL; choose it before VllmConfig reads
-        # model defaults for the upstream V2 runner.
+    if vendor_name in ("mthreads", "tsingmicro"):
+        # These backends require the legacy runner. Ascend, Enflame, and GCU
+        # preserve upstream runner selection and configure workers separately.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
