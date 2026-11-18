@@ -14,7 +14,6 @@ from datetime import timedelta
 from types import NoneType
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import regex as re
 import torch
 import torch.nn as nn
@@ -98,7 +97,7 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -125,6 +124,10 @@ def _normalize_process_group_backend(backend: str) -> str:
         # CommunicatorFL uses FlagCX for tensor-parallel collectives; torch
         # process groups still use the NPU's native backend.
         return "hccl"
+    if backend == "flagcx" and getattr(current_platform, "vendor_name", None) == "amd":
+        # Keep Torch process groups on RCCL. CommunicatorFL submits TP
+        # collectives to FlagCX directly, including during HIP graph capture.
+        return "nccl"
     return backend
 
 
@@ -240,9 +243,11 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
-        # this flag to select the matching block-table and KV-cache kernels.
-        self.use_v2_model_runner = False
+        # Follow the upstream selection (V2 unless the config or the platform
+        # rules it out). Vendors that only ship the V1 ModelRunnerFL reject V2
+        # in PlatformFL.check_and_update_config, so the value seen here is
+        # already the runner this process is going to build.
+        self.use_v2_model_runner = vllm_config.use_v2_model_runner
 
         # Hybrid models (mamba/linear attention + full attention) keep the
         # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
@@ -285,7 +290,6 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        self.use_v2_model_runner = vllm_config.use_v2_model_runner
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 
@@ -549,9 +553,38 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            from vllm.v1.worker.gpu.model_runner import (
-                GPUModelRunner as GPUModelRunnerV2,
-            )
+            if current_platform.device_type == "npu":
+                from vllm_fl.dispatch.backends.vendor.ascend.patches import (
+                    ascend_v2_device,
+                )
+
+                ascend_v2_device.install_ascend_v2_device_shims()
+                from vllm_fl.dispatch.backends.vendor.ascend.worker.model_runner_v2 import (
+                    GPUModelRunnerFLV2 as GPUModelRunnerV2,
+                )
+            else:
+                if getattr(current_platform, "vendor_name", "") == "amd":
+                    from vllm_fl.dispatch.backends.vendor.amd.v2_runner_compat import (
+                        install_v2_runner_compat,
+                    )
+
+                    install_v2_runner_compat()
+                elif getattr(current_platform, "vendor_name", "") == "thead":
+                    # Platform-side adaptations for the upstream V2 runner; see
+                    # vllm_fl/dispatch/backends/vendor/thead/patches/.
+                    from vllm_fl.dispatch.backends.vendor.thead.patches import (
+                        v2_runner_compat,
+                    )
+
+                    v2_runner_compat.install_v2_runner_compat()
+                from vllm.v1.worker.gpu.model_runner import (
+                    GPUModelRunner as GPUModelRunnerV2,
+                )
+
+            if getattr(current_platform, "vendor_name", None) == "iluvatar":
+                from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
+                    IluvatarGPUModelRunnerV2 as GPUModelRunnerV2,
+                )
 
             # HACK(woosuk): This is a temporary fix to avoid type errors.
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
@@ -588,6 +621,10 @@ class WorkerFL(WorkerBase):
                 self.device,
                 self.model_runner.get_model(),
             )
+
+        if self.device.type == "npu":
+            # Keep the Dynamo thread guard stable from graph warmup to serving.
+            set_torch_threads_for_runtime()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
@@ -636,10 +673,25 @@ class WorkerFL(WorkerBase):
 
         maybe_apply_startup_plan(self)
 
+        is_amd = getattr(current_platform, "vendor_name", None) == "amd"
+        if is_amd:
+            # The upstream V2 runner can compile during either profile_run.
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops(amd_compile=True)
+
+        # The first compile uses the active config to select the graph wrapper
+        # whose registry the upstream V2 graph profiler manages.
+        profile_config = (
+            set_current_vllm_config(self.vllm_config)
+            if is_amd and self.use_v2_model_runner
+            else nullcontext()
+        )
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
             # max_num_batched_tokens
-            self.model_runner.profile_run()
+            with profile_config:
+                self.model_runner.profile_run()
 
             msg = (
                 f"Initial free memory {format_gib(self.init_snapshot.free_memory)} "
@@ -662,10 +714,13 @@ class WorkerFL(WorkerBase):
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
-        with memory_profiling(
-            self.init_snapshot,
-            weights_memory=int(self.model_runner.model_memory_usage),
-        ) as profile_result:
+        with (
+            memory_profiling(
+                self.init_snapshot,
+                weights_memory=int(self.model_runner.model_memory_usage),
+            ) as profile_result,
+            profile_config,
+        ):
             self.model_runner.profile_run()
 
         # Profile CUDA graph memory if graphs will be captured.
@@ -845,6 +900,12 @@ class WorkerFL(WorkerBase):
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
 
+    def get_supported_kv_cache_layouts(self) -> list[str]:
+        # This RPC is outside WorkerWrapperBase's init/load contexts. Ascend
+        # selects planar or dense hybrid layouts from the current model config.
+        with set_current_vllm_config(self.vllm_config):
+            return super().get_supported_kv_cache_layouts()
+
     def update_max_model_len(self, max_model_len: int) -> None:
         """Update max_model_len after auto-fit to GPU memory.
         This is called when max_model_len=-1 is used and the engine
@@ -875,13 +936,16 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        # vLLM 0.32 dropped ModelConfig.enable_return_routed_experts when the
+        # routed-experts plumbing moved to the aux-output connector; treat an
+        # absent field as the feature being off.
+        if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
         # allocator and are not discarded during sleep/wake cycles.
-        if kv_cache_config.needs_kv_cache_zeroing and hasattr(
+        if getattr(kv_cache_config, "needs_kv_cache_zeroing", False) and hasattr(
             self.model_runner, "_init_kv_zero_meta"
         ):
             self.model_runner._init_kv_zero_meta()
@@ -1065,10 +1129,16 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        activate_jit_monitor(
-            mode=self.observability_config.jit_monitor_mode,
-            verbose=self.observability_config.jit_monitor_verbose,
-        )
+        # Eager execution permits runtime JIT compilation. Match the 0.32
+        # worker and monitor only when kernel warmup was enabled.
+        if (
+            self.device.type != "npu"
+            or self.vllm_config.kernel_config.enable_jit_warmup
+        ):
+            activate_jit_monitor(
+                mode=self.observability_config.jit_monitor_mode,
+                verbose=self.observability_config.jit_monitor_verbose,
+            )
 
         # Freeze the worker heap so the GC won't scan static objects
         # (model weights, KV caches, CUDA graphs) during inference.
@@ -1079,9 +1149,8 @@ class WorkerFL(WorkerBase):
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
 
-        # Startup is done; steady-state serving gets no benefit from torch
-        # intra-op parallelism.
-        set_torch_threads_for_runtime()
+        if self.device.type != "npu":
+            set_torch_threads_for_runtime()
 
         return CompilationTimes(
             language_model=self.compilation_config.compilation_time,
@@ -1278,39 +1347,7 @@ class WorkerFL(WorkerBase):
 
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         all_gather_tensors = {}
-        compilation_config = self.vllm_config.compilation_config
-        parallel_config = self.vllm_config.parallel_config
-
-        if (
-            parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
-            and forward_pass
-        ):
-            # currently only supported by V1 GPUModelRunner
-            assert not self.use_v2_model_runner
-            num_scheduled_tokens_np = np.array(
-                list(scheduler_output.num_scheduled_tokens.values()),
-                dtype=np.int32,
-            )
-            # TODO(lucas): This is pretty gross; ideally we should only ever call
-            # `_determine_batch_execution_and_padding` once (will get called again
-            # in `execute_model`) but this requires a larger refactor of PP.
-            _, batch_desc, _, _, _ = (
-                self.model_runner._determine_batch_execution_and_padding(
-                    num_tokens=num_scheduled_tokens,
-                    num_reqs=len(num_scheduled_tokens_np),
-                    num_scheduled_tokens_np=num_scheduled_tokens_np,
-                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
-                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
-                )
-            )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
-                )
-            }
 
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (
@@ -1354,6 +1391,9 @@ class WorkerFL(WorkerBase):
             all_gather_group=get_tp_group(),
             all_gather_tensors=all_gather_tensors,
         )
+
+        if self.use_v2_model_runner and self.model_runner.is_pooling_model:
+            self.model_runner.pool()
 
         return None
 
@@ -1620,7 +1660,11 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    # vLLM 0.32 keeps the module under ``determinism``; the 0.28 location
+    # (``layers.batch_invariant``) no longer exists.
+    from vllm.model_executor.determinism.batch_invariant import (
+        init_batch_invariance,
+    )
 
     init_batch_invariance()
     override_envs_for_eplb(

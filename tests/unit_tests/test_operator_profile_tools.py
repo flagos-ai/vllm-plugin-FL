@@ -62,6 +62,16 @@ def test_iter_events_rejects_missing_trace_events(tmp_path):
         list(extractor.iter_events(path))
 
 
+def shell_test_env():
+    """Keep fake tools ahead of image activation hooks in noninteractive shells."""
+    env = os.environ.copy()
+    # Bash reads BASH_ENV before profile.sh/serve.sh; other POSIX shells may
+    # read ENV. An image activation hook can replace the test's fake-tool PATH.
+    for variable in ("BASH_ENV", "ENV"):
+        env.pop(variable, None)
+    return env
+
+
 def test_profile_script_rejects_nested_stale_trace(tmp_path):
     run_dir = tmp_path / "run"
     nested = run_dir / "profile/rank0"
@@ -78,6 +88,8 @@ def test_profile_script_rejects_nested_stale_trace(tmp_path):
             capture_output=True,
             text=True,
             check=False,
+            env=shell_test_env(),
+            timeout=30,
         )
 
         assert result.returncode == 1
@@ -89,6 +101,52 @@ def make_executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def test_fake_tools_ignore_inherited_shell_startup_scripts(tmp_path, monkeypatch):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for tool in ("curl", "python3"):
+        make_executable(fake_bin / tool, "#!/bin/sh\nexit 0\n")
+    startup_marker = tmp_path / "startup-ran"
+    startup = tmp_path / "activate.sh"
+    startup.write_text(
+        f"printf activated > '{startup_marker}'\nexport PATH=/usr/bin:/bin\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BASH_ENV", str(startup))
+    monkeypatch.setenv("ENV", str(startup))
+    contaminated = subprocess.run(
+        ["bash", "-c", 'printf "%s" "$PATH"'],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        timeout=30,
+    )
+    assert contaminated.stdout == "/usr/bin:/bin"
+    assert startup_marker.read_text(encoding="utf-8") == "activated"
+    startup_marker.unlink()
+    env = shell_test_env()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    result = subprocess.run(
+        ["bash", "-c", "command -v curl; command -v python3"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+    assert result.stdout.splitlines() == [
+        str(fake_bin / "curl"),
+        str(fake_bin / "python3"),
+    ]
+    assert not startup_marker.exists()
+    # Isolation belongs to each child; the parent process keeps its settings.
+    assert os.environ["BASH_ENV"] == str(startup)
+    assert os.environ["ENV"] == str(startup)
+
+
 def test_serve_script_cleans_configured_flaggems_oplist(tmp_path):
     run_dir = tmp_path / "run"
     fake_bin = tmp_path / "bin"
@@ -97,7 +155,7 @@ def test_serve_script_cleans_configured_flaggems_oplist(tmp_path):
     oplist = tmp_path / "evidence/custom-oplist.txt"
     oplist.parent.mkdir()
     oplist.write_text("stale", encoding="utf-8")
-    env = os.environ.copy()
+    env = shell_test_env()
     env.update(
         {
             "FLAGGEMS_ENABLE_OPLIST_PATH": str(oplist),
@@ -111,6 +169,7 @@ def test_serve_script_cleans_configured_flaggems_oplist(tmp_path):
         text=True,
         check=False,
         env=env,
+        timeout=30,
     )
 
     assert result.returncode == 0
@@ -128,7 +187,7 @@ def test_profile_script_moves_configured_flaggems_oplist(tmp_path):
     oplist = tmp_path / "evidence/custom-oplist.txt"
     oplist.parent.mkdir()
     oplist.write_text("current", encoding="utf-8")
-    env = os.environ.copy()
+    env = shell_test_env()
     env.update(
         {
             "FLAGGEMS_ENABLE_OPLIST_PATH": str(oplist),
@@ -142,6 +201,7 @@ def test_profile_script_moves_configured_flaggems_oplist(tmp_path):
         text=True,
         check=False,
         env=env,
+        timeout=30,
     )
 
     copied = run_dir / "results/flaggems_enable_oplist.txt"
@@ -165,7 +225,7 @@ def test_serve_script_uses_supported_vllm_profiler_config(tmp_path):
         "'argv': sys.argv[1:], "
         "'oplist': os.environ['FLAGGEMS_ENABLE_OPLIST_PATH']}))\n",
     )
-    env = os.environ.copy()
+    env = shell_test_env()
     env.pop("FLAGGEMS_ENABLE_OPLIST_PATH", None)
     env.update(
         {
@@ -188,6 +248,7 @@ def test_serve_script_uses_supported_vllm_profiler_config(tmp_path):
         capture_output=True,
         text=True,
         env=env,
+        timeout=30,
     )
 
     recorded = json.loads(invocation.read_text())

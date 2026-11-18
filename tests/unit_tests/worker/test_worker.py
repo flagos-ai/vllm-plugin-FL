@@ -2,6 +2,9 @@
 
 """Contract tests for the FL adaptation of vLLM v0.28.0 GPUWorker."""
 
+import importlib
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -113,6 +116,37 @@ def test_sunrise_process_group_uses_pccl(monkeypatch):
     assert worker_module._normalize_process_group_backend("gloo") == "gloo"
 
 
+def test_mapped_host_buffers_probe_the_cuda_view_op(monkeypatch):
+    """The V2 UVA buffers need a real mapped-host-memory op, not just pinning."""
+    import torch
+
+    import vllm.utils.platform_utils as platform_utils
+    import vllm.utils.torch_utils as torch_utils
+
+    from vllm_fl.dispatch.backends.vendor.thead.patches import v2_runner_compat
+
+    probed = []
+
+    def unavailable_view(tensor):
+        probed.append(tensor)
+        raise RuntimeError("vLLM empty builds do not provide a mapped CUDA view")
+
+    monkeypatch.setattr(
+        torch_utils, "get_accelerator_view_from_cpu_tensor", unavailable_view
+    )
+    monkeypatch.setattr(
+        torch, "zeros", lambda *args, **kwargs: torch.empty(1, dtype=torch.int32)
+    )
+
+    monkeypatch.setattr(platform_utils, "is_uva_available", lambda: False)
+    assert v2_runner_compat.mapped_host_buffers_available() is False
+    assert probed == []
+
+    monkeypatch.setattr(platform_utils, "is_uva_available", lambda: True)
+    assert v2_runner_compat.mapped_host_buffers_available() is False
+    assert len(probed) == 1
+
+
 @pytest.mark.parametrize(
     "device_type,flagcx_backend",
     [
@@ -176,6 +210,7 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "cuda")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "nvidia")
     parallel_config = SimpleNamespace(
         worker_cls=None,
         all2all_backend=None,
@@ -236,6 +271,12 @@ def test_gcu_worker_constructs_selected_runner(monkeypatch, use_v2):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
+    # Importing the shared v0.28 runner imports the graph adapter. On a
+    # CPU-only test host, use PyTorch's always-importable CUDA graph class
+    # for this factory-only contract; no graph or device operation is run.
+    from vllm.platforms import current_platform
+
+    monkeypatch.setattr(current_platform, "device_type", "cuda", raising=False)
     from vllm_fl.dispatch.backends.vendor.gcu.worker import model_runner_v2
     from vllm_fl.dispatch.backends.vendor.gcu.worker.worker import WorkerGCU
     from vllm_fl.worker import model_runner
@@ -254,3 +295,205 @@ def test_gcu_worker_constructs_selected_runner(monkeypatch, use_v2):
     result = WorkerGCU._make_model_runner(worker)
     assert result is factory.return_value
     factory.assert_called_once_with(config, device)
+
+
+def test_v2_initializes_uva_before_upstream_buffers(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.iluvatar import iluvatar
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker import model_runner_v2
+
+    events = []
+    monkeypatch.setattr(iluvatar, "patch_v2_uva", lambda: events.append("uva"))
+    monkeypatch.setattr(
+        model_runner_v2.GPUModelRunner,
+        "__init__",
+        lambda self, config, device: events.append((config, device)),
+    )
+    model_runner_v2.IluvatarGPUModelRunnerV2("config", "device")
+    assert events == ["uva", ("config", "device")]
+
+
+def test_compat_does_not_hide_transitive_import_error(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.iluvatar.patches import worker_compat
+
+    monkeypatch.setattr(worker_compat, "apply_worker_symbols_032", lambda: None)
+
+    def broken(name):
+        raise ModuleNotFoundError("missing dependency", name="unrelated_dependency")
+
+    monkeypatch.setattr(importlib, "import_module", broken)
+    with pytest.raises(ModuleNotFoundError, match="missing dependency"):
+        worker_compat.apply_import_compat()
+
+
+def test_compat_preserves_existing_old_module(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.iluvatar.patches import worker_compat
+
+    calls = []
+    monkeypatch.setattr(worker_compat, "apply_worker_symbols_032", lambda: None)
+    monkeypatch.setattr(importlib, "import_module", lambda name: calls.append(name))
+    worker_compat.apply_import_compat()
+    assert calls == ["vllm.model_executor.layers.batch_invariant"]
+
+
+def test_vendor_update_config_synchronizes_worker_and_runner(monkeypatch):
+    import vllm.config
+
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker import IluvatarWorkerFL
+
+    new_config = object()
+    monkeypatch.setattr(vllm.config, "update_config", lambda old, values: new_config)
+    worker = object.__new__(IluvatarWorkerFL)
+    worker.vllm_config = SimpleNamespace(model_config=object())
+    worker.model_runner = SimpleNamespace()
+    worker.update_config({"model_config": {"dtype": "auto"}})
+    assert worker.model_config is new_config
+    assert worker.model_runner.model_config is new_config
+    assert worker.vllm_config.model_config is new_config
+    with pytest.raises(ValueError, match="not supported"):
+        worker.update_config({"unsupported": {}})
+
+
+def test_compat_aliases_missing_module_and_is_idempotent(monkeypatch):
+    import sys
+
+    from vllm_fl.dispatch.backends.vendor.iluvatar.patches import worker_compat
+
+    old = "vllm.model_executor.layers.batch_invariant"
+    new = "vllm.model_executor.determinism.batch_invariant"
+    replacement = SimpleNamespace(init_batch_invariance=object())
+    calls = []
+    monkeypatch.delitem(sys.modules, old, raising=False)
+    # Ensure pytest restores the real module after this test mutates the alias.
+    monkeypatch.setitem(sys.modules, old, None)
+    monkeypatch.setattr(worker_compat, "apply_worker_symbols_032", lambda: None)
+
+    def load(name):
+        calls.append(name)
+        if name == old:
+            module = sys.modules.get(old)
+            if module is None:
+                raise ModuleNotFoundError(name, name=old)
+            return module
+        assert name == new
+        return replacement
+
+    monkeypatch.setattr(importlib, "import_module", load)
+    worker_compat.apply_import_compat()
+    worker_compat.apply_import_compat()
+    assert sys.modules[old] is replacement
+    assert calls == [old, new, old]
+
+
+def test_worker_installs_pipeline_after_base_initialization(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.iluvatar import iluvatar, pipeline
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker import worker
+
+    events = []
+    group = object()
+    monkeypatch.setattr(
+        iluvatar, "apply_worker_patches", lambda: events.append("patch")
+    )
+    monkeypatch.setattr(
+        worker.BaseWorkerFL, "init_device", lambda self: events.append("base")
+    )
+    monkeypatch.setattr(worker, "get_pp_group", lambda: group)
+    monkeypatch.setattr(
+        pipeline, "install_pipeline_transport", lambda value: events.append(value)
+    )
+    object.__new__(worker.IluvatarWorkerFL).init_device()
+    assert events == ["patch", "base", group]
+
+
+@pytest.mark.parametrize("vendor", [None, "nvidia", "ascend", "iluvatar"])
+def test_shared_v2_route_preserves_upstream_for_other_platforms(vendor):
+    import ast
+    import inspect
+
+    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
+        IluvatarGPUModelRunnerV2,
+    )
+    from vllm_fl.worker import worker
+
+    # Execute the production routing block without allocating GPU worker state.
+    tree = ast.parse(inspect.getsource(worker))
+    routes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(child, ast.ImportFrom)
+            and child.module
+            == "vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2"
+            for child in node.body
+        )
+    ]
+    assert len(routes) == 1
+    platform = (
+        SimpleNamespace() if vendor is None else SimpleNamespace(vendor_name=vendor)
+    )
+    namespace = {"current_platform": platform, "GPUModelRunnerV2": GPUModelRunner}
+    exec(  # noqa: S102 - execute only the production runner selection block
+        compile(ast.Module(body=routes, type_ignores=[]), worker.__file__, "exec"),
+        namespace,
+    )
+    expected = IluvatarGPUModelRunnerV2 if vendor == "iluvatar" else GPUModelRunner
+    assert namespace["GPUModelRunnerV2"] is expected
+
+
+@pytest.mark.parametrize("vendor", [False, True])
+@pytest.mark.parametrize("v2,pooling", [(True, True), (True, False), (False, True)])
+@pytest.mark.parametrize("last_rank", [False, True])
+def test_pooling_pipeline_state_is_consumed(
+    monkeypatch, vendor, v2, pooling, last_rank
+):
+    import inspect
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+
+    from vllm_fl.dispatch.backends.vendor.iluvatar.worker import worker as iluvatar
+    from vllm_fl.worker import worker as shared
+
+    module = iluvatar if vendor else shared
+    cls = module.IluvatarWorkerFL if vendor else module.WorkerFL
+    group = SimpleNamespace(
+        is_first_rank=True,
+        is_last_rank=last_rank,
+        isend_tensor_dict=Mock(return_value=[Mock(), Mock()]),
+    )
+    monkeypatch.setattr(module, "get_pp_group", lambda: group)
+    monkeypatch.setattr(module, "get_tp_group", lambda: None)
+    runner = SimpleNamespace(is_pooling_model=pooling, pending=False, calls=0)
+
+    def execute(*args):
+        assert not runner.pending
+        runner.pending = v2 and pooling
+        return None if last_rank else module.IntermediateTensors({})
+
+    def pool():
+        assert runner.pending
+        runner.pending = False
+        runner.calls += 1
+
+    runner.execute_model, runner.pool = execute, pool
+    instance = SimpleNamespace(
+        model_runner=runner,
+        use_v2_model_runner=v2,
+        _pp_send_work=[],
+        annotate_profile=lambda _: nullcontext(),
+        vllm_config=SimpleNamespace(
+            parallel_config=SimpleNamespace(distributed_executor_backend="mp")
+        ),
+    )
+    # Exercise the real method without inference/profiling decorators or devices.
+    method = inspect.unwrap(cls.execute_model)
+    for _ in range(2):
+        assert method(instance, SimpleNamespace(total_num_scheduled_tokens=1)) is None
+        assert not runner.pending
+    assert runner.calls == (2 if v2 and pooling else 0)
+    assert group.isend_tensor_dict.call_count == (0 if last_rank else 2)
+    if not last_rank:
+        handles = group.isend_tensor_dict.return_value
+        assert instance._pp_send_work == (handles[1:] if vendor else handles)
+        handles[-1].wait.assert_called_once()

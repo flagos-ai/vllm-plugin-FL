@@ -30,7 +30,6 @@ def rms_norm_flaggems(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    # Device-specific policy belongs in the platform dispatch configuration.
     if (
         current_platform.device_type == "musa"
         and x.device.type == "musa"

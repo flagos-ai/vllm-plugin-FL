@@ -494,15 +494,19 @@ def test_gcu_internal_i64_enabled_with_i32_argument_signature():
 
 
 @pytest.mark.parametrize("part", ["LO", "HI"])
-def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(part):
+@pytest.mark.parametrize("symbol", ["tops_truncf_v2_fp32_to_v1_bf16", "other_symbol"])
+@pytest.mark.parametrize("context", ["", "compiler context\n"])
+def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(
+    part, symbol, context
+):
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
     _, heuristics, _, _, _ = make_provider()
     inductor._install_gcu_resource_errors(heuristics)
     autotuner = heuristics.CachingAutotuner("gcu")
     failure = Exception(
-        f"ld.lld: error: relocation R_DTU_ADDR16_{part}_ICALL cannot be "
-        "used against symbol tops_truncf_v2_fp32_to_v1_bf16; recompile with -fPIC"
+        context + f"ld.lld: error: relocation R_DTU_ADDR16_{part}_ICALL cannot be "
+        f"used against symbol {symbol}; recompile with -fPIC"
     )
     first, last = object(), object()
     autotuner.compile_results = []
@@ -521,7 +525,9 @@ def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(part):
 
 
 @pytest.mark.parametrize("device", ["gcu", "cpu", "cuda"])
-@pytest.mark.parametrize("variant", ["other_symbol", "context", "runtime", "exact"])
+@pytest.mark.parametrize(
+    "variant", ["other_symbol", "context", "runtime", "exact", "relocation", "no_pic"]
+)
 def test_gcu_linker_adapter_preserves_unrelated_failures(device, variant):
     _, heuristics, _, _, _ = make_provider()
     inductor._install_gcu_resource_errors(heuristics)
@@ -533,8 +539,15 @@ def test_gcu_linker_adapter_preserves_unrelated_failures(device, variant):
         message = message.replace("tops_truncf_v2_fp32_to_v1_bf16", "other_symbol")
     if variant == "context":
         message = "context\n" + message
+    if variant == "relocation":
+        message = message.replace("ADDR16_LO_ICALL", "ADDR32")
+    if variant == "no_pic":
+        message = message.replace("; recompile with -fPIC", "")
     failure = RuntimeError(message) if variant == "runtime" else Exception(message)
-    if variant == "exact" and device == "gcu":
+    if device == "gcu" and variant in ("exact", "context", "other_symbol"):
+        with pytest.raises(heuristics.PTXASError) as caught:
+            heuristics.CachingAutotuner(device)._precompile_config(failure)
+        assert caught.value.__cause__ is failure
         return
     with pytest.raises(type(failure)) as caught:
         heuristics.CachingAutotuner(device)._precompile_config(failure)
@@ -576,18 +589,22 @@ def test_gcu_silu_grid_config_is_private_and_preserves_smaller_limits(limits):
 
     from vllm_fl.dispatch.backends.vendor.gcu.impl import activation
 
-    config_type = make_dataclass("Config", ["max_grid_size", "max_tile_size"])
+    config_type = make_dataclass(
+        "Config", ["max_grid_size", "max_tile_size", "prefer_block_pointer"]
+    )
 
     class Kernel:
         def __init__(self, fx, scalar_fn, config):
             self.fx, self._scalar_fn, self.config = fx, scalar_fn, config
 
-    original = Kernel(object(), object(), config_type(limits, 512))
+    original = Kernel(object(), object(), config_type(limits, 512, True))
     adapted = activation._gcu_pointwise_kernel(original)
     assert adapted is not original
     assert adapted.config is not original.config
     assert original.config.max_grid_size == limits
     assert adapted.config.max_grid_size == tuple(min(x, 65535) for x in limits)
     assert adapted.config.max_tile_size == 512
+    assert adapted.config.prefer_block_pointer is False
+    assert original.config.prefer_block_pointer is True
     assert adapted.fx is original.fx
     assert adapted._scalar_fn is original._scalar_fn

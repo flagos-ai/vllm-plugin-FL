@@ -20,17 +20,19 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
-# The v0.32 CI image supplies the vendor SDK and the validated vLLM/runtime
-# stack. Install only the checked-out plugin and test-only dependencies; do not
-# rebuild or replace the runtime on every CI job.
+# Preserve the image's vendor SDK, vLLM and flaggems-vllm. Older CI image
+# digests lack xdist, which tests/run.py and session-finish probes require.
+# Resolve only this test tool (and execnet), never the project's runtime extras.
+# The SDK's private pip index lacks xdist; override it for this command only.
+python -m pip install --index-url https://mirrors.aliyun.com/pypi/simple 'pytest-xdist>=3.0.0,<4'
+
+# Reinstall only the checked-out plugin without resolving image dependencies.
 unset PYTHONPATH
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo 'PYTHONPATH=' >> "${GITHUB_ENV}"
 fi
 
-python .github/scripts/install_flaggems_vllm.py
 python -m pip install --no-build-isolation --no-deps -e .
-python -m pip install --index-url "${PYPI_INDEX_URL:-https://pypi.org/simple}" "pytest-xdist>=3.0.0"
 
 python - <<'PY'
 import flag_gems

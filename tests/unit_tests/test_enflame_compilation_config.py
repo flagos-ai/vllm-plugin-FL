@@ -56,12 +56,11 @@ def test_enflame_inductor_disables_combo_without_disabling_graphs(monkeypatch, v
     PlatformFL.check_and_update_config(config)
 
     assert compilation.inductor_compile_config is options
-    assert options["combo_kernels"] is False
-    assert options["benchmark_combo_kernel"] is False
-    assert options["epilogue_fusion"] is False
-    assert set(options) == {
-        *original_options,
-        "post_grad_custom_post_pass",
+    assert options == {
+        **original_options,
+        "post_grad_custom_post_pass": options["post_grad_custom_post_pass"],
+        "combo_kernels": False,
+        "benchmark_combo_kernel": False,
     }
     assert (
         compilation.mode,
@@ -122,16 +121,13 @@ def test_codegen_version_invalidates_cache_without_mutating_user_config(monkeypa
     simulate_platform(monkeypatch, vendor)
     PlatformFL.check_and_update_config(config)
     assert config.additional_config is user
-    assert config.additional_config == {"customer_option": [1, 3]}
-    codegen_pass = config.compilation_config.inductor_compile_config[
-        "post_grad_custom_post_pass"
-    ]
-    assert codegen_pass.uuid() == ("fl_gcu_codegen", "preserve_dtype_v1", None)
+    assert user == {"customer_option": [1, 3]}
+    first_hash = config.compilation_config.compute_hash()
     PlatformFL.check_and_update_config(config)
-    assert config.additional_config == {"customer_option": [1, 3]}
-    assert config.compilation_config.inductor_compile_config[
-        "post_grad_custom_post_pass"
-    ].uuid() == ("fl_gcu_codegen", "preserve_dtype_v1", None)
+    assert config.compilation_config.compute_hash() == first_hash
+    monkeypatch.setenv("FL_GCU_PRESERVE_DTYPE_CODEGEN", "0")
+    PlatformFL.check_and_update_config(config)
+    assert config.compilation_config.compute_hash() != first_hash
 
 
 def test_other_vendor_does_not_change_additional_config(monkeypatch):
@@ -147,6 +143,53 @@ def test_codegen_cache_salt_respects_disabled_adapter(monkeypatch):
     config = config_for_platform()
     simulate_platform(monkeypatch, "enflame")
     PlatformFL.check_and_update_config(config)
-    assert config.compilation_config.inductor_compile_config[
+    salt = config.compilation_config.inductor_compile_config[
         "post_grad_custom_post_pass"
-    ].uuid() == ("fl_gcu_codegen", "vendor_v1", None)
+    ]
+    assert salt.uuid()[:2] == ("fl_gcu_codegen", "vendor_v1")
+
+
+def test_user_codegen_key_is_not_reserved(monkeypatch):
+    config = config_for_platform()
+    config.additional_config = {"fl_gcu_codegen": "customer"}
+    simulate_platform(monkeypatch, "enflame")
+    PlatformFL.check_and_update_config(config)
+    assert config.additional_config == {"fl_gcu_codegen": "customer"}
+
+
+@pytest.mark.parametrize("device", ["gcu", "cuda"])
+@pytest.mark.parametrize("native_available", [False, True])
+@pytest.mark.parametrize("backend", ["inductor", "eager"])
+def test_ir_provider_merge_preserves_device_and_build_guards(
+    monkeypatch, device, native_available, backend
+):
+    import vllm_fl.platform as platform_mod
+
+    monkeypatch.setattr(PlatformFL, "device_type", device)
+    monkeypatch.setattr(platform_mod, "_vllm_c_available", lambda: native_available)
+    config = config_for_platform(backend=backend)
+    priority = PlatformFL.get_default_ir_op_priority(config)
+    expected = ["native"]
+    if device != "gcu" and backend != "inductor" and native_available:
+        expected = ["vllm_c", "native"]
+    assert priority.rms_norm == expected
+    assert priority.fused_add_rms_norm == expected
+
+
+def test_codegen_cache_preserves_existing_callable_pass(monkeypatch):
+    config = config_for_platform()
+    calls = []
+
+    def user_pass(graph):
+        calls.append(graph)
+
+    options = config.compilation_config.inductor_compile_config
+    options["post_grad_custom_post_pass"] = user_pass
+    simulate_platform(monkeypatch, "enflame")
+    PlatformFL.check_and_update_config(config)
+    initial_hash = config.compilation_config.compute_hash()
+    graph = object()
+    options["post_grad_custom_post_pass"](graph)
+    assert calls == [graph]
+    PlatformFL.check_and_update_config(config)
+    assert config.compilation_config.compute_hash() == initial_hash

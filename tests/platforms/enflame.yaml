@@ -39,12 +39,18 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.90
       max_num_seqs: 64
+      # Bound prefill/profile workspace independently of decode capture sizes.
+      max_num_batched_tokens: 4096
       disable_custom_all_reduce: false
       # Explicit FL SiLU dispatch is required by the validated S60 cases.
       # Do not extend this policy to other models without validation.
       compilation_config:
         custom_ops: ["none", "+SiluAndMul"]
         cudagraph_capture_sizes: [1, 2, 4, 8, 16, 32]
+    serve:
+      # Cold-cache 35B graph startup approaches the default 20-minute limit.
+      # Preserve the existing 40-minute budget at 10-second polling intervals.
+      startup_retries: 240
 
 env_defaults:
   VLLM_PLUGINS: "fl"
@@ -52,6 +58,7 @@ env_defaults:
   TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
   ENABLE_I64_CHECK: "0"
   TORCHGCU_INDUCTOR_ENABLE: "1"
+  GRAPH_COMPILATION_CONFIG: '{"cudagraph_capture_sizes":[1,2,4,8,16,32]}'
 # Set TORCHINDUCTOR_EMULATE_PRECISION_CASTS=1 explicitly only for validated
 # BF16 compiled runs; it is not a platform-wide test default.
 
@@ -63,25 +70,32 @@ s60:
         inference:
           qwen3_6:
             - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
             - 27b_tp2_graph
-        serving:
+        adaptation_gate:
           qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
             - 35b_a3b_tp2_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
             - 27b_tp2_graph
-        serving:
+        adaptation_gate:
           qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
             - 35b_a3b_tp2_graph
         concurrent:
           qwen3_6:
             - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
     timeouts:
       e2e:
         inference: 120
-        serving: 120
+        adaptation_gate: 180
         concurrent: 120
     functional:
       include: "*"

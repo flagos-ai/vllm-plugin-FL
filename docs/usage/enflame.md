@@ -1,7 +1,7 @@
 # Enflame S60 Deployment Guide
 
-The pinned image and deployment instructions below describe vLLM 0.28.
-For the vLLM 0.32.0 build requirements, see the
+The pinned image and deployment instructions below describe the published vLLM 0.32.0 Enflame image.
+For the image build requirements, see the
 [image recipe](../../docker/enflame/README.md).
 
 This guide starts an OpenAI-compatible vLLM service on Enflame S60 GCUs using
@@ -9,19 +9,19 @@ the dependency stack validated by this repository. Use the pinned image and
 install the plugin from the revision you intend to deploy; the image does not
 contain each candidate's plugin changes.
 
-## Validated software stack
+## Published image and expected software stack
 
-| Component | Validated version or configuration |
+| Component | Version or configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci` |
-| Image manifest | `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88` |
+| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-enflame-ci` |
+| Image manifest | `sha256:732e3d505e89203215727189b0820dd601dc426c4b05092259bdabeec7c68b71` |
 | Accelerator / host driver | Enflame S60 / `1.10.6` |
-| vLLM | `0.28.0+empty` (`VLLM_TARGET_DEVICE=empty`) |
+| vLLM | `0.32.0+empty` (`VLLM_TARGET_DEVICE=empty`) |
 | Python | `3.12.8` |
 | PyTorch | `2.11.0+cpu` with `torch-gcu==2.11.0+3.8.20260713` |
 | FlagTree | `0.7.0+enflame3.6`, the Enflame-specific release |
 | Triton GCU | `3.6.0+1.0.20260722`; FlagTree provides the `triton` Python namespace |
-| FlagGems | `5.4.0` |
+| FlagGems | `5.5.0.dev0` |
 | OpenAI SDK / pandas | `3.28.0` / `3.0.6` |
 
 The `+cpu` PyTorch version is the vendor package's version string; execution
@@ -62,11 +62,13 @@ tmux new-session -s "enflame-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 ## 2. Prepare the checkout and models
 
 Use a private checkout at the branch, tag, or commit you intend to deploy.
-Keep model weights on the host and mount them read-only. The native test YAMLs
+The example selects the vLLM 0.32 adaptation branch `0.5.0-dev`; before the
+Enflame PR is merged, select its reviewed commit instead of assuming the target
+branch contains the adaptation. Keep model weights on the host and mount them read-only. The native test YAMLs
 expect the following two directories under `/data/models/Qwen` in the container:
 
 ```bash
-git clone --branch 0.4.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git
+git clone --branch 0.5.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git
 cd vllm-plugin-FL
 
 export REPO_DIR="$PWD"
@@ -88,7 +90,7 @@ The digest pins the dependency image even if its tag changes. Authenticate with
 `docker login harbor.baai.ac.cn` only if required by your registry access.
 
 ```bash
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-enflame-ci@sha256:732e3d505e89203215727189b0820dd601dc426c4b05092259bdabeec7c68b71
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 
@@ -154,19 +156,16 @@ bash .github/scripts/enflame/setup.sh 2>&1 | tee /logs/setup.log
 ```
 
 `check.sh` requires at least two visible GCUs and creates a small GCU tensor.
-`setup.sh` verifies package versions and runs both checkout guards:
+The image supplies vLLM, flaggems-vllm, the vendor runtime, and test dependencies.
+`setup.sh` reinstalls only the selected plugin checkout with
+`--no-build-isolation --no-deps -e .`, then checks imports and device availability.
+It reuses the image's installed dependencies without reinstalling them.
 
-- [`verify_compiler.py`](../../docker/enflame/verify_compiler.py) checks the
-  imported Triton origin and FlagTree's recorded release-file hashes.
-- [`verify_index_fill.py`](../../docker/enflame/verify_index_fill.py) checks the
-  supported FlagGems release bytes used by the GCU `index_fill` adapter.
-
-It then installs this checkout with
-`python -m pip install --no-build-isolation --no-deps -e .` and checks imports.
-Do not resolve dependencies again with a generic `pip install -U`: a dependency
-can overwrite FlagTree's Triton files while leaving its package metadata intact.
-The guards detect that corruption; metadata versions alone do not prove that
-the intended compiler is active.
+Do not resolve runtime dependencies again with a generic `pip install -U`: a
+dependency can overwrite FlagTree's Triton files while leaving its metadata
+intact. The checkout's [compiler guard](../../docker/enflame/verify_compiler.py)
+and [index_fill guard](../../docker/enflame/verify_index_fill.py) are available
+for diagnosing the image stack; import success is not hardware Gate acceptance.
 
 ## 5. Start and query the service
 
@@ -263,8 +262,8 @@ max sequences 256, memory utilization 0.94, and FP32 Mamba state; the 8192-token
 CI smoke settings above do not reproduce that capacity test. Retain FP32 Mamba
 state and the original quality checks when repeating it.
 
-The pinned dependency image has hardware validation history, but it does not
-establish acceptance of an arbitrary plugin checkout. Re-run the relevant tests
+The image manifest was verified in the registry. That observation does not
+establish hardware acceptance of this image or an arbitrary plugin checkout. Re-run the relevant tests
 and original Gate for the exact revision you deploy.
 
 ## Limitations and troubleshooting
@@ -278,9 +277,9 @@ and original Gate for the exact revision you deploy.
   the S60 `0.94` budget is applied. Changing context length, concurrency,
   precision, or tensor parallelism requires separate validation of that new
   configuration; it is not a passing result for the original Gate.
-- **Runner or speculative-decoding error:** Enflame uses `ModelRunnerFL` for
-  eager and graph execution. Explicit `VLLM_USE_V2_MODEL_RUNNER=1` and V2-only
-  features are unsupported. Hybrid models with speculative decoding and
+- **Runner or speculative-decoding error:** Enflame uses `ModelRunnerFL` by
+  default and provides `GPUModelRunnerFLV2` when `VLLM_USE_V2_MODEL_RUNNER=1`.
+  Validate the selected runner and execution mode on hardware. Hybrid models with speculative decoding and
   `mamba_cache_mode=align` are rejected because the fused Mamba state-copy path
   does not yet translate its indirect pointers to GCU addresses. Other
   speculative/cache combinations still need their own hardware validation.

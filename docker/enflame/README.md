@@ -1,10 +1,12 @@
 # Enflame S60 recipe for vLLM 0.32
 
-The Dockerfile now targets official vLLM 0.32.0 at commit
-`5df63a7203cdb9328d824a27b682e77c7b9928be`. This updated image has not been
-built or published in the adaptation environment (Docker is unavailable).
-The published 0.28 images and validation results below are historical;
-CI setup now rejects their vLLM version.
+The Dockerfile targets official vLLM 0.32.0 at commit
+`5df63a7203cdb9328d824a27b682e77c7b9928be`. The published dependency image is
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-enflame-ci`, with observed
+manifest digest
+`sha256:732e3d505e89203215727189b0820dd601dc426c4b05092259bdabeec7c68b71`.
+Registry availability does not prove that this recipe was used for that image
+or that a new hardware run passed. The 0.28 results below are historical.
 
 The recipe keeps the vendor torch 2.11.0+cpu / torch_gcu
 2.11.0+3.8.20260713 stack and installs the official vLLM 0.32.0 empty-device
@@ -14,7 +16,7 @@ build. The FL plugin registers the GCU platform. The vendor base is:
 harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853
 ```
 
-The installed packages are pinned to FlagGems 5.4.0, FlagTree
+The recipe pins FlagGems 5.5.0.dev0, FlagTree
 0.7.0+enflame3.6 and triton-gcu 3.6.0+1.0.20260722. FlagTree's Enflame wheel
 provides the `triton` Python namespace; the generic `+triton3.6` release is a
 different build. Wheel hashes are checked against the official
@@ -24,14 +26,13 @@ and [Enflame installation guide](https://github.com/flagos-ai/FlagTree/wiki/User
 select this FlagTree version. FlagGems v5.4.0's own older backend matrix
 selects 0.6.1+enflame3.6; the newer combination is validated below.
 
-Enflame uses `ModelRunnerFL` by default for eager and graph execution.
-vLLM 0.28 can otherwise select its upstream V2 runner automatically for
-ordinary dense models, reaching sampler kernels that the current GCU stack
-does not support. Explicit `VLLM_USE_V2_MODEL_RUNNER=1` requests fail during
-configuration; V2-only features are unavailable on this backend.
+Enflame supports the vLLM 0.32 V1 and V2 runner selection contract. V1 uses
+`ModelRunnerFL`; V2 uses the GCU runner with device buffer, stream and sampling
+compatibility patches. Runner selection alone does not establish hardware
+acceptance for every model or feature.
 
 Hybrid models with speculative decoding and `mamba_cache_mode="align"`
-are rejected during configuration. vLLM 0.28 uses fused speculative Mamba
+are rejected during configuration. Older vLLM releases use fused speculative Mamba
 pre/post-copy kernels for that combination; their indirect state and block-table
 pointers are not yet translated to GCU device addresses. Disable speculative
 decoding for hybrid align-mode serving. Other speculative/cache combinations
@@ -59,7 +60,7 @@ An anonymous manifest lookup confirmed that both names identify the same content
 Its registry manifest digest is
 `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`.
 Authenticated and anonymous pulls by this digest both resolved to the local
-image ID above. CI uses the canonical tag with this digest and installs the tested plugin checkout
+image ID above. Historical 0.28 CI used the canonical tag with this digest and installed the tested plugin checkout
 with `--no-deps`; the dependency image does not bake in that checkout.
 
 See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
@@ -79,14 +80,14 @@ The example tag is a local build destination, not a published image.
 The default generated tag includes the selected stage, such as
 the branch defaults from `docker/build.sh`. Pass the explicit candidate tag
 above when building 0.32. This command does not push.
-`.github/configs/enflame.yml` references the published vLLM 0.28 dependency
-image by digest. Enflame is enabled in `platforms.yml`; the existing
+`.github/configs/enflame.yml` references the published vLLM 0.32.0 dependency
+image by its observed manifest digest, matching the deployment guide.
+Enflame is enabled in `platforms.yml`; the existing
 configuration retains the `enflame-s60` runner label, devices `2,3` and
-`/data:/data` mount. Its strict setup gate rejects the old dependency image;
-this is an external image-publication blocker, not a passing hardware CI run.
-Keep the gate and platform enabled. Select a replacement digest only after
-building, publishing and validating a real 0.32 dependency image. This requires
-access to the vendor base image, a Docker builder and registry push permissions.
+`/data:/data` mount. The current image tag is available in the registry; the
+manifest digest in the deployment guide was observed from the registry. Image
+availability is not the same as hardware CI acceptance; record workflow results
+separately.
 The reference is main commit `6182281a42ce857fa52ef73ec1abafca941cdf3a`.
 Publishing the image and selecting this configuration do not establish
 that hardware CI has passed; record the actual workflow results separately.

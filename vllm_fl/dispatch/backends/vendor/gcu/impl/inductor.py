@@ -2,11 +2,13 @@
 
 """Adapt TorchGCU compilation metadata to the installed Torch interfaces."""
 
+import ast
 import inspect
 import logging
 import os
 import re
 import sys
+import textwrap
 from collections.abc import Mapping
 from functools import wraps
 from types import ModuleType
@@ -85,10 +87,9 @@ def _install_gcu_resource_errors(heuristics) -> None:
             # The symbol and preceding diagnostic context vary by kernel.
             # Only reject the known ICALL relocation/PIC failure; other linker
             # errors must still propagate instead of hiding compiler defects.
-            linker_failure = re.fullmatch(
+            linker_failure = re.search(
                 r"ld\.lld: error: relocation R_DTU_ADDR16_(?:LO|HI)_ICALL "
-                r"cannot be used against symbol tops_truncf_v2_fp32_to_v1_bf16; "
-                r"recompile with -fPIC",
+                r"cannot be used against symbol [^;\n]+; recompile with -fPIC",
                 str(error),
             )
             if linker_failure is not None:
@@ -249,29 +250,53 @@ def gcu_codegen_mode() -> str:
     value = os.environ.get("FL_GCU_PRESERVE_DTYPE_CODEGEN", "1")
     if value not in ("0", "1"):
         raise ValueError("FL_GCU_PRESERVE_DTYPE_CODEGEN must be 0 or 1")
-    return "preserve_dtype_v1" if value == "1" else "vendor_v1"
+    return "preserve_integer_abi_v2" if value == "1" else "vendor_v1"
 
 
 def _install_gcu_dtype_preserving_codegen(provider) -> None:
-    from torch._inductor.graph import GraphLowering
-
     if gcu_codegen_mode() == "vendor_v1":
         return
     helper = provider.GCUCompileHelper
     original = helper.compile_to_module
-    native = GraphLowering._compile_to_module
-    if original is native:
+    marker = "_fl_gcu_dtype_preserving_codegen"
+    if getattr(original, marker, False) is True:
         return
-    if len(inspect.signature(original).parameters) != 1:
+    if tuple(inspect.signature(original).parameters) != ("graph_lowering_self",):
         logger.warning("Skipping GCU dtype codegen adapter: unknown vendor ABI")
         return
-    if tuple(inspect.signature(native).parameters) != ("self",):
-        logger.warning("Skipping GCU dtype codegen adapter: unknown Torch ABI")
+    # Retain the vendor's cache, logging, float64 lowering and module loading.
+    # Remove only the four observed integer ABI/limit rewrites. Unknown source
+    # is never silently substituted with Torch's entire implementation.
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(original)))
+        function = tree.body[0]
+        expected = {
+            'wrapper_code.value = wrapper_code.value.replace("int64", "int32")',
+            'wrapper_code.value = wrapper_code.value.replace("i64", "i32")',
+            'wrapper_code.value = wrapper_code.value.replace("9223372036854775808", str(2**31))',
+            'wrapper_code.value = wrapper_code.value.replace("9223372036854775807", str(2**31 - 1))',
+        }
+        patterns = {ast.dump(ast.parse(line).body[0]): line for line in expected}
+        matches = [node for node in function.body if ast.dump(node) in patterns]
+        if len(matches) != len(patterns) or len({ast.dump(n) for n in matches}) != len(
+            patterns
+        ):
+            raise ValueError("unrecognized integer source rewrites")
+        function.body = [node for node in function.body if node not in matches]
+        function.decorator_list = []
+        if original.__closure__:
+            raise ValueError("vendor helper has closure state")
+        namespace = dict(original.__globals__)
+        exec(
+            compile(ast.fix_missing_locations(tree), inspect.getfile(original), "exec"),
+            namespace,
+        )
+        adapted = wraps(original)(namespace[function.name])
+    except (OSError, TypeError, SyntaxError, ValueError) as error:
+        logger.warning("Skipping GCU dtype codegen adapter: %s", error)
         return
-    # The vendor helper globally rewrites int64/i64 to int32/i32 in source,
-    # including pointer signatures, without converting input tensor storage.
-    # Native Torch retains those ABIs and the current artifact-saving protocol.
-    helper.compile_to_module = staticmethod(native)
+    setattr(adapted, marker, True)
+    helper.compile_to_module = staticmethod(adapted)
 
 
 def apply_inductor_gcu_patch() -> None:

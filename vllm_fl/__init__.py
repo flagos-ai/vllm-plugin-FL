@@ -194,6 +194,17 @@ def _init_vendor_device():
 
         _patch_xpu_get_device()
 
+    if vendor_name == "amd":
+        # vLLM's bundled triton_kernels import AMD architecture predicates that
+        # FlagTree's target_info does not define. Without them every path that
+        # touches those kernels fails to import, which takes out MoE models
+        # while dense ones still serve. Must precede the model layer imports.
+        from vllm_fl.patches.flagtree_target_info import (
+            apply_flagtree_target_info,
+        )
+
+        apply_flagtree_target_info()
+
 
 def _install_metax_compat():
     """Apply the MetaX vLLM 0.28 compatibility shims before any kernel runs.
@@ -266,9 +277,9 @@ def register():
     if vendor_name == "kunlunxin":
         _install_kunlunxin_fla_alias()
 
-    if vendor_name in ("ascend", "mthreads", "tsingmicro"):
-        # These backends use ModelRunnerFL; choose it before VllmConfig reads
-        # model defaults for the upstream V2 runner.
+    if vendor_name in ("mthreads", "tsingmicro"):
+        # These backends require the legacy runner. Ascend, Enflame, and GCU
+        # preserve upstream runner selection and configure workers separately.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
@@ -370,6 +381,13 @@ def register_model():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
+    if vendor_name == "iluvatar":
+        from vllm_fl.dispatch.backends.vendor.iluvatar.shutdown import (
+            install_worker_cleanup,
+        )
+
+        install_worker_cleanup()
+
     if vendor_name != "nvidia":
         # NVIDIA's native vLLM 0.32 already preserves packed GDN beta precision.
         _register_gdn_packed_decode_patch()

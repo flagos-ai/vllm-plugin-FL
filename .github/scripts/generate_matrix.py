@@ -56,6 +56,7 @@ DEFAULT_TIMEOUT: dict[str, int] = {
     "inference": 60,
     "serving": 60,
     "concurrent": 60,
+    "adaptation_gate": 180,
 }
 
 
@@ -101,20 +102,24 @@ def build_e2e_matrix(
     devices: list[str],
     unsupported: list[str],
     ci_stage: str = "nightly",
+    device_configs: dict[str, dict] | None = None,
 ) -> list[dict]:
-    """End-to-end model tests (inference, serving, concurrent).
+    """End-to-end model tests (inference, serving, concurrent, adaptation Gate).
 
-    These are slow and require model files.  Entries are grouped by
-    ``(task, device)`` so that all model/case combos for the same task
-    run inside a single job, avoiding repeated container startup and
-    project installation.
+    These are slow and require model files.  Most entries are grouped by
+    ``(task, device)`` so all model/case combos for the same task run inside
+    one job.  Adaptation Gate entries are deliberately sharded per model/case:
+    a Gate case can consume every visible device for a long model lifetime,
+    so grouping four TP4 cases would serialize them behind one job timeout and
+    discard the cross-runner parallelism of the old inference/serving jobs.
 
     The ``e2e`` block in each device's YAML is keyed by CI stage
     (``pr`` / ``nightly`` / ``weekly``).  In ``weekly`` stage, falls back
     to ``nightly`` if no ``weekly`` key is defined.
     """
-    # Collect per-(task, device) groups
-    groups: dict[tuple[str, str], list[dict]] = {}
+    # Collect normal tasks per (task, device).  The optional third key shards
+    # adaptation Gate cases into independent matrix jobs.
+    groups: dict[tuple[str, str, str], list[dict]] = {}
     for device in devices:
         section = config[device]
         e2e = section.get("tests", {}).get("e2e", {})
@@ -142,23 +147,30 @@ def build_e2e_matrix(
                 if not isinstance(cases, list):
                     cases = [cases]
 
-                key = (task_dir, device)
-                groups.setdefault(key, [])
                 for case in cases:
+                    shard = f"{model}/{case}" if task_dir == "adaptation_gate" else ""
+                    key = (task_dir, device, shard)
+                    groups.setdefault(key, [])
                     groups[key].append({"model": model, "case": str(case)})
 
-    # Build one matrix entry per (task, device) group
+    # Build one matrix entry per normal group or adaptation Gate shard.
     entries = []
-    for (task_dir, device), case_list in groups.items():
+    for (task_dir, device, _shard), case_list in groups.items():
         timeout = resolve_e2e_timeout(config, device, task_dir)
-        entries.append(
-            {
-                "task": task_dir,
-                "device": device,
-                "cases": json.dumps(case_list, separators=(",", ":")),
-                "timeout": timeout,
-            }
-        )
+        entry = {
+            "task": task_dir,
+            "device": device,
+            "cases": json.dumps(case_list, separators=(",", ":")),
+            "timeout": timeout,
+        }
+        # Attach per-device hardware config so the workflow can pick image /
+        # runner_labels / container_options directly from the matrix entry.
+        if device_configs and device in device_configs:
+            dcfg = device_configs[device]
+            entry["image"] = dcfg.get("ci_image")
+            entry["runner_labels"] = dcfg.get("runner_labels")
+            entry["container_options"] = dcfg.get("container_options")
+        entries.append(entry)
     return entries
 
 
@@ -242,6 +254,7 @@ _FULL_RUN_PREFIXES: list[str] = [
     "tests/run.py",
     "tests/platforms/",
     "tests/conftest.py",
+    "tools/adaptation-gate-cases/",
     ".github/",
 ]
 
@@ -296,6 +309,62 @@ def filter_e2e_by_changes(
         if kept:
             filtered.append({**entry, "cases": json.dumps(kept, separators=(",", ":"))})
     return filtered
+
+
+def _attach_device_hw(
+    entry: dict, device: str, device_configs: dict[str, dict]
+) -> dict:
+    """Attach hardware fields from device_configs into a matrix entry."""
+    if device_configs and device in device_configs:
+        dcfg = device_configs[device]
+        entry["image"] = dcfg.get("ci_image")
+        entry["runner_labels"] = dcfg.get("runner_labels")
+        entry["container_options"] = dcfg.get("container_options")
+    return entry
+
+
+def build_functional_matrix(
+    config: dict,
+    devices: list[str],
+    device_configs: dict[str, dict] | None = None,
+) -> list[dict]:
+    """One functional job per device that declares a functional block.
+
+    Returns one entry per device with hardware fields attached so the
+    workflow does not need a separate runner-label lookup.
+    """
+    entries = []
+    for device in devices:
+        section = config[device]
+        functional = section.get("tests", {}).get("functional", {})
+        if not functional:
+            continue
+        entry: dict = {"device": device}
+        _attach_device_hw(entry, device, device_configs or {})
+        entries.append(entry)
+    return entries
+
+
+def build_benchmark_matrix(
+    config: dict,
+    devices: list[str],
+    ci_stage: str = "nightly",
+    device_configs: dict[str, dict] | None = None,
+) -> list[dict]:
+    """One benchmark job per device that declares a benchmark block for this stage."""
+    entries = []
+    for device in devices:
+        section = config[device]
+        benchmark = section.get("tests", {}).get("benchmark", {})
+        if not benchmark:
+            continue
+        stage_cfg = benchmark.get(ci_stage) or benchmark.get("nightly", {})
+        if not stage_cfg or not stage_cfg.get("enabled", False):
+            continue
+        entry: dict = {"device": device}
+        _attach_device_hw(entry, device, device_configs or {})
+        entries.append(entry)
+    return entries
 
 
 def build_unit_matrix(config: dict, devices: list[str]) -> list[dict]:
@@ -382,33 +451,62 @@ def main(argv: list[str] | None = None) -> int:
     if not devices:
         print(f"::warning::No device sections found in {args.platform}.yaml")
 
+    # Load per-device hardware configs from .github/configs/<platform>.yml.
+    device_configs: dict[str, dict] = {}
+    configs_dir = REPO_ROOT / ".github" / "configs"
+    hw_path = configs_dir / f"{args.platform}.yml"
+    if hw_path.exists():
+        with open(hw_path) as f:
+            hw_cfg = yaml.safe_load(f) or {}
+        devices_map = hw_cfg.get("devices", {})
+        if devices_map:
+            base = {
+                k: v
+                for k, v in hw_cfg.items()
+                if k not in ("devices", "unit_devices", "device_runner_labels")
+            }
+            for dev, overrides in devices_map.items():
+                device_configs[dev] = {**base, **overrides, "device": dev}
+
     ci_stage = args.ci_stage
-    e2e_matrix = build_e2e_matrix(config, devices, unsupported, ci_stage=ci_stage)
+    e2e_matrix = build_e2e_matrix(
+        config,
+        devices,
+        unsupported,
+        ci_stage=ci_stage,
+        device_configs=device_configs,
+    )
+    functional_matrix = build_functional_matrix(
+        config, devices, device_configs=device_configs
+    )
+    benchmark_matrix = build_benchmark_matrix(
+        config, devices, ci_stage=ci_stage, device_configs=device_configs
+    )
     unit_matrix = build_unit_matrix(config, devices)
 
     # Apply PR smart-skip filtering when changed files are provided.
-    # Only meaningful for nightly/weekly full runs; in pr stage the pr subset
-    # is already narrow, so we skip the filter to avoid hiding pr cases.
     if args.changed_files and ci_stage != "pr":
         changed = load_changed_files(args.changed_files)
         if changed:
             e2e_matrix = filter_e2e_by_changes(e2e_matrix, changed)
 
-    # The NVIDIA fused-operator dual-run (VLLM_FL_USE_FLAGGEMS_VLLM 0/1) is a
-    # case-level variant declared in tests/platforms/nvidia.yaml
-    # (e2e_variants) and expanded by tests/run.py — the matrix does not
-    # duplicate jobs per mode.
-
     e2e_json = json.dumps(e2e_matrix, separators=(",", ":"))
+    functional_json = json.dumps(functional_matrix, separators=(",", ":"))
+    benchmark_json = json.dumps(benchmark_matrix, separators=(",", ":"))
     unit_json = json.dumps(unit_matrix, separators=(",", ":"))
 
     set_output("e2e", e2e_json)
+    set_output("functional", functional_json)
+    set_output("benchmark", benchmark_json)
     set_output("unit", unit_json)
 
-    # Human-readable summary for CI logs
+    # Human-readable summary
     print(f"Platform:    {args.platform}")
     print(f"Stage:       {ci_stage}")
     print(f"Devices:     {devices}")
+    print(f"Functional:  {len(functional_matrix)} job(s)")
+    for entry in functional_matrix:
+        print(f"  - device={entry['device']} labels={entry.get('runner_labels')}")
     print(f"E2E:         {len(e2e_matrix)} job(s)")
     for entry in e2e_matrix:
         case_list = json.loads(entry["cases"])
@@ -418,6 +516,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         for c in case_list:
             print(f"      {c['model']}/{c['case']}")
+    print(f"Benchmark:   {len(benchmark_matrix)} job(s)")
+    for entry in benchmark_matrix:
+        print(f"  - device={entry['device']} labels={entry.get('runner_labels')}")
     print(f"Unit:        {len(unit_matrix)} config(s)")
     for entry in unit_matrix:
         print(

@@ -156,6 +156,7 @@ def profile_factory():
                 )
             ),
         }
+        namespace["device_module"] = namespace["current_platform"].torch_device_fn
         get_context = _method(
             "model_runner.py",
             "ModelRunnerFL",
@@ -317,6 +318,7 @@ def test_exhausted_budget_diagnostics_preserve_accounting(
             "maybe_rocm_profiling_fallback": lambda _: None,
             "set_current_vllm_config": lambda _: nullcontext(),
             "memory_profiling": lambda *args, **kwargs: nullcontext(profile),
+            "nullcontext": nullcontext,
             "CUDAGraphMode": Mode,
             "envs": NS(VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=estimate_enabled),
             "logger": logger,
@@ -480,6 +482,7 @@ def pool_lifecycle(monkeypatch):
         empty_wrappers = NS(_all_instances=(), clear_all_graphs=Mock())
         namespace = {
             "current_platform": platform,
+            "device_module": platform.torch_device_fn,
             "compilation_counter": counter,
             "set_current_vllm_config": lambda _: nullcontext(),
             "logger": Mock(),

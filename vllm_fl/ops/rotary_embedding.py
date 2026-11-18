@@ -31,6 +31,9 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             dtype,
             init_cache,
         )
+        self._use_amd_graph_ops = (
+            getattr(current_platform, "vendor_name", None) == "amd"
+        )
         if current_platform.device_type == "npu":
             from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
                 initialize_rotary_embedding_ascend,
@@ -67,16 +70,33 @@ class RotaryEmbeddingFL(RotaryEmbedding):
 
         cos, sin = cos_sin_cache.chunk(2, dim=-1)
 
-        q_embed, k_embed = _rotary_embedding(
-            self,
-            query_rot,
-            key_rot,
-            cos,
-            sin,
-            positions,
-            not self.is_neox_style,  # rotary_interleaved
-            True,  # inplace
-        )
+        if self._use_amd_graph_ops and torch.compiler.is_compiling():
+            from vllm_fl.dispatch.backends.vendor.amd.graph_ops import (
+                rotary_embedding_custom_op,
+            )
+
+            q_embed, k_embed = rotary_embedding_custom_op(
+                query_rot,
+                key_rot,
+                cos,
+                sin,
+                positions,
+                rotary_interleaved=not self.is_neox_style,
+            )
+            query_rot.copy_(q_embed)
+            key_rot.copy_(k_embed)
+            q_embed, k_embed = query_rot, key_rot
+        else:
+            q_embed, k_embed = _rotary_embedding(
+                self,
+                query_rot,
+                key_rot,
+                cos,
+                sin,
+                positions,
+                not self.is_neox_style,  # rotary_interleaved
+                True,  # inplace
+            )
 
         if self.rotary_dim < self.head_size:
             query = torch.cat((q_embed, query_pass), dim=-1).reshape(query_shape)
