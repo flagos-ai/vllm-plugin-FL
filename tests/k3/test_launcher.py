@@ -152,6 +152,7 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(environment[prefix + "_BUFFSIZE"], "1048576")
             self.assertEqual(environment[prefix + "_IB_HCA"], "=hca0:1")
         self.assertEqual(environment["VLLM_PP_LAYER_PARTITION"], "24,24,24,21")
+        self.assertEqual(environment["VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS"], "120")
         self.assertEqual(
             {k for k in environment if k.startswith("K3_")}, {"K3_CACHE_ROOT"}
         )

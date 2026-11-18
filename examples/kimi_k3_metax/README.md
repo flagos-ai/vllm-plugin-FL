@@ -118,6 +118,18 @@ prefix caching off (the YAML uses the explicit `no-enable-prefix-caching` flag).
 Containers require `/dev/dri`, `/dev/mxcd`,
 `/dev/infiniband`, host networking, sufficient shared memory and unlimited memlock.
 
+## Stopping the PP service
+
+Drain requests and stop the API and all three headless containers together.
+Allow 180 seconds for Docker to stop each container. This profile gives the
+native API and worker executors 120 seconds for graceful shutdown.
+
+The K3 runner scopes remote scheduler-input cancellation to one worker's group
+instance. After the input queue is created, the original factory is restored.
+An idle remote reader checks for shutdown at most every 100 ms and delegates
+ready packets to vLLM's original decoder. The native dependency is the K3 pin
+listed above. The related upstream proposal is [vLLM #64786](https://github.com/vllm-project/vllm/pull/64786).
+
 ## Weight lifecycle
 
 Load the checkpoint once per worker. In-place weight-transfer sessions and

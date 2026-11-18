@@ -9,6 +9,7 @@ from vllm.v1.worker.gpu.cudagraph_utils import ModelCudaGraphManager
 from vllm.v1.worker.gpu.model_runner import GPUModelRunner
 
 from vllm_fl.distributed.kimi_k3_pp import HostPackedPPHandler
+from vllm_fl.distributed.kimi_k3_rpc import arm_remote_rpc_input
 from vllm_fl.models.kimi_k3_context import execution_config
 from vllm_fl.ops.kimi_k3.workspace_contract import (
     ACTIVATION_COLUMNS,
@@ -129,6 +130,14 @@ class K3ModelRunner(GPUModelRunner):
             self._release_k3_resources()
             raise
 
+    def load_model(self, load_dummy_weights=False, *args, **kwargs):
+        result = super().load_model(load_dummy_weights, *args, **kwargs)
+        if self.k3_execution.enabled:
+            self._remote_input_factory = arm_remote_rpc_input(
+                self.vllm_config.parallel_config
+            )
+        return result
+
     def reload_weights(self, *args, **kwargs):
         """Reject reload before vLLM restores raw checkpoint parameter layouts."""
         raise NotImplementedError(
@@ -137,6 +146,10 @@ class K3ModelRunner(GPUModelRunner):
         )
 
     def _release_k3_resources(self):
+        factory = getattr(self, "_remote_input_factory", None)
+        if factory is not None:
+            factory.restore()
+            self._remote_input_factory = None
         workspace = getattr(self, "_tp8_prefill_workspace", None)
         self._tp8_prefill_workspace = None
         handler = getattr(self, "pp_handler", None)
