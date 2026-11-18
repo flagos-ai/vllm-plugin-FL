@@ -1,7 +1,9 @@
 """Early profile selection and operator policy contracts, without GPU arithmetic."""
 
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -107,3 +109,39 @@ def test_existing_flagcx_transport_keeps_the_legacy_sdk_route(monkeypatch):
     monkeypatch.setenv("FLAGCX_PATH", "/existing/transport")
     monkeypatch.setattr(metax_open, "find_spec", lambda _: None)
     assert not uses_open_metax_runtime()
+
+
+@pytest.mark.parametrize(
+    ("backend", "module"),
+    [("FLASH_ATTN", "vllm.vllm_flash_attn"), ("ROCM_AITER_FA", "aiter")],
+)
+@pytest.mark.parametrize("k3", [False, True])
+def test_metax_vit_provider_scope(monkeypatch, k3, backend, module):
+    import vllm.platforms
+    from vllm.model_executor.layers.attention import mm_encoder_attention as mm
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+    from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+    if k3:
+        config = ROOT / "examples/kimi_k3_metax/dispatch.yaml"
+        monkeypatch.setenv("VLLM_FL_CONFIG", str(config))
+    else:
+        monkeypatch.delenv("VLLM_FL_CONFIG", raising=False)
+    monkeypatch.setattr(
+        vllm.platforms,
+        "current_platform",
+        SimpleNamespace(vendor_name="metax", is_cuda=lambda: False),
+    )
+    provider = object()
+    monkeypatch.setitem(
+        sys.modules, module, SimpleNamespace(flash_attn_varlen_func=provider)
+    )
+    monkeypatch.setattr(mm, "maybe_get_vit_flash_attn_backend", None, raising=False)
+    patch_mm_encoder_attention()
+    if k3:
+        with pytest.raises(NotImplementedError, match="K3 MetaX"):
+            mm.maybe_get_vit_flash_attn_backend(AttentionBackendEnum[backend])
+    else:
+        selected = mm.maybe_get_vit_flash_attn_backend(AttentionBackendEnum[backend])
+        assert selected is provider

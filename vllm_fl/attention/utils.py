@@ -1,5 +1,7 @@
 from vllm.logger import init_logger
 
+from vllm_fl.kimi_k3_config import is_kimi_k3_profile
+
 logger = init_logger(__name__)
 
 _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE = 512
@@ -226,7 +228,9 @@ def patch_mm_encoder_attention():
     def _patched_maybe_get_vit_flash_attn_backend(attn_backend):
         if (
             getattr(current_platform, "vendor_name", None) == "metax"
-            and attn_backend in (
+            and is_kimi_k3_profile()
+            and attn_backend
+            in (
                 AttentionBackendEnum.FLASH_ATTN,
                 AttentionBackendEnum.ROCM_AITER_FA,
             )
