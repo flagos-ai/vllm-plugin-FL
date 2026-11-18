@@ -60,8 +60,12 @@ For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
 for the full official vLLM 0.32 CUDA image, pinned development dependencies,
 upstream V1/V2 runners and regression commands. FlagGems remains enabled.
 It replaces the previous NVIDIA 0.28 setup.
-The generic setup below applies to the other backends; their 0.32 validation
-is outside the NVIDIA adaptation. See also the
+The source installation example below targets `0.5.0-dev` and uses vLLM 0.32.0,
+matching this branch's dependency declaration. Backend validation is tracked
+separately; this example does not imply that every backend is validated on 0.32.
+For backend-specific images and version constraints, follow the deployment guides
+above. For the `main` branch's vLLM 0.28.0 setup, use the documentation on `main`.
+See also the
 [T-Head PPU guide](./docs/usage/thead.md),
 [Enflame S60 guide](./docs/usage/enflame.md), and
 [Tsingmicro TXDA guide](./docs/usage/tsingmicro.md).
@@ -70,7 +74,7 @@ is outside the NVIDIA adaptation. See also the
 
     For **non-NVIDIA** chips, install vLLM from source with the `empty` device target:
     ```sh
-    git clone -b v0.28.0 https://github.com/vllm-project/vllm.git
+    git clone -b v0.32.0 https://github.com/vllm-project/vllm.git
     cd vllm
     VLLM_TARGET_DEVICE=empty pip install -v --no-build-isolation --no-deps .
     ```
@@ -80,7 +84,7 @@ is outside the NVIDIA adaptation. See also the
     2.1 Clone the repository:
 
     ```sh
-    git clone https://github.com/flagos-ai/vllm-plugin-FL
+    git clone --branch 0.5.0-dev https://github.com/flagos-ai/vllm-plugin-FL
     ```
 
     2.2 Install
