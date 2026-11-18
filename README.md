@@ -59,7 +59,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
 for the full official vLLM 0.32 CUDA image, pinned development dependencies,
 upstream V1/V2 runners and regression commands. FlagGems remains enabled.
-It replaces the previous NVIDIA 0.28 setup.
+The NVIDIA setup targets vLLM 0.32.
 The source installation example below targets `0.5.0-dev` and uses vLLM 0.32.0,
 matching this branch's dependency declaration. Backend validation is tracked
 separately; this example does not imply that every backend is validated on 0.32.
@@ -142,7 +142,7 @@ general ATen registration remains with FlagGems.
 
 The plugin installs runtime compatibility hooks through vLLM's plugin entry
 points without modifying the installed vLLM package. Model configs and classes
-that are native in vLLM 0.28.0 and Transformers 5 are not duplicated here.
+that are native in vLLM 0.32.0 and Transformers 5 are not duplicated here.
 
 Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
@@ -151,7 +151,7 @@ to follow the common FlagOS controls.
 ### Operator profiling
 
 See the [operator profiling tools](./tools/operator_profile/README.md) for a
-reproducible native-vLLM and plugin comparison workflow on vLLM 0.28.0.
+reproducible native-vLLM and plugin comparison workflow on vLLM 0.32.0.
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
@@ -186,7 +186,7 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
-For native decode graph execution with vLLM 0.28, see the
+For native decode graph execution with vLLM 0.32, see the
 [Ascend graph guide](./docs/ascend-vllm028-graph.md).
 
 1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
