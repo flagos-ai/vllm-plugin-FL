@@ -66,6 +66,9 @@ peer TP2/BF16; it does not qualify other topologies, dtypes or a concurrent
 model workload. The repaired dense TP2 service passes full graph capture,
 three semantic requests and serial 1K/4K/16K/64K-input-token requests, but
 its subsequent 64-choice, 512-output-token functional request timed out.
+The matched native-fusion control passes that same batch, including all 64
+choices and 32768 output tokens. The paired runtime and service arguments
+were audited; neither qualification arm launched a throughput client.
 No throughput gain or complete large-load repair follows from the operator
 regression. Provider dispatch/workspace diagnostics use the vLLM logger
 namespace so they remain visible under the vLLM CLI logging configuration.
