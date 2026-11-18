@@ -610,6 +610,9 @@ class ModelRunnerFL(
         self.use_async_scheduling = self.scheduler_config.async_scheduling
 
         # Sampler
+        from vllm_fl.models.unlimited_ocr import get_ocr_rswa_window
+
+        self.ocr_rswa_window = get_ocr_rswa_window(self.model_config)
         self.sampler = Sampler(
             logprobs_mode=self.model_config.logprobs_mode,
             use_fp64_gumbel=self.model_config.use_fp64_gumbel,
@@ -2258,11 +2261,22 @@ class ModelRunnerFL(
         self.seq_lens[num_reqs:].fill_(0)
 
         if self.common_attention_metadata_graph is None:
-            self.input_batch.block_table.compute_slot_mapping(
-                num_reqs,
-                self.query_start_loc.gpu[: num_reqs + 1],
-                self.positions[:total_num_scheduled_tokens],
-            )
+            if self.ocr_rswa_window is not None:
+                from vllm_fl.models.ocr_runtime import compute_ocr_slot_mapping
+
+                if not compute_ocr_slot_mapping(
+                    self.input_batch.block_table,
+                    num_reqs,
+                    req_indices_gpu,
+                    self.positions[:total_num_scheduled_tokens],
+                ):
+                    raise RuntimeError("Unsupported Unlimited-OCR KV slot mapping")
+            else:
+                self.input_batch.block_table.compute_slot_mapping(
+                    num_reqs,
+                    self.query_start_loc.gpu[: num_reqs + 1],
+                    self.positions[:total_num_scheduled_tokens],
+                )
 
         # Copy the tensors to the GPU.
         self._prepare_input_ids(
@@ -2494,6 +2508,15 @@ class ModelRunnerFL(
             positions=self.positions[:num_tokens_padded],
             mm_req_doc_ranges=req_doc_ranges,
         )
+
+        if self.ocr_rswa_window is not None:
+            # Preserve the original image/text prefix through chunking/reorder.
+            cm_base.rswa_prefix_lens = (
+                torch.zeros_like(num_prompt_tokens_cpu)
+                if for_cudagraph_capture else num_prompt_tokens_cpu.clone()
+            )
+            cm_base.rswa_prefix_lens[num_reqs:] = 0
+            cm_base.rswa_num_actual_reqs = num_reqs
 
         if self.use_ascend_attention:
             phase = (
@@ -3596,6 +3619,14 @@ class ModelRunnerFL(
             if batch_desc_num_reqs is not None
             else num_reqs
         )
+
+        if (
+            self.ocr_rswa_window is not None
+            and self.compilation_config.cudagraph_mode == CUDAGraphMode.FULL_DECODE_ONLY
+            and self.uniform_decode_query_len == 1
+        ):
+            # One padded request per token keeps capture/replay mask B fixed.
+            num_reqs_padded = num_tokens_padded
 
         if (
             num_tokens_padded
@@ -6997,35 +7028,35 @@ class ModelRunnerFL(
         # Capture the large shapes first so that the smaller shapes
         # can reuse the memory pool allocated for the large shapes.
         set_cudagraph_capturing_enabled(True)
-        with self._freeze_gc(), graph_capture(device=self.device):
-            _accelerator_synchronize()
-            torch.accelerator.empty_cache()
-            start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
-
-            for (
-                runtime_mode,
-                batch_descs,
-            ) in self.cudagraph_dispatcher.get_capture_descs():
-                self._capture_cudagraphs(
-                    batch_descriptors=batch_descs,
-                    cudagraph_runtime_mode=runtime_mode,
-                )
+        try:
+            with self._freeze_gc(), graph_capture(device=self.device):
                 _accelerator_synchronize()
+                torch.accelerator.empty_cache()
+                start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
 
-            # Capture encoder CUDA graphs if enabled
-            if self.encoder_cudagraph_manager is not None:
-                encoder_graph_pool = current_platform.graph_pool_handle()
-                self.encoder_cudagraph_manager.capture(graph_pool=encoder_graph_pool)
+                for (
+                    runtime_mode,
+                    batch_descs,
+                ) in self.cudagraph_dispatcher.get_capture_descs():
+                    self._capture_cudagraphs(
+                        batch_descriptors=batch_descs,
+                        cudagraph_runtime_mode=runtime_mode,
+                    )
+                    _accelerator_synchronize()
 
-            _accelerator_synchronize()
-            end_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
+                # Capture encoder CUDA graphs if enabled
+                if self.encoder_cudagraph_manager is not None:
+                    encoder_graph_pool = current_platform.graph_pool_handle()
+                    self.encoder_cudagraph_manager.capture(graph_pool=encoder_graph_pool)
 
-        # Disable cudagraph capturing globally, so any unexpected cudagraph
-        # capturing will be detected and raise an error after here.
-        # Note: We don't put it into graph_capture context manager because
-        # we may do lazy capturing in future that still allows capturing
-        # after here.
-        set_cudagraph_capturing_enabled(False)
+                _accelerator_synchronize()
+                end_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
+
+        except BaseException:
+            _clear_decoder_graphs(self.graph_runtime)
+            raise
+        finally:
+            set_cudagraph_capturing_enabled(False)
 
         _accelerator_synchronize()
         torch.accelerator.empty_cache()

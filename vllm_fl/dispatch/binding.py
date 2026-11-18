@@ -69,8 +69,11 @@ class OperatorBinding:
         candidates = [
             impl
             for impl in candidates
-            if impl.impl_id not in self.supports
-            or self.supports[impl.impl_id](*args, **kwargs)
+            if (impl.supports is None or impl.supports(*args, **kwargs))
+            and (
+                impl.impl_id not in self.supports
+                or self.supports[impl.impl_id](*args, **kwargs)
+            )
         ]
         explicit = dict(policy.per_op_order).get(self.op_name)
         if self.default_order and explicit is None and policy.prefer == PREFER_DEFAULT:

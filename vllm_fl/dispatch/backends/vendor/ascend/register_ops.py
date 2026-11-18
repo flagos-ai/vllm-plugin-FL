@@ -33,6 +33,12 @@ def register_builtins(registry: OpRegistry) -> None:
         registry: Registry to register into
     """
     from .ascend import AscendBackend
+    from .impl.capabilities import has_npu_operator
+    from .impl.rotary import rotary_embedding_torch_npu
+    from .impl.vision_attention import (
+        scaled_dot_product_attention_ascend,
+        supports_scaled_dot_product_attention,
+    )
 
     backend = AscendBackend()
     is_avail = backend.is_available
@@ -72,6 +78,38 @@ def register_builtins(registry: OpRegistry) -> None:
             fn=_bind_is_available(backend.rotary_embedding, is_avail),
             vendor="ascend",
             priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="rotary_embedding",
+            impl_id="vendor.ascend.torch_npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                rotary_embedding_torch_npu,
+                lambda: is_avail()
+                and has_npu_operator("npu_rotary_mul", "rotary_mode"),
+            ),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR - 1,
+        ),
+        OpImpl(
+            op_name="scaled_dot_product_attention",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                scaled_dot_product_attention_ascend,
+                lambda: is_avail()
+                and has_npu_operator(
+                    "npu_fused_infer_attention_score",
+                    "pse_shift",
+                    "num_heads",
+                    "num_key_value_heads",
+                    "input_layout",
+                    "scale",
+                ),
+            ),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+            supports=supports_scaled_dot_product_attention,
         ),
         # Attention Backend
         OpImpl(

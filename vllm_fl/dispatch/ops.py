@@ -9,9 +9,26 @@ This module defines the abstract base class that all backends must implement.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import Optional, Union
 
 import torch
+
+from .binding import OperatorBinding
+from .manager import get_default_manager
+
+
+@lru_cache(maxsize=1)
+def _top_k_top_p_binding(manager) -> OperatorBinding:
+    return OperatorBinding(manager, "apply_top_k_top_p")
+
+
+def apply_top_k_top_p(
+    logits: torch.Tensor, k: torch.Tensor | None, p: torch.Tensor | None
+) -> torch.Tensor:
+    """Apply vLLM's top-k/top-p logit filter and retain its mutation contract."""
+    binding = _top_k_top_p_binding(get_default_manager())
+    return binding(logits, k, p)
 
 
 class VLLMFLBackendBase(ABC):

@@ -41,7 +41,7 @@ op_backends:
     - vendor
     - reference
   rotary_embedding:
-    - vendor
+    - impl:vendor.ascend
     - flagos
     - reference
 

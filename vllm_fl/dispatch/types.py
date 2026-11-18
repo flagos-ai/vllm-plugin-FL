@@ -54,6 +54,7 @@ class OpImpl:
         priority: Priority for selection (higher = preferred)
         supported_dtypes: Set of supported data types (optional)
         min_arch: Minimum architecture requirement (optional)
+        supports: Optional argument guard for OperatorBinding
     """
 
     op_name: str
@@ -64,6 +65,7 @@ class OpImpl:
     priority: int = 0
     supported_dtypes: Optional[Set[str]] = None
     min_arch: Optional[str] = None
+    supports: Optional[Callable[..., bool]] = None
 
     def __post_init__(self):
         if self.kind == BackendImplKind.VENDOR and not self.vendor:

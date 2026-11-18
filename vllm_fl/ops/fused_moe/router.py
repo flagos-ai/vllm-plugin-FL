@@ -131,22 +131,25 @@ def _fl_grouped_topk(
     else:
         raise ValueError(f"Unsupported scoring function: {scoring_func}")
 
-    num_experts = scores.size(-1)
-    group_size = num_experts // num_expert_group
+    # Selecting every group leaves every expert eligible. Avoid constructing
+    # an all-one mask (and one scatter per expert), preserving expert topk.
+    if not (0 < num_expert_group == topk_group):
+        num_experts = scores.size(-1)
+        group_size = num_experts // num_expert_group
 
-    scores_grouped = scores.view(-1, num_expert_group, group_size)
-    group_scores = scores_grouped.amax(dim=-1)
-    _, selected_groups = torch.topk(
-        group_scores, k=topk_group, dim=-1, sorted=False
-    )
-    mask = torch.zeros_like(scores)
-    for i in range(topk_group):
-        group_idx = selected_groups[:, i]
-        start = group_idx * group_size
-        for j in range(group_size):
-            mask.scatter_(1, (start + j).unsqueeze(1), 1.0)
+        scores_grouped = scores.view(-1, num_expert_group, group_size)
+        group_scores = scores_grouped.amax(dim=-1)
+        _, selected_groups = torch.topk(
+            group_scores, k=topk_group, dim=-1, sorted=False
+        )
+        mask = torch.zeros_like(scores)
+        for i in range(topk_group):
+            group_idx = selected_groups[:, i]
+            start = group_idx * group_size
+            for j in range(group_size):
+                mask.scatter_(1, (start + j).unsqueeze(1), 1.0)
 
-    scores = scores * mask
+        scores = scores * mask
     topk_weights, topk_ids = torch.topk(
         scores, k=topk, dim=-1, sorted=False
     )

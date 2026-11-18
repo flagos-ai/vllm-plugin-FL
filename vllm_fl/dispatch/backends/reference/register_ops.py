@@ -47,6 +47,8 @@ def register_builtins(registry) -> None:
         "rms_norm",
         "rotary_embedding",
         "apply_rotary_emb",
+        "apply_top_k_top_p",
+        "scaled_dot_product_attention",
         "attention_backend",
         "moe_align_block_size",
         "moe_sum",

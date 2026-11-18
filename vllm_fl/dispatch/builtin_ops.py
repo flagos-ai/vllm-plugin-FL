@@ -12,6 +12,8 @@ from __future__ import annotations
 import importlib
 import os
 
+from vllm_fl.utils import _NATIVE_NPU
+
 from .config import get_vendor_device_map
 from .registry import OpRegistry
 from .logger_manager import get_logger
@@ -134,14 +136,15 @@ def register_builtins(registry: OpRegistry) -> None:
     Args:
         registry: Registry to register into
     """
-    # Register FlagGems (DEFAULT) implementations
-    try:
-        from .backends.flaggems.register_ops import register_builtins as register_flaggems
+    if not _NATIVE_NPU:
+        # Register FlagGems (DEFAULT) implementations
+        try:
+            from .backends.flaggems.register_ops import register_builtins as register_flaggems
 
-        register_flaggems(registry)
-        logger.debug("Registered FlagGems operators")
-    except Exception as e:
-        logger.warning(f"Failed to register FlagGems operators: {e}")
+            register_flaggems(registry)
+            logger.debug("Registered FlagGems operators")
+        except Exception as e:
+            logger.warning(f"Failed to register FlagGems operators: {e}")
 
     # Register PyTorch (REFERENCE) implementations
     try:
@@ -163,5 +166,3 @@ def register_builtins(registry: OpRegistry) -> None:
             logger.debug(f"Registered {plugin_count} external plugins")
     except Exception as e:
         logger.debug(f"Plugin discovery failed: {e}")
-
-

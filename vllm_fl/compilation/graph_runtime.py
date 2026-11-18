@@ -23,6 +23,33 @@ class GraphRuntimeController:
         self.attention_impls: tuple[type, ...] | None = None
         self.update_stream = None
         self._active = False
+        self._rswa_params = None
+        self._rswa_replay_stream = None
+
+    def prepare_rswa_graph(self, device: Any) -> int:
+        """Reserve the R-SWA graph buffers before the worker sizes its KV cache."""
+        from vllm_fl.models.unlimited_ocr import get_ocr_rswa_window
+
+        config = self.vllm_config
+        if (
+            get_ocr_rswa_window(config.model_config) is None
+            or not config.compilation_config.cudagraph_mode.has_full_cudagraphs()
+        ):
+            return 0
+
+        if self._rswa_params is None:
+            from vllm_fl.compilation.graph_params import GraphParams
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                reserve_rswa_graph_buffers,
+            )
+
+            buffers = reserve_rswa_graph_buffers(config, device)
+            if buffers is None:
+                return 0
+            self.update_stream = current_platform.torch_device_fn.Stream(device=device)
+            self._rswa_params = GraphParams(rswa_buffers=buffers)
+
+        return self._rswa_params.rswa_buffers.nbytes
 
     @staticmethod
     def _num_tokens(context: Any) -> int:
@@ -40,30 +67,68 @@ class GraphRuntimeController:
 
         assert not self._active
         num_tokens = self._num_tokens(context)
-        prepare_graph_params(num_tokens)
+        rswa_params = self._rswa_params
+        if rswa_params is None:
+            params = prepare_graph_params(num_tokens)
+        else:
+            params = rswa_params
+            params.prepare_shape(num_tokens)
+
+        was_capturing = getattr(context, "capturing", False)
         self._active = True
         context.capturing = True
         try:
+            if rswa_params is not None:
+                context.rswa_graph_params = rswa_params
+                self._stage_rswa_graph_inputs(context, num_tokens)
             yield
-        finally:
-            try:
+            if rswa_params is None:
                 weak_ref_workspace(num_tokens)
-            finally:
-                context.capturing = False
-                self._active = False
+        except BaseException:
+            params.discard_shape(num_tokens)
+            raise
+        finally:
+            if rswa_params is not None:
+                del context.rswa_graph_params
+                if hasattr(context, "rswa_graph_inputs"):
+                    del context.rswa_graph_inputs
+            context.capturing = was_capturing
+            self._active = False
 
     @contextmanager
     def replay_scope(self, context: Any):
         assert not self._active
+        rswa_params = self._rswa_params
+        if rswa_params is not None:
+            context.rswa_graph_params = rswa_params
         self._active = True
         try:
+            stream = current_platform.torch_device_fn.current_stream()
+            if rswa_params is not None:
+                # Only one graph per runner may use the shared buffers at a time.
+                previous_stream = self._rswa_replay_stream
+                if previous_stream is not None and previous_stream != stream:
+                    stream.wait_stream(previous_stream)
+                self._stage_rswa_graph_inputs(context, self._num_tokens(context))
             # rc1 waits for the previous replay before releasing this step's
             # external events with task updates on a separate stream.
-            current_platform.torch_device_fn.current_stream().synchronize()
+            # On R-SWA this also completes the metadata copies on the replay stream.
+            stream.synchronize()
             yield
+            if rswa_params is not None:
+                self._rswa_replay_stream = stream
             self._update_attention(context)
         finally:
+            if rswa_params is not None:
+                del context.rswa_graph_params
             self._active = False
+
+    def _stage_rswa_graph_inputs(self, context: Any, num_tokens: int) -> None:
+        if not self.attention_impls or len(self.attention_impls) != 1:
+            raise RuntimeError(
+                "R-SWA graphs require one bound Ascend attention backend"
+            )
+        self.attention_impls[0].stage_rswa_graph_inputs(context, num_tokens)
 
     def _update_attention(self, context: Any) -> None:
         if self.attention_impls is None:
@@ -107,6 +172,17 @@ class GraphRuntimeController:
 
     def clear_decoder_graphs(self) -> None:
         from vllm_fl.compilation.graph_params import clear_graph_params
+
+        if self._rswa_params is not None:
+            if self._rswa_replay_stream is not None:
+                self._rswa_replay_stream.synchronize()
+            if self.wrapper_type is not None:
+                self.wrapper_type.clear_all_graphs(self)
+            self._rswa_params.clear()
+            self._rswa_params = None
+            self._rswa_replay_stream = None
+            self.update_stream = None
+            return
 
         if self.wrapper_type is not None:
             self.wrapper_type.clear_all_graphs()

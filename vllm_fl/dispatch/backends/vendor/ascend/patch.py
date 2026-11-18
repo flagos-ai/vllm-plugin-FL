@@ -123,6 +123,16 @@ def patch_fla_ops():
     except Exception as e:
         logger.warning("Failed to patch FLA ops: %s", e)
 
+def ascend_vision_oot_classes():
+    from .impl.mm_encoder_attention import AscendMMEncoderAttention
+    from .impl.vocab_parallel_embedding import AscendVocabParallelEmbedding
+
+    return {
+        "VocabParallelEmbedding": AscendVocabParallelEmbedding,
+        "MMEncoderAttention": AscendMMEncoderAttention,
+    }
+
+
 def patch_op_cls():
     """Patch MMEncoderAttention to use manual matmul attention on NPU.
 
@@ -135,13 +145,7 @@ def patch_op_cls():
     try:
         from vllm.model_executor.custom_op import CustomOp
 
-        from .impl.mm_encoder_attention import AscendMMEncoderAttention
-        from .impl.vocab_parallel_embedding import AscendVocabParallelEmbedding
-        REGISTERED_ASCEND_OPS = {
-            "VocabParallelEmbedding": AscendVocabParallelEmbedding,
-            "MMEncoderAttention": AscendMMEncoderAttention,
-        }
-        for name, op_cls in REGISTERED_ASCEND_OPS.items():
+        for name, op_cls in ascend_vision_oot_classes().items():
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=name)
         logger.info("Patched MMEncoderAttention for NPU (matmul attention)")
     except Exception as e:

@@ -266,6 +266,14 @@ def register_model():
 
     from vllm.platforms import current_platform
 
+    if (
+        current_platform.device_type == "npu"
+        and getattr(current_platform, "vendor_name", None) == "ascend"
+    ):
+        from vllm_fl.models.unlimited_ocr.registration import register_unlimited_ocr_support
+
+        register_unlimited_ocr_support()
+
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
         from vllm_fl.patches.arm_cpu_gdn import (
             apply_arm_cpu_gdn_state_indices_patch,

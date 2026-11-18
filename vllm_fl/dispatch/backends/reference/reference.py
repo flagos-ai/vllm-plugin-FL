@@ -112,13 +112,13 @@ class ReferenceBackend(Backend):
         self,
         obj,
         query: torch.Tensor,
-        key: torch.Tensor,
+        key: torch.Tensor | None,
         cos: torch.Tensor,
         sin: torch.Tensor,
         position_ids: torch.Tensor,
         rotary_interleaved: bool = False,
         inplace: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         Apply rotary position embedding.
 
@@ -154,6 +154,17 @@ class ReferenceBackend(Backend):
         from .impl.rotary import apply_rotary_emb_torch
 
         return apply_rotary_emb_torch(obj, x, cos, sin)
+
+    def apply_top_k_top_p(self, logits, k, p):
+        from vllm.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p_pytorch
+
+        # Use the upstream tensor path for every batch size.
+        return apply_top_k_top_p_pytorch(logits, k, p)
+
+    def scaled_dot_product_attention(self, query, key, value, attn_bias=None):
+        return torch.nn.functional.scaled_dot_product_attention(
+            query, key, value, attn_mask=attn_bias
+        )
 
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
