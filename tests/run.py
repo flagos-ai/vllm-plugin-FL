@@ -15,7 +15,7 @@ Usage::
     # Run only functional tests (ops, compilation, distributed)
     python tests/run.py --platform cuda --device a100 --scope functional
 
-    # Run only E2E tests (inference, serving — require model files)
+    # Run only E2E tests (including adaptation Gate — require model files)
     python tests/run.py --platform cuda --device a100 --scope e2e
 
     # Run only unit tests
@@ -58,6 +58,8 @@ from tests.utils.device_utils import get_device_count, get_visible_device_env_va
 from tests.utils.model_config import ModelConfig
 from tests.utils.platform_config import PlatformConfig
 from tests.utils.report import TestReport, TestResult
+
+_MODEL_E2E_TASKS = ("inference", "serving", "adaptation_gate")
 
 # ---------------------------------------------------------------------------
 # Test case descriptor
@@ -329,6 +331,11 @@ class TestRunner:
 
         results: list[TestResult] = []
         results_lock = threading.Lock()
+        # A sharded Gate job has exactly one case, so there is no competing
+        # subprocess output to interleave. Stream it live instead of hiding up
+        # to hours of scenario progress in the parallel runner's capture
+        # buffer. Multi-case jobs keep prefixed buffering as before.
+        capture_case_output = len(cases) > 1
 
         def _ts() -> str:
             return time.strftime("%H:%M:%S")
@@ -344,9 +351,15 @@ class TestRunner:
             # the inherited mask names (identical when no mask is set).
             ids = [device_ids[s] for s in slots]
             visible = ",".join(str(d) for d in ids)
+            output_mode = (
+                "stdout buffered until done"
+                if capture_case_output
+                else "stdout streaming live"
+            )
             print(
                 f"[run] [{_ts()}] START  {tc.name}  "
-                f"{visible_env_var}={visible}  (devices={tc.num_devices}, stdout buffered until done)",
+                f"{visible_env_var}={visible}  "
+                f"(devices={tc.num_devices}, {output_mode})",
                 flush=True,
             )
             status = "FAIL"
@@ -365,7 +378,7 @@ class TestRunner:
                 result = self._run_single(
                     tc,
                     extra_env_override=device_env,
-                    _quiet=True,
+                    _quiet=capture_case_output,
                     device_slots=slots,
                     device_ids=ids,
                 )
@@ -405,7 +418,7 @@ class TestRunner:
         Scopes:
         - ``unit``: unit tests
         - ``functional``: component-level GPU tests (ops, compilation, distributed)
-        - ``e2e``: end-to-end model tests (inference, serving)
+        - ``e2e``: end-to-end model tests (including adaptation Gate)
         - ``benchmark``: benchmark tests selected by platform YAML
         - ``all``: all of the above
         """
@@ -512,8 +525,7 @@ class TestRunner:
     ) -> list[TestCase]:
         """Build test cases from platform YAML config for e2e tests.
 
-        For inference/serving/concurrent tasks, routes to the unified smoke
-        tests (``test_inference_smoke.py`` etc.) and injects
+        For model-backed tasks, routes to the unified test module and injects
         ``FL_TEST_MODEL``/``FL_TEST_CASE`` env vars so the smoke test can
         load the correct model YAML config.
 
@@ -570,6 +582,12 @@ class TestRunner:
             elif task == "concurrent":
                 # Route to unified concurrent smoke test with env-based config
                 pytest_path = f"{test_dir}/test_concurrent_smoke.py"
+                extra_env = {
+                    "FL_TEST_MODEL": model,
+                    "FL_TEST_CASE": case,
+                }
+            elif task == "adaptation_gate":
+                pytest_path = f"{test_dir}/test_adaptation_gate.py"
                 extra_env = {
                     "FL_TEST_MODEL": model,
                     "FL_TEST_CASE": case,
@@ -684,7 +702,7 @@ class TestRunner:
         ]
 
     def _discover_e2e_tests(self) -> list[TestCase]:
-        """End-to-end model tests (inference, serving)."""
+        """End-to-end model tests (including adaptation Gate)."""
         return self._discover_from_yaml("tests/e2e_tests")
 
     def _discover_benchmark_tests(self) -> list[TestCase]:
@@ -835,7 +853,7 @@ class TestRunner:
         # Wait for sufficient device memory before e2e tests.
         # When running in parallel the memory check runs under the already-acquired
         # device slots, so we only look at the assigned cards.
-        if tc.task in ("inference", "serving") and tc.model and tc.case:
+        if tc.task in _MODEL_E2E_TASKS and tc.model and tc.case:
             gpu_util = ModelConfig.load(
                 tc.model,
                 tc.case,
@@ -959,7 +977,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["all", "unit", "functional", "e2e", "benchmark"],
         default="all",
         help="Which test scope to run: unit, functional (ops/compilation/"
-        "distributed), e2e (inference/serving), benchmark, or all (default: all)",
+        "distributed), e2e (including adaptation Gate), benchmark, or all "
+        "(default: all)",
     )
     parser.add_argument(
         "--stage",
@@ -971,7 +990,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--task",
         default=None,
-        help="Functional test task filter (e.g., inference, serve)",
+        help="E2E/functional task filter (e.g., inference, adaptation_gate)",
     )
     parser.add_argument(
         "--model",
