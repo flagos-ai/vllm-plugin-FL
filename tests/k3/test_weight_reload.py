@@ -36,7 +36,9 @@ def test_weight_transfer_is_rejected_before_runner_allocation(monkeypatch):
     parent.assert_not_called()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires device Graph replay")
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="requires device Graph replay"
+)
 def test_rejected_reload_preserves_captured_storage():
     runner = runner_mod.K3ModelRunner.__new__(runner_mod.K3ModelRunner)
     weight = torch.arange(16, device="cuda", dtype=torch.bfloat16)
