@@ -24,6 +24,8 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 | Model | Status | Reference |
 |-------|--------|-----------|
+| Qwen3-VL-Embedding-8B | Merging (Ascend A2; text / single image / image+text; eager / PIECEWISE) | [example](./examples/qwen3_retrieval.md) |
+| Qwen3-Reranker-8B | Merging (Ascend A2; text scoring; eager / PIECEWISE) | [example](./examples/qwen3_retrieval.md) |
 | Qwen3.5-397B-A17B | Supported | [example](./examples/qwen3_5_offline_inference.py) |
 | Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
 | Qwen3.8-Flash-Next / Qwen4Exp | Supported | [implementation](./vllm_fl/models/qwen3_8_flash_next/) |
