@@ -285,7 +285,7 @@ For LLM throughput measurements use the repository's
 `benchmarks/benchmark_throughput_serve.py` under the task's approved test
 protocol; do not substitute a smoke client for that benchmark.
 
-## Throughput campaign snapshot (2026-11-18)
+## Throughput campaign snapshot (2026-11-19)
 
 The completed functional scenarios above are separate from the ongoing
 throughput campaign. The latter uses the official
@@ -311,12 +311,14 @@ The completed DeepSeek-V4-Flash TP8 input-length groups currently show:
 | 1024 | 3225.33 | 1766.80 | -45.22% |
 | 4096 | 1940.14 | 1599.52 | -17.56% |
 | 16384 | 709.72 | 524.30 | -26.13% |
+| 65536 | 200.07 | 152.68 | -23.69% |
 
 The adapter's retained-round throughput spread is 135.56% for input 1024
 and 15.58% for input 16384. These are observed two-round means, not stable
-effect estimates or statistical significance claims. The 65536 group remains
-in progress. The adapter currently shows no demonstrated acceleration in
-these completed groups. Both dependencies already contain PR4483/PR4943, so
+effect estimates or statistical significance claims. All 24 Flash rounds
+completed successfully, with per-request JSON checked for 256 requests and
+1024 output tokens each. The adapter currently shows no demonstrated
+acceleration in these completed groups. Both dependencies already contain PR4483/PR4943, so
 this is a native-vLLM versus adapter comparison, not an isolated measurement
 of applying either upstream optimization.
 
@@ -348,12 +350,36 @@ startup. Driver, host and cache effects have not been independently isolated.
 CUDA module-loading stacks and NVIDIA's
 [lazy-loading concurrency guidance](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/lazy-loading.html)
 motivate this configuration, but do not establish one root cause for every
-failure. Its paired throughput tests are still running, with fresh case IDs
-and all original failures preserved. No AllReduceRMSNorm end-to-end speedup
-is claimed yet.
+failure. The separate formal paired tests have now completed: both native
+arms recorded 12 successful rounds, while both provider arms recorded 12
+failed rounds. The short requests therefore did not qualify the official
+load. All original failures are preserved; no AllReduceRMSNorm end-to-end
+speedup is established.
 
-AttnRes Kimi TP32/EP32 and Marlin Pro TP16/DeepSeek-V4.1 DP16/EP16 have the
-functional qualification described above; their throughput A/B stages remain
-pending. PR3340 is already present in the baseline, so its existing coverage
-does not constitute a new migration speedup. All new providers remain
-experimental and disabled by default.
+### Two-host MXFP4 qualification and partial results
+
+The larger Pro TP16 service configuration with max model length 67584 failed
+KV-capacity initialization in both arms, before any throughput client ran.
+The adapter's I192 storage reduction does not qualify this context length.
+These startup failures remain separate from the 8192-token functional result.
+
+DeepSeek-V4.1 DP16/EP16 completed all 12 native rounds. Nine adapter rounds
+have completed; the 65536-input group remains in progress. Audited completed
+groups use the same original rounds 2/3 and per-request checks as Flash:
+
+| Input tokens | Native output tok/s | Adapter output tok/s | Change |
+| --- | ---: | ---: | ---: |
+| 1024 | 2202.73 | 155.32 | -92.95% |
+| 4096 | 1942.31 | 151.11 | -92.22% |
+| 16384 | 1285.73 | 150.14 | -88.32% |
+
+Retained-round adapter spreads are 12.07%, 28.01% and 56.28%, respectively.
+Live process stacks show real Marlin autotuning and Triton compilation during
+this run; shared-memory broadcast warnings alone do not establish deadlock.
+Foreign-route work described above is a concrete optimization candidate,
+not a measured causal partition of this regression. These are provider A/B
+results; they do not isolate PR4483 from PR4943.
+
+AttnRes Kimi TP32/EP32 throughput remains queued. PR3340 is already present in
+the baseline, so its existing coverage does not constitute a new migration
+speedup. All new providers remain experimental and disabled by default.
