@@ -78,13 +78,24 @@ bw1000:
       pr:
         inference:
           qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
-        serving:
-          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+        adaptation_gate:
+          qwen3_6:
+            - "27b_tp2_eager"
+            - "27b_tp2_graph"
+            - "35b_a3b_tp2_eager"
+            - "35b_a3b_tp2_graph"
       nightly:
         inference:
           qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
-        serving:
-          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+        adaptation_gate:
+          qwen3_6:
+            - "27b_tp2_eager"
+            - "27b_tp2_graph"
+            - "35b_a3b_tp2_eager"
+            - "35b_a3b_tp2_graph"
+    timeouts:
+      e2e:
+        adaptation_gate: 180
     functional:
       include: "*"
       exclude: []
