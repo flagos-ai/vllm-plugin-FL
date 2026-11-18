@@ -103,6 +103,28 @@ class InstallerTests(unittest.TestCase):
             with self.metadata({"url": path.as_uri(), "dir_info": {}}):
                 self.assertFalse(installer.release_is_installed(commit))
 
+    def test_iluvatar_reuses_image_without_installer(self):
+        setup = Path(__file__).resolve().parents[1] / "iluvatar/setup.sh"
+        text = setup.read_text()
+        self.assertNotIn("install_flaggems_vllm.py", text)
+        line = next(line for line in text.splitlines() if line.startswith("python -c "))
+        code = line.split("'", 1)[1].rsplit("'", 1)[0]
+        with (
+            patch("importlib.metadata.version", return_value="0.1.0"),
+            patch("subprocess.run") as run,
+        ):
+            exec(code, {})
+            run.assert_not_called()
+        with (
+            patch(
+                "importlib.metadata.version", side_effect=installer.PackageNotFoundError
+            ),
+            patch("subprocess.run") as run,
+        ):
+            with self.assertRaises(installer.PackageNotFoundError):
+                exec(code, {})
+            run.assert_not_called()
+
     def test_xdist_reuse_and_repair(self):
         setup = Path(__file__).resolve().parents[1] / "iluvatar/setup.sh"
         code = setup.read_text().split("python - <<'PY'\n", 1)[1].split("\nPY", 1)[0]

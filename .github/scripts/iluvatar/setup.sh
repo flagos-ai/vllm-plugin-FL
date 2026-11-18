@@ -22,7 +22,9 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
-CI_FLAGGEMS_VLLM_VENDOR=iluvatar python .github/scripts/install_flaggems_vllm.py
+# FlagGems-vllm is supplied by the CI image. Never replace it during setup;
+# missing packages indicate a broken image, not a request to install from Git.
+python -c 'from importlib.metadata import version; print("Reusing image FlagGems-vllm", version("flaggems-vllm"))'
 python -m pip install --no-build-isolation --no-deps -e .
 
 # The shared unit and functional runners pass -n to pytest. Reuse the image's

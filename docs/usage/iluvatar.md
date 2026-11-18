@@ -306,10 +306,10 @@ The `0.28.0` base-image entry above records image ancestry only. It is **not**
 the deployment tag or a supported runtime version for this checkout. Deploy
 `v0.32.0-iluvatar-ci`; do not use an old 0.28 wheel to rebuild this environment.
 
-CI compares the installed FlagGems-vllm source with the expected repository and
-commit in [the installer](../../.github/scripts/install_flaggems_vllm.py).
-A matching Git install or local Git checkout is reused; an absent, unknown, or
-mismatching revision is replaced with `--no-deps --no-build-isolation`. Package
+Iluvatar CI reuses the FlagGems-vllm package preinstalled in the image. Setup
+reports its package version and fails if it is missing; it never installs or
+replaces FlagGems-vllm, even when Git source metadata is unavailable. Updating
+that dependency belongs in image maintenance, not the CI setup job. Package
 version alone is not source-revision evidence. CI also reuses pytest-xdist >=3
 and installs it only if missing or too old. The checked-out plugin is always
 installed with `--no-deps --no-build-isolation -e .`.
