@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
 
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 from vllm_fl.utils import use_flaggems_op
@@ -172,6 +173,58 @@ def register_builtins(registry) -> None:
             priority=BackendPriority.DEFAULT,
         ),
     ]
+
+    for name in (
+        "hy4_flash_rotary_coefficients",
+        "hy4_flash_fwht_quant_fp8",
+        "hy4_flash_gated_pool",
+        "hy4_flash_rotate_indexer",
+        "hy4_flash_select_groups",
+        "hy4_flash_expand_groups",
+        "hy4_flash_write_pool",
+    ):
+        impls.append(
+            OpImpl(
+                op_name=name,
+                impl_id="default.flagos",
+                kind=BackendImplKind.DEFAULT,
+                fn=_bind_is_available(getattr(backend, name), is_avail),
+                vendor=None,
+                priority=BackendPriority.DEFAULT,
+            )
+        )
+
+    if current_platform.is_cuda():
+        from .impl import hy4_flash_kernels
+
+        for name in (
+            "ihc_pre",
+            "ihc_post",
+            "sparse_mla",
+            "fp32_router_gemm",
+            "paged_mqa",
+            "int8_scaled_mm",
+            "concat_mla_q",
+            "concat_and_cache_mla",
+            "moe_align",
+            "moe_sum",
+            "expert_quant_int8",
+            "mrope",
+        ):
+            op_name = f"hy4_flash_{name}"
+            if use_flaggems_op(op_name):
+                impls.append(
+                    OpImpl(
+                        op_name=op_name,
+                        impl_id="default.flagos",
+                        kind=BackendImplKind.DEFAULT,
+                        fn=_bind_is_available(
+                            getattr(hy4_flash_kernels, name), is_avail
+                        ),
+                        vendor=None,
+                        priority=BackendPriority.DEFAULT,
+                    )
+                )
 
     filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
     registry.register_many(filtered)

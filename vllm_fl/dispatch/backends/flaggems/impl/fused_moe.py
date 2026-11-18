@@ -5,6 +5,7 @@ FlagGems fused moe operator implementations.
 """
 
 import torch
+
 from vllm.logger import init_logger
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
@@ -147,6 +148,7 @@ def grouped_topk_flaggems(
     routed_scaling_factor,
     bias,
     scoring_func=0,
+    is_padding=None,
 ):
     from flaggems_vllm import grouped_topk
 
@@ -159,6 +161,7 @@ def grouped_topk_flaggems(
         routed_scaling_factor,
         bias,
         scoring_func,
+        is_padding=is_padding,
     )
 
 

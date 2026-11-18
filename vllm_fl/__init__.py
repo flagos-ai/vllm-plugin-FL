@@ -397,6 +397,9 @@ def register_model():
         # General plugins run before encoder budgets are built in the engine
         # frontend and spawned workers, for both upstream model runners.
         patch_minicpmo_audio_budget()
+        from vllm_fl.models.hy_v4_flash.registration import register_hy4_flash
+
+        register_hy4_flash()
 
     if vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
