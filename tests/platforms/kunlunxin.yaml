@@ -15,6 +15,9 @@
 platform: kunlunxin
 vendor: kunlunxin
 
+# Run TP groups separately while validating P800 FlagCX startup and replay.
+e2e_serial: true
+
 device_types:
   p800:
     memory_gb: 96

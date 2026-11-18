@@ -20,6 +20,27 @@ from vllm_fl.models.glm5.processor import (
 UNIT = 1568
 
 
+def _cpu_only_vllm_config():
+    """Build a VllmConfig whose compilation mode every platform accepts.
+
+    The vision cases below run on CPU and never capture graphs, but the default
+    cudagraph mode is rejected by platforms that allow only NONE or
+    FULL_DECODE_ONLY (Ascend), so pin an explicit no-op compilation config.
+    """
+    from vllm.config import (
+        CompilationConfig,
+        CompilationMode,
+        CUDAGraphMode,
+        VllmConfig,
+    )
+
+    return VllmConfig(
+        compilation_config=CompilationConfig(
+            mode=CompilationMode.NONE, cudagraph_mode=CUDAGraphMode.NONE
+        )
+    )
+
+
 def make_processor(deployment):
     tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=Tokenizer(
@@ -463,7 +484,7 @@ def test_no_sample_frames_uses_provided_indices() -> None:
 def test_vision_activation_clamps_large_inputs(monkeypatch, merger):
     import torch
 
-    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.config import set_current_vllm_config
 
     from vllm_fl.models.glm5 import multimodal as vision
 
@@ -477,7 +498,7 @@ def test_vision_activation_clamps_large_inputs(monkeypatch, merger):
     ):
         monkeypatch.setattr(vision, name, lambda *a, **kw: torch.nn.Identity())
     cls = vision.Glm5NextPatchMerger if merger else vision.Glm5NextVisionMLP
-    with set_current_vllm_config(VllmConfig()):
+    with set_current_vllm_config(_cpu_only_vllm_config()):
         layer = cls(4, 4, swiglu_limit=2.0)
     x = torch.tensor([[10.0, -10.0, 1.0, -1.0, 10.0, -10.0, 3.0, -3.0]])
     gate = x[:, :4].clamp(max=2.0)
@@ -494,7 +515,7 @@ def test_vision_uses_configured_rms_epsilon_without_mutating_checkpoint(
 
     import torch
 
-    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.config import set_current_vllm_config
 
     from vllm_fl.models.glm5 import multimodal as vision, runtime
 
@@ -542,7 +563,7 @@ def test_vision_uses_configured_rms_epsilon_without_mutating_checkpoint(
     ):
         monkeypatch.setattr(vision, name, lambda *a, **kw: torch.nn.Identity())
     monkeypatch.setattr(vision, "get_vit_attn_backend", lambda **kw: None)
-    with set_current_vllm_config(VllmConfig()):
+    with set_current_vllm_config(_cpu_only_vllm_config()):
         tower = cls(vllm_config=deployment).visual
     x = torch.tensor([[0.001, -0.002, 0.003, -0.004]])
     expected = x * torch.rsqrt(x.square().mean(-1, keepdim=True) + epsilon)
@@ -559,7 +580,7 @@ def test_vision_uses_configured_rms_epsilon_without_mutating_checkpoint(
 def test_vision_block_rounds_attention_residual_before_normalization(monkeypatch):
     import torch
 
-    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.config import set_current_vllm_config
     from vllm.model_executor.layers.layernorm import RMSNorm
 
     from vllm_fl.models.glm5.multimodal import Glm5NextVisionBlock
@@ -567,7 +588,7 @@ def test_vision_block_rounds_attention_residual_before_normalization(monkeypatch
     block = Glm5NextVisionBlock.__new__(Glm5NextVisionBlock)
     torch.nn.Module.__init__(block)
     block.norm1 = torch.nn.Identity()
-    with set_current_vllm_config(VllmConfig()):
+    with set_current_vllm_config(_cpu_only_vllm_config()):
         block.norm2 = RMSNorm(4, eps=1e-5).to(dtype=torch.bfloat16)
     # Execute the actual CPU norm while isolating the residual ordering.
     monkeypatch.setattr(block.norm2, "_forward_method", block.norm2.forward_native)

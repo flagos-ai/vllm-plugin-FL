@@ -69,6 +69,21 @@ device_overrides:
         - "--no-enable-prefix-caching"
       stream: true
       max_tokens: 1024
+    # The platform accepts only NONE or FULL_DECODE_ONLY, so graph variants
+    # must request the decode-only mode instead of vLLM's default. Graph
+    # capture also needs headroom beyond the KV cache sized at 0.8, so the
+    # graph variants reserve the device at a lower utilisation.
+    case_overrides:
+      qwen3_6/27b_tp2_graph:
+        llm:
+          gpu_memory_utilization: 0.7
+          compilation_config:
+            cudagraph_mode: FULL_DECODE_ONLY
+      qwen3_6/35b_a3b_tp2_graph:
+        llm:
+          gpu_memory_utilization: 0.7
+          compilation_config:
+            cudagraph_mode: FULL_DECODE_ONLY
 
 # Features not supported on this platform.
 # Test cases whose model name contains any of these strings will be skipped.
@@ -76,7 +91,21 @@ device_overrides:
 unsupported_features: []
 
 # Default environment variables for this platform (applied by run.py before tests start)
-env_defaults: {}
+env_defaults:
+  # This image's FlagTree Triton cannot run every FlagGems kernel: gelu_tanh
+  # misses pow(float32, int32) in its extern table, and the ArgMax kernel is
+  # rejected by libentry ("Invalid Runtime Function"). FlagGems'
+  # index_copy_ also validates its indices with a host synchronisation, which
+  # graph capture forbids ("Not allow to synchronize captured-stream"). Keep
+  # these on the native path, as this platform already does for silu and
+  # silu_and_mul.
+  VLLM_FL_FLAGOS_BLACKLIST_APPEND: gelu,argmax,index_copy_
+
+# Diagnostics in progress: run e2e without FlagGems to check whether the
+# vision tower's degraded output comes from a FlagGems kernel on this image.
+e2e_variants:
+  - env:
+      USE_FLAGGEMS: "0"
 
 # ---- Device-specific test configurations ------------------------------------
 910c:
