@@ -168,8 +168,23 @@ The generic TP4 image in this guide uses a different software stack.
 
 The public base used by the tested K3 runtime is
 `harbor.baai.ac.cn/flagos-base/flagos-base-metax-maca3.8.1.3@sha256:c5100d65b6af8ff4d1e6e90fdf14d041597702bbc2e4d9c372d77d3d2d93adc9`.
-It supplies the starting layers. The complete tested image with the K3 Python,
-operator and RDMA dependencies has no public pull URI in this PR.
+For sites supplied with the offline K3 runtime archive, restore the same image
+on each node. The `d66a186` archive contains the installed K3 plugin, vLLM,
+FlagOS libraries, compiler and RDMA userspace. Weights and writable caches are
+mounted at launch. An external registry pull URI is still pending.
+
+```sh
+sha256sum -c SHA256SUMS
+docker load -i kimi-k3-metax-runtime-d66a186.tar.gz
+export IMAGE=kimi-k3-metax-runtime:d66a186
+docker run --rm --network none "$IMAGE" --help
+```
+
+The archive SHA-256 is
+`6266127007b086fe52e903b59b5f26a9710548ee4712429afe3f073938f43130`.
+The built-in launcher is `/opt/k3-example/launch.sh`. With the offline
+image, the command below can omit the source mount, working directory and
+entrypoint override and pass the launcher arguments directly after `"$IMAGE"`.
 
 Use the same prepared image on each node. From the plugin checkout, set
 `NODE_RANK` to 0 through 3 and `CACHE_DIR` to a private local directory:
