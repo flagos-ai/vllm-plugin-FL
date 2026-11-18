@@ -179,13 +179,17 @@ read-only. Keep the container's default private PID namespace because the
 test runner performs process cleanup. Use a unique task container and
 tmux sessions for setup, service and tests.
 
-On S60, Qwen3.6-35B-A3B was validated in TP2 graph mode with
-`--gpu-memory-utilization 0.94`, `--max-model-len 32768`,
-`--max-num-seqs 256` and FP32 Mamba state. All five original Gate scenarios
-passed (26 requests and 260 checks), with their inputs and checks unchanged.
-Enflame CI shares one device-level memory budget across its four configured
-TP2 eager/graph cases, so the `0.94` override applies to all four while
-retaining their existing model settings and quality thresholds.
+Current S60 CI configures memory utilization `0.90`, max model length `8192`,
+max sequences `64` and max batched tokens `4096` for the four Qwen3.6 TP2
+cases. Graph compilation explicitly selects `none,+SiluAndMul` and capture
+sizes `[1,2,4,8,16,32]`; eager cases retain `enforce_eager`. These bounds reserve
+memory and limit prefill/graph workspace; they are model-scoped capacity
+settings, not relaxed quality thresholds. A historical 32768-context,
+256-sequence capacity run does not validate this configuration or a new SHA.
+Run all four adaptation Gate combinations and preserve all five scenarios
+(26 requests and 260 quality checks per combination), including failed,
+skipped and unexecuted items. See the [deployment guide](../../docs/usage/enflame.md)
+for commands and required provenance.
 
 Inside that task container, from the private plugin checkout:
 

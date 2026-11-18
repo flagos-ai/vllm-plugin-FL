@@ -17,9 +17,10 @@ class _LogprobTorch:
         if input.device.type != "gcu":
             return torch.topk(input, *args, **kwargs)
         result = torch.topk(input.detach().cpu(), *args, **kwargs)
-        return torch.return_types.topk(
-            (result.values.to(input.device), result.indices.to(input.device))
-        )
+        # vLLM's two callers consume only ``indices``.  Keep values on the
+        # host to avoid an unused batch-by-k transfer back to the accelerator
+        # on every sampling step.
+        return torch.return_types.topk((result.values, result.indices.to(input.device)))
 
 
 def apply_logprob_gcu_patch() -> bool:

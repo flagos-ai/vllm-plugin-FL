@@ -17,12 +17,13 @@ def install_gcu_v2_buffers():
         # existing device-copy branches without disabling pinned allocations.
         return current_platform.device_type != "gcu" and original()
 
-    is_uva_available._fl_gcu_uva_guard = True
-    buffer_utils.is_uva_available = is_uva_available
-
+    # Resolve dependencies and the ABI before modifying either global object.
+    # In particular, an empty build may not provide BlockTables yet.
     from vllm.v1.worker.gpu.block_table import BlockTables
 
     original_make_ptr_tensor = BlockTables._make_ptr_tensor
+    if not callable(original) or not callable(original_make_ptr_tensor):
+        raise TypeError("GCU V2 buffer hooks require callable upstream methods")
 
     def make_ptr_tensor(self, tensors):
         raw = original_make_ptr_tensor(self, tensors)
@@ -34,4 +35,17 @@ def install_gcu_v2_buffers():
 
         return _device_segment_addresses(raw)
 
-    BlockTables._make_ptr_tensor = make_ptr_tensor
+    # Install both hooks as one transaction.  If either assignment or a
+    # descriptor/ABI check fails, leave the process exactly as it was so a
+    # later call can retry after the missing dependency is fixed.
+    previous_uva = buffer_utils.is_uva_available
+    previous_ptr = BlockTables._make_ptr_tensor
+    try:
+        buffer_utils.is_uva_available = is_uva_available
+        BlockTables._make_ptr_tensor = make_ptr_tensor
+        is_uva_available._fl_gcu_uva_guard = True
+        make_ptr_tensor._fl_gcu_v2_buffers_guard = True
+    except Exception:
+        buffer_utils.is_uva_available = previous_uva
+        BlockTables._make_ptr_tensor = previous_ptr
+        raise
