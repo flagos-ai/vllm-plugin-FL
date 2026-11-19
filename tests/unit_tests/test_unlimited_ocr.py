@@ -171,3 +171,28 @@ def test_sam_dispatch_falls_back_before_launch(
     actual = scaled_dot_product_attention(q, k, v)
     torch.testing.assert_close(actual, torch_sdpa(q, k, v))
     assert ocr_dispatch._called_ops["scaled_dot_product_attention"] == "reference.torch"
+
+
+@pytest.mark.parametrize(
+    ("enabled", "whitelist", "accepted"),
+    [
+        (False, "", True),
+        (True, "silu_and_mul", True),
+        (True, "", False),
+        (True, "silu_and_mul,rms_norm", False),
+        (False, "silu_and_mul", False),
+    ],
+)
+def test_ocr_flaggems_whitelist(monkeypatch, enabled, whitelist, accepted):
+    from vllm_fl import utils
+    from vllm_fl.models.ocr_runtime import _ocr_flaggems_silu
+
+    monkeypatch.setattr(utils, "use_flaggems", lambda: enabled)
+    monkeypatch.setenv("VLLM_FL_FLAGOS_WHITELIST", whitelist)
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST", raising=False)
+    monkeypatch.delenv("VLLM_FL_USE_FLAGGEMS_VLLM", raising=False)
+    if accepted:
+        assert _ocr_flaggems_silu() is enabled
+    else:
+        with pytest.raises(ValueError, match="FlagGems|FLAGOS_WHITELIST"):
+            _ocr_flaggems_silu()

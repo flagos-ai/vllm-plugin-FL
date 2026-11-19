@@ -253,6 +253,12 @@ R-SWA retains the full KV cache and uses a 2,048 MiB mask budget per rank.
 Prefix caching and speculative decoding are disabled. For single-device
 eager serving, use `--devices 0 --tp 1 --eager --max-num-seqs 4`.
 
+To route the SiLU-and-multiply activation through the official FlagGems package,
+set `USE_FLAGGEMS=1 VLLM_FL_FLAGOS_WHITELIST=silu_and_mul` when launching the
+example. This selects the FL `default.flagos` activation and keeps R-SWA, RoPE
+and MoE on their Ascend routes. The benchmark results below use the default
+torch-npu configuration.
+
 Send one image and a text prompt to `/v1/chat/completions` for
 `Unlimited-OCR`. The example uses a single BOS, Gundam image preprocessing
 (`image_size=640`, `base_size=1024`, `crop_mode=true`) and the FL NGram

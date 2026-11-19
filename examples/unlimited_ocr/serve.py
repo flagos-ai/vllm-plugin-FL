@@ -67,7 +67,7 @@ def main():
         "ASCEND_RT_VISIBLE_DEVICES": args.devices,
         "VLLM_PLUGINS": "fl",
         "VLLM_FL_VENDOR": "ascend",
-        "USE_FLAGGEMS": "0",
+        "USE_FLAGGEMS": os.environ.get("USE_FLAGGEMS", "0"),
         "VLLM_FL_PREFER_ENABLED": "1",
         "VLLM_FL_STRICT": "1",
         "VLLM_USE_BREAKABLE_CUDAGRAPH": "0",

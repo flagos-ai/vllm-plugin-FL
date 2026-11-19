@@ -28,6 +28,21 @@ def get_ocr_rswa_window(model_config) -> int | None:
     return getattr(model_config.hf_config, "rswa_window", None)
 
 
+def _ocr_flaggems_silu() -> bool:
+    from vllm_fl.utils import get_flag_gems_whitelist_blacklist, use_flaggems
+
+    whitelist, _ = get_flag_gems_whitelist_blacklist()
+    if not use_flaggems():
+        if whitelist:
+            raise ValueError("An OCR FlagGems whitelist requires USE_FLAGGEMS=1 and FlagOS preference")
+        return False
+    if set(whitelist or ()) != {"silu_and_mul"}:
+        raise ValueError("Unlimited-OCR requires VLLM_FL_FLAGOS_WHITELIST=silu_and_mul when FlagGems is enabled")
+    if os.getenv("VLLM_FL_USE_FLAGGEMS_VLLM", "0").lower() in ("1", "true"):
+        raise ValueError("Unlimited-OCR requires the official flag_gems activation provider")
+    return True
+
+
 def validate_ocr_config(config, *, device_type, vendor):
     """Check the supported runtime before enabling any OCR behavior."""
     model = config.model_config
@@ -40,7 +55,6 @@ def validate_ocr_config(config, *, device_type, vendor):
         get_oot_blacklist,
         get_oot_whitelist,
         is_oot_enabled,
-        use_flaggems,
     )
 
     if device_type != "npu" or vendor != "ascend":
@@ -113,14 +127,14 @@ def validate_ocr_config(config, *, device_type, vendor):
             "Unlimited-OCR graph execution requires ASCEND_LAUNCH_BLOCKING=0"
         )
 
+    _ocr_flaggems_silu()
     whitelist = get_oot_whitelist()
     if (
-        use_flaggems()
-        or not is_oot_enabled()
+        not is_oot_enabled()
         or _REQUIRED_OOT.intersection(get_oot_blacklist() or ())
         or (whitelist is not None and not _REQUIRED_OOT.issubset(whitelist))
     ):
-        raise ValueError("Unlimited-OCR requires FL OOT dispatch and USE_FLAGGEMS=0")
+        raise ValueError("Unlimited-OCR requires FL OOT dispatch for all required operators")
     return True
 
 
@@ -172,6 +186,13 @@ def initialize_ocr_worker(config):
         vendor=current_platform.vendor_name,
     )
 
+    gems_silu = _ocr_flaggems_silu()
+    if gems_silu:
+        from flag_gems.modules.activation import gems_silu_and_mul
+
+        if not callable(gems_silu_and_mul):
+            raise RuntimeError("FlagGems does not provide gems_silu_and_mul")
+
     original = topk_topp_sampler.apply_top_k_top_p
     if original is not apply_top_k_top_p and (
         original.__module__ != topk_topp_sampler.__name__
@@ -190,7 +211,7 @@ def initialize_ocr_worker(config):
         owner=topk_topp_sampler,
         attr="apply_top_k_top_p",
         replacement=apply_top_k_top_p,
-        fingerprint="unlimited-ocr-ascend-v0.24",
+        fingerprint="unlimited-ocr-ascend-v0.24" + ("-gems-silu" if gems_silu else ""),
         pristine=original,
         expected_params=("logits", "k", "p"),
     )
@@ -202,17 +223,19 @@ def initialize_ocr_worker(config):
     vendor_ops = (
         "attention_backend",
         "rms_norm",
-        "silu_and_mul",
         "topk_softmax",
         "fused_experts",
     )
+    silu_id = "default.flagos" if gems_silu else "vendor.ascend"
     ordered = (
+        ("silu_and_mul", (f"impl:{silu_id}",)),
         *((name, vendor) for name in vendor_ops),
         ("rotary_embedding", ("impl:vendor.ascend.torch_npu",)),
         ("scaled_dot_product_attention", vendor + reference),
         ("apply_top_k_top_p", reference),
     )
     required = (
+        ("silu_and_mul", ("flagos",) if gems_silu else ("vendor:ascend",)),
         *((name, ("vendor:ascend",)) for name in (*vendor_ops, "rotary_embedding")),
         ("scaled_dot_product_attention", ("vendor:ascend", "reference")),
         ("apply_top_k_top_p", ("reference",)),
@@ -238,6 +261,7 @@ def initialize_ocr_worker(config):
             plan, manager.resolve_candidates, policy.get_per_op_order
         )
         for op, expected in (
+            ("silu_and_mul", silu_id),
             ("attention_backend", "vendor.ascend"),
             ("rotary_embedding", "vendor.ascend.torch_npu"),
         ):
