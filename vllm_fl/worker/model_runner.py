@@ -292,6 +292,8 @@ from vllm_fl.dispatch.io_dumper import (
     init_io_dump_from_env,
     register_io_module_hooks,
 )
+from vllm_fl.worker.model_state import ModelRunnerState
+from vllm_fl.worker.sampling_rng import preserve_discarded_generator_offsets
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
@@ -586,6 +588,7 @@ class ModelRunnerFL(
         vllm_config: VllmConfig,
         device: torch.device,
     ):
+        self.model_state = ModelRunnerState(self)
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -1109,11 +1112,6 @@ class ModelRunnerFL(
         self.kv_connector_output: KVConnectorOutput | None = None
         self.mamba_state_idx: dict[str, int] = {}
         self._mamba_bufs: mamba_utils.MambaBuffers | None = None
-        self.mamba_prev_last_scheduled_idx: CpuGpuBuffer | None = None
-        if self.cache_config.mamba_cache_mode == "all" and self.num_spec_tokens > 0:
-            self.mamba_prev_last_scheduled_idx = self._make_buffer(
-                self.max_num_reqs, dtype=torch.int32
-            )
         self.layerwise_nvtx_hooks_registered = False
 
     def update_max_model_len(self, max_model_len: int) -> None:
@@ -1399,6 +1397,7 @@ class ModelRunnerFL(
         The SamplingMetadata is updated and copied to the GPU if there is a
         new/resumed/paused/finished request in the batch.
         """
+        self.model_state.remove_requests(scheduler_output.finished_req_ids)
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
             req_state = self.requests.pop(req_id, None)
@@ -1464,6 +1463,7 @@ class ModelRunnerFL(
 
         # Add new requests to the cached states.
         for new_req_data in scheduler_output.scheduled_new_reqs:
+            self.model_state.remove_requests((new_req_data.req_id,))
             req_id = new_req_data.req_id
             if req_id in self.requests:
                 # For streaming case only.
@@ -1648,6 +1648,7 @@ class ModelRunnerFL(
                 assert new_block_ids is not None
                 # The request is resumed from preemption.
                 # Replace the existing block IDs with the new ones.
+                self.model_state.remove_requests((req_id,))
                 req_state.block_ids = new_block_ids
 
             if req_index is None:
@@ -1811,16 +1812,6 @@ class ModelRunnerFL(
             assert self.num_accepted_tokens_event is not None
             self.num_accepted_tokens_event.record()
 
-            if self.cache_config.mamba_cache_mode == "all":
-                mamba_utils.postprocess_mamba_all(
-                    scheduler_output,
-                    self.kv_cache_config,
-                    self.input_batch,
-                    self.requests,
-                    self.mamba_state_idx,
-                    self.num_spec_tokens,
-                    num_reqs,
-                )
 
     def _update_streaming_request(
         self, req_id: str, new_req_data: NewRequestData
@@ -2345,14 +2336,6 @@ class ModelRunnerFL(
             self.num_accepted_tokens.np.fill(1)
             self.num_accepted_tokens.gpu.fill_(1)
 
-        if self.mamba_prev_last_scheduled_idx is not None:
-            mamba_utils.preprocess_mamba_all_specdec(
-                scheduler_output,
-                self.input_batch,
-                self.mamba_state_idx,
-                num_reqs,
-                self.mamba_prev_last_scheduled_idx,
-            )
 
         # Update num_computed_tokens on GPU. In async spec decode,
         # CPU values are optimistic (all drafts accepted). The kernel
@@ -2752,13 +2735,6 @@ class ModelRunnerFL(
                         :num_reqs_padded
                     ],
                 )
-                if (
-                    isinstance(builder, Mamba2AttentionMetadataBuilder)
-                    and self.mamba_prev_last_scheduled_idx is not None
-                ):
-                    extra_attn_metadata_args["prev_last_scheduled_idx"] = (
-                        self.mamba_prev_last_scheduled_idx.gpu[:num_reqs_padded]
-                    )
 
             if for_cudagraph_capture:
                 attn_metadata_i = attn_group.build_metadata_for_cudagraph_capture(
@@ -3865,6 +3841,13 @@ class ModelRunnerFL(
             inputs_embeds = None
             model_kwargs = self._init_model_kwargs()
 
+        # Full-capacity PLE buffers keep their shape and address across graphs.
+        model_kwargs.update(
+            self.model_state.prepare_inputs(
+                self.input_batch.num_reqs, self.max_num_reqs, input_ids
+            )
+        )
+
         if self.uses_mrope:
             positions = self.mrope_positions.gpu[:, :num_input_tokens]
         else:
@@ -3905,37 +3888,35 @@ class ModelRunnerFL(
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
-        # CPU generators (used by TXDA) do not expose Philox offsets. Save
-        # their full state before sampling so a discarded chunked-prefill
-        # sample does not advance the request's seeded random stream.
-        self._cpu_generator_states = {
-            index: generator.get_state()
-            for index, generator in sampling_metadata.generators.items()
-            if generator.device.type == "cpu"
-        }
-        # Update output token ids with tokens sampled in last step
-        # if async scheduling and required by current sampling params.
-        self.input_batch.update_async_output_token_ids()
-        if spec_decode_metadata is None:
-            return self.sampler(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
-
-        # Update spec_token_ids with real draft tokens from pre step only when
-        # output_token_ids is needed (penalties or bad_words are in use).
-        if self.use_async_scheduling and self._draft_token_req_ids is not None:
-            draft_token_ids_cpu, _ = self._get_draft_token_ids_cpu()
-            self.input_batch.update_async_spec_token_ids(draft_token_ids_cpu)
-
-        draft_probs = self._get_spec_decode_draft_probs(spec_decode_metadata)
-        sampler_output = self.rejection_sampler(
-            spec_decode_metadata,
-            draft_probs,
-            logits,
-            sampling_metadata,
+        discarded_indices = np.flatnonzero(
+            self.discard_request_mask.np[: self.input_batch.num_reqs]
         )
-        return sampler_output
+        with preserve_discarded_generator_offsets(
+            sampling_metadata.generators, discarded_indices
+        ):
+            # Update output token ids with tokens sampled in last step
+            # if async scheduling and required by current sampling params.
+            self.input_batch.update_async_output_token_ids()
+            if spec_decode_metadata is None:
+                return self.sampler(
+                    logits=logits,
+                    sampling_metadata=sampling_metadata,
+                )
+
+            # Update spec_token_ids with real draft tokens from pre step only when
+            # output_token_ids is needed (penalties or bad_words are in use).
+            if self.use_async_scheduling and self._draft_token_req_ids is not None:
+                draft_token_ids_cpu, _ = self._get_draft_token_ids_cpu()
+                self.input_batch.update_async_spec_token_ids(draft_token_ids_cpu)
+
+            draft_probs = self._get_spec_decode_draft_probs(spec_decode_metadata)
+            sampler_output = self.rejection_sampler(
+                spec_decode_metadata,
+                draft_probs,
+                logits,
+                sampling_metadata,
+            )
+            return sampler_output
 
     def _bookkeeping_sync(
         self,
@@ -3965,17 +3946,9 @@ class ModelRunnerFL(
                 num_nans_in_logits = self._get_nans_in_logits(logits)
 
         num_reqs = self.input_batch.num_reqs
-        discard_sampled_tokens_req_indices = np.nonzero(
+        discard_sampled_tokens_req_indices = np.flatnonzero(
             self.discard_request_mask.np[:num_reqs]
-        )[0]
-        for i in discard_sampled_tokens_req_indices:
-            gen = self.input_batch.generators.get(int(i))
-            if gen is not None:
-                if gen.device.type == "cpu":
-                    gen.set_state(self._cpu_generator_states[int(i)])
-                else:
-                    gen.set_offset(gen.get_offset() - 4)
-
+        )
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
         req_ids_output_copy = self.input_batch.req_ids.copy()
@@ -5581,6 +5554,9 @@ class ModelRunnerFL(
                     self.model = model_loader.load_model(
                         vllm_config=self.vllm_config, model_config=self.model_config
                     )
+                get_state_cls = getattr(self.model, "get_legacy_model_state_cls", None)
+                if get_state_cls is not None:
+                    self.model_state = get_state_cls()(self)
                 if self.lora_config:
                     self.model = self.load_lora_model(
                         self.model, self.vllm_config, self.device
@@ -6454,6 +6430,12 @@ class ModelRunnerFL(
             else:
                 input_ids = self.input_ids.gpu[:num_tokens_padded]
                 inputs_embeds = None
+
+            model_kwargs.update(
+                self.model_state.prepare_dummy_inputs(
+                    num_reqs, self.max_num_reqs, num_scheduled_tokens
+                )
+            )
 
             if self.uses_mrope:
                 positions = self.mrope_positions.gpu[:, :num_tokens_padded]
@@ -7959,7 +7941,7 @@ class ModelRunnerFL(
             2 if self.model_config.hf_config.model_type == "longcat_flash" else 1
         )
         attn_groups = [g for groups in self.attn_groups for g in groups]
-        if self.speculative_config:
+        if self.speculative_config and get_pp_group().is_last_rank:
             attn_groups += getattr(self.drafter, "draft_attn_groups", [])
         bind_kv_cache(
             kv_caches,

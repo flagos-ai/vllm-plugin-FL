@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install the pinned FlagGems-vllm source in the platform's CI interpreter."""
+"""Install pinned FlagGems-vllm sources in the platform CI interpreter."""
 
 import json
 import os
@@ -11,8 +11,12 @@ RELEASE = "v0.2.0"
 COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
 # T-Head Qwen3.8 requires the HC, PLE and QSA operator exports.
 THEAD_COMMIT = "80a8e9716abed1bac3fc0ba5fd4e9f650ae3f989"
-THEAD_ARCHIVE = f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{THEAD_COMMIT}"
-THEAD_ARCHIVE_SHA256 = "1b51d13ac797e1396193e9841aa8af1fbf1478bad7d51466266803cd3343ba06"
+THEAD_ARCHIVE = (
+    f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{THEAD_COMMIT}"
+)
+THEAD_ARCHIVE_SHA256 = (
+    "1b51d13ac797e1396193e9841aa8af1fbf1478bad7d51466266803cd3343ba06"
+)
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
 RUNTIME_PACKAGES = ("torch", "flagtree", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
@@ -25,21 +29,18 @@ def package_version(name):
         return None
 
 
-def release_is_installed(thead):
+def release_is_installed(commit=COMMIT, source_archive=None, archive_sha256=None):
     try:
         text = distribution("flaggems-vllm").read_text("direct_url.json")
         source = json.loads(text or "{}")
     except (PackageNotFoundError, ValueError):
         return False
-    if thead:
-        return (
-            source.get("url") == THEAD_ARCHIVE
-            and source.get("archive_info", {}).get("hashes", {}).get("sha256")
-            == THEAD_ARCHIVE_SHA256
-        )
+    if source_archive is not None:
+        digest = source.get("archive_info", {}).get("hashes", {}).get("sha256")
+        return source.get("url") == source_archive and digest == archive_sha256
     return (
         source.get("url", "").removesuffix(".git") == REPOSITORY.removesuffix(".git")
-        and source.get("vcs_info", {}).get("commit_id") == COMMIT
+        and source.get("vcs_info", {}).get("commit_id") == commit
     )
 
 
@@ -48,37 +49,42 @@ def pip_install(*args):
     subprocess.run([sys.executable, "-m", "pip", "install", *args], env=env, check=True)
 
 
-def main():
-    thead = os.environ.get("GEMS_VENDOR", "").lower() == "thead"
-    release, commit = RELEASE, COMMIT
-    requirement_url = f"git+{REPOSITORY}@{commit}"
-    if thead:
-        release, commit = "0.3.0.dev1", THEAD_COMMIT
-        # The source archive also works on PPU runners without Git HTTPS access.
-        requirement_url = f"{THEAD_ARCHIVE}#sha256={THEAD_ARCHIVE_SHA256}"
+def main(*, commit=COMMIT, source_archive=None, archive_sha256=None):
+    source = (
+        f"{source_archive}#sha256={archive_sha256}"
+        if source_archive is not None
+        else f"git+{REPOSITORY}@{commit}"
+    )
     before = {name: package_version(name) for name in RUNTIME_PACKAGES}
     missing = [name for name in PACKAGE_DEPENDENCIES if package_version(name) is None]
     if missing:
         pip_install(*missing)
-    if not release_is_installed(thead):
-        # Replace a different source even if its metadata has the same version.
+    if not release_is_installed(commit, source_archive, archive_sha256):
+        # Metadata still says 0.1.0; force replacement of another 0.1.0 source.
         # Reuse the build tools already used by this platform's plugin setup.
         pip_install(
             "--no-deps",
             "--no-build-isolation",
             "--force-reinstall",
-            f"flaggems-vllm @ {requirement_url}",
+            f"flaggems-vllm @ {source}",
         )
-    if not release_is_installed(thead):
-        raise RuntimeError(f"FlagGems-vllm must come from {release} commit {commit}")
+    if not release_is_installed(commit, source_archive, archive_sha256):
+        raise RuntimeError(f"FlagGems-vllm must come from source commit {commit}")
     after = {name: package_version(name) for name in RUNTIME_PACKAGES}
     if after != before:
         raise RuntimeError(f"CI runtime dependencies changed: {before} -> {after}")
     print(
-        f"FlagGems-vllm: {release}, commit {commit}, "
+        f"FlagGems-vllm: source commit {commit}, "
         f"package metadata {package_version('flaggems-vllm')}"
     )
 
 
 if __name__ == "__main__":
-    main()
+    if os.environ.get("GEMS_VENDOR", "").lower() == "thead":
+        main(
+            commit=THEAD_COMMIT,
+            source_archive=THEAD_ARCHIVE,
+            archive_sha256=THEAD_ARCHIVE_SHA256,
+        )
+    else:
+        main()

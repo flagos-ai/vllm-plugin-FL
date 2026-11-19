@@ -1,9 +1,11 @@
 #!/bin/bash
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Setup script for Iluvatar CoreX CI environment.
+# Install the checked-out plugin into the published Iluvatar CI image.
 set -euo pipefail
 
 export PATH="/opt/conda/bin:${PATH:-}"
+# Do not let a baked-in checkout shadow the source under test.
+unset PYTHONPATH
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
@@ -12,41 +14,31 @@ export PATH="/opt/conda/bin:${PATH:-}"
 git config --global --add safe.directory "$(pwd)"
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
-  for name in \
-    PATH \
-    VLLM_PLUGINS \
-    USE_FLAGGEMS \
-    GEMS_VENDOR; do
+  echo 'PYTHONPATH=' >> "${GITHUB_ENV}"
+  for name in PATH VLLM_PLUGINS USE_FLAGGEMS GEMS_VENDOR; do
     if [[ -n "${!name:-}" ]]; then
       echo "${name}=${!name}" >> "${GITHUB_ENV}"
     fi
   done
 fi
 
-# vLLM / FlagGems / torch come from the CI image.
-# Install only the checked-out plugin source for this workflow run.
+# FlagGems-vllm is supplied by the CI image. Never replace it during setup;
+# missing packages indicate a broken image, not a request to install from Git.
+python -c 'from importlib.metadata import version; print("Reusing image FlagGems-vllm", version("flaggems-vllm"))'
 python -m pip install --no-build-isolation --no-deps -e .
-python -m pip install "pytest-xdist>=3.0.0"
 
-python .github/scripts/install_flaggems_vllm.py
-
+# The shared unit and functional runners pass -n to pytest. Reuse the image's
+# dependency when it satisfies CI; install only when it is absent or too old.
 python - <<'PY'
-import flag_gems
-import torch
-import vllm
-import vllm_fl
-from vllm.platforms import current_platform
-
-assert torch.cuda.is_available(), "Iluvatar accelerator is unavailable"
-assert torch.cuda.device_count() >= 4, torch.cuda.device_count()
-assert current_platform.device_type == "cuda", current_platform.device_type
-assert current_platform.vendor_name == "iluvatar", current_platform.vendor_name
-assert vllm.__version__.startswith("0.28"), vllm.__version__
-
-print(f"vLLM import ok: {vllm.__version__}")
-print(f"vLLM-FL import ok: {vllm_fl.__file__}")
-print(f"FlagGems import ok: {getattr(flag_gems, '__version__', 'unknown')}")
-print(f"Torch import ok: {torch.__version__}")
-print(f"Iluvatar devices: {torch.cuda.device_count()}")
-print(f"Platform: {current_platform}")
+from importlib.metadata import PackageNotFoundError, version
+from packaging.version import Version
+try:
+    installed = Version(version("pytest-xdist"))
+except (PackageNotFoundError, ValueError):
+    installed = None
+if installed is None or installed < Version("3.0.0"):
+    import subprocess, sys
+    subprocess.run([sys.executable, "-m", "pip", "install", "--break-system-packages", "pytest-xdist>=3.0.0"], check=True)
+else:
+    print(f"Reusing preinstalled pytest-xdist {installed}")
 PY

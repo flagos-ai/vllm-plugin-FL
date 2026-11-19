@@ -3,7 +3,6 @@
 
 import ast
 import importlib.util
-import os
 import sys
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -448,8 +447,7 @@ def test_graph_cleanup_clears_wrapper_before_task_registry(monkeypatch):
 
 
 def _configure(monkeypatch, *, breakable=False):
-    # Extract the standalone helper, avoiding PlatformFL's device discovery and
-    # unrelated operator registration at import time on another vendor's CI.
+    # Load the helper without triggering the vendor package's initialization.
     graph_modes = NS(NONE="none", FULL_DECODE_ONLY="decode", PIECEWISE="piecewise")
     compile_modes = NS(NONE="none", VLLM_COMPILE="vllm")
     _module(
@@ -459,24 +457,20 @@ def _configure(monkeypatch, *, breakable=False):
         CompilationMode=compile_modes,
     )
     _module(monkeypatch, "vllm.envs", VLLM_USE_BREAKABLE_CUDAGRAPH=breakable)
-    source = ast.parse((ROOT / "platform.py").read_text())
-    helper = next(
-        n
-        for n in source.body
-        if isinstance(n, ast.FunctionDef) and n.name == "_configure_ascend_compilation"
+    spec = importlib.util.spec_from_file_location(
+        "_fl_ascend_compilation_contract",
+        ROOT / "dispatch/backends/vendor/ascend/patches/compilation.py",
     )
-    namespace = {"os": os}
-    exec(
-        compile(ast.Module(body=[helper], type_ignores=[]), "platform-helper", "exec"),
-        namespace,
-    )
-    return namespace[helper.name]
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._configure_ascend_compilation
 
 
-def _config(enabled=None, *, eager=False):
+def _config(enabled=None, *, eager=False, use_v2=False):
     options = {} if enabled is None else {"enable_npugraph_ex": enabled}
     return NS(
         additional_config={"ascend_compilation_config": options},
+        use_v2_model_runner=use_v2,
         model_config=NS(enforce_eager=eager),
         parallel_config=NS(use_ubatching=False),
         compilation_config=NS(mode="vllm", cudagraph_mode="decode", pass_config=NS()),
@@ -576,12 +570,15 @@ def test_graph_disabled_allows_breakable_switch(monkeypatch, eager, mode):
 
 
 @pytest.mark.parametrize("enabled", [None, False])
-def test_full_decode_uses_eager_fx(monkeypatch, enabled):
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_full_decode_uses_runner_native_capture(monkeypatch, enabled, use_v2):
     monkeypatch.delenv("ASCEND_LAUNCH_BLOCKING", raising=False)
-    config = _config(enabled)
+    config = _config(enabled, use_v2=use_v2)
     _configure(monkeypatch)(config)
     compilation = config.compilation_config
-    assert compilation.mode == "vllm" and compilation.backend == "eager"
+    assert compilation.mode == ("none" if use_v2 else "vllm")
+    assert compilation.cudagraph_mode == "decode"
+    assert compilation.backend == "eager"
     assert not compilation.use_inductor and compilation.splitting_ops == []
     assert compilation.cudagraph_num_of_warmups == 1
     assert not any(vars(compilation.pass_config).values())

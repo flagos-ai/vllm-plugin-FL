@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 
-from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -36,7 +36,17 @@ def register_builtins(registry) -> None:
     backend = IluvatarBackend()
     is_avail = backend.is_available
 
+    from .impl.fused_moe import moe_align_block_size
+
     impls = [
+        OpImpl(
+            op_name="moe_align_block_size",
+            impl_id="vendor.iluvatar",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(moe_align_block_size, is_avail),
+            vendor="iluvatar",
+            priority=BackendPriority.VENDOR,
+        ),
         # Activation
         OpImpl(
             op_name="silu_and_mul",

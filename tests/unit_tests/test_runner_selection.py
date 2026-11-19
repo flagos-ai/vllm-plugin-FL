@@ -2,7 +2,33 @@
 
 """Runner-selection contracts for vLLM 0.32.0."""
 
+from types import SimpleNamespace
+
 import pytest
+
+
+def test_amd_sparse_mla_rejected_before_dispatch(monkeypatch):
+    from vllm_fl import dispatch
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", "amd")
+
+    def fake_dispatch(op_name, *, use_mla, use_sparse):
+        assert (op_name, use_mla, use_sparse) == ("attention_backend", True, False)
+        return "dense_backend"
+
+    monkeypatch.setattr(dispatch, "call_op", fake_dispatch)
+    with pytest.raises(NotImplementedError, match="Sparse MLA"):
+        PlatformFL.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=True, use_sparse=True)
+        )
+
+    assert (
+        PlatformFL.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=True, use_sparse=False)
+        )
+        == "dense_backend"
+    )
 
 
 def _make_ascend_vllm_config(
@@ -80,13 +106,14 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
-    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+    if vendor == "ascend":
+        expected = requested
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == expected
 
 
 @pytest.mark.parametrize(
     "device_type,vendor,error_pattern",
     [
-        ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
@@ -218,7 +245,12 @@ def test_enflame_rejects_only_hybrid_speculative_align_cache(
         assert config.parallel_config.worker_cls is None
     else:
         PlatformFL.check_and_update_config(config)
-        assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+        expected_worker = (
+            "vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker.IluvatarWorkerFL"
+            if vendor == "iluvatar"
+            else "vllm_fl.worker.worker.WorkerFL"
+        )
+        assert config.parallel_config.worker_cls == expected_worker
 
     # Validation must not silently disable speculative decoding or change the
     # requested Mamba cache policy to avoid the unsupported fused-copy path.
@@ -226,7 +258,8 @@ def test_enflame_rejects_only_hybrid_speculative_align_cache(
     assert config.cache_config.mamba_cache_mode == mamba_cache_mode
 
 
-def test_ascend_preserves_full_decode_graphs(monkeypatch):
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_ascend_preserves_full_decode_graphs(monkeypatch, use_v2):
     from vllm.config import CUDAGraphMode
 
     from vllm_fl.platform import PlatformFL
@@ -234,10 +267,16 @@ def test_ascend_preserves_full_decode_graphs(monkeypatch):
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
     monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY)
+    config.use_v2_model_runner = use_v2
 
     PlatformFL.check_and_update_config(config)
 
     assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+    from vllm.config.compilation import CompilationMode
+
+    assert config.compilation_config.mode is (
+        CompilationMode.NONE if use_v2 else CompilationMode.VLLM_COMPILE
+    )
     assert config.compilation_config.backend == "eager"
     assert config.compilation_config.compile_sizes == []
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.FULL_DECODE_ONLY
@@ -281,8 +320,9 @@ def test_ascend_eager_mode_accepts_inductor_backend(monkeypatch):
     assert config.compilation_config.pass_config.fuse_attn_quant is True
 
 
-@pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
-def test_iluvatar_keeps_vendor_graph_config(monkeypatch, requested, expected):
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_iluvatar_keeps_vendor_graph_config(monkeypatch, requested, use_v2):
     import os
 
     from vllm_fl.platform import PlatformFL
@@ -294,17 +334,19 @@ def test_iluvatar_keeps_vendor_graph_config(monkeypatch, requested, expected):
     else:
         monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
     config = _make_ascend_vllm_config(backend="inductor")
+    config.use_v2_model_runner = use_v2
 
     PlatformFL.check_and_update_config(config)
 
+    assert config.use_v2_model_runner is use_v2
     assert config.compilation_config.cudagraph_mm_encoder is False
     assert config.compilation_config.use_inductor_graph_partition is True
     assert config.compilation_config.pass_config.fuse_rope_kvcache_cat_mla is False
-    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
-    # Ascend-only fusion restrictions must not leak into the CoreX backend.
-    assert config.compilation_config.pass_config.fuse_norm_quant is True
-    assert config.compilation_config.pass_config.fuse_act_quant is True
-    assert config.compilation_config.pass_config.fuse_attn_quant is True
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested
+    # 0.32 does not import these CUDA-only passes for the OOT CoreX platform.
+    assert config.compilation_config.pass_config.fuse_norm_quant is False
+    assert config.compilation_config.pass_config.fuse_act_quant is False
+    assert config.compilation_config.pass_config.fuse_attn_quant is False
 
 
 def test_ascend_revalidates_parallelism_after_glm_dense_fallback(monkeypatch):
@@ -384,24 +426,31 @@ def test_ascend_forces_breakable_graph_off(monkeypatch, existing):
     assert os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] == "0"
 
 
-def test_register_preserves_upstream_runner_selection(monkeypatch):
+@pytest.mark.parametrize("vendor", ["metax", "iluvatar"])
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+def test_register_preserves_upstream_runner_selection(monkeypatch, vendor, requested):
     from types import SimpleNamespace
 
     import vllm_fl
     import vllm_fl.utils
 
-    monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
     monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
     monkeypatch.setattr(
         vllm_fl.utils,
         "DeviceInfo",
-        lambda: SimpleNamespace(vendor_name="metax"),
+        lambda: SimpleNamespace(vendor_name=vendor),
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
-    assert "VLLM_USE_V2_MODEL_RUNNER" not in __import__("os").environ
+    assert __import__("os").environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested
 
 
 def test_register_preserves_explicit_v1_request(monkeypatch):
@@ -444,6 +493,32 @@ def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
     )
 
     assert vllm_fl.register() == "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+
+
+@pytest.mark.parametrize("vendor", ["iluvatar", "nvidia"])
+@pytest.mark.parametrize("cuda_kernels_available", [False, True])
+def test_ir_defaults_follow_kernel_availability(
+    monkeypatch, vendor, cuda_kernels_available
+):
+    from vllm.config.compilation import CompilationMode
+
+    import vllm_fl.platform as platform_module
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(
+        platform_module, "_vllm_c_available", lambda: cuda_kernels_available
+    )
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
+    config = SimpleNamespace(
+        compilation_config=SimpleNamespace(
+            backend="inductor", mode=CompilationMode.NONE
+        )
+    )
+    priorities = PlatformFL.get_default_ir_op_priority(config)
+    expected = ["vllm_c", "native"] if cuda_kernels_available else ["native"]
+    assert priorities.rms_norm == expected
+    assert priorities.fused_add_rms_norm == expected
 
 
 def test_ascend_allows_layer_only_vllm_config(monkeypatch):

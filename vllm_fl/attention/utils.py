@@ -119,6 +119,10 @@ def patch_mm_encoder_attention():
     from vllm.platforms import current_platform
     from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
+    if getattr(current_platform, "vendor_name", None) == "thead":
+        mm_mod.MMEncoderAttention.forward_oot = mm_mod.MMEncoderAttention.forward_native
+        return
+
     if getattr(current_platform, "vendor_name", None) == "hygon":
         _patch_hygon_sdpa_contiguous()
 

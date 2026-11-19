@@ -11,7 +11,6 @@ own HC, PLE and attention classes.
 import torch
 from torch import nn
 from transformers import Qwen4ExpConfig, Qwen4ExpTextConfig
-
 from vllm.config import VllmConfig
 from vllm.distributed import get_pp_group
 from vllm.model_executor.layers.fused_moe.utils import (
@@ -31,6 +30,8 @@ from vllm.model_executor.models.qwen3_next import (
 )
 from vllm.model_executor.models.qwen3_vl import (
     Qwen3_VisionTransformer,
+    Qwen3VLDummyInputsBuilder,
+    Qwen3VLMultiModalProcessor,
 )
 from vllm.model_executor.models.utils import (
     StageMissingLayer,
@@ -53,10 +54,12 @@ from vllm.models.qwen4_exp.nvidia.ops.cute_dsl.hc_down_silu import (
     request_hc_down_silu_warmup,
 )
 from vllm.models.qwen4_exp.nvidia.qsa import Qwen4ExpQSAAttention
+from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.platforms import current_platform
 from vllm.tokenizers.registry import cached_tokenizer_from_config
 
 from .hyperconnection import GatedResidual, HyperConnectionConfig
+from .multimodal import validate_video_fps, validate_video_pruning
 from .ple_layer import Qwen4ExpPLELayer
 from .quantization import configure_bf16_weights
 
@@ -240,6 +243,12 @@ class Qwen4ExpModel(upstream.Qwen4ExpModel):
 
 
 class Qwen4ExpForCausalLM(upstream.Qwen4ExpForCausalLM):
+    @staticmethod
+    def get_legacy_model_state_cls():
+        from .legacy_model_state import Qwen4ExpLegacyModelState
+
+        return Qwen4ExpLegacyModelState
+
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         nn.Module.__init__(self)
         config: Qwen4ExpTextConfig = vllm_config.model_config.hf_text_config
@@ -281,7 +290,37 @@ class Qwen4ExpForCausalLM(upstream.Qwen4ExpForCausalLM):
             )
 
 
+class Qwen4ExpProcessingInfo(upstream.Qwen4ExpProcessingInfo):
+    def get_hf_config(self) -> Qwen4ExpConfig:
+        validate_video_pruning(self.ctx.get_mm_config())
+        return super().get_hf_config()
+
+    def _get_video_second_idx(
+        self, metadata, do_sample_frames=None, sampled_fps=None, sampled_num_frames=None
+    ):
+        validate_video_fps(metadata.get("fps"), name="source video fps")
+        if sampled_fps is not None:
+            validate_video_fps(sampled_fps, name="sampled video fps")
+        return super()._get_video_second_idx(
+            metadata=metadata,
+            do_sample_frames=do_sample_frames,
+            sampled_fps=sampled_fps,
+            sampled_num_frames=sampled_num_frames,
+        )
+
+
+@MULTIMODAL_REGISTRY.register_processor(
+    Qwen3VLMultiModalProcessor,
+    info=Qwen4ExpProcessingInfo,
+    dummy_inputs=Qwen3VLDummyInputsBuilder,
+)
 class Qwen4ExpForConditionalGeneration(upstream.Qwen4ExpForConditionalGeneration):
+    @staticmethod
+    def get_legacy_model_state_cls():
+        from .legacy_model_state import Qwen4ExpLegacyModelState
+
+        return Qwen4ExpLegacyModelState
+
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "model") -> None:
         nn.Module.__init__(self)
         config: Qwen4ExpConfig = vllm_config.model_config.hf_config
@@ -299,6 +338,7 @@ class Qwen4ExpForConditionalGeneration(upstream.Qwen4ExpForConditionalGeneration
                 "Qwen4ExpForConditionalGeneration requires multimodal_config"
             )
 
+        validate_video_pruning(multimodal_config)
         self.config = config
         self.model_config = vllm_config.model_config
         self.multimodal_config = multimodal_config

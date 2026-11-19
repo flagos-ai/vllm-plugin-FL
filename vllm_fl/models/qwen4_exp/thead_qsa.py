@@ -127,10 +127,9 @@ class Qwen4ExpQSAFlashAttentionImpl(TheadFlashAttentionImpl):
         output: torch.Tensor,
         output_gate: torch.Tensor,
     ) -> None:
-        from flaggems_vllm.ops.qwen4 import (
-            qsa_sparse_paged_attention,
-            qsa_store_kv_cache_rows,
-        )
+        # The top-level export resolves the vendor kernel (minimum tile 16).
+        from flaggems_vllm import qsa_sparse_paged_attention
+        from flaggems_vllm.ops.qwen4 import qsa_store_kv_cache_rows
 
         tokens = metadata.num_actual_tokens
         output.zero_()
