@@ -51,7 +51,11 @@ bi_v150:
           qwen3_6:
             - 27b_tp4_eager
             - 35b_a3b_tp4_eager
-        adaptation_gate:
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+        concurrent:
           qwen3_6:
             - 27b_tp4_eager
             - 35b_a3b_tp4_eager
@@ -60,7 +64,7 @@ bi_v150:
           qwen3_6:
             - 27b_tp4_eager
             - 35b_a3b_tp4_eager
-        adaptation_gate:
+        serving:
           qwen3_6:
             - 27b_tp4_eager
             - 35b_a3b_tp4_eager
@@ -71,7 +75,7 @@ bi_v150:
     timeouts:
       e2e:
         inference: 180
-        adaptation_gate: 180
+        serving: 180
         concurrent: 180
     functional:
       include: "*"

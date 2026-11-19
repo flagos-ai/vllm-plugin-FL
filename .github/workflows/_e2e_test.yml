@@ -34,7 +34,7 @@ on:
         type: string
         default: ""
       task:
-        description: "Test task category (e.g., inference, adaptation_gate)"
+        description: "Test task category (e.g., inference, serving, concurrent)"
         required: true
         type: string
       device:

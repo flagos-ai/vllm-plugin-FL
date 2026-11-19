@@ -35,6 +35,13 @@ from tests.e2e_tests.adaptation_gate.gate_contract import (
     summarize_gate_progress,
     temporary_environment,
     validate_gate_documents,
+    validate_scenario_documents,
+)
+from tests.e2e_tests.verification_cases import (
+    ADAPTATION_GATE_SOURCE,
+    ensure_server_alive,
+    validate_case_selection,
+    verification_results_root,
 )
 from tests.run import _MODEL_E2E_TASKS, TestCase, TestRunner
 from tests.utils.platform_config import E2eTestConfig, PlatformConfig
@@ -81,11 +88,41 @@ def test_contract_accepts_original_26_requests_and_260_checks(tmp_path):
     }
 
 
+def test_split_job_contracts_preserve_26_requests_and_260_checks(tmp_path):
+    _write_valid_documents(tmp_path)
+    serving = (("text_single", 1), ("image_single", 1))
+    concurrent = (
+        ("text_concurrent_8", 8),
+        ("image_concurrent_8", 8),
+        ("mixed_concurrent_8", 8),
+    )
+    serving_dir = tmp_path / "serving"
+    concurrent_dir = tmp_path / "concurrent"
+    serving_dir.mkdir()
+    concurrent_dir.mkdir()
+    for scenario, _ in serving:
+        (serving_dir / f"{scenario}.json").write_text(
+            (tmp_path / f"{scenario}.json").read_text()
+        )
+    for scenario, _ in concurrent:
+        (concurrent_dir / f"{scenario}.json").write_text(
+            (tmp_path / f"{scenario}.json").read_text()
+        )
+
+    serving_result = validate_scenario_documents(serving_dir, serving)
+    concurrent_result = validate_scenario_documents(concurrent_dir, concurrent)
+
+    assert serving_result["logical_requests"] == 2
+    assert serving_result["checks"] == 20
+    assert concurrent_result["logical_requests"] == 24
+    assert concurrent_result["checks"] == 240
+
+
 def test_contract_rejects_missing_scenario(tmp_path):
     _write_valid_documents(tmp_path)
     (tmp_path / "image_single.json").unlink()
 
-    with pytest.raises(AssertionError, match="five original scenarios"):
+    with pytest.raises(AssertionError, match="unexpected scenario set"):
         validate_gate_documents(tmp_path)
 
 
@@ -284,12 +321,17 @@ def test_build_server_args_rejects_duplicate_media_path(tmp_path, value):
         build_server_args(config, tmp_path)
 
 
-def test_runner_routes_adaptation_gate_to_unified_module(monkeypatch):
+def test_runner_routes_verification_cases_through_standard_jobs(monkeypatch):
     config = SimpleNamespace(
         platform="demo",
         device="card",
         get_e2e_tests=lambda: E2eTestConfig(
-            tests={"nightly": {"adaptation_gate": {"qwen3_6": ["27b_tp4_eager"]}}}
+            tests={
+                "nightly": {
+                    "serving": {"qwen3_6": ["27b_tp4_eager"]},
+                    "concurrent": {"qwen3_6": ["27b_tp4_eager"]},
+                }
+            }
         ),
         should_skip_model=lambda _: False,
         get_e2e_variants=lambda: [],
@@ -300,20 +342,22 @@ def test_runner_routes_adaptation_gate_to_unified_module(monkeypatch):
         platform="demo",
         device="card",
         scope="e2e",
-        task="adaptation_gate",
+        task=None,
     )
     cases = runner.discover_tests()
 
-    assert len(cases) == 1
-    assert cases[0].task == "adaptation_gate"
-    assert cases[0].pytest_path.endswith(
-        "tests/e2e_tests/adaptation_gate/test_adaptation_gate.py"
+    assert [case.task for case in cases] == ["serving", "concurrent"]
+    assert cases[0].pytest_path.endswith("serving/test_serving_smoke.py")
+    assert cases[1].pytest_path.endswith("concurrent/test_concurrent_smoke.py")
+    assert all(
+        case.extra_env
+        == {
+            "FL_TEST_MODEL": "qwen3_6",
+            "FL_TEST_CASE": "27b_tp4_eager",
+        }
+        for case in cases
     )
-    assert cases[0].extra_env == {
-        "FL_TEST_MODEL": "qwen3_6",
-        "FL_TEST_CASE": "27b_tp4_eager",
-    }
-    assert "adaptation_gate" in _MODEL_E2E_TASKS
+    assert _MODEL_E2E_TASKS == ("inference", "serving", "concurrent")
 
 
 @pytest.mark.parametrize(
@@ -339,9 +383,9 @@ def test_e2e_runner_streams_single_sharded_case_live(
     monkeypatch.setattr(runner, "_run_single", fake_run_single)
     cases = [
         TestCase(
-            name=f"adaptation_gate/qwen3_6/case-{index}",
+            name=f"concurrent/qwen3_6/case-{index}",
             pytest_path="unused",
-            task="adaptation_gate",
+            task="concurrent",
             num_devices=1,
         )
         for index in range(case_count)
@@ -352,17 +396,17 @@ def test_e2e_runner_streams_single_sharded_case_live(
     assert quiet_values == [expected_quiet] * case_count
 
 
-def test_matrix_declares_gate_timeout_and_tools_as_full_run_trigger():
+def test_matrix_uses_standard_tasks_and_tools_as_full_run_trigger():
     path = Path(__file__).parents[2] / ".github/scripts/generate_matrix.py"
     spec = importlib.util.spec_from_file_location("_gate_generate_matrix", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    assert module.DEFAULT_TIMEOUT["adaptation_gate"] == 180
+    assert "adaptation_gate" not in module.DEFAULT_TIMEOUT
     assert "tools/adaptation-gate-cases/" in module._FULL_RUN_PREFIXES
 
 
-def test_matrix_groups_gate_cases_to_keep_device_scheduling_in_one_job():
+def test_matrix_groups_standard_task_cases_for_in_job_device_scheduling():
     path = Path(__file__).parents[2] / ".github/scripts/generate_matrix.py"
     spec = importlib.util.spec_from_file_location("_gate_shard_matrix", path)
     module = importlib.util.module_from_spec(spec)
@@ -372,9 +416,7 @@ def test_matrix_groups_gate_cases_to_keep_device_scheduling_in_one_job():
             "tests": {
                 "e2e": {
                     "pr": {
-                        "adaptation_gate": {
-                            "qwen3_6": ["27b_tp4_eager", "27b_tp4_graph"]
-                        },
+                        "concurrent": {"qwen3_6": ["27b_tp4_eager", "27b_tp4_graph"]},
                         "inference": {"qwen3": ["4b_tp2", "8b_tp2"]},
                     }
                 }
@@ -383,11 +425,11 @@ def test_matrix_groups_gate_cases_to_keep_device_scheduling_in_one_job():
     }
 
     matrix = module.build_e2e_matrix(config, ["card"], [], ci_stage="pr")
-    gate_entries = [entry for entry in matrix if entry["task"] == "adaptation_gate"]
+    concurrent_entries = [entry for entry in matrix if entry["task"] == "concurrent"]
     inference_entries = [entry for entry in matrix if entry["task"] == "inference"]
 
-    assert len(gate_entries) == 1
-    assert len(json.loads(gate_entries[0]["cases"])) == 2
+    assert len(concurrent_entries) == 1
+    assert len(json.loads(concurrent_entries[0]["cases"])) == 2
     assert len(inference_entries) == 1
     assert len(json.loads(inference_entries[0]["cases"])) == 2
 
@@ -398,3 +440,65 @@ def test_e2e_workflow_uploads_gate_documents():
     ).read_text()
 
     assert "test-results/gate/" in workflow
+
+
+@pytest.mark.parametrize(
+    "case",
+    sorted(
+        path.stem
+        for path in (Path(__file__).parents[1] / "models/qwen3_6").glob("*.yaml")
+    ),
+)
+def test_qwen36_yaml_references_tools_cases_without_copying_requests(case):
+    from tests.utils.model_config import ModelConfig
+
+    config = ModelConfig.load("qwen3_6", case)
+
+    assert config.verification.source == ADAPTATION_GATE_SOURCE
+    assert config.verification.serving_scenarios == ["text_single", "image_single"]
+    assert config.verification.concurrent_scenarios == [
+        "text_concurrent_8",
+        "image_concurrent_8",
+        "mixed_concurrent_8",
+    ]
+
+
+def test_case_selection_rejects_unknown_sources_scenarios_and_duplicates():
+    with pytest.raises(ValueError, match="Unsupported verification"):
+        validate_case_selection("other", ["text_single"])
+    with pytest.raises(ValueError, match="Unknown adaptation"):
+        validate_case_selection(ADAPTATION_GATE_SOURCE, ["unknown"])
+    with pytest.raises(ValueError, match="duplicates"):
+        validate_case_selection(ADAPTATION_GATE_SOURCE, ["text_single", "text_single"])
+
+
+def test_phase_results_use_distinct_paths(tmp_path):
+    serving = verification_results_root(
+        tmp_path,
+        phase="serving",
+        platform="demo",
+        device="card",
+        model="qwen3_6",
+        case="27b_tp2_eager",
+    )
+    concurrent = verification_results_root(
+        tmp_path,
+        phase="concurrent",
+        platform="demo",
+        device="card",
+        model="qwen3_6",
+        case="27b_tp2_eager",
+    )
+
+    assert serving != concurrent
+
+
+def test_dead_verification_server_fails_without_waiting_for_client_timeout():
+    process = SimpleNamespace(poll=lambda: 42)
+    server = SimpleNamespace(
+        _process=process,
+        preserve_failure_logs=lambda message: f"{message}: log",
+    )
+
+    with pytest.raises(RuntimeError, match="exited before the concurrent"):
+        ensure_server_alive(server, "concurrent")

@@ -93,7 +93,11 @@ env_defaults:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
-        adaptation_gate:
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        concurrent:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
@@ -102,13 +106,18 @@ env_defaults:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
-        adaptation_gate:
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        concurrent:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
     timeouts:
       e2e:
-        adaptation_gate: 180
+        serving: 180
+        concurrent: 180
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

@@ -20,11 +20,25 @@ import hashlib
 import json
 import os
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 import requests
 
+from tests.e2e_tests.adaptation_gate.gate_contract import (
+    build_server_args,
+    format_gate_progress,
+    summarize_gate_progress,
+    validate_scenario_documents,
+)
 from tests.e2e_tests.serving.server_helper import _NO_PROXY, VllmServer
+from tests.e2e_tests.verification_cases import (
+    case_pack_environment,
+    ensure_server_alive,
+    load_case_pack,
+    validate_case_selection,
+    verification_results_root,
+)
 from tests.utils.model_config import ModelConfig
 
 # ---------------------------------------------------------------------------
@@ -43,6 +57,12 @@ if not _MODEL or not _CASE:
     )
 
 _CFG = ModelConfig.load(_MODEL, _CASE, platform=_PLATFORM, device=_DEVICE)
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_VERIFICATION = _CFG.verification
+_CASE_UTILS = None
+if _VERIFICATION.source and _VERIFICATION.serving_scenarios:
+    validate_case_selection(_VERIFICATION.source, _VERIFICATION.serving_scenarios)
+    _CASE_UTILS = load_case_pack(_REPO_ROOT, _VERIFICATION.source)
 
 if not os.path.exists(_CFG.model):
     pytest.fail(
@@ -62,7 +82,10 @@ def server():
     serve = _CFG.serve
 
     # Build extra_args from engine config + serve-specific overrides
-    extra_args = [*_CFG.serve_args(**serve.extra_engine), *serve.extra_args]
+    if _CASE_UTILS is None:
+        extra_args = [*_CFG.serve_args(**serve.extra_engine), *serve.extra_args]
+    else:
+        extra_args = build_server_args(_CFG, Path(_CASE_UTILS.IMAGE_DIR))
 
     with VllmServer(
         model=_CFG.model,
@@ -89,6 +112,41 @@ def headers():
     return h
 
 
+@pytest.fixture(scope="module")
+def verification_context(server):
+    """Share one serving process and environment across selected scenarios."""
+    if _CASE_UTILS is None:
+        yield None
+        return
+    results_root = verification_results_root(
+        _REPO_ROOT,
+        phase="serving",
+        platform=_PLATFORM,
+        device=_DEVICE,
+        model=_MODEL,
+        case=_CASE,
+    )
+    scenarios = tuple(
+        (name, len(_CASE_UTILS.scenario_requests(name)))
+        for name in _VERIFICATION.serving_scenarios
+    )
+    with case_pack_environment(
+        case_utils=_CASE_UTILS,
+        config=_CFG,
+        server=server,
+        results_root=results_root,
+    ) as document_dir:
+        yield document_dir
+        with server.log_on_failure("Serving verification contract failed"):
+            summary = validate_scenario_documents(document_dir, scenarios)
+        print(
+            f"[Gate] serving total: PASS; requests={summary['passed_requests']}/"
+            f"{summary['logical_requests']} passed; checks={summary['passed_checks']}/"
+            f"{summary['checks']} passed",
+            flush=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -106,6 +164,30 @@ def test_model_list(server, base_url, headers):
         assert response.status_code == 200
         models = response.json()["data"]
         assert any(m["id"] == _REQUEST_MODEL for m in models)
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize(
+    "scenario",
+    _VERIFICATION.serving_scenarios or [None],
+    ids=_VERIFICATION.serving_scenarios or ["not-configured"],
+)
+def test_verification_case(scenario, server, verification_context):
+    """Run configured single-request cases in the standard serving job."""
+    if scenario is None or _CASE_UTILS is None:
+        pytest.skip("No external serving verification cases configured")
+    with server.log_on_failure(f"Serving verification scenario '{scenario}' failed"):
+        ensure_server_alive(server, "serving")
+        try:
+            _CASE_UTILS.run_case(scenario)
+        finally:
+            print(
+                format_gate_progress(
+                    f"serving/{scenario}",
+                    summarize_gate_progress(verification_context, scenario),
+                ),
+                flush=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +459,8 @@ _ENDPOINT_RUNNERS = {
 @pytest.mark.parametrize("endpoint", _CFG.serve.endpoints, ids=_CFG.serve.endpoints)
 def test_endpoint(endpoint: str, server, base_url, headers):
     """Validate a serving endpoint configured in the model YAML."""
+    if _CASE_UTILS is not None:
+        pytest.skip("External verification cases replace standard chat cases")
     with server.log_on_failure(f"Serving endpoint '{endpoint}' validation failed"):
         runner = _ENDPOINT_RUNNERS.get(endpoint)
         assert runner is not None, f"Unknown endpoint type: {endpoint}"

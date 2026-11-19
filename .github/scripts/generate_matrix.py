@@ -56,7 +56,6 @@ DEFAULT_TIMEOUT: dict[str, int] = {
     "inference": 60,
     "serving": 60,
     "concurrent": 60,
-    "adaptation_gate": 180,
 }
 
 
@@ -103,14 +102,12 @@ def build_e2e_matrix(
     unsupported: list[str],
     ci_stage: str = "nightly",
 ) -> list[dict]:
-    """End-to-end model tests (inference, serving, concurrent, adaptation Gate).
+    """End-to-end model tests (inference, serving, concurrent).
 
     These are slow and require model files. Entries are grouped by
     ``(task, device)`` so all model/case combos for the same task run inside
-    one job. In particular, adaptation Gate cases must share one job so the
-    in-process device scheduler can prevent multiple model servers from
-    claiming the same physical cards. Self-hosted jobs with identical labels
-    are not guaranteed to land on isolated hosts.
+    one job. The in-process device scheduler prevents multiple model-backed
+    cases from claiming the same physical cards.
 
     The ``e2e`` block in each device's YAML is keyed by CI stage
     (``pr`` / ``nightly`` / ``weekly``).  In ``weekly`` stage, falls back
