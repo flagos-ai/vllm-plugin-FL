@@ -498,14 +498,16 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
+        # TXDA installs its own adaptations for the upstream V2 runner (see
+        # vendor/txda/patches/v2_runner_compat.py), so it is not rejected
+        # here; Ascend and MUSA still require ModelRunnerFL.
         if (
-            cls.device_type in {"npu", "musa", "txda"}
+            cls.device_type in {"npu", "musa"}
             and vllm_config.use_v2_model_runner
         ):
             platform_name = {
                 "npu": "Ascend",
                 "musa": "MUSA",
-                "txda": "Tsingmicro TXDA",
             }[cls.device_type]
             raise ValueError(
                 f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "

@@ -557,6 +557,14 @@ class WorkerFL(WorkerBase):
                 )
 
                 v2_runner_compat.install_v2_runner_compat()
+            elif getattr(current_platform, "device_type", "") == "txda":
+                # TXDA adaptations for the upstream V2 runner; see
+                # vllm_fl/dispatch/backends/vendor/txda/patches/.
+                from vllm_fl.dispatch.backends.vendor.txda.patches import (
+                    v2_runner_compat as txda_v2_runner_compat,
+                )
+
+                txda_v2_runner_compat.install_v2_runner_compat()
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
@@ -689,7 +697,11 @@ class WorkerFL(WorkerBase):
         # XPU stays excluded (see #39977).
         cudagraph_memory_estimate = 0
         if (
-            current_platform.is_cuda_alike()
+            (
+                current_platform.is_cuda()
+                or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+                or current_platform.device_type == "txda"
+            )
             and self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         ):
             cudagraph_memory_estimate = self.model_runner.profile_cudagraph_memory()
@@ -856,7 +868,15 @@ class WorkerFL(WorkerBase):
         return {(pp_rank, tp_rank): metadata}
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
-        return self.model_runner.get_kv_cache_spec()
+        # The upstream V2 path calls this outside any config context, but the
+        # TXDA attention backend resolves its supported kernel block sizes
+        # through get_current_vllm_config(). Enter the context there so the V2
+        # runner sees the configuration this worker was built with; every
+        # other backend keeps the upstream call unchanged.
+        if current_platform.device_type != "txda":
+            return self.model_runner.get_kv_cache_spec()
+        with set_current_vllm_config(self.vllm_config):
+            return self.model_runner.get_kv_cache_spec()
 
     def update_max_model_len(self, max_model_len: int) -> None:
         """Update max_model_len after auto-fit to GPU memory.

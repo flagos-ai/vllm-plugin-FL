@@ -267,8 +267,13 @@ def register():
         _install_kunlunxin_fla_alias()
 
     if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
-        # These backends use ModelRunnerFL; choose it before VllmConfig reads
-        # model defaults for the upstream V2 runner.
+        # These backends default to ModelRunnerFL; choose it before VllmConfig
+        # reads model defaults for the upstream V2 runner. TXDA additionally
+        # supports the upstream V2 runner (see
+        # vendor/txda/patches/v2_runner_compat.py): an explicit
+        # VLLM_USE_V2_MODEL_RUNNER=1 wins over this default (setdefault),
+        # while the other vendors reject V2 in
+        # PlatformFL.check_and_update_config.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"

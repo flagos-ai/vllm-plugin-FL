@@ -142,10 +142,25 @@ def _config(
     )
 
 
-def test_txda_rejects_explicit_upstream_v2_runner(configure_platform):
-    platform = SimpleNamespace(device_type="txda", vendor_name="tsingmicro")
-    with pytest.raises(ValueError, match="VLLM_USE_V2_MODEL_RUNNER=0"):
-        configure_platform(platform, SimpleNamespace(use_v2_model_runner=True))
+def test_txda_accepts_explicit_upstream_v2_runner(configure_platform):
+    """TXDA adapts the upstream V2 runner instead of rejecting it.
+
+    The adaptations live in vendor/txda/patches/v2_runner_compat.py and are
+    installed by WorkerFL, so the platform hook must let the configuration
+    through.
+    """
+    config = _config()
+    config.use_v2_model_runner = True
+    platform = SimpleNamespace(
+        device_type="txda",
+        vendor_name="tsingmicro",
+        dist_backend="flagcx",
+    )
+
+    configure_platform(platform, config)
+
+    assert config.use_v2_model_runner is True
+    assert config.parallel_config.disable_custom_all_reduce is True
 
 
 @pytest.mark.parametrize(
