@@ -497,6 +497,13 @@ class FlagGemsSparseMLABackend(AttentionBackend):
             vllm_config, kv_cache_spec
         )
 
+    # The KV write goes through do_kv_cache_update, not forward(). vLLM's
+    # model runner keys on this flag to decide whether slot_mapping needs to be
+    # padded to the key/value tensors; leaving it at the AttentionBackend
+    # default (True) hands an unpadded slot_mapping to concat_and_cache_mla,
+    # which rejects it with "MLA cache inputs need one slot per token".
+    forward_includes_kv_cache_update: ClassVar[bool] = False
+
     @staticmethod
     def get_name() -> str:
         return "FLAGGEMS_MLA_SPARSE"

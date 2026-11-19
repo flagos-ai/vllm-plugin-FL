@@ -412,6 +412,13 @@ class Glm5ConfigError(RuntimeError):
     """The resolved GLM5 configuration requests an unsupported mode."""
 
 
+def _pp_enabled() -> bool:
+    """Experimental pipeline-parallel path (mHC state carried between stages)."""
+    import os
+
+    return os.environ.get("GLM53_ALLOW_PP", "0") == "1"
+
+
 def validate_glm5_config(vllm_config) -> None:
     """Reject modes whose loading/state contracts are not implemented on 0.24.
 
@@ -421,10 +428,11 @@ def validate_glm5_config(vllm_config) -> None:
     if not _is_glm5_model(vllm_config):
         return
     parallel = getattr(vllm_config, "parallel_config", None)
-    if getattr(parallel, "pipeline_parallel_size", 1) != 1:
+    if getattr(parallel, "pipeline_parallel_size", 1) != 1 and not _pp_enabled():
         raise Glm5ConfigError(
             "GLM5-Next on vLLM 0.24 requires pipeline_parallel_size=1: "
             "mHC state transfer between pipeline stages is not implemented"
+            " (opt in with GLM53_ALLOW_PP=1 to use the experimental path)"
         )
     if getattr(vllm_config, "speculative_config", None) is not None:
         raise Glm5ConfigError(
