@@ -73,6 +73,18 @@ No throughput gain or complete large-load repair follows from the operator
 regression. Provider dispatch/workspace diagnostics use the vLLM logger
 namespace so they remain visible under the vLLM CLI logging configuration.
 
+A subsequent same-host diagnostic compares ordinary PDL forwarding with
+forced PDL-off dispatch, leaving the kernel unchanged. Both arms complete
+full graph capture, three semantic responses, four serial input lengths and
+the mixed-length 64-choice batch with 143736 prompt and 32768 completion
+tokens. Dispatch logs confirm PDL on/off on both ranks. This does not establish
+PDL-off as a remedy for the earlier timeout, or isolate a host effect. No
+PDL-disable workaround is included. Separately, setting both CUDA module
+code and data loading to EAGER exhausts the bounded initialization deadline
+in all four dense/MoE native/peer arms, before any functional request.
+Unmodified combined-public-source native/peer qualification is separate;
+the earlier failed qualification and performance rounds remain unchanged.
+
 H100 peer qualification covers TP2/TP8 operator correctness and the TP2 dense
 model control above. TP8 checks exercise BF16/FP8, explicit/in-place outputs and
 changing-input graph replay; they do not establish a TP8 whole-model result.
@@ -218,9 +230,29 @@ Qualification covers 36 GPU cases, 108 numerical phases and 132 changed-mask
 graph phases, including all-false masks, three dtypes and an assertion of the
 actual fused dispatch. A frozen public-source Flash TP8 service completes full
 graph capture, three semantic responses, serial 1K/4K/16K/64K-input probes and
-a C64/1K/128-output functional batch. These are functional checks. A distinct
-original-adapter versus fused-adapter official comparison is in progress;
-component latency reductions do not establish model throughput gains.
+a C64/1K/128-output functional batch. These are functional checks.
+
+A separate Flash TP8 official comparison completes all 24 rounds. Both arms
+use the adapter; only the three masked-reduction runtime files differ. The
+means below use original rounds 2/3, with all three raw rounds retained and
+256 requests of 1024 output tokens audited in every round.
+
+| Input tokens | Original adapter output tok/s | Fused adapter output tok/s | Change |
+| --- | --- | --- | --- |
+| 1024 | 3255.375 | 2363.030 | -27.41% |
+| 4096 | 1930.805 | 1982.860 | +2.70% |
+| 16384 | 740.065 | 751.935 | +1.60% |
+| 65536 | 198.130 | 211.570 | +6.78% |
+
+The fused 1K retained-round spread is 83.30%, versus 0.33% in its control.
+The slow retained round is included; available compilation logs do not prove
+its cause. Only two samples contribute to each mean, so these are observed
+differences, not established stable gains. Both arms report 22.93 GiB/rank
+model allocation; automatic KV capacity is 815790 versus 815920 tokens, not
+a fixed-KV counterfactual. This isolates the fusion within the frozen adapter
+runtime, not the original upstream PR4483/4943 gain or a whole-source retest
+of the later combined public runtime. It does not erase the earlier
+native-versus-adapter regressions.
 
 ```bash
 PYTHONPATH=. python tests/manual/check_marlin_masked_reduce_gpu.py
