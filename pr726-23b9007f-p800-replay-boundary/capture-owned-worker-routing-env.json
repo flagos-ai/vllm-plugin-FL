@@ -1,0 +1,14 @@
+[
+  {
+    "host": "<P800_HOST_A>",
+    "exit": 0,
+    "out": "{\"role\": 0, \"observed_at\": \"2026-11-19T21:16:11.550373+00:00\", \"workers\": [{\"pid\": 1930312, \"selected_environment\": {\"FLAGCX_USE_HETERO_COMM\": null, \"FLAGCX_USE_HOST_COMM\": null, \"FLAGCX_CLUSTER_SPLIT_LIST\": null, \"FLAGCX_USE_TUNER\": null, \"USE_TUNER\": null, \"BKCL_RDMA_NICS\": \"bond0,bond1,bond2,bond3,bond4,bond5,bond6,bond7\"}}, {\"pid\": 1930313, \"selected_environment\": {\"FLAGCX_USE_HETERO_COMM\": null, \"FLAGCX_USE_HOST_COMM\": null, \"FLAGCX_CLUSTER_SPLIT_LIST\": null, \"FLAGCX_USE_TUNER\": null, \"USE_TUNER\": null, \"BKCL_RDMA_NICS\": \"bond0,bond1,bond2,bond3,bond4,bond5,bond6,bond7\"}}]}\n",
+    "error": ""
+  },
+  {
+    "host": "<P800_HOST_B>",
+    "exit": 0,
+    "out": "{\"role\": 1, \"observed_at\": \"2026-11-19T21:16:11.612380+00:00\", \"workers\": [{\"pid\": 1494137, \"selected_environment\": {\"FLAGCX_USE_HETERO_COMM\": null, \"FLAGCX_USE_HOST_COMM\": null, \"FLAGCX_CLUSTER_SPLIT_LIST\": null, \"FLAGCX_USE_TUNER\": null, \"USE_TUNER\": null, \"BKCL_RDMA_NICS\": \"bond0,bond1,bond2,bond3,bond4,bond5,bond6,bond7\"}}, {\"pid\": 1494138, \"selected_environment\": {\"FLAGCX_USE_HETERO_COMM\": null, \"FLAGCX_USE_HOST_COMM\": null, \"FLAGCX_CLUSTER_SPLIT_LIST\": null, \"FLAGCX_USE_TUNER\": null, \"USE_TUNER\": null, \"BKCL_RDMA_NICS\": \"bond0,bond1,bond2,bond3,bond4,bond5,bond6,bond7\"}}]}\n",
+    "error": ""
+  }
+]

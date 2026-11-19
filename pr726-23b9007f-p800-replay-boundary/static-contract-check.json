@@ -1,0 +1,14 @@
+[
+  {
+    "route": "native",
+    "original_assert_close_AST_preserved": true,
+    "original_replay_and_shape_contracts_preserved": true,
+    "sha256": "6416732009269cbd36d4e10cc8c634f17e88f7da1f48989558d0a2caec236469"
+  },
+  {
+    "route": "direct",
+    "original_assert_close_AST_preserved": true,
+    "original_replay_and_shape_contracts_preserved": true,
+    "sha256": "0713dee8cb2213ff2a5cc5e0a6533bfa616cc0a8e2e82f05b95a22637dc951f6"
+  }
+]

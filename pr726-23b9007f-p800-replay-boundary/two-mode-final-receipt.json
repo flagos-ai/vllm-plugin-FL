@@ -1,0 +1,112 @@
+{
+  "observed_at": "2026-11-19T21:21:22.403735+00:00",
+  "head": "23b9007ffe8a96e64b6f247e2309daffe3b77213",
+  "historical_baseline_head": "adc917edea0933a8823b7dbe067debaeb8dc582a",
+  "image_manifest": "sha256:93caedbfc36d665c2e7d9f70a38bbb2501a860c9389be660888b0b6d66bc4402",
+  "image_config": "sha256:562f5a483b37b5dc6b143cbb5df5ef7707e72ddc2dc6f3603605f2829e0a026c",
+  "hardware": {
+    "nodes": 2,
+    "ranks_per_node": 2,
+    "world_size": 4,
+    "host_smi_cards": [
+      4,
+      6
+    ],
+    "in_container_pci_bus_ids": [
+      132,
+      182
+    ],
+    "pci": [
+      "84:00.0",
+      "B6:00.0"
+    ]
+  },
+  "input": {
+    "shape": [
+      1,
+      2048
+    ],
+    "dtype": "BF16",
+    "per_rank_value": "rank+1",
+    "expected_allreduce_sum": 10,
+    "rtol": 0,
+    "atol": 0
+  },
+  "source_archive_sha256": "9f1ca703903b2a0405d20fc9c30cc3b8126e1cfb3c76ed7e81e93d61eca40eaf",
+  "flagcx": {
+    "package": "0.14.1+xre5.37.1",
+    "wheel_sha256": "b49203511f7906aaa3cebdbf304aff521a86f0540f6b57c6af6154092f8a658e",
+    "native_sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934",
+    "build_source": "6fe36310fb5c9bd2396f531d7bf78c08fc792340"
+  },
+  "xccl": {
+    "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+    "sha256": "c802af1db0b1c25ff4f839faf52d5709877c57eb50b95a9338141f825f7d9e5e",
+    "banner": "8185b2f [rdma] [fix Connection reset by peer] build data: May 19 2026 02:23:43"
+  },
+  "results": {
+    "original": {
+      "eager_exact10_ranks": 4,
+      "replay1_exact10_ranks": 4,
+      "replay2_started_ranks": 4,
+      "replay2_enqueue_returned_ranks": 0,
+      "replay2_sync_returned_ranks": 0,
+      "exit_per_node": [
+        137,
+        137
+      ],
+      "first_case_last_entered": 2,
+      "first_case_last_completed": 1,
+      "requested_replays": 12,
+      "second_case_executed": false
+    },
+    "capture": {
+      "eager_exact10_ranks": 4,
+      "replay1_exact10_ranks": 4,
+      "replay2_started_ranks": 4,
+      "replay2_enqueue_returned_ranks": 0,
+      "replay2_sync_returned_ranks": 0,
+      "exit_per_node": [
+        137,
+        137
+      ],
+      "first_case_last_entered": 2,
+      "first_case_last_completed": 1,
+      "requested_replays": 12,
+      "second_case_executed": false
+    }
+  },
+  "routing": {
+    "homo_query": {
+      "result": 0,
+      "value": 1,
+      "observed_ranks_per_mode": 4
+    },
+    "tuner": "Disabled in startup logs on both hosts",
+    "capture_worker_route_environment": "FLAGCX_USE_HETERO_COMM, FLAGCX_USE_HOST_COMM, FLAGCX_CLUSTER_SPLIT_LIST absent in all four label+cgroup verified worker environments sampled21:16:11UTC"
+  },
+  "debug_sampling": {
+    "gdb_pstack_gstack": "Unavailable on both hosts and test containers at21:14:11UTC",
+    "attached": false,
+    "installed_tools": false,
+    "process_environment_read": "Only selected routing environment keys of label+cgroup verified owned workers; no ptrace or thread stop."
+  },
+  "boundary": "graph.replay did not reach its immediately-following return marker on replay2 in either Python stream context. Exact internal XRE/BKCL kernel, proxy or counter remains unidentified; not proof of a specific reset/barrier bug.",
+  "limits": [
+    "Changing the Python replay-current-stream context did not resolve the symptom; internal SDK graph-launch stream handling is not observed directly.",
+    "No third experiment or native-PG expansion was run.",
+    "The new libbkcl hash is observed in these new runs; it was not retroactively captured in the historical logs.",
+    "This pure-collective diagnostic does not change the current single-host CI acceptance or claim a production fix."
+  ],
+  "cleanup": {
+    "selected_memory_mib_per_node": [
+      0,
+      0
+    ],
+    "selected_compute_processes": 0,
+    "owned_containers": 0,
+    "tmux_sessions": 0,
+    "foreign_processes_touched": false,
+    "device_reset": false
+  }
+}

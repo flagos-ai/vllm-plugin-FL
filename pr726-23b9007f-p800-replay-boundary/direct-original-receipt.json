@@ -1,0 +1,259 @@
+{
+  "route": "direct PyFlagcxCommunicator",
+  "replay_context": "unchanged caller stream",
+  "head": "23b9007ffe8a96e64b6f247e2309daffe3b77213",
+  "image_manifest": "sha256:93caedbfc36d665c2e7d9f70a38bbb2501a860c9389be660888b0b6d66bc4402",
+  "image_config": "sha256:562f5a483b37b5dc6b143cbb5df5ef7707e72ddc2dc6f3603605f2829e0a026c",
+  "timeout_seconds": 355,
+  "hard_kill_grace_seconds": 15,
+  "roles": [
+    {
+      "node_role": 0,
+      "ranks": [
+        0,
+        1
+      ],
+      "exit": 137,
+      "raw_log_sha256": "bb9b84bd387b7cdbfc13808629a6e8399475579424b71b7656889b2bb3affa66",
+      "runtime_observations": [
+        {
+          "flagcx_package": "0.14.1+xre5.37.1",
+          "is_homo": {
+            "available": true,
+            "result": 0,
+            "value": 1
+          },
+          "libraries": [
+            {
+              "path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+              "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"
+            },
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "c802af1db0b1c25ff4f839faf52d5709877c57eb50b95a9338141f825f7d9e5e"
+            }
+          ],
+          "plugin_imported": true,
+          "rank": 1,
+          "route": "direct"
+        },
+        {
+          "flagcx_package": "0.14.1+xre5.37.1",
+          "is_homo": {
+            "available": true,
+            "result": 0,
+            "value": 1
+          },
+          "libraries": [
+            {
+              "path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+              "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"
+            },
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "c802af1db0b1c25ff4f839faf52d5709877c57eb50b95a9338141f825f7d9e5e"
+            }
+          ],
+          "plugin_imported": true,
+          "rank": 0,
+          "route": "direct"
+        }
+      ],
+      "stages": {
+        "eager_exact10": 2,
+        "replay1_started": 2,
+        "replay1_enqueue_return_markers": 2,
+        "replay1_sync_return_markers": 2,
+        "replay1_exact10_done": 2,
+        "replay2_started": 2,
+        "replay2_enqueue_return_markers": 0,
+        "replay2_sync_return_markers": 0,
+        "replay2_exact10_done": 0
+      },
+      "per_rank_first_case": [
+        {
+          "rank": 0,
+          "eager_exact10": true,
+          "replay1_started": true,
+          "replay1_enqueue_returned": true,
+          "replay1_sync_returned": true,
+          "replay1_exact10": true,
+          "replay2_started": true,
+          "replay2_enqueue_returned": false,
+          "replay2_sync_returned": false,
+          "replay2_exact10": false
+        },
+        {
+          "rank": 1,
+          "eager_exact10": true,
+          "replay1_started": true,
+          "replay1_enqueue_returned": true,
+          "replay1_sync_returned": true,
+          "replay1_exact10": true,
+          "replay2_started": true,
+          "replay2_enqueue_returned": false,
+          "replay2_sync_returned": false,
+          "replay2_exact10": false
+        }
+      ],
+      "contract": {
+        "requested_replays": 12,
+        "first_case": {
+          "segments": 1,
+          "ops": 1,
+          "last_entered_replay": 2,
+          "last_completed_replay": 1
+        },
+        "second_case": {
+          "segments": 8,
+          "ops": 16,
+          "executed": false
+        }
+      },
+      "native_error_markers": {
+        "wait for noc idle timeout": 0,
+        "cudaErrorNocIdleTimeout": 0,
+        "kl3ChannelCheckErrors": 0,
+        "device-side assert": 0,
+        "Watchdog caught": 0
+      },
+      "marker_note": "START/DONE emit uses atomic os.write; observation print fields can interleave. Counts match both rank DONE1 paths and no return marker after either START2."
+    },
+    {
+      "node_role": 1,
+      "ranks": [
+        2,
+        3
+      ],
+      "exit": 137,
+      "raw_log_sha256": "c83b56de39a2876311600c6eb8f39cc09c4dc75ace8f85e62af5d10698704390",
+      "runtime_observations": [
+        {
+          "flagcx_package": "0.14.1+xre5.37.1",
+          "is_homo": {
+            "available": true,
+            "result": 0,
+            "value": 1
+          },
+          "libraries": [
+            {
+              "path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+              "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"
+            },
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "c802af1db0b1c25ff4f839faf52d5709877c57eb50b95a9338141f825f7d9e5e"
+            }
+          ],
+          "plugin_imported": true,
+          "rank": 3,
+          "route": "direct"
+        },
+        {
+          "flagcx_package": "0.14.1+xre5.37.1",
+          "is_homo": {
+            "available": true,
+            "result": 0,
+            "value": 1
+          },
+          "libraries": [
+            {
+              "path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+              "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"
+            },
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "c802af1db0b1c25ff4f839faf52d5709877c57eb50b95a9338141f825f7d9e5e"
+            }
+          ],
+          "plugin_imported": true,
+          "rank": 2,
+          "route": "direct"
+        }
+      ],
+      "stages": {
+        "eager_exact10": 2,
+        "replay1_started": 2,
+        "replay1_enqueue_return_markers": 2,
+        "replay1_sync_return_markers": 2,
+        "replay1_exact10_done": 2,
+        "replay2_started": 2,
+        "replay2_enqueue_return_markers": 0,
+        "replay2_sync_return_markers": 0,
+        "replay2_exact10_done": 0
+      },
+      "per_rank_first_case": [
+        {
+          "rank": 2,
+          "eager_exact10": true,
+          "replay1_started": true,
+          "replay1_enqueue_returned": true,
+          "replay1_sync_returned": true,
+          "replay1_exact10": true,
+          "replay2_started": true,
+          "replay2_enqueue_returned": false,
+          "replay2_sync_returned": false,
+          "replay2_exact10": false
+        },
+        {
+          "rank": 3,
+          "eager_exact10": true,
+          "replay1_started": true,
+          "replay1_enqueue_returned": true,
+          "replay1_sync_returned": true,
+          "replay1_exact10": true,
+          "replay2_started": true,
+          "replay2_enqueue_returned": false,
+          "replay2_sync_returned": false,
+          "replay2_exact10": false
+        }
+      ],
+      "contract": {
+        "requested_replays": 12,
+        "first_case": {
+          "segments": 1,
+          "ops": 1,
+          "last_entered_replay": 2,
+          "last_completed_replay": 1
+        },
+        "second_case": {
+          "segments": 8,
+          "ops": 16,
+          "executed": false
+        }
+      },
+      "native_error_markers": {
+        "wait for noc idle timeout": 0,
+        "cudaErrorNocIdleTimeout": 0,
+        "kl3ChannelCheckErrors": 0,
+        "device-side assert": 0,
+        "Watchdog caught": 0
+      },
+      "marker_note": "START/DONE emit uses atomic os.write; observation print fields can interleave. Counts match both rank DONE1 paths and no return marker after either START2."
+    }
+  ],
+  "cleanup": [
+    {
+      "host": "<P800_HOST_A>",
+      "exit": "137",
+      "memory": {
+        "4": 0,
+        "6": 0
+      },
+      "no_compute_processes": true,
+      "owned_containers": 0,
+      "tail": "========================|\n|  No running processes found                                                 |\n+-----------------------------------------------------------------------------+\n                     USER        PID ACCESS COMMAND\n/dev/xpu4:           root      387620 F.... barad_agent\n/dev/xpu5:           root      387620 F.... barad_agent\n"
+    },
+    {
+      "host": "<P800_HOST_B>",
+      "exit": "137",
+      "memory": {
+        "4": 0,
+        "6": 0
+      },
+      "no_compute_processes": true,
+      "owned_containers": 0,
+      "tail": "======================|\n|  No running processes found                                                 |\n+-----------------------------------------------------------------------------+\n                     USER        PID ACCESS COMMAND\n/dev/xpu4:           root      4002692 F.... barad_agent\n/dev/xpu5:           root      4002692 F.... barad_agent\n"
+    }
+  ]
+}

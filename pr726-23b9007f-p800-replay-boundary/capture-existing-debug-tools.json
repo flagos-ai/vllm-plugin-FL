@@ -1,0 +1,18 @@
+[
+  {
+    "host": "<P800_HOST_A>",
+    "label_verified": true,
+    "container_init_pid": 1930035,
+    "tools": "host tools: container tools: ",
+    "stderr": "",
+    "observed_at": "2026-11-19T21:14:11.454511+00:00"
+  },
+  {
+    "host": "<P800_HOST_B>",
+    "label_verified": true,
+    "container_init_pid": 1493626,
+    "tools": "host tools: container tools: ",
+    "stderr": "",
+    "observed_at": "2026-11-19T21:14:11.381040+00:00"
+  }
+]

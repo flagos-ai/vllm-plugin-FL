@@ -1,0 +1,60 @@
+--- probe-direct-flagcx-graph-adc917e.py
++++ probe-direct-flagcx-graph.py
+@@ -1,4 +1,7 @@
+ from datetime import timedelta
++from contextlib import nullcontext
++import argparse
++from probe_observations import observe_runtime
+ import json
+ import os
+ 
+@@ -11,7 +14,7 @@
+     os.write(1, (" ".join(map(str, values)) + "\n").encode())
+ 
+ 
+-def test_graphs(comm, source, segments, ops):
++def test_graphs(comm, source, segments, ops, replay_stream):
+     stream = torch.cuda.Stream()
+     stream.wait_stream(torch.cuda.current_stream())
+     captured = []
+@@ -29,11 +32,16 @@
+     torch.cuda.current_stream().wait_stream(stream)
+     torch.cuda.synchronize()
+     expected = torch.full(source.shape, 10, dtype=source.dtype)
++    print("STREAMS", dist.get_rank(), "capture", stream.cuda_stream, "caller", torch.cuda.current_stream().cuda_stream, "mode", replay_stream, flush=True)
+     for replay in range(1, 13):
+         emit("START_REPLAY", dist.get_rank(), segments, ops, replay)
+-        for graph, _ in captured:
+-            graph.replay()
+-        torch.cuda.synchronize()
++        context = torch.cuda.stream(stream) if replay_stream == "capture" else nullcontext()
++        with context:
++            for graph_index, (graph, _) in enumerate(captured):
++                graph.replay()
++                print("AFTER_REPLAY_ENQUEUE", dist.get_rank(), segments, ops, replay, graph_index, flush=True)
++            torch.cuda.synchronize()
++            print("AFTER_SYNC", dist.get_rank(), segments, ops, replay, flush=True)
+         for _, outputs in captured:
+             for out in outputs:
+                 torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
+@@ -43,6 +51,9 @@
+ 
+ 
+ def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--replay-stream", choices=("original", "capture"), default="original")
++    args = parser.parse_args()
+     rank = int(os.environ["RANK"])
+     local = int(os.environ["LOCAL_RANK"])
+     device = torch.device("cuda", local)
+@@ -59,8 +70,9 @@
+     torch.cuda.synchronize()
+     torch.testing.assert_close(warmup.cpu(), torch.full((1,2048),10,dtype=torch.bfloat16), rtol=0, atol=0)
+     emit(json.dumps({"rank":rank,"backend":"FlagCX direct","eager_warmup":10,"library":comm.flagcx.lib._name}))
++    observe_runtime(rank, comm)
+     for segments, ops in ((1,1),(8,16)):
+-        test_graphs(comm, source, segments, ops)
++        test_graphs(comm, source, segments, ops, args.replay_stream)
+     dist.destroy_process_group()
+ 
+ 
