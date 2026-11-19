@@ -112,7 +112,9 @@ if not hasattr(torch.library, "get_kernel"):
         if isinstance(name_or_op, str):
             qualified_name = name_or_op
         else:
-            qualified_name = name_or_op._qualified_op_name
+            # OpOverload has no `_qualified_op_name`; `.name()` returns the
+            # "namespace::op" string that _RedispatchKernel splits on "::".
+            qualified_name = name_or_op.name()
         return _RedispatchKernel(qualified_name)
 
     torch.library.get_kernel = _get_kernel
