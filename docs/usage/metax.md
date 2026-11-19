@@ -570,7 +570,8 @@ response assertion failures separately from the capture and replay evidence.
 
 - `mcoplib` is optional. Native operators retain ownership when present;
   otherwise attention cache/merge use bundled Triton kernels and the top-k
-  bridge preserves bias, renormalization and graph-padding semantics in Torch.
+  bridge passes bias, renormalization and graph-padding metadata to the public
+  FlagGems-vLLM operators.
 - Unquantized MoE requires the FlagGems backend and an OOT policy allowing
   `fused_moe`. A native MoE fallback has not been validated; disabling this
   backend reports an explicit unsupported-policy error.
