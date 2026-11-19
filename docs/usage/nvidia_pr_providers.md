@@ -269,27 +269,35 @@ are not established stable speedups. Both arms fail the 16K/64K groups;
 their failed rounds are preserved and excluded from throughput comparisons.
 
 A separate repaired padding/no-TLE configuration passes serial long-input
-probes, but its optimized arm still fails the official 16K/64K groups. Its
-1K/4K groups have three successful rounds each. The first asynchronous error
-is reported while GDN linear attention indexes its initial state with a
-Boolean mask; this reporting site does not identify the first failing kernel.
-The never-benchmarked baseline is being recovered after an SSH transport
-failure. No paired gain is inferred from this partial configuration, and the
-new failures do not replace any earlier result.
+probes, but both exact-ablation arms still fail the official 16K group.
+The optimized 64K group also fails; the recovered baseline's last group is
+still being audited. New fixed-source 1K/4K means are 1341.82→1324.03
+(-1.33%) and 924.23→879.855 (-4.80%) output tok/s. Both short groups have
+three successful raw rounds per arm. The first asynchronous error is reported
+while GDN linear attention indexes its initial state with a Boolean mask;
+this reporting site does not identify the first failing kernel. Recovery
+starts only the arm that never benchmarked after an SSH transport failure.
+No measured optimized round or earlier configuration result is replaced.
 
 A common four-stage alignment configuration completes Hy3 TP16 graph capture
 on all ranks and three semantic requests in both ablation arms at max length
-67584. Its exact-seven-function PR3340 comparison has audited 1K/4K means of
-1675.96→1708.985 (+1.97%) and 1181.125→1194.895 (+1.17%) output tok/s.
-These use original rounds 2/3 with all three raw rounds retained; 16K/64K
-remain in progress. Two retained samples do not establish stable speedups.
-Reported KV capacity is 870160→875792 tokens under the same launch flags,
-with both model allocations 34.82 GiB/rank; capacity was not independently
-fixed. Qwen3.6 additionally
-requires the metadata-padding repair below; both exact-ablation arms now pass
-full graph capture and three semantic requests at the original full context
-configuration. Its distinct fixed-source throughput comparison is starting.
-The earlier failed cases and every measured round remain unchanged.
+67584. Its exact-seven-function PR3340 comparison has audited 1K/4K/16K means
+of 1675.96→1708.985 (+1.97%), 1181.125→1194.895 (+1.17%) and
+473.20→485.415 (+2.58%) output tok/s. Original rounds 2/3 supply these means,
+with all three raw rounds retained; 64K remains in progress. Two retained
+samples do not establish stable speedups. Reported KV capacity is
+870160→875792 tokens under the same launch flags, with both model allocations
+34.82 GiB/rank; capacity was not independently fixed.
+
+Qwen3.6-35B-A3B additionally requires the metadata-padding repair below.
+Both exact-ablation arms pass full graph capture and three semantic requests
+at the original full-context configuration. The distinct fixed-source TP2
+comparison completes all 12 baseline rounds; its first paired 1K group is
+1758.02→1884.215 output tok/s (+7.18%). The baseline's two retained rounds
+have an 11.18% spread, versus 1.41% after optimization, so this partial result
+does not establish a stable speedup. Both arms report the same 32.81 GiB/rank
+model allocation and 3600108-token KV capacity. Remaining groups continue;
+the earlier failures and every measured round remain unchanged.
 
 ### CUDA graph padding compatibility
 
