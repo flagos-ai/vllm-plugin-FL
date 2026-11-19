@@ -1,0 +1,78 @@
+{
+  "Qwen3.6-27B": {
+    "files": {
+      "config.json": {
+        "bytes": 4308,
+        "sha256": "69db4eb7196bc8190813231b3018ca05d8c2e3abc7b1af19d55c157af44a9d9c"
+      },
+      "model.safetensors.index.json": {
+        "bytes": 112216,
+        "sha256": "a8ad2c26fb707ff8c245806315b03e3b4b74595528492423af5dae0ce39b4d9b"
+      },
+      "tokenizer.json": {
+        "bytes": 12807982,
+        "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+      },
+      "tokenizer_config.json": {
+        "bytes": 16718,
+        "sha256": "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b"
+      }
+    },
+    "local_checkpoint_label": "Qwen3.6-27B",
+    "provenance_note": "The local snapshot has no embedded repository revision. The checkpoint label and configuration/index/tokenizer SHA256 hashes identify the tested files. Weight-shard contents were not separately hashed for this run.",
+    "repository_revision": null
+  },
+  "Qwen3.6-35B-A3B": {
+    "files": {
+      "config.json": {
+        "bytes": 3686,
+        "sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99"
+      },
+      "model.safetensors.index.json": {
+        "bytes": 98383,
+        "sha256": "41b9356101ebf8e7519e150dc811f80c4226e727301fbb032b890f006ed0be83"
+      },
+      "tokenizer.json": {
+        "bytes": 12807982,
+        "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+      },
+      "tokenizer_config.json": {
+        "bytes": 16718,
+        "sha256": "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b"
+      }
+    },
+    "local_checkpoint_label": "Qwen3.6-35B-A3B",
+    "modelscope_cached_file_revisions": {
+      "config.json": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00001-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00002-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00003-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00004-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00005-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00006-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00007-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00008-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00009-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00010-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00011-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00012-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00013-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00014-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00015-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00016-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00017-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00018-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00019-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00020-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00021-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00022-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00023-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00024-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00025-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model-00026-of-00026.safetensors": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "model.safetensors.index.json": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "tokenizer.json": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "tokenizer_config.json": "1a5ae24e867f8d82388070d3f61590158a01d15c"
+    }
+  }
+}

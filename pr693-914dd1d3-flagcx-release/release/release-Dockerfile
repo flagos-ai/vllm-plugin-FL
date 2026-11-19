@@ -1,0 +1,13 @@
+FROM harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7
+COPY runtime/ /opt/FlagCX/
+RUN echo "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad  /opt/FlagCX/build/lib/libflagcx.so" | sha256sum -c - \
+ && echo "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf  /opt/FlagCX/plugin/interservice/flagcx_wrapper.py" | sha256sum -c -
+ENV FLAGCX_PATH=/opt/FlagCX
+ENV PYTHONPATH=/opt/FlagCX:${PYTHONPATH}
+ENV LD_LIBRARY_PATH=/opt/FlagCX/build/lib:${LD_LIBRARY_PATH}
+LABEL org.opencontainers.image.title="vllm-plugin-FL MetaX vLLM 0.32 FlagCX release"
+LABEL org.opencontainers.image.version="0.32.0-metax-flagcx-0.13.0"
+LABEL org.flagos.flagcx.source="https://github.com/flagos-ai/FlagCX"
+LABEL org.flagos.flagcx.revision="0beba7aa7e76cc0885a9929f1975857bcd310d5e"
+LABEL org.flagos.flagcx.library.sha256="33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+LABEL org.flagos.flagcx.wrapper.sha256="a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"

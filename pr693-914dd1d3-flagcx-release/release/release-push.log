@@ -1,0 +1,131 @@
+The push refers to repository [harbor.baai.ac.cn/plugin/vllm-plugin-fl]
+502c2b2ba1f8: Waiting
+f9ec0e1c9ddf: Waiting
+acc8ebc64702: Waiting
+1319c20e1aab: Waiting
+a67ff9d788f9: Waiting
+860519fe3575: Waiting
+1bb3773b3703: Waiting
+f61f3cc67833: Waiting
+ca2678b20700: Waiting
+795d7e54817a: Waiting
+3aaef27f32a8: Waiting
+1e1e35775fca: Waiting
+da6db0608687: Waiting
+04959e241be9: Waiting
+4f4fb700ef54: Waiting
+3a2338ee1812: Waiting
+161bd77ede4a: Waiting
+cd1477544847: Waiting
+3055c10abc1e: Waiting
+321bef660caf: Waiting
+debc7a0f3c0e: Waiting
+51c0eb048399: Waiting
+a646b96412c4: Waiting
+1ef6af125488: Waiting
+7d28c7fead3d: Waiting
+a8989ef1691e: Waiting
+7fa1eb888b93: Waiting
+f57db2498742: Waiting
+657cbd1ca5eb: Waiting
+debc7a0f3c0e: Waiting
+51c0eb048399: Waiting
+a646b96412c4: Waiting
+1ef6af125488: Waiting
+7d28c7fead3d: Waiting
+a8989ef1691e: Waiting
+7fa1eb888b93: Waiting
+f57db2498742: Waiting
+657cbd1ca5eb: Waiting
+502c2b2ba1f8: Waiting
+f9ec0e1c9ddf: Waiting
+acc8ebc64702: Waiting
+1319c20e1aab: Waiting
+a67ff9d788f9: Waiting
+860519fe3575: Waiting
+1bb3773b3703: Waiting
+f61f3cc67833: Waiting
+ca2678b20700: Waiting
+795d7e54817a: Waiting
+3aaef27f32a8: Waiting
+1e1e35775fca: Waiting
+da6db0608687: Waiting
+04959e241be9: Waiting
+4f4fb700ef54: Waiting
+3a2338ee1812: Waiting
+161bd77ede4a: Waiting
+cd1477544847: Waiting
+3055c10abc1e: Waiting
+321bef660caf: Waiting
+657cbd1ca5eb: Waiting
+502c2b2ba1f8: Waiting
+f9ec0e1c9ddf: Waiting
+acc8ebc64702: Waiting
+1319c20e1aab: Waiting
+a67ff9d788f9: Waiting
+860519fe3575: Waiting
+1bb3773b3703: Waiting
+f61f3cc67833: Waiting
+ca2678b20700: Waiting
+795d7e54817a: Waiting
+3aaef27f32a8: Waiting
+1e1e35775fca: Waiting
+da6db0608687: Waiting
+04959e241be9: Waiting
+4f4fb700ef54: Layer already exists
+3a2338ee1812: Waiting
+161bd77ede4a: Layer already exists
+cd1477544847: Waiting
+3055c10abc1e: Waiting
+321bef660caf: Waiting
+debc7a0f3c0e: Waiting
+51c0eb048399: Waiting
+a646b96412c4: Waiting
+1ef6af125488: Waiting
+7d28c7fead3d: Waiting
+a8989ef1691e: Waiting
+7fa1eb888b93: Waiting
+f57db2498742: Waiting
+1319c20e1aab: Layer already exists
+a67ff9d788f9: Layer already exists
+860519fe3575: Waiting
+1bb3773b3703: Layer already exists
+f61f3cc67833: Layer already exists
+ca2678b20700: Layer already exists
+795d7e54817a: Layer already exists
+3aaef27f32a8: Waiting
+1e1e35775fca: Waiting
+da6db0608687: Waiting
+04959e241be9: Waiting
+3a2338ee1812: Layer already exists
+cd1477544847: Layer already exists
+3055c10abc1e: Waiting
+321bef660caf: Layer already exists
+debc7a0f3c0e: Layer already exists
+51c0eb048399: Layer already exists
+a646b96412c4: Layer already exists
+1ef6af125488: Layer already exists
+7d28c7fead3d: Layer already exists
+a8989ef1691e: Layer already exists
+7fa1eb888b93: Layer already exists
+f57db2498742: Waiting
+657cbd1ca5eb: Layer already exists
+502c2b2ba1f8: Waiting
+f9ec0e1c9ddf: Waiting
+acc8ebc64702: Layer already exists
+3055c10abc1e: Layer already exists
+f57db2498742: Layer already exists
+502c2b2ba1f8: Waiting
+f9ec0e1c9ddf: Layer already exists
+860519fe3575: Layer already exists
+3aaef27f32a8: Layer already exists
+1e1e35775fca: Waiting
+da6db0608687: Layer already exists
+04959e241be9: Layer already exists
+502c2b2ba1f8: Waiting
+1e1e35775fca: Waiting
+502c2b2ba1f8: Waiting
+1e1e35775fca: Pushed
+502c2b2ba1f8: Pushed
+v0.32.0-metax-flagcx0130-release-914dd1d: digest: sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f size: 856
+["codex-metax032@sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f","harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f"]

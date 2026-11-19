@@ -1,0 +1,203 @@
+[run] Run id:   e8151d2d2c584af18b22073d0dfccd58  (FL_RUN_ID)
+[run] Platform: metax
+[run] Device:   c550
+[run] Scope:    e2e
+[run] Cases:    1
+
+[run] E2E parallel: MACA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3
+
+[run] ============================================================
+[run] E2E parallel schedule
+[run]   Total devices : 4  (MACA_VISIBLE_DEVICES)
+[run]   Cases         : 1  (0 will be skipped)
+[run]   Max concurrent: 1  (limited by largest tp)
+[run] ────────────────────────────────────────────────────────────
+[run]   Case                                     devices
+[run]   ──────────────────────────────────────── ───────
+[run]   adaptation_gate/qwen3_6/35b_a3b_tp4_graph       4
+[run] ============================================================
+
+[run] [12:13:38] START  adaptation_gate/qwen3_6/35b_a3b_tp4_graph  MACA_VISIBLE_DEVICES=0,1,2,3  (devices=4, stdout streaming live)
+[run] --- adaptation_gate/qwen3_6/35b_a3b_tp4_graph ---
+[run] Env:     FL_TEST_MODEL=qwen3_6 FL_TEST_CASE=35b_a3b_tp4_graph
+[run] Devices: MACA_VISIBLE_DEVICES=0,1,2,3 HCCL_NPU_SOCKET_PORT_RANGE=18000-18019
+[run] Command: /flagos/bin/python -W ignore::DeprecationWarning -m pytest tests/e2e_tests/adaptation_gate/test_adaptation_gate.py --platform=metax --device=c550 -v --tb=short -s
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0 -- /flagos/bin/python
+cachedir: .pytest_cache
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 5 items
+
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_single] 
+[Setup] Starting vLLM (Qwen3.6-35B-A3B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)
+[Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-35B-A3B --tensor-parallel-size 4 --host 127.0.0.1 --port 40975 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /qualification/src/tools/adaptation-gate-cases/images
+[Setup] Waiting for service to be ready (polling http://127.0.0.1:40975/health)...
+[Setup] Waiting (1/300) ConnectionError
+[Setup] Waiting (2/300) ConnectionError
+[Setup] Waiting (3/300) ConnectionError
+[Setup] Waiting (4/300) ConnectionError
+[Setup] Waiting (5/300) ConnectionError
+[Setup] Waiting (6/300) ConnectionError
+[Setup] Waiting (7/300) ConnectionError
+[Setup] Waiting (8/300) ConnectionError
+[Setup] Waiting (9/300) ConnectionError
+[Setup] Waiting (10/300) ConnectionError
+[Setup] Waiting (11/300) ConnectionError
+[Setup] Waiting (12/300) ConnectionError
+[Setup] Waiting (13/300) ConnectionError
+[Setup] Waiting (14/300) ConnectionError
+[Setup] Waiting (15/300) ConnectionError
+[Setup] Waiting (16/300) ConnectionError
+[Setup] Waiting (17/300) ConnectionError
+[Setup] Waiting (18/300) ConnectionError
+[Setup] Waiting (19/300) ConnectionError
+[Setup] Waiting (20/300) ConnectionError
+[Setup] Waiting (21/300) ConnectionError
+[Setup] Waiting (22/300) ConnectionError
+[Setup] Waiting (23/300) ConnectionError
+[Setup] Waiting (24/300) ConnectionError
+[Setup] Waiting (25/300) ConnectionError
+[Setup] Waiting (26/300) ConnectionError
+[Setup] Waiting (27/300) ConnectionError
+[Setup] Waiting (28/300) ConnectionError
+[Setup] Waiting (29/300) ConnectionError
+[Setup] Waiting (30/300) ConnectionError
+[Setup] Waiting (31/300) ConnectionError
+[Setup] Waiting (32/300) ConnectionError
+[Setup] Waiting (33/300) ConnectionError
+[Setup] Waiting (34/300) ConnectionError
+[Setup] Waiting (35/300) ConnectionError
+[Setup] Waiting (36/300) ConnectionError
+[Setup] Waiting (37/300) ConnectionError
+[Setup] Waiting (38/300) ConnectionError
+[Setup] Waiting (39/300) ConnectionError
+[Setup] Waiting (40/300) ConnectionError
+[Setup] Waiting (41/300) ConnectionError
+[Setup] Waiting (42/300) ConnectionError
+[Setup] Waiting (43/300) ConnectionError
+[Setup] Waiting (44/300) ConnectionError
+[Setup] Waiting (45/300) ConnectionError
+[Setup] Waiting (46/300) ConnectionError
+[Setup] Waiting (47/300) ConnectionError
+[Setup] Waiting (48/300) ConnectionError
+[Setup] Waiting (49/300) ConnectionError
+[Setup] Waiting (50/300) ConnectionError
+[Setup] Waiting (51/300) ConnectionError
+[Setup] Waiting (52/300) ConnectionError
+[Setup] Waiting (53/300) ConnectionError
+[Setup] Waiting (54/300) ConnectionError
+[Setup] Waiting (55/300) ConnectionError
+[Setup] Waiting (56/300) ConnectionError
+[Setup] Waiting (57/300) ConnectionError
+[Setup] Waiting (58/300) ConnectionError
+[Setup] Waiting (59/300) ConnectionError
+[Setup] Waiting (60/300) ConnectionError
+[Setup] Waiting (61/300) ConnectionError
+[Setup] Waiting (62/300) ConnectionError
+[Setup] Waiting (63/300) ConnectionError
+[Setup] Waiting (64/300) ConnectionError
+[Setup] Waiting (65/300) ConnectionError
+[Setup] Waiting (66/300) ConnectionError
+[Setup] Waiting (67/300) ConnectionError
+[Setup] Waiting (68/300) ConnectionError
+[Setup] Waiting (69/300) ConnectionError
+[Setup] Waiting (70/300) ConnectionError
+[Setup] Waiting (71/300) ConnectionError
+[Setup] Waiting (72/300) ConnectionError
+[Setup] Waiting (73/300) ConnectionError
+[Setup] Waiting (74/300) ConnectionError
+[Setup] Waiting (75/300) ConnectionError
+[Setup] Waiting (76/300) ConnectionError
+[Setup] Waiting (77/300) ConnectionError
+[Setup] Waiting (78/300) ConnectionError
+[Setup] Waiting (79/300) ConnectionError
+[Setup] Waiting (80/300) ConnectionError
+[Setup] Waiting (81/300) ConnectionError
+[Setup] Waiting (82/300) ConnectionError
+[Setup] Waiting (83/300) ConnectionError
+[Setup] Waiting (84/300) ConnectionError
+[Setup] Waiting (85/300) ConnectionError
+[Setup] Waiting (86/300) ConnectionError
+[Setup] Waiting (87/300) ConnectionError
+[Setup] Waiting (88/300) ConnectionError
+[Setup] Waiting (89/300) ConnectionError
+[Setup] Waiting (90/300) ConnectionError
+[Setup] Waiting (91/300) ConnectionError
+[Setup] Waiting (92/300) ConnectionError
+[Setup] Waiting (93/300) ConnectionError
+[Setup] Waiting (94/300) ConnectionError
+[Setup] Waiting (95/300) ConnectionError
+[Setup] Waiting (96/300) ConnectionError
+[Setup] Waiting (97/300) ConnectionError
+[Setup] Waiting (98/300) ConnectionError
+[Setup] Waiting (99/300) ConnectionError
+[Setup] Waiting (100/300) ConnectionError
+[Setup] Waiting (101/300) ConnectionError
+[Setup] Waiting (102/300) ConnectionError
+[Setup] Waiting (103/300) ConnectionError
+[Setup] Waiting (104/300) ConnectionError
+[Setup] Waiting (105/300) ConnectionError
+[Setup] Waiting (106/300) ConnectionError
+[Setup] Waiting (107/300) ConnectionError
+[Setup] Waiting (108/300) ConnectionError
+[Setup] Waiting (109/300) ConnectionError
+[Setup] Waiting (110/300) ConnectionError
+[Setup] Waiting (111/300) ConnectionError
+[Setup] Waiting (112/300) ConnectionError
+[Setup] Waiting (113/300) ConnectionError
+[Setup] Waiting (114/300) ConnectionError
+[Setup] Waiting (115/300) ConnectionError
+[Setup] Waiting (116/300) ConnectionError
+[Setup] Waiting (117/300) ConnectionError
+[Setup] Waiting (118/300) ConnectionError
+[Setup] Waiting (119/300) ConnectionError
+[Setup] Waiting (120/300) ConnectionError
+[Setup] Waiting (121/300) ConnectionError
+[Setup] Waiting (122/300) ConnectionError
+[Setup] Waiting (123/300) ConnectionError
+[Setup] Waiting (124/300) ConnectionError
+[Setup] Waiting (125/300) ConnectionError
+[Setup] Waiting (126/300) ConnectionError
+[Setup] Waiting (127/300) ConnectionError
+[Setup] Waiting (128/300) ConnectionError
+[Setup] Waiting (129/300) ConnectionError
+[Setup] Waiting (130/300) ConnectionError
+[Setup] Waiting (131/300) ConnectionError
+[Setup] Waiting (132/300) ConnectionError
+[Setup] Waiting (133/300) ConnectionError
+[Setup] Waiting (134/300) ConnectionError
+[Setup] Waiting (135/300) ConnectionError
+[Setup] vLLM service ready (port=40975)
+[Gate] text_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_concurrent_8] [Gate] text_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_single] [Gate] image_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_concurrent_8] [Gate] image_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[mixed_concurrent_8] [Gate] mixed_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED[Gate] total: PASS; scenarios=5/5; requests=26/26 passed (26 observed); checks=260/260 passed (260 observed)
+
+[Teardown] Shutting down vLLM service...
+
+
+======================== 5 passed in 2175.88s (0:36:15) ========================
+[run] [12:50:11] PASS   adaptation_gate/qwen3_6/35b_a3b_tp4_graph  released MACA_VISIBLE_DEVICES=0,1,2,3
+
+============================================================
+Test Report: metax/c550
+============================================================
+Total: 1  Passed: 1  Failed: 0
+Duration: 2193.0s
+
+Test timing:
+  adaptation_gate/qwen3_6/35b_a3b_tp4_graph      2185s  PASS
+
+Overall: PASSED
+============================================================
+
+[run] JUnit XML: /qualification/reports/35b_a3b_tp4_graph/test-results-metax.xml
+[run] JSON:      /qualification/reports/35b_a3b_tp4_graph/test-results-metax.json

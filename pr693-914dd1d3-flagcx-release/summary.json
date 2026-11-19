@@ -1,0 +1,97 @@
+{
+  "collectives": {
+    "cases_per_rank": 4,
+    "rank_case_results_passed": 16,
+    "skipped": 0,
+    "torchrun_exit": 0,
+    "world_size": 4
+  },
+  "core_sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad",
+  "cpu_regressions": {
+    "device_skipped": 13,
+    "exit": 0,
+    "passed": 252
+  },
+  "execution_rpc_timeout_seconds": 1800,
+  "flagcx_commit": "0beba7aa7e76cc0885a9929f1975857bcd310d5e",
+  "flagos_whitelist_environment_key_present": false,
+  "http_timeout_seconds_per_attempt": 300,
+  "independent_host_digest_pull_and_payload_hashes": "passed",
+  "linux_amd64_config_digest": "sha256:b0da0d49d49d7e466263953b935ee85a8d90061443d5f9662c0cfdfdbffa31f8",
+  "linux_amd64_manifest_digest": "sha256:3f0b024d0475a1f7920506c88a3df3984b2f95df9efcc2f8fb6e16da288eea58",
+  "logical_requests": 104,
+  "new_image_payload_files": [
+    "build/lib/libflagcx.so",
+    "plugin/interservice/flagcx_wrapper.py",
+    "provenance.json"
+  ],
+  "oci_index_digest": "sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f",
+  "openai_sdk_max_retries_default": 2,
+  "parent_release_index": "sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7",
+  "passed": true,
+  "profile_count": 4,
+  "profiles": {
+    "27b_tp4_eager": {
+      "checks": 260,
+      "device_communicator": "native FlagCX core through plugin communicator; Gloo Torch bootstrap/control group",
+      "logical_requests": 26,
+      "max_logical_request_latency_seconds": 111.345,
+      "passed": true,
+      "passed_checks": 260,
+      "passed_requests": 26,
+      "runner": "vllm.v1.worker.gpu.model_runner.GPUModelRunner",
+      "scenarios": 5,
+      "server_log_sanitized_sha256": "d6c46bfb54a00a86387c9f82632ea3404b8f9226095f7e0f87b98893cef04713"
+    },
+    "27b_tp4_graph": {
+      "checks": 260,
+      "device_communicator": "native FlagCX core through plugin communicator; Gloo Torch bootstrap/control group",
+      "logical_requests": 26,
+      "max_logical_request_latency_seconds": 602.804,
+      "passed": true,
+      "passed_checks": 260,
+      "passed_requests": 26,
+      "runner": "vllm.v1.worker.gpu.model_runner.GPUModelRunner",
+      "scenarios": 5,
+      "server_log_sanitized_sha256": "d38063dff69ded5983ea55b3609cf56943d7987e7c68bc01482f838473962468"
+    },
+    "35b_a3b_tp4_eager": {
+      "checks": 260,
+      "device_communicator": "native FlagCX core through plugin communicator; Gloo Torch bootstrap/control group",
+      "logical_requests": 26,
+      "max_logical_request_latency_seconds": 169.984,
+      "passed": true,
+      "passed_checks": 260,
+      "passed_requests": 26,
+      "runner": "vllm.v1.worker.gpu.model_runner.GPUModelRunner",
+      "scenarios": 5,
+      "server_log_sanitized_sha256": "1985a45850ad4b2033e95fb58f8130fc09463af8e5360552f6e78a8eb3b322c4"
+    },
+    "35b_a3b_tp4_graph": {
+      "checks": 260,
+      "device_communicator": "native FlagCX core through plugin communicator; Gloo Torch bootstrap/control group",
+      "logical_requests": 26,
+      "max_logical_request_latency_seconds": 447.269,
+      "passed": true,
+      "passed_checks": 260,
+      "passed_requests": 26,
+      "runner": "vllm.v1.worker.gpu.model_runner.GPUModelRunner",
+      "scenarios": 5,
+      "server_log_sanitized_sha256": "611995edfce24516c3621e3f2c6b300d5ca41fc87c65b6199817f4eddb163541"
+    }
+  },
+  "quality_checks": 1040,
+  "release_tag": "harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-flagcx0130-release-914dd1d",
+  "runner_override_environment_key_present": false,
+  "runtime_source_trees": {
+    ".github": "89d71cf5d286a5ad59e47c96d4b0fdd49260bf43",
+    "docker/metax": "d31edb548a1735141ba42b474d84015ec6013c8d",
+    "tests": "9f2456d2f73dd4f339fa5a820cd2a423264c7190",
+    "vllm_fl": "cb69913dbcdfa78a541f3e5f94f06d4174faa915"
+  },
+  "sanitization": "Physical-host addresses and owned work paths are removed. Repeated full server output is gzip-compressed, with selected runner/communicator/capture/error lines also readable in server-observations.log. Original scenario prompts, outputs and checks are retained. Both controller and Docker exit0 are recorded; individual serving worker process exits are not independently asserted.",
+  "scenarios": 20,
+  "source_base": "045afdc496e33cbbf803235632b32303f0452d0c",
+  "source_commit": "914dd1d30f2212c8cee3184a3dc3cabaa44409a2",
+  "wrapper_sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+}

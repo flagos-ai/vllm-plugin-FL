@@ -1,0 +1,14 @@
+harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f: Pulling from plugin/vllm-plugin-fl
+4f4fb700ef54: Pulling fs layer
+502c2b2ba1f8: Pulling fs layer
+4f4fb700ef54: Already exists
+4f4fb700ef54: Pull complete
+1e1e35775fca: Download complete
+502c2b2ba1f8: Download complete
+502c2b2ba1f8: Pull complete
+Digest: sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f
+Status: Downloaded newer image for harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f
+harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f
+33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad  /opt/FlagCX/build/lib/libflagcx.so
+a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf  /opt/FlagCX/plugin/interservice/flagcx_wrapper.py
+Independent pull and exact payload verification PASS

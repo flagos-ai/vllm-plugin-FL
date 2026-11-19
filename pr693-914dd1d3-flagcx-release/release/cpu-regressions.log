@@ -1,0 +1,40 @@
+source.bundle: OK
+914dd1d30f2212c8cee3184a3dc3cabaa44409a2 refs/heads/qualification
+Processing ./.
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: vllm-plugin-fl
+  Building wheel for vllm-plugin-fl (pyproject.toml): started
+  Building wheel for vllm-plugin-fl (pyproject.toml): finished with status 'done'
+  Created wheel for vllm-plugin-fl: filename=vllm_plugin_fl-0.0.0+g914dd1d30-py3-none-any.whl size=759559 sha256=890560c38a98d67ab299fbcc7e625781d9249d546274c172da5681709bd47615
+  Stored in directory: /tmp/pip-ephem-wheel-cache-hz3cqj6g/wheels/8f/47/26/aaa5616b49a3b160c4d5f93d5db76b3daa3c47d701448d0faf
+Successfully built vllm-plugin-fl
+Installing collected packages: vllm-plugin-fl
+Successfully installed vllm-plugin-fl-0.0.0+g914dd1d30
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+cachedir: /qualification/cache
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 265 items
+
+tests/unit_tests/test_adaptation_gate.py ..........................      [  9%]
+tests/unit_tests/test_runner_selection.py .............................. [ 21%]
+.....................................................................    [ 47%]
+tests/unit_tests/test_metax_ir_priority.py ..                            [ 47%]
+tests/unit_tests/test_ascend_ir_priority.py ...                          [ 49%]
+tests/unit_tests/test_metax_runtime_constraints.py .......               [ 51%]
+tests/unit_tests/test_metax_op_schema_registry.py ......                 [ 53%]
+tests/unit_tests/worker/test_metax_v2_buffers.py sssssssssssss           [ 58%]
+tests/unit_tests/worker/test_metax_v2_contracts.py ..................... [ 66%]
+.....                                                                    [ 68%]
+tests/unit_tests/worker/test_metax_runtime_init.py ..                    [ 69%]
+tests/unit_tests/worker/test_model_runner_merge_032_contracts.py ....... [ 72%]
+...                                                                      [ 73%]
+tests/unit_tests/dispatch/test_metax_native_registration.py .......      [ 75%]
+tests/unit_tests/dispatch/test_metax_runtime_gates.py ................   [ 81%]
+tests/unit_tests/distributed/test_metax_flagcx_policy.py ............... [ 87%]
+.................................                                        [100%]
+
+======================= 252 passed, 13 skipped in 12.63s =======================

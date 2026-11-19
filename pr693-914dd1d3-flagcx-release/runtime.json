@@ -1,0 +1,21 @@
+{
+  "devices": [
+    "MetaX C550",
+    "MetaX C550",
+    "MetaX C550",
+    "MetaX C550"
+  ],
+  "plugin": "/qualification/src/vllm_fl/__init__.py",
+  "provider": {
+    "archive_info": {
+      "hash": "sha256=2e19546b78a838c188b2e4e4f12b1a40b395a13fc75f24fbabb7229e63461656",
+      "hashes": {
+        "sha256": "2e19546b78a838c188b2e4e4f12b1a40b395a13fc75f24fbabb7229e63461656"
+      }
+    },
+    "url": "https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/e00557103e284db5b57168386db60faa051989ef"
+  },
+  "triton": "/opt/flagtree/triton/__init__.py",
+  "vllm": "0.32.0",
+  "vllm_dist": "0.32.0+empty"
+}

@@ -1,0 +1,88 @@
+W1119 12:12:51.805000 109 torch/distributed/run.py:852] 
+W1119 12:12:51.805000 109 torch/distributed/run.py:852] *****************************************
+W1119 12:12:51.805000 109 torch/distributed/run.py:852] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1119 12:12:51.805000 109 torch/distributed/run.py:852] *****************************************
+============================= test session starts =========================================================== test session starts ==============================
+
+============================= test session starts ==============================
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+rootdir: /qualification/srcrootdir: /qualification/src
+
+configfile: pyproject.tomlconfigfile: pyproject.toml
+
+plugins: anyio-4.15.1plugins: anyio-4.15.1
+
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 4 items
+
+tests/functional_tests/distributed/test_metax_flagcx_collectives.py collected 4 items
+
+tests/functional_tests/distributed/test_metax_flagcx_collectives.py collected 4 items
+collected 4 items
+
+tests/functional_tests/distributed/test_metax_flagcx_collectives.py 
+tests/functional_tests/distributed/test_metax_flagcx_collectives.py [W1119 12:13:17.588717848 ProcessGroupGloo.cpp:511] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[W1119 12:13:17.607644151 ProcessGroupGloo.cpp:511] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[W1119 12:13:17.612502918 ProcessGroupGloo.cpp:511] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[W1119 12:13:17.615852427 ProcessGroupGloo.cpp:511] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[Gloo] Rank 0 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
+[Gloo] Rank 1 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
+[Gloo] Rank 3[Gloo] Rank  is connected to 3 peer ranks. 2Expected number of connected peer ranks is :  is connected to 33
+ peer ranks. Expected number of connected peer ranks is : 3
+c550-container:184:184 [0] FLAGCX INFO rank 2 nranks 4 - DONE
+c550-container:182:182 [0] FLAGCX INFO rank 0 nranks 4 - DONE
+c550-container:185:185 [0] FLAGCX INFO rank 3 nranks 4 - DONE
+c550-container:183:183 [0] FLAGCX INFO rank 1 nranks 4 - DONE
+c550-container:182:182 [0] FLAGCX INFO Intra-node topology: localRank=0 localRanks=4
+c550-container:184:184 [0] FLAGCX INFO Intra-node topology: localRank=2 localRanks=4
+c550-container:183:183 [0] FLAGCX INFO Intra-node topology: localRank=1 localRanks=4
+c550-container:185:185 [0] FLAGCX INFO Intra-node topology: localRank=3 localRanks=4
+c550-container:184:184 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:185:185 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:184:184 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:182:182 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:183:183 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:185:185 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:182:182 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:183:183 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+FLAGCX_READY rank=0 world=4 device=cuda:0 library=/opt/FlagCX/build/lib/libflagcx.so wrapper=plugin.interservice.flagcx_wrapper available=True disabled=False
+FLAGCX_READY rank=3 world=4 device=cuda:3 library=/opt/FlagCX/build/lib/libflagcx.so wrapper=plugin.interservice.flagcx_wrapper available=True disabled=False
+FLAGCX_READY rank=1 world=4 device=cuda:1 library=/opt/FlagCX/build/lib/libflagcx.so wrapper=plugin.interservice.flagcx_wrapper available=True disabled=FalseFLAGCX_READY rank=2 world=4 device=cuda:2 library=/opt/FlagCX/build/lib/libflagcx.so wrapper=plugin.interservice.flagcx_wrapper available=True disabled=False
+
+FLAGCX_EAGER_PASS rank=3 world=4 dtype=torch.float32
+FLAGCX_EAGER_PASS rank=0 world=4 dtype=torch.float32
+FLAGCX_EAGER_PASS rank=1 world=4 dtype=torch.float32FLAGCX_EAGER_PASS rank=2 world=4 dtype=torch.float32
+
+....FLAGCX_EAGER_PASS rank=1 world=4 dtype=torch.bfloat16
+FLAGCX_EAGER_PASS rank=3 world=4 dtype=torch.bfloat16
+FLAGCX_EAGER_PASS rank=0 world=4 dtype=torch.bfloat16
+FLAGCX_EAGER_PASS rank=2 world=4 dtype=torch.bfloat16
+....FLAGCX_GRAPH_PASS rank=0 world=4 dtype=torch.float32
+FLAGCX_GRAPH_PASS rank=1 world=4 dtype=torch.float32
+FLAGCX_GRAPH_PASS rank=2 world=4 dtype=torch.float32
+FLAGCX_GRAPH_PASS rank=3 world=4 dtype=torch.float32
+....FLAGCX_GRAPH_PASS rank=3 world=4 dtype=torch.bfloat16FLAGCX_GRAPH_PASS rank=1 world=4 dtype=torch.bfloat16FLAGCX_GRAPH_PASS rank=0 world=4 dtype=torch.bfloat16
+
+FLAGCX_GRAPH_PASS rank=2 world=4 dtype=torch.bfloat16
+
+....
+
+============================== 4 passed in 16.23s ==============================
+
+
+============================== 4 passed in 16.24s ==============================
+
+
+
+============================== 4 passed in 16.25s ==============================
+
+============================== 4 passed in 16.25s ==============================

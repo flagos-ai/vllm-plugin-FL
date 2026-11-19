@@ -1,0 +1,85 @@
+(Worker pid=1695) INFO 11-19 12:15:24 [parallel_state.py:1906] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_07df67e6a282434e8f21fc1c62be6f45 backend=flagcx
+(Worker pid=1694) INFO 11-19 12:15:24 [parallel_state.py:1906] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_07df67e6a282434e8f21fc1c62be6f45 backend=flagcx
+(Worker pid=1693) INFO 11-19 12:15:24 [parallel_state.py:1906] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_07df67e6a282434e8f21fc1c62be6f45 backend=flagcx
+(Worker pid=1695) WARNING 11-19 12:15:24 [parallel_state.py:1919] Distributed backend flagcx is not available; falling back to gloo.
+(Worker pid=1694) WARNING 11-19 12:15:24 [parallel_state.py:1919] Distributed backend flagcx is not available; falling back to gloo.
+(Worker pid=1693) WARNING 11-19 12:15:24 [parallel_state.py:1919] Distributed backend flagcx is not available; falling back to gloo.
+(Worker pid=1692) INFO 11-19 12:15:24 [parallel_state.py:1906] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_07df67e6a282434e8f21fc1c62be6f45 backend=flagcx
+(Worker pid=1692) WARNING 11-19 12:15:24 [parallel_state.py:1919] Distributed backend flagcx is not available; falling back to gloo.
+c550-container:1694:1694 [0] FLAGCX INFO rank 2 nranks 4 - DONE
+c550-container:1692:1692 [0] FLAGCX INFO rank 0 nranks 4 - DONE
+c550-container:1695:1695 [0] FLAGCX INFO rank 3 nranks 4 - DONE
+c550-container:1693:1693 [0] FLAGCX INFO rank 1 nranks 4 - DONE
+c550-container:1693:1693 [0] FLAGCX INFO Intra-node topology: localRank=1 localRanks=4
+c550-container:1694:1694 [0] FLAGCX INFO Intra-node topology: localRank=2 localRanks=4
+c550-container:1692:1692 [0] FLAGCX INFO Intra-node topology: localRank=0 localRanks=4
+c550-container:1695:1695 [0] FLAGCX INFO Intra-node topology: localRank=3 localRanks=4
+c550-container:1694:1694 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:1695:1695 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:1694:1694 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:1692:1692 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:1693:1693 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:1695:1695 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:1692:1692 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:1693:1693 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:1694:1694 [0] FLAGCX INFO rank 2 nranks 4 - DONE
+c550-container:1692:1692 [0] FLAGCX INFO rank 0 nranks 4 - DONE
+c550-container:1695:1695 [0] FLAGCX INFO rank 3 nranks 4 - DONE
+c550-container:1693:1693 [0] FLAGCX INFO rank 1 nranks 4 - DONE
+c550-container:1693:1693 [0] FLAGCX INFO Intra-node topology: localRank=1 localRanks=4
+c550-container:1695:1695 [0] FLAGCX INFO Intra-node topology: localRank=3 localRanks=4
+c550-container:1692:1692 [0] FLAGCX INFO Intra-node topology: localRank=0 localRanks=4
+c550-container:1694:1694 [0] FLAGCX INFO Intra-node topology: localRank=2 localRanks=4
+c550-container:1695:1695 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:1693:1693 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:1694:1694 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:1695:1695 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:1692:1692 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:1693:1693 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:1694:1694 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:1692:1692 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+(Worker pid=1692) INFO 11-19 12:15:26 [metax_v2.py:46] MetaX V2 uses upstream NonUvaBuffer: no native mapped CPU-view kernel.
+(Worker pid=1692) INFO 11-19 12:15:27 [worker.py:598] MetaX V2 model runner: vllm.v1.worker.gpu.model_runner.GPUModelRunner
+Capturing CUDA graphs (PIECEWISE):   0%|          | 0/9 [00:00<?, ?it/s](EngineCore pid=1283) INFO 11-19 12:25:56 [shm_broadcast.py:871] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+Capturing CUDA graphs (PIECEWISE):  11%|█         | 1/9 [01:49<14:38, 109.86s/it](EngineCore pid=1283) INFO 11-19 12:27:56 [shm_broadcast.py:871] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+Capturing CUDA graphs (PIECEWISE):  22%|██▏       | 2/9 [03:20<11:31, 98.78s/it] (EngineCore pid=1283) INFO 11-19 12:28:56 [shm_broadcast.py:871] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+Capturing CUDA graphs (PIECEWISE):  33%|███▎      | 3/9 [04:20<08:04, 80.80s/it](EngineCore pid=1283) INFO 11-19 12:29:56 [shm_broadcast.py:871] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+Capturing CUDA graphs (PIECEWISE):  44%|████▍     | 4/9 [05:03<05:29, 65.89s/it]
+Capturing CUDA graphs (PIECEWISE):  56%|█████▌    | 5/9 [05:28<03:25, 51.26s/it](EngineCore pid=1283) INFO 11-19 12:30:56 [shm_broadcast.py:871] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+Capturing CUDA graphs (PIECEWISE):  67%|██████▋   | 6/9 [06:35<02:49, 56.43s/it](EngineCore pid=1283) INFO 11-19 12:31:56 [shm_broadcast.py:871] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+Capturing CUDA graphs (PIECEWISE):  78%|███████▊  | 7/9 [06:57<01:30, 45.23s/it]
+Capturing CUDA graphs (PIECEWISE):  89%|████████▉ | 8/9 [07:19<00:37, 37.81s/it](EngineCore pid=1283) INFO 11-19 12:32:56 [shm_broadcast.py:871] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+Capturing CUDA graphs (PIECEWISE): 100%|██████████| 9/9 [08:25<00:00, 46.84s/it]
+Capturing CUDA graphs (PIECEWISE): 100%|██████████| 9/9 [08:25<00:00, 56.21s/it]
+(Worker_TP3 pid=1695) INFO 11-19 12:33:36 [model_runner.py:1127] Graph capturing finished in 508 secs, took 0.08 GiB
+(Worker_TP1 pid=1693) INFO 11-19 12:33:36 [model_runner.py:1127] Graph capturing finished in 507 secs, took 0.08 GiB
+(Worker_TP2 pid=1694) INFO 11-19 12:33:36 [model_runner.py:1127] Graph capturing finished in 507 secs, took 0.08 GiB
+(Worker_TP0 pid=1692) INFO 11-19 12:33:36 [model_runner.py:1127] Graph capturing finished in 507 secs, took 0.05 GiB
+(EngineCore pid=1283) INFO 11-19 12:33:37 [kv_cache_utils.py:2327] GPU KV cache size: 2,777,088 tokens, Maximum concurrency for 8,192 tokens per request: 339.00x
+Capturing CUDA graphs (PIECEWISE):   0%|          | 0/9 [00:00<?, ?it/s]
+Capturing CUDA graphs (PIECEWISE):  11%|█         | 1/9 [00:00<00:04,  1.83it/s]
+Capturing CUDA graphs (PIECEWISE):  22%|██▏       | 2/9 [00:01<00:03,  1.89it/s]
+Capturing CUDA graphs (PIECEWISE):  33%|███▎      | 3/9 [00:01<00:03,  1.91it/s]
+Capturing CUDA graphs (PIECEWISE):  44%|████▍     | 4/9 [00:02<00:02,  1.94it/s]
+Capturing CUDA graphs (PIECEWISE):  56%|█████▌    | 5/9 [00:02<00:02,  1.91it/s]
+Capturing CUDA graphs (PIECEWISE):  67%|██████▋   | 6/9 [00:03<00:01,  1.87it/s]
+Capturing CUDA graphs (PIECEWISE):  78%|███████▊  | 7/9 [00:03<00:01,  1.88it/s]
+Capturing CUDA graphs (PIECEWISE):  89%|████████▉ | 8/9 [00:04<00:00,  1.87it/s]
+Capturing CUDA graphs (PIECEWISE): 100%|██████████| 9/9 [00:04<00:00,  1.84it/s]
+Capturing CUDA graphs (PIECEWISE): 100%|██████████| 9/9 [00:04<00:00,  1.87it/s]
+(Worker_TP3 pid=1695) INFO 11-19 12:34:03 [model_runner.py:1127] Graph capturing finished in 6 secs, took 0.04 GiB
+(Worker_TP1 pid=1693) INFO 11-19 12:34:03 [model_runner.py:1127] Graph capturing finished in 6 secs, took 0.04 GiB
+(Worker_TP2 pid=1694) INFO 11-19 12:34:03 [model_runner.py:1127] Graph capturing finished in 6 secs, took 0.04 GiB
+(Worker_TP0 pid=1692) INFO 11-19 12:34:03 [model_runner.py:1127] Graph capturing finished in 6 secs, took 0.04 GiB
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+(APIServer pid=863) INFO 11-19 12:36:24 [loggers.py:335] Engine 000: Avg prompt throughput: 5.8 tokens/s, Avg generation throughput: 10.0 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.1%, Prefix cache hit rate: 0.0%
+(APIServer pid=863) INFO 11-19 12:36:34 [loggers.py:335] Engine 000: Avg prompt throughput: 4.7 tokens/s, Avg generation throughput: 9.8 tokens/s, Running: 7 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.4%, Prefix cache hit rate: 0.0%
+(APIServer pid=863) INFO 11-19 12:36:44 [loggers.py:335] Engine 000: Avg prompt throughput: 15.6 tokens/s, Avg generation throughput: 1.8 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=863) INFO 11-19 12:36:54 [loggers.py:335] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=863) INFO 11-19 12:41:24 [loggers.py:335] Engine 000: Avg prompt throughput: 126.3 tokens/s, Avg generation throughput: 0.9 tokens/s, Running: 8 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.4%, Prefix cache hit rate: 0.0%, MM cache hit rate: 11.1%
+(APIServer pid=863) INFO 11-19 12:41:34 [loggers.py:335] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 8 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.4%, Prefix cache hit rate: 0.0%, MM cache hit rate: 11.1%
+(APIServer pid=863) INFO 11-19 12:46:14 [loggers.py:335] Engine 000: Avg prompt throughput: 114.3 tokens/s, Avg generation throughput: 0.7 tokens/s, Running: 8 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.5%, Prefix cache hit rate: 0.0%, MM cache hit rate: 11.1%
+(APIServer pid=863) INFO 11-19 12:46:24 [loggers.py:335] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 8 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.5%, Prefix cache hit rate: 0.0%, MM cache hit rate: 11.1%
+(APIServer pid=863) INFO 11-19 12:48:44 [loggers.py:335] Engine 000: Avg prompt throughput: 189.0 tokens/s, Avg generation throughput: 3.5 tokens/s, Running: 7 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.4%, Prefix cache hit rate: 7.5%, MM cache hit rate: 61.9%
+(APIServer pid=863) INFO 11-19 12:48:54 [loggers.py:335] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 7 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.4%, Prefix cache hit rate: 7.5%, MM cache hit rate: 61.9%

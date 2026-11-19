@@ -1,0 +1,766 @@
+mx-smi  version: 2.3.1
+
+=================== MetaX System Management Interface Log ===================
+Timestamp                                         : Thu Nov 19 20:12:25 2026
+
+Attached GPUs                                     : 8
++---------------------------------------------------------------------------------+
+| MX-SMI 2.3.1                       Kernel Mode Driver Version: 3.8.1            |
+| MACA Version: 3.7.1.5              BIOS Version: 1.29.1.0                       |
+|------------------+-----------------+---------------------+----------------------|
+| Board       Name | GPU   Persist-M | Bus-id              | GPU-Util      sGPU-M |
+| Pwr:Usage/Cap    | Temp       Perf | Memory-Usage        | GPU-State            |
+|==================+=================+=====================+======================|
+| 0     MetaX C550 | 0           Off | 0000:2b:00.0        | 0%          Disabled |
+| 95W / 450W       | 38C          P0 | 858/65536 MiB       | Available            |
++------------------+-----------------+---------------------+----------------------+
+| 1     MetaX C550 | 1           Off | 0000:3a:00.0        | 0%          Disabled |
+| 96W / 450W       | 39C          P0 | 858/65536 MiB       | Available            |
++------------------+-----------------+---------------------+----------------------+
+| 2     MetaX C550 | 2           Off | 0000:4d:00.0        | 0%          Disabled |
+| 96W / 450W       | 39C          P0 | 858/65536 MiB       | Available            |
++------------------+-----------------+---------------------+----------------------+
+| 3     MetaX C550 | 3           Off | 0000:5c:00.0        | 0%          Disabled |
+| 94W / 450W       | 38C          P0 | 858/65536 MiB       | Available            |
++------------------+-----------------+---------------------+----------------------+
+| 4     MetaX C550 | 4           Off | 0000:aa:00.0        | 0%          Disabled |
+| 95W / 450W       | 38C          P0 | 858/65536 MiB       | Available            |
++------------------+-----------------+---------------------+----------------------+
+| 5     MetaX C550 | 5           Off | 0000:ba:00.0        | 0%          Disabled |
+| 94W / 450W       | 38C          P0 | 858/65536 MiB       | Available            |
++------------------+-----------------+---------------------+----------------------+
+| 6     MetaX C550 | 6           Off | 0000:ca:00.0        | 0%          Disabled |
+| 96W / 450W       | 39C          P0 | 858/65536 MiB       | Available            |
++------------------+-----------------+---------------------+----------------------+
+| 7     MetaX C550 | 7           Off | 0000:da:00.0        | 0%          Disabled |
+| 94W / 450W       | 38C          P0 | 858/65536 MiB       | Available            |
++------------------+-----------------+---------------------+----------------------+
+
++---------------------------------------------------------------------------------+
+| Process:                                                                        |
+|  GPU                    PID         Process Name                 GPU Memory     |
+|                                                                  Usage(MiB)     |
+|=================================================================================|
+|  no process found                                                               |
++---------------------------------------------------------------------------------+
+
+End of Log
+source.bundle: OK
+sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f
+Processing ./.
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: vllm-plugin-fl
+  Building wheel for vllm-plugin-fl (pyproject.toml): started
+  Building wheel for vllm-plugin-fl (pyproject.toml): finished with status 'done'
+  Created wheel for vllm-plugin-fl: filename=vllm_plugin_fl-0.0.0+g914dd1d30-py3-none-any.whl size=759559 sha256=5ebe654a3be4aef2972690936efc4494dd6c21813b0e6df56e74b2d1cf6ac4dd
+  Stored in directory: /tmp/pip-ephem-wheel-cache-4p3a3d6t/wheels/8f/47/26/aaa5616b49a3b160c4d5f93d5db76b3daa3c47d701448d0faf
+Successfully built vllm-plugin-fl
+Installing collected packages: vllm-plugin-fl
+Successfully installed vllm-plugin-fl-0.0.0+g914dd1d30
+RUNTIME {"provider": {"archive_info": {"hash": "sha256=2e19546b78a838c188b2e4e4f12b1a40b395a13fc75f24fbabb7229e63461656", "hashes": {"sha256": "2e19546b78a838c188b2e4e4f12b1a40b395a13fc75f24fbabb7229e63461656"}}, "url": "https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/e00557103e284db5b57168386db60faa051989ef"}, "vllm": "0.32.0", "vllm_dist": "0.32.0+empty", "triton": "/opt/flagtree/triton/__init__.py", "plugin": "/qualification/src/vllm_fl/__init__.py", "devices": ["MetaX C550", "MetaX C550", "MetaX C550", "MetaX C550"]}
+W1119 12:12:51.805000 109 torch/distributed/run.py:852] 
+W1119 12:12:51.805000 109 torch/distributed/run.py:852] *****************************************
+W1119 12:12:51.805000 109 torch/distributed/run.py:852] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1119 12:12:51.805000 109 torch/distributed/run.py:852] *****************************************
+============================= test session starts =========================================================== test session starts ==============================
+
+============================= test session starts ==============================
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+rootdir: /qualification/srcrootdir: /qualification/src
+
+configfile: pyproject.tomlconfigfile: pyproject.toml
+
+plugins: anyio-4.15.1plugins: anyio-4.15.1
+
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 4 items
+
+tests/functional_tests/distributed/test_metax_flagcx_collectives.py collected 4 items
+
+tests/functional_tests/distributed/test_metax_flagcx_collectives.py collected 4 items
+collected 4 items
+
+tests/functional_tests/distributed/test_metax_flagcx_collectives.py 
+tests/functional_tests/distributed/test_metax_flagcx_collectives.py [W1119 12:13:17.588717848 ProcessGroupGloo.cpp:511] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[W1119 12:13:17.607644151 ProcessGroupGloo.cpp:511] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[W1119 12:13:17.612502918 ProcessGroupGloo.cpp:511] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[W1119 12:13:17.615852427 ProcessGroupGloo.cpp:511] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[Gloo] Rank 0 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
+[Gloo] Rank 1 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
+[Gloo] Rank 3[Gloo] Rank  is connected to 3 peer ranks. 2Expected number of connected peer ranks is :  is connected to 33
+ peer ranks. Expected number of connected peer ranks is : 3
+c550-container:184:184 [0] FLAGCX INFO rank 2 nranks 4 - DONE
+c550-container:182:182 [0] FLAGCX INFO rank 0 nranks 4 - DONE
+c550-container:185:185 [0] FLAGCX INFO rank 3 nranks 4 - DONE
+c550-container:183:183 [0] FLAGCX INFO rank 1 nranks 4 - DONE
+c550-container:182:182 [0] FLAGCX INFO Intra-node topology: localRank=0 localRanks=4
+c550-container:184:184 [0] FLAGCX INFO Intra-node topology: localRank=2 localRanks=4
+c550-container:183:183 [0] FLAGCX INFO Intra-node topology: localRank=1 localRanks=4
+c550-container:185:185 [0] FLAGCX INFO Intra-node topology: localRank=3 localRanks=4
+c550-container:184:184 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:185:185 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:184:184 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:182:182 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:183:183 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+c550-container:185:185 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:182:182 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+c550-container:183:183 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+FLAGCX_READY rank=0 world=4 device=cuda:0 library=/opt/FlagCX/build/lib/libflagcx.so wrapper=plugin.interservice.flagcx_wrapper available=True disabled=False
+FLAGCX_READY rank=3 world=4 device=cuda:3 library=/opt/FlagCX/build/lib/libflagcx.so wrapper=plugin.interservice.flagcx_wrapper available=True disabled=False
+FLAGCX_READY rank=1 world=4 device=cuda:1 library=/opt/FlagCX/build/lib/libflagcx.so wrapper=plugin.interservice.flagcx_wrapper available=True disabled=FalseFLAGCX_READY rank=2 world=4 device=cuda:2 library=/opt/FlagCX/build/lib/libflagcx.so wrapper=plugin.interservice.flagcx_wrapper available=True disabled=False
+
+FLAGCX_EAGER_PASS rank=3 world=4 dtype=torch.float32
+FLAGCX_EAGER_PASS rank=0 world=4 dtype=torch.float32
+FLAGCX_EAGER_PASS rank=1 world=4 dtype=torch.float32FLAGCX_EAGER_PASS rank=2 world=4 dtype=torch.float32
+
+....FLAGCX_EAGER_PASS rank=1 world=4 dtype=torch.bfloat16
+FLAGCX_EAGER_PASS rank=3 world=4 dtype=torch.bfloat16
+FLAGCX_EAGER_PASS rank=0 world=4 dtype=torch.bfloat16
+FLAGCX_EAGER_PASS rank=2 world=4 dtype=torch.bfloat16
+....FLAGCX_GRAPH_PASS rank=0 world=4 dtype=torch.float32
+FLAGCX_GRAPH_PASS rank=1 world=4 dtype=torch.float32
+FLAGCX_GRAPH_PASS rank=2 world=4 dtype=torch.float32
+FLAGCX_GRAPH_PASS rank=3 world=4 dtype=torch.float32
+....FLAGCX_GRAPH_PASS rank=3 world=4 dtype=torch.bfloat16FLAGCX_GRAPH_PASS rank=1 world=4 dtype=torch.bfloat16FLAGCX_GRAPH_PASS rank=0 world=4 dtype=torch.bfloat16
+
+FLAGCX_GRAPH_PASS rank=2 world=4 dtype=torch.bfloat16
+
+....
+
+============================== 4 passed in 16.23s ==============================
+
+
+============================== 4 passed in 16.24s ==============================
+
+
+
+============================== 4 passed in 16.25s ==============================
+
+============================== 4 passed in 16.25s ==============================
+[run] Run id:   e8151d2d2c584af18b22073d0dfccd58  (FL_RUN_ID)
+[run] Platform: metax
+[run] Device:   c550
+[run] Scope:    e2e
+[run] Cases:    1
+
+[run] E2E parallel: MACA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3
+
+[run] ============================================================
+[run] E2E parallel schedule
+[run]   Total devices : 4  (MACA_VISIBLE_DEVICES)
+[run]   Cases         : 1  (0 will be skipped)
+[run]   Max concurrent: 1  (limited by largest tp)
+[run] ────────────────────────────────────────────────────────────
+[run]   Case                                     devices
+[run]   ──────────────────────────────────────── ───────
+[run]   adaptation_gate/qwen3_6/35b_a3b_tp4_graph       4
+[run] ============================================================
+
+[run] [12:13:38] START  adaptation_gate/qwen3_6/35b_a3b_tp4_graph  MACA_VISIBLE_DEVICES=0,1,2,3  (devices=4, stdout streaming live)
+[run] --- adaptation_gate/qwen3_6/35b_a3b_tp4_graph ---
+[run] Env:     FL_TEST_MODEL=qwen3_6 FL_TEST_CASE=35b_a3b_tp4_graph
+[run] Devices: MACA_VISIBLE_DEVICES=0,1,2,3 HCCL_NPU_SOCKET_PORT_RANGE=18000-18019
+[run] Command: /flagos/bin/python -W ignore::DeprecationWarning -m pytest tests/e2e_tests/adaptation_gate/test_adaptation_gate.py --platform=metax --device=c550 -v --tb=short -s
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0 -- /flagos/bin/python
+cachedir: .pytest_cache
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 5 items
+
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_single] 
+[Setup] Starting vLLM (Qwen3.6-35B-A3B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)
+[Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-35B-A3B --tensor-parallel-size 4 --host 127.0.0.1 --port 40975 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /qualification/src/tools/adaptation-gate-cases/images
+[Setup] Waiting for service to be ready (polling http://127.0.0.1:40975/health)...
+[Setup] Waiting (1/300) ConnectionError
+[Setup] Waiting (2/300) ConnectionError
+[Setup] Waiting (3/300) ConnectionError
+[Setup] Waiting (4/300) ConnectionError
+[Setup] Waiting (5/300) ConnectionError
+[Setup] Waiting (6/300) ConnectionError
+[Setup] Waiting (7/300) ConnectionError
+[Setup] Waiting (8/300) ConnectionError
+[Setup] Waiting (9/300) ConnectionError
+[Setup] Waiting (10/300) ConnectionError
+[Setup] Waiting (11/300) ConnectionError
+[Setup] Waiting (12/300) ConnectionError
+[Setup] Waiting (13/300) ConnectionError
+[Setup] Waiting (14/300) ConnectionError
+[Setup] Waiting (15/300) ConnectionError
+[Setup] Waiting (16/300) ConnectionError
+[Setup] Waiting (17/300) ConnectionError
+[Setup] Waiting (18/300) ConnectionError
+[Setup] Waiting (19/300) ConnectionError
+[Setup] Waiting (20/300) ConnectionError
+[Setup] Waiting (21/300) ConnectionError
+[Setup] Waiting (22/300) ConnectionError
+[Setup] Waiting (23/300) ConnectionError
+[Setup] Waiting (24/300) ConnectionError
+[Setup] Waiting (25/300) ConnectionError
+[Setup] Waiting (26/300) ConnectionError
+[Setup] Waiting (27/300) ConnectionError
+[Setup] Waiting (28/300) ConnectionError
+[Setup] Waiting (29/300) ConnectionError
+[Setup] Waiting (30/300) ConnectionError
+[Setup] Waiting (31/300) ConnectionError
+[Setup] Waiting (32/300) ConnectionError
+[Setup] Waiting (33/300) ConnectionError
+[Setup] Waiting (34/300) ConnectionError
+[Setup] Waiting (35/300) ConnectionError
+[Setup] Waiting (36/300) ConnectionError
+[Setup] Waiting (37/300) ConnectionError
+[Setup] Waiting (38/300) ConnectionError
+[Setup] Waiting (39/300) ConnectionError
+[Setup] Waiting (40/300) ConnectionError
+[Setup] Waiting (41/300) ConnectionError
+[Setup] Waiting (42/300) ConnectionError
+[Setup] Waiting (43/300) ConnectionError
+[Setup] Waiting (44/300) ConnectionError
+[Setup] Waiting (45/300) ConnectionError
+[Setup] Waiting (46/300) ConnectionError
+[Setup] Waiting (47/300) ConnectionError
+[Setup] Waiting (48/300) ConnectionError
+[Setup] Waiting (49/300) ConnectionError
+[Setup] Waiting (50/300) ConnectionError
+[Setup] Waiting (51/300) ConnectionError
+[Setup] Waiting (52/300) ConnectionError
+[Setup] Waiting (53/300) ConnectionError
+[Setup] Waiting (54/300) ConnectionError
+[Setup] Waiting (55/300) ConnectionError
+[Setup] Waiting (56/300) ConnectionError
+[Setup] Waiting (57/300) ConnectionError
+[Setup] Waiting (58/300) ConnectionError
+[Setup] Waiting (59/300) ConnectionError
+[Setup] Waiting (60/300) ConnectionError
+[Setup] Waiting (61/300) ConnectionError
+[Setup] Waiting (62/300) ConnectionError
+[Setup] Waiting (63/300) ConnectionError
+[Setup] Waiting (64/300) ConnectionError
+[Setup] Waiting (65/300) ConnectionError
+[Setup] Waiting (66/300) ConnectionError
+[Setup] Waiting (67/300) ConnectionError
+[Setup] Waiting (68/300) ConnectionError
+[Setup] Waiting (69/300) ConnectionError
+[Setup] Waiting (70/300) ConnectionError
+[Setup] Waiting (71/300) ConnectionError
+[Setup] Waiting (72/300) ConnectionError
+[Setup] Waiting (73/300) ConnectionError
+[Setup] Waiting (74/300) ConnectionError
+[Setup] Waiting (75/300) ConnectionError
+[Setup] Waiting (76/300) ConnectionError
+[Setup] Waiting (77/300) ConnectionError
+[Setup] Waiting (78/300) ConnectionError
+[Setup] Waiting (79/300) ConnectionError
+[Setup] Waiting (80/300) ConnectionError
+[Setup] Waiting (81/300) ConnectionError
+[Setup] Waiting (82/300) ConnectionError
+[Setup] Waiting (83/300) ConnectionError
+[Setup] Waiting (84/300) ConnectionError
+[Setup] Waiting (85/300) ConnectionError
+[Setup] Waiting (86/300) ConnectionError
+[Setup] Waiting (87/300) ConnectionError
+[Setup] Waiting (88/300) ConnectionError
+[Setup] Waiting (89/300) ConnectionError
+[Setup] Waiting (90/300) ConnectionError
+[Setup] Waiting (91/300) ConnectionError
+[Setup] Waiting (92/300) ConnectionError
+[Setup] Waiting (93/300) ConnectionError
+[Setup] Waiting (94/300) ConnectionError
+[Setup] Waiting (95/300) ConnectionError
+[Setup] Waiting (96/300) ConnectionError
+[Setup] Waiting (97/300) ConnectionError
+[Setup] Waiting (98/300) ConnectionError
+[Setup] Waiting (99/300) ConnectionError
+[Setup] Waiting (100/300) ConnectionError
+[Setup] Waiting (101/300) ConnectionError
+[Setup] Waiting (102/300) ConnectionError
+[Setup] Waiting (103/300) ConnectionError
+[Setup] Waiting (104/300) ConnectionError
+[Setup] Waiting (105/300) ConnectionError
+[Setup] Waiting (106/300) ConnectionError
+[Setup] Waiting (107/300) ConnectionError
+[Setup] Waiting (108/300) ConnectionError
+[Setup] Waiting (109/300) ConnectionError
+[Setup] Waiting (110/300) ConnectionError
+[Setup] Waiting (111/300) ConnectionError
+[Setup] Waiting (112/300) ConnectionError
+[Setup] Waiting (113/300) ConnectionError
+[Setup] Waiting (114/300) ConnectionError
+[Setup] Waiting (115/300) ConnectionError
+[Setup] Waiting (116/300) ConnectionError
+[Setup] Waiting (117/300) ConnectionError
+[Setup] Waiting (118/300) ConnectionError
+[Setup] Waiting (119/300) ConnectionError
+[Setup] Waiting (120/300) ConnectionError
+[Setup] Waiting (121/300) ConnectionError
+[Setup] Waiting (122/300) ConnectionError
+[Setup] Waiting (123/300) ConnectionError
+[Setup] Waiting (124/300) ConnectionError
+[Setup] Waiting (125/300) ConnectionError
+[Setup] Waiting (126/300) ConnectionError
+[Setup] Waiting (127/300) ConnectionError
+[Setup] Waiting (128/300) ConnectionError
+[Setup] Waiting (129/300) ConnectionError
+[Setup] Waiting (130/300) ConnectionError
+[Setup] Waiting (131/300) ConnectionError
+[Setup] Waiting (132/300) ConnectionError
+[Setup] Waiting (133/300) ConnectionError
+[Setup] Waiting (134/300) ConnectionError
+[Setup] Waiting (135/300) ConnectionError
+[Setup] vLLM service ready (port=40975)
+[Gate] text_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_concurrent_8] [Gate] text_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_single] [Gate] image_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_concurrent_8] [Gate] image_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[mixed_concurrent_8] [Gate] mixed_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED[Gate] total: PASS; scenarios=5/5; requests=26/26 passed (26 observed); checks=260/260 passed (260 observed)
+
+[Teardown] Shutting down vLLM service...
+
+
+======================== 5 passed in 2175.88s (0:36:15) ========================
+[run] [12:50:11] PASS   adaptation_gate/qwen3_6/35b_a3b_tp4_graph  released MACA_VISIBLE_DEVICES=0,1,2,3
+
+============================================================
+Test Report: metax/c550
+============================================================
+Total: 1  Passed: 1  Failed: 0
+Duration: 2193.0s
+
+Test timing:
+  adaptation_gate/qwen3_6/35b_a3b_tp4_graph      2185s  PASS
+
+Overall: PASSED
+============================================================
+
+[run] JUnit XML: /qualification/reports/35b_a3b_tp4_graph/test-results-metax.xml
+[run] JSON:      /qualification/reports/35b_a3b_tp4_graph/test-results-metax.json
+{"checks": 260, "logical_requests": 26, "passed": true, "passed_checks": 260, "passed_requests": 26}
+[run] Run id:   7242a6535a1c4df0bc607b397dec513e  (FL_RUN_ID)
+[run] Platform: metax
+[run] Device:   c550
+[run] Scope:    e2e
+[run] Cases:    1
+
+[run] E2E parallel: MACA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3
+
+[run] ============================================================
+[run] E2E parallel schedule
+[run]   Total devices : 4  (MACA_VISIBLE_DEVICES)
+[run]   Cases         : 1  (0 will be skipped)
+[run]   Max concurrent: 1  (limited by largest tp)
+[run] ────────────────────────────────────────────────────────────
+[run]   Case                                     devices
+[run]   ──────────────────────────────────────── ───────
+[run]   adaptation_gate/qwen3_6/35b_a3b_tp4_eager       4
+[run] ============================================================
+
+[run] [12:50:20] START  adaptation_gate/qwen3_6/35b_a3b_tp4_eager  MACA_VISIBLE_DEVICES=0,1,2,3  (devices=4, stdout streaming live)
+[run] --- adaptation_gate/qwen3_6/35b_a3b_tp4_eager ---
+[run] Env:     FL_TEST_MODEL=qwen3_6 FL_TEST_CASE=35b_a3b_tp4_eager
+[run] Devices: MACA_VISIBLE_DEVICES=0,1,2,3 HCCL_NPU_SOCKET_PORT_RANGE=18000-18019
+[run] Command: /flagos/bin/python -W ignore::DeprecationWarning -m pytest tests/e2e_tests/adaptation_gate/test_adaptation_gate.py --platform=metax --device=c550 -v --tb=short -s
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0 -- /flagos/bin/python
+cachedir: .pytest_cache
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 5 items
+
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_single] 
+[Setup] Starting vLLM (Qwen3.6-35B-A3B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)
+[Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-35B-A3B --tensor-parallel-size 4 --host 127.0.0.1 --port 49237 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --enforce-eager --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /qualification/src/tools/adaptation-gate-cases/images
+[Setup] Waiting for service to be ready (polling http://127.0.0.1:49237/health)...
+[Setup] Waiting (1/300) ConnectionError
+[Setup] Waiting (2/300) ConnectionError
+[Setup] Waiting (3/300) ConnectionError
+[Setup] Waiting (4/300) ConnectionError
+[Setup] Waiting (5/300) ConnectionError
+[Setup] Waiting (6/300) ConnectionError
+[Setup] Waiting (7/300) ConnectionError
+[Setup] Waiting (8/300) ConnectionError
+[Setup] Waiting (9/300) ConnectionError
+[Setup] Waiting (10/300) ConnectionError
+[Setup] Waiting (11/300) ConnectionError
+[Setup] Waiting (12/300) ConnectionError
+[Setup] Waiting (13/300) ConnectionError
+[Setup] Waiting (14/300) ConnectionError
+[Setup] Waiting (15/300) ConnectionError
+[Setup] Waiting (16/300) ConnectionError
+[Setup] Waiting (17/300) ConnectionError
+[Setup] Waiting (18/300) ConnectionError
+[Setup] Waiting (19/300) ConnectionError
+[Setup] Waiting (20/300) ConnectionError
+[Setup] Waiting (21/300) ConnectionError
+[Setup] Waiting (22/300) ConnectionError
+[Setup] Waiting (23/300) ConnectionError
+[Setup] Waiting (24/300) ConnectionError
+[Setup] Waiting (25/300) ConnectionError
+[Setup] Waiting (26/300) ConnectionError
+[Setup] Waiting (27/300) ConnectionError
+[Setup] Waiting (28/300) ConnectionError
+[Setup] Waiting (29/300) ConnectionError
+[Setup] Waiting (30/300) ConnectionError
+[Setup] Waiting (31/300) ConnectionError
+[Setup] Waiting (32/300) ConnectionError
+[Setup] Waiting (33/300) ConnectionError
+[Setup] Waiting (34/300) ConnectionError
+[Setup] Waiting (35/300) ConnectionError
+[Setup] Waiting (36/300) ConnectionError
+[Setup] vLLM service ready (port=49237)
+[Gate] text_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_concurrent_8] [Gate] text_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_single] [Gate] image_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_concurrent_8] [Gate] image_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[mixed_concurrent_8] [Gate] mixed_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED[Gate] total: PASS; scenarios=5/5; requests=26/26 passed (26 observed); checks=260/260 passed (260 observed)
+
+[Teardown] Shutting down vLLM service...
+
+
+======================== 5 passed in 680.95s (0:11:20) =========================
+[run] [13:01:59] PASS   adaptation_gate/qwen3_6/35b_a3b_tp4_eager  released MACA_VISIBLE_DEVICES=0,1,2,3
+
+============================================================
+Test Report: metax/c550
+============================================================
+Total: 1  Passed: 1  Failed: 0
+Duration: 698.4s
+
+Test timing:
+  adaptation_gate/qwen3_6/35b_a3b_tp4_eager       690s  PASS
+
+Overall: PASSED
+============================================================
+
+[run] JUnit XML: /qualification/reports/35b_a3b_tp4_eager/test-results-metax.xml
+[run] JSON:      /qualification/reports/35b_a3b_tp4_eager/test-results-metax.json
+{"checks": 260, "logical_requests": 26, "passed": true, "passed_checks": 260, "passed_requests": 26}
+[run] Run id:   15697d68e59e41bda3215f79384e2294  (FL_RUN_ID)
+[run] Platform: metax
+[run] Device:   c550
+[run] Scope:    e2e
+[run] Cases:    1
+
+[run] E2E parallel: MACA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3
+
+[run] ============================================================
+[run] E2E parallel schedule
+[run]   Total devices : 4  (MACA_VISIBLE_DEVICES)
+[run]   Cases         : 1  (0 will be skipped)
+[run]   Max concurrent: 1  (limited by largest tp)
+[run] ────────────────────────────────────────────────────────────
+[run]   Case                                     devices
+[run]   ──────────────────────────────────────── ───────
+[run]   adaptation_gate/qwen3_6/27b_tp4_graph          4
+[run] ============================================================
+
+[run] [13:02:08] START  adaptation_gate/qwen3_6/27b_tp4_graph  MACA_VISIBLE_DEVICES=0,1,2,3  (devices=4, stdout streaming live)
+[run] --- adaptation_gate/qwen3_6/27b_tp4_graph ---
+[run] Env:     FL_TEST_MODEL=qwen3_6 FL_TEST_CASE=27b_tp4_graph
+[run] Devices: MACA_VISIBLE_DEVICES=0,1,2,3 HCCL_NPU_SOCKET_PORT_RANGE=18000-18019
+[run] Command: /flagos/bin/python -W ignore::DeprecationWarning -m pytest tests/e2e_tests/adaptation_gate/test_adaptation_gate.py --platform=metax --device=c550 -v --tb=short -s
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0 -- /flagos/bin/python
+cachedir: .pytest_cache
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 5 items
+
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_single] 
+[Setup] Starting vLLM (Qwen3.6-27B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)
+[Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 4 --host 127.0.0.1 --port 51129 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /qualification/src/tools/adaptation-gate-cases/images
+[Setup] Waiting for service to be ready (polling http://127.0.0.1:51129/health)...
+[Setup] Waiting (1/300) ConnectionError
+[Setup] Waiting (2/300) ConnectionError
+[Setup] Waiting (3/300) ConnectionError
+[Setup] Waiting (4/300) ConnectionError
+[Setup] Waiting (5/300) ConnectionError
+[Setup] Waiting (6/300) ConnectionError
+[Setup] Waiting (7/300) ConnectionError
+[Setup] Waiting (8/300) ConnectionError
+[Setup] Waiting (9/300) ConnectionError
+[Setup] Waiting (10/300) ConnectionError
+[Setup] Waiting (11/300) ConnectionError
+[Setup] Waiting (12/300) ConnectionError
+[Setup] Waiting (13/300) ConnectionError
+[Setup] Waiting (14/300) ConnectionError
+[Setup] Waiting (15/300) ConnectionError
+[Setup] Waiting (16/300) ConnectionError
+[Setup] Waiting (17/300) ConnectionError
+[Setup] Waiting (18/300) ConnectionError
+[Setup] Waiting (19/300) ConnectionError
+[Setup] Waiting (20/300) ConnectionError
+[Setup] Waiting (21/300) ConnectionError
+[Setup] Waiting (22/300) ConnectionError
+[Setup] Waiting (23/300) ConnectionError
+[Setup] Waiting (24/300) ConnectionError
+[Setup] Waiting (25/300) ConnectionError
+[Setup] Waiting (26/300) ConnectionError
+[Setup] Waiting (27/300) ConnectionError
+[Setup] Waiting (28/300) ConnectionError
+[Setup] Waiting (29/300) ConnectionError
+[Setup] Waiting (30/300) ConnectionError
+[Setup] Waiting (31/300) ConnectionError
+[Setup] Waiting (32/300) ConnectionError
+[Setup] Waiting (33/300) ConnectionError
+[Setup] Waiting (34/300) ConnectionError
+[Setup] Waiting (35/300) ConnectionError
+[Setup] Waiting (36/300) ConnectionError
+[Setup] Waiting (37/300) ConnectionError
+[Setup] Waiting (38/300) ConnectionError
+[Setup] Waiting (39/300) ConnectionError
+[Setup] Waiting (40/300) ConnectionError
+[Setup] Waiting (41/300) ConnectionError
+[Setup] Waiting (42/300) ConnectionError
+[Setup] Waiting (43/300) ConnectionError
+[Setup] Waiting (44/300) ConnectionError
+[Setup] Waiting (45/300) ConnectionError
+[Setup] Waiting (46/300) ConnectionError
+[Setup] Waiting (47/300) ConnectionError
+[Setup] Waiting (48/300) ConnectionError
+[Setup] Waiting (49/300) ConnectionError
+[Setup] Waiting (50/300) ConnectionError
+[Setup] Waiting (51/300) ConnectionError
+[Setup] Waiting (52/300) ConnectionError
+[Setup] Waiting (53/300) ConnectionError
+[Setup] Waiting (54/300) ConnectionError
+[Setup] Waiting (55/300) ConnectionError
+[Setup] Waiting (56/300) ConnectionError
+[Setup] Waiting (57/300) ConnectionError
+[Setup] Waiting (58/300) ConnectionError
+[Setup] Waiting (59/300) ConnectionError
+[Setup] Waiting (60/300) ConnectionError
+[Setup] Waiting (61/300) ConnectionError
+[Setup] Waiting (62/300) ConnectionError
+[Setup] Waiting (63/300) ConnectionError
+[Setup] Waiting (64/300) ConnectionError
+[Setup] Waiting (65/300) ConnectionError
+[Setup] Waiting (66/300) ConnectionError
+[Setup] Waiting (67/300) ConnectionError
+[Setup] Waiting (68/300) ConnectionError
+[Setup] Waiting (69/300) ConnectionError
+[Setup] Waiting (70/300) ConnectionError
+[Setup] Waiting (71/300) ConnectionError
+[Setup] Waiting (72/300) ConnectionError
+[Setup] Waiting (73/300) ConnectionError
+[Setup] Waiting (74/300) ConnectionError
+[Setup] Waiting (75/300) ConnectionError
+[Setup] Waiting (76/300) ConnectionError
+[Setup] Waiting (77/300) ConnectionError
+[Setup] Waiting (78/300) ConnectionError
+[Setup] Waiting (79/300) ConnectionError
+[Setup] Waiting (80/300) ConnectionError
+[Setup] Waiting (81/300) ConnectionError
+[Setup] Waiting (82/300) ConnectionError
+[Setup] Waiting (83/300) ConnectionError
+[Setup] Waiting (84/300) ConnectionError
+[Setup] Waiting (85/300) ConnectionError
+[Setup] Waiting (86/300) ConnectionError
+[Setup] Waiting (87/300) ConnectionError
+[Setup] Waiting (88/300) ConnectionError
+[Setup] Waiting (89/300) ConnectionError
+[Setup] Waiting (90/300) ConnectionError
+[Setup] Waiting (91/300) ConnectionError
+[Setup] Waiting (92/300) ConnectionError
+[Setup] Waiting (93/300) ConnectionError
+[Setup] Waiting (94/300) ConnectionError
+[Setup] Waiting (95/300) ConnectionError
+[Setup] Waiting (96/300) ConnectionError
+[Setup] Waiting (97/300) ConnectionError
+[Setup] Waiting (98/300) ConnectionError
+[Setup] Waiting (99/300) ConnectionError
+[Setup] Waiting (100/300) ConnectionError
+[Setup] Waiting (101/300) ConnectionError
+[Setup] Waiting (102/300) ConnectionError
+[Setup] Waiting (103/300) ConnectionError
+[Setup] Waiting (104/300) ConnectionError
+[Setup] Waiting (105/300) ConnectionError
+[Setup] Waiting (106/300) ConnectionError
+[Setup] Waiting (107/300) ConnectionError
+[Setup] Waiting (108/300) ConnectionError
+[Setup] Waiting (109/300) ConnectionError
+[Setup] Waiting (110/300) ConnectionError
+[Setup] Waiting (111/300) ConnectionError
+[Setup] Waiting (112/300) ConnectionError
+[Setup] Waiting (113/300) ConnectionError
+[Setup] Waiting (114/300) ConnectionError
+[Setup] Waiting (115/300) ConnectionError
+[Setup] Waiting (116/300) ConnectionError
+[Setup] Waiting (117/300) ConnectionError
+[Setup] Waiting (118/300) ConnectionError
+[Setup] Waiting (119/300) ConnectionError
+[Setup] Waiting (120/300) ConnectionError
+[Setup] Waiting (121/300) ConnectionError
+[Setup] Waiting (122/300) ConnectionError
+[Setup] Waiting (123/300) ConnectionError
+[Setup] Waiting (124/300) ConnectionError
+[Setup] Waiting (125/300) ConnectionError
+[Setup] Waiting (126/300) ConnectionError
+[Setup] Waiting (127/300) ConnectionError
+[Setup] Waiting (128/300) ConnectionError
+[Setup] Waiting (129/300) ConnectionError
+[Setup] Waiting (130/300) ConnectionError
+[Setup] Waiting (131/300) ConnectionError
+[Setup] Waiting (132/300) ConnectionError
+[Setup] Waiting (133/300) ConnectionError
+[Setup] Waiting (134/300) ConnectionError
+[Setup] Waiting (135/300) ConnectionError
+[Setup] Waiting (136/300) ConnectionError
+[Setup] Waiting (137/300) ConnectionError
+[Setup] Waiting (138/300) ConnectionError
+[Setup] Waiting (139/300) ConnectionError
+[Setup] Waiting (140/300) ConnectionError
+[Setup] vLLM service ready (port=51129)
+[Gate] text_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_concurrent_8] [Gate] text_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_single] [Gate] image_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_concurrent_8] [Gate] image_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[mixed_concurrent_8] [Gate] mixed_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED[Gate] total: PASS; scenarios=5/5; requests=26/26 passed (26 observed); checks=260/260 passed (260 observed)
+
+[Teardown] Shutting down vLLM service...
+
+
+======================== 5 passed in 2314.83s (0:38:34) ========================
+[run] [13:41:00] PASS   adaptation_gate/qwen3_6/27b_tp4_graph  released MACA_VISIBLE_DEVICES=0,1,2,3
+
+============================================================
+Test Report: metax/c550
+============================================================
+Total: 1  Passed: 1  Failed: 0
+Duration: 2332.2s
+
+Test timing:
+  adaptation_gate/qwen3_6/27b_tp4_graph          2324s  PASS
+
+Overall: PASSED
+============================================================
+
+[run] JUnit XML: /qualification/reports/27b_tp4_graph/test-results-metax.xml
+[run] JSON:      /qualification/reports/27b_tp4_graph/test-results-metax.json
+{"checks": 260, "logical_requests": 26, "passed": true, "passed_checks": 260, "passed_requests": 26}
+[run] Run id:   ab7ea66fd0ed455dac479010b1988935  (FL_RUN_ID)
+[run] Platform: metax
+[run] Device:   c550
+[run] Scope:    e2e
+[run] Cases:    1
+
+[run] E2E parallel: MACA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3
+
+[run] ============================================================
+[run] E2E parallel schedule
+[run]   Total devices : 4  (MACA_VISIBLE_DEVICES)
+[run]   Cases         : 1  (0 will be skipped)
+[run]   Max concurrent: 1  (limited by largest tp)
+[run] ────────────────────────────────────────────────────────────
+[run]   Case                                     devices
+[run]   ──────────────────────────────────────── ───────
+[run]   adaptation_gate/qwen3_6/27b_tp4_eager          4
+[run] ============================================================
+
+[run] [13:41:10] START  adaptation_gate/qwen3_6/27b_tp4_eager  MACA_VISIBLE_DEVICES=0,1,2,3  (devices=4, stdout streaming live)
+[run] --- adaptation_gate/qwen3_6/27b_tp4_eager ---
+[run] Env:     FL_TEST_MODEL=qwen3_6 FL_TEST_CASE=27b_tp4_eager
+[run] Devices: MACA_VISIBLE_DEVICES=0,1,2,3 HCCL_NPU_SOCKET_PORT_RANGE=18000-18019
+[run] Command: /flagos/bin/python -W ignore::DeprecationWarning -m pytest tests/e2e_tests/adaptation_gate/test_adaptation_gate.py --platform=metax --device=c550 -v --tb=short -s
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0 -- /flagos/bin/python
+cachedir: .pytest_cache
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 5 items
+
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_single] 
+[Setup] Starting vLLM (Qwen3.6-27B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)
+[Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 4 --host 127.0.0.1 --port 55227 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --enforce-eager --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /qualification/src/tools/adaptation-gate-cases/images
+[Setup] Waiting for service to be ready (polling http://127.0.0.1:55227/health)...
+[Setup] Waiting (1/300) ConnectionError
+[Setup] Waiting (2/300) ConnectionError
+[Setup] Waiting (3/300) ConnectionError
+[Setup] Waiting (4/300) ConnectionError
+[Setup] Waiting (5/300) ConnectionError
+[Setup] Waiting (6/300) ConnectionError
+[Setup] Waiting (7/300) ConnectionError
+[Setup] Waiting (8/300) ConnectionError
+[Setup] Waiting (9/300) ConnectionError
+[Setup] Waiting (10/300) ConnectionError
+[Setup] Waiting (11/300) ConnectionError
+[Setup] Waiting (12/300) ConnectionError
+[Setup] Waiting (13/300) ConnectionError
+[Setup] Waiting (14/300) ConnectionError
+[Setup] Waiting (15/300) ConnectionError
+[Setup] Waiting (16/300) ConnectionError
+[Setup] Waiting (17/300) ConnectionError
+[Setup] Waiting (18/300) ConnectionError
+[Setup] Waiting (19/300) ConnectionError
+[Setup] Waiting (20/300) ConnectionError
+[Setup] Waiting (21/300) ConnectionError
+[Setup] Waiting (22/300) ConnectionError
+[Setup] Waiting (23/300) ConnectionError
+[Setup] Waiting (24/300) ConnectionError
+[Setup] Waiting (25/300) ConnectionError
+[Setup] Waiting (26/300) ConnectionError
+[Setup] Waiting (27/300) ConnectionError
+[Setup] Waiting (28/300) ConnectionError
+[Setup] Waiting (29/300) ConnectionError
+[Setup] vLLM service ready (port=55227)
+[Gate] text_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_concurrent_8] [Gate] text_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_single] [Gate] image_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_concurrent_8] [Gate] image_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[mixed_concurrent_8] [Gate] mixed_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED[Gate] total: PASS; scenarios=5/5; requests=26/26 passed (26 observed); checks=260/260 passed (260 observed)
+
+[Teardown] Shutting down vLLM service...
+
+
+======================== 5 passed in 497.28s (0:08:17) =========================
+[run] [13:49:44] PASS   adaptation_gate/qwen3_6/27b_tp4_eager  released MACA_VISIBLE_DEVICES=0,1,2,3
+
+============================================================
+Test Report: metax/c550
+============================================================
+Total: 1  Passed: 1  Failed: 0
+Duration: 514.3s
+
+Test timing:
+  adaptation_gate/qwen3_6/27b_tp4_eager           506s  PASS
+
+Overall: PASSED
+============================================================
+
+[run] JUnit XML: /qualification/reports/27b_tp4_eager/test-results-metax.xml
+[run] JSON:      /qualification/reports/27b_tp4_eager/test-results-metax.json
+{"checks": 260, "logical_requests": 26, "passed": true, "passed_checks": 260, "passed_requests": 26}
+0

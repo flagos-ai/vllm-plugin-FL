@@ -1,0 +1,77 @@
+flagcx-runtime.tar.gz: OK
+runtime/build/lib/libflagcx.so
+runtime/plugin/interservice/flagcx_wrapper.py
+runtime/provenance.json
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.10kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7
+#2 ...
+
+#3 [auth] plugin/vllm-plugin-fl:pull token for harbor.baai.ac.cn
+#3 DONE 0.0s
+
+#2 [internal] load metadata for harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7
+#2 DONE 0.6s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [1/3] FROM harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7
+#5 resolve harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7 done
+#5 ...
+
+#6 [internal] load build context
+#6 transferring context: 19.78MB 0.1s done
+#6 DONE 0.1s
+
+#5 [1/3] FROM harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc28a0284a7fc703cad89dd9041ec19d35b7db59850cf699141f4a3f4b4da6c7
+#5 DONE 0.3s
+
+#7 [2/3] COPY runtime/ /opt/FlagCX/
+#7 DONE 0.0s
+
+#8 [3/3] RUN echo "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad  /opt/FlagCX/build/lib/libflagcx.so" | sha256sum -c -  && echo "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf  /opt/FlagCX/plugin/interservice/flagcx_wrapper.py" | sha256sum -c -
+#8 0.073 /opt/FlagCX/build/lib/libflagcx.so: OK
+#8 0.074 /opt/FlagCX/plugin/interservice/flagcx_wrapper.py: OK
+#8 DONE 0.1s
+
+#9 exporting to image
+#9 exporting layers
+#9 exporting layers 0.7s done
+#9 exporting manifest sha256:3f0b024d0475a1f7920506c88a3df3984b2f95df9efcc2f8fb6e16da288eea58 done
+#9 exporting config sha256:b0da0d49d49d7e466263953b935ee85a8d90061443d5f9662c0cfdfdbffa31f8 done
+#9 exporting attestation manifest sha256:5cced8d24326a505bd0ba8d63ae93b7c6285c5df1413cfe5f6c248e34dfaf44c done
+#9 exporting manifest list sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f done
+#9 naming to docker.io/library/codex-metax032:flagcx0130-release-20261119 done
+#9 unpacking to docker.io/library/codex-metax032:flagcx0130-release-20261119 0.1s done
+#9 DONE 0.9s
+	linux-vdso.so.1 (0x00007ffd34587000)
+	libmccl.so => /opt/maca/lib/libmccl.so (0x00007f2772e00000)
+	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f2772b82000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f27a3eba000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f27a3e8c000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f277296f000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f27a43b7000)
+	libmcToolsExt.so => /opt/maca/lib/libmcToolsExt.so (0x00007f2771a00000)
+	libmccompiler.so => /opt/maca/lib/libmccompiler.so (0x00007f2771400000)
+	libmcruntime.so => /opt/maca/lib/libmcruntime.so (0x00007f2770800000)
+	libmaca_mathlib_host.so => /opt/maca/lib/libmaca_mathlib_host.so (0x00007f2770400000)
+	librt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007f27a3e85000)
+	libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f27a3e7e000)
+	libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f27a3e79000)
+	libmcanalyzer.so.1.10 => /opt/maca/lib/libmcanalyzer.so.1.10 (0x00007f2770000000)
+	libmcpti.so => /opt/maca/lib/libmcpti.so (0x00007f276fa00000)
+	libmchotspot_host.so => /opt/maca/lib/libmchotspot_host.so (0x00007f276f400000)
+	libmchotspot_target.so => /opt/maca/lib/libmchotspot_target.so (0x00007f276f000000)
+	libelf.so.1 => /lib/x86_64-linux-gnu/libelf.so.1 (0x00007f2772950000)
+	libmxc-runtime64.so.1 => /opt/maca/lib/libmxc-runtime64.so.1 (0x00007f276ec00000)
+	libnuma.so.1 => /lib/x86_64-linux-gnu/libnuma.so.1 (0x00007f27a3e69000)
+	libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x00007f2772934000)
+	libzstd.so.1 => /lib/x86_64-linux-gnu/libzstd.so.1 (0x00007f277287a000)
+	libmxkw.so.1 => /opt/maca/lib/libmxkw.so.1 (0x00007f276e800000)
+CPU_ABI_PASS /opt/FlagCX/plugin/interservice/flagcx_wrapper.py /opt/flagtree/triton/__init__.py

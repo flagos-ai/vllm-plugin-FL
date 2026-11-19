@@ -1,0 +1,97 @@
+[run] Run id:   ab7ea66fd0ed455dac479010b1988935  (FL_RUN_ID)
+[run] Platform: metax
+[run] Device:   c550
+[run] Scope:    e2e
+[run] Cases:    1
+
+[run] E2E parallel: MACA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3
+
+[run] ============================================================
+[run] E2E parallel schedule
+[run]   Total devices : 4  (MACA_VISIBLE_DEVICES)
+[run]   Cases         : 1  (0 will be skipped)
+[run]   Max concurrent: 1  (limited by largest tp)
+[run] ────────────────────────────────────────────────────────────
+[run]   Case                                     devices
+[run]   ──────────────────────────────────────── ───────
+[run]   adaptation_gate/qwen3_6/27b_tp4_eager          4
+[run] ============================================================
+
+[run] [13:41:10] START  adaptation_gate/qwen3_6/27b_tp4_eager  MACA_VISIBLE_DEVICES=0,1,2,3  (devices=4, stdout streaming live)
+[run] --- adaptation_gate/qwen3_6/27b_tp4_eager ---
+[run] Env:     FL_TEST_MODEL=qwen3_6 FL_TEST_CASE=27b_tp4_eager
+[run] Devices: MACA_VISIBLE_DEVICES=0,1,2,3 HCCL_NPU_SOCKET_PORT_RANGE=18000-18019
+[run] Command: /flagos/bin/python -W ignore::DeprecationWarning -m pytest tests/e2e_tests/adaptation_gate/test_adaptation_gate.py --platform=metax --device=c550 -v --tb=short -s
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0 -- /flagos/bin/python
+cachedir: .pytest_cache
+rootdir: /qualification/src
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 5 items
+
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_single] 
+[Setup] Starting vLLM (Qwen3.6-27B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)
+[Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 4 --host 127.0.0.1 --port 55227 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --enforce-eager --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /qualification/src/tools/adaptation-gate-cases/images
+[Setup] Waiting for service to be ready (polling http://127.0.0.1:55227/health)...
+[Setup] Waiting (1/300) ConnectionError
+[Setup] Waiting (2/300) ConnectionError
+[Setup] Waiting (3/300) ConnectionError
+[Setup] Waiting (4/300) ConnectionError
+[Setup] Waiting (5/300) ConnectionError
+[Setup] Waiting (6/300) ConnectionError
+[Setup] Waiting (7/300) ConnectionError
+[Setup] Waiting (8/300) ConnectionError
+[Setup] Waiting (9/300) ConnectionError
+[Setup] Waiting (10/300) ConnectionError
+[Setup] Waiting (11/300) ConnectionError
+[Setup] Waiting (12/300) ConnectionError
+[Setup] Waiting (13/300) ConnectionError
+[Setup] Waiting (14/300) ConnectionError
+[Setup] Waiting (15/300) ConnectionError
+[Setup] Waiting (16/300) ConnectionError
+[Setup] Waiting (17/300) ConnectionError
+[Setup] Waiting (18/300) ConnectionError
+[Setup] Waiting (19/300) ConnectionError
+[Setup] Waiting (20/300) ConnectionError
+[Setup] Waiting (21/300) ConnectionError
+[Setup] Waiting (22/300) ConnectionError
+[Setup] Waiting (23/300) ConnectionError
+[Setup] Waiting (24/300) ConnectionError
+[Setup] Waiting (25/300) ConnectionError
+[Setup] Waiting (26/300) ConnectionError
+[Setup] Waiting (27/300) ConnectionError
+[Setup] Waiting (28/300) ConnectionError
+[Setup] Waiting (29/300) ConnectionError
+[Setup] vLLM service ready (port=55227)
+[Gate] text_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[text_concurrent_8] [Gate] text_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_single] [Gate] image_single: PASS; scenarios=1/1; requests=1/1 passed (1 observed); checks=10/10 passed (10 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[image_concurrent_8] [Gate] image_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED
+tests/e2e_tests/adaptation_gate/test_adaptation_gate.py::test_adaptation_gate_scenario[mixed_concurrent_8] [Gate] mixed_concurrent_8: PASS; scenarios=1/1; requests=8/8 passed (8 observed); checks=80/80 passed (80 observed)
+PASSED[Gate] total: PASS; scenarios=5/5; requests=26/26 passed (26 observed); checks=260/260 passed (260 observed)
+
+[Teardown] Shutting down vLLM service...
+
+
+======================== 5 passed in 497.28s (0:08:17) =========================
+[run] [13:49:44] PASS   adaptation_gate/qwen3_6/27b_tp4_eager  released MACA_VISIBLE_DEVICES=0,1,2,3
+
+============================================================
+Test Report: metax/c550
+============================================================
+Total: 1  Passed: 1  Failed: 0
+Duration: 514.3s
+
+Test timing:
+  adaptation_gate/qwen3_6/27b_tp4_eager           506s  PASS
+
+Overall: PASSED
+============================================================
+
+[run] JUnit XML: /qualification/reports/27b_tp4_eager/test-results-metax.xml
+[run] JSON:      /qualification/reports/27b_tp4_eager/test-results-metax.json
