@@ -12,6 +12,8 @@ follow the main KV-cache lifecycle.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, fields as dataclass_fields
 from typing import ClassVar
 
@@ -21,6 +23,7 @@ from torch import nn
 from vllm.config import CacheConfig, VllmConfig
 from vllm.config.cache import CacheDType
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
+from vllm.platforms import current_platform
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionCGSupport,
@@ -34,6 +37,8 @@ from vllm.v1.kv_cache_interface import (
     KVCacheSpec,
     MLAAttentionSpec,
 )
+
+from .qsa_packing import _cached_indexer_pack_rows, _cached_pack_rows
 
 
 def _spec_supports_block_stride_flag() -> bool:
@@ -326,8 +331,7 @@ class QSAMetadataBuilder(AttentionMetadataBuilder[QSAForwardMetadata]):
         # into model forward when the already-resolved global config requests a
         # full graph; otherwise metadata is built eagerly once below.
         self.defer_metadata_to_forward = (
-            _global_full_cudagraph_enabled(vllm_config)
-            and triton_metadata_supported
+            _global_full_cudagraph_enabled(vllm_config) and triton_metadata_supported
         )
         self.token_to_req_buffer = torch.empty(
             max_tokens, dtype=torch.int32, device=device
@@ -376,6 +380,294 @@ class QSAMetadataBuilder(AttentionMetadataBuilder[QSAForwardMetadata]):
             metadata.prepare()
         return metadata
 
+
+# Width is a graph geometry choice, independent of cache allocation/page size.
+_QSA_CAPTURE_COLUMNS: ContextVar[int | None] = ContextVar(
+    "qwen38_qsa_capture_columns", default=None
+)
+
+
+def qsa_column_buckets(capacity: int) -> tuple[int, ...]:
+    if capacity <= 0:
+        return (0,)
+    return tuple(sorted({min(capacity, n) for n in (512, 2048, 8192, capacity)}))
+
+
+def qsa_score_columns(max_seq_len: int, compress_ratio: int, capacity: int) -> int:
+    """Cover all visible complete groups using a trusted CPU length bound."""
+    if max_seq_len < 0 or compress_ratio <= 0 or capacity < 0:
+        raise ValueError("invalid QSA score geometry")
+    required = max_seq_len // compress_ratio
+    if required > capacity:
+        raise ValueError("QSA visible groups exceed the allocated cache capacity")
+    return next(n for n in qsa_column_buckets(capacity) if n >= required)
+
+
+@contextmanager
+def qsa_capture_columns(columns: int):
+    """Only dummy/capture runs may force a width; zero means full capacity."""
+    token = _QSA_CAPTURE_COLUMNS.set(columns)
+    try:
+        yield
+    finally:
+        _QSA_CAPTURE_COLUMNS.reset(token)
+
+
+def qsa_graph_columns(metadata) -> int:
+    if not isinstance(metadata, dict):
+        return 0
+    columns = {
+        m.score_columns
+        for m in metadata.values()
+        if isinstance(m, PreparedQSAForwardMetadata)
+        and m.compress_ratio > 1
+        and m.score_columns is not None
+    }
+    if len(columns) > 1:
+        raise ValueError("QSA layers disagree on the score-width graph key")
+    return next(iter(columns), 0)
+
+
+def qsa_cudagraph_key(batch_descriptor, forward_context):
+    columns = qsa_graph_columns(forward_context.attn_metadata)
+    return (batch_descriptor, columns) if columns else batch_descriptor
+
+
+@dataclass
+class PreparedQSAForwardMetadata(AttentionMetadata):
+    """Common per-forward metadata for one QSA side cache."""
+
+    block_table: torch.Tensor
+    slot_mapping: torch.Tensor
+    seq_lens: torch.Tensor
+    query_start_loc: torch.Tensor
+    token_to_req: torch.Tensor
+    logical_positions: torch.Tensor
+    num_actual_tokens: int
+    storage_block_size: int
+    compress_ratio: int
+    score_columns: int | None = None
+    pack_rows: torch.Tensor | None = None
+    indexer_pack_rows: torch.Tensor | None = None
+    native_workspace: dict[str, torch.Tensor] | None = None
+
+
+class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMetadata]):
+    """Build QSA metadata from vLLM's cache-group-specific common metadata."""
+
+    _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.UNIFORM_BATCH
+
+    def __init__(
+        self,
+        kv_cache_spec: AttentionSpec,
+        layer_names: list[str],
+        vllm_config: VllmConfig,
+        device: torch.device,
+    ) -> None:
+        super().__init__(kv_cache_spec, layer_names, vllm_config, device)
+        self.compress_ratio = (
+            kv_cache_spec.compress_ratio
+            if isinstance(kv_cache_spec, MLAAttentionSpec)
+            else 1
+        )
+        self.storage_block_size = kv_cache_spec.storage_block_size
+        self.fused_metadata_enabled = (
+            vllm_config.additional_config.get("qwen38_fused_qsa_metadata", False)
+            and getattr(current_platform, "vendor_name", None) == "metax"
+            and device.type == "cuda"
+        )
+        self.length_buckets = bool(
+            vllm_config.additional_config.get("qwen38_qsa_length_buckets", False)
+        )
+        self.pack_rows_enabled = (
+            bool(vllm_config.additional_config.get("qwen38_qsa_packing", False))
+            and vllm_config.speculative_config is None
+            and device.type == "cuda"
+        )
+        self.native_attention_enabled = bool(
+            vllm_config.additional_config.get("qwen38_qsa_native_attention", False)
+            and vllm_config.speculative_config is None
+            and getattr(current_platform, "vendor_name", None) == "metax"
+            and device.type == "cuda"
+        )
+        max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+        self.token_to_req_buffer = torch.empty(
+            max_tokens, dtype=torch.int32, device=device
+        )
+        self.arange_buffer = torch.arange(max_tokens, dtype=torch.int64, device=device)
+        self.slot_mapping_buffer = torch.empty(
+            max_tokens, dtype=torch.int64, device=device
+        )
+        self.logical_positions_buffer = torch.empty(
+            max_tokens, dtype=torch.int64, device=device
+        )
+
+    def build(
+        self,
+        common_prefix_len: int,
+        common_attn_metadata: CommonAttentionMetadata,
+        fast_build: bool = False,
+    ) -> PreparedQSAForwardMetadata:
+        del common_prefix_len, fast_build
+        num_tokens = common_attn_metadata.num_actual_tokens
+        token_to_req = self.token_to_req_buffer[:num_tokens]
+        logical_positions = self.logical_positions_buffer[:num_tokens]
+        slot_mapping = (
+            common_attn_metadata.slot_mapping[:num_tokens]
+            if self.compress_ratio == 1
+            else self.slot_mapping_buffer[:num_tokens]
+        )
+        fused = False
+        if self.fused_metadata_enabled:
+            from ..gpu.ops.qsa import build_qsa_forward_metadata
+
+            fused = build_qsa_forward_metadata(
+                token_to_req,
+                common_attn_metadata.query_start_loc,
+                common_attn_metadata.seq_lens,
+                common_attn_metadata.block_table_tensor,
+                common_attn_metadata.slot_mapping[:num_tokens],
+                logical_positions,
+                self.slot_mapping_buffer[:num_tokens],
+                self.storage_block_size,
+                self.compress_ratio,
+                allow_uncompressed=True,
+            )
+        if not fused:
+            token_to_req_fn = getattr(
+                common_attn_metadata, "token_to_req_indices", None
+            )
+            if token_to_req_fn is not None:
+                token_to_req = token_to_req_fn(self.token_to_req_buffer)[:num_tokens]
+            else:
+                # vLLM 0.24 predates the cached convenience method. Reproduce the
+                # same device-side mapping without changing CommonAttentionMetadata.
+                num_mapped = int(common_attn_metadata.query_start_loc_cpu[-1])
+                query_lens = (
+                    common_attn_metadata.query_start_loc[1:]
+                    - common_attn_metadata.query_start_loc[:-1]
+                )
+                mapped = torch.repeat_interleave(
+                    torch.arange(
+                        query_lens.shape[0],
+                        dtype=torch.int32,
+                        device=self.token_to_req_buffer.device,
+                    ),
+                    query_lens,
+                    output_size=num_mapped,
+                )
+                self.token_to_req_buffer[:num_mapped].copy_(mapped)
+                if num_mapped < num_tokens:
+                    self.token_to_req_buffer[num_mapped:num_tokens].zero_()
+                token_to_req = self.token_to_req_buffer[:num_tokens]
+            num_mapped_tokens = int(common_attn_metadata.query_start_loc_cpu[-1])
+            logical_positions = self.logical_positions_buffer[:num_tokens]
+            logical_positions[:num_mapped_tokens].copy_(
+                _logical_positions(
+                    common_attn_metadata.query_start_loc,
+                    common_attn_metadata.seq_lens,
+                    token_to_req[:num_mapped_tokens],
+                    num_mapped_tokens,
+                    self.arange_buffer,
+                )
+            )
+            if num_mapped_tokens < num_tokens:
+                logical_positions[num_mapped_tokens:].fill_(-1)
+            if self.compress_ratio == 1:
+                slot_mapping = common_attn_metadata.slot_mapping[:num_tokens]
+            else:
+                slot_mapping = compressed_qsa_slot_mapping(
+                    common_attn_metadata.block_table_tensor,
+                    token_to_req,
+                    logical_positions,
+                    self.storage_block_size,
+                    self.compress_ratio,
+                    self.slot_mapping_buffer,
+                )
+                slot_mapping.masked_fill_(
+                    common_attn_metadata.slot_mapping[:num_tokens] < 0, -1
+                )
+        columns = None
+        if self.length_buckets and self.compress_ratio > 1:
+            capacity = (
+                common_attn_metadata.block_table_tensor.shape[1]
+                * self.storage_block_size
+            )
+            forced = _QSA_CAPTURE_COLUMNS.get()
+            if forced is not None:
+                columns = capacity if forced == 0 else min(forced, capacity)
+            else:
+                columns = qsa_score_columns(
+                    int(common_attn_metadata.max_seq_len), self.compress_ratio, capacity
+                )
+        native_workspace = None
+        if (
+            getattr(self, "native_attention_enabled", False)
+            and self.compress_ratio == 1
+        ):
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.qsa_native import (
+                native_available,
+            )
+
+            if native_available(self.token_to_req_buffer.device):
+                from .qsa_workspace import prepare_native_qsa_workspace
+
+                native_workspace = prepare_native_qsa_workspace(
+                    num_tokens, self.token_to_req_buffer.device
+                )
+        pack_rows = None
+        seq_cpu = getattr(common_attn_metadata, "seq_lens_cpu_upper_bound", None)
+        if seq_cpu is None:
+            seq_cpu = getattr(common_attn_metadata, "_seq_lens_cpu", None)
+        if (
+            self.pack_rows_enabled
+            and self.compress_ratio == 1
+            and native_workspace is None
+            and num_tokens > 64
+            and int(common_attn_metadata.max_seq_len) <= 2051
+            and seq_cpu is not None
+        ):
+            # With MTP off, MRV1 copies these logical counts to the GPU even
+            # under async scheduling. Only async speculation can roll them back.
+            # Do not call the deprecated property that can synchronize CUDA.
+            pack_rows = _cached_pack_rows(
+                common_attn_metadata.query_start_loc_cpu,
+                seq_cpu,
+                num_tokens,
+                self.token_to_req_buffer.device,
+            )
+
+        indexer_pack_rows = None
+        if (
+            self.pack_rows_enabled
+            and self.compress_ratio == 4
+            and num_tokens > 64
+            and columns is not None
+            and columns > 512
+        ):
+            indexer_pack_rows = _cached_indexer_pack_rows(
+                common_attn_metadata.query_start_loc_cpu,
+                num_tokens,
+                self.token_to_req_buffer.device,
+            )
+
+        return PreparedQSAForwardMetadata(
+            block_table=common_attn_metadata.block_table_tensor,
+            slot_mapping=slot_mapping,
+            seq_lens=common_attn_metadata.seq_lens,
+            query_start_loc=common_attn_metadata.query_start_loc,
+            token_to_req=token_to_req,
+            logical_positions=logical_positions,
+            num_actual_tokens=num_tokens,
+            storage_block_size=self.storage_block_size,
+            compress_ratio=self.compress_ratio,
+            score_columns=columns,
+            pack_rows=pack_rows,
+            indexer_pack_rows=indexer_pack_rows,
+            native_workspace=native_workspace,
+        )
+
+
 class QSAStateBackend(AttentionBackend):
     """Key-only dummy backend for out-of-band BF16 QSA side-cache operations."""
 
@@ -394,7 +686,11 @@ class QSAStateBackend(AttentionBackend):
 
     @staticmethod
     def get_builder_cls() -> type[QSAMetadataBuilder]:
-        return QSAMetadataBuilder
+        return (
+            PreparedQSAMetadataBuilder
+            if (getattr(current_platform, "vendor_name", None) == "metax")
+            else QSAMetadataBuilder
+        )
 
     @staticmethod
     def get_kv_cache_shape(
@@ -519,7 +815,7 @@ class QSAKeyStateCache(_QSAStateCache):
                     f"{self._BF16_PER_INT64})"
                 )
             try:
-                kv_cache[..., self.rope_position_offset:].view(torch.int64)
+                kv_cache[..., self.rope_position_offset :].view(torch.int64)
             except RuntimeError as exc:
                 raise ValueError(
                     "QSA position cache cannot be viewed as int64 from the raw "
@@ -530,15 +826,28 @@ class QSAKeyStateCache(_QSAStateCache):
     def bind_kv_cache(self, kv_cache: torch.Tensor) -> None:
         self.validate_kv_cache(kv_cache)
         super().bind_kv_cache(kv_cache)
-        self.key_cache = kv_cache[..., : self.key_head_size]
-        if self.cache_rope_positions:
-            position_tail = kv_cache[..., self.rope_position_offset :]
-            self.rope_position_cache = position_tail.view(torch.int64)
-        else:
-            self.rope_position_cache = None
+
+    @property
+    def key_cache(self) -> torch.Tensor:
+        # Legacy direct assignment and the explicit binding hook share one owner.
+        return self.kv_cache[..., : self.key_head_size]
+
+    @property
+    def rope_position_cache(self) -> torch.Tensor | None:
+        if not self.cache_rope_positions:
+            return None
+        return self.kv_cache[..., self.rope_position_offset :].view(torch.int64)
 
     def get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec:
         del vllm_config
+        if getattr(current_platform, "vendor_name", None) == "metax":
+            return FullAttentionSpec(
+                block_size=self.cache_config.block_size,
+                num_kv_heads=1,
+                head_size=self.head_size,
+                head_size_v=0,
+                dtype=self.dtype,
+            )
         spec_kwargs = dict(
             block_size=self.cache_config.block_size,
             num_kv_heads=1,

@@ -2,10 +2,11 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Cross-vendor Qwen3.8-Flash-Next position-learning enhancement layers."""
 
+import math
 from collections.abc import Iterable, Sequence
-from functools import wraps
 
 import torch
+import torch.nn.functional as F
 from flaggems_vllm import ple_short_conv_
 from torch import nn
 
@@ -25,7 +26,13 @@ from vllm.v1.attention.backends.registry import MambaAttentionBackendEnum
 from vllm.v1.attention.backends.utils import NULL_BLOCK_ID
 
 from ..common.hyperconnection import GroupedGemmaRMSNorm
-from ..common.ple import copy_ple_embedding_shard_
+from ..common.ple import (
+    _PLE_HASH_BUFFER_NAMES,
+    copy_ple_embedding_shard_,
+    initialize_ple_hash_buffers,
+    validate_ple_embedding_shard,
+    validate_ple_embedding_weights,
+)
 from ..common.short_conv_attn import (
     PleShortConvAttentionBackend,
     PleShortConvAttentionMetadata,
@@ -36,102 +43,14 @@ from .ops.ple_fusion import (
     ple_gate_norm,
     ple_prefill_short_conv_,
 )
-
-_MASK64 = (1 << 64) - 1
-_SPLITMIX_GAMMA = 0x9E3779B97F4A7C15
-_SPLITMIX_M1 = 0xBF58476D1CE4E5B9
-_SPLITMIX_M2 = 0x94D049BB133111EB
-_PLE_LAYER_PRIME = 10007
-
-
-def _splitmix64(value: int) -> int:
-    value = (value + _SPLITMIX_GAMMA) & _MASK64
-    value = ((value ^ (value >> 30)) * _SPLITMIX_M1) & _MASK64
-    value = ((value ^ (value >> 27)) * _SPLITMIX_M2) & _MASK64
-    return (value ^ (value >> 31)) & _MASK64
-
-
-def _is_prime_64(value: int) -> bool:
-    if value < 2:
-        return False
-    for prime in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
-        if value % prime == 0:
-            return value == prime
-    exponent = value - 1
-    shifts = 0
-    while exponent % 2 == 0:
-        exponent //= 2
-        shifts += 1
-    for base in (2, 325, 9375, 28178, 450775, 9780504, 1795265022):
-        if base % value == 0:
-            continue
-        witness = pow(base, exponent, value)
-        if witness in (1, value - 1):
-            continue
-        for _ in range(shifts - 1):
-            witness = pow(witness, 2, value)
-            if witness == value - 1:
-                break
-        else:
-            return False
-    return True
-
-
-def _nth_prime_after(start: int, count: int) -> int:
-    prime = int(start)
-    for _ in range(count):
-        candidate = prime + 1
-        if candidate <= 2:
-            prime = 2
-            continue
-        if candidate % 2 == 0:
-            candidate += 1
-        while not _is_prime_64(candidate):
-            candidate += 2
-        prime = candidate
-    return prime
+from .runtime import is_metax
+from vllm_fl.dispatch import resolve_op
 
 
 class Qwen3_8FlashNextPLEGroupedNorm(GroupedGemmaRMSNorm):
     @property
     def eps(self) -> float:
         return self.variance_epsilon
-
-
-def validate_ple_embedding_weights(load_weights):
-    """Validate row coverage at the outermost model-loading boundary.
-
-    AutoWeightsLoader groups *adjacent* module prefixes, so one PLE table can
-    receive multiple calls as checkpoint files are streamed. Nested loaders
-    participate in the same transaction; a direct embedding call is also a
-    complete transaction. Only bookkeeping is retained, never checkpoint tensors.
-    """
-
-    @wraps(load_weights)
-    def checked_load(model, weights, *args, **kwargs):
-        owners = [
-            module
-            for module in model.modules()
-            if isinstance(module, Qwen3_8FlashNextNGramEmbedding)
-            and getattr(module, "_ple_embedding_load_state", None) is None
-        ]
-        for module in owners:
-            module._ple_embedding_load_state = {"shards": set(), "full": False}
-        try:
-            loaded = load_weights(model, weights, *args, **kwargs)
-            for module in owners:
-                seen = module._ple_embedding_load_state["shards"]
-                missing = sorted(module._required_embedding_shards() - seen)
-                if seen and missing:
-                    raise ValueError(
-                        f"Missing PLE embedding shards for this TP rank: {missing}"
-                    )
-            return loaded
-        finally:
-            for module in owners:
-                del module._ple_embedding_load_state
-
-    return checked_load
 
 
 class Qwen3_8FlashNextNGramEmbedding(nn.Module):
@@ -166,46 +85,13 @@ class Qwen3_8FlashNextNGramEmbedding(nn.Module):
         if self.split_ngram_parts <= 0:
             raise ValueError("split_ngram_parts must be positive")
 
-        max_multiplier = ((1 << 63) - 1) // self.unigram_vocab_size
-        half_bound = max(1, max_multiplier // 2)
-        seed = int(getattr(config, "seed", 1234))
-        base_seed = seed + _PLE_LAYER_PRIME * ple_dense_layer_id
-        multipliers = []
-        for index in range(self.ngram_size):
-            value = base_seed + _SPLITMIX_GAMMA * (index + 1)
-            multipliers.append(2 * (_splitmix64(value) % half_bound) + 1)
-        self.register_buffer(
-            "layer_multipliers",
-            torch.tensor(multipliers, dtype=torch.long),
-            persistent=True,
+        padded_vocab_size = initialize_ple_hash_buffers(
+            self, config, ple_dense_layer_id
         )
-
-        ngram_vocab_size_base = int(config.ngram_vocab_size_base)
-        sizes: list[int] = []
-        offsets: list[int] = []
-        offset = 0
-        for local_head in range(self.ngram_heads):
-            global_head = ple_dense_layer_id * self.ngram_heads + local_head
-            size = _nth_prime_after(ngram_vocab_size_base - 1, global_head + 1)
-            sizes.append(size)
-            offsets.append(offset)
-            offset += size
-        self.register_buffer(
-            "ngram_heads_vocab_sizes",
-            torch.tensor(sizes, dtype=torch.long),
-            persistent=True,
-        )
-        self.register_buffer(
-            "ngram_heads_offsets",
-            torch.tensor(offsets, dtype=torch.long),
-            persistent=True,
-        )
-        divisor = int(config.make_ngram_vocab_size_divisible_by)
-        padded_vocab_size = ((offset + divisor - 1) // divisor) * divisor
         self.ngram_embedding = VocabParallelEmbedding(
             padded_vocab_size,
             self.head_dim,
-            padding_size=divisor,
+            padding_size=int(config.make_ngram_vocab_size_divisible_by),
             prefix=f"{prefix}.ngram_embedding",
         )
         self.register_buffer(
@@ -309,9 +195,7 @@ class Qwen3_8FlashNextNGramEmbedding(nn.Module):
         """Load hash buffers and checkpoint-split embedding rows."""
 
         persistent_buffers = {
-            "layer_multipliers": self.layer_multipliers,
-            "ngram_heads_offsets": self.ngram_heads_offsets,
-            "ngram_heads_vocab_sizes": self.ngram_heads_vocab_sizes,
+            name: getattr(self, name) for name in _PLE_HASH_BUFFER_NAMES
         }
         loaded: set[str] = set()
         regular_weights: list[tuple[str, torch.Tensor]] = []
@@ -353,21 +237,9 @@ class Qwen3_8FlashNextNGramEmbedding(nn.Module):
                         f"split_ngram_parts={self.split_ngram_parts}"
                     )
                 embedding = self.ngram_embedding
-                shard_size = (
-                    embedding.org_vocab_size + self.split_ngram_parts - 1
-                ) // self.split_ngram_parts
-                checkpoint_start = shard_index * shard_size
-                expected_rows = max(
-                    0,
-                    min(shard_size, embedding.org_vocab_size - checkpoint_start),
+                checkpoint_start = validate_ple_embedding_shard(
+                    embedding, loaded_weight, shard_index, self.split_ngram_parts
                 )
-                expected_shape = (expected_rows, embedding.embedding_dim)
-                if tuple(loaded_weight.shape) != expected_shape:
-                    raise ValueError(
-                        f"Shape mismatch for PLE embedding shard {shard_index}: "
-                        f"expected {expected_shape}, got "
-                        f"{tuple(loaded_weight.shape)}"
-                    )
                 copy_ple_embedding_shard_(
                     embedding.weight.data,
                     loaded_weight,
@@ -400,6 +272,17 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
+        self._metax = is_metax()
+        self._hc_grouped_norm = (
+            resolve_op("qwen38_hc_grouped_norm")
+            if self._metax
+            and vllm_config.additional_config.get("qwen38_hc_small_fusions", False)
+            and vllm_config.speculative_config is None
+            else None
+        )
+        if self._metax:
+            self._ple_short_conv = resolve_op("ple_short_conv_")
+            self._ple_gate = resolve_op("qwen38_ple_gate")
         self.model_config: ModelConfig = model_config
         self.cache_config: CacheConfig = cache_config
         self.layer_idx = layer_idx
@@ -417,13 +300,31 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         self.conv_state_len = (self.conv_kernel_size - 1) * self.short_conv_dilation
         self.num_spec_tokens = vllm_config.num_speculative_tokens
         self.activation = "silu"
-        self.ple_embedding: nn.Module = Qwen3_8FlashNextNGramEmbedding(
+        ngram_cls = Qwen3_8FlashNextNGramEmbedding
+        ngram_kwargs = {}
+        if self._metax:
+            from .host_ngram import HostNGramEmbedding
+
+            ngram_cls = HostNGramEmbedding
+            ngram_kwargs = dict(
+                params_dtype=model_config.dtype,
+                host_lookup_mode=vllm_config.additional_config.get(
+                    "qwen38_ngram_mode", "sharded"
+                ),
+            )
+        lookup_mode = ngram_kwargs.get("host_lookup_mode", "sharded")
+        if lookup_mode in {"uva_broadcast", "uva_sharded", "uva_auto"} and (
+            not self._metax or vllm_config.speculative_config is not None
+        ):
+            raise NotImplementedError("PLE UVA currently requires MetaX with MTP off")
+        self.ple_embedding: nn.Module = ngram_cls(
             config,
             int(config.ple_embed_dim),
             self.ple_dense_layer_id,
             vllm_config.scheduler_config.max_num_batched_tokens,
             vllm_config.scheduler_config.max_num_seqs,
             f"{prefix}.ple_embedding",
+            **ngram_kwargs,
         )
         self.key_proj = ReplicatedLinear(
             int(config.ple_embed_dim),
@@ -445,9 +346,15 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
             self.hidden_size,
             model_config.dtype,
         )
-        self.norm_key = Qwen3_8FlashNextPLEGroupedNorm(*norm_args)
-        self.norm_query = Qwen3_8FlashNextPLEGroupedNorm(*norm_args)
-        self.norm_conv = Qwen3_8FlashNextPLEGroupedNorm(*norm_args)
+        self.norm_key = Qwen3_8FlashNextPLEGroupedNorm(
+            *norm_args, use_fused_ops=not self._metax
+        )
+        self.norm_query = Qwen3_8FlashNextPLEGroupedNorm(
+            *norm_args, use_fused_ops=not self._metax
+        )
+        self.norm_conv = Qwen3_8FlashNextPLEGroupedNorm(
+            *norm_args, use_fused_ops=not self._metax
+        )
         self.conv1d = nn.Conv1d(
             self.hc_hidden_size,
             self.hc_hidden_size,
@@ -489,6 +396,11 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         )
 
     def _short_conv_fallback(self, inputs: torch.Tensor) -> torch.Tensor:
+        if self._metax:
+            # Profiling / CUDA graph capture only; conv state is not updated.
+            inputs_t = inputs.transpose(0, 1).unsqueeze(0)
+            output = self.conv1d(inputs_t)[..., : inputs_t.size(-1)]
+            return F.silu(output).squeeze(0).transpose(0, 1)
         # Profiling has no cache metadata or persistent state updates.
         output = torch.empty_like(inputs)
         state = torch.empty(
@@ -782,6 +694,13 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
                     f"expect at least {state_capacity}."
                 )
             conv_state = conv_state[..., -state_capacity:]
+        if self._metax:
+            return self._short_conv_dispatch_metax(
+                inputs,
+                layer_attn_metadata,
+                conv_state,
+                conv_weights.to(dtype=inputs.dtype),
+            )
         return self._short_conv_dilated_dispatch(
             inputs,
             layer_attn_metadata,
@@ -810,17 +729,25 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         token_count = hidden_states.shape[0]
         key = key.reshape(token_count, self.hc_count, self.hidden_size)
         query = hidden_states.reshape(token_count, self.hc_count, self.hidden_size)
-        gated_value, normalized_grouped = ple_gate_norm(
-            key,
-            query,
-            value,
-            self.norm_key.weight,
-            self.norm_query.weight,
-            self.norm_conv.weight,
-            self.hc_count,
-            self.norm_conv.eps,
-        )
-        normalized = normalized_grouped.flatten(-2)
+        if self._metax:
+            key = self._apply_norm(self.norm_key, key)
+            query = self._apply_norm(self.norm_query, query)
+            gate = (key * query).sum(dim=-1, keepdim=True) / math.sqrt(self.hidden_size)
+            gate = self._ple_gate(gate)
+            gated_value = gate * value.unsqueeze(-2)
+            normalized = self._apply_norm(self.norm_conv, gated_value).flatten(-2)
+        else:
+            gated_value, normalized_grouped = ple_gate_norm(
+                key,
+                query,
+                value,
+                self.norm_key.weight,
+                self.norm_query.weight,
+                self.norm_conv.weight,
+                self.hc_count,
+                self.norm_conv.eps,
+            )
+            normalized = normalized_grouped.flatten(-2)
         conv_output = torch.zeros_like(normalized)
         torch.ops.vllm.qwen3_8_flash_next_ple_short_conv(
             normalized,
@@ -828,6 +755,135 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
             self.prefix,
         )
         return gated_value.flatten(-2) + conv_output
+
+    def _apply_norm(
+        self, norm: Qwen3_8FlashNextPLEGroupedNorm, hidden_states: torch.Tensor
+    ) -> torch.Tensor:
+        shape = hidden_states.shape
+        flat = hidden_states.flatten(-2)
+        grouped_norm = getattr(self, "_hc_grouped_norm", None)
+        if grouped_norm is not None:
+            result = grouped_norm(flat, norm.weight, self.hc_count, norm.eps)
+            if result is not None:
+                return result.reshape(shape)
+        return norm(flat).reshape(shape)
+
+    def prepare_host_lookup(
+        self,
+        input_ids,
+        query_start_loc,
+        ngram_context,
+        *,
+        dummy: bool = False,
+        num_reqs: int | None = None,
+        num_tokens: int | None = None,
+    ) -> None:
+        """Graph-external producer called by the Qwen worker hook."""
+        self.ple_embedding.prepare_host_lookup(
+            input_ids,
+            query_start_loc,
+            ngram_context,
+            dummy=dummy,
+            num_reqs=num_reqs,
+            num_tokens=num_tokens,
+        )
+
+    def _short_conv_dispatch_metax(
+        self,
+        inputs: torch.Tensor,
+        metadata: PleShortConvAttentionMetadata,
+        conv_state: torch.Tensor,
+        conv_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        """Dispatch packed requests without packing or scattering the cache.
+
+        The FGV operator reads the previous speculative history at accepted-1
+        and retains all newly verified prefixes. In particular a one-token
+        decode following a rejected draft still needs the accepted offset.
+        """
+        x = inputs[: metadata.num_actual_tokens]
+        output = torch.zeros_like(x)
+        has_spec = metadata.spec_sequence_masks is not None
+        has_non_spec = metadata.num_decodes > 0 or metadata.num_prefills > 0
+        if has_spec:
+            if (
+                metadata.spec_state_indices_tensor is None
+                or metadata.spec_query_start_loc is None
+                or metadata.num_accepted_tokens is None
+            ):
+                raise ValueError("PLE speculative metadata is incomplete")
+            if has_non_spec:
+                if metadata.spec_token_indx is None:
+                    raise ValueError("PLE mixed batch lacks speculative token mapping")
+                spec_x = x.index_select(0, metadata.spec_token_indx.long())
+                spec_out = torch.empty_like(spec_x)
+            else:
+                # Keep graph padding in the same fixed output allocation; the
+                # varlen operator zeroes tokens beyond the query offsets.
+                spec_x, spec_out = x, output
+            self._ple_short_conv(
+                spec_x,
+                spec_out,
+                conv_state,
+                conv_weights,
+                # FGV's state writer retains the index dtype for row*stride.
+                # Hybrid page strides can overflow int32 even for small row IDs.
+                metadata.spec_state_indices_tensor.to(torch.int64),
+                dilation=self.short_conv_dilation,
+                query_start_loc=metadata.spec_query_start_loc,
+                accepted_tokens=metadata.num_accepted_tokens,
+                max_query_len=metadata.spec_query_len,
+                null_block_id=NULL_BLOCK_ID,
+            )
+            if has_non_spec:
+                output.index_copy_(0, metadata.spec_token_indx.long(), spec_out)
+        if has_non_spec:
+            if (
+                metadata.state_indices_tensor is None
+                or metadata.non_spec_query_start_loc is None
+            ):
+                raise ValueError("PLE non-speculative metadata is incomplete")
+            if has_spec:
+                if metadata.non_spec_token_indx is None:
+                    raise ValueError("PLE mixed batch lacks non-spec token mapping")
+                non_x = x.index_select(0, metadata.non_spec_token_indx.long())
+                non_out = torch.empty_like(non_x)
+            else:
+                non_x, non_out = x, output
+            if metadata.num_decodes and metadata.num_prefills:
+                if (
+                    metadata.has_initial_states_d is None
+                    or metadata.has_initial_states_p is None
+                ):
+                    raise ValueError(
+                        "PLE mixed decode/prefill lacks initial-state flags"
+                    )
+                initial = torch.cat(
+                    (
+                        metadata.has_initial_states_d[: metadata.num_decodes],
+                        metadata.has_initial_states_p[: metadata.num_prefills],
+                    )
+                )
+            elif metadata.num_prefills:
+                initial = metadata.has_initial_states_p
+            else:
+                initial = metadata.has_initial_states_d
+            if initial is None:
+                raise ValueError("PLE metadata lacks initial-state flags")
+            self._ple_short_conv(
+                non_x,
+                non_out,
+                conv_state,
+                conv_weights,
+                metadata.state_indices_tensor.to(torch.int64),
+                dilation=self.short_conv_dilation,
+                query_start_loc=metadata.non_spec_query_start_loc,
+                has_initial_state=initial,
+                null_block_id=NULL_BLOCK_ID,
+            )
+            if has_spec:
+                output.index_copy_(0, metadata.non_spec_token_indx.long(), non_out)
+        return output
 
 
 def qwen3_8_flash_next_ple_short_conv(

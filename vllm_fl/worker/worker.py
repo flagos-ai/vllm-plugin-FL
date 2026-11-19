@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
+
 from vllm import envs
 from vllm.config import CUDAGraphMode, VllmConfig, set_current_vllm_config
 from vllm.config.compilation import CompilationMode
@@ -47,8 +48,11 @@ except ImportError:
         pass
 
 
-import vllm_fl.envs as fl_envs
-from vllm.distributed.parallel_state import get_pcp_group, get_pp_group, get_tp_group
+from vllm.distributed.parallel_state import (
+    get_pcp_group,
+    get_pp_group,
+    get_tp_group,
+)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
@@ -66,6 +70,8 @@ from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
+
+import vllm_fl.envs as fl_envs
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
@@ -248,6 +254,7 @@ class WorkerFL(WorkerBase):
             patch_mm_encoder_attention,
             patch_oot_apply_rotary_emb,
         )
+
         patch_mm_encoder_attention()
         patch_oot_apply_rotary_emb()
 
@@ -273,7 +280,11 @@ class WorkerFL(WorkerBase):
 
             # Only rank 0 records the oplist to avoid file truncation and
             # interleaved writes when tensor-parallel-size > 1.
-            should_record = (rank == 0)
+            from vllm_fl.worker.flaggems_logging import configure_oplist_recording
+
+            should_record = configure_oplist_recording(
+                vllm_config.additional_config, rank
+            )
 
             # Use whitelist if specified (takes precedence over blacklist)
             if whitelist:
@@ -295,7 +306,9 @@ class WorkerFL(WorkerBase):
             else:
                 logger.info("[FlagGems] Enable all ops")
                 flag_gems.enable(
-                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
+                    record=should_record,
+                    once=True,
+                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
 
     # def sleep(self, level: int = 1) -> None:
@@ -375,9 +388,8 @@ class WorkerFL(WorkerBase):
                 patch_sampler_compile_for_iluvatar()
             except Exception as _e:
                 import logging as _lg
-                _lg.getLogger(__name__).warning(
-                    "iluvatar worker patch failed: %s", _e
-                )
+
+                _lg.getLogger(__name__).warning("iluvatar worker patch failed: %s", _e)
 
         # PTPU: register the Inductor/Dynamo/Triton wiring in EVERY worker
         # process (torch.compile runs here, not in EngineCore, and the
@@ -392,6 +404,7 @@ class WorkerFL(WorkerBase):
                 register_ptpu_inductor_backend()
             except Exception as _e:
                 import logging as _lg
+
                 _lg.getLogger(__name__).warning(
                     "ptpu inductor backend registration failed: %s", _e
                 )
@@ -816,10 +829,9 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        if (
-            current_platform.device_type == "txda"
-            or getattr(current_platform, "vendor_name", None) in ("kunlunxin", "thead")
-        ):
+        if current_platform.device_type == "txda" or getattr(
+            current_platform, "vendor_name", None
+        ) in ("kunlunxin", "thead"):
             # vLLM 0.24 imports MiniMax's NVIDIA implementation even for
             # unrelated models, initializing unsupported FlashInfer CUDA APIs.
             # The actual model dummy runs and graph capture remain below.

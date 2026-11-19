@@ -103,7 +103,9 @@ def test_full_graph_exclusion_survives_dp_redispatch(
     runner = SimpleNamespace(
         _is_uniform_decode=module.ModelRunnerFL._is_uniform_decode,
         uniform_decode_query_len=1,
-        model_config=SimpleNamespace(is_encoder_decoder=False),
+        model_config=SimpleNamespace(
+            is_encoder_decoder=False, hf_text_config=SimpleNamespace()
+        ),
         input_batch=SimpleNamespace(lora_id_to_lora_request={}),
         _pad_for_sequence_parallelism=lambda tokens: tokens,
         cudagraph_dispatcher=dispatcher,

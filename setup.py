@@ -3,7 +3,7 @@
 # vllm-plugin-FL: vLLM Federated Learning Plugin
 #
 # This setup script builds the vllm_fl._C C++/CUDA extension via CMake.
-# It supports vendor-specific compilation (currently CUDA only) controlled by
+# It supports vendor-specific compilation (CUDA or MetaX) controlled by
 # the VLLM_VENDOR environment variable. The build pipeline:
 #   1. Detects available tooling (cmake, ninja, sccache/ccache)
 #   2. Configures and compiles the C++/CUDA sources under csrc/
@@ -32,7 +32,7 @@ NVCC_THREADS = os.environ.get("NVCC_THREADS")
 CMAKE_BUILD_TYPE = os.environ.get("CMAKE_BUILD_TYPE")
 VERBOSE = os.environ.get("VERBOSE", "0") == "1"
 
-SUPPORTED_VENDORS = ("cuda",)
+SUPPORTED_VENDORS = ("cuda", "metax")
 
 
 def _is_cuda() -> bool:
@@ -169,7 +169,24 @@ class CMakeBuildExt(build_ext):
 
 
 ext_modules = []
-if VLLM_VENDOR:
+build_command = CMakeBuildExt
+if VLLM_VENDOR == "metax":
+    from torch.utils.cpp_extension import BuildExtension, CppExtension
+
+    maca_root = Path(os.environ.get("MACA_PATH", "/opt/maca"))
+    ext_modules.append(
+        CppExtension(
+            name="vllm_fl._metax_host_memory",
+            sources=["csrc/metax/host_memory.cpp"],
+            include_dirs=[str(maca_root / "include")],
+            library_dirs=[str(maca_root / "lib")],
+            libraries=["mcruntime"],
+            extra_compile_args=["-O2"],
+            extra_link_args=[f"-Wl,-rpath,{maca_root / 'lib'}"],
+        )
+    )
+    build_command = BuildExtension
+elif VLLM_VENDOR:
     if VLLM_VENDOR not in SUPPORTED_VENDORS:
         raise ValueError(
             f"Unsupported vendor: {VLLM_VENDOR}. "
@@ -179,8 +196,7 @@ if VLLM_VENDOR:
         CMakeExtension(name="vllm_fl._C", cmake_lists_dir=str(ROOT_DIR / "csrc"))
     )
 
-
 setup(
     ext_modules=ext_modules,
-    cmdclass={"build_ext": CMakeBuildExt} if ext_modules else {},
+    cmdclass={"build_ext": build_command} if ext_modules else {},
 )
