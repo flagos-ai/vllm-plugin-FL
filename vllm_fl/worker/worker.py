@@ -251,6 +251,11 @@ class WorkerFL(WorkerBase):
         patch_mm_encoder_attention()
         patch_oot_apply_rotary_emb()
 
+        from vllm_fl.models.ocr_runtime import initialize_ocr_worker
+
+        if initialize_ocr_worker(self.vllm_config):
+            return
+
         # GLM patches must precede CustomOp construction, including the VLM
         # vision tower. Other models keep the common startup path below.
         from vllm_fl.models.glm5.worker import initialize_glm5_worker
@@ -593,6 +598,17 @@ class WorkerFL(WorkerBase):
             return fallback_val
 
         GiB = lambda b: b / GiB_bytes
+        reserved_graph_bytes = 0
+        if self.model_runner.graph_runtime is not None:
+            reserved_graph_bytes = self.model_runner.graph_runtime.reserve_graph_memory(
+                self.device
+            )
+            if reserved_graph_bytes:
+                logger.info(
+                    "Reserved %.2f MiB for full decode graphs",
+                    reserved_graph_bytes / (1 << 20),
+                )
+
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
             # max_num_batched_tokens
@@ -658,6 +674,7 @@ class WorkerFL(WorkerBase):
             profile_result.non_torch_increase
             + profile_result.torch_peak_increase
             + profile_result.weights_memory
+            + reserved_graph_bytes
         )
         cudagraph_memory_estimate_applied = (
             cudagraph_memory_estimate

@@ -5,7 +5,7 @@ import torch
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
 from vllm.platforms import current_platform
 
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.dispatch import CachedOp, get_default_manager
 
 _rotary_embedding = CachedOp("rotary_embedding")
 _apply_rotary_emb = CachedOp("apply_rotary_emb")
@@ -31,12 +31,20 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         super().__init__(
             head_size, rotary_dim, max_position_embeddings, base, is_neox_style, dtype
         )
+        self._rotary_inplace = True
         if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
-                initialize_rotary_embedding_ascend,
+            manager = get_default_manager()
+            candidates = manager.resolve_candidates("rotary_embedding")
+            self._rotary_inplace = candidates[0].impl_id not in (
+                "vendor.ascend.torch_npu",
+                "reference.torch",
             )
+            if any(impl.impl_id == "vendor.ascend" for impl in candidates):
+                from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
+                    initialize_rotary_embedding_ascend,
+                )
 
-            initialize_rotary_embedding_ascend()
+                initialize_rotary_embedding_ascend()
 
     def forward_oot(
         self,
@@ -44,6 +52,9 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         query: torch.Tensor,
         key: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if key is None and self._rotary_inplace:
+            # Legacy Q/K providers require both tensors.
+            return super().forward_native(positions, query, key)
         cos_sin_cache = self.cos_sin_cache.to(positions.device)
         # Follow upstream's compile-safe buffer handling, retaining FL's
         # device-only conversion and the existing cache dtype.
@@ -52,16 +63,11 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         positions = positions.flatten()
         num_tokens = positions.shape[0]
 
-        query_shape = query.shape
-        key_shape = key.shape
-        query = query.view(num_tokens, -1, self.head_size)
-        key = key.view(num_tokens, -1, self.head_size)
+        query_heads = query.reshape(num_tokens, -1, self.head_size)
+        key_heads = None if key is None else key.reshape(num_tokens, -1, self.head_size)
 
-        query_rot = query[..., : self.rotary_dim]
-        key_rot = key[..., : self.rotary_dim]
-        if self.rotary_dim < self.head_size:
-            query_pass = query[..., self.rotary_dim :]
-            key_pass = key[..., self.rotary_dim :]
+        query_rot = query_heads[..., : self.rotary_dim]
+        key_rot = None if key_heads is None else key_heads[..., : self.rotary_dim]
 
         cos, sin = cos_sin_cache.chunk(2, dim=-1)
 
@@ -73,17 +79,20 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             sin,
             positions,
             not self.is_neox_style,  # rotary_interleaved
-            True,  # inplace
+            self._rotary_inplace,
         )
 
         if self.rotary_dim < self.head_size:
-            query = torch.cat((q_embed, query_pass), dim=-1).reshape(query_shape)
-            key = torch.cat((k_embed, key_pass), dim=-1).reshape(key_shape)
-        else:
-            query = q_embed.reshape(query_shape)
-            key = k_embed.reshape(key_shape)
+            q_embed = torch.cat((q_embed, query_heads[..., self.rotary_dim :]), dim=-1)
+            if key_heads is not None:
+                k_embed = torch.cat(
+                    (k_embed, key_heads[..., self.rotary_dim :]), dim=-1
+                )
 
-        return query, key
+        return (
+            q_embed.reshape(query.shape),
+            None if key is None else k_embed.reshape(key.shape),
+        )
 
     def forward_hip(
         self,

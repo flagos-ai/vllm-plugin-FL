@@ -537,11 +537,24 @@ class ModelRunnerFL(
 
             self.use_ascend_hybrid_cache = uses_dense_hybrid_cache(model_config)
         self._ascend_attn_state = None
+        from vllm_fl.models.ocr_runtime import get_ocr_rswa_window
+
+        self.ocr_rswa_window = get_ocr_rswa_window(self.model_config)
         self.graph_runtime = None
         if self.use_ascend_attention:
             from vllm_fl.compilation.graph_runtime import GraphRuntimeController
 
-            self.graph_runtime = GraphRuntimeController(
+            runtime_cls = GraphRuntimeController
+            if (
+                self.ocr_rswa_window is not None
+                and self.compilation_config.cudagraph_mode.has_full_cudagraphs()
+            ):
+                from vllm_fl.dispatch.backends.vendor.ascend.rswa_graph import (
+                    RswaGraphRuntime,
+                )
+
+                runtime_cls = RswaGraphRuntime
+            self.graph_runtime = runtime_cls(
                 vllm_config=vllm_config,
                 full_graph_wrapper_type=GraphWrapper,
             )
@@ -2258,11 +2271,22 @@ class ModelRunnerFL(
         self.seq_lens[num_reqs:].fill_(0)
 
         if self.common_attention_metadata_graph is None:
-            self.input_batch.block_table.compute_slot_mapping(
-                num_reqs,
-                self.query_start_loc.gpu[: num_reqs + 1],
-                self.positions[:total_num_scheduled_tokens],
-            )
+            if self.ocr_rswa_window is not None:
+                from vllm_fl.models.ocr_runtime import compute_ocr_slot_mapping
+
+                if not compute_ocr_slot_mapping(
+                    self.input_batch.block_table,
+                    num_reqs,
+                    req_indices_gpu,
+                    self.positions[:total_num_scheduled_tokens],
+                ):
+                    raise RuntimeError("Unsupported Unlimited-OCR KV slot mapping")
+            else:
+                self.input_batch.block_table.compute_slot_mapping(
+                    num_reqs,
+                    self.query_start_loc.gpu[: num_reqs + 1],
+                    self.positions[:total_num_scheduled_tokens],
+                )
 
         # Copy the tensors to the GPU.
         self._prepare_input_ids(
@@ -2494,6 +2518,15 @@ class ModelRunnerFL(
             positions=self.positions[:num_tokens_padded],
             mm_req_doc_ranges=req_doc_ranges,
         )
+
+        if self.ocr_rswa_window is not None:
+            # Preserve the original image/text prefix through chunking/reorder.
+            cm_base.rswa_prefix_lens = (
+                torch.zeros_like(num_prompt_tokens_cpu)
+                if for_cudagraph_capture else num_prompt_tokens_cpu.clone()
+            )
+            cm_base.rswa_prefix_lens[num_reqs:] = 0
+            cm_base.rswa_num_actual_reqs = num_reqs
 
         if self.use_ascend_attention:
             phase = (
@@ -3596,6 +3629,14 @@ class ModelRunnerFL(
             if batch_desc_num_reqs is not None
             else num_reqs
         )
+
+        if (
+            self.ocr_rswa_window is not None
+            and self.compilation_config.cudagraph_mode == CUDAGraphMode.FULL_DECODE_ONLY
+            and self.uniform_decode_query_len == 1
+        ):
+            # One padded request per token keeps capture/replay mask B fixed.
+            num_reqs_padded = num_tokens_padded
 
         if (
             num_tokens_padded
@@ -6975,6 +7016,14 @@ class ModelRunnerFL(
 
         return int(total_estimate)
 
+    @contextmanager
+    def _decoder_capture_scope(self):
+        set_cudagraph_capturing_enabled(True)
+        try:
+            yield
+        finally:
+            set_cudagraph_capturing_enabled(False)
+
     @instrument(span_name="Capture model")
     def capture_model(self) -> int:
         if self.compilation_config.cudagraph_mode == CUDAGraphMode.NONE:
@@ -6996,8 +7045,7 @@ class ModelRunnerFL(
         # Trigger CUDA graph capture for specific shapes.
         # Capture the large shapes first so that the smaller shapes
         # can reuse the memory pool allocated for the large shapes.
-        set_cudagraph_capturing_enabled(True)
-        with self._freeze_gc(), graph_capture(device=self.device):
+        with self._decoder_capture_scope(), self._freeze_gc(), graph_capture(device=self.device):
             _accelerator_synchronize()
             torch.accelerator.empty_cache()
             start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
@@ -7019,13 +7067,6 @@ class ModelRunnerFL(
 
             _accelerator_synchronize()
             end_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
-
-        # Disable cudagraph capturing globally, so any unexpected cudagraph
-        # capturing will be detected and raise an error after here.
-        # Note: We don't put it into graph_capture context manager because
-        # we may do lazy capturing in future that still allows capturing
-        # after here.
-        set_cudagraph_capturing_enabled(False)
 
         _accelerator_synchronize()
         torch.accelerator.empty_cache()

@@ -364,6 +364,17 @@ class PlatformFL(Platform):
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 
+        if cls.vendor_name == "ascend":
+            from vllm_fl.models.ocr_runtime import (
+                enable_ocr_custom_ops,
+                validate_ocr_config,
+            )
+
+            if validate_ocr_config(
+                vllm_config, device_type=cls.device_type, vendor=cls.vendor_name
+            ):
+                enable_ocr_custom_ops(vllm_config.compilation_config)
+
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         cache_config = vllm_config.cache_config

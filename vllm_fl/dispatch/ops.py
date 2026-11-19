@@ -9,9 +9,31 @@ This module defines the abstract base class that all backends must implement.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import Optional, Union
 
 import torch
+
+from .binding import OperatorBinding
+from .manager import get_default_manager
+
+
+@lru_cache(maxsize=2)
+def _binding(manager, op_name: str) -> OperatorBinding:
+    return OperatorBinding(manager, op_name)
+
+
+def apply_top_k_top_p(
+    logits: torch.Tensor, k: torch.Tensor | None, p: torch.Tensor | None
+) -> torch.Tensor:
+    return _binding(get_default_manager(), "apply_top_k_top_p")(logits, k, p)
+
+
+def scaled_dot_product_attention(query, key, value, attn_bias=None):
+    """Noncausal BNSD attention with an optional additive bias."""
+    return _binding(get_default_manager(), "scaled_dot_product_attention")(
+        query, key, value, attn_bias
+    )
 
 
 class VLLMFLBackendBase(ABC):

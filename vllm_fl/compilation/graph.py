@@ -117,10 +117,11 @@ class GraphWrapper:
     _all_instances: ClassVar[weakref.WeakSet["GraphWrapper"]] = weakref.WeakSet()
 
     @classmethod
-    def clear_all_graphs(cls) -> None:
-        """Clear captured graphs from all GraphWrapper instances."""
+    def clear_all_graphs(cls, graph_runtime: Any | None = None) -> None:
+        """Clear captured graphs, optionally restricted to a single runner."""
         for instance in list(cls._all_instances):
-            instance.clear_graphs()
+            if graph_runtime is None or instance.graph_runtime is graph_runtime:
+                instance.clear_graphs()
 
     def __init__(self,
                  runnable: Callable,
@@ -203,15 +204,9 @@ class GraphWrapper:
             return self.runnable(*args, **kwargs)
 
         assert batch_descriptor is not None
-        if batch_descriptor not in self.concrete_graph_entries:
-            # create a new entry for this batch descriptor
-            self.concrete_graph_entries[batch_descriptor] = GraphEntry(
-                batch_descriptor=batch_descriptor
-            )
-
-        entry = self.concrete_graph_entries[batch_descriptor]
-
-        if entry.graph is None:
+        entry = self.concrete_graph_entries.get(batch_descriptor)
+        if entry is None:
+            entry = GraphEntry(batch_descriptor=batch_descriptor)
             if self.cudagraph_options.debug_log_enable:
                 logger.debug(
                     "Capturing a cudagraph on (%s,%s)",
@@ -299,6 +294,7 @@ class GraphWrapper:
 
             entry.output = weak_ref_tensors(output)
             entry.graph = graph
+            self.concrete_graph_entries[batch_descriptor] = entry
 
             compilation_counter.num_cudagraph_captured += 1
 

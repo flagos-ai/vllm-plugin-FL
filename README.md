@@ -29,6 +29,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Qwen3.8-Flash-Next / Qwen4Exp | Supported | [implementation](./vllm_fl/models/qwen3_8_flash_next/) |
 | Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
+| Unlimited-OCR | Ascend 910C BF16 | [example](./examples/unlimited_ocr/serve.py) / [serving and validation](#unlimited-ocr-on-ascend) |
 | GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
 | GLM-5.3 Flash | Supported | [implementation](./vllm_fl/models/glm5/model.py) |
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
@@ -222,6 +223,90 @@ If there are multiple plugins in the current environment, you can specify use vl
     standard Python-only FL installation above is sufficient. Use a compatible
     FlagGems/FlagTree installation when setting `USE_FLAGGEMS=1`.
 
+
+### Unlimited-OCR on Ascend
+
+Unlimited-OCR loads the original checkpoint through FL's model and multimodal
+registration. NPU execution uses FL and torch-npu. The verified environment
+is Ascend 910C with CANN 9.0.1, Python
+3.12.13, PyTorch 2.10.0+cpu, torch-npu 2.10.0.post2, Transformers 5.13.0 and
+torchvision 0.25.0+cpu.
+
+Load the CANN toolkit environment. Use the source install above with
+`VLLM_TARGET_DEVICE=empty` at the pinned vLLM 0.24 revision and install
+Python-only FL in that environment. Install official FlagGems v5.3.4 as
+described above for both OCR routes. FL uses its standard FlagGems device
+detector during startup, including when `USE_FLAGGEMS=0` selects torch-npu
+for inference.
+[Pinned vLLM source](https://github.com/vllm-project/vllm/tree/ee0da84ab9e04ac7610e28580af62c365e898389)
+
+From the repository root, pass the checkpoint path and one Ascend device ID
+per tensor-parallel rank to the serving example.
+
+```bash
+python examples/unlimited_ocr/serve.py /path/to/Unlimited-OCR --devices 0,1 --tp 2
+```
+
+The example selects FL and the torch-npu path (`VLLM_PLUGINS=fl`,
+`USE_FLAGGEMS=0`). Its defaults are BF16 weights and KV cache, TP2,
+`FULL_DECODE_ONLY` with capture sizes 1, 2, 4, 8, 16, 32 and 64, synchronous
+scheduling and chunked prefill. It uses a 32,768-token context, 64 active
+sequences, a 1,024-token batch budget and 0.80 device-memory utilization.
+R-SWA retains the full KV cache and uses a 2,048 MiB mask budget per rank.
+Prefix caching and speculative decoding are disabled. For single-device
+eager serving, use `--devices 0 --tp 1 --eager --max-num-seqs 4`.
+
+To route the SiLU-and-multiply activation through the official FlagGems package,
+set `USE_FLAGGEMS=1 VLLM_FL_FLAGOS_WHITELIST=silu_and_mul` when launching the
+example. This selects the FL `default.flagos` activation and keeps R-SWA, RoPE
+and MoE on their Ascend routes. The benchmark results below use the default
+torch-npu configuration.
+
+Send one image and a text prompt to `/v1/chat/completions` for
+`Unlimited-OCR`. The example uses a single BOS, Gundam image preprocessing
+(`image_size=640`, `base_size=1024`, `crop_mode=true`) and the FL NGram
+logits processor. Both measurements below set `ngram_size=35` and
+`window_size=128` per request.
+
+#### Validation
+
+The tables show the FL OCR baseline `8f36bf1` followed by the measured FL
+revision `d5aacf5e2002`. The two builds used different pairs of Ascend 910C
+devices. At `d5aacf5e2002`, 298 targeted tests passed, TP2 graph capture and
+replay were verified on both ranks, and TP1 eager serving was verified with
+one image.
+
+Performance used EvalScope 1.14.1 `random_vl` with 1,024 streaming requests per run
+and concurrency 64. Each build ran once per length with zero failures and a
+mean of 1,024 output tokens. Each request included one synthetic 2,048 × 2,048
+RGB image. Generation used a 1,024-token fixed length, seed 42, temperature 0
+and disabled EOS and stop criteria. Server input counts include image and
+template tokens. Total throughput counts server input and output tokens.
+
+| Text tokens | Server input tokens | Output tokens/s | Total tokens/s | Mean TTFT (ms) | Mean TPOT (ms) |
+|------------:|--------------------:|----------------:|---------------:|---------------:|---------------:|
+| 1,024 | 2,938 | 1,826.93 → 1,806.14 | 7,068.64 → 6,988.20 | 2,884.50 → 2,989.70 | 32.17 → 32.46 |
+| 4,096 | 6,010 | 1,531.12 → 1,509.97 | 10,517.45 → 10,372.19 | 2,168.76 → 2,353.82 | 39.54 → 39.94 |
+| 16,384 | 18,298 | 811.07 → 805.77 | 15,304.17 → 15,204.11 | 13,349.97 → 13,599.42 | 65.11 → 65.38 |
+
+OmniDocBench v1.5 used one request per page at concurrency 64 with the
+`document parsing.` prompt, non-streaming generation, temperature 0, seed 1024
+and an 8,192-token output cap. Official `quick_match` scoring covered all
+1,355 Markdown outputs.
+The CDM self-check returned F1 = 1.0. Both builds had zero HTTP failures.
+Scoring included 14 → 16 length-truncated outputs and two empty Markdown
+outputs per build. The edit metrics use a 0–1 scale (lower is better). The
+other scores use a 0–100 scale (higher is better). Overall averages text
+accuracy (`(1 - Text Edit) × 100`), Formula CDM and Table TEDS.
+
+| Metric | Baseline | Measured FL revision |
+|--------|---------:|---------------------:|
+| Text Edit | 0.03970 | 0.03913 |
+| Formula CDM | 91.685 | 91.240 |
+| Table TEDS | 91.033 | 90.682 |
+| Table TEDS-S | 94.640 | 93.946 |
+| Reading-order Edit | 0.04419 | 0.04484 |
+| Overall | 92.916 | 92.670 |
 
 ### HY4 on NVIDIA
 

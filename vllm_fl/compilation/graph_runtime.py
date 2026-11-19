@@ -24,6 +24,10 @@ class GraphRuntimeController:
         self.update_stream = None
         self._active = False
 
+    def reserve_graph_memory(self, device: Any) -> int:
+        """Return bytes allocated before KV-cache memory profiling."""
+        return 0
+
     @staticmethod
     def _num_tokens(context: Any) -> int:
         num_tokens = getattr(getattr(context, "batch_descriptor", None), "num_tokens", None)
@@ -40,17 +44,21 @@ class GraphRuntimeController:
 
         assert not self._active
         num_tokens = self._num_tokens(context)
-        prepare_graph_params(num_tokens)
+        params = prepare_graph_params(num_tokens)
+        was_capturing = getattr(context, "capturing", False)
         self._active = True
         context.capturing = True
         try:
-            yield
-        finally:
             try:
-                weak_ref_workspace(num_tokens)
+                yield
             finally:
-                context.capturing = False
-                self._active = False
+                weak_ref_workspace(num_tokens)
+        except BaseException:
+            params.discard_shape(num_tokens)
+            raise
+        finally:
+            context.capturing = was_capturing
+            self._active = False
 
     @contextmanager
     def replay_scope(self, context: Any):

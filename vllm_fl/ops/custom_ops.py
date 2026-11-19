@@ -199,6 +199,65 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         _patch_fused_moe_factory()
 
 
+def register_ocr_oot_ops(required_ops, sampler_binding) -> None:
+    """Use the native registry and bind only adapters reached by the OCR worker."""
+    import inspect
+
+    from vllm.model_executor.custom_op import op_registry_oot
+    from vllm.model_executor.models import deepseek_v2
+
+    from vllm_fl.activation import PendingPatch, bind_patches, preflight_patches
+    from vllm_fl.dispatch.backends.vendor.ascend.patch import ascend_vision_oot_classes
+
+    classes = {
+        name: cls for op, (cls, name) in OOT_OPS.items() if op in required_ops
+    }
+    classes.update(ascend_vision_oot_classes())
+    missing = {}
+    for name, cls in classes.items():
+        registered = op_registry_oot.get(name)
+        if registered is None:
+            missing[name] = cls
+        elif registered is not cls:
+            raise RuntimeError(f"Conflicting Unlimited-OCR OOT registration for {name}")
+
+    factory = deepseek_v2.FusedMoE
+    if factory is not FusedMoEFL:  # noqa F405
+        signature = inspect.signature(factory)
+        if (
+            factory.__module__ != "vllm.model_executor.layers.fused_moe.layer"
+            or not {"num_experts", "top_k", "hidden_size", "intermediate_size"}
+            <= signature.parameters.keys()
+        ):
+            raise RuntimeError("Unsupported vLLM DeepSeek-V2 FusedMoE factory API")
+
+    factory_binding = PendingPatch(
+        target=f"{deepseek_v2.__name__}.FusedMoE",
+        owner=deepseek_v2,
+        attr="FusedMoE",
+        replacement=FusedMoEFL,  # noqa F405
+        pristine=factory,
+        fingerprint=sampler_binding.fingerprint,
+    )
+    bindings = (sampler_binding, factory_binding)
+    preflight_patches(bindings)
+    names = {cls: vars(cls).get("name") for cls in missing.values()}
+    try:
+        for name, cls in missing.items():
+            CustomOp.register_oot(_decorated_op_cls=cls, name=name)
+        bind_patches(bindings)
+    except BaseException:
+        for name, cls in missing.items():
+            if op_registry_oot.get(name) is cls:
+                del op_registry_oot[name]
+            if names[cls] is None:
+                if "name" in vars(cls):
+                    del cls.name
+            else:
+                cls.name = names[cls]
+        raise
+
+
 def _patch_fused_moe_factory() -> None:
     """Replace the FusedMoE factory function with FusedMoEFL in all relevant
     vllm modules so that model code picks up the FL version automatically."""

@@ -7,9 +7,12 @@ This module provides utilities for creating and caching attention masks
 required by Ascend NPU attention operators.
 """
 
+import os
 from typing import ClassVar, Optional
 
 import torch
+
+_RSWA_MASK_CHUNK_ELEMENTS = 1 << 24
 
 
 class AttentionMaskBuilder:
@@ -32,7 +35,7 @@ class AttentionMaskBuilder:
     _pcp_mla_mask: ClassVar[Optional[torch.Tensor]] = None
     _pcp_mla_mask_dtype: ClassVar[Optional[torch.dtype]] = None
 
-    def __init__(self, device: torch.device):
+    def __init__(self, device: torch.device, *, ocr_mode: bool = False):
         """
         Initialize the attention mask builder.
 
@@ -40,6 +43,7 @@ class AttentionMaskBuilder:
             device: The device to create masks on.
         """
         self.device = device
+        self.ocr_mode = ocr_mode
 
     def get_splitfuse_attn_mask(self) -> torch.Tensor:
         """
@@ -59,6 +63,81 @@ class AttentionMaskBuilder:
             ).to(torch.int8).to(self.device)
             cls._chunked_prefill_mask_device = self.device
         return cls._chunked_prefill_mask
+
+    def get_rswa_attn_mask(
+        self,
+        prefix_lens: torch.Tensor,
+        seq_lens: torch.Tensor,
+        query_lens: torch.Tensor,
+        max_kv_len: int,
+        max_query_len: int,
+        rswa_window: int,
+    ) -> torch.Tensor:
+        for name, size in (
+            ("rswa_window", rswa_window),
+            ("max_kv_len", max_kv_len),
+            ("max_query_len", max_query_len),
+        ):
+            if type(size) is not int or size <= 0:
+                raise ValueError(f"{name} must be a positive integer, got {size!r}")
+
+        num_reqs = prefix_lens.numel()
+        if seq_lens.numel() != num_reqs or query_lens.numel() != num_reqs:
+            raise ValueError("R-SWA lengths must have the same number of requests")
+        limit = os.environ.get(
+            "VLLM_FL_RSWA_MASK_MAX_MIB", "2048" if self.ocr_mode else "512"
+        )
+        if not limit.isascii() or not limit.isdecimal() or not 1 <= int(limit) <= 8192:
+            raise ValueError(
+                "VLLM_FL_RSWA_MASK_MAX_MIB must be an integer from 1 to 8192"
+            )
+        if num_reqs * max_query_len * max_kv_len > int(limit) * (1 << 20):
+            raise ValueError(f"R-SWA mask is too large: configured limit={limit} MiB")
+
+        prefix_lens, seq_lens, query_lens = (
+            lens.to(device=self.device, dtype=torch.int64, non_blocking=True).reshape(
+                -1
+            )
+            for lens in (prefix_lens, seq_lens, query_lens)
+        )
+        # A full prompt prefix may exceed the KV processed by an early chunk.
+        valid = (
+            (prefix_lens >= 0)
+            & (prefix_lens <= max_kv_len)
+            & (query_lens >= 0)
+            & (query_lens <= max_query_len)
+            & (query_lens <= seq_lens)
+            & (seq_lens <= max_kv_len)
+        )
+        torch._assert(valid.all(), "R-SWA lengths exceed mask bounds")
+
+        # FIA needs the full KV width. Bound the temporary tensors by tiling rows.
+        mask = torch.empty(
+            (num_reqs, 1, max_query_len, max_kv_len),
+            dtype=torch.int8,
+            device=self.device,
+        )
+        output = mask.view(num_reqs * max_query_len, max_kv_len)
+        keys = torch.arange(max_kv_len, device=self.device)
+        chunk = max(1, _RSWA_MASK_CHUNK_ELEMENTS // max_kv_len)
+        for start in range(0, len(output), chunk):
+            rows = torch.arange(
+                start, min(start + chunk, len(output)), device=self.device
+            )
+            requests = rows // max_query_len
+            offsets = (rows % max_query_len).unsqueeze(1)
+            prefixes = prefix_lens[requests].unsqueeze(1)
+            sequences = seq_lens[requests].unsqueeze(1)
+            queries = query_lens[requests].unsqueeze(1)
+            positions = sequences - queries + offsets
+            keep = (
+                (offsets < queries)
+                & (keys < sequences)
+                & (keys <= positions)
+                & ((keys < prefixes) | (keys > positions - rswa_window))
+            )
+            output[start : start + chunk].copy_(~keep)
+        return mask
 
     def get_mla_mask(self, dtype: torch.dtype) -> torch.Tensor:
         """
