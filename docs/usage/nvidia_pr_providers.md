@@ -269,13 +269,16 @@ are not established stable speedups. Both arms fail the 16K/64K groups;
 their failed rounds are preserved and excluded from throughput comparisons.
 
 A separate repaired padding/no-TLE configuration passes serial long-input
-probes, but both exact-ablation arms still fail the official 16K group.
-The optimized 64K group also fails; the recovered baseline's last group is
-still being audited. New fixed-source 1K/4K means are 1341.82→1324.03
+probes, but both exact-ablation arms still fail the official 16K/64K groups.
+All 24 raw rounds have been audited: each arm has six successful short-input
+rounds and six failed long-input rounds. New fixed-source 1K/4K means are 1341.82→1324.03
 (-1.33%) and 924.23→879.855 (-4.80%) output tok/s. Both short groups have
 three successful raw rounds per arm. The first asynchronous error is reported
-while GDN linear attention indexes its initial state with a Boolean mask;
-this reporting site does not identify the first failing kernel. Recovery
+while GDN linear attention indexes its initial state with a Boolean mask.
+A separate launch-blocking C64/16K functional diagnostic locates the first
+synchronous CUDA failure at the later GDN recurrent-state write through
+FlagGems `index_put`; the exact faulty inputs and repair are still under
+investigation. This diagnostic is not an official throughput result. Recovery
 starts only the arm that never benchmarked after an SSH transport failure.
 No measured optimized round or earlier configuration result is replaced.
 
@@ -292,12 +295,20 @@ samples do not establish stable speedups. Reported KV capacity is
 Qwen3.6-35B-A3B additionally requires the metadata-padding repair below.
 Both exact-ablation arms pass full graph capture and three semantic requests
 at the original full-context configuration. The distinct fixed-source TP2
-comparison completes all 12 baseline rounds; its first paired 1K group is
-1758.02→1884.215 output tok/s (+7.18%). The baseline's two retained rounds
-have an 11.18% spread, versus 1.41% after optimization, so this partial result
-does not establish a stable speedup. Both arms report the same 32.81 GiB/rank
-model allocation and 3600108-token KV capacity. Remaining groups continue;
-the earlier failures and every measured round remain unchanged.
+comparison completes all 12 baseline rounds and the first nine optimized
+rounds. Audited means of original rounds 2/3 are:
+
+| Input tokens | Pre3340 output tok/s | Optimized output tok/s | Change |
+| --- | ---: | ---: | ---: |
+| 1024 | 1758.02 | 1884.215 | +7.18% |
+| 4096 | 1262.07 | 1296.53 | +2.73% |
+| 16384 | 562.57 | 571.21 | +1.54% |
+
+At 1K, the baseline's two retained rounds have an 11.18% spread, versus
+1.41% after optimization. These partial observations do not establish stable
+speedups. Both arms report the same 32.81 GiB/rank model allocation and
+3600108-token KV capacity. The 64K group continues; the earlier failures and
+every measured round remain unchanged.
 
 ### CUDA graph padding compatibility
 
