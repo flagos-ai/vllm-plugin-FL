@@ -1,0 +1,44 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+name: Iluvatar OCR Reproduction
+
+on:
+  push:
+    branches: [codex/ci-iluvatar-ocr-repro-20261120]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iluvatar-ocr-repro-20261120
+  cancel-in-progress: false
+
+jobs:
+  original-35b-graph:
+    uses: ./.github/workflows/_e2e_test.yml
+    with:
+      platform: iluvatar
+      device: bi_v150
+      task: adaptation_gate
+      branch: 23b9007ffe8a96e64b6f247e2309daffe3b77213
+      ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci@sha256:e400f2a5da8d3020f86a0129463223d637401f9c7b3c0a7157f1c7f199d7adc6
+      runner_labels: '["iluvatar-cicd-vllm-plugin"]'
+      container_volumes: >-
+        ["/data:/data", "/dev:/dev", "/lib/modules:/lib/modules", "/usr/local/corex-4.5.0/lib64/libcuda.so.1:/usr/local/corex/lib64/libcuda.so.1", "/usr/local/corex-4.5.0/lib64/libixml.so:/usr/local/corex/lib64/libixml.so", "/usr/local/corex-4.5.0/bin/ixsmi:/usr/local/corex/bin/ixsmi", "/mnt/share/user_homes/models:/data/models/Qwen:ro"]
+      container_options: >-
+        --hostname vllm-plugin-fl
+        --privileged
+        --ipc=host
+        --shm-size=64g
+        --user root
+        --ulimit nofile=65535:65535
+        --env GEMS_VENDOR=iluvatar
+        --env VLLM_PLUGINS=fl
+        --env USE_FLAGGEMS=1
+        --env CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+        --env VLLM_ENGINE_ITERATION_TIMEOUT_S=72000
+        --env VLLM_RPC_TIMEOUT=72000000
+        --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=7200
+      timeout: 180
+      cases: '[{"model":"qwen3_6","case":"35b_a3b_tp4_graph"}]'
