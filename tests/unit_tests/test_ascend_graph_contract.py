@@ -361,13 +361,48 @@ def test_failed_capture_and_replay_restore_state(monkeypatch):
         RuntimeError, fail_in_scope, controller.capture_scope(context), "capture failed"
     ).match("capture failed")
     assert not context.capturing and not controller._active
-    assert calls == [("prepare", 4), ("discard", 4)]
+    assert calls == [("prepare", 4), ("weak-ref", 4), ("discard", 4)]
     calls.clear()
     pytest.raises(
         RuntimeError, fail_in_scope, controller.replay_scope(context), "replay failed"
     ).match("replay failed")
     assert calls == ["synchronize"]  # Failed enqueue must not release update events.
     assert not controller._active
+
+
+def test_non_ocr_failed_capture_discards_only_failed_shape_and_allows_retry(
+    monkeypatch,
+):
+    runtime, _ = _runtime(monkeypatch, [])
+    resources = _graph_params(monkeypatch)
+    monkeypatch.setitem(sys.modules, "vllm_fl.compilation.graph_params", resources)
+    params = resources.prepare_graph_params(8)
+    params.handles[8].append("existing graph")
+    controller = runtime.GraphRuntimeController(vllm_config=None)
+    assert controller.reserve_graph_memory(None) == 0
+    context = NS(batch_descriptor=NS(num_tokens=4), capturing=False)
+    with (
+        pytest.raises(RuntimeError, match="capture failed"),
+        controller.capture_scope(context),
+    ):
+        params.handles[4].append("partial handle")
+        params.events[4].append("partial event")
+        params.attn_params[4].append("partial task")
+        params.workspaces[4] = object()
+        raise RuntimeError("capture failed")
+    assert not context.capturing and not controller._active
+    for registry in (
+        params.handles,
+        params.events,
+        params.attn_params,
+        params.workspaces,
+    ):
+        assert set(registry) == {8}
+    assert params.handles[8] == ["existing graph"]
+    with controller.capture_scope(context):
+        assert params.handles[4] == []
+        params.handles[4].append("retried graph")
+    assert params.handles[4] == ["retried graph"]
 
 
 def test_selected_backends_are_bound_once(monkeypatch):
@@ -557,6 +592,24 @@ def test_runtime_has_no_accelerator_import_side_effects():
     assert not any(
         name.startswith(("torch_npu", "npugraph_ex", "vllm_fl.attention"))
         for name in names
+    )
+
+
+def test_generic_graph_runtime_has_no_ocr_or_vendor_dependencies():
+    tree = ast.parse((ROOT / "compilation/graph_runtime.py").read_text())
+    imports = [
+        name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for name in (
+            [node.module or ""]
+            if isinstance(node, ast.ImportFrom)
+            else [alias.name for alias in node.names]
+        )
+    ]
+    assert not any(
+        name.startswith(("vllm_fl.models", "vllm_fl.dispatch.backends.vendor"))
+        for name in imports
     )
 
 

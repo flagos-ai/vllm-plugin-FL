@@ -15,20 +15,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass(frozen=True)
-class RswaGraphBuffers:
-    """One runner's fixed-address inputs and workspace for decode buckets."""
-
-    capture_sizes: frozenset[int]
-    attn_mask: Any
-    block_table: Any
-    workspace: Any
-
-    @property
-    def nbytes(self) -> int:
-        return self.attn_mask.nbytes + self.block_table.nbytes + self.workspace.nbytes
-
-
 @dataclass
 class GraphParams:
     """Captured device-task state indexed by the full-graph token shape."""
@@ -37,18 +23,10 @@ class GraphParams:
     workspaces: dict[int, Any | None] = field(default_factory=dict)
     handles: dict[int, list[Any]] = field(default_factory=dict)
     attn_params: dict[int, list[Any]] = field(default_factory=dict)
-    rswa_buffers: RswaGraphBuffers | None = None
 
     def prepare_shape(self, num_tokens: int) -> None:
         if num_tokens <= 0:
             raise ValueError(f"Graph capture size must be positive, got {num_tokens}")
-        if (
-            self.rswa_buffers is not None
-            and num_tokens not in self.rswa_buffers.capture_sizes
-        ):
-            raise RuntimeError(
-                f"R-SWA graph buffers were not sized for {num_tokens} tokens"
-            )
         if num_tokens in self.attn_params and (
             self.attn_params[num_tokens]
             or self.handles[num_tokens]
@@ -59,9 +37,7 @@ class GraphParams:
                 "already contain captured state"
             )
         self.events[num_tokens] = []
-        self.workspaces[num_tokens] = (
-            self.rswa_buffers.workspace if self.rswa_buffers is not None else None
-        )
+        self.workspaces[num_tokens] = None
         self.handles[num_tokens] = []
         self.attn_params[num_tokens] = []
 

@@ -252,11 +252,11 @@ def test_ocr_full_decode_updates_paged_rswa_graph(tp_group):
     from vllm.v1.attention.backend import AttentionType
 
     from vllm_fl.compilation.graph import GraphWrapper
-    from vllm_fl.compilation.graph_runtime import GraphRuntimeController
     from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
         AscendAttentionBackend,
         AscendAttentionState,
     )
+    from vllm_fl.dispatch.backends.vendor.ascend.rswa_graph import RswaGraphRuntime
 
     device = torch.device("npu", torch.npu.current_device())
     rank = tp_group.rank_in_group
@@ -310,10 +310,8 @@ def test_ocr_full_decode_updates_paged_rswa_graph(tp_group):
     )
     config.compilation_config.static_forward_context[layer_name] = layer
     builder = backend.get_builder_cls()(None, [layer_name], config, device)
-    runtime = GraphRuntimeController(
-        vllm_config=config, full_graph_wrapper_type=GraphWrapper
-    )
-    assert runtime.prepare_rswa_graph(device) > 0
+    runtime = RswaGraphRuntime(vllm_config=config, full_graph_wrapper_type=GraphWrapper)
+    assert runtime.reserve_graph_memory(device) > 0
     runtime.bind_attention_groups([[SimpleNamespace(backend=backend)]])
 
     pages = _MAX_LENGTH // _BLOCK_SIZE + max(_CAPTURE_SIZES)

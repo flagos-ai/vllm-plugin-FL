@@ -50,9 +50,9 @@ from vllm.v1.attention.backends.registry import (
     register_backend,
 )
 
-from vllm_fl.compilation.graph_params import RswaGraphBuffers
 from vllm_fl.models.ocr_runtime import get_ocr_rswa_window, is_unlimited_ocr
 
+from ..rswa_graph import RswaGraphBuffers
 from .attention_mask import AttentionMaskBuilder
 
 logger = logging.getLogger(__name__)

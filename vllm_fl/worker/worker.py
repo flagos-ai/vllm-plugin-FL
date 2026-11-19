@@ -598,15 +598,15 @@ class WorkerFL(WorkerBase):
             return fallback_val
 
         GiB = lambda b: b / GiB_bytes
-        rswa_graph_bytes = 0
+        reserved_graph_bytes = 0
         if self.model_runner.graph_runtime is not None:
-            rswa_graph_bytes = self.model_runner.graph_runtime.prepare_rswa_graph(
+            reserved_graph_bytes = self.model_runner.graph_runtime.reserve_graph_memory(
                 self.device
             )
-            if rswa_graph_bytes:
+            if reserved_graph_bytes:
                 logger.info(
-                    "Reserved %.2f MiB for R-SWA full decode graphs",
-                    rswa_graph_bytes / (1 << 20),
+                    "Reserved %.2f MiB for full decode graphs",
+                    reserved_graph_bytes / (1 << 20),
                 )
 
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
@@ -674,7 +674,7 @@ class WorkerFL(WorkerBase):
             profile_result.non_torch_increase
             + profile_result.torch_peak_increase
             + profile_result.weights_memory
-            + rswa_graph_bytes
+            + reserved_graph_bytes
         )
         cudagraph_memory_estimate_applied = (
             cudagraph_memory_estimate

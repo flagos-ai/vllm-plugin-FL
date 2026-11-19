@@ -537,11 +537,24 @@ class ModelRunnerFL(
 
             self.use_ascend_hybrid_cache = uses_dense_hybrid_cache(model_config)
         self._ascend_attn_state = None
+        from vllm_fl.models.ocr_runtime import get_ocr_rswa_window
+
+        self.ocr_rswa_window = get_ocr_rswa_window(self.model_config)
         self.graph_runtime = None
         if self.use_ascend_attention:
             from vllm_fl.compilation.graph_runtime import GraphRuntimeController
 
-            self.graph_runtime = GraphRuntimeController(
+            runtime_cls = GraphRuntimeController
+            if (
+                self.ocr_rswa_window is not None
+                and self.compilation_config.cudagraph_mode.has_full_cudagraphs()
+            ):
+                from vllm_fl.dispatch.backends.vendor.ascend.rswa_graph import (
+                    RswaGraphRuntime,
+                )
+
+                runtime_cls = RswaGraphRuntime
+            self.graph_runtime = runtime_cls(
                 vllm_config=vllm_config,
                 full_graph_wrapper_type=GraphWrapper,
             )
@@ -610,9 +623,6 @@ class ModelRunnerFL(
         self.use_async_scheduling = self.scheduler_config.async_scheduling
 
         # Sampler
-        from vllm_fl.models.ocr_runtime import get_ocr_rswa_window
-
-        self.ocr_rswa_window = get_ocr_rswa_window(self.model_config)
         self.sampler = Sampler(
             logprobs_mode=self.model_config.logprobs_mode,
             use_fp64_gumbel=self.model_config.use_fp64_gumbel,
@@ -7011,9 +7021,6 @@ class ModelRunnerFL(
         set_cudagraph_capturing_enabled(True)
         try:
             yield
-        except BaseException:
-            _clear_decoder_graphs(self.graph_runtime)
-            raise
         finally:
             set_cudagraph_capturing_enabled(False)
 
