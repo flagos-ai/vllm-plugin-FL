@@ -243,9 +243,9 @@ launches 50455–52148 GEMMs and 40702–42058 zeroing kernels per rank, versus
 with the pinned autotuner's benchmark/reset path. Its tuning key includes
 `EM_BUCKET`, supplied with the actual aligned token-slot allocation length
 except for the singleton specialization, and uses an align32 key strategy.
-A controlled tuning-policy counterfactual is still needed to isolate its
-contribution. These observations do not establish the original PRs' individual
-benefits, a critical-path percentage, or the cause of the EP16 regression.
+The three-length tuning-policy counterfactual below now tests this mechanism.
+These observations do not establish the original PRs' individual benefits, a
+critical-path percentage, or the cause of the EP16 regression.
 
 The adapter's long diagnostic request timed out after raw trace export;
 sampled worker stacks showed optional profiler CPU table aggregation.
@@ -254,6 +254,66 @@ same-runtime official rounds remain separate successful evidence. Future
 profiling disables the optional table while retaining raw CPU/CUDA traces.
 The functional diagnostic's different request count and output length cannot
 replace the formal C64/N256 comparison or qualify an optimization's throughput.
+
+### Dynamic tuning-key counterfactual
+
+A follow-up native/adapter diagnosis records all eight ranks in 1K, 4K and
+16K functional windows. In the second 1K-input window, each adapter rank
+encounters six new tuning keys, taking 168.763–169.372 seconds cumulatively
+per rank. First 4K/16K windows each encounter two new keys, taking about
+59 seconds per rank. CPU tuner annotations align with real execute events
+and thousands of benchmark GEMM/zeroing launches. This directly establishes
+request-time tuning work; its wall time includes benchmark, JIT and cache
+work, not compilation alone. Parallel rank times must not be added.
+
+The key includes padded routed-slot allocation length, which changes with
+scheduled token batches even when client input length stays the same.
+The tested candidate leaves singleton and small-EM keys unchanged and rounds
+EM >= 8192 up to the next power of two for the **tuning key only**. Actual EM,
+launch grid, valid-token count, strides and GEMM math remain unchanged.
+Component tests using five observed large model shapes and both projections
+reduce ten new-key misses to four, with total miss wall time falling from
+295.991 to 117.027 seconds. Each arm passes 48 full-output numerical checks
+and 48 changed-input/index graph replays. These use synthetic weights/routes
+at actual shapes, not captured model tensors.
+
+A separate Flash TP8 official comparison then completes all 18 rounds for
+1K/4K/16K. Both arms use the original adapter; only the key helper and its
+installation differ. No route fusion, mask/reduction fusion, observer or
+profiler is included. This candidate is **not integrated into this PR's
+runtime**. Original rounds 2/3 output-throughput means are:
+
+| Input tokens | Original key output tok/s | Bucketed key output tok/s | Change | Retained spread before / after |
+| --- | ---: | ---: | ---: | ---: |
+| 1024 | 1057.955 | 3001.290 | +183.69% | 95.61% / 1.68% |
+| 4096 | 1633.745 | 1649.895 | +0.99% | 0.07% / 0.54% |
+| 16384 | 574.515 | 571.885 | -0.46% | 0.84% / 0.23% |
+
+Every round passes the original 256-request/fixed-length/raw-JSON audit.
+At 1K, retained baseline rounds have 81.486 and 388.983 seconds cumulatively
+in global token-arrival gaps longer than one second; neither candidate
+retained round has such a gap. Its first round still has 136.688 seconds.
+At 4K/16K, both arms' retained rounds have no such gaps and throughput is
+approximately unchanged. Together with the component intervention, this
+supports reducing repeated dynamic-key tuning stalls, not a general
+steady-state GEMM speedup or a stable +184% deployment gain.
+
+Both arms start with separate empty task caches; initialization and identical
+semantic probes populate them before the official client starts. Caches are
+not cleared between rounds. Allocation is 22.93 GiB/rank in both arms, but
+reported KV capacity is 801144 versus 801070 tokens, not fixed KV. There are
+only two retained samples. The formal run has no tuner observer, so its client
+gaps cannot be assigned to individual keys or pure compilation. These new
+cache histories cannot allocate percentages of the older native/adapter
+regressions or erase their slow rounds.
+
+A second independent candidate fuses route range checks, EP mapping and
+zero selection into one kernel, retaining invalid/padding/NaN/Inf semantics.
+Its component traces confirm seven launches become one; numerical and
+changed-input graph checks plus three-length whole-model functional checks
+pass. Its separate official comparison is still running. This route candidate
+is also not part of the current PR runtime; no complete paired performance
+claim is made yet.
 
 ### Masked top-k reduction
 
@@ -681,9 +741,11 @@ speedup is established.
 Independent native/peer comparisons use the published CTA-barrier repair,
 ordinary PDL forwarding and common `CUDA_MODULE_DATA_LOADING=EAGER`.
 The original TP2/BF16 service and official client load are preserved. Each
-native arm has 12 successful rounds; each repaired peer arm has nine successful
-closed rounds so far. Detailed JSON, source/configuration, client and actual
-commands pass audit. The 64K groups are still running. The following are
+model has nine successful rounds per arm for the retained 1K/4K/16K scope.
+Detailed JSON, source/configuration, client and actual commands pass audit.
+The user subsequently excluded 64K; in-progress 64K clients were interrupted
+and their evidence retained as user-directed, not model failures. Completed
+older 64K rounds remain historical data. The following are
 arithmetic means of original rounds 2/3, with all three raw rounds retained:
 
 | Model | Input tokens | Native output tok/s | Repaired peer output tok/s | Change |
@@ -756,6 +818,10 @@ Foreign-route work described above is a concrete optimization candidate,
 not a measured causal partition of this regression. These are provider A/B
 results; they do not isolate PR4483 from PR4943.
 
-AttnRes Kimi TP32/EP32 throughput remains queued. PR3340 is already present in
+New performance work uses only 1K/4K/16K at the user's request; historical
+64K results above remain preserved. AttnRes Kimi TP32/EP32 throughput remains
+pending a separate three-length control handoff and resource qualification.
+A host with zero GPU memory but an active checkpoint-triggered GPU queue is
+not considered idle. PR3340 is already present in
 the baseline, so its existing coverage does not constitute a new migration
 speedup. All new providers remain experimental and disabled by default.
