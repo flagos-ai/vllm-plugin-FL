@@ -5,6 +5,7 @@
 import __future__
 
 import ast
+import importlib.util
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any, NamedTuple, cast
 from unittest.mock import Mock
 
 import numpy as np
+import pytest
 import torch
 
 
@@ -46,6 +48,38 @@ def _runner_class(methods, **namespace):
     runner_class.use_ascend_attention = False
     runner_class.use_ascend_hybrid_cache = False
     return runner_class
+
+
+@pytest.mark.parametrize("num_dims", [3, 4])
+@pytest.mark.parametrize("section_name", ["mrope_section", "xdrope_section"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_mrope_uses_native_config_dimensions(num_dims, section_name, nested):
+    """Native 0.32 routes legacy XD-RoPE sections through M-RoPE."""
+    if importlib.util.find_spec("vllm") is None:
+        pytest.skip("Requires installed vLLM 0.32 ModelConfig")
+    from transformers import PretrainedConfig
+
+    from vllm.config import ModelConfig
+
+    text_config = PretrainedConfig(rope_parameters={section_name: [16] * num_dims})
+    config = object.__new__(ModelConfig)
+    config.hf_config = (
+        PretrainedConfig(text_config=text_config) if nested else text_config
+    )
+    assert config.uses_mrope
+    assert config.mrope_num_dims == num_dims
+    runner = _runner_class({"_get_positions"}, torch=torch)()
+    runner.uses_mrope = config.uses_mrope
+    positions = torch.arange(num_dims * 100).reshape(num_dims, 100)
+    runner.mrope_positions = SimpleNamespace(gpu=positions)
+
+    result = runner._get_positions(10)
+    assert result.shape == (num_dims, 10)
+    torch.testing.assert_close(result, positions[:, :10])
+    indices = torch.tensor([9, 1, 9, 50])
+    indexed = runner._get_positions(indices)
+    assert indexed.shape == (num_dims, 4)
+    torch.testing.assert_close(indexed, positions[:, indices])
 
 
 def test_allocator_binds_kernel_views_and_preserves_shared_manager_views():
@@ -333,7 +367,6 @@ def test_zero_draft_spec_batch_keeps_decode_state_offset_and_masks_prefill():
     runner.seq_lens = torch.zeros(4, dtype=torch.int32)
     runner.num_decode_draft_tokens = Buffer(4)
     runner.uses_mrope = False
-    runner.uses_xdrope_dim = 0
     runner.enable_prompt_embeds = False
     runner.use_async_spec_decode = False
     runner.mamba_prev_last_scheduled_idx = None
