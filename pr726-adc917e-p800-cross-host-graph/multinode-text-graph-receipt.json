@@ -1,0 +1,103 @@
+{
+  "head": "adc917edea0933a8823b7dbe067debaeb8dc582a",
+  "published_runtime_digest": "sha256:93caedbfc36d665c2e7d9f70a38bbb2501a860c9389be660888b0b6d66bc4402",
+  "mode": "35B-A3B BF16 default Runner V2 text-only FULL_DECODE_ONLY",
+  "results": [
+    {
+      "role": 0,
+      "raw_file": "multinode-text-graph-role-0.tar.gz",
+      "sha256": "b0de60e5f06ad08d16236d9a68b53c223f3b408488a9810f8ddfc4fb8f3941ad",
+      "exit": 1,
+      "noc_matches": 0,
+      "worker_library_mappings": [
+        "488828 VLLM::Worker_TP /flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+        "488829 VLLM::Worker_TP /flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so"
+      ],
+      "rdma_accepts": 24,
+      "replays": [
+        [
+          1,
+          1,
+          0,
+          4
+        ]
+      ],
+      "gate_exit": 124,
+      "summary": {
+        "text_single": {
+          "request_count": 1,
+          "passed_count": 0,
+          "failed_count": 1,
+          "passed": false
+        },
+        "text_concurrent_8": {
+          "request_count": 8,
+          "passed_count": 0,
+          "failed_count": 8,
+          "passed": false
+        }
+      },
+      "generation_http_responses": 0,
+      "request_failures": [
+        {
+          "request_id": "text-llm-details",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        },
+        {
+          "request_id": "text-01",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        },
+        {
+          "request_id": "text-02",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        },
+        {
+          "request_id": "text-03",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        },
+        {
+          "request_id": "text-04",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        },
+        {
+          "request_id": "text-05",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        },
+        {
+          "request_id": "text-06",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        },
+        {
+          "request_id": "text-07",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        },
+        {
+          "request_id": "text-08",
+          "passed": false,
+          "error": "APIConnectionError: Connection error."
+        }
+      ]
+    },
+    {
+      "role": 1,
+      "raw_file": "multinode-text-graph-role-1.tar.gz",
+      "sha256": "392efd9581aa4bc02ed3ee77a17ac8f2b5d5dc94b2cce593302d31ba6807e6f7",
+      "exit": 124,
+      "noc_matches": 0,
+      "worker_library_mappings": [
+        "2502315 VLLM::Worker_TP /flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+        "2502316 VLLM::Worker_TP /flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so"
+      ],
+      "rdma_accepts": 24
+    }
+  ],
+  "finding": "Capture succeeded. Four actual 1-to-1 full graph replays occurred after readiness and generation stopped."
+}

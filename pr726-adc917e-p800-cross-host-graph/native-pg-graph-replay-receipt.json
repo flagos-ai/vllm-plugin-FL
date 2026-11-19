@@ -1,0 +1,28 @@
+{
+  "head": "adc917edea0933a8823b7dbe067debaeb8dc582a",
+  "image_manifest": "sha256:93caedbfc36d665c2e7d9f70a38bbb2501a860c9389be660888b0b6d66bc4402",
+  "workload": "Torch ProcessGroupFlagCX two-host effective world size 4, BF16 [1,2048], one all-reduce in one native CUDA graph",
+  "phase": "Eager and first replay produce exact 10 on all ranks. Second replay did not finish before bounded timeout; launcher forced shutdown.",
+  "roles": [
+    {
+      "role": 0,
+      "file": "native-pg-graph-replay-role-0.log",
+      "sha256": "4856dcf54466fd8d96fc0a226398c661408bd9635178e9ae2c3e06e4ea61b7d4",
+      "exit": 137,
+      "noc": 0,
+      "rank_eager_success": 2,
+      "replay_first_completed_ranks": 2,
+      "remaining_device_processes": 0
+    },
+    {
+      "role": 1,
+      "file": "native-pg-graph-replay-role-1.log",
+      "sha256": "c94c50db617589848b6eb5e3ff5a7dae0f5c7ebca60fa1f96bd240e7f4b64a43",
+      "exit": 137,
+      "noc": 0,
+      "rank_eager_success": 2,
+      "replay_first_completed_ranks": 2,
+      "remaining_device_processes": 0
+    }
+  ]
+}

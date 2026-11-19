@@ -1,0 +1,64 @@
+{
+  "head": "adc917edea0933a8823b7dbe067debaeb8dc582a",
+  "published_runtime_digest": "sha256:93caedbfc36d665c2e7d9f70a38bbb2501a860c9389be660888b0b6d66bc4402",
+  "provider": "8ae5c22f5af6d650216f881c329c4dff20c182e1",
+  "plugin_archive_sha256": "d53cad7fd4aaf6522b28cff8fd1c1fdb0c4c20383b944e7ea4d473e488142291",
+  "model": "Qwen3.6-35B-A3B",
+  "mode": "default Runner V2, BF16 eager text-only",
+  "topology": "two P800 hosts, TP4, two physical cards on each host",
+  "nodes": [
+    {
+      "node": 0,
+      "archive": "adc917e-multinode-text-eager-node-0.tar.gz",
+      "sha256": "e4b11e854fedefbbae01b786cb61b07405af04c59a29f8d55a7dc70efa202846",
+      "process_exit": 0,
+      "worker_library": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+      "worker_library_mappings": 2,
+      "flagcx_ranks": [
+        0,
+        1
+      ],
+      "rdma_accepts": 24,
+      "noc_matches": 0,
+      "runner_v2_loads": 2,
+      "text_gate": {
+        "passed": 9,
+        "total": 9,
+        "scenarios": [
+          "text_concurrent_8",
+          "text_single"
+        ],
+        "duration_seconds": 210.65,
+        "driver": "CPU-only external original pytest entrypoint with documented PORT set",
+        "response": {
+          "http": 200,
+          "content": "Paris",
+          "usage": {
+            "prompt_tokens": 24,
+            "total_tokens": 26,
+            "completion_tokens": 2,
+            "prompt_tokens_details": null,
+            "completion_tokens_details": null
+          },
+          "finish_reason": "stop"
+        },
+        "runtime_installed_only_plugin": true
+      }
+    },
+    {
+      "node": 1,
+      "archive": "adc917e-multinode-text-eager-node-1.tar.gz",
+      "sha256": "cc73b08f67ad88c2a3a92e19fcb73c3075c85da2529b6d2eb889ae99ad75e8b2",
+      "process_exit": 0,
+      "worker_library": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+      "worker_library_mappings": 2,
+      "flagcx_ranks": [
+        2,
+        3
+      ],
+      "rdma_accepts": 24,
+      "noc_matches": 0,
+      "runner_v2_loads": 2
+    }
+  ]
+}

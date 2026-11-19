@@ -1,0 +1,103 @@
+{
+  "head": "adc917edea0933a8823b7dbe067debaeb8dc582a",
+  "image_manifest": "sha256:93caedbfc36d665c2e7d9f70a38bbb2501a860c9389be660888b0b6d66bc4402",
+  "workload": "direct PyFlagcxCommunicator with explicit capture stream, two P800 hosts, world size 4, BF16 [1,2048], one all-reduce",
+  "roles": [
+    {
+      "role": 0,
+      "start_replay": [
+        [
+          0,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          2
+        ],
+        [
+          0,
+          1,
+          1,
+          2
+        ]
+      ],
+      "done_replay": [
+        [
+          0,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ]
+      ],
+      "exit_after_deadline": 137,
+      "raw_log": "direct-graph-replay-role-0.log",
+      "raw_sha256": "1266cc89ec01f458b993740492156e4b61fd546659dc6f36cef09fe30bc1d8ab",
+      "noc_matches": 0
+    },
+    {
+      "role": 1,
+      "start_replay": [
+        [
+          3,
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          1,
+          1,
+          1
+        ],
+        [
+          3,
+          1,
+          1,
+          2
+        ],
+        [
+          2,
+          1,
+          1,
+          2
+        ]
+      ],
+      "done_replay": [
+        [
+          3,
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          1,
+          1,
+          1
+        ]
+      ],
+      "exit_after_deadline": 137,
+      "raw_log": "direct-graph-replay-role-1.log",
+      "raw_sha256": "5221107909c7cdc786a01f768a1677fa4300760c1279bcf846a8786b449ffa6e",
+      "noc_matches": 0
+    }
+  ],
+  "first_replay_exact_value": 10,
+  "second_replay_completed_ranks": 0
+}

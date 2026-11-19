@@ -1,0 +1,79 @@
+[
+  {
+    "file": "issue-draft.md",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\flagcx-p800-cross-host-graph-issue-draft.md",
+    "source_sha256": "55a5903e1eff6a5ca1a6c09084e713780fdf9f1ade65990a880e4584f9e4f4a3",
+    "published_copy_sha256": "55a5903e1eff6a5ca1a6c09084e713780fdf9f1ade65990a880e4584f9e4f4a3",
+    "sanitized": false
+  },
+  {
+    "file": "probe-native-flagcx-graph-adc917e.py",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\probe-native-flagcx-graph-adc917e.py",
+    "source_sha256": "e0e36b42b16b49948714a559faac4c5b0abb498037beb20dd06768bcb3a36915",
+    "published_copy_sha256": "e0e36b42b16b49948714a559faac4c5b0abb498037beb20dd06768bcb3a36915",
+    "sanitized": false
+  },
+  {
+    "file": "probe-direct-flagcx-graph-adc917e.py",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\probe-direct-flagcx-graph-adc917e.py",
+    "source_sha256": "b97f1193086164985ea84bc46084f67b5b2dec03b7e799f04f5d48011ccd7710",
+    "published_copy_sha256": "b97f1193086164985ea84bc46084f67b5b2dec03b7e799f04f5d48011ccd7710",
+    "sanitized": false
+  },
+  {
+    "file": "native-pg-graph-replay-receipt.json",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\native-pg-graph-replay-receipt.json",
+    "source_sha256": "535c59c14ff62b71ad380ad4668b74309c49220f471e8b07242637f50b1f83a1",
+    "published_copy_sha256": "535c59c14ff62b71ad380ad4668b74309c49220f471e8b07242637f50b1f83a1",
+    "sanitized": false
+  },
+  {
+    "file": "direct-graph-replay-receipt.json",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\direct-graph-replay-receipt.json",
+    "source_sha256": "dfa8abefb14e54e366e6044fc0c9f43bd0e586e2ecb2553200bf8b7f64086de1",
+    "published_copy_sha256": "dfa8abefb14e54e366e6044fc0c9f43bd0e586e2ecb2553200bf8b7f64086de1",
+    "sanitized": false
+  },
+  {
+    "file": "multinode-text-graph-receipt.json",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\multinode-text-graph-receipt.json",
+    "source_sha256": "4ec3d6641bff407513f95dba7d84c1104c42da03c1385f68ff61ecb5131693e0",
+    "published_copy_sha256": "4ec3d6641bff407513f95dba7d84c1104c42da03c1385f68ff61ecb5131693e0",
+    "sanitized": false
+  },
+  {
+    "file": "multinode-text-eager-receipt.json",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\multinode-text-eager-receipt.json",
+    "source_sha256": "7143034229c947f0cd929463b17904f33010b9b58899c21d3127b7b6d2ab1fcc",
+    "published_copy_sha256": "7143034229c947f0cd929463b17904f33010b9b58899c21d3127b7b6d2ab1fcc",
+    "sanitized": false
+  },
+  {
+    "file": "native-pg-graph-replay-role-0.log",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\native-pg-graph-replay-role-0.log",
+    "source_sha256": "4856dcf54466fd8d96fc0a226398c661408bd9635178e9ae2c3e06e4ea61b7d4",
+    "published_copy_sha256": "8b00170d58c6ae94f0e503da35d579bf1f54f5561822a2801de6dad484741a90",
+    "sanitized": true
+  },
+  {
+    "file": "native-pg-graph-replay-role-1.log",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\native-pg-graph-replay-role-1.log",
+    "source_sha256": "c94c50db617589848b6eb5e3ff5a7dae0f5c7ebca60fa1f96bd240e7f4b64a43",
+    "published_copy_sha256": "6794eafa66b2517b91ff2e94c4398d3c7bdaeddc36f86202229083cdd8c307fc",
+    "sanitized": true
+  },
+  {
+    "file": "direct-graph-replay-role-0.log",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\direct-graph-replay-role-0.log",
+    "source_sha256": "1266cc89ec01f458b993740492156e4b61fd546659dc6f36cef09fe30bc1d8ab",
+    "published_copy_sha256": "f1a5563d82bbebcfd1b7718479b7047b8c304695d415820b1b99152975cb74ee",
+    "sanitized": true
+  },
+  {
+    "file": "direct-graph-replay-role-1.log",
+    "source": "D:\\Codex\\work\\pr726-nov15-trace\\review-provider\\adc917e-P800-receipts\\direct-graph-replay-role-1.log",
+    "source_sha256": "5221107909c7cdc786a01f768a1677fa4300760c1279bcf846a8786b449ffa6e",
+    "published_copy_sha256": "c956d043f60c0ce8c7c4361612ccc3a29a421dda4042d3de755def52d3f5276c",
+    "sanitized": true
+  }
+]
