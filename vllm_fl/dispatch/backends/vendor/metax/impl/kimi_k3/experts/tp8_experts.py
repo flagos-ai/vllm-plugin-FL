@@ -6,20 +6,29 @@ and the existing top16 reduction remain unchanged.
 
 import torch
 import triton
+from flaggems_vllm.ops.moe_align_block_size import moe_align_block_size_compact
 from flaggems_vllm.ops.situ_and_mul import situ_and_mul
-from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.marlin_mxfp4 import pack_matrix
-from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.expert_gemm import _paired_arithmetic_mm, meta
+
 from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.decode_experts import (
     _paired_scheduled_mm,
 )
-from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.grouped_moe import _alignment, _weighted_sum
-from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.small_alignment import align_small
-from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.tp8_expert_g1 import _tp8_g1_situ
-
-
+from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.expert_gemm import (
+    _paired_arithmetic_mm,
+    meta,
+)
+from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.grouped_moe import (
+    _alignment,
+    _weighted_sum,
+)
+from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.marlin_mxfp4 import (
+    pack_matrix,
+)
+from vllm_fl.dispatch.backends.vendor.metax.impl.kimi_k3.experts.tp8_expert_g1 import (
+    _tp8_g1_situ,
+)
 from vllm_fl.ops.kimi_k3.workspace_contract import (
-    MIN_PREFILL_TOKENS,
     MAX_PREFILL_TOKENS,
+    MIN_PREFILL_TOKENS,
     ROUTE_COLUMNS,
 )
 
@@ -83,7 +92,10 @@ def run(x, packed, weights, ids, prepared, record=None, *, workspace=None):
         4,
     )
     r = m * 16
-    si, ei, total = align_small(ids, bm, 896) if m <= 64 else _alignment(ids, bm, 896)
+    if 2 <= m <= 64:
+        si, ei, total = moe_align_block_size_compact(ids, bm, 896)
+    else:
+        si, ei, total = _alignment(ids, bm, 896)
     cap = min(triton.cdiv(si.numel(), bm), min(896, r) + (r - min(896, r)) // bm)
     # Bound the prefill routing scratch; each output column retains the same
     # FP32 dot, BF16 rounding and top16 reduction as the full-width path.

@@ -19,7 +19,7 @@
       "distribution": "flaggems_vllm",
       "import_package": "flaggems_vllm",
       "repository": "https://github.com/cshujie131-bot/FlagGems-vllm.git",
-      "commit": "1d4b69b355a8a42deb0edd485ef9d9a94b2477b8",
+      "commit": "84d871a810dd6a0060cbb1d9b09b60a30ae0d6f5",
       "validated_base": "3e9e47c988bf834204b416d2a0b3db8c91e7a4de"
     }
   },
