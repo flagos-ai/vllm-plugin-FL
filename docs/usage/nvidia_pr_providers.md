@@ -318,20 +318,21 @@ with all three raw rounds retained. The 64K group completes at
 Qwen3.6-35B-A3B additionally requires the metadata-padding repair below.
 Both exact-ablation arms pass full graph capture and three semantic requests
 at the original full-context configuration. The distinct fixed-source TP2
-comparison completes all 12 baseline rounds and the first nine optimized
-rounds. Audited means of original rounds 2/3 are:
+comparison completes all 24 rounds with detailed 256-request and fixed-length
+JSON audits. Means of original rounds 2/3 are:
 
 | Input tokens | Pre3340 output tok/s | Optimized output tok/s | Change |
 | --- | ---: | ---: | ---: |
 | 1024 | 1758.02 | 1884.215 | +7.18% |
 | 4096 | 1262.07 | 1296.53 | +2.73% |
 | 16384 | 562.57 | 571.21 | +1.54% |
+| 65536 | 172.575 | 175.905 | +1.93% |
 
 At 1K, the baseline's two retained rounds have an 11.18% spread, versus
-1.41% after optimization. These partial observations do not establish stable
-speedups. Both arms report the same 32.81 GiB/rank model allocation and
-3600108-token KV capacity. The 64K group continues; the earlier failures and
-every measured round remain unchanged.
+1.41% after optimization. These two-sample observations do not establish
+stable speedups. Both arms report the same 32.81 GiB/rank model allocation and
+3600108-token KV capacity. Earlier failed configurations and every measured
+round remain unchanged.
 
 ### CUDA graph padding compatibility
 
@@ -385,7 +386,8 @@ A numel-only guard would miss the actual strided layout.
 
 The isolated repair passes 18 numerical cases, 54 changed-value graph replays,
 four additional cases with 12 changed-index/value replays, and eight CPU
-contracts. Its no-ablation TP8 service passes full graph capture, three semantic
+contracts. The combined public runtime independently passes eight-rank TP8
+full graph capture, three semantic
 responses, serial 1K/4K/16K/64K probes and the previously failing C64/16K batch
 with 64 choices, 1048576 prompt tokens and 65536 completion tokens. This is
 functional evidence, not an official 256-request throughput result or dataset
