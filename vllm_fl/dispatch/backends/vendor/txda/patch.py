@@ -27,12 +27,22 @@ import os
 import sys
 
 import torch
+from torch.types import Device
 
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
 _patches_applied = False
+
+# Undo callables for every patch installed by ``apply_txda_patches``. The
+# installer appends here as each patch succeeds, so a later failure can restore
+# every already-replaced global and a retry starts from a clean slate.
+_undo_stack: list[tuple[str, "callable"]] = []
+
+# Original torch.txda guard objects, kept for rollback and capture scopes.
+_orig_device_cls = None
+_orig_exchange_device = None
 
 # Reuse Stream wrapper objects per (device_index, stream_id): every
 # torch.txda.current_stream() call constructs a new Stream object, and
@@ -84,7 +94,7 @@ def patch_current_stream_for_txda():
     import vllm.utils.torch_utils as torch_utils
 
     if getattr(torch_utils, "_fl_txda_stream_patched", False):
-        return
+        return None
 
     _orig_current_stream = torch_utils.current_stream
 
@@ -111,6 +121,18 @@ def patch_current_stream_for_txda():
         rebound or "none",
     )
 
+    def _undo() -> None:
+        torch_utils.current_stream = _orig_current_stream
+        torch_utils._fl_txda_stream_patched = False
+        for mod_name in rebound:
+            mod = sys.modules.get(mod_name)
+            if mod is not None and (
+                getattr(mod, "current_stream", None) is _current_stream_txda
+            ):
+                mod.current_stream = _orig_current_stream
+
+    return _undo
+
 
 def patch_cuda_stream_apis_for_txda():
     """Delegate torch.cuda stream APIs to torch.txda.
@@ -127,7 +149,7 @@ def patch_cuda_stream_apis_for_txda():
     import torch.cuda as torch_cuda
 
     if getattr(torch_cuda, "_fl_txda_stream_patched", False):
-        return
+        return None
 
     import contextlib
 
@@ -155,6 +177,15 @@ def patch_cuda_stream_apis_for_txda():
                                 _orig_current_stream)
     logger.info("Patched torch.cuda stream APIs -> torch.txda for txda")
 
+    def _undo() -> None:
+        torch_cuda.stream = _orig_stream
+        torch_cuda.set_stream = _orig_set_stream
+        torch_cuda.current_stream = _orig_current_stream
+        torch_cuda._fl_txda_stream_patched = False
+        torch_cuda._fl_txda_orig = None
+
+    return _undo
+
 
 def patch_aux_stream_for_txda():
     """Opt-in: enable MoE shared-expert overlap via a dedicated txda stream.
@@ -173,6 +204,7 @@ def patch_aux_stream_for_txda():
     import vllm.utils.torch_utils as torch_utils
 
     _orig_aux_stream = torch_utils.aux_stream
+    _orig_aux_stream_attr = getattr(torch_utils, "_aux_stream", None)
     enabled = os.environ.get("VLLM_FL_TXDA_AUX_STREAM", "0").lower() in (
         "1", "true", "on",
     )
@@ -211,9 +243,45 @@ def patch_aux_stream_for_txda():
         rebound or "none",
     )
 
+    def _undo() -> None:
+        torch_utils.aux_stream = _orig_aux_stream
+        torch_utils._aux_stream = _orig_aux_stream_attr
+        for mod_name in rebound:
+            mod = sys.modules.get(mod_name)
+            if mod is not None and getattr(mod, "aux_stream", None) is _aux_stream_txda:
+                mod.aux_stream = _orig_aux_stream
+
+    return _undo
+
+
+def _preflight() -> None:
+    """Fail before touching any global if a step's inputs are unusable.
+
+    ``import_kernels`` calls this while ``import vllm`` is still running, so a
+    missing ``torch.txda`` here means the platform was selected for the wrong
+    backend; better to raise than to half-patch the process.
+    """
+    if not hasattr(torch, "txda"):
+        raise RuntimeError(
+            "TXDA runtime patches require torch.txda; is torch_txda installed "
+            "and registered for this platform?"
+        )
+
+
+def rollback_txda_patches() -> None:
+    """Undo every patch applied so far, newest first."""
+    global _patches_applied
+    while _undo_stack:
+        name, undo = _undo_stack.pop()
+        try:
+            undo()
+        except Exception:  # pragma: no cover - best-effort restore
+            logger.exception("Failed to roll back txda patch '%s'", name)
+    _patches_applied = False
+
 
 def apply_txda_patches():
-    """Apply the early-path txda runtime patches (idempotent).
+    """Apply the early-path txda runtime patches (idempotent, rollback-safe).
 
     Called from PlatformFL.import_kernels(), which runs at vllm/_custom_ops
     import time — only patches that touch torch / torch_txda / already-loaded
@@ -221,95 +289,172 @@ def apply_txda_patches():
     vllm.compilation, ... belongs in register_ops.py instead, which the
     dispatch system loads only once vllm is fully imported
     (same convention as vendor/musa/patch.py).
+
+    Every step records how to undo itself, so a failure halfway through
+    restores all previously replaced globals instead of leaving the process
+    half-patched; the completion flag is only set once every step succeeded,
+    which keeps a retry working.
     """
     global _patches_applied
     if _patches_applied:
         return
+
+    _preflight()
+    try:
+        for name, patch in _PATCH_STEPS:
+            undo = patch()
+            if undo is not None:
+                _undo_stack.append((name, undo))
+    except Exception:
+        rollback_txda_patches()
+        raise
     _patches_applied = True
-    patch_current_stream_for_txda()
-    patch_cuda_stream_apis_for_txda()
-    patch_noop_device_guard_for_txda()
-    patch_aux_stream_for_txda()
 
 
-class _NoopDevice:
-    """Drop-in no-op replacement for the torch.txda device guard class."""
 
-    def __init__(self, *args, **kwargs):
-        pass
+def _txda_get_device_index(device: Device) -> int:
+    """Resolve a device spec to a TXDA index.
+
+    Mirrors ``torch.txda.device.__init__``: ``optional=True`` keeps
+    ``"txda"`` (no index) and ``None`` valid, which FlagGems passes when the
+    target is simply "the current device".
+    """
+    from torch_txda.txda import _get_device_index
+
+    idx = _get_device_index(device, optional=True)
+    if idx is None or idx < 0:
+        try:
+            return int(torch.txda.current_device())
+        except Exception:
+            return 0
+    return idx
+
+
+class _CurrentDeviceGuard:
+    """Device guard that skips the driver call when already on ``idx``.
+
+    ``torch.txda.device`` is a real context manager: FlagCX's abort/cleanup
+    threads and any explicit cross-device call rely on it actually selecting
+    the device. What is expensive is the unconditional
+    ``txSetDevice`` round-trip (plus the stream reset) that FlagGems pays on
+    every Triton kernel launch, even though workers are single-device
+    processes and the device is almost always already current.
+
+    So instead of neutering the guard, keep the switch but make it a no-op
+    when the current device already matches. Cross-device use stays correct.
+    """
+
+    def __init__(self, device=None):
+        self.idx = int(_txda_get_device_index(device))
+        self._inner = None
+        self._switched = False
 
     def __enter__(self):
-        return None
+        try:
+            current = torch.txda.current_device()
+        except Exception:
+            current = None
+        if current == self.idx:
+            # Already on the target device: no driver round-trip, no stream
+            # reset.
+            return None
+        # Must use the class captured before patching: ``torch.txda.device``
+        # may already be this guard, which would recurse forever.
+        self._inner = _orig_device_cls(self.idx)
+        self._switched = True
+        return self._inner.__enter__()
 
     def __exit__(self, *args):
-        return False
+        if not self._switched or self._inner is None:
+            return False
+        return self._inner.__exit__(*args)
 
 
-def _noop_exchange_device(idx: int) -> int:
-    """No-op _exchange_device: report the current device, switch nothing."""
+def _exchange_device_skip_current(idx: int) -> int:
+    """``_exchange_device`` that avoids the driver call on a no-op switch."""
     try:
-        return torch.txda.current_device()
+        current = torch.txda.current_device()
+        # ``idx`` arrives as a tensor from some call sites; normalize both
+        # sides so the comparison is never a tensor-vs-int bool.
+        idx_int = int(idx)
+        current_int = int(current)
     except Exception:
-        return idx
+        return _orig_exchange_device(idx)
+    if idx_int < 0 or current_int == idx_int:
+        return current
+    return _orig_exchange_device(idx)
 
 
 def patch_noop_device_guard_for_txda():
-    """Perf: replace the torch.txda device guard with a no-op permanently.
+    """Make the txda device guard a no-op *only* when already on the device.
 
-    torch_txda's device context (torch.txda.device -> _exchange_device ->
-    ExchangeDevice -> txSetDevice) resets the current stream to the device
-    default stream and costs a driver round-trip on every enter/exit.
-    FlagGems wraps *every* triton kernel launch in
-    ``with torch_device_fn.device(...)``, so in eager mode each triton
-    kernel pays that overhead (and silently resets the current stream —
-    a live hazard for any code running on a non-default stream).
+    torch_txda's guard (``torch.txda.device`` -> ``_exchange_device`` ->
+    ``ExchangeDevice`` -> ``txSetDevice``) resets the current stream to the
+    device default stream and costs a driver round-trip on every enter/exit.
+    FlagGems wraps *every* Triton kernel launch in
+    ``with torch_device_fn.device(...)``, so eager mode pays that on every
+    launch (and silently drops to the default stream).
 
-    vLLM workers are single-device processes: the guard can never
-    legitimately switch devices, so a no-op is semantically equivalent.
-    This is also what makes cudagraph capture work on txda (together with
-    capture_guard_context); applying it globally removes the
-    per-launch overhead in eager mode as well.
+    Workers are single-device processes, so in the common case the target
+    device is already current and the switch has no effect; skipping just
+    that case removes the overhead while leaving genuine device switches —
+    including FlagCX's per-device cleanup threads — intact.
 
-    Set VLLM_FL_TXDA_NOOP_DEVICE_GUARD=0 to restore the real device guard
-    (e.g. when debugging driver-side stream behaviour).
+    Set VLLM_FL_TXDA_NOOP_DEVICE_GUARD=0 to keep the upstream guard verbatim.
     """
+    global _orig_exchange_device, _orig_device_cls
+
     if os.environ.get("VLLM_FL_TXDA_NOOP_DEVICE_GUARD", "1").lower() in (
         "0", "false", "off",
     ):
-        return
+        return None
 
     import torch_txda  # noqa: F401  # registers torch.txda
 
     if not hasattr(torch, "txda"):
-        return
-    if getattr(torch.txda, "_fl_txda_guard_neutralized", False):
-        return
+        return None
+    if getattr(torch.txda, "_fl_txda_guard_patched", False):
+        return None
 
-    torch.txda.device = _NoopDevice
-    if hasattr(torch.txda, "_exchange_device"):
-        torch.txda._exchange_device = _noop_exchange_device
-    torch.txda._fl_txda_guard_neutralized = True
+    _orig_device_cls = torch.txda.device
+    _orig_exchange_device = getattr(torch.txda, "_exchange_device", None)
+
+    torch.txda.device = _CurrentDeviceGuard
+    if _orig_exchange_device is not None:
+        torch.txda._exchange_device = _exchange_device_skip_current
+    torch.txda._fl_txda_guard_patched = True
     logger.info(
-        "Neutralized torch.txda device guard (no-op; single-device worker)")
+        "Patched torch.txda device guard (skips the driver call when the "
+        "target device is already current; cross-device switches preserved)")
+
+    def _undo() -> None:
+        torch.txda.device = _orig_device_cls
+        if _orig_exchange_device is not None:
+            torch.txda._exchange_device = _orig_exchange_device
+        torch.txda._fl_txda_guard_patched = False
+
+    return _undo
 
 
 @contextlib.contextmanager
 def capture_guard_context():
-    """Neutralize the torch.txda device guard for the duration of a capture.
+    """Keep TXDA kernels on the capture stream for the duration of a capture.
 
     Consumed by vllm_fl.compilation.graph.GraphWrapper around cudagraph
     captures on txda. torch_txda's ExchangeDevice -> txSetDevice resets the
     current stream to the device's default stream. FlagGems wraps every
-    triton kernel launch in `with torch_device_fn.device(...)`, so during
+    Triton kernel launch in ``with torch_device_fn.device(...)``, so during
     graph capture triton kernels would be launched on the default stream
     instead of the capture stream, breaking the capture (txStreamEndCapture
-    "Unknown error" / "Failed to txLaunchKernel"). vLLM workers are
-    single-device processes, so no device switch can legitimately happen
-    inside capture.
+    "Unknown error" / "Failed to txLaunchKernel").
+
+    Only the no-op-device case is skipped here (the target is already the
+    capture device); a real switch still goes through the SDK guard so a
+    capture is never silently redirected to another device.
 
     Redundant with patch_noop_device_guard_for_txda() when that is active
     (the default), but kept so capture stays correct even when the global
-    no-op guard is disabled via VLLM_FL_TXDA_NOOP_DEVICE_GUARD=0.
+    guard patch is disabled via VLLM_FL_TXDA_NOOP_DEVICE_GUARD=0.
     """
     if not hasattr(torch, "txda"):
         yield
@@ -318,9 +463,9 @@ def capture_guard_context():
     orig_device = torch.txda.device
     orig_exchange = getattr(torch.txda, "_exchange_device", None)
 
-    torch.txda.device = _NoopDevice
+    torch.txda.device = _CurrentDeviceGuard
     if orig_exchange is not None:
-        torch.txda._exchange_device = _noop_exchange_device
+        torch.txda._exchange_device = _exchange_device_skip_current
     try:
         yield
     finally:
@@ -328,3 +473,10 @@ def capture_guard_context():
         if orig_exchange is not None:
             torch.txda._exchange_device = orig_exchange
 
+
+_PATCH_STEPS = (
+    ("current_stream", patch_current_stream_for_txda),
+    ("cuda_stream_apis", patch_cuda_stream_apis_for_txda),
+    ("device_guard", patch_noop_device_guard_for_txda),
+    ("aux_stream", patch_aux_stream_for_txda),
+)

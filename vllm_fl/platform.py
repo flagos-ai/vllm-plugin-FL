@@ -363,18 +363,20 @@ class PlatformFL(Platform):
                 logger.warning(f"Failed to apply MUSA patches: {e}")
 
         if cls.device_type == "txda":
-            # torch-level patches only (stream handling, device-guard
-            # neutralization). Model-level patches live in
-            # vendor/txda/register_ops.py to avoid circular imports while
-            # `import vllm` is still in progress.
-            try:
-                from vllm_fl.dispatch.backends.vendor.txda.patch import (
-                    apply_txda_patches,
-                )
+            # Torch-level patches only (stream handling, device guard).
+            # Model-level patches live in vendor/txda/register_ops.py to avoid
+            # circular imports while `import vllm` is still in progress.
+            #
+            # The installer rolls every patch back on failure, so surfacing the
+            # error is the safe behaviour: continuing without the patches
+            # produces wrong results (a stale current_stream silently drops
+            # collectives out of graph capture), which is worse than failing
+            # to start.
+            from vllm_fl.dispatch.backends.vendor.txda.patch import (
+                apply_txda_patches,
+            )
 
-                apply_txda_patches()
-            except Exception as e:
-                logger.warning(f"Failed to apply TXDA patches: {e}")
+            apply_txda_patches()
 
     @classmethod
     def import_ir_kernels(cls) -> None:
