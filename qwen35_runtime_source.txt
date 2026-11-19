@@ -1,0 +1,2240 @@
+FILE=/usr/local/lib/python3.12/site-packages/vllm/model_executor/models/qwen3_5.py
+INFO 09-28 11:35:05 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+INFO 09-28 11:35:05 [__init__.py:46] - fl -> vllm_fl:register
+INFO 09-28 11:35:05 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+ERROR 09-28 11:35:05 [__init__.py:64] Failed to load plugin fl
+ERROR 09-28 11:35:05 [__init__.py:64] Traceback (most recent call last):
+ERROR 09-28 11:35:05 [__init__.py:64]   File "/usr/local/lib/python3.12/site-packages/vllm/plugins/__init__.py", line 61, in load_plugins_by_group
+ERROR 09-28 11:35:05 [__init__.py:64]     func = plugin.load()
+ERROR 09-28 11:35:05 [__init__.py:64]            ^^^^^^^^^^^^^
+ERROR 09-28 11:35:05 [__init__.py:64]   File "/usr/local/lib/python3.12/importlib/metadata/__init__.py", line 205, in load
+ERROR 09-28 11:35:05 [__init__.py:64]     module = import_module(match.group('module'))
+ERROR 09-28 11:35:05 [__init__.py:64]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 09-28 11:35:05 [__init__.py:64]   File "/usr/local/lib/python3.12/importlib/__init__.py", line 90, in import_module
+ERROR 09-28 11:35:05 [__init__.py:64]     return _bootstrap._gcd_import(name[level:], package, level)
+ERROR 09-28 11:35:05 [__init__.py:64]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 09-28 11:35:05 [__init__.py:64]   File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+ERROR 09-28 11:35:05 [__init__.py:64]   File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+ERROR 09-28 11:35:05 [__init__.py:64]   File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+ERROR 09-28 11:35:05 [__init__.py:64]   File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+ERROR 09-28 11:35:05 [__init__.py:64]   File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+ERROR 09-28 11:35:05 [__init__.py:64]   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+ERROR 09-28 11:35:05 [__init__.py:64]   File "/vllm-workspace/vllm-plugin-FL/vllm_fl/__init__.py", line 20, in <module>
+ERROR 09-28 11:35:05 [__init__.py:64]     from vllm_fl.utils import get_op_config as _get_op_config
+ERROR 09-28 11:35:05 [__init__.py:64]   File "/vllm-workspace/vllm-plugin-FL/vllm_fl/utils.py", line 7, in <module>
+ERROR 09-28 11:35:05 [__init__.py:64]     import flag_gems
+ERROR 09-28 11:35:05 [__init__.py:64] ModuleNotFoundError: No module named 'flag_gems'
+INFO 09-28 11:35:19 [nixl_utils.py:20] Setting UCX_RCACHE_MAX_UNRELEASED to '1024' to avoid a rare memory leak in UCX when using NIXL.
+INFO 09-28 11:35:19 [nixl_utils.py:32] NIXL is available
+
+================================================================================
+CLASS=Qwen3_5RMSNorm
+@CustomOp.register("gemma_rms_norm")
+class GemmaRMSNorm(CustomOp):
+    """RMS normalization for Gemma.
+
+    Two differences from the above RMSNorm:
+        1. x * (1 + w) instead of x * w.
+        2. (x * w).to(orig_dtype) instead of x.to(orig_dtype) * w.
+    """
+
+    # --8<-- [end:gemma_rms_norm]
+
+    def __init__(
+        self,
+        hidden_size: int,
+        eps: float = 1e-6,
+    ) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(hidden_size))
+        self.variance_epsilon = eps
+
+    def forward_native(
+        self,
+        x: torch.Tensor,
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """PyTorch-native implementation equivalent to forward()."""
+        orig_dtype = x.dtype
+        weight = self.weight.data.float() + 1.0
+        if residual is not None:
+            x = (
+                x.float() + residual.float()
+                if orig_dtype == torch.float16
+                else x + residual
+            )
+            residual = x
+        # ir.ops.rms_norm handles fp32 upcast internally
+        out = ir.ops.rms_norm(x, weight, self.variance_epsilon)
+        return (
+            out.to(orig_dtype) if residual is None else (out.to(orig_dtype), residual)
+        )
+
+    def forward_cuda(
+        self,
+        x: torch.Tensor,
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        return self.forward_native(x, residual)
+
+
+================================================================================
+CLASS=GatedDeltaNetAttention
+@PluggableLayer.register("gated_delta_net_attention")
+class GatedDeltaNetAttention(PluggableLayer, MambaBase):
+    @property
+    def mamba_type(self) -> str:
+        return "gdn_attention"
+
+    def get_state_dtype(self) -> tuple[torch.dtype, torch.dtype]:
+        return MambaStateDtypeCalculator.gated_delta_net_state_dtype(
+            self.model_config.dtype,
+            self.cache_config.mamba_cache_dtype,
+            self.cache_config.mamba_ssm_cache_dtype,
+        )
+
+    def get_state_shape(self) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        return MambaStateShapeCalculator.gated_delta_net_state_shape(
+            self.tp_size,
+            self.num_k_heads,
+            self.num_v_heads,
+            self.head_k_dim,
+            self.head_v_dim,
+            self.conv_kernel_size,
+            self.num_spec,
+        )
+
+    def __init__(
+        self,
+        config: Qwen3NextConfig,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+        create_in_proj_qkvz: bool = True,
+        gqa_interleaved_layout=False,
+    ) -> None:
+        super().__init__()
+        self.tp_size = get_tensor_model_parallel_world_size()
+        self.tp_rank = get_tensor_model_parallel_rank()
+        self.hidden_size = config.hidden_size
+        self.num_v_heads = config.linear_num_value_heads
+        self.num_k_heads = config.linear_num_key_heads
+        self.head_k_dim = config.linear_key_head_dim
+        self.head_v_dim = config.linear_value_head_dim
+        self.key_dim = self.head_k_dim * self.num_k_heads
+        self.value_dim = self.head_v_dim * self.num_v_heads
+
+        self.conv_kernel_size = config.linear_conv_kernel_dim
+        self.layer_idx = extract_layer_index(prefix)
+        self.activation = config.hidden_act
+        self.act = ACT2FN[config.hidden_act]
+        self.layer_norm_epsilon = config.rms_norm_eps
+        self.prefix = prefix
+        self.config = config
+        self.model_config = vllm_config.model_config
+        self.cache_config = vllm_config.cache_config
+        quant_config = vllm_config.quant_config
+        self.speculative_config = vllm_config.speculative_config
+        self.num_spec = (
+            self.speculative_config.num_speculative_tokens
+            if self.speculative_config
+            else 0
+        )
+        self.gqa_interleaved_layout = gqa_interleaved_layout
+        self._forward_method = (
+            self.forward_xpu if current_platform.is_xpu() else self.forward_cuda
+        )
+
+        # QKV
+        self.conv_dim = self.key_dim * 2 + self.value_dim
+        self.conv1d = ColumnParallelLinear(
+            input_size=self.conv_kernel_size,
+            output_size=self.conv_dim,
+            bias=False,
+            prefix=f"{prefix}.conv1d",
+        )
+        self.conv1d.weight.data = self.conv1d.weight.data.unsqueeze(1)
+
+        # projection of the input hidden states
+        # Qwen3-Next and Qwen3.5 has a different qkv_proj layout,
+        # we need to create qkvz_proj adaptively here.
+        # When create_in_proj_qkvz is False (e.g. LoRA enabled in Qwen3.5),
+        # in_proj_qkv and in_proj_z are created separately instead.
+        if create_in_proj_qkvz:
+            self.in_proj_qkvz = self.create_qkvz_proj(
+                hidden_size=self.hidden_size,
+                key_dim=self.key_dim,
+                value_dim=self.value_dim,
+                quant_config=quant_config,
+                prefix=f"{prefix}.in_proj_qkvz",
+            )
+        else:
+            # LoRA case (Qwen3.5 only): keep q/k/v and z as separate modules
+            # so that LoRA adapters can be applied independently.
+            self.in_proj_qkv = MergedColumnParallelLinear(
+                input_size=self.hidden_size,
+                output_sizes=[self.key_dim, self.key_dim, self.value_dim],
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.in_proj_qkv",
+            )
+            self.in_proj_z = ColumnParallelLinear(
+                input_size=self.hidden_size,
+                output_size=self.value_dim,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.in_proj_z",
+            )
+        # ba_proj doesn't support blockwise fp8 quantization.
+        # Qwen3-Next and Qwen3.5 have different in_proj_ba checkpoint
+        # layouts, so we use a factory method to create the projection.
+        self.in_proj_ba = self.create_ba_proj(
+            hidden_size=self.hidden_size,
+            num_v_heads=self.num_v_heads,
+            quant_config=quant_config,
+            prefix=f"{prefix}.in_proj_ba",
+        )
+
+        query_key_settings = (self.key_dim, 0, False)
+        value_settings = (self.value_dim, 0, False)
+
+        self.conv1d.weight.weight_loader = mamba_v2_sharded_weight_loader(
+            [
+                query_key_settings,
+                query_key_settings,
+                value_settings,
+            ],
+            self.tp_size,
+            self.tp_rank,
+        )
+
+        # selective projection used to make dt, B and C input dependent
+
+        # time step projection (discretization)
+        # instantiate once and copy inv_dt in init_weights of PretrainedModel
+        self.dt_bias = nn.Parameter(
+            torch.ones(self.num_v_heads // self.tp_size),
+        )
+        self.A_log = nn.Parameter(
+            torch.empty(
+                divide(self.num_v_heads, self.tp_size),
+                dtype=torch.float32,
+            )
+        )
+
+        set_weight_attrs(self.A_log, {"weight_loader": sharded_weight_loader(0)})
+        set_weight_attrs(self.dt_bias, {"weight_loader": sharded_weight_loader(0)})
+
+        output_gate_type = getattr(config, "output_gate_type", "silu")
+        if output_gate_type == "swish":
+            output_gate_type = "silu"
+        assert output_gate_type in ["silu", "swish", "sigmoid"], (
+            f"unsupported {output_gate_type=}"
+        )
+
+        self.norm = RMSNormGated(
+            self.head_v_dim,
+            eps=self.layer_norm_epsilon,
+            group_size=None,
+            norm_before_gate=True,
+            activation=output_gate_type,
+            device=current_platform.current_device(),
+        )
+
+        self.out_proj = RowParallelLinear(
+            self.value_dim,
+            self.hidden_size,
+            bias=False,
+            input_is_parallel=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.out_proj",
+        )
+
+        self.chunk_gated_delta_rule = ChunkGatedDeltaRule()
+        self.enable_packed_recurrent_decode = (
+            envs.VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE
+        )
+
+        compilation_config = get_current_vllm_config().compilation_config
+        if prefix in compilation_config.static_forward_context:
+            raise ValueError(f"Duplicate layer name: {prefix}")
+        compilation_config.static_forward_context[prefix] = self
+
+    def create_qkvz_proj(
+        self,
+        hidden_size: int,
+        key_dim: int,
+        value_dim: int,
+        quant_config: QuantizationConfig | None,
+        prefix: str,
+    ) -> MergedColumnParallelLinear:
+        # When gqa_interleaved_layout=True (Qwen3-Next), qkvz weights are
+        # stored as a single fused tensor with interleaved GQA layout, so we
+        # use one output shard to preserve the interleaving across TP ranks.
+        # When gqa_interleaved_layout=False (Qwen3.5), the checkpoint has
+        # separate q, k, v, z weights, so we use 4 independent output sizes.
+        output_sizes = (
+            [sum((key_dim, key_dim, value_dim, value_dim))]
+            if self.gqa_interleaved_layout
+            else [key_dim, key_dim, value_dim, value_dim]
+        )
+        return MergedColumnParallelLinear(
+            input_size=hidden_size,
+            output_sizes=output_sizes,
+            bias=False,
+            quant_config=quant_config,
+            prefix=prefix,
+        )
+
+    def create_ba_proj(
+        self,
+        hidden_size: int,
+        num_v_heads: int,
+        quant_config: QuantizationConfig | None,
+        prefix: str,
+    ) -> MergedColumnParallelLinear:
+        # When gqa_interleaved_layout=True (Qwen3-Next), in_proj_ba is stored
+        # as a single fused weight [b_g0, a_g0, b_g1, a_g1, ...] interleaved
+        # by key-head group; a single output shard preserves this across TP.
+        # When gqa_interleaved_layout=False (Qwen3.5), in_proj_b and in_proj_a
+        # are separate checkpoint weights, so we use 2 independent output sizes.
+        output_sizes = (
+            [num_v_heads * 2] if self.gqa_interleaved_layout else [num_v_heads] * 2
+        )
+        return MergedColumnParallelLinear(
+            input_size=hidden_size,
+            output_sizes=output_sizes,
+            bias=False,
+            quant_config=quant_config,
+            prefix=prefix,
+        )
+
+    def fix_query_key_value_ordering(
+        self,
+        mixed_qkvz: torch.Tensor,
+        mixed_ba: torch.Tensor,
+    ):
+        """
+        Derives `query`, `key` and `value` tensors from `mixed_qkvzba`.
+        """
+        new_tensor_shape_qkvz = mixed_qkvz.size()[:-1] + (
+            self.num_k_heads // self.tp_size,
+            (
+                self.head_k_dim
+                + self.head_k_dim
+                + (self.head_v_dim + self.head_v_dim)
+                * self.num_v_heads
+                // self.num_k_heads
+            ),
+        )
+        new_tensor_shape_ba = mixed_ba.size()[:-1] + (
+            self.num_k_heads // self.tp_size,
+            2 * self.num_v_heads // self.num_k_heads,
+        )
+
+        mixed_qkvz = mixed_qkvz.view(*new_tensor_shape_qkvz)
+        mixed_ba = mixed_ba.view(*new_tensor_shape_ba)
+
+        split_arg_list_qkvz = [
+            self.head_k_dim,
+            self.head_k_dim,
+            (self.num_v_heads // self.num_k_heads * self.head_v_dim),
+            (self.num_v_heads // self.num_k_heads * self.head_v_dim),
+        ]
+        split_arg_list_ba = [
+            self.num_v_heads // self.num_k_heads,
+            self.num_v_heads // self.num_k_heads,
+        ]
+
+        # [b, sq, ng, (hn + hn + np/ng * hn + np/ng + np/ng)]
+        # --> [b, sq, ng, hn], [b, sq, ng, hn], [b, sq, ng, np/ng * hn],
+        #  [b, sq, ng, np/ng * hn], [b, sq, ng, np/ng], [b, sq, ng, np/ng]
+        (query, key, value, z) = torch.split(mixed_qkvz, split_arg_list_qkvz, dim=2)
+        (b, a) = torch.split(mixed_ba, split_arg_list_ba, dim=2)
+
+        # [b, sq, ng, np/ng * hn] -> [b, sq, np, hn]
+        value = value.reshape(value.size(0), -1, self.head_v_dim)
+        z = z.reshape(z.size(0), -1, self.head_v_dim)
+        b = b.reshape(b.size(0), self.num_v_heads // self.tp_size)
+        a = a.reshape(a.size(0), self.num_v_heads // self.tp_size)
+
+        return query, key, value, z, b, a
+
+    def rearrange_mixed_qkv(self, mixed_qkv):
+        if mixed_qkv is None:
+            return None, None, None
+        query, key, value = torch.split(
+            mixed_qkv,
+            [
+                self.key_dim // self.tp_size,
+                self.key_dim // self.tp_size,
+                self.value_dim // self.tp_size,
+            ],
+            dim=-1,
+        )
+        query, key = map(
+            lambda x: rearrange(x, "l (h d) -> 1 l h d", d=self.head_k_dim),
+            (query, key),
+        )
+        value = rearrange(value, "l (h d) -> 1 l h d", d=self.head_v_dim)
+        return query.contiguous(), key.contiguous(), value.contiguous()
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        output: torch.Tensor,
+    ):
+        self._forward_method(hidden_states, output)
+
+    def forward_cuda(
+        self,
+        hidden_states: torch.Tensor,
+        output: torch.Tensor,
+    ):
+        """
+        Forward pass with three parts:
+        1. Input projection
+        2. Core attention (custom op)
+        3. Output projection
+        """
+        num_tokens = hidden_states.size(0)
+        # ============================================================
+        # Part 1: Input Projection
+        # ============================================================
+        if hasattr(self, "in_proj_qkv"):
+            # LoRA path (Qwen3.5 only): separate in_proj_qkv and in_proj_z
+            mixed_qkv, _ = self.in_proj_qkv(hidden_states)
+            ba, _ = self.in_proj_ba(hidden_states)
+            z, _ = self.in_proj_z(hidden_states)
+            z = z.reshape(z.size(0), -1, self.head_v_dim)
+            b, a = ba.chunk(2, dim=-1)
+            b = b.contiguous()
+            a = a.contiguous()
+        else:
+            mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
+            ba, _ = self.in_proj_ba(hidden_states)
+
+            if self.gqa_interleaved_layout:
+                # Qwen3-Next: unpack the interleaved GQA layout
+                query, key, value, z, b, a = self.fix_query_key_value_ordering(
+                    mixed_qkvz, ba
+                )
+                query, key, value = map(
+                    lambda x: rearrange(x, "l p d -> l (p d)"), (query, key, value)
+                )
+                mixed_qkv = torch.cat((query, key, value), dim=-1)
+            else:
+                # Qwen3.5: weights are already in [q, k, v, z] and [b, a] order
+                qkv_size = (self.key_dim * 2 + self.value_dim) // self.tp_size
+                z_size = self.value_dim // self.tp_size
+                mixed_qkv, z = mixed_qkvz.split([qkv_size, z_size], dim=-1)
+                z = z.reshape(z.size(0), -1, self.head_v_dim)
+                b, a = ba.chunk(2, dim=-1)
+                b = b.contiguous()
+                a = a.contiguous()
+
+        # ============================================================
+        # Part 2: Core Attention (Custom Op)
+        # ============================================================
+        # Note: we should not use torch.empty here like other attention backends,
+        # see discussions in https://github.com/vllm-project/vllm/pull/28182
+        core_attn_out = torch.zeros(
+            (num_tokens, self.num_v_heads // self.tp_size, self.head_v_dim),
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
+
+        torch.ops.vllm.gdn_attention_core(
+            mixed_qkv,
+            b,
+            a,
+            core_attn_out,
+            _encode_layer_name(self.prefix),
+        )
+
+        # ============================================================
+        # Part 3: Output Projection
+        # ============================================================
+        z_shape_og = z.shape
+        # Reshape input data into 2D tensor
+        core_attn_out = core_attn_out.reshape(-1, core_attn_out.shape[-1])
+        z = z.reshape(-1, z.shape[-1])
+        core_attn_out = self.norm(core_attn_out, z)
+        core_attn_out = core_attn_out.reshape(z_shape_og)
+        core_attn_out = rearrange(core_attn_out, "... h d -> ... (h d)")
+        output[:num_tokens], _ = self.out_proj(core_attn_out)
+
+    def forward_xpu(
+        self,
+        hidden_states: torch.Tensor,
+        output: torch.Tensor,
+    ):
+        """
+        Forward pass with three parts:
+        1. Input projection
+        2. Core attention (custom op)
+        3. Output projection
+        """
+        num_tokens = hidden_states.size(0)
+
+        assert not hasattr(self, "in_proj_qkv"), "lora isn't supported on XPU."
+
+        # ============================================================
+        # Part 1: Input Projection
+        # ============================================================
+        projected_states_qkvz, _ = self.in_proj_qkvz(hidden_states)
+        projected_states_ba, _ = self.in_proj_ba(hidden_states)
+
+        # ============================================================
+        # Part 2: Core Attention
+        # ============================================================
+        core_attn_out = torch.zeros(
+            (num_tokens, self.num_v_heads // self.tp_size, self.head_v_dim),
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
+        z = torch.empty_like(core_attn_out)
+
+        torch.ops.vllm.gdn_attention_core_xpu(
+            core_attn_out,
+            z,
+            projected_states_qkvz,
+            projected_states_ba,
+            self.prefix,
+        )
+
+        # ============================================================
+        # Part 3: Output Projection
+        # ============================================================
+        z_shape_og = z.shape
+        # Reshape input data into 2D tensor
+        core_attn_out = core_attn_out.reshape(-1, core_attn_out.shape[-1])
+        z = z.reshape(-1, z.shape[-1])
+        core_attn_out = self.norm(core_attn_out, z)
+        core_attn_out = core_attn_out.reshape(z_shape_og)
+        core_attn_out = rearrange(core_attn_out, "... h d -> ... (h d)")
+        output[:num_tokens], _ = self.out_proj(core_attn_out)
+
+    def _warmup_prefill_kernels(self, mixed_qkv: torch.Tensor) -> None:
+        """Warm up GDN prefill kernels during V1 profiling.
+
+        During V1 profile runs, ``_forward_core`` returns early because
+        ``attn_metadata`` is ``None``, so the autotuned kernels used by
+        ``chunk_gated_delta_rule`` (e.g. ``solve_tril``,
+        ``chunk_scaled_dot_kkt``) are never invoked.  After profiling,
+        vLLM allocates KV cache using most of the remaining GPU memory.
+        When the first real inference triggers the autotuner it OOMs
+        because there is not enough memory left for benchmarking.
+
+        This method runs minimal forward passes through
+        ``chunk_gated_delta_rule`` with small dummy tensors to force
+        autotuning while GPU memory is still plentiful.  The autotuner
+        results are cached globally, so only the first layer incurs
+        actual benchmarking cost.
+
+        All kernels including ``chunk_fwd_kernel_o`` now use a fixed
+        ``BT = chunk_size`` (64).  A single warmup pass with T = 64
+        is sufficient to populate the autotuner cache.
+
+        The decode path uses ``fused_sigmoid_gating_delta_rule_update``
+        which has fixed kernel parameters (no autotuning), so only the
+        prefill (chunked) path needs warming up.
+        """
+        if hasattr(self, "_prefill_kernels_warmed_up"):
+            return
+        self._prefill_kernels_warmed_up = True
+
+        device = mixed_qkv.device
+        dtype = mixed_qkv.dtype
+        num_k_heads = self.num_k_heads // self.tp_size
+        num_v_heads = self.num_v_heads // self.tp_size
+        _, state_dtype = self.get_state_dtype()
+
+        # All kernels use BT = chunk_size, so a single pass with T = chunk_size
+        # is sufficient to populate every autotuner cache. Mirror the real
+        # prefill path here: build q/k/v/g/beta via fused_post_conv_prep and
+        # then run chunk_gated_delta_rule with in-kernel L2 norm disabled.
+        T = FLA_CHUNK_SIZE
+        dummy_mixed_qkv = torch.randn(
+            T, mixed_qkv.shape[-1], device=device, dtype=dtype
+        )
+        dummy_a = torch.randn(T, num_v_heads, device=device, dtype=dtype)
+        dummy_b = torch.randn(T, num_v_heads, device=device, dtype=dtype)
+        q, k, v, g, beta = fused_post_conv_prep(
+            conv_output=dummy_mixed_qkv,
+            a=dummy_a,
+            b=dummy_b,
+            A_log=self.A_log,
+            dt_bias=self.dt_bias,
+            num_k_heads=num_k_heads,
+            head_k_dim=self.head_k_dim,
+            head_v_dim=self.head_v_dim,
+            apply_l2norm=True,
+            output_g_exp=False,
+        )
+        q = q.unsqueeze(0)
+        k = k.unsqueeze(0)
+        v = v.unsqueeze(0)
+        g = g.unsqueeze(0)
+        beta = beta.unsqueeze(0)
+        state = torch.zeros(
+            1,
+            num_v_heads,
+            self.head_v_dim,
+            self.head_k_dim,
+            device=device,
+            dtype=state_dtype,
+        )
+        cu_seqlens = torch.tensor([0, T], device=device, dtype=torch.int32)
+
+        try:
+            self.chunk_gated_delta_rule(
+                q=q,
+                k=k,
+                v=v,
+                g=g,
+                beta=beta,
+                initial_state=state,
+                output_final_state=True,
+                cu_seqlens=cu_seqlens,
+                use_qk_l2norm_in_kernel=False,
+            )
+        except Exception:
+            logger.warning(
+                "GDN prefill kernel warmup (T=%d) failed for "
+                "layer %s. First inference may OOM due to "
+                "autotuner.",
+                T,
+                self.prefix,
+                exc_info=True,
+            )
+        else:
+            logger.debug(
+                "GDN prefill kernel warmup (T=%d) completed for layer %s",
+                T,
+                self.prefix,
+            )
+        finally:
+            del dummy_mixed_qkv, q, k, v, dummy_a, dummy_b, g, beta, state, cu_seqlens
+
+        torch.accelerator.empty_cache()
+
+    def _forward_core(
+        self,
+        mixed_qkv: torch.Tensor,
+        b: torch.Tensor,
+        a: torch.Tensor,
+        core_attn_out: torch.Tensor,
+    ):
+        forward_context = get_forward_context()
+        attn_metadata_raw = forward_context.attn_metadata
+
+        if attn_metadata_raw is None:
+            # V1 profile run — warm up prefill kernels so that
+            # autotuning completes before KV cache allocation.
+            self._warmup_prefill_kernels(mixed_qkv)
+            return
+
+        assert isinstance(attn_metadata_raw, dict)
+        attn_metadata = attn_metadata_raw[self.prefix]  # type: ignore[index]
+        assert isinstance(attn_metadata, GDNAttentionMetadata)
+
+        if (
+            self.enable_packed_recurrent_decode
+            and attn_metadata.spec_sequence_masks is None
+            and attn_metadata.num_prefills == 0
+            and attn_metadata.num_decodes > 0
+        ):
+            return self._forward_core_decode_non_spec(
+                mixed_qkv=mixed_qkv,
+                b=b,
+                a=a,
+                core_attn_out=core_attn_out,
+                attn_metadata=attn_metadata,
+            )
+
+        has_initial_state = attn_metadata.has_initial_state
+        spec_query_start_loc = attn_metadata.spec_query_start_loc
+        non_spec_query_start_loc = attn_metadata.non_spec_query_start_loc
+        spec_sequence_masks = attn_metadata.spec_sequence_masks
+        spec_token_indx = attn_metadata.spec_token_indx
+        non_spec_token_indx = attn_metadata.non_spec_token_indx
+        spec_state_indices_tensor = attn_metadata.spec_state_indices_tensor  # noqa: E501
+        non_spec_state_indices_tensor = attn_metadata.non_spec_state_indices_tensor  # noqa: E501
+        self_kv_cache = self.kv_cache
+        # conv_state must be (..., dim, width-1) for the conv kernels.
+        # DS layout stores it that way directly; SD layout needs a transpose.
+        conv_state = (
+            self_kv_cache[0]
+            if is_conv_state_dim_first()
+            else self_kv_cache[0].transpose(-1, -2)
+        )
+        ssm_state = self_kv_cache[1]
+        num_actual_tokens = attn_metadata.num_actual_tokens
+        num_accepted_tokens = attn_metadata.num_accepted_tokens
+
+        mixed_qkv = mixed_qkv[:num_actual_tokens]
+        b = b[:num_actual_tokens]
+        a = a[:num_actual_tokens]
+
+        # 1. Convolution sequence transformation
+        conv_weights = self.conv1d.weight.view(
+            self.conv1d.weight.size(0), self.conv1d.weight.size(2)
+        )
+
+        if spec_sequence_masks is not None:
+            if attn_metadata.num_prefills == 0 and attn_metadata.num_decodes == 0:
+                mixed_qkv_spec = mixed_qkv
+                mixed_qkv_non_spec = None
+            else:
+                mixed_qkv_spec = mixed_qkv.index_select(0, spec_token_indx)
+                mixed_qkv_non_spec = mixed_qkv.index_select(0, non_spec_token_indx)
+        else:
+            mixed_qkv_spec = None
+            mixed_qkv_non_spec = mixed_qkv
+
+        # 1.1: Process the multi-query part
+        if spec_sequence_masks is not None:
+            # spec_state_indices_tensor is always set when spec_sequence_masks is set
+            assert spec_state_indices_tensor is not None
+            mixed_qkv_spec = causal_conv1d_update(
+                mixed_qkv_spec,
+                conv_state,
+                conv_weights,
+                self.conv1d.bias,
+                self.activation,
+                conv_state_indices=spec_state_indices_tensor[:, 0][  # type: ignore[index]
+                    : attn_metadata.num_spec_decodes  # type: ignore[attr-defined]
+                ],
+                num_accepted_tokens=num_accepted_tokens,
+                query_start_loc=spec_query_start_loc,
+                max_query_len=spec_state_indices_tensor.size(-1),
+                validate_data=False,
+            )
+
+        # 1.2: Process the remaining part
+        if attn_metadata.num_prefills > 0:
+            assert mixed_qkv_non_spec is not None
+            mixed_qkv_non_spec_T = mixed_qkv_non_spec.transpose(0, 1)
+            # - "cache_indices" updates the conv_state cache in positions
+            #   pointed to by "state_indices_tensor"
+            mixed_qkv_non_spec = causal_conv1d_fn(
+                mixed_qkv_non_spec_T,
+                conv_weights,
+                self.conv1d.bias,
+                activation=self.activation,
+                conv_states=conv_state,
+                has_initial_state=has_initial_state,
+                cache_indices=non_spec_state_indices_tensor,
+                query_start_loc=non_spec_query_start_loc,
+                metadata=attn_metadata,
+            ).transpose(0, 1)
+        elif attn_metadata.num_decodes > 0:
+            assert mixed_qkv_non_spec is not None
+            mixed_qkv_non_spec = causal_conv1d_update(
+                mixed_qkv_non_spec,
+                conv_state,
+                conv_weights,
+                self.conv1d.bias,
+                self.activation,
+                conv_state_indices=non_spec_state_indices_tensor[  # type: ignore[index]
+                    : attn_metadata.num_actual_tokens  # type: ignore[attr-defined]
+                ],
+                validate_data=True,
+            )
+        else:
+            mixed_qkv_non_spec = None
+
+        query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)
+        if attn_metadata.num_prefills > 0:
+            assert mixed_qkv_non_spec is not None, (
+                "mixed_qkv_non_spec must be provided for prefill path"
+            )
+            if spec_sequence_masks is not None:
+                a_non_spec = a.index_select(0, non_spec_token_indx)
+                b_non_spec = b.index_select(0, non_spec_token_indx)
+            else:
+                a_non_spec = a
+                b_non_spec = b
+
+            (
+                query_non_spec,
+                key_non_spec,
+                value_non_spec,
+                g_non_spec,
+                beta_non_spec,
+            ) = fused_post_conv_prep(
+                conv_output=mixed_qkv_non_spec,
+                a=a_non_spec,
+                b=b_non_spec,
+                A_log=self.A_log,
+                dt_bias=self.dt_bias,
+                num_k_heads=self.num_k_heads // self.tp_size,
+                head_k_dim=self.head_k_dim,
+                head_v_dim=self.head_v_dim,
+                apply_l2norm=True,
+                output_g_exp=False,
+            )
+            query_non_spec = query_non_spec.unsqueeze(0)
+            key_non_spec = key_non_spec.unsqueeze(0)
+            value_non_spec = value_non_spec.unsqueeze(0)
+            g_non_spec = g_non_spec.unsqueeze(0)
+            beta_non_spec = beta_non_spec.unsqueeze(0)
+        else:
+            query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(
+                mixed_qkv_non_spec
+            )
+            g_non_spec = None
+            beta_non_spec = None
+
+        # 2. Recurrent attention
+
+        # 2.1: Process the multi-query part
+        if spec_sequence_masks is not None:
+            core_attn_out_spec, last_recurrent_state = (
+                fused_sigmoid_gating_delta_rule_update(
+                    A_log=self.A_log,
+                    a=a,
+                    b=b,
+                    dt_bias=self.dt_bias,
+                    q=query_spec,
+                    k=key_spec,
+                    v=value_spec,
+                    initial_state=ssm_state,
+                    inplace_final_state=True,
+                    cu_seqlens=spec_query_start_loc[  # type: ignore[index]
+                        : attn_metadata.num_spec_decodes
+                        + 1  # type: ignore[attr-defined]
+                    ],
+                    ssm_state_indices=spec_state_indices_tensor,
+                    num_accepted_tokens=num_accepted_tokens,
+                    use_qk_l2norm_in_kernel=True,
+                )
+            )
+        else:
+            core_attn_out_spec, last_recurrent_state = None, None
+
+        # 2.2: Process the remaining part
+        if attn_metadata.num_prefills > 0:
+            assert non_spec_state_indices_tensor is not None
+            initial_state = ssm_state[non_spec_state_indices_tensor].contiguous()  # type: ignore[index]
+            assert has_initial_state is not None
+            initial_state[~has_initial_state, ...] = 0  # type: ignore[operator]
+            (
+                core_attn_out_non_spec,
+                last_recurrent_state,
+            ) = self.chunk_gated_delta_rule(
+                q=query_non_spec,
+                k=key_non_spec,
+                v=value_non_spec,
+                g=g_non_spec,
+                beta=beta_non_spec,
+                initial_state=initial_state,
+                output_final_state=True,
+                cu_seqlens=non_spec_query_start_loc,
+                chunk_indices=attn_metadata.chunk_indices,
+                chunk_offsets=attn_metadata.chunk_offsets,
+                use_qk_l2norm_in_kernel=False,
+            )
+            # Init cache
+            ssm_state[non_spec_state_indices_tensor] = last_recurrent_state.to(
+                ssm_state.dtype
+            )
+        elif attn_metadata.num_decodes > 0:
+            core_attn_out_non_spec, last_recurrent_state = (
+                fused_sigmoid_gating_delta_rule_update(
+                    A_log=self.A_log,
+                    a=a,
+                    b=b,
+                    dt_bias=self.dt_bias,
+                    q=query_non_spec,
+                    k=key_non_spec,
+                    v=value_non_spec,
+                    initial_state=ssm_state,
+                    inplace_final_state=True,
+                    cu_seqlens=non_spec_query_start_loc[  # type: ignore[index]
+                        : attn_metadata.num_decodes
+                        + 1  # type: ignore[attr-defined]
+                    ],
+                    ssm_state_indices=non_spec_state_indices_tensor,
+                    use_qk_l2norm_in_kernel=True,
+                )
+            )
+        else:
+            core_attn_out_non_spec, last_recurrent_state = None, None
+
+        # 3. Merge core attention output
+        if spec_sequence_masks is not None and core_attn_out_non_spec is not None:
+            merged_out = torch.empty(
+                (1, num_actual_tokens, *core_attn_out_spec.shape[2:]),
+                dtype=core_attn_out_non_spec.dtype,
+                device=core_attn_out_non_spec.device,
+            )
+            merged_out.index_copy_(1, spec_token_indx, core_attn_out_spec)
+            merged_out.index_copy_(1, non_spec_token_indx, core_attn_out_non_spec)
+            core_attn_out[:num_actual_tokens] = merged_out.squeeze(0)
+        elif spec_sequence_masks is not None:
+            core_attn_out[:num_actual_tokens] = core_attn_out_spec.squeeze(0)
+        else:
+            core_attn_out[:num_actual_tokens] = core_attn_out_non_spec.squeeze(0)
+
+    def _forward_core_decode_non_spec(
+        self,
+        mixed_qkv: torch.Tensor,
+        b: torch.Tensor,
+        a: torch.Tensor,
+        core_attn_out: torch.Tensor,
+        attn_metadata: GDNAttentionMetadata,
+    ):
+        """
+        Core attention computation with a packed non-spec decode fast path.
+        """
+        non_spec_state_indices_tensor = attn_metadata.non_spec_state_indices_tensor  # noqa: E501
+        self_kv_cache = self.kv_cache
+        # conv_state must be (..., dim, width-1) for the conv kernels.
+        # DS layout stores it that way directly; SD layout needs a transpose.
+        conv_state = (
+            self_kv_cache[0]
+            if is_conv_state_dim_first()
+            else self_kv_cache[0].transpose(-1, -2)
+        )
+        ssm_state = self_kv_cache[1]
+        num_actual_tokens = attn_metadata.num_actual_tokens
+
+        mixed_qkv = mixed_qkv[:num_actual_tokens]
+        b = b[:num_actual_tokens]
+        a = a[:num_actual_tokens]
+
+        conv_weights = self.conv1d.weight.view(
+            self.conv1d.weight.size(0), self.conv1d.weight.size(2)
+        )
+        mixed_qkv_non_spec = causal_conv1d_update(
+            mixed_qkv,
+            conv_state,
+            conv_weights,
+            self.conv1d.bias,
+            self.activation,
+            conv_state_indices=non_spec_state_indices_tensor[:num_actual_tokens],  # type: ignore[index]
+            validate_data=False,
+        )
+        out_buf = core_attn_out[:num_actual_tokens].unsqueeze(1)
+        fused_recurrent_gated_delta_rule_packed_decode(
+            mixed_qkv=mixed_qkv_non_spec,
+            a=a,
+            b=b,
+            A_log=self.A_log,
+            dt_bias=self.dt_bias,
+            scale=self.head_k_dim**-0.5,
+            initial_state=ssm_state,
+            out=out_buf,
+            ssm_state_indices=non_spec_state_indices_tensor[:num_actual_tokens],  # type: ignore[index]
+            use_qk_l2norm_in_kernel=True,
+        )
+        return
+
+
+================================================================================
+CLASS=Qwen3_5Config
+class Qwen3_5Config(PretrainedConfig):
+    model_type = "qwen3_5"
+    sub_configs = {
+        "vision_config": Qwen3_5VisionConfig,
+        "text_config": Qwen3_5TextConfig,
+    }
+    keys_to_ignore_at_inference = ["past_key_values"]
+
+    def __init__(
+        self,
+        text_config=None,
+        vision_config=None,
+        image_token_id=248056,
+        video_token_id=248057,
+        vision_start_token_id=248053,
+        vision_end_token_id=248054,
+        tie_word_embeddings=False,
+        **kwargs,
+    ):
+        if isinstance(vision_config, dict):
+            self.vision_config = self.sub_configs["vision_config"](**vision_config)
+        elif vision_config is None:
+            self.vision_config = self.sub_configs["vision_config"]()
+
+        if isinstance(text_config, dict):
+            self.text_config = self.sub_configs["text_config"](**text_config)
+        elif text_config is None:
+            self.text_config = self.sub_configs["text_config"]()
+
+        self.image_token_id = image_token_id
+        self.video_token_id = video_token_id
+        self.vision_start_token_id = vision_start_token_id
+        self.vision_end_token_id = vision_end_token_id
+        super().__init__(**kwargs)
+        # Set after super().__init__() to avoid v4 PretrainedConfig overwrite
+        self.tie_word_embeddings = tie_word_embeddings
+
+
+================================================================================
+CLASS=Qwen3_5TextConfig
+class Qwen3_5TextConfig(PretrainedConfig):
+    model_type = "qwen3_5_text"
+    keys_to_ignore_at_inference = ["past_key_values"]
+
+    base_model_tp_plan = {
+        "layers.*.self_attn.q_proj": "colwise",
+        "layers.*.self_attn.k_proj": "colwise",
+        "layers.*.self_attn.v_proj": "colwise",
+        "layers.*.self_attn.o_proj": "rowwise",
+        "layers.*.mlp.gate_proj": "colwise",
+        "layers.*.mlp.up_proj": "colwise",
+        "layers.*.mlp.down_proj": "rowwise",
+    }
+    base_model_pp_plan = {
+        "embed_tokens": (["input_ids"], ["inputs_embeds"]),
+        "layers": (["hidden_states", "attention_mask"], ["hidden_states"]),
+        "norm": (["hidden_states"], ["hidden_states"]),
+    }
+    base_config_key = "text_config"
+
+    def __init__(
+        self,
+        vocab_size=248320,
+        hidden_size=4096,
+        intermediate_size=12288,
+        num_hidden_layers=32,
+        num_attention_heads=16,
+        num_key_value_heads=4,
+        hidden_act="silu",
+        max_position_embeddings=32768,
+        initializer_range=0.02,
+        rms_norm_eps=1e-6,
+        use_cache=True,
+        tie_word_embeddings=False,
+        rope_parameters=None,
+        attention_bias=False,
+        attention_dropout=0.0,
+        head_dim=256,
+        linear_conv_kernel_dim=4,
+        linear_key_head_dim=128,
+        linear_value_head_dim=128,
+        linear_num_key_heads=16,
+        linear_num_value_heads=32,
+        layer_types=None,
+        pad_token_id=None,
+        bos_token_id=None,
+        eos_token_id=None,
+        **kwargs,
+    ):
+        self.vocab_size = vocab_size
+        self.max_position_embeddings = max_position_embeddings
+        self.hidden_size = hidden_size
+        self.intermediate_size = intermediate_size
+        self.num_hidden_layers = num_hidden_layers
+        self.num_attention_heads = num_attention_heads
+        self.num_key_value_heads = num_key_value_heads
+        self.hidden_act = hidden_act
+        self.initializer_range = initializer_range
+        self.rms_norm_eps = rms_norm_eps
+        self.use_cache = use_cache
+        self.attention_bias = attention_bias
+        self.attention_dropout = attention_dropout
+        self.head_dim = head_dim
+        self.rope_parameters = rope_parameters
+        kwargs.setdefault("partial_rotary_factor", 0.25)
+
+        self.layer_types = layer_types
+        if self.layer_types is None:
+            interval_pattern = kwargs.get("full_attention_interval", 4)
+            self.layer_types = [
+                "linear_attention"
+                if bool((i + 1) % interval_pattern)
+                else "full_attention"
+                for i in range(self.num_hidden_layers)
+            ]
+        if hasattr(self, "validate_layer_type"):
+            # Transformers v5
+            kwargs["ignore_keys_at_rope_validation"] = {
+                "mrope_section",
+                "mrope_interleaved",
+            }
+            self.validate_layer_type()
+        else:
+            # Transformers v4
+            from transformers.configuration_utils import layer_type_validation
+
+            layer_type_validation(self.layer_types, self.num_hidden_layers)
+
+        # linear attention part
+        self.linear_conv_kernel_dim = linear_conv_kernel_dim
+        self.linear_key_head_dim = linear_key_head_dim
+        self.linear_value_head_dim = linear_value_head_dim
+        self.linear_num_key_heads = linear_num_key_heads
+        self.linear_num_value_heads = linear_num_value_heads
+        super().__init__(**kwargs)
+        # Set these AFTER super().__init__() because transformers v4's
+        # PretrainedConfig.__init__ has these as explicit params with different
+        # defaults (e.g. tie_word_embeddings=True) that would overwrite our values.
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
+        self.tie_word_embeddings = tie_word_embeddings
+
+
+================================================================================
+CLASS=Qwen3_5MoeConfig
+class Qwen3_5MoeConfig(PretrainedConfig):
+    model_type = "qwen3_5_moe"
+    sub_configs = {
+        "vision_config": Qwen3_5MoeVisionConfig,
+        "text_config": Qwen3_5MoeTextConfig,
+    }
+    keys_to_ignore_at_inference = ["past_key_values"]
+
+    def __init__(
+        self,
+        text_config=None,
+        vision_config=None,
+        image_token_id=248056,
+        video_token_id=248057,
+        vision_start_token_id=248053,
+        vision_end_token_id=248054,
+        tie_word_embeddings=False,
+        **kwargs,
+    ):
+        if isinstance(vision_config, dict):
+            self.vision_config = self.sub_configs["vision_config"](**vision_config)
+        elif vision_config is None:
+            self.vision_config = self.sub_configs["vision_config"]()
+
+        if isinstance(text_config, dict):
+            self.text_config = self.sub_configs["text_config"](**text_config)
+        elif text_config is None:
+            self.text_config = self.sub_configs["text_config"]()
+
+        self.image_token_id = image_token_id
+        self.video_token_id = video_token_id
+        self.vision_start_token_id = vision_start_token_id
+        self.vision_end_token_id = vision_end_token_id
+        super().__init__(**kwargs)
+        # Set after super().__init__() to avoid v4 PretrainedConfig overwrite
+        self.tie_word_embeddings = tie_word_embeddings
+
+
+================================================================================
+CLASS=Qwen3_5MoeTextConfig
+class Qwen3_5MoeTextConfig(PretrainedConfig):
+    model_type = "qwen3_5_moe_text"
+    keys_to_ignore_at_inference = ["past_key_values"]
+
+    base_model_tp_plan = {
+        "layers.*.self_attn.q_proj": "colwise",
+        "layers.*.self_attn.k_proj": "colwise",
+        "layers.*.self_attn.v_proj": "colwise",
+        "layers.*.self_attn.o_proj": "rowwise",
+        "layers.*.mlp.experts.gate_up_proj": "packed_colwise",
+        "layers.*.mlp.experts.down_proj": "rowwise",
+        "layers.*.mlp.shared_expert.gate_proj": "colwise",
+        "layers.*.mlp.shared_expert.up_proj": "colwise",
+        "layers.*.mlp.shared_expert.down_proj": "rowwise",
+    }
+    base_model_pp_plan = {
+        "embed_tokens": (["input_ids"], ["inputs_embeds"]),
+        "layers": (["hidden_states", "attention_mask"], ["hidden_states"]),
+        "norm": (["hidden_states"], ["hidden_states"]),
+    }
+    base_config_key = "text_config"
+
+    def __init__(
+        self,
+        vocab_size=248320,
+        hidden_size=2048,
+        num_hidden_layers=40,
+        num_attention_heads=16,
+        num_key_value_heads=2,
+        hidden_act="silu",
+        max_position_embeddings=32768,
+        initializer_range=0.02,
+        rms_norm_eps=1e-6,
+        use_cache=True,
+        tie_word_embeddings=False,
+        rope_parameters=None,
+        attention_bias=False,
+        attention_dropout=0.0,
+        head_dim=256,
+        linear_conv_kernel_dim=4,
+        linear_key_head_dim=128,
+        linear_value_head_dim=128,
+        linear_num_key_heads=16,
+        linear_num_value_heads=32,
+        moe_intermediate_size=512,
+        shared_expert_intermediate_size=512,
+        num_experts_per_tok=8,
+        num_experts=256,
+        output_router_logits=False,
+        router_aux_loss_coef=0.001,
+        layer_types=None,
+        pad_token_id=None,
+        bos_token_id=None,
+        eos_token_id=None,
+        **kwargs,
+    ):
+        self.vocab_size = vocab_size
+        self.max_position_embeddings = max_position_embeddings
+        self.hidden_size = hidden_size
+        self.num_hidden_layers = num_hidden_layers
+        self.num_attention_heads = num_attention_heads
+        self.num_key_value_heads = num_key_value_heads
+        self.hidden_act = hidden_act
+        self.initializer_range = initializer_range
+        self.rms_norm_eps = rms_norm_eps
+        self.use_cache = use_cache
+        self.attention_bias = attention_bias
+        self.attention_dropout = attention_dropout
+        self.head_dim = head_dim
+        self.rope_parameters = rope_parameters
+        kwargs.setdefault("partial_rotary_factor", 0.25)
+
+        self.layer_types = layer_types
+        if self.layer_types is None:
+            interval_pattern = kwargs.get("full_attention_interval", 4)
+            self.layer_types = [
+                "linear_attention"
+                if bool((i + 1) % interval_pattern)
+                else "full_attention"
+                for i in range(self.num_hidden_layers)
+            ]
+        if hasattr(self, "validate_layer_type"):
+            # Transformers v5
+            kwargs["ignore_keys_at_rope_validation"] = {
+                "mrope_section",
+                "mrope_interleaved",
+            }
+            self.validate_layer_type()
+        else:
+            # Transformers v4
+            from transformers.configuration_utils import layer_type_validation
+
+            layer_type_validation(self.layer_types, self.num_hidden_layers)
+
+        # linear attention part
+        self.linear_conv_kernel_dim = linear_conv_kernel_dim
+        self.linear_key_head_dim = linear_key_head_dim
+        self.linear_value_head_dim = linear_value_head_dim
+        self.linear_num_key_heads = linear_num_key_heads
+        self.linear_num_value_heads = linear_num_value_heads
+        self.moe_intermediate_size = moe_intermediate_size
+        self.shared_expert_intermediate_size = shared_expert_intermediate_size
+        self.num_experts_per_tok = num_experts_per_tok
+        self.num_experts = num_experts
+        self.output_router_logits = output_router_logits
+        self.router_aux_loss_coef = router_aux_loss_coef
+        super().__init__(**kwargs)
+        # Set these AFTER super().__init__() because transformers v4's
+        # PretrainedConfig.__init__ has these as explicit params with different
+        # defaults (e.g. tie_word_embeddings=True) that would overwrite our values.
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
+        self.tie_word_embeddings = tie_word_embeddings
+
+
+================================================================================
+CLASS=Qwen3NextDecoderLayer
+class Qwen3NextDecoderLayer(nn.Module):
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        layer_type: str,
+        prefix: str = "",
+    ) -> None:
+        super().__init__()
+
+        config = vllm_config.model_config.hf_config
+        model_config = vllm_config.model_config
+        cache_config = vllm_config.cache_config
+        quant_config = vllm_config.quant_config
+
+        self.layer_type = layer_type
+        self.layer_idx = extract_layer_index(prefix)
+
+        if self.layer_type == "linear_attention":
+            self.linear_attn = GatedDeltaNetAttention(
+                config,
+                vllm_config=vllm_config,
+                prefix=f"{prefix}.linear_attn",
+                gqa_interleaved_layout=True,
+            )
+        elif self.layer_type == "full_attention":
+            self.self_attn = Qwen3NextAttention(
+                config,
+                model_config=model_config,
+                cache_config=cache_config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.self_attn",
+            )
+        else:
+            raise ValueError(f"Invalid layer_type {self.layer_type}")
+
+        mlp_only_layers = (
+            [] if not hasattr(config, "mlp_only_layers") else config.mlp_only_layers
+        )
+        if (self.layer_idx not in mlp_only_layers) and (
+            config.num_experts > 0
+            and (self.layer_idx + 1) % config.decoder_sparse_step == 0
+        ):
+            self.mlp = Qwen3NextSparseMoeBlock(
+                vllm_config=vllm_config,
+                prefix=f"{prefix}.mlp",
+            )
+        else:
+            self.mlp = Qwen3NextMLP(
+                hidden_size=config.hidden_size,
+                intermediate_size=config.intermediate_size,
+                hidden_act=config.hidden_act,
+                quant_config=quant_config,
+                prefix=f"{prefix}.mlp",
+            )
+
+        self.input_layernorm = Qwen3NextRMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
+        self.post_attention_layernorm = Qwen3NextRMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
+
+        self.layer_scale = getattr(config, "layer_scale", False)
+        if self.layer_scale:
+            self.attn_layer_scale = torch.nn.Parameter(
+                torch.zeros(
+                    1,
+                    1,
+                    config.hidden_size,
+                ),
+            )
+            self.ffn_layer_scale = torch.nn.Parameter(
+                torch.zeros(
+                    1,
+                    1,
+                    config.hidden_size,
+                ),
+            )
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        residual: torch.Tensor | None,
+        positions: torch.Tensor = None,
+        **kwargs: object,
+    ):
+        if residual is None:
+            residual = hidden_states
+            hidden_states = self.input_layernorm(hidden_states)
+        else:
+            hidden_states, residual = self.input_layernorm(hidden_states, residual)
+
+        self_attention_output = torch.empty_like(hidden_states)
+        if self.layer_type == "linear_attention":
+            self.linear_attn(
+                hidden_states=hidden_states,
+                output=self_attention_output,
+            )
+        elif self.layer_type == "full_attention":
+            self.self_attn(
+                hidden_states=hidden_states,
+                output=self_attention_output,
+                positions=positions,
+            )
+        else:
+            raise ValueError("Invalid layer_type")
+        hidden_states = self_attention_output
+
+        if self.layer_scale:
+            if len(hidden_states.shape) == 2:
+                hidden_states = hidden_states * (
+                    self.attn_layer_scale.to(hidden_states.dtype)[0] + 1
+                )
+            else:
+                hidden_states = hidden_states * (
+                    self.attn_layer_scale.to(hidden_states.dtype) + 1
+                )
+
+        # Fully Connected
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
+        hidden_states = self.mlp(hidden_states)
+
+        if self.layer_scale:
+            if len(hidden_states.shape) == 2:
+                hidden_states = hidden_states * (
+                    self.ffn_layer_scale.to(hidden_states.dtype)[0] + 1
+                )
+            else:
+                assert len(hidden_states.shape) == len(self.ffn_layer_scale.shape), (
+                    f"shape must be the same {len(hidden_states.shape)}, "
+                    f"{len(self.ffn_layer_scale.shape)}"
+                )
+                hidden_states = hidden_states * (
+                    self.ffn_layer_scale.to(hidden_states.dtype) + 1
+                )
+
+        return hidden_states, residual
+
+
+================================================================================
+CLASS=Qwen3NextSparseMoeBlock
+class Qwen3NextSparseMoeBlock(nn.Module):
+    def __init__(self, vllm_config: VllmConfig, prefix: str = ""):
+        super().__init__()
+
+        config = vllm_config.model_config.hf_text_config
+        parallel_config = vllm_config.parallel_config
+        quant_config = vllm_config.quant_config
+
+        self.tp_size = get_tensor_model_parallel_world_size()
+
+        self.ep_group = get_ep_group().device_group
+        self.ep_rank = get_ep_group().rank_in_group
+        self.ep_size = self.ep_group.size()
+        self.n_routed_experts = config.num_experts
+
+        self.is_sequence_parallel = parallel_config.use_sequence_parallel_moe
+
+        if self.tp_size > config.num_experts:
+            raise ValueError(
+                f"Tensor parallel size {self.tp_size} is greater than "
+                f"the number of experts {config.num_experts}."
+            )
+
+        # Load balancing settings.
+        vllm_config = get_current_vllm_config()
+        eplb_config = vllm_config.parallel_config.eplb_config
+        self.enable_eplb = parallel_config.enable_eplb
+
+        self.n_logical_experts = self.n_routed_experts
+        self.n_redundant_experts = eplb_config.num_redundant_experts
+        self.n_physical_experts = self.n_logical_experts + self.n_redundant_experts
+        self.n_local_physical_experts = self.n_physical_experts // self.ep_size
+
+        self.physical_expert_start = self.ep_rank * self.n_local_physical_experts
+        self.physical_expert_end = (
+            self.physical_expert_start + self.n_local_physical_experts
+        )
+
+        self.gate = ReplicatedLinear(
+            config.hidden_size,
+            config.num_experts,
+            bias=False,
+            quant_config=None,
+            prefix=f"{prefix}.gate",
+        )
+
+        self.shared_expert_gate = ReplicatedLinear(
+            config.hidden_size,
+            1,
+            bias=False,
+            quant_config=None,
+            prefix=f"{prefix}.shared_expert_gate",
+        )
+
+        if config.shared_expert_intermediate_size > 0:
+            self.shared_expert = Qwen3NextMLP(
+                hidden_size=config.hidden_size,
+                intermediate_size=config.shared_expert_intermediate_size,
+                hidden_act=config.hidden_act,
+                quant_config=quant_config,
+                reduce_results=False,
+                expert_gate=self.shared_expert_gate,
+                is_sequence_parallel=self.is_sequence_parallel,
+                prefix=f"{prefix}.shared_expert",
+            )
+        else:
+            self.shared_expert = None
+
+        self.experts = FusedMoE(
+            shared_experts=self.shared_expert,
+            gate=self.gate,
+            num_experts=self.n_routed_experts,
+            top_k=config.num_experts_per_tok,
+            hidden_size=config.hidden_size,
+            intermediate_size=config.moe_intermediate_size,
+            renormalize=getattr(config, "norm_topk_prob", True),
+            quant_config=quant_config,
+            prefix=f"{prefix}.experts",
+            enable_eplb=self.enable_eplb,
+            num_redundant_experts=self.n_redundant_experts,
+            is_sequence_parallel=self.is_sequence_parallel,
+        )
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        # NOTE: hidden_states can have either 1D or 2D shape.
+        orig_shape = hidden_states.shape
+        num_tokens, hidden_dim = hidden_states.shape
+        hidden_states = hidden_states.view(-1, hidden_dim)
+
+        if self.is_sequence_parallel:
+            hidden_states = sequence_parallel_chunk(hidden_states)
+
+        if self.experts.is_internal_router:
+            # In this case, the gate/router runs inside the FusedMoE class
+            final_hidden_states = self.experts(
+                hidden_states=hidden_states, router_logits=hidden_states
+            )
+        else:
+            # router_logits: (num_tokens, n_experts)
+            router_logits, _ = self.gate(hidden_states)
+            final_hidden_states = self.experts(
+                hidden_states=hidden_states, router_logits=router_logits
+            )
+
+        if self.is_sequence_parallel:
+            final_hidden_states = tensor_model_parallel_all_gather(
+                final_hidden_states, 0
+            )
+            final_hidden_states = final_hidden_states[:num_tokens]
+
+        return final_hidden_states.view(orig_shape)
+
+
+================================================================================
+CLASS=Qwen3_5ProcessingInfo
+class Qwen3_5ProcessingInfo(Qwen3VLProcessingInfo):
+    def get_hf_config(self):
+        return self.ctx.get_hf_config(Qwen3_5Config)
+
+
+================================================================================
+CLASS=Qwen3_5MoeProcessingInfo
+class Qwen3_5MoeProcessingInfo(Qwen3VLProcessingInfo):
+    def get_hf_config(self):
+        return self.ctx.get_hf_config(Qwen3_5MoeConfig)
+
+
+================================================================================
+CLASS=Qwen3_5DecoderLayer
+class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        layer_type: str,
+        prefix: str = "",
+    ) -> None:
+        super(Qwen3NextDecoderLayer, self).__init__()
+
+        config = vllm_config.model_config.hf_text_config
+        model_config = vllm_config.model_config
+        cache_config = vllm_config.cache_config
+        quant_config = vllm_config.quant_config
+
+        self.layer_type = layer_type
+        self.layer_idx = extract_layer_index(prefix)
+
+        if self.layer_type == "linear_attention":
+            self.linear_attn = GatedDeltaNetAttention(
+                config=config,
+                vllm_config=vllm_config,
+                prefix=f"{prefix}.linear_attn",
+                gqa_interleaved_layout=False,
+                create_in_proj_qkvz=vllm_config.lora_config is None,
+            )
+        elif self.layer_type == "full_attention":
+            self.self_attn = Qwen3NextAttention(
+                config,
+                model_config=model_config,
+                cache_config=cache_config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.self_attn",
+            )
+        else:
+            raise ValueError(f"Invalid layer_type {self.layer_type}")
+
+        # NOTE: Determine the MLP type based on the model type
+        # Qwen3.5 use all layers for MLP / Qwen3.5-MoE use sparse MoE blocks
+        if config.model_type == "qwen3_5_moe_text":
+            self.mlp = Qwen3NextSparseMoeBlock(
+                vllm_config=vllm_config,
+                prefix=f"{prefix}.mlp",
+            )
+        elif config.model_type == "qwen3_5_text":
+            self.mlp = Qwen3NextMLP(
+                hidden_size=config.hidden_size,
+                intermediate_size=config.intermediate_size,
+                hidden_act=config.hidden_act,
+                quant_config=quant_config,
+                prefix=f"{prefix}.mlp",
+            )
+        else:
+            raise ValueError(f"Invalid model_type {config.model_type}")
+
+        self.input_layernorm = Qwen3_5RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
+        self.post_attention_layernorm = Qwen3_5RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
+
+        self.layer_scale = getattr(config, "layer_scale", False)
+        if self.layer_scale:
+            self.attn_layer_scale = torch.nn.Parameter(
+                torch.zeros(
+                    1,
+                    1,
+                    config.hidden_size,
+                ),
+            )
+            self.ffn_layer_scale = torch.nn.Parameter(
+                torch.zeros(
+                    1,
+                    1,
+                    config.hidden_size,
+                ),
+            )
+
+
+================================================================================
+CLASS=Qwen3_5Model
+@support_torch_compile(
+    dynamic_arg_dims={
+        "input_ids": 0,
+        # positions is of shape (3, seq_len) if mrope is enabled for qwen2-vl,
+        # otherwise (seq_len, ).
+        "positions": -1,
+        "intermediate_tensors": 0,
+        "inputs_embeds": 0,
+    }
+)
+class Qwen3_5Model(Qwen3NextModel):
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+        super(Qwen3NextModel, self).__init__()
+
+        config: Qwen3_5TextConfig | Qwen3_5MoeTextConfig = (
+            vllm_config.model_config.hf_text_config
+        )
+        parallel_config = vllm_config.parallel_config
+
+        eplb_config = parallel_config.eplb_config
+        self.num_redundant_experts = eplb_config.num_redundant_experts
+
+        self.config = config
+        self.enable_lora = vllm_config.lora_config is not None
+
+        self.vocab_size = config.vocab_size
+
+        self.embed_tokens = VocabParallelEmbedding(
+            self.vocab_size,
+            config.hidden_size,
+        )
+
+        def get_layer(prefix: str):
+            return Qwen3_5DecoderLayer(
+                vllm_config,
+                layer_type=config.layer_types[extract_layer_index(prefix)],
+                prefix=prefix,
+            )
+
+        self.start_layer, self.end_layer, self.layers = make_layers(
+            config.num_hidden_layers, get_layer, prefix=f"{prefix}.layers"
+        )
+        self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(
+            ["hidden_states", "residual"], config.hidden_size
+        )
+
+        if get_pp_group().is_last_rank:
+            self.norm = Qwen3_5RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        else:
+            self.norm = PPMissingLayer()
+
+        self.aux_hidden_state_layers: tuple[int, ...] = ()
+
+    def load_fused_expert_weights(
+        self,
+        name: str,
+        params_dict: dict,
+        loaded_weight: torch.Tensor,
+        shard_id: str,
+        num_experts: int,
+    ) -> bool:
+        param = params_dict[name]
+        weight_loader = typing.cast(Callable[..., bool], param.weight_loader)
+        loaded_local_expert = False
+        for expert_id in range(num_experts):
+            curr_expert_weight = loaded_weight[expert_id]
+            success = weight_loader(
+                param,
+                curr_expert_weight,
+                name,
+                shard_id,
+                expert_id,
+                return_success=True,
+            )
+            if success:
+                loaded_local_expert = True
+
+        return loaded_local_expert
+
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        stacked_params_mapping = [
+            # (param_name, shard_name, shard_id)
+            # self attention
+            ("qkv_proj", "q_proj", "q"),
+            ("qkv_proj", "k_proj", "k"),
+            ("qkv_proj", "v_proj", "v"),
+            # mlp
+            ("gate_up_proj", "gate_proj", 0),
+            ("gate_up_proj", "up_proj", 1),
+            ("in_proj_ba", "in_proj_b", 0),
+            ("in_proj_ba", "in_proj_a", 1),
+        ]
+
+        if self.enable_lora:
+            stacked_params_mapping.extend(
+                [
+                    ("in_proj_qkv", "in_proj_qkv", (0, 1, 2)),
+                    ("in_proj_z", "in_proj_z", 0),
+                ]
+            )
+        else:
+            stacked_params_mapping.extend(
+                [
+                    ("in_proj_qkvz", "in_proj_qkv", (0, 1, 2)),
+                    ("in_proj_qkvz", "in_proj_z", 3),
+                ]
+            )
+
+        params_dict = dict(self.named_parameters())
+        loaded_params: set[str] = set()
+        expert_params_mapping = self.get_expert_mapping()
+        is_fused_expert = False
+        base_layer = (
+            "base_layer." if any(".base_layer." in name for name in params_dict) else ""
+        )
+        fused_expert_params_mapping = [
+            (f"experts.{base_layer}w13_weight", "experts.gate_up_proj", 0, "w1"),
+            (f"experts.{base_layer}w2_weight", "experts.down_proj", 0, "w2"),
+        ]
+        num_experts = (
+            self.config.num_experts if hasattr(self.config, "num_experts") else 0
+        )
+        for name, loaded_weight in weights:
+            if "rotary_emb.inv_freq" in name:
+                continue
+
+            if name.startswith("mtp."):
+                continue
+
+            # Remapping the name of FP8 kv-scale.
+            if name.endswith("scale"):
+                name = maybe_remap_kv_scale_name(name, params_dict)
+                if name is None:
+                    continue
+
+            for param_name, weight_name, shard_id in stacked_params_mapping:
+                if "experts.gate_up_proj" in name or "experts.down_proj" in name:
+                    is_fused_expert = True
+                    expert_params_mapping = fused_expert_params_mapping
+
+                if weight_name not in name:
+                    continue
+
+                if "mlp.experts" in name:
+                    continue
+
+                name = name.replace(weight_name, param_name)
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
+                    continue
+                # Skip layers on other devices.
+                if is_pp_missing_parameter(name, self):
+                    continue
+                # name = apply_attn_prefix(name, params_dict)
+                if name not in params_dict:
+                    continue
+                param = params_dict[name]
+                weight_loader = param.weight_loader
+                if param_name == "in_proj_z" and self.enable_lora:
+                    weight_loader(param, loaded_weight)
+                else:
+                    weight_loader(param, loaded_weight, shard_id)
+                break
+            else:
+                is_expert_weight = False
+                for mapping in expert_params_mapping:
+                    param_name, weight_name, expert_id, shard_id = mapping
+                    if weight_name not in name:
+                        continue
+                    is_expert_weight = True
+                    name_mapped = name.replace(weight_name, param_name)
+                    # Skip layers on other devices.
+                    if is_pp_missing_parameter(name_mapped, self):
+                        continue
+                    if is_fused_expert:
+                        # qwen3.5 no need to transpose
+                        # loaded_weight = loaded_weight.transpose(-1, -2)
+                        if "experts.gate_up_proj" in name:
+                            loaded_weight = loaded_weight.chunk(2, dim=-2)
+                            success_w1 = self.load_fused_expert_weights(
+                                name_mapped,
+                                params_dict,
+                                loaded_weight[0],
+                                "w1",
+                                num_experts,
+                            )
+                            success_w3 = self.load_fused_expert_weights(
+                                name_mapped,
+                                params_dict,
+                                loaded_weight[1],
+                                "w3",
+                                num_experts,
+                            )
+                            success = success_w1 and success_w3
+                        else:
+                            # down_proj
+                            success = self.load_fused_expert_weights(
+                                name_mapped,
+                                params_dict,
+                                loaded_weight,
+                                shard_id,
+                                num_experts,
+                            )
+                        if success:
+                            name = name_mapped
+                            break
+                    else:
+                        # Skip loading extra bias for GPTQ models.
+                        if (
+                            name_mapped.endswith(".bias")
+                            or name_mapped.endswith("_bias")
+                        ) and name_mapped not in params_dict:
+                            continue
+                        param = params_dict[name_mapped]
+                        weight_loader = param.weight_loader
+                        success = weight_loader(
+                            param,
+                            loaded_weight,
+                            name_mapped,
+                            shard_id=shard_id,
+                            expert_id=expert_id,
+                            return_success=True,
+                        )
+                    if success:
+                        name = name_mapped
+                        break
+                else:
+                    if is_expert_weight:
+                        # We've checked that this is an expert weight
+                        # However it's not mapped locally to this rank
+                        # So we simply skip it
+                        continue
+                    # Skip loading extra bias for GPTQ models.
+                    if name.endswith(".bias") and name not in params_dict:
+                        continue
+                    if is_pp_missing_parameter(name, self):
+                        continue
+                    if name not in params_dict:
+                        logger.warning_once(
+                            f"Parameter {name} not found in params_dict, skip loading"
+                        )
+                        continue
+                    param = params_dict[name]
+                    weight_loader = getattr(
+                        param, "weight_loader", default_weight_loader
+                    )
+                    weight_loader(param, loaded_weight)
+            loaded_params.add(name)
+        return loaded_params
+
+
+================================================================================
+CLASS=Qwen3_5ForCausalLMBase
+class Qwen3_5ForCausalLMBase(
+    nn.Module,
+    HasInnerState,
+    SupportsEagle3,
+    SupportsLoRA,
+    SupportsPP,
+):
+    packed_modules_mapping = {
+        "qkv_proj": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+        ],
+        "gate_up_proj": ["gate_proj", "up_proj"],
+        # GDN fused projections.
+        "in_proj_qkvz": ["in_proj_qkv", "in_proj_z"],
+        "in_proj_ba": ["in_proj_b", "in_proj_a"],
+    }
+
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+        config = vllm_config.model_config.hf_text_config
+        self.vllm_config = vllm_config
+        self.model_config = vllm_config.model_config
+        cache_config = vllm_config.cache_config
+
+        scheduler_config = vllm_config.scheduler_config
+        if cache_config.mamba_cache_mode == "all":
+            raise NotImplementedError(
+                "Qwen3.5 currently does not support 'all' prefix caching, "
+                "please use '--mamba-cache-mode=align' instead"
+            )
+        self.quant_config = vllm_config.quant_config
+
+        super().__init__()
+        self.config = config
+        self.scheduler_config = scheduler_config
+        self.model = Qwen3_5Model(
+            vllm_config=vllm_config, prefix=maybe_prefix(prefix, "model")
+        )
+
+        # When LoRA is enabled, GDN uses separate in_proj_qkv and in_proj_z
+        # instead of merged in_proj_qkvz; pack mapping must match.
+        if vllm_config.lora_config:
+            base = getattr(Qwen3_5ForCausalLMBase, "packed_modules_mapping", {})
+            self.packed_modules_mapping = {k: list(v) for k, v in base.items()}
+            self.packed_modules_mapping.pop("in_proj_qkvz", None)
+            self.packed_modules_mapping["in_proj_qkv"] = ["in_proj_qkv"]
+            self.packed_modules_mapping["in_proj_z"] = ["in_proj_z"]
+
+        if get_pp_group().is_last_rank:
+            if config.tie_word_embeddings:
+                self.lm_head = self.model.embed_tokens
+            else:
+                self.lm_head = ParallelLMHead(
+                    config.vocab_size,
+                    config.hidden_size,
+                    prefix=maybe_prefix(prefix, "lm_head"),
+                )
+        else:
+            self.lm_head = PPMissingLayer()
+
+        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.make_empty_intermediate_tensors = (
+            self.model.make_empty_intermediate_tensors
+        )
+
+    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
+        return self.model.embed_input_ids(input_ids)
+
+    def set_aux_hidden_state_layers(self, layers: tuple[int, ...]) -> None:
+        self.model.aux_hidden_state_layers = layers
+
+    def get_eagle3_aux_hidden_state_layers(self) -> tuple[int, ...]:
+        num_layers = len(self.model.layers)
+        return (2, num_layers // 2, num_layers - 3)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        intermediate_tensors: IntermediateTensors | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        **kwargs: object,
+    ):
+        hidden_states = self.model(
+            input_ids, positions, intermediate_tensors, inputs_embeds
+        )
+
+        return hidden_states
+
+    def compute_logits(
+        self,
+        hidden_states: torch.Tensor,
+    ) -> torch.Tensor | None:
+        return self.logits_processor(self.lm_head, hidden_states)
+
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        loader = AutoWeightsLoader(
+            self,
+            skip_prefixes=["mtp."],
+        )
+        return loader.load_weights(weights)
+
+
+================================================================================
+CLASS=Qwen3_5ForCausalLM
+class Qwen3_5ForCausalLM(Qwen3_5ForCausalLMBase):
+    pass
+
+
+================================================================================
+CLASS=Qwen3_5MoeForCausalLM
+class Qwen3_5MoeForCausalLM(Qwen3_5ForCausalLMBase, QwenNextMixtureOfExperts):
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+        super().__init__(vllm_config=vllm_config, prefix=prefix)
+
+        # set MoE hyperparameters
+        self.set_moe_parameters()
+
+    def get_expert_mapping(self) -> list[tuple[str, str, int, str]]:
+        return self.model.get_expert_mapping()
+
+
+================================================================================
+CLASS=Qwen3_5ForConditionalGeneration
+@MULTIMODAL_REGISTRY.register_processor(
+    Qwen3VLMultiModalProcessor,
+    info=Qwen3_5ProcessingInfo,
+    dummy_inputs=Qwen3VLDummyInputsBuilder,
+)
+class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid):
+    # Qwen3.5 does not support multimodal pruning (EVS).
+    supports_multimodal_pruning = False
+
+    packed_modules_mapping = Qwen3VLForConditionalGeneration.packed_modules_mapping | {
+        "in_proj_qkvz": ["in_proj_qkv", "in_proj_z"],
+        "in_proj_ba": ["in_proj_b", "in_proj_a"],
+    }
+
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "model"):
+        # protocols have not __init__ method, so we need to use nn.Module.__init__
+        nn.Module.__init__(self)
+        self.update_packed_mapping(enable_lora=vllm_config.lora_config is not None)
+        config: Qwen3_5Config = vllm_config.model_config.hf_config
+        quant_config = vllm_config.quant_config
+        multimodal_config = vllm_config.model_config.multimodal_config
+
+        self.config = config
+        self.multimodal_config = multimodal_config
+        self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
+        # Qwen3.5 does not support multimodal pruning (EVS).
+        self.is_multimodal_pruning_enabled = False
+
+        with self._mark_tower_model(vllm_config, {"image", "video"}):
+            self.visual = Qwen3_VisionTransformer(
+                config.vision_config,
+                norm_eps=getattr(config, "rms_norm_eps", 1e-6),
+                quant_config=quant_config,
+                prefix=maybe_prefix(prefix, "visual"),
+            )
+
+        with self._mark_language_model(vllm_config):
+            self.language_model = Qwen3_5ForCausalLM(
+                vllm_config=vllm_config, prefix=maybe_prefix(prefix, "language_model")
+            )
+
+        self.make_empty_intermediate_tensors = (
+            self.language_model.make_empty_intermediate_tensors
+        )
+
+    def update_packed_mapping(self, enable_lora: bool):
+        # When LoRA is enabled, GDN uses separate in_proj_qkv and in_proj_z
+        if enable_lora:
+            base = getattr(
+                Qwen3_5ForConditionalGeneration, "packed_modules_mapping", {}
+            )
+            self.packed_modules_mapping = {k: list(v) for k, v in base.items()}
+            self.packed_modules_mapping.pop("in_proj_qkvz", None)
+            self.packed_modules_mapping["in_proj_qkv"] = ["in_proj_qkv"]
+            self.packed_modules_mapping["in_proj_z"] = ["in_proj_z"]
+
+    def embed_input_ids(
+        self,
+        input_ids: torch.Tensor,
+        multimodal_embeddings: MultiModalEmbeddings | None = None,
+        *,
+        is_multimodal: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        inputs_embeds = self._embed_text_input_ids(
+            input_ids,
+            self.language_model.embed_input_ids,
+            is_multimodal=is_multimodal,
+        )
+
+        if multimodal_embeddings is None or len(multimodal_embeddings) == 0:
+            return inputs_embeds
+
+        is_multimodal = _require_is_multimodal(is_multimodal)
+
+        inputs_embeds = _merge_multimodal_embeddings(
+            inputs_embeds=inputs_embeds,
+            multimodal_embeddings=multimodal_embeddings,
+            is_multimodal=is_multimodal,
+        )
+
+        return inputs_embeds
+
+    def recompute_mrope_positions(self, *args, **kwargs):
+        raise NotImplementedError(
+            "Qwen3.5 does not support multimodal pruning (EVS). "
+            "recompute_mrope_positions should never be called."
+        )
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        intermediate_tensors: IntermediateTensors | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        **kwargs: object,
+    ) -> torch.Tensor | IntermediateTensors:
+        """Run forward pass for Qwen3.5.
+
+        Args:
+            input_ids: Flattened (concatenated) input_ids corresponding to a
+                batch.
+            positions: Flattened (concatenated) position ids corresponding to a
+                batch.
+                **NOTE**: If mrope is enabled (default setting for Qwen3VL
+                opensource models), the shape will be `(3, seq_len)`,
+                otherwise it will be `(seq_len,).
+            intermediate_tensors: Intermediate tensors from previous pipeline
+                stages.
+            inputs_embeds: Pre-computed input embeddings.
+            **kwargs: Additional keyword arguments including:
+                - pixel_values: Pixel values to be fed to a model.
+                    `None` if no images are passed.
+                - image_grid_thw: Tensor `(n_images, 3)` of image 3D grid in
+                    LLM. `None` if no images are passed.
+                - pixel_values_videos: Pixel values of videos to be fed to a
+                    model. `None` if no videos are passed.
+                - video_grid_thw: Tensor `(n_videos, 3)` of video 3D grid in
+                    LLM. `None` if no videos are passed.
+        """
+
+        if intermediate_tensors is not None:
+            inputs_embeds = None
+
+        hidden_states = self.language_model.model(
+            input_ids=input_ids,
+            positions=positions,
+            intermediate_tensors=intermediate_tensors,
+            inputs_embeds=inputs_embeds,
+        )
+
+        return hidden_states
+
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        loader = AutoWeightsLoader(
+            self,
+            skip_prefixes=["mtp."],
+        )
+        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+
+    @classmethod
+    def get_mamba_state_dtype_from_config(
+        cls,
+        vllm_config: "VllmConfig",
+    ) -> tuple[torch.dtype, torch.dtype]:
+        return MambaStateDtypeCalculator.gated_delta_net_state_dtype(
+            vllm_config.model_config.dtype,
+            vllm_config.cache_config.mamba_cache_dtype,
+            vllm_config.cache_config.mamba_ssm_cache_dtype,
+        )
+
+    @classmethod
+    def get_mamba_state_shape_from_config(
+        cls, vllm_config: "VllmConfig"
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
+        parallel_config = vllm_config.parallel_config
+        hf_config = vllm_config.model_config.hf_text_config
+        tp_size = parallel_config.tensor_parallel_size
+        num_spec = (
+            vllm_config.speculative_config.num_speculative_tokens
+            if vllm_config.speculative_config
+            else 0
+        )
+        return MambaStateShapeCalculator.gated_delta_net_state_shape(
+            tp_size,
+            hf_config.linear_num_key_heads,
+            hf_config.linear_num_value_heads,
+            hf_config.linear_key_head_dim,
+            hf_config.linear_value_head_dim,
+            hf_config.linear_conv_kernel_dim,
+            num_spec,
+        )
+
+    @classmethod
+    def get_mamba_state_copy_func(cls) -> tuple[MambaStateCopyFunc, MambaStateCopyFunc]:
+        return MambaStateCopyFuncCalculator.gated_delta_net_state_copy_func()
+
+
+================================================================================
+CLASS=Qwen3_5_MoeMixtureOfExperts
+class Qwen3_5_MoeMixtureOfExperts(MixtureOfExperts):
+    def update_physical_experts_metadata(
+        self,
+        num_physical_experts: int,
+        num_local_physical_experts: int,
+    ) -> None:
+        assert self.num_local_physical_experts == num_local_physical_experts
+        self.num_physical_experts = num_physical_experts
+        self.num_local_physical_experts = num_local_physical_experts
+        self.num_redundant_experts = num_physical_experts - self.num_logical_experts
+        for layer in self.language_model.model.layers:
+            if isinstance(layer.mlp, Qwen3NextSparseMoeBlock):
+                moe = layer.mlp
+                moe.n_local_physical_experts = num_local_physical_experts
+                moe.n_physical_experts = num_physical_experts
+                moe.n_redundant_experts = self.num_redundant_experts
+                moe.experts.update_expert_map()
+
+    def set_moe_parameters(self):
+        self.expert_weights = []
+
+        self.moe_layers = []
+        example_moe = None
+        for layer in self.language_model.model.layers:
+            if isinstance(layer, Qwen3_5DecoderLayer) and isinstance(
+                layer.mlp, Qwen3NextSparseMoeBlock
+            ):
+                example_moe = layer.mlp
+                self.moe_layers.append(layer.mlp.experts)
+
+        if example_moe is None:
+            raise RuntimeError(
+                "No Qwen3_5 layer found in the language_model.model.layers."
+            )
+
+        # Set MoE hyperparameters
+        self.num_moe_layers = len(self.moe_layers)
+        self.num_expert_groups = 1
+        self.num_shared_experts = 0
+        self.num_logical_experts = example_moe.n_logical_experts
+        self.num_physical_experts = example_moe.n_physical_experts
+        self.num_local_physical_experts = example_moe.n_local_physical_experts
+        self.num_routed_experts = example_moe.n_routed_experts
+        self.num_redundant_experts = example_moe.n_redundant_experts
+
+
+================================================================================
+CLASS=Qwen3_5MoeForConditionalGeneration
+@MULTIMODAL_REGISTRY.register_processor(
+    Qwen3VLMultiModalProcessor,
+    info=Qwen3_5MoeProcessingInfo,
+    dummy_inputs=Qwen3VLDummyInputsBuilder,
+)
+class Qwen3_5MoeForConditionalGeneration(
+    Qwen3_5ForConditionalGeneration, Qwen3_5_MoeMixtureOfExperts
+):
+    # For MoE LoRA weights loading
+    is_3d_moe_weight: bool = True
+
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "model"):
+        # protocols have not __init__ method, so we need to use nn.Module.__init__
+        nn.Module.__init__(self)
+        self.update_packed_mapping(enable_lora=vllm_config.lora_config is not None)
+        config: Qwen3_5MoeConfig = vllm_config.model_config.hf_config
+        quant_config = vllm_config.quant_config
+        multimodal_config = vllm_config.model_config.multimodal_config
+
+        self.config = config
+        self.multimodal_config = multimodal_config
+        self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
+        # Qwen3.5 does not support multimodal pruning (EVS).
+        self.is_multimodal_pruning_enabled = False
+
+        with self._mark_tower_model(vllm_config, {"image", "video"}):
+            self.visual = Qwen3_VisionTransformer(
+                config.vision_config,
+                norm_eps=getattr(config, "rms_norm_eps", 1e-6),
+                quant_config=quant_config,
+                prefix=maybe_prefix(prefix, "visual"),
+            )
+
+        with self._mark_language_model(vllm_config):
+            self.language_model = Qwen3_5MoeForCausalLM(
+                vllm_config=vllm_config, prefix=maybe_prefix(prefix, "language_model")
+            )
+
+        self.make_empty_intermediate_tensors = (
+            self.language_model.make_empty_intermediate_tensors
+        )
+
+        # set MoE hyperparameters
+        self.set_moe_parameters()

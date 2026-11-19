@@ -31,6 +31,7 @@ import urllib.parse
 import uuid
 from contextlib import asynccontextmanager
 
+import anyio
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -77,7 +78,11 @@ async def lifespan(app):
                     timeout=None,
                     base_url=url,
                     limits=httpx.Limits(
-                        max_connections=None, max_keepalive_connections=None
+                        # P requests can arrive after long decode-only gaps.
+                        # Avoid reusing a socket concurrently closed by the
+                        # upstream keep-alive timeout.
+                        max_connections=None,
+                        max_keepalive_connections=0,
                     ),
                 ),
                 "url": url,
@@ -138,14 +143,11 @@ async def send_to_prefill(prefill_client, endpoint, req_data, request_id):
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    response = await prefill_client["client"].post(endpoint, json=data, headers=headers)
     try:
-        response = await prefill_client["client"].post(
-            endpoint, json=data, headers=headers
-        )
         response.raise_for_status()
+    finally:
         await response.aclose()
-    except Exception as exc:
-        print(f"Prefill request {request_id} error: {exc}")
 
 
 async def stream_from_decode(
@@ -179,13 +181,21 @@ async def _handle_completions(api, request):
         request_id = str(uuid.uuid4())
         prefill_client = app.state.prefill_clients[next(app.state.prefill_iterator)]
         decode_client = app.state.decode_clients[next(app.state.decode_iterator)]
-        asyncio.create_task(send_to_prefill(prefill_client, api, req_data, request_id))
 
         async def generate():
-            async for chunk in stream_from_decode(
-                prefill_client, decode_client, api, req_data, request_id
-            ):
-                yield chunk
+            # Own both sides for the entire response lifetime. A failed P
+            # request must terminate D's wait for a cache that will never arrive.
+            async with anyio.create_task_group() as tasks:
+                tasks.start_soon(
+                    send_to_prefill, prefill_client, api, req_data, request_id
+                )
+                try:
+                    async for chunk in stream_from_decode(
+                        prefill_client, decode_client, api, req_data, request_id
+                    ):
+                        yield chunk
+                finally:
+                    tasks.cancel_scope.cancel()
 
         return StreamingResponse(generate(), media_type="application/json")
     except Exception as e:

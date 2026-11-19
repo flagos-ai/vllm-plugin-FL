@@ -17,8 +17,6 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
-from vllm_fl.utils import get_op_config as _get_op_config
-
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
 
@@ -104,6 +102,8 @@ def _init_vendor_device():
 
 def register():
     """Register the FL platform."""
+    from vllm_fl.utils import get_op_config as _get_op_config
+
     _init_vendor_device()
 
     _patch_custom_ops()
