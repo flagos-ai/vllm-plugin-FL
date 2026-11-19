@@ -311,9 +311,31 @@ A second independent candidate fuses route range checks, EP mapping and
 zero selection into one kernel, retaining invalid/padding/NaN/Inf semantics.
 Its component traces confirm seven launches become one; numerical and
 changed-input graph checks plus three-length whole-model functional checks
-pass. Its separate official comparison is still running. This route candidate
-is also not part of the current PR runtime; no complete paired performance
-claim is made yet.
+pass. Its separate official comparison now completes all 18 original rounds,
+with every 256-request detailed result, source, client and command audited.
+Original rounds 2/3 output-throughput means are:
+
+| Input tokens | Original route output tok/s | Fused route output tok/s | Change | Retained spread before / after |
+| --- | ---: | ---: | ---: | ---: |
+| 1024 | 1131.255 | 1093.160 | -3.37% | 74.91% / 92.10% |
+| 4096 | 1360.940 | 1727.825 | +26.96% | 38.72% / 0.77% |
+| 16384 | 528.685 | 545.450 | +3.17% | 15.98% / 31.30% |
+
+This route-only intervention retains the original tuning-key policy. At 1K,
+the candidate's retained rounds still contain 82.408/362.580 seconds in global
+token-arrival gaps longer than one second. At 4K, the baseline's third round
+has a 77.457-second gap while neither candidate retained round has one. At
+16K, the third baseline/candidate rounds contain 77.198/154.808 seconds in
+such gaps. These unequal stalls and large retained spreads prevent treating
+the aggregate changes as pure routing-kernel savings or a stable deployment
+gain. No gaps or slow rounds are removed from the throughput calculation.
+
+Allocation remains 22.93 GiB/rank; reported KV capacity is 789040 versus
+801443 tokens, so this is not fixed KV. The two arms have separate initially
+empty task caches populated by initialization and identical probes. This
+route candidate is not part of the current PR runtime. A combined production
+integration is undergoing separate qualification; individual candidate
+results do not establish combined correctness or performance.
 
 ### Masked top-k reduction
 
