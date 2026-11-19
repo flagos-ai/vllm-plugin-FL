@@ -92,7 +92,8 @@ env_defaults:
     timeouts:
       e2e:
         # Four sequential model/mode cases include cold compilation and OCR.
-        adaptation_gate: 180
+        serving: 180
+        concurrent: 180
     e2e:
       # Add or remove test cases per model
       pr:
@@ -102,7 +103,13 @@ env_defaults:
             - 35b_a3b_tp2_eager
             - 27b_tp2_graph_ascend
             - 35b_a3b_tp2_graph_ascend
-        adaptation_gate:
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
+        concurrent:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
@@ -115,7 +122,13 @@ env_defaults:
             - 35b_a3b_tp2_eager
             - 27b_tp2_graph_ascend
             - 35b_a3b_tp2_graph_ascend
-        adaptation_gate:
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
+        concurrent:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager

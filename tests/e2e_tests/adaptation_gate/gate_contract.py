@@ -185,12 +185,10 @@ def build_server_args(config: Any, image_dir: Path) -> list[str]:
     return [*args, _LOCAL_MEDIA_FLAG, str(image_dir.resolve())]
 
 
-def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
-    """Validate the original five-scenario, 26-request, 260-check contract.
-
-    The contract matches the validation used by the T-Head Gate runner, while
-    remaining independent of that platform-specific process orchestration.
-    """
+def validate_scenario_documents(
+    directory: Path, scenarios: tuple[tuple[str, int], ...]
+) -> dict[str, int | bool]:
+    """Validate one selected group of adaptation Gate scenario documents."""
     directory = Path(directory)
     documents = [json.loads(path.read_text()) for path in directory.glob("*.json")]
     by_scenario: dict[str, dict[str, Any]] = {}
@@ -200,10 +198,10 @@ def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
             raise AssertionError("Gate results contain a missing or duplicate scenario")
         by_scenario[scenario] = document
 
-    expected_scenarios = dict(SCENARIOS)
-    if len(documents) != len(SCENARIOS) or set(by_scenario) != set(expected_scenarios):
+    expected_scenarios = dict(scenarios)
+    if len(documents) != len(scenarios) or set(by_scenario) != set(expected_scenarios):
         raise AssertionError(
-            "Gate must produce exactly the five original scenarios: "
+            "Gate produced an unexpected scenario set: "
             f"expected={sorted(expected_scenarios)}, actual={sorted(by_scenario)}"
         )
 
@@ -211,7 +209,7 @@ def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
     check_count = 0
     passed_checks = 0
     passed_requests = 0
-    for scenario, expected_count in SCENARIOS:
+    for scenario, expected_count in scenarios:
         document = by_scenario[scenario]
         inputs = document.get("input")
         outputs = document.get("output")
@@ -254,18 +252,25 @@ def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
             raise AssertionError(f"{scenario} summary does not match its responses")
         request_count += expected_count
 
+    expected_request_count = sum(expected_scenarios.values())
+    expected_check_count = expected_request_count * len(QUALITY_CHECKS)
     result = {
         "logical_requests": request_count,
         "checks": check_count,
         "passed_checks": passed_checks,
         "passed_requests": passed_requests,
         "passed": (
-            request_count == 26
-            and check_count == 260
-            and passed_checks == 260
-            and passed_requests == 26
+            request_count == expected_request_count
+            and check_count == expected_check_count
+            and passed_checks == expected_check_count
+            and passed_requests == expected_request_count
         ),
     }
     if not result["passed"]:
         raise AssertionError(f"Adaptation Gate quality contract failed: {result}")
     return result
+
+
+def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
+    """Validate the original five-scenario, 26-request, 260-check contract."""
+    return validate_scenario_documents(directory, SCENARIOS)

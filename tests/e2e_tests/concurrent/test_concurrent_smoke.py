@@ -21,9 +21,24 @@ Overrides (optional): ``FL_CONCURRENT_N``, ``FL_CONCURRENT_MAX_TOKENS``.
 import contextlib
 import os
 import time
+from pathlib import Path
 
 import pytest
 
+from tests.e2e_tests.adaptation_gate.gate_contract import (
+    build_server_args,
+    format_gate_progress,
+    summarize_gate_progress,
+    validate_scenario_documents,
+)
+from tests.e2e_tests.serving.server_helper import VllmServer
+from tests.e2e_tests.verification_cases import (
+    case_pack_environment,
+    ensure_server_alive,
+    load_case_pack,
+    validate_case_selection,
+    verification_results_root,
+)
 from tests.utils.device_utils import get_visible_device_env_var
 from tests.utils.model_config import ModelConfig
 from vllm import LLM, SamplingParams
@@ -45,6 +60,8 @@ if not _MODEL or not _CASE:
     )
 
 _CFG = ModelConfig.load(_MODEL, _CASE, platform=_PLATFORM, device=_DEVICE)
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_VERIFICATION = _CFG.verification
 
 if not os.path.exists(_CFG.model):
     pytest.fail(
@@ -123,9 +140,81 @@ def _report(n_req: int, elapsed: float, total_tokens: int) -> None:
     )
 
 
+@pytest.fixture(scope="module")
+def verification_server():
+    """Share one HTTP server across the three concurrent Gate scenarios."""
+    if not (_VERIFICATION.source and _VERIFICATION.concurrent_scenarios):
+        yield None
+        return
+    validate_case_selection(_VERIFICATION.source, _VERIFICATION.concurrent_scenarios)
+    case_utils = load_case_pack(_REPO_ROOT, _VERIFICATION.source)
+    serve = _CFG.serve
+    extra_args = build_server_args(_CFG, Path(case_utils.IMAGE_DIR))
+    results_root = verification_results_root(
+        _REPO_ROOT,
+        phase="concurrent",
+        platform=_PLATFORM,
+        device=_DEVICE,
+        model=_MODEL,
+        case=_CASE,
+    )
+    scenarios = tuple(
+        (name, len(case_utils.scenario_requests(name)))
+        for name in _VERIFICATION.concurrent_scenarios
+    )
+    with (
+        VllmServer(
+            model=_CFG.model,
+            tp_size=_CFG.engine.get("tensor_parallel_size", 1),
+            api_key=serve.api_key,
+            served_model_name=serve.served_model_name,
+            max_retries=serve.startup_retries,
+            extra_args=extra_args,
+        ) as server,
+        case_pack_environment(
+            case_utils=case_utils,
+            config=_CFG,
+            server=server,
+            results_root=results_root,
+        ) as document_dir,
+    ):
+        yield server, case_utils, document_dir
+        with server.log_on_failure("Concurrent verification contract failed"):
+            summary = validate_scenario_documents(document_dir, scenarios)
+        print(
+            f"[Gate] concurrent total: PASS; requests={summary['passed_requests']}/"
+            f"{summary['logical_requests']} passed; "
+            f"checks={summary['passed_checks']}/"
+            f"{summary['checks']} passed",
+            flush=True,
+        )
+
+
 @pytest.mark.e2e
-def test_concurrent() -> None:
+@pytest.mark.parametrize(
+    "verification_scenario",
+    _VERIFICATION.concurrent_scenarios or [None],
+    ids=_VERIFICATION.concurrent_scenarios or ["offline"],
+)
+def test_concurrent(verification_scenario, verification_server) -> None:
     """Smoke test: N concurrent requests through one generate call."""
+    if verification_scenario is not None:
+        server, case_utils, document_dir = verification_server
+        with server.log_on_failure(
+            f"Concurrent verification scenario '{verification_scenario}' failed"
+        ):
+            ensure_server_alive(server, "concurrent")
+            try:
+                case_utils.run_case(verification_scenario)
+            finally:
+                print(
+                    format_gate_progress(
+                        f"concurrent/{verification_scenario}",
+                        summarize_gate_progress(document_dir, verification_scenario),
+                    ),
+                    flush=True,
+                )
+        return
     print(f"\n[{_MODEL}/{_CASE}] concurrent_n: {CONCURRENT_N}")
     print(f"[{_MODEL}/{_CASE}] model: {_CFG.model}")
     _visible_env_var = get_visible_device_env_var()
