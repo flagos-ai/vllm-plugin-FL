@@ -15,7 +15,7 @@ Usage::
     # Run only functional tests (ops, compilation, distributed)
     python tests/run.py --platform cuda --device a100 --scope functional
 
-    # Run only E2E tests (including adaptation Gate — require model files)
+    # Run only E2E tests (inference, serving, concurrent — require model files)
     python tests/run.py --platform cuda --device a100 --scope e2e
 
     # Run only unit tests
@@ -59,7 +59,7 @@ from tests.utils.model_config import ModelConfig
 from tests.utils.platform_config import PlatformConfig
 from tests.utils.report import TestReport, TestResult
 
-_MODEL_E2E_TASKS = ("inference", "serving", "adaptation_gate")
+_MODEL_E2E_TASKS = ("inference", "serving", "concurrent")
 
 # ---------------------------------------------------------------------------
 # Test case descriptor
@@ -421,7 +421,7 @@ class TestRunner:
         Scopes:
         - ``unit``: unit tests
         - ``functional``: component-level GPU tests (ops, compilation, distributed)
-        - ``e2e``: end-to-end model tests (including adaptation Gate)
+        - ``e2e``: end-to-end model tests (inference, serving, concurrent)
         - ``benchmark``: benchmark tests selected by platform YAML
         - ``all``: all of the above
         """
@@ -525,7 +525,7 @@ class TestRunner:
     ) -> list[TestCase]:
         """Build test cases from platform YAML config for e2e tests.
 
-        For model-backed tasks, routes to the unified test module and injects
+        For inference/serving/concurrent tasks, routes to the unified test and injects
         ``FL_TEST_MODEL``/``FL_TEST_CASE`` env vars so the smoke test can
         load the correct model YAML config.
 
@@ -582,12 +582,6 @@ class TestRunner:
             elif task == "concurrent":
                 # Route to unified concurrent smoke test with env-based config
                 pytest_path = f"{test_dir}/test_concurrent_smoke.py"
-                extra_env = {
-                    "FL_TEST_MODEL": model,
-                    "FL_TEST_CASE": case,
-                }
-            elif task == "adaptation_gate":
-                pytest_path = f"{test_dir}/test_adaptation_gate.py"
                 extra_env = {
                     "FL_TEST_MODEL": model,
                     "FL_TEST_CASE": case,
@@ -702,7 +696,7 @@ class TestRunner:
         ]
 
     def _discover_e2e_tests(self) -> list[TestCase]:
-        """End-to-end model tests (including adaptation Gate)."""
+        """End-to-end model tests (inference, serving, concurrent)."""
         return self._discover_from_yaml("tests/e2e_tests")
 
     def _discover_benchmark_tests(self) -> list[TestCase]:
@@ -977,7 +971,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["all", "unit", "functional", "e2e", "benchmark"],
         default="all",
         help="Which test scope to run: unit, functional (ops/compilation/"
-        "distributed), e2e (including adaptation Gate), benchmark, or all "
+        "distributed), e2e (inference/serving/concurrent), benchmark, or all "
         "(default: all)",
     )
     parser.add_argument(
@@ -990,7 +984,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--task",
         default=None,
-        help="E2E/functional task filter (e.g., inference, adaptation_gate)",
+        help="E2E/functional task filter (e.g., inference, serving, concurrent)",
     )
     parser.add_argument(
         "--model",

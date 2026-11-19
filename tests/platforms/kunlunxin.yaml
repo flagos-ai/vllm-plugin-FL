@@ -88,7 +88,13 @@ p800:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
-        adaptation_gate:
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        concurrent:
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
@@ -101,7 +107,7 @@ p800:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
-        adaptation_gate:
+        serving:
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
@@ -110,11 +116,13 @@ p800:
         concurrent:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
     timeouts:
       e2e:
         inference: 180
-        adaptation_gate: 180
+        serving: 180
         concurrent: 180
     functional:
       include: "*"
