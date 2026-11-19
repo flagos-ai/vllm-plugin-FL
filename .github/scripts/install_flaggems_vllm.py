@@ -15,11 +15,7 @@ SOURCE_ARCHIVE = f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{C
 SOURCE_ARCHIVE_SHA256 = (
     "1b47e1eb7982acc606e2fc920561d169e2a17fac7c92ff65c5f11cafa6b8b16e"
 )
-if os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "iluvatar":
-    COMMIT = "90dd13cd721f2ff139e6f42ef36854518c0b2b95"
-    REPOSITORY = "https://github.com/luoyc123/FlagGems-vllm.git"
-    SOURCE_ARCHIVE = None
-elif os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "kunlunxin":
+if os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "kunlunxin":
     COMMIT = "8ae5c22f5af6d650216f881c329c4dff20c182e1"
     SOURCE_ARCHIVE = (
         f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"
