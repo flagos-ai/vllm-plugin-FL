@@ -328,7 +328,7 @@ The 0.32.0 adaptation was accepted on 2026-11-05:
 | Branch | `vllm-plugin-FL` `0.5.0-dev` (vLLM 0.32.0 `empty` build) |
 | Models | Qwen3.6-27B, Qwen3.6-35B-A3B (TP4) |
 | Runtime | `flagos-runtime-mthreads-musa4.3.6:2.2.0`, plugin installed editable |
-| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:9bcde3f187884dd201b7d1a8ad459ffe29d0773125d7fc36e2233fc24e81d6a0` |
+| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:91fc3bd23ceb50fb8d9b0f702fbec116c7dddbe924ecfe96f2bab2820a8c8239` |
 | Dependency tuple | torch 2.9.0 (`torch.version.musa` = 40306), FlagGems 5.4.0, FlagTree 0.7.0+mthreads3.6, Triton 3.6.0 |
 | Gate | 4/4 groups `GATE_TEST_RC=0` (27B and 35B-A3B × eager and graph) |
 | Unit tests | raw full suite 2004 passed, 225 skipped, 0 failed; `FL_TEST_PLATFORM=musa` (CI path) 1883 passed, 231 skipped, 0 failed |
@@ -355,7 +355,7 @@ Key changes in this adaptation:
 |---|---|
 | Date | 2026-11-12 |
 | Runner | Upstream V2 `GPUModelRunner` by default; `VLLM_USE_V2_MODEL_RUNNER` unset |
-| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:9bcde3f187884dd201b7d1a8ad459ffe29d0773125d7fc36e2233fc24e81d6a0` |
+| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:91fc3bd23ceb50fb8d9b0f702fbec116c7dddbe924ecfe96f2bab2820a8c8239` |
 | Gate | 4/4 groups `GATE_TEST_RC=0` (27B and 35B-A3B × eager and graph); graph groups ran `cudagraph_mode=PIECEWISE` with per-rank `Graph capturing finished` records from the V2 runner (`model_runner.py:1127`) |
 | Unit tests | raw full suite 2004 passed, 225 skipped, 0 failed; `FL_TEST_PLATFORM=musa` (CI path) 1883 passed, 231 skipped, 0 failed |
 | Evidence | Validation host `/data/mt032/gate_v2_{eager,graph}/` (`*.server.log`, gate summaries), `/data/mt032/final_validation.log` |
