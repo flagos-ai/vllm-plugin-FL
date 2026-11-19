@@ -702,7 +702,11 @@ Other GPU work was observed on the MoE host during the peer arm, and a read-only
 CPU-client export overlapped its native arm. These are shared-host observations,
 not an isolated causal estimate. No rounds are excluded or rerun. The separate
 older public-source MoE pair retains its frozen source and currently has only
-one successful peer round followed by a stall; it is not upgraded in place.
+one successful peer round followed by a natural 7200-second `sample_tokens`
+RPC timeout and engine shutdown. The second 1K round returns only 128 requests
+and 73227 output tokens, so it is failed and cannot provide a valid throughput
+comparison. Subsequent planned failures are retained. No debugger was attached
+to this performance case, and it is not upgraded or rerun in place.
 
 ### Exact PR3340 OCR comparison
 
