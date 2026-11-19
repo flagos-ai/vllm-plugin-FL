@@ -39,6 +39,8 @@ try:
         if not hasattr(_t, _name) and hasattr(_te, _name):
             setattr(_t, _name, getattr(_te, _name))
 except Exception:
+    # Best-effort back-fill only: a missing or older typing_extensions just
+    # means the interpreter keeps the symbols it already has.
     pass
 
 try:
@@ -47,6 +49,8 @@ try:
     if not hasattr(_dt, "UTC"):
         _dt.UTC = _dt.timezone.utc
 except Exception:
+    # datetime already defines UTC (3.11+) or the module cannot be patched;
+    # either way there is nothing left to do.
     pass
 
 try:
@@ -63,4 +67,5 @@ try:
     if not hasattr(_enum, "StrEnum"):
         _enum.StrEnum = _StrEnum
 except Exception:
+    # enum already provides StrEnum (3.11+); the shim is not needed.
     pass

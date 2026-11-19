@@ -565,6 +565,8 @@ def patch_device_config_for_musa():
             torch.device("musa")
             return  # this build accepts the bare device string
         except RuntimeError:
+            # This build rejects the bare "musa" string; fall back to the
+            # (type, index) device object built below.
             pass
 
         def _musa_device_object() -> torch.device:
