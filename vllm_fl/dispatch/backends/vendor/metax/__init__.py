@@ -26,7 +26,10 @@ __all__ = ["MacaBackend"]
 def __getattr__(name: str):
     if name == "MacaBackend":
         # Backend-load time: the model layers are importable here.
-        from . import patches  # noqa: F401 — apply MetaX kernel patches
+        from vllm_fl.patches.metax_open import uses_open_metax_runtime
+
+        if not uses_open_metax_runtime():
+            from . import patches  # noqa: F401 — apply MetaX kernel patches
 
         from .metax import MacaBackend
 

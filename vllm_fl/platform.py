@@ -4,11 +4,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-# Import custom ops and trigger registration on both legacy and stable-ABI
-# vLLM wheels. Keep the attempts independent: official vLLM 0.28 wheels have
-# only the stable-ABI module, so failure of the legacy import must not skip it.
-import importlib
+# Device SDK bindings are selected by the vendor runtime entry.
 import os
+import importlib
 from contextlib import suppress
 from typing import TYPE_CHECKING, TypeVar
 
@@ -335,20 +333,9 @@ class PlatformFL(Platform):
         logger.info(f"current vendor_name is: {cls.vendor_name}")
 
         if cls.vendor_name == "metax":
-            try:
-                import mcoplib._C  # noqa: F401
-            except ImportError:
-                logger.warning("Failed to import mcoplib._C")
+            from vllm_fl.dispatch.backends.vendor.metax.runtime import register_runtime
 
-            try:
-                import mcoplib._moe_C  # noqa: F401
-            except ImportError:
-                logger.warning("Failed to import mcoplib._moe_C")
-
-            try:
-                import vllm_fl.dispatch.backends.vendor.metax.patches  # noqa: F401
-            except Exception as e:
-                logger.warning(f"Failed to import maca patches: {e}")
+            register_runtime()
         else:
             super().import_kernels()
 
@@ -718,7 +705,7 @@ class PlatformFL(Platform):
             compilation_config.mode = CompilationMode.NONE
 
         # --------------------------------------------------------
-        # maca specific config updates
+        # MetaX attention defaults; model constraints belong to model configuration.
         if cls.vendor_name == "metax":
             if model_config is not None:
                 model_config.disable_cascade_attn = True

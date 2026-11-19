@@ -216,6 +216,9 @@ class CudaRTLibrary:
         return devPtr
 
 
-import vllm.distributed.device_communicators.cuda_wrapper
+from vllm_fl.patches.metax_open import uses_open_metax_runtime
 
-vllm.distributed.device_communicators.cuda_wrapper.CudaRTLibrary = CudaRTLibrary
+if not uses_open_metax_runtime():
+    import vllm.distributed.device_communicators.cuda_wrapper
+
+    vllm.distributed.device_communicators.cuda_wrapper.CudaRTLibrary = CudaRTLibrary

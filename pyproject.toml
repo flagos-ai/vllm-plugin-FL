@@ -38,7 +38,7 @@ dependencies = [
 fl = "vllm_fl:register"
 
 [project.entry-points."vllm.general_plugins"]
-fl = "vllm_fl:register_model"
+fl = "vllm_fl.model_registration:register_model"
 
 [project.urls]
 Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"
@@ -95,6 +95,7 @@ where = ["."]
 include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
+"vllm_fl" = ["configs/kimi_k3_dependencies.json"]
 "vllm_fl.dispatch.config" = ["*.yaml"]
 
 [tool.pytest.ini_options]

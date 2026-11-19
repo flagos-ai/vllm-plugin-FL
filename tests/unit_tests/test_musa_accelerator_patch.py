@@ -277,6 +277,7 @@ def parent_registration(monkeypatch, musa_patch, vendor_modules):
     namespace = {
         "os": os,
         "logger": Mock(),
+        "is_kimi_k3_profile": lambda: False,
         # The extracted hooks still call the unrelated MetaX installer.
         "_install_metax_compat": Mock(),
         "_arm_cpu_platform": lambda: None,
@@ -305,7 +306,10 @@ def parent_registration(monkeypatch, musa_patch, vendor_modules):
         "vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils"
     )
     kunlunxin._patch_xpu_get_device = Mock()
+    metax_open = ModuleType("vllm_fl.patches.metax_open")
+    metax_open.uses_open_metax_runtime = lambda: False
     with monkeypatch.context() as imports:
+        imports.setitem(sys.modules, metax_open.__name__, metax_open)
         imports.setitem(sys.modules, "vllm_fl.utils", utils)
         imports.setitem(
             sys.modules, "vllm_fl.dispatch.backends.vendor.musa.patch", musa_patch

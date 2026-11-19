@@ -39,6 +39,8 @@ HSA = "HSA"
 
 [files]
 extend-exclude = [
+    # Do not rewrite pinned source diffs; check their applied sources separately.
+    "examples/kimi_k3_metax/dependencies/*.patch",
     # Auto-generated or third-party
     "*.egg-info/**",
     "build/**",
