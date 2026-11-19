@@ -38,10 +38,14 @@ op_backends:
     - vendor
     - reference
 
+  # rms_norm: the FlagGems Triton kernel cannot run on TXDA (it exceeds the
+  # shared-memory limit), so it must not be tried first: with strict: false
+  # the dispatcher would catch the failure *after* a possibly in-place
+  # residual update and replay it against already-mutated inputs. The vendor
+  # entry delegates to the shared reference contract and is the only
+  # implementation selected here; capability is decided before any compute.
   rms_norm:
-    - flagos
     - vendor
-    - reference
 
 
 # FlagGems ATen-replacement blacklist. GDN (Qwen3.5 linear attention) does a

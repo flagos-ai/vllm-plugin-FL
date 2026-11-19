@@ -1,13 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""
-Txda vendor implementation of rms_norm using PyTorch native ops.
-
-The FlagGems Triton kernel fails on txda hardware with "out of resource:
-shared memory" because the txda Triton backend has a lower shared-memory
-limit.  This implementation uses pure PyTorch which is functionally
-correct and works on all hardware.
-"""
+"""TXDA RMSNorm fallback built on the shared reference contract."""
 
 from __future__ import annotations
 
@@ -15,28 +8,21 @@ from typing import Optional, Union
 
 import torch
 
+from vllm_fl.dispatch.backends.reference.impl.normalization import rms_norm_torch
+
 
 def rms_norm_txda(
     obj,
     x: torch.Tensor,
     residual: Optional[torch.Tensor] = None,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-    """RMS normalization using PyTorch native ops.
+    """RMS normalization for TXDA.
 
-    Works on txda hardware where the Triton-based FlagGems kernel
-    runs out of shared memory.
+    The FlagGems Triton kernel exceeds the TXDA shared-memory limit, so the
+    reference implementation is used instead. Delegating keeps the upstream
+    numerical contract: residual accumulation, the variance reduction and the
+    output all follow ``rms_norm_torch`` (FP32 accumulation, honor
+    ``variance_size_override``, output in the input dtype), which a local
+    reimplementation would have to replicate exactly.
     """
-    weight = obj.weight
-    epsilon = obj.variance_epsilon
-
-    if residual is not None:
-        x = x + residual
-        residual = x
-
-    variance = x.pow(2).mean(-1, keepdim=True)
-    x = x * torch.rsqrt(variance + epsilon)
-    output = weight * x
-
-    if residual is not None:
-        return output, residual
-    return output
+    return rms_norm_torch(obj, x, residual)
