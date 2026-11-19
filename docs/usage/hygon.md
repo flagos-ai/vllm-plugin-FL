@@ -222,8 +222,8 @@ you are not reproducing the gate.
 | Flag | Applies to | Why it is set | Effect of changing it |
 |---|---|---|---|
 | `--tensor-parallel-size 2` | both models | Two DCUs, TP2 over vendor RCCL. The 35B MoE weights in bf16 exceed a single 64 GiB card, and the 27B leaves no usable KV space on one card. | Requires re-running with a matching card count; collectives must stay on RCCL. |
-| `--gpu-memory-utilization 0.85` | both models | Keeps a 15% device margin for the host driver reservation and capture growth. This matters on this platform because `is_cuda_alike()` is `False`, so upstream's cudagraph memory estimator never runs and the KV cache would otherwise take the entire budget; the plugin also subtracts an explicit headroom of its own through `VLLM_FL_HYGON_GRAPH_HEADROOM_GB` (default 4 GiB, capped at 30% of one card). 0.85 is the value the recorded runs used; the headroom, not the ratio, is the part the platform requires. | Raising it shrinks the margin below the recorded footprint and risks a HIP OOM during the first capture, which leaves DCU memory unreclaimable; lowering it cuts KV blocks and therefore the maximum context that fits. |
-| `--cudagraph-capture-sizes 1 2 4 8` and `--max-cudagraph-capture-size 8` | graph runs only | Device constraint. vLLM 0.32 pre-fills a 51-entry table (up to 512 tokens) before the platform hook runs, and every captured size costs DCU memory on top of the KV cache. Eight entries cover the concurrency this recipe allows, so larger sizes are never dispatched. The plugin additionally caps the pre-filled table through `VLLM_FL_HYGON_CUDAGRAPH_CAPTURE_CAP` (default 64); the CLI value here is the tighter, per-deployment limit. | A larger table increases the capture footprint and can OOM during startup; a smaller one re-uses a bigger graph for small batches, which costs latency but not correctness. |
+| `--gpu-memory-utilization 0.85` | both models | Keeps a 15% device margin for the host driver reservation and capture growth. This matters on this platform because `is_cuda_alike()` is `False`, so upstream's cudagraph memory estimator never runs and the KV cache would otherwise take the entire budget; the plugin subtracts its own fixed headroom of 4 GiB (never more than 30% of one card). 0.85 is the value the recorded runs used; the headroom, not the ratio, is the part the platform requires. | Raising it shrinks the margin below the recorded footprint and risks a HIP OOM during the first capture, which leaves DCU memory unreclaimable; lowering it cuts KV blocks and therefore the maximum context that fits. |
+| `--cudagraph-capture-sizes 1 2 4 8` and `--max-cudagraph-capture-size 8` | graph runs only | Required on this platform, not optional tuning. vLLM 0.32 generates the table from `max_num_seqs`/`max_num_batched_tokens` (up to 512 tokens) before the platform hook runs, and every captured size costs DCU memory on top of the KV cache. The upstream estimator that would account for that never runs here (`is_cuda_alike()` is `False`), so an unconstrained table runs out of memory during the first capture and leaves DCU memory unreclaimable. Eight entries cover the concurrency this recipe allows. | A larger table increases the capture footprint and can OOM during startup; a smaller one re-uses a bigger graph for small batches, which costs latency but not correctness. |
 | `--max-model-len 4096` | both models | Gate workload constraint. The adaptation gate sends short text and image prompts, and 4096 was the limit used for the recorded results on two 64 GiB cards. | Longer limits consume more KV blocks per sequence and change the measured memory profile; re-measure before publishing numbers. |
 | `--max-num-seqs 8` | both models | Gate workload constraint. The gate's concurrency scenario sends eight simultaneous requests, so eight sequences bound both the scheduler batch and the KV peak for the reported run. | Larger values raise concurrency and KV pressure; the `1 2 4 8` capture table then no longer covers every batch size. |
 | `--max-num-batched-tokens 8192` | both models | Gate workload constraint. Caps one prefill step at 8192 tokens so a long prompt cannot spike activation memory beyond the budget the capture table assumes. | Raising it allows larger prefills at higher peak memory; lowering it splits prefills into more steps. |
@@ -231,12 +231,13 @@ you are not reproducing the gate.
 | `--compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE"}'` | graph runs only | Both capture modes are exercised: piecewise graphs for prefill and decode, plus full graphs where the scheduler can replay a whole batch. This is the mode the recorded `PIECEWISE`/`FULL` capture counts refer to. | Other modes change which batches are replayed and therefore both latency and the capture footprint. |
 
 Two rows are worth calling out because they are often mistaken for tuning. The
-capture-size pair is what makes graph mode fit in DCU memory, together with the
-plugin's graph headroom; `--gpu-memory-utilization 0.85` is the additional
-device margin the recorded runs used and should be re-measured rather than
-copied blindly. `--max-model-len`, `--max-num-seqs`,
-`--max-num-batched-tokens` and `--no-enable-prefix-caching` exist only to
-reproduce the gate workload and can be relaxed for real traffic.
+capture-size pair is **mandatory** on this platform: it is the only thing that
+bounds graph-capture memory, because the upstream estimator does not run here.
+`--gpu-memory-utilization 0.85` is the additional device margin the recorded
+runs used and should be re-measured rather than copied blindly.
+`--max-model-len`, `--max-num-seqs`, `--max-num-batched-tokens` and
+`--no-enable-prefix-caching` exist only to reproduce the gate workload and can
+be relaxed for real traffic.
 
 ## 6. Send a real chat request
 
@@ -357,14 +358,15 @@ Steps that differ from the legacy 0.28 recipe:
    `vllm._C`, so `vllm_c` is only kept when the op actually registered it and
    the rest fall back to `native`; CUDA behaviour is unchanged because it
    registers both.
-7. **Bound graph-capture memory.** 0.32 pre-fills a 51-entry capture table
-   (up to 512 tokens) before the platform hook runs, and Hygon DCUs report
-   `is_cuda_alike() == False`, so the upstream graph-memory estimator never
-   runs and the KV cache takes the whole budget. The plugin caps the table
-   (`VLLM_FL_HYGON_CUDAGRAPH_CAPTURE_CAP`, default 64, larger batches run
-   eager) and reserves graph headroom
-   (`VLLM_FL_HYGON_GRAPH_HEADROOM_GB`, default 4), clamped to 30% of the DCU
-   budget so a smaller card is never starved.
+7. **Bound graph-capture memory.** 0.32 generates the capture table from
+   `max_num_seqs`/`max_num_batched_tokens` (up to 512 tokens) before the
+   platform hook runs, and Hygon DCUs report `is_cuda_alike() == False`, so the
+   upstream graph-memory estimator never runs and the KV cache takes the whole
+   budget. The plugin reserves a fixed 4 GiB of graph headroom, clamped to 30%
+   of the DCU budget so a smaller card is never starved, but it does not resize
+   the table: pass `--cudagraph-capture-sizes` together with
+   `--max-cudagraph-capture-size` whenever graph mode is on. An unconstrained
+   table does not fit in that headroom.
 
 Runtime removals that the plugin had to drop (0.32 has no replacement):
 

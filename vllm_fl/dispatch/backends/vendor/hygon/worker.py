@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import os
-
 from vllm.config import CUDAGraphMode
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
 
-#: Default request, in GiB, kept out of the KV-cache budget for graph capture.
+#: Requested headroom, in GiB, kept out of the KV-cache budget for graph capture.
 DEFAULT_HEADROOM_GB = 4.0
 #: Upper bound as a fraction of one card, so small cards are not starved.
 DEVICE_BUDGET_FRACTION = 0.3
@@ -30,10 +28,7 @@ def cudagraph_memory_headroom(vllm_config) -> int:
     ):
         return 0
 
-    requested = int(
-        float(os.environ.get("VLLM_FL_HYGON_GRAPH_HEADROOM_GB", DEFAULT_HEADROOM_GB))
-        * 1024**3
-    )
+    requested = int(DEFAULT_HEADROOM_GB * 1024**3)
     device_budget_cap = int(
         current_platform.get_device_total_memory() * DEVICE_BUDGET_FRACTION
     )
