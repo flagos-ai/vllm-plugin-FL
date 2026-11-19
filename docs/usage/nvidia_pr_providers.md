@@ -676,6 +676,51 @@ failed rounds. The short requests therefore did not qualify the official
 load. All original failures are preserved; no AllReduceRMSNorm end-to-end
 speedup is established.
 
+### Repaired AllReduceRMSNorm formal progress
+
+Independent native/peer comparisons use the published CTA-barrier repair,
+ordinary PDL forwarding and common `CUDA_MODULE_DATA_LOADING=EAGER`.
+The original TP2/BF16 service and official client load are preserved. Each
+native arm has 12 successful rounds; each repaired peer arm has nine successful
+closed rounds so far. Detailed JSON, source/configuration, client and actual
+commands pass audit. The 64K groups are still running. The following are
+arithmetic means of original rounds 2/3, with all three raw rounds retained:
+
+| Model | Input tokens | Native output tok/s | Repaired peer output tok/s | Change |
+| --- | ---: | ---: | ---: | ---: |
+| Qwen3.6-27B | 1024 | 1580.180 | 1616.175 | +2.28% |
+| Qwen3.6-27B | 4096 | 1189.185 | 1209.115 | +1.68% |
+| Qwen3.6-27B | 16384 | 592.920 | 592.420 | -0.08% |
+| Qwen3.6-35B-A3B | 1024 | 1901.960 | 1889.435 | -0.66% |
+| Qwen3.6-35B-A3B | 4096 | 1290.130 | 1276.485 | -1.06% |
+| Qwen3.6-35B-A3B | 16384 | 571.765 | 561.855 | -1.73% |
+
+Two retained samples do not establish stable gains. Model allocations match
+within each pair, but reported KV capacities differ: dense 1353932 to 1344921
+tokens, MoE 3600108 to 3589013. No fixed-KV counterfactual was measured.
+Other GPU work was observed on the MoE host during the peer arm, and a read-only
+CPU-client export overlapped its native arm. These are shared-host observations,
+not an isolated causal estimate. No rounds are excluded or rerun. The separate
+older public-source MoE pair retains its frozen source and currently has only
+one successful peer round followed by a stall; it is not upgraded in place.
+
+### Exact PR3340 OCR comparison
+
+Unlimited-OCR enters `fused_experts_impl` in both exact seven-function ablation
+modes. With the reference service defaults, TP1/BF16 and the original checkpoint,
+both modes pass graph capture, two image requests and three native EvalScope
+2048-square-image requests with 1K/4K/16K text budgets. Actual server tokenization
+matches the frozen CPU tokenizer IDs. Friend is recognized; Centre still returns
+an image box, so these checks do not establish full OCR accuracy.
+
+The independent formal comparison is running with the approved EvalScope 1.5.1
+`random_vl` client: one 2048x2048 RGB image, text budgets 1024/4096/16384,
+C64, N1024 and output 1024. All five rounds per group are retained; the main mean
+uses original rounds 2–5. It does not use the LLM text-generation client. The
+baseline's five 1K rounds pass independent read-only native SQLite integrity,
+1024-request, fixed-output, argument, hash and metric checks. This is baseline
+progress, not a paired throughput result or a benefit claim.
+
 ### Two-host MXFP4 results and capacity limits
 
 The larger Pro TP16 service configuration with max model length 67584 failed
