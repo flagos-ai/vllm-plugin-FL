@@ -63,10 +63,10 @@ checks those invariants and 360 mixed-shape calls with PDL on/off, including
 144 graph replays with changed inputs. Numerical comparisons sample up to
 128 rows per call against an independent reference. This qualification is
 peer TP2/BF16; it does not qualify other topologies, dtypes or a concurrent
-model workload. The repaired dense TP2 service passes full graph capture,
-three semantic requests and serial 1K/4K/16K/64K-input-token requests, but
-its subsequent 64-choice, 512-output-token functional request timed out.
-The matched native-fusion control passes that same batch, including all 64
+model workload. The earlier strategy-only dense TP2 candidate passed full
+graph capture, three semantic requests and serial 1K/4K/16K/64K-input-token
+requests, but its subsequent 64-choice, 512-output-token functional request
+timed out. The matched native-fusion control passed that same batch, including all 64
 choices and 32768 output tokens. The paired runtime and service arguments
 were audited; neither qualification arm launched a throughput client.
 No throughput gain or complete large-load repair follows from the operator
@@ -85,10 +85,48 @@ in all four dense/MoE native/peer arms, before any functional request.
 Unmodified combined-public-source native/peer qualification is separate;
 the earlier failed qualification and performance rounds remain unchanged.
 
+### CTA warp retirement
+
+A separate instrumented dense TP2 run locates a remaining stall inside the
+peer rowwise one-shot kernel, with a 64-CTA, 256-thread launch. Rank 0's
+remaining CTA 0 warps read arrival count zero while the SASS loop waits for
+64. Scalar polling executes in multiple sibling warps: a leader can retire
+and reset the counter before the remaining warps observe its completed value.
+The diagnostic times out and remains separate from performance evidence.
+
+The repair adds CTA barriers before publishing metadata arrival, before a
+leader retires a polled counter, and before a CTA acknowledges that its warps
+have consumed a phase counter. PDL, backend selection and communication
+layouts remain unchanged. A bounded controlled-warp-delay reproducer reports
+96/224/992 affected threads in 4/8/32-warp configurations; with the retirement
+barrier, nine eager checks and nine changed-input graph replays have zero
+mismatches. This reproducer models the protocol race; it does not call the
+complete AllReduce kernel or measure throughput.
+
+The actual repaired kernels pass the 360-call/144-replay peer TP2/BF16
+regression above. Additional full-matrix interleaved graph checks cover
+peer TP2/FP16, MNNVL TP2/BF16, peer TP4/BF16 and peer TP8/BF16, with 84 checks
+per rank for patterns 1/2 and explicit/in-place outputs. These operator
+checks do not qualify whole models on those other topologies or FP4 output.
+The combined repaired runtime passes 103 CPU contracts with zero skips.
+
+Independent dense and MoE TP2 native/peer model pairs now complete full graph
+capture, three semantic responses, four serial input lengths and the original
+mixed-length C64/512-output functional batch. Each batch returns 64 choices,
+143736 prompt tokens and 32768 completion tokens. Their exact running source,
+service arguments and provider dispatch are audited. Separate official
+repaired-source throughput comparisons are running; these functional checks
+do not establish a throughput gain or general workload reliability.
+
+```bash
+python tests/manual/check_allreduce_rms_warp_retirement_gpu.py
+```
+
 H100 peer qualification covers TP2/TP8 operator correctness and the TP2 dense
 model control above. TP8 checks exercise BF16/FP8, explicit/in-place outputs and
 changing-input graph replay; they do not establish a TP8 whole-model result.
-TP4 has not been qualified in this campaign. MNNVL qualification currently
+The CTA repair additionally has the scoped TP4 operator coverage above.
+MNNVL qualification currently
 covers TP2 operator correctness, including FP8
 outputs and changing-input graph replay. It does not establish MNNVL TP8,
 cross-host transport or whole-model correctness. These are correctness checks;
@@ -418,13 +456,28 @@ A numel-only guard would miss the actual strided layout.
 
 The isolated repair passes 18 numerical cases, 54 changed-value graph replays,
 four additional cases with 12 changed-index/value replays, and eight CPU
-contracts. The combined public runtime independently passes eight-rank TP8
+contracts. A separate frozen public-source qualification passes eight-rank TP8
 full graph capture, three semantic
 responses, serial 1K/4K/16K/64K probes and the previously failing C64/16K batch
 with 64 choices, 1048576 prompt tokens and 65536 completion tokens. This is
 functional evidence, not an official 256-request throughput result or dataset
 accuracy. A new exact-PR3340 pair shares the repair in both arms and keeps every
-older failed round unchanged; formal performance is still pending.
+older failed round unchanged. That source-327 pair has completed all 12
+baseline rounds and nine optimized rounds, with the optimized 64K group still
+running. The first three paired groups pass detailed 256-request and fixed
+1024-output-token audits:
+
+| Input tokens | Pre3340 output tok/s | Optimized output tok/s | Change |
+| --- | --- | --- | --- |
+| 1024 | 1341.725 | 1348.515 | +0.51% |
+| 4096 | 911.230 | 924.000 | +1.40% |
+| 16384 | 403.650 | 411.420 | +1.92% |
+
+Means use original rounds 2/3 and retain all three. Before/after retained
+spreads are 0.34/0.06%, 1.82/0.16% and 0.40/0.33%; two retained samples do not
+establish stable gains. This exact-seven-function comparison shares the index
+repair in both arms. It is not a whole-source retest of the later CTA repair
+or a replacement of any older failed round.
 
 On a free 80GB GPU, the public check includes the captured strided layout and
 both index widths, with native controls and changed-index/value graph replay:

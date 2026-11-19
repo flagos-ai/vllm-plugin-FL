@@ -260,6 +260,8 @@ def _peer_rowwise_oneshot_allreduce_rms_norm_kernel(
     slot = tl.load(state + 1)
     previous_numel = tl.load(state + 2)
     previous_strategy = tl.load(state + 3)
+    # Every warp must snapshot metadata before the CTA publishes arrival.
+    tl.debug_barrier()
     tl.atomic_add(state, 1, sem="release", scope="gpu")
 
     slot_stride = WORLD_SIZE * CAPACITY
@@ -361,6 +363,9 @@ def _peer_rowwise_oneshot_allreduce_rms_norm_kernel(
         arrived = tl.load(state, volatile=True)
         while arrived != GRID_SIZE:
             arrived = tl.load(state, volatile=True)
+        # A scalar poll runs in multiple warps: no warp may reset the counter
+        # before its siblings have observed this generation.
+        tl.debug_barrier()
         tl.store(state + 1, (slot + 1) % 3)
         tl.store(state + 2, M * H)
         tl.store(state + 3, 0)
@@ -414,6 +419,8 @@ def _peer_tiled_oneshot_allreduce_rms_norm_kernel(
     slot = tl.load(state + 1)
     previous_numel = tl.load(state + 2)
     previous_strategy = tl.load(state + 3)
+    # Every warp must snapshot metadata before the CTA publishes arrival.
+    tl.debug_barrier()
     tl.atomic_add(state, 1, sem="release", scope="gpu")
 
     slot_capacity = WORLD_SIZE * CAPACITY
@@ -549,12 +556,15 @@ def _peer_tiled_oneshot_allreduce_rms_norm_kernel(
         )
         work_index += GRID_SIZE
 
-    # All CTAs must finish consuming the phase counter before it is reset.
+    # All warps must finish consuming the phase counter before their CTA
+    # publishes its completion acknowledgment.
+    tl.debug_barrier()
     tl.atomic_add(state, 1, sem="release", scope="gpu")
     if pid == 0:
         arrived = tl.load(state, volatile=True)
         while arrived != 2 * GRID_SIZE:
             arrived = tl.load(state, volatile=True)
+        tl.debug_barrier()
         tl.store(state + 1, (slot + 1) % 3)
         tl.store(state + 2, M * H)
         tl.store(state + 3, 0)
@@ -679,6 +689,8 @@ def _mnnvl_tiled_oneshot_allreduce_rms_norm_kernel(
     slot = tl.load(state + 1)
     previous_numel = tl.load(state + 2)
     previous_strategy = tl.load(state + 3)
+    # Every warp must snapshot metadata before the CTA publishes arrival.
+    tl.debug_barrier()
     tl.atomic_add(state, 1, sem="release", scope="gpu")
 
     data_slot_base = slot * SLOT_CAPACITY
@@ -837,12 +849,15 @@ def _mnnvl_tiled_oneshot_allreduce_rms_norm_kernel(
         )
         work_index += GRID_SIZE
 
-    # All CTAs must finish consuming the phase counter before it is reset.
+    # All warps must finish consuming the phase counter before their CTA
+    # publishes its completion acknowledgment.
+    tl.debug_barrier()
     tl.atomic_add(state, 1, sem="release", scope="gpu")
     if pid == 0:
         arrived = tl.load(state, volatile=True)
         while arrived != 2 * GRID_SIZE:
             arrived = tl.load(state, volatile=True)
+        tl.debug_barrier()
         tl.store(state + 1, (slot + 1) % 3)
         tl.store(state + 2, M * H)
         tl.store(state + 3, 0)
@@ -897,6 +912,8 @@ def _tiled_twoshot_allreduce_rms_norm_body(
     slot = tl.load(state + 1)
     previous_numel = tl.load(state + 2)
     previous_strategy = tl.load(state + 3)
+    # Every warp must snapshot metadata before the CTA publishes arrival.
+    tl.debug_barrier()
     tl.atomic_add(state, 1, sem="release", scope="gpu")
 
     data_slot_base = slot * SLOT_CAPACITY
@@ -1070,6 +1087,9 @@ def _tiled_twoshot_allreduce_rms_norm_body(
         arrived = tl.load(state, volatile=True)
         while arrived != GRID_SIZE:
             arrived = tl.load(state, volatile=True)
+        # A scalar poll runs in multiple warps: no warp may reset the counter
+        # before its siblings have observed this generation.
+        tl.debug_barrier()
         tl.store(state + 1, (slot + 1) % 3)
         tl.store(state + 2, M * H)
         tl.store(state + 3, 1)
