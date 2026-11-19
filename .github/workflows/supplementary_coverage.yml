@@ -1,0 +1,59 @@
+name: Supplementary coverage
+
+on:
+  workflow_dispatch:
+
+# Least privilege: read the checkout and workflow metadata, never write.
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: supplementary-coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      nvidia: ${{ steps.load.outputs.config }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+      - run: python -m pip install PyYAML
+      - id: load
+        run: python .github/scripts/load_config.py --platform nvidia
+
+  nvidia-coverage:
+    needs: config
+    runs-on: ${{ fromJson(needs.config.outputs.nvidia).runner_labels }}
+    timeout-minutes: 60
+    container:
+      image: ${{ fromJson(needs.config.outputs.nvidia).ci_image }}
+      volumes: ${{ fromJson(needs.config.outputs.nvidia).container_volumes }}
+      options: ${{ fromJson(needs.config.outputs.nvidia).container_options }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash .github/scripts/nvidia/check.sh
+      - run: bash .github/scripts/nvidia/setup.sh
+      - name: Measure core and supplementary coverage
+        run: bash coverage_tests/run_nvidia.sh
+      - name: Coverage phase summary
+        if: always()
+        run: |
+          if [ -f coverage-results/summary.txt ]; then
+            cat coverage-results/summary.txt
+            cat coverage-results/summary.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "coverage-results/summary.txt not found" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Archive coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supplementary-coverage-nvidia-a100
+          path: coverage-results/
