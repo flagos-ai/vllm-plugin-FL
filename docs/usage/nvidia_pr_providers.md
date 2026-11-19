@@ -462,21 +462,23 @@ responses, serial 1K/4K/16K/64K probes and the previously failing C64/16K batch
 with 64 choices, 1048576 prompt tokens and 65536 completion tokens. This is
 functional evidence, not an official 256-request throughput result or dataset
 accuracy. A new exact-PR3340 pair shares the repair in both arms and keeps every
-older failed round unchanged. That source-327 pair has completed all 12
-baseline rounds and nine optimized rounds, with the optimized 64K group still
-running. The first three paired groups pass detailed 256-request and fixed
-1024-output-token audits:
+older failed round unchanged. That source-327 pair has completed all 24
+baseline/optimized rounds successfully. All four paired groups pass detailed
+256-request, fixed-input-length and fixed-1024-output-token audits:
 
 | Input tokens | Pre3340 output tok/s | Optimized output tok/s | Change |
 | --- | --- | --- | --- |
 | 1024 | 1341.725 | 1348.515 | +0.51% |
 | 4096 | 911.230 | 924.000 | +1.40% |
 | 16384 | 403.650 | 411.420 | +1.92% |
+| 65536 | 125.160 | 126.845 | +1.35% |
 
 Means use original rounds 2/3 and retain all three. Before/after retained
-spreads are 0.34/0.06%, 1.82/0.16% and 0.40/0.33%; two retained samples do not
-establish stable gains. This exact-seven-function comparison shares the index
-repair in both arms. It is not a whole-source retest of the later CTA repair
+spreads are 0.34/0.06%, 1.82/0.16%, 0.40/0.33% and 0.34/0.72%; two retained
+samples do not establish stable gains. Both arms report 31.19 GiB model-loading
+allocation per rank; reported KV capacity is 5667506 versus 5672648 tokens, so
+this is not a separately fixed-KV experiment. This exact-seven-function
+comparison shares the index repair in both arms. It is not a whole-source retest of the later CTA repair
 or a replacement of any older failed round.
 
 On a free 80GB GPU, the public check includes the captured strided layout and
