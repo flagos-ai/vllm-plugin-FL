@@ -30,7 +30,8 @@ Its preinstalled vLLM is **0.24.0**; pulling the base alone does not install the
 | Native FLA / FlashMLA / FlashInfer | `0.5.0+metax3.8.1.0torch2.10` / `1.0.1+metax3.8.1.0torch2.10` / `0.2.6+metax3.8.1.0torch2.10` |
 | Python interoperability pins | Transformers `5.19.0`, tokenizers `0.23.3`, depyf `0.20.0`; vendor XGrammar `0.2.3+flagos` and compressed-tensors `0.17.0+flagos` retained |
 | Build dependency resolver | uv `0.13.4`, native-package overrides and explicit transitive Triton exclusion when FlagTree owns the import namespace |
-| Optional FlagCX | `v0.13.0`, [`0beba7aa7e76cc0885a9929f1975857bcd310d5e`](https://github.com/flagos-ai/FlagCX/commit/0beba7aa7e76cc0885a9929f1975857bcd310d5e); not bundled in the CI image |
+| Optional FlagCX release image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-flagcx0130-release-914dd1d@sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f` |
+| Optional FlagCX | `v0.13.0`, [`0beba7aa7e76cc0885a9929f1975857bcd310d5e`](https://github.com/flagos-ai/FlagCX/commit/0beba7aa7e76cc0885a9929f1975857bcd310d5e); core and Python wrapper preinstalled in the optional release image |
 | Model runner | vLLM 0.32 selects native V2 for supported configurations and `ModelRunnerFL` when it selects V1 |
 | Attention | MACA FlashAttention; separate MACA FlashAttention MLA prefill |
 | Communication | MCCL; pass `--disable-custom-all-reduce` |
@@ -334,34 +335,52 @@ when one scenario fails; `run_test.sh` runs all three pytest files.
 
 ## Optional FlagCX validation
 
-The CI image does not include FlagCX. The optional configuration uses the
-v0.13.0 source/core at the commit in the runtime table, without installing its
-Torch backend plugin. The tested native library SHA256 is
+Select the complete FlagCX release image before running the container setup.
+It extends the default release with the pinned v0.13.0 native core and Python
+interservice wrapper. FlagGems-vLLM, FlagTree, torch and the MACA libraries
+retain the versions in the runtime table.
+
+```bash
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-flagcx0130-release-914dd1d@sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f
+docker pull "$IMAGE"
+export MODEL_ROOT=/data/models
+export CONTAINER=metax-vllm032-flagcx
+
+docker run -d --name "$CONTAINER" \
+  --hostname vllm-plugin-fl --ipc=host --shm-size=64g \
+  --device /dev/dri:/dev/dri --device /dev/mxcd:/dev/mxcd \
+  -e GEMS_VENDOR=metax -e VLLM_PLUGINS=fl \
+  -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800 \
+  -e MACA_VISIBLE_DEVICES=0,1,2,3 \
+  -v "$MODEL_ROOT":/data/models:ro \
+  -v "$PWD":/src \
+  --entrypoint bash "$IMAGE" -lc 'sleep infinity'
+
+docker exec "$CONTAINER" python -m pip install --no-index \
+  --no-build-isolation --no-deps /src
+```
+
+The image provides `/opt/FlagCX/build/lib/libflagcx.so`,
+`/opt/FlagCX/plugin/interservice/flagcx_wrapper.py` and their provenance in
+`/opt/FlagCX/provenance.json`. It presets `FLAGCX_PATH=/opt/FlagCX`, prepends
+`/opt/FlagCX` to `PYTHONPATH` while retaining `/opt/flagtree`, and prepends the
+core library directory to `LD_LIBRARY_PATH`.
+
+The published OCI index is `sha256:b8579e0baa84898822e7592580c360e2d1405ba7b67d231f3d99740f6e03df4f`.
+Its Linux/amd64 manifest is `sha256:3f0b024d0475a1f7920506c88a3df3984b2f95df9efcc2f8fb6e16da288eea58`.
+The core SHA256 is
 `33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad`,
-and `plugin/interservice/flagcx_wrapper.py` has SHA256
+and the wrapper SHA256 is
 `a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf`.
-The native core links the image's `/opt/maca/lib/libmccl.so`.
-
-Use a matching source tree containing `build/lib/libflagcx.so` and the Python
-interservice wrapper. The pinned upstream source documents the MetaX build as
-`make USE_METAX=1`, with MACA development headers and libraries. Mount the
-completed tree read-only when starting an isolated container:
-
-```bash
-# Add to the docker run options before --entrypoint:
--v "$FLAGCX_DIR:/opt/FlagCX:ro" \
--e FLAGCX_PATH=/opt/FlagCX \
-```
-
-Set this environment before the new Python process starts. If extending the
-import/library paths manually inside the container, retain the image's paths:
-
-```bash
-export FLAGCX_PATH=/opt/FlagCX
-export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
-export PYTHONPATH="$FLAGCX_PATH${PYTHONPATH:+:$PYTHONPATH}"
-export LD_LIBRARY_PATH="$FLAGCX_PATH/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-```
+The core links the image's `/opt/maca/lib/libmccl.so`. A second C550 host
+pulled the published digest and verified both payload hashes. A fresh
+network-isolated container installed only the FL plugin and passed the
+four-rank native collective suite and all four standard TP4 adaptation Gate
+profiles for Qwen3.6-27B and Qwen3.6-35B-A3B in eager and PIECEWISE modes.
+Native Runner V2 was selected with its override unset. All 20 scenarios,
+104 logical requests and 1,040 quality checks passed. The source commit,
+commands, model metadata, JSON reports and server logs are in the
+[release and Gate evidence](https://github.com/physics31415926/vllm-plugin-FL/tree/5c2e60506ec129f03e0548fb6c0c6f1e477c0310/pr693-914dd1d3-flagcx-release).
 
 The core-only configuration uses Gloo for Torch control/bootstrap groups and
 `CommunicatorFL` / `PyFlagcxCommunicator` for device collectives. The plugin
@@ -437,7 +456,7 @@ on both hosts. Mount the checkpoint at the same absolute path. Weights are
 loaded on each host; the MP executor does not distribute model files.
 
 Start one isolated container per host using the earlier container options,
-adding `--network host` and the FlagCX mount. Set `MACA_VISIBLE_DEVICES` to the
+adding `--network host` with the FlagCX release image selected above. Set `MACA_VISIBLE_DEVICES` to the
 single reserved card on that host. Retain the image's original `PYTHONPATH`
 (including `/opt/flagtree`) when prepending the FlagCX path as shown above.
 Before launching, confirm that Torch sees one device per container and record
