@@ -239,6 +239,15 @@ Qwen3.8-Flash-Next TP8 has valid 1K/4K paired means of 1420.88→1443.64
 are not established stable speedups. Both arms fail the 16K/64K groups;
 their failed rounds are preserved and excluded from throughput comparisons.
 
+A separate repaired padding/no-TLE configuration passes serial long-input
+probes, but its optimized arm still fails the official 16K/64K groups. Its
+1K/4K groups have three successful rounds each. The first asynchronous error
+is reported while GDN linear attention indexes its initial state with a
+Boolean mask; this reporting site does not identify the first failing kernel.
+The never-benchmarked baseline is being recovered after an SSH transport
+failure. No paired gain is inferred from this partial configuration, and the
+new failures do not replace any earlier result.
+
 A common four-stage alignment configuration completes Hy3 TP16 graph capture
 on all ranks and three semantic requests in both ablation arms at max length
 67584. Its new paired throughput campaign is running. Qwen3.6 additionally
