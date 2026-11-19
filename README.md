@@ -60,17 +60,23 @@ For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
 for the full official vLLM 0.32 CUDA image, pinned development dependencies,
 upstream V1/V2 runners and regression commands. FlagGems remains enabled.
 For MetaX C550, follow the [MetaX guide](./docs/usage/metax.md) for the pinned
-vLLM 0.32 MetaX image, setup, and serving commands. See also the
+vLLM 0.32 MetaX image, setup, and serving commands.
+The NVIDIA setup targets vLLM 0.32.
+The source installation example below targets `0.5.0-dev` and uses vLLM 0.32.0,
+matching this branch's dependency declaration. Backend validation is tracked
+separately; this example does not imply that every backend is validated on 0.32.
+For backend-specific images and version constraints, follow the deployment guides
+above. For the `main` branch's vLLM 0.28.0 setup, use the documentation on `main`.
+See also the
 [T-Head PPU guide](./docs/usage/thead.md),
 [Enflame S60 guide](./docs/usage/enflame.md), and
 [Tsingmicro TXDA guide](./docs/usage/tsingmicro.md).
 
 1. Install vLLM
 
-    For backends whose deployment guide calls for **vLLM 0.28**, install vLLM
-    from source with the `empty` device target:
+    For **non-NVIDIA** chips, install vLLM from source with the `empty` device target:
     ```sh
-    git clone -b v0.28.0 https://github.com/vllm-project/vllm.git
+    git clone -b v0.32.0 https://github.com/vllm-project/vllm.git
     cd vllm
     VLLM_TARGET_DEVICE=empty pip install -v --no-build-isolation --no-deps .
     ```
@@ -80,7 +86,7 @@ vLLM 0.32 MetaX image, setup, and serving commands. See also the
     2.1 Clone the repository:
 
     ```sh
-    git clone https://github.com/flagos-ai/vllm-plugin-FL
+    git clone --branch 0.5.0-dev https://github.com/flagos-ai/vllm-plugin-FL
     ```
 
     2.2 Install
@@ -138,7 +144,7 @@ general ATen registration remains with FlagGems.
 
 The plugin installs runtime compatibility hooks through vLLM's plugin entry
 points without modifying the installed vLLM package. Model configs and classes
-that are native in vLLM 0.28.0 and Transformers 5 are not duplicated here.
+that are native in vLLM 0.32.0 and Transformers 5 are not duplicated here.
 
 Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
@@ -147,7 +153,7 @@ to follow the common FlagOS controls.
 ### Operator profiling
 
 See the [operator profiling tools](./tools/operator_profile/README.md) for a
-reproducible native-vLLM and plugin comparison workflow on vLLM 0.28.0.
+reproducible native-vLLM and plugin comparison workflow on vLLM 0.32.0.
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
@@ -182,7 +188,7 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
-For native decode graph execution with vLLM 0.28, see the
+For native decode graph execution with vLLM 0.32, see the
 [Ascend graph guide](./docs/ascend-vllm028-graph.md).
 
 1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)

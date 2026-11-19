@@ -143,7 +143,8 @@ docker exec "$CONTAINER" vllm serve /data/models/Qwen3.5-4B
 
 Long-running remote commands, including installation, tests and serving, should
 run in a named `tmux` session. Stop the default server before reusing port 8000
-for the following tuned example with four C550s and eager execution.
+for the following bounded Qwen3.6-35B-A3B smoke profile with four C550s
+and eager execution.
 
 ```bash
 docker exec "$CONTAINER" bash -lc '
@@ -157,6 +158,24 @@ docker exec "$CONTAINER" bash -lc '
     --disable-custom-all-reduce \
     --enforce-eager'
 ```
+
+The recorded HTTP smoke uses the following limits. Choose limits for the
+actual checkpoint and workload when deploying the service.
+
+| Option | Purpose and effect in this smoke profile |
+|---|---|
+| `--tensor-parallel-size 4` | Shards the 35B-A3B checkpoint over four C550s and exercises inter-device collectives. |
+| `--max-model-len 2048` | Bounds each request's combined prompt and generated context to 2,048 tokens for the short text and generated-image requests shown here. Longer requests require a larger limit. |
+| `--max-num-batched-tokens 512` | Caps the scheduler's token budget per iteration at 512. Longer prefills are chunked, and throughput depends on the chosen budget. |
+| `--max-num-seqs 4` | Caps concurrent scheduler sequences at four for this small HTTP smoke. Additional requests queue and peak concurrency is limited. |
+| `--gpu-memory-utilization 0.70` | Caps each engine worker's memory budget at 70% of its C550. This reserves less KV-cache capacity and lowers available concurrency compared with the standard Gate's 0.90 setting. |
+| `--disable-custom-all-reduce` | Uses the validated MCCL collective path on MetaX. |
+| `--enforce-eager` | Selects eager execution for the eager/graph comparison. |
+| `--served-model-name`, `--host`, `--port` | Match the example client's model name and container-local loopback endpoint. |
+
+These values reproduce the recorded short-request smoke. The standard
+`adaptation_gate` profiles use their checked-in model and platform YAML,
+including 8,192-token contexts and memory utilization 0.90.
 
 Remove `--enforce-eager` to exercise the plugin's PIECEWISE graph default.
 Keep the same model, prompts and sampling parameters when comparing modes.
@@ -391,6 +410,17 @@ vllm serve "$SMALL_MODEL_PATH" \
   --compilation-config '{"cudagraph_capture_sizes":[1,2,4]}' \
   --enforce-eager
 ```
+
+This FlagCX smoke uses Qwen3.5-4B with TP2 to exercise two device ranks.
+The 2,048-token context, 512-token iteration budget, four sequence slots and
+0.70 memory fraction retain the bounded smoke limits and their effects listed
+above. BF16 matches the tested checkpoint execution dtype. Capture sizes
+`1,2,4` cover this four-sequence smoke and bound graph warmup work. The
+`--disable-custom-all-reduce` flag leaves device collectives on the selected
+FlagCX communicator. The service name and loopback port match the client.
+These settings also define the two-host example's model and scheduler scope.
+The execution-RPC timeout of 1,800 seconds permits the measured cold GEMM
+compilation during startup and first-use shapes.
 
 Remove `--enforce-eager` for the recorded PIECEWISE configuration. Use the same
 temperature-zero, no-thinking API requests as the HTTP example above, with
