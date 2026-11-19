@@ -217,10 +217,10 @@ environment, the actual imported `triton.__file__` and `triton.__version__`
 determine which compiler is used.
 
 Build vLLM with the empty target from the pinned source, using the build
-prerequisites already prepared for the vendor runtime. Install the desired
-plugin checkout without a CUDA extension build. A CUDA-oriented
-`VLLM_VENDOR=cuda` command from the NVIDIA guide is not the validated PPU
-installation.
+prerequisites already prepared for the vendor runtime. Leave `VLLM_VENDOR`
+empty when building the plugin wheel. The T-Head plugin registers a
+`weak_ref_tensor` fallback on PyTorch's CUDA dispatch key and borrows graph
+allocations through the PPU PyTorch runtime's storage and tensor bindings.
 
 ```bash
 mkdir -p /work/sources

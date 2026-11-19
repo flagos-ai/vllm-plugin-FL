@@ -420,6 +420,20 @@ class PlatformFL(Platform):
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
+        if cls.vendor_name == "thead" and getattr(model_config, "architecture", None) in (
+            "Qwen4ExpForCausalLM",
+            "Qwen4ExpForConditionalGeneration",
+            "Qwen4ExpMTP",
+        ):
+            from vllm_fl.models.qwen4_exp.quantization import configure_bf16_cache
+
+            configure_bf16_cache(vllm_config)
+        if cls.vendor_name in ("nvidia", "thead") and getattr(
+            model_config, "architecture", None
+        ) == "Qwen4ExpForConditionalGeneration":
+            from vllm_fl.models.qwen4_exp.multimodal import configure_video_loader
+
+            configure_video_loader(model_config)
         parallel_config = vllm_config.parallel_config
         if cls.device_type == "txda":
             if getattr(vllm_config, "speculative_config", None) is not None:
@@ -737,6 +751,8 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_supported_vit_attn_backends(cls) -> list["AttentionBackendEnum"]:
+        if cls.vendor_name == "thead":
+            return [AttentionBackendEnum.TORCH_SDPA]
         if cls.vendor_name == "amd":
             # AMD defers ViT backend selection to vLLM's ROCm platform, so it
             # must accept everything that platform can return (notably the
@@ -763,6 +779,14 @@ class PlatformFL(Platform):
         backend: "AttentionBackendEnum | None" = None,
     ) -> "AttentionBackendEnum":
         from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+        # Validate before installing bindings: PPU exposes CUDA-shaped APIs
+        # but cannot execute NVIDIA vision FlashAttention.
+        if cls.vendor_name == "thead":
+            if backend not in (None, AttentionBackendEnum.TORCH_SDPA):
+                raise ValueError("T-Head vision only supports TORCH_SDPA.")
+            patch_mm_encoder_attention()
+            return AttentionBackendEnum.TORCH_SDPA
 
         patch_mm_encoder_attention()
         if backend is not None:

@@ -87,6 +87,32 @@ def _unavailable_weak_ref(tensor):
     )
 
 
+def _non_owning_tensor_view(tensor: torch.Tensor) -> torch.Tensor:
+    """Borrow graph storage for a T-Head tensor on the CUDA dispatch key."""
+    if tensor.numel() == 0:
+        return tensor
+
+    # Borrow the storage base so a strided view retains its offset.
+    storage = tensor.untyped_storage()
+    borrowed = torch._C._construct_storage_from_data_pointer(
+        storage.data_ptr(), tensor.device, storage.nbytes()
+    )
+    result = torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(
+        {
+            "size": tensor.shape,
+            "stride": tensor.stride(),
+            "dtype": tensor.dtype,
+            "storage_offset": tensor.storage_offset(),
+        },
+        borrowed,
+    )
+    if tensor.is_conj():
+        torch._C._set_conj(result, True)
+    if tensor.is_neg():
+        torch._C._set_neg(result, True)
+    return result
+
+
 # A capable GPU does not supply the absent CUTLASS kernels. Keep upstream
 # selection on implementations that an EMPTY wheel actually provides.
 _QUERY_OP_IMPLS = [
@@ -161,12 +187,14 @@ def _C_ops_present() -> bool:
     ops = getattr(torch.ops, "_C", None)
     if ops is None:
         return False
-    names = [name for name, _ in _QUERY_OP_IMPLS]
+    # The optional FL extension only supplies weak_ref_tensor. Its presence
+    # does not mean an empty vLLM wheel has the rest of the native schemas.
+    names = [name for name, _ in _QUERY_OP_IMPLS if name != "weak_ref_tensor"]
     names += [name for name, _ in _CUDA_FALLBACK_IMPLS]
     return any(hasattr(ops, name) for name in names)
 
 
-def register_op_schemas():
+def register_op_schemas(vendor_name: str = ""):
     """Register missing vLLM schemas in their upstream namespaces."""
     if getattr(register_op_schemas, "_libs", None) is not None:
         return
@@ -225,6 +253,14 @@ def register_op_schemas():
 
     c_lib = libs.get("_C")
     if c_lib is not None:
+        if (
+            vendor_name == "thead"
+            and not torch._C._dispatch_has_kernel_for_dispatch_key(
+                "_C::weak_ref_tensor", "CUDA"
+            )
+        ):
+            c_lib.impl("weak_ref_tensor", _non_owning_tensor_view, "CUDA")
+
         for name, fn in _QUERY_OP_IMPLS:
             with suppress(RuntimeError):
                 c_lib.impl(name, fn, "CompositeImplicitAutograd")

@@ -292,6 +292,8 @@ from vllm_fl.dispatch.io_dumper import (
     init_io_dump_from_env,
     register_io_module_hooks,
 )
+from vllm_fl.worker.model_state import ModelRunnerState
+from vllm_fl.worker.sampling_rng import preserve_discarded_generator_offsets
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
@@ -586,6 +588,7 @@ class ModelRunnerFL(
         vllm_config: VllmConfig,
         device: torch.device,
     ):
+        self.model_state = ModelRunnerState(self)
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -1394,6 +1397,7 @@ class ModelRunnerFL(
         The SamplingMetadata is updated and copied to the GPU if there is a
         new/resumed/paused/finished request in the batch.
         """
+        self.model_state.remove_requests(scheduler_output.finished_req_ids)
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
             req_state = self.requests.pop(req_id, None)
@@ -1459,6 +1463,7 @@ class ModelRunnerFL(
 
         # Add new requests to the cached states.
         for new_req_data in scheduler_output.scheduled_new_reqs:
+            self.model_state.remove_requests((new_req_data.req_id,))
             req_id = new_req_data.req_id
             if req_id in self.requests:
                 # For streaming case only.
@@ -1643,6 +1648,7 @@ class ModelRunnerFL(
                 assert new_block_ids is not None
                 # The request is resumed from preemption.
                 # Replace the existing block IDs with the new ones.
+                self.model_state.remove_requests((req_id,))
                 req_state.block_ids = new_block_ids
 
             if req_index is None:
@@ -3835,6 +3841,13 @@ class ModelRunnerFL(
             inputs_embeds = None
             model_kwargs = self._init_model_kwargs()
 
+        # Full-capacity PLE buffers keep their shape and address across graphs.
+        model_kwargs.update(
+            self.model_state.prepare_inputs(
+                self.input_batch.num_reqs, self.max_num_reqs, input_ids
+            )
+        )
+
         if self.uses_mrope:
             positions = self.mrope_positions.gpu[:, :num_input_tokens]
         else:
@@ -3875,37 +3888,35 @@ class ModelRunnerFL(
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
-        # CPU generators (used by TXDA) do not expose Philox offsets. Save
-        # their full state before sampling so a discarded chunked-prefill
-        # sample does not advance the request's seeded random stream.
-        self._cpu_generator_states = {
-            index: generator.get_state()
-            for index, generator in sampling_metadata.generators.items()
-            if generator.device.type == "cpu"
-        }
-        # Update output token ids with tokens sampled in last step
-        # if async scheduling and required by current sampling params.
-        self.input_batch.update_async_output_token_ids()
-        if spec_decode_metadata is None:
-            return self.sampler(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
-
-        # Update spec_token_ids with real draft tokens from pre step only when
-        # output_token_ids is needed (penalties or bad_words are in use).
-        if self.use_async_scheduling and self._draft_token_req_ids is not None:
-            draft_token_ids_cpu, _ = self._get_draft_token_ids_cpu()
-            self.input_batch.update_async_spec_token_ids(draft_token_ids_cpu)
-
-        draft_probs = self._get_spec_decode_draft_probs(spec_decode_metadata)
-        sampler_output = self.rejection_sampler(
-            spec_decode_metadata,
-            draft_probs,
-            logits,
-            sampling_metadata,
+        discarded_indices = np.flatnonzero(
+            self.discard_request_mask.np[: self.input_batch.num_reqs]
         )
-        return sampler_output
+        with preserve_discarded_generator_offsets(
+            sampling_metadata.generators, discarded_indices
+        ):
+            # Update output token ids with tokens sampled in last step
+            # if async scheduling and required by current sampling params.
+            self.input_batch.update_async_output_token_ids()
+            if spec_decode_metadata is None:
+                return self.sampler(
+                    logits=logits,
+                    sampling_metadata=sampling_metadata,
+                )
+
+            # Update spec_token_ids with real draft tokens from pre step only when
+            # output_token_ids is needed (penalties or bad_words are in use).
+            if self.use_async_scheduling and self._draft_token_req_ids is not None:
+                draft_token_ids_cpu, _ = self._get_draft_token_ids_cpu()
+                self.input_batch.update_async_spec_token_ids(draft_token_ids_cpu)
+
+            draft_probs = self._get_spec_decode_draft_probs(spec_decode_metadata)
+            sampler_output = self.rejection_sampler(
+                spec_decode_metadata,
+                draft_probs,
+                logits,
+                sampling_metadata,
+            )
+            return sampler_output
 
     def _bookkeeping_sync(
         self,
@@ -3935,17 +3946,9 @@ class ModelRunnerFL(
                 num_nans_in_logits = self._get_nans_in_logits(logits)
 
         num_reqs = self.input_batch.num_reqs
-        discard_sampled_tokens_req_indices = np.nonzero(
+        discard_sampled_tokens_req_indices = np.flatnonzero(
             self.discard_request_mask.np[:num_reqs]
-        )[0]
-        for i in discard_sampled_tokens_req_indices:
-            gen = self.input_batch.generators.get(int(i))
-            if gen is not None:
-                if gen.device.type == "cpu":
-                    gen.set_state(self._cpu_generator_states[int(i)])
-                else:
-                    gen.set_offset(gen.get_offset() - 4)
-
+        )
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
         req_ids_output_copy = self.input_batch.req_ids.copy()
@@ -5551,6 +5554,9 @@ class ModelRunnerFL(
                     self.model = model_loader.load_model(
                         vllm_config=self.vllm_config, model_config=self.model_config
                     )
+                get_state_cls = getattr(self.model, "get_legacy_model_state_cls", None)
+                if get_state_cls is not None:
+                    self.model_state = get_state_cls()(self)
                 if self.lora_config:
                     self.model = self.load_lora_model(
                         self.model, self.vllm_config, self.device
@@ -6424,6 +6430,12 @@ class ModelRunnerFL(
             else:
                 input_ids = self.input_ids.gpu[:num_tokens_padded]
                 inputs_embeds = None
+
+            model_kwargs.update(
+                self.model_state.prepare_dummy_inputs(
+                    num_reqs, self.max_num_reqs, num_scheduled_tokens
+                )
+            )
 
             if self.uses_mrope:
                 positions = self.mrope_positions.gpu[:, :num_tokens_padded]

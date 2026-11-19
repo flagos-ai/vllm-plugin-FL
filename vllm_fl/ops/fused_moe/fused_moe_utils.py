@@ -53,6 +53,7 @@ except ImportError:
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
+from vllm_fl import envs as fl_envs
 from vllm_fl.dispatch import CachedOp, call_op
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import get_oot_blacklist, use_flaggems
@@ -431,9 +432,24 @@ class TritonExpertsFL(TritonExperts):
             )
             return
 
-        # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
-        if self._lora_context is None and current_platform.is_cuda():
+        # T-Head's provider implements standard unquantized SiLU experts.
+        thead_fused = (
+            current_platform.vendor_name == "thead"
+            and fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM
+            and self.moe_config.moe_backend in ("auto", "triton")
+            and activation == MoEActivation.SILU
+            and self.activation_config.clamp_limit is None
+            and self.quant_config.quant_dtype is None
+            and self.quant_config.weight_quant_dtype is None
+            and hidden_states.shape[0] > 0
+            and hidden_states.is_contiguous()
+            and w1.stride(-1) == w2.stride(-1) == 1
+        )
+        if self._lora_context is None and (current_platform.is_cuda() or thead_fused):
             from flaggems_vllm import fused_experts_impl
+
+            if thead_fused:
+                logger.info_once("Using FlagGems-vllm fused SiLU experts on T-Head")
 
             output.copy_(
                 fused_experts_impl(

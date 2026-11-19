@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install the same FlagGems-vllm release in every platform's CI interpreter."""
+"""Install pinned FlagGems-vllm sources in the platform CI interpreter."""
 
 import json
 import os
@@ -9,6 +9,14 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 
 RELEASE = "v0.2.0"
 COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
+# T-Head Qwen3.8 requires the HC, PLE and QSA operator exports.
+THEAD_COMMIT = "80a8e9716abed1bac3fc0ba5fd4e9f650ae3f989"
+THEAD_ARCHIVE = (
+    f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{THEAD_COMMIT}"
+)
+THEAD_ARCHIVE_SHA256 = (
+    "1b51d13ac797e1396193e9841aa8af1fbf1478bad7d51466266803cd3343ba06"
+)
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
 RUNTIME_PACKAGES = ("torch", "flagtree", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
@@ -72,4 +80,11 @@ def main(*, commit=COMMIT, source_archive=None, archive_sha256=None):
 
 
 if __name__ == "__main__":
-    main()
+    if os.environ.get("GEMS_VENDOR", "").lower() == "thead":
+        main(
+            commit=THEAD_COMMIT,
+            source_archive=THEAD_ARCHIVE,
+            archive_sha256=THEAD_ARCHIVE_SHA256,
+        )
+    else:
+        main()

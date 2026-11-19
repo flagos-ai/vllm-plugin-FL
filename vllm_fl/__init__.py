@@ -144,7 +144,7 @@ def _is_metax_backend() -> bool:
     return _impl()
 
 
-def _patch_custom_ops():
+def _patch_custom_ops(vendor_name: str):
     """Register fallback schemas when neither vLLM extension ABI is present."""
     # On MetaX the maca mcoplib._C already registered every _C operator.
     # Importing vLLM's own vllm._C .so on top of it raises a
@@ -168,7 +168,7 @@ def _patch_custom_ops():
 
     from vllm_fl.ops._C_ops_registry import register_op_schemas
 
-    register_op_schemas()
+    register_op_schemas(vendor_name)
 
 
 def _init_vendor_device():
@@ -262,7 +262,7 @@ def register():
     if vendor_name != "nvidia":
         # Other accelerators still use EMPTY wheels. NVIDIA uses upstream's
         # native CUDA extensions and must not replace failed imports with stubs.
-        _patch_custom_ops()
+        _patch_custom_ops(vendor_name)
         _patch_flash_attn_import()
 
     # Note: FlagCX connector registration is deferred to register_model()
@@ -397,6 +397,25 @@ def register_model():
         # General plugins run before encoder budgets are built in the engine
         # frontend and spawned workers, for both upstream model runners.
         patch_minicpmo_audio_budget()
+
+    if vendor_name in ("nvidia", "thead"):
+        from vllm.model_executor.models import ModelRegistry
+
+        from vllm_fl.models.qwen4_exp.multimodal import register_video_loader
+
+        register_video_loader()
+
+        ModelRegistry.register_model(
+            "Qwen4ExpForCausalLM",
+            "vllm_fl.models.qwen4_exp.model:Qwen4ExpForCausalLM",
+        )
+        ModelRegistry.register_model(
+            "Qwen4ExpForConditionalGeneration",
+            "vllm_fl.models.qwen4_exp.model:Qwen4ExpForConditionalGeneration",
+        )
+        ModelRegistry.register_model(
+            "Qwen4ExpMTP", "vllm_fl.models.qwen4_exp.mtp:Qwen4ExpMTP"
+        )
 
     if vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
