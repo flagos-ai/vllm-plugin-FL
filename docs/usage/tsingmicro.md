@@ -6,8 +6,10 @@ containing the TXDA 0.32 adaptation described here.
 
 ## Execution scope
 
-- Use the FL/V1 model runner with `--enforce-eager` at every tensor-parallel
-  size. Graph mode is temporarily unsupported on TXDA.
+- The FL/V1 model runner is the default at every tensor-parallel size. The
+  upstream V2 runner is supported with `VLLM_USE_V2_MODEL_RUNNER=1` and the
+  adaptations in `vendor/txda/patches/`; both are validated with
+  `--enforce-eager`. Graph mode is temporarily unsupported on TXDA.
 - Multi-device execution, including the TP8 examples below, requires a valid
   `FLAGCX_PATH`. Native TCCL remains the single-device fallback.
 - Prefill and decode context parallel sizes must both be 1.
@@ -53,6 +55,39 @@ packages when installing the target vLLM and plugin. The standard CUDA wheels do
 not provide the TXDA runtime. `flaggems-vllm` is a separate shared operator
 provider required by the current plugin; install it using the repository's
 pinned installer below.
+
+## Validated 0.32 stack
+
+The reference image above ships the 0.24 stack. The TXDA 0.32 adaptation is
+validated against the versions below; `install_flaggems_vllm.py` upgrades
+FlagGems and FlagGems-vLLM inside the container to reach it.
+
+| Component | Validated version |
+| --- | --- |
+| vLLM | `0.32.0+empty` (source tag `v0.32.0`) |
+| Triton | `3.7.1+git7ea4b5be` |
+| FlagGems | `5.5.0.dev1+g1c93bb08c` |
+| FlagGems-vLLM | `0.3.0.dev1` |
+| torch | Vendor TXDA build, `2.13.0+cpu` |
+| Model runner | FL/V1 (`VLLM_USE_V2_MODEL_RUNNER=0`) by default; the upstream V2 runner is supported with `VLLM_USE_V2_MODEL_RUNNER=1` |
+
+Two stack properties the code depends on:
+
+- The MoE fast path imports `flag_gems.runtime.backend._tsingmicro.tx81`, so the
+  plugin refuses that path unless FlagGems is at least `5.5.0`. On an older
+  build it logs a warning and uses the generic MoE path instead of running a
+  different kernel silently.
+- `rms_norm` runs on the reference implementation; the FlagGems Triton kernel
+  cannot run on TXDA (shared-memory limit), so `tsingmicro.yaml` selects the
+  vendor entry before any compute rather than relying on error fallback.
+
+Non-default settings used by the examples below:
+
+- `--kv-cache-memory-bytes`: TXDA cannot profile peak allocation safely, so the
+  KV budget is set explicitly instead of being derived from
+  `--gpu-memory-utilization`.
+- `--max-num-seqs` / `--max-num-batched-tokens`: bounded to keep the smoke tests
+  small; raise them for production capacity.
 
 ## Create an isolated container
 

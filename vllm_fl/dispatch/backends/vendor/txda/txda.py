@@ -3,7 +3,7 @@
 """
 Txda backend implementation.
 
-This backend provides operator implementations for <PII:company:公司名称> TXDA devices.
+This backend provides operator implementations for TXDA devices.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ class TxdaBackend(Backend):
     """
     Txda backend for operator implementations.
 
-    This backend routes dispatch ops to <PII:company:公司名称> TXDA implementations:
-    attention and MoE go through the FlagGems <PII:product_4:硬件型号编码> stack, normalization
+    This backend routes dispatch ops to the TXDA device implementations:
+    attention and MoE go through the FlagGems TX8 stack, normalization
     through the reference torch fallback in ``impl.normalization``.
     """
 
@@ -113,8 +113,8 @@ class TxdaBackend(Backend):
         Get the attention backend class path for TXDA.
 
         Returns the FlagGems attention backend, which calls
-        ``flag_gems.flash_attn_varlen_func`` on the <PII:product_4:硬件型号编码> stack. Validated
-        end-to-end on <PII:product_6:硬件型号编码> with flaggems_vllm 0.3.0.dev1 + triton
+        ``flag_gems.flash_attn_varlen_func`` on the TX8 stack. Validated
+        end-to-end on Qwen3.6-27B and Qwen3.6-35B-A3B with flaggems_vllm 0.3.0.dev1 + triton
         3.7.1 (the 0.28-era silently-wrong flash_attn results do not
         reproduce on this stack).
 

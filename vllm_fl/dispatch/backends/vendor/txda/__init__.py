@@ -1,7 +1,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-Txda (<PII:company_5:公司名称>) backend for vllm-plugin-FL dispatch.
+TXDA backend for vllm-plugin-FL dispatch.
 """
 
 from .txda import TxdaBackend
