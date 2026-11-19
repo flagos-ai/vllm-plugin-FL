@@ -717,13 +717,17 @@ both modes pass graph capture, two image requests and three native EvalScope
 matches the frozen CPU tokenizer IDs. Friend is recognized; Centre still returns
 an image box, so these checks do not establish full OCR accuracy.
 
-The independent formal comparison is running with the approved EvalScope 1.5.1
+The independent formal comparison used the approved EvalScope 1.5.1
 `random_vl` client: one 2048x2048 RGB image, text budgets 1024/4096/16384,
 C64, N1024 and output 1024. All five rounds per group are retained; the main mean
 uses original rounds 2–5. It does not use the LLM text-generation client. The
 baseline's five 1K rounds pass independent read-only native SQLite integrity,
 1024-request, fixed-output, argument, hash and metric checks. This is baseline
-progress, not a paired throughput result or a benefit claim.
+progress, not a paired throughput result or a benefit claim. The user then
+removed OCR from the remaining validation scope. The client and service were
+stopped, with completed baseline results and interrupted-round evidence retained.
+The optimized arm was never started. The interruption is user-directed, not a
+model failure, and no paired OCR performance conclusion is available.
 
 ### Two-host MXFP4 results and capacity limits
 
