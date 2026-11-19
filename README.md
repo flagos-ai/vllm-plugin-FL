@@ -234,7 +234,10 @@ torchvision 0.25.0+cpu.
 
 Load the CANN toolkit environment. Use the source install above with
 `VLLM_TARGET_DEVICE=empty` at the pinned vLLM 0.24 revision and install
-Python-only FL in that environment.
+Python-only FL in that environment. Install official FlagGems v5.3.4 as
+described above for both OCR routes. FL uses its standard FlagGems device
+detector during startup, including when `USE_FLAGGEMS=0` selects torch-npu
+for inference.
 [Pinned vLLM source](https://github.com/vllm-project/vllm/tree/ee0da84ab9e04ac7610e28580af62c365e898389)
 
 From the repository root, pass the checkpoint path and one Ascend device ID
