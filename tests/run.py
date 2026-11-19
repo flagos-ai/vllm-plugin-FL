@@ -335,10 +335,9 @@ class TestRunner:
 
         results: list[TestResult] = []
         results_lock = threading.Lock()
-        # A sharded Gate job has exactly one case, so there is no competing
-        # subprocess output to interleave. Stream it live instead of hiding up
-        # to hours of scenario progress in the parallel runner's capture
-        # buffer. Multi-case jobs keep prefixed buffering as before.
+        # A one-case job has no competing subprocess output, so stream it
+        # live. Multi-case jobs keep per-case buffered/prefixed output to
+        # prevent concurrent subprocesses from interleaving their logs.
         capture_case_output = len(cases) > 1
 
         def _ts() -> str:

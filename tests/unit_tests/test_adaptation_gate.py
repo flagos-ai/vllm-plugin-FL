@@ -368,7 +368,7 @@ def test_matrix_declares_gate_timeout_and_tools_as_full_run_trigger():
     assert "tools/adaptation-gate-cases/" in module._FULL_RUN_PREFIXES
 
 
-def test_matrix_shards_each_gate_case_but_keeps_other_tasks_grouped():
+def test_matrix_groups_gate_cases_for_in_job_device_scheduling():
     path = Path(__file__).parents[2] / ".github/scripts/generate_matrix.py"
     spec = importlib.util.spec_from_file_location("_gate_shard_matrix", path)
     module = importlib.util.module_from_spec(spec)
@@ -401,9 +401,9 @@ def test_matrix_shards_each_gate_case_but_keeps_other_tasks_grouped():
     gate_entries = [entry for entry in matrix if entry["task"] == "adaptation_gate"]
     inference_entries = [entry for entry in matrix if entry["task"] == "inference"]
 
-    assert len(gate_entries) == 2
-    assert all(len(json.loads(entry["cases"])) == 1 for entry in gate_entries)
-    assert all(entry["image"] == "example/image" for entry in gate_entries)
+    assert len(gate_entries) == 1
+    assert len(json.loads(gate_entries[0]["cases"])) == 2
+    assert gate_entries[0]["image"] == "example/image"
     assert len(inference_entries) == 1
     assert len(json.loads(inference_entries[0]["cases"])) == 2
 
