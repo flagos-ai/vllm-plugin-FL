@@ -64,6 +64,93 @@ _moe_sum = CachedOp("moe_sum")
 logger = init_logger(__name__)
 
 
+# FlagGems release whose ``_tsingmicro.tx81`` backend provides the
+# compact-grouped MoE fast path used below. The import is pinned to that
+# private module, so refuse to use it on any other build instead of silently
+# running whatever happens to be importable.
+_TXDA_FUSED_MOE_MIN_VERSION = (5, 5, 0)
+
+
+def _txda_fused_experts_impl(
+    *,
+    activation: str,
+    quant_config: Any,
+    per_channel_quant: bool,
+    apply_router_weight_on_input: bool,
+    expert_map: torch.Tensor | None,
+    a1_scale: torch.Tensor | None,
+    a2_scale: torch.Tensor | None,
+    block_shape: list[int] | None,
+    w1_bias: torch.Tensor | None,
+    w2_bias: torch.Tensor | None,
+    w1_scale: torch.Tensor | None,
+    w2_scale: torch.Tensor | None,
+):
+    """Return the TXDA compact-grouped MoE entry point, or ``None``.
+
+    Deciding before any compute keeps this a capability check: the generic
+    dispatch path (or an error) is chosen up front instead of falling back
+    after a half-applied kernel.
+
+    The predicates mirror ``flag_gems``' own ``_use_compact_grouped_moe``:
+    only plain bf16/fp16 (or INT8-w8a16 with scales) plus silu-family
+    activations take the compact-grouped GEMM. Everything else returns
+    ``None`` so the caller uses the generic implementation.
+    """
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "txda":
+        return None
+    if not activation.startswith(("silu", "swiglu")):
+        return None
+    if apply_router_weight_on_input or expert_map is not None:
+        return None
+    if quant_config.use_fp8_w8a8 or quant_config.use_int8_w8a8:
+        return None
+    if quant_config.use_int4_w4a16:
+        return None
+    if block_shape is not None or a1_scale is not None or a2_scale is not None:
+        return None
+    if w1_bias is not None or w2_bias is not None:
+        return None
+    if per_channel_quant:
+        return None
+    if quant_config.use_int8_w8a16:
+        if w1_scale is None or w2_scale is None:
+            return None
+    elif w1_scale is not None or w2_scale is not None:
+        return None
+
+    try:
+        import flag_gems
+
+        version = getattr(flag_gems, "__version__", "0")
+        parts = tuple(int(p) for p in version.split("+")[0].split(".")[:3])
+    except Exception:
+        return None
+    if parts < _TXDA_FUSED_MOE_MIN_VERSION:
+        logger.warning_once(
+            "FlagGems %s is older than the pinned %s that ships the TX81 "
+            "compact-grouped MoE; using the generic MoE path on TXDA.",
+            getattr(flag_gems, "__version__", "?"),
+            ".".join(map(str, _TXDA_FUSED_MOE_MIN_VERSION)),
+        )
+        return None
+
+    try:
+        from flag_gems.runtime.backend._tsingmicro.tx81.fused.fused_moe import (
+            fused_experts_impl,
+        )
+    except ImportError:
+        logger.warning_once(
+            "FlagGems %s does not expose the TX81 compact-grouped MoE; "
+            "using the generic MoE path on TXDA.",
+            getattr(flag_gems, "__version__", "?"),
+        )
+        return None
+    return fused_experts_impl
+
+
 def _should_use_fl_triton_experts() -> bool:
     """Return whether the FL FlagGems MoE backend is enabled by policy."""
     return (
@@ -463,43 +550,65 @@ class TritonExpertsFL(TritonExperts):
             )
             return
 
-        # TXDA (<PII:company_4:公司名称>) fast path: single fused FlagGems call using the
-        # TX81-native compact-grouped MoE. The generic Triton fused_moe_kernel
-        # (tl.dot) produces wrong values on TXDA, so the dispatch reference
-        # fallback is unusable; route through FlagGems' <PII:product_4:硬件型号编码> fused_experts_impl
+        # TXDA fast path: a single fused FlagGems call using the TX81-native
+        # compact-grouped MoE. The generic Triton fused_moe_kernel (tl.dot)
+        # produces wrong values on TXDA, so the dispatch reference fallback is
+        # unusable; this routes through FlagGems' TX81 fused_experts_impl,
         # which selects _moe_compact_grouped_gemm for bf16+silu.
         if self._lora_context is None and current_platform.device_type == "txda":
-            from flag_gems.runtime.backend._tsingmicro.tx81.fused.fused_moe import (
-                fused_experts_impl as txda_fused_experts_impl,
+            txda_fused_experts_impl = _txda_fused_experts_impl(
+                activation=activation.value,
+                quant_config=self.quant_config,
+                per_channel_quant=self.per_act_token_quant,
+                apply_router_weight_on_input=apply_router_weight_on_input,
+                expert_map=expert_map,
+                a1_scale=a1q_scale,
+                a2_scale=a2_scale,
+                block_shape=self.block_shape,
+                w1_bias=self.w1_bias,
+                w2_bias=self.w2_bias,
+                w1_scale=self.w1_scale,
+                w2_scale=self.w2_scale,
             )
-
-            output.copy_(
-                txda_fused_experts_impl(
-                    hidden_states,
-                    w1,
-                    w2,
-                    topk_weights,
-                    topk_ids,
-                    inplace=False,
-                    activation=activation.value,
-                    apply_router_weight_on_input=apply_router_weight_on_input,
-                    use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
-                    use_int8_w8a8=self.quant_config.use_int8_w8a8,
-                    use_int8_w8a16=self.quant_config.use_int8_w8a16,
-                    use_int4_w4a16=self.quant_config.use_int4_w4a16,
-                    per_channel_quant=self.per_act_token_quant,
-                    global_num_experts=global_num_experts,
-                    expert_map=expert_map,
-                    w1_scale=self.w1_scale,
-                    w2_scale=self.w2_scale,
-                    a1_scale=a1q_scale,
-                    a2_scale=a2_scale,
-                    block_shape=self.block_shape,
-                    w1_bias=self.w1_bias,
-                    w2_bias=self.w2_bias,
+            if txda_fused_experts_impl is not None:
+                # The fused kernel has dedicated clamp/alpha/beta parameters;
+                # the activation config must be forwarded or clamped /
+                # non-default SwiGLU models would silently change their math.
+                activation_config = self.activation_config
+                output.copy_(
+                    txda_fused_experts_impl(
+                        hidden_states,
+                        w1,
+                        w2,
+                        topk_weights,
+                        topk_ids,
+                        inplace=False,
+                        activation=activation.value,
+                        gemm1_clamp_limit=activation_config.clamp_limit,
+                        gemm1_alpha=activation_config.alpha,
+                        gemm1_beta=activation_config.beta,
+                        apply_router_weight_on_input=apply_router_weight_on_input,
+                        use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                        use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                        use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                        use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                        per_channel_quant=self.per_act_token_quant,
+                        global_num_experts=global_num_experts,
+                        expert_map=expert_map,
+                        w1_scale=self.w1_scale,
+                        w2_scale=self.w2_scale,
+                        a1_scale=a1q_scale,
+                        a2_scale=a2_scale,
+                        block_shape=self.block_shape,
+                        w1_bias=self.w1_bias,
+                        w2_bias=self.w2_bias,
+                    )
                 )
-            )
-            return
+                return
+            # An unsupported combination falls through to the generic path so
+            # the caller gets the dispatch-selected implementation rather than
+            # a silently different kernel. The eligibility check runs before
+            # any compute, so a half-applied activation cannot leak here.
 
         # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
         # adapters can be injected between GEMM1/activation/GEMM2.
