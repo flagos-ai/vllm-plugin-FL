@@ -99,6 +99,12 @@ class NvidiaWorkerFL(NativeGPUWorker):
     def init_device(self):
         super().init_device()
 
+        from vllm_fl.envs import USE_FLAGGEMS
+        from vllm_fl.patches.qwen_gdn_state_index import patch_qwen_gdn_state_indices
+
+        if USE_FLAGGEMS:
+            patch_qwen_gdn_state_indices(self.model_config)
+
         from vllm_fl.patches.allreduce_rms_provider import (
             initialize_allreduce_rms_provider,
         )

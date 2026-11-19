@@ -5,6 +5,7 @@ Keep vLLM's checkpoint loaders, router, prepare/finalize and native activation.
 Consume the ORIGINAL loader layout, never vLLM's Marlin-repacked weights.
 The split GEMM1/activation path deliberately retains SwiGLU clamp/SiTU semantics.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -15,14 +16,20 @@ from types import MethodType
 import torch
 
 from .mxfp4_marlin_align import align_mxfp4_tokens
-from .mxfp4_marlin_reduce import safe_moe_sum
-from .raw_retirement import assert_retired_aliases, retire_raw_parameters, compact_raw_intermediate
+from .mxfp4_marlin_reduce import safe_moe_sum, masked_moe_sum
+from .raw_retirement import (
+    assert_retired_aliases,
+    retire_raw_parameters,
+    compact_raw_intermediate,
+)
 
 logger = logging.getLogger(__name__)
 GROUP_SIZE = 32
 
 
-def validate_raw_weights(w1, w2, s1, s2, *, hidden_size, num_experts, intermediate_alignment=128):
+def validate_raw_weights(
+    w1, w2, s1, s2, *, hidden_size, num_experts, intermediate_alignment=128
+):
     """Check the byte and E8M0 layouts before replacing any service kernel."""
     if w1.ndim != 3 or w1.shape[1] % 2:
         raise ValueError("MXFP4 requires contiguous gate-then-up rows")
@@ -72,8 +79,15 @@ def deployment_rejection(moe, activation_key=None):
     return None
 
 
-def localize_routing(topk_weights, topk_ids, expert_map, *, local_experts,
-                     global_experts, return_valid_mask=False):
+def localize_routing(
+    topk_weights,
+    topk_ids,
+    expert_map,
+    *,
+    local_experts,
+    global_experts,
+    return_valid_mask=False,
+):
     """Map standard-format EP routes without handing invalid IDs to Gems.
 
     Foreign/invalid routes select a valid dummy local expert and have weight
@@ -91,15 +105,30 @@ def localize_routing(topk_weights, topk_ids, expert_map, *, local_experts,
         in_range = (topk_ids >= 0) & (topk_ids < global_experts)
         local_ids = expert_map[topk_ids.long().clamp(0, global_experts - 1)]
         valid = in_range & (local_ids >= 0) & (local_ids < local_experts)
-    result = (torch.where(valid, topk_weights, 0).contiguous(),
-              torch.where(valid, local_ids, 0).to(topk_ids.dtype).contiguous())
+    result = (
+        torch.where(valid, topk_weights, 0).contiguous(),
+        torch.where(valid, local_ids, 0).to(topk_ids.dtype).contiguous(),
+    )
     return (*result, valid) if return_valid_mask else result
 
 
-def execute_split_gemms(gems, hidden, packed, topk_weights, topk_ids,
-                        output, activation, *, num_experts,
-                        apply_router_weight_on_input, fold_scale, compute_type,
-                        route_mask=None, second_block_k=128, gemm2=None):
+def execute_split_gemms(
+    gems,
+    hidden,
+    packed,
+    topk_weights,
+    topk_ids,
+    output,
+    activation,
+    *,
+    num_experts,
+    apply_router_weight_on_input,
+    fold_scale,
+    compute_type,
+    route_mask=None,
+    second_block_k=128,
+    gemm2=None,
+):
     """Use #4483/#4943 GEMMs, with vLLM's exact activation callback between them.
 
     Dependency injection also permits a CPU numerical contract test. `activation`
@@ -113,33 +142,55 @@ def execute_split_gemms(gems, hidden, packed, topk_weights, topk_ids,
         output.zero_()
         return
     policy = gems._select_w4a16_mxfp4_kernel_policy(
-        hidden.device, m, num_experts, topk, True)
+        hidden.device, m, num_experts, topk, True
+    )
     sorted_ids, expert_ids, padded = align_mxfp4_tokens(
-        gems, topk_ids, num_experts, policy)
-    first = torch.empty((m * topk, 2 * intermediate), device=hidden.device,
-                        dtype=hidden.dtype)
-    activated = torch.empty((m * topk, intermediate), device=hidden.device,
-                            dtype=hidden.dtype)
+        gems, topk_ids, num_experts, policy
+    )
+    first = torch.empty(
+        (m * topk, 2 * intermediate), device=hidden.device, dtype=hidden.dtype
+    )
+    activated = torch.empty(
+        (m * topk, intermediate), device=hidden.device, dtype=hidden.dtype
+    )
     second = torch.empty((m, topk, h), device=hidden.device, dtype=hidden.dtype)
-    common = dict(sorted_token_ids=sorted_ids, expert_ids=expert_ids,
-                  num_tokens_post_padded=padded, block_m=policy.block_m,
-                  block_size_k=128, group_size=32, compute_type=compute_type,
-                  swap_ab=True, fold_scale=fold_scale)
+    common = dict(
+        sorted_token_ids=sorted_ids,
+        expert_ids=expert_ids,
+        num_tokens_post_padded=padded,
+        block_m=policy.block_m,
+        block_size_k=128,
+        group_size=32,
+        compute_type=compute_type,
+        swap_ab=True,
+        fold_scale=fold_scale,
+    )
     gems._invoke_w4a16_mxfp4_moe_gemm(
-        A=hidden, B=w1, C=first, B_scale=s1,
+        A=hidden,
+        B=w1,
+        C=first,
+        B_scale=s1,
         topk_weights=topk_weights if apply_router_weight_on_input else None,
-        mul_routed_weight=apply_router_weight_on_input, top_k=topk, **common)
+        mul_routed_weight=apply_router_weight_on_input,
+        top_k=topk,
+        **common,
+    )
     # This is vLLM's native activation, including clamp/SITU parameters.
     activation(activated, first)
     (gemm2 or gems._invoke_w4a16_mxfp4_moe_gemm)(
-        A=activated, B=w2, C=second, B_scale=s2,
+        A=activated,
+        B=w2,
+        C=second,
+        B_scale=s2,
         topk_weights=None if apply_router_weight_on_input else topk_weights,
-        mul_routed_weight=not apply_router_weight_on_input, top_k=1,
-        **dict(common, block_size_k=second_block_k))
+        mul_routed_weight=not apply_router_weight_on_input,
+        top_k=1,
+        **dict(common, block_size_k=second_block_k),
+    )
     if route_mask is not None:
-        # Zero explicitly: 0*NaN or 0*Inf from a dummy expert is not zero.
-        second.masked_fill_(~route_mask.unsqueeze(-1), 0)
-    safe_moe_sum(gems, second, output)
+        masked_moe_sum(gems, second, route_mask, output)
+    else:
+        safe_moe_sum(gems, second, output)
 
 
 def _make_experts_class():
@@ -156,7 +207,9 @@ def _make_experts_class():
 
         @staticmethod
         def _supports_current_device():
-            return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 9
+            return (
+                torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 9
+            )
 
         @staticmethod
         def _supports_no_act_and_mul():
@@ -172,11 +225,21 @@ def _make_experts_class():
 
         @staticmethod
         def _supports_parallel_config(parallel):
-            return (not parallel.enable_eplb
-                    and not parallel.use_batched_activation_format)
+            return (
+                not parallel.enable_eplb and not parallel.use_batched_activation_format
+            )
 
-        def workspace_shapes(self, M, N, K, topk, global_num_experts,
-                             local_num_experts, expert_tokens_meta, activation):
+        def workspace_shapes(
+            self,
+            M,
+            N,
+            K,
+            topk,
+            global_num_experts,
+            local_num_experts,
+            expert_tokens_meta,
+            activation,
+        ):
             # Output is already top-k weighted and reduced, as in native Marlin.
             return (0,), (0,), (M, K)
 
@@ -195,70 +258,130 @@ def _make_experts_class():
             self.gemm2 = None
             if self.second_block_k == 64:
                 from .mxfp4_marlin_k64 import invoke_down_k64
+
                 self.gemm2 = invoke_down_k64
             self.gems = importlib.import_module("flaggems_vllm.ops.fused_marlin_moe")
-            validate_raw_weights(layer.w13_weight, layer.w2_weight,
-                                 self.w1_scale, self.w2_scale,
-                                 hidden_size=self.moe_config.hidden_dim,
-                                 num_experts=self.moe_config.num_local_experts,
-                                 intermediate_alignment=self.second_block_k)
+            validate_raw_weights(
+                layer.w13_weight,
+                layer.w2_weight,
+                self.w1_scale,
+                self.w2_scale,
+                hidden_size=self.moe_config.hidden_dim,
+                num_experts=self.moe_config.num_local_experts,
+                intermediate_alignment=self.second_block_k,
+            )
             dtype = self.moe_config.in_dtype
             self._packed_activation_dtype = dtype
             self._packed_device = layer.w13_weight.device
-            self.fold_scale = (dtype == torch.bfloat16
-                               and self.gems._e8m0_fold_safe(self.w1_scale, dtype)
-                               and self.gems._e8m0_fold_safe(self.w2_scale, dtype))
+            self.fold_scale = (
+                dtype == torch.bfloat16
+                and self.gems._e8m0_fold_safe(self.w1_scale, dtype)
+                and self.gems._e8m0_fold_safe(self.w2_scale, dtype)
+            )
             if self.second_block_k == 128:
                 self.packed = self.gems.w4a16_mxfp4_pack(
-                    layer.w13_weight, layer.w2_weight, self.w1_scale, self.w2_scale,
-                    dtype, cached=True, block_size_k=128, fold_scale=self.fold_scale)
+                    layer.w13_weight,
+                    layer.w2_weight,
+                    self.w1_scale,
+                    self.w2_scale,
+                    dtype,
+                    cached=True,
+                    block_size_k=128,
+                    fold_scale=self.fold_scale,
+                )
             else:
-                scale_pack = (self.gems._cached_pack_scale_e8m0_fold if self.fold_scale
-                              else self.gems._cached_pack_scale_e8m0)
+                scale_pack = (
+                    self.gems._cached_pack_scale_e8m0_fold
+                    if self.fold_scale
+                    else self.gems._cached_pack_scale_e8m0
+                )
                 self.packed = (
                     self.gems._cached_pack_w(layer.w13_weight, 128, cached=True),
                     self.gems._cached_pack_w(layer.w2_weight, 64, cached=True),
                     scale_pack(self.w1_scale, dtype, cached=True),
-                    scale_pack(self.w2_scale, dtype, cached=True))
+                    scale_pack(self.w2_scale, dtype, cached=True),
+                )
             if os.getenv("VLLM_FL_MXFP4_RETIRE_RAW", "1") == "1":
                 retire_raw_parameters(layer, self.packed, self.gems)
             # Pack before CUDA graph capture; never call .max().item() in forward.
-            logger.warning("FL_MXFP4_MARLIN_READY E=%d H=%d I=%d clamp=%s activation=%s",
-                           layer.w13_weight.shape[0], self.moe_config.hidden_dim,
-                           layer.w13_weight.shape[1] // 2,
-                           self.quant_config.gemm1_clamp_limit,
-                           self.moe_config.activation)
+            logger.warning(
+                "FL_MXFP4_MARLIN_READY E=%d H=%d I=%d clamp=%s activation=%s",
+                layer.w13_weight.shape[0],
+                self.moe_config.hidden_dim,
+                layer.w13_weight.shape[1] // 2,
+                self.quant_config.gemm1_clamp_limit,
+                self.moe_config.activation,
+            )
 
-        def apply(self, output, hidden_states, w1, w2, topk_weights, topk_ids,
-                  activation, global_num_experts, expert_map, a1q_scale,
-                  a2_scale, workspace13, workspace2, expert_tokens_meta,
-                  apply_router_weight_on_input):
+        def apply(
+            self,
+            output,
+            hidden_states,
+            w1,
+            w2,
+            topk_weights,
+            topk_ids,
+            activation,
+            global_num_experts,
+            expert_map,
+            a1q_scale,
+            a2_scale,
+            workspace13,
+            workspace2,
+            expert_tokens_meta,
+            apply_router_weight_on_input,
+        ):
             if getattr(self._layer, "_fl_mxfp4_retirement", None) is not None:
                 assert_retired_aliases(self._layer, self.packed)
             topk_weights, topk_ids, route_mask = localize_routing(
-                topk_weights, topk_ids, expert_map, local_experts=w1.shape[0],
-                global_experts=global_num_experts, return_valid_mask=True)
+                topk_weights,
+                topk_ids,
+                expert_map,
+                local_experts=w1.shape[0],
+                global_experts=global_num_experts,
+                return_valid_mask=True,
+            )
             if a1q_scale is not None or a2_scale is not None:
                 raise RuntimeError("FL MXFP4 Marlin refuses activation quantization")
-            if hidden_states.dtype != self._packed_activation_dtype or hidden_states.device != self._packed_device:
-                raise RuntimeError("FL MXFP4 Marlin activation dtype changed after packing")
+            if (
+                hidden_states.dtype != self._packed_activation_dtype
+                or hidden_states.device != self._packed_device
+            ):
+                raise RuntimeError(
+                    "FL MXFP4 Marlin activation dtype changed after packing"
+                )
             if not hidden_states.is_contiguous():
                 raise RuntimeError("FL MXFP4 Marlin requires contiguous activations")
             if not getattr(self, "_fl_hit_logged", False):
-                logger.warning("FL_MXFP4_MARLIN_HIT M=%d H=%d topk=%d clamp=%s",
-                               hidden_states.shape[0], hidden_states.shape[1],
-                               topk_ids.shape[1], self.quant_config.gemm1_clamp_limit)
+                logger.warning(
+                    "FL_MXFP4_MARLIN_HIT M=%d H=%d topk=%d clamp=%s",
+                    hidden_states.shape[0],
+                    hidden_states.shape[1],
+                    topk_ids.shape[1],
+                    self.quant_config.gemm1_clamp_limit,
+                )
                 self._fl_hit_logged = True
-            compute_type = (self.gems.tl.bfloat16 if hidden_states.dtype == torch.bfloat16
-                            else self.gems.tl.float16)
+            compute_type = (
+                self.gems.tl.bfloat16
+                if hidden_states.dtype == torch.bfloat16
+                else self.gems.tl.float16
+            )
             execute_split_gemms(
-                self.gems, hidden_states, self.packed, topk_weights, topk_ids,
-                output, lambda out, inp: self.activation(activation, out, inp),
+                self.gems,
+                hidden_states,
+                self.packed,
+                topk_weights,
+                topk_ids,
+                output,
+                lambda out, inp: self.activation(activation, out, inp),
                 num_experts=w1.shape[0],
                 apply_router_weight_on_input=apply_router_weight_on_input,
-                fold_scale=self.fold_scale, compute_type=compute_type,
-                route_mask=route_mask, second_block_k=self.second_block_k,
-                gemm2=self.gemm2)
+                fold_scale=self.fold_scale,
+                compute_type=compute_type,
+                route_mask=route_mask,
+                second_block_k=self.second_block_k,
+                gemm2=self.gemm2,
+            )
 
     return FlagGemsMxfp4Experts
 
@@ -273,31 +396,39 @@ def maybe_install_mxfp4_marlin(runner):
     if os.getenv("VLLM_FL_MXFP4_MARLIN", "0") != "1":
         return False
     from vllm.model_executor.layers.quantization.mxfp4 import Mxfp4MoEMethod
+
     method = runner.routed_experts.quant_method
     if type(method) is not Mxfp4MoEMethod:
-        return False  # GPT-OSS and checkpoint-specific subclasses are separate contracts.
+        return (
+            False  # GPT-OSS and checkpoint-specific subclasses are separate contracts.
+        )
     if getattr(method, "_fl_mxfp4_marlin_installed", False):
         return True
     reason = deployment_rejection(method.moe, method.activation_key)
     if reason:
         raise RuntimeError(f"VLLM_FL_MXFP4_MARLIN rejected deployment: {reason}")
     if method.moe_kernel is not None:
-        raise RuntimeError("MXFP4 adapter must be installed before weights are processed")
+        raise RuntimeError(
+            "MXFP4 adapter must be installed before weights are processed"
+        )
     experts_cls = _make_experts_class()
     if not experts_cls._supports_current_device():
         raise RuntimeError("FL MXFP4 Marlin currently requires Hopper SM90")
     from vllm.model_executor.layers.fused_moe.config import mxfp4_w4a16_moe_quant_config
     from vllm.model_executor.layers.fused_moe.oracle.mxfp4 import (
-        Mxfp4MoeBackend, make_mxfp4_moe_kernel,
+        Mxfp4MoeBackend,
+        make_mxfp4_moe_kernel,
     )
     from vllm.model_executor.utils import is_weights_pre_processed
 
     def quant_config(self, layer):
         return mxfp4_w4a16_moe_quant_config(
-            w1_scale=layer.w13_weight_scale, w2_scale=layer.w2_weight_scale,
+            w1_scale=layer.w13_weight_scale,
+            w2_scale=layer.w2_weight_scale,
             gemm1_alpha=getattr(layer, "swiglu_alpha", None),
             gemm1_beta=getattr(layer, "swiglu_beta", None),
-            gemm1_clamp_limit=getattr(layer, "swiglu_limit", None))
+            gemm1_clamp_limit=getattr(layer, "swiglu_limit", None),
+        )
 
     def process(self, layer):
         if getattr(layer, "_fl_mxfp4_retirement", None) is not None:
@@ -305,14 +436,22 @@ def maybe_install_mxfp4_marlin(runner):
             return
         if is_weights_pre_processed():
             raise RuntimeError("FL MXFP4 Marlin requires raw checkpoint weights")
-        validate_raw_weights(layer.w13_weight, layer.w2_weight,
-                             layer.w13_weight_scale, layer.w2_weight_scale,
-                             hidden_size=self.hidden_size, num_experts=self.num_experts)
+        validate_raw_weights(
+            layer.w13_weight,
+            layer.w2_weight,
+            layer.w13_weight_scale,
+            layer.w2_weight_scale,
+            hidden_size=self.hidden_size,
+            num_experts=self.num_experts,
+        )
         self.moe_quant_config = self.get_fused_moe_quant_config(layer)
         self.moe_kernel = make_mxfp4_moe_kernel(
-            moe_quant_config=self.moe_quant_config, moe_config=self.moe,
-            mxfp4_backend=self.mxfp4_backend, experts_cls=self.experts_cls,
-            routing_tables=layer._expert_routing_tables())
+            moe_quant_config=self.moe_quant_config,
+            moe_config=self.moe,
+            mxfp4_backend=self.mxfp4_backend,
+            experts_cls=self.experts_cls,
+            routing_tables=layer._expert_routing_tables(),
+        )
         self.moe_kernel.fused_experts.process_weights_after_loading(layer)
 
     # Keep the original loader and all its TP slicing and E8M0 encoding intact.

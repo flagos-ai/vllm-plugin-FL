@@ -205,6 +205,27 @@ profiling disables the optional table while retaining raw CPU/CUDA traces.
 The functional diagnostic's different request count and output length cannot
 replace the formal C64/N256 comparison or qualify an optimization's throughput.
 
+### Masked top-k reduction
+
+The adapter now fuses route masking into the reduction loads, avoiding a
+separate mask write and second read of GEMM2 output. Invalid routes are load
+predicates, so dummy-expert NaN/Inf cannot reach arithmetic. Small-token
+pairwise FP32 accumulation and large-token sequential accumulation retain
+the pinned reduction order, including odd top-k; the flattened grid supports
+large token counts. Unsupported layouts retain the legacy path.
+
+Qualification covers 36 GPU cases, 108 numerical phases and 132 changed-mask
+graph phases, including all-false masks, three dtypes and an assertion of the
+actual fused dispatch. A frozen public-source Flash TP8 service completes full
+graph capture, three semantic responses, serial 1K/4K/16K/64K-input probes and
+a C64/1K/128-output functional batch. These are functional checks. A distinct
+original-adapter versus fused-adapter official comparison is in progress;
+component latency reductions do not establish model throughput gains.
+
+```bash
+PYTHONPATH=. python tests/manual/check_marlin_masked_reduce_gpu.py
+```
+
 ## Existing unquantized MoE path
 
 The pinned dependency already contains
@@ -277,8 +298,9 @@ three successful raw rounds per arm. The first asynchronous error is reported
 while GDN linear attention indexes its initial state with a Boolean mask.
 A separate launch-blocking C64/16K functional diagnostic locates the first
 synchronous CUDA failure at the later GDN recurrent-state write through
-FlagGems `index_put`; the exact faulty inputs and repair are still under
-investigation. This diagnostic is not an official throughput result. Recovery
+FlagGems `index_put`. The signed-int32 offset repair below passes the tested
+functional batch; its new formal comparison remains separate and pending.
+This diagnostic is not an official throughput result. Recovery
 starts only the arm that never benchmarked after an SSH transport failure.
 No measured optimized round or earlier configuration result is replaced.
 
@@ -287,8 +309,9 @@ on all ranks and three semantic requests in both ablation arms at max length
 67584. Its exact-seven-function PR3340 comparison has audited 1K/4K/16K means
 of 1675.96→1708.985 (+1.97%), 1181.125→1194.895 (+1.17%) and
 473.20→485.415 (+2.58%) output tok/s. Original rounds 2/3 supply these means,
-with all three raw rounds retained; 64K remains in progress. Two retained
-samples do not establish stable speedups. Reported KV capacity is
+with all three raw rounds retained. The 64K group completes at
+136.315→137.675 (+1.00%) output tok/s; all 24 rounds pass the detailed
+256-request audit. Two retained samples do not establish stable speedups. Reported KV capacity is
 870160→875792 tokens under the same launch flags, with both model allocations
 34.82 GiB/rank; capacity was not independently fixed.
 
@@ -339,6 +362,41 @@ On an available NVIDIA GPU, run the public operator check from the repository:
 
 ```bash
 PYTHONPATH=. python tests/manual/check_moe_padding_gpu.py
+```
+
+## Qwen GDN state-index width
+
+A launch-blocking long-batch diagnostic records the same failing write on all
+eight ranks: FP32 state shape `[7466, 6, 128, 128]`, element strides
+`[1279488, 16384, 128, 1]`, and legal int32 indices `[1682, 1655]`.
+The selected maximum element offset is 2152197119, beyond signed int32.
+The pinned FlagGems generator multiplies the loaded int32 index by the stride
+without widening it. The resulting illegal access occurs in recurrent-state
+writeback; the earlier asynchronous Boolean-index report was a later reporting
+site. An independent numerical counterexample also distinguishes failing int32
+writes from correct native and int64 controls.
+
+Only for the `qwen4_exp` architecture with FlagGems enabled, the worker wraps
+that dependency entry point after device setup. FP32 rank-four inputs with a
+single one-dimensional int32 index use int64 indices when the metadata-derived
+maximum strided element offset exceeds signed int32. It uses no host tensor
+value reads and preserves input/output identity, values and other paths.
+A numel-only guard would miss the actual strided layout.
+
+The isolated repair passes 18 numerical cases, 54 changed-value graph replays,
+four additional cases with 12 changed-index/value replays, and eight CPU
+contracts. Its no-ablation TP8 service passes full graph capture, three semantic
+responses, serial 1K/4K/16K/64K probes and the previously failing C64/16K batch
+with 64 choices, 1048576 prompt tokens and 65536 completion tokens. This is
+functional evidence, not an official 256-request throughput result or dataset
+accuracy. A new exact-PR3340 pair shares the repair in both arms and keeps every
+older failed round unchanged; formal performance is still pending.
+
+On a free 80GB GPU, the public check includes the captured strided layout and
+both index widths, with native controls and changed-index/value graph replay:
+
+```bash
+PYTHONPATH=. python tests/manual/check_qwen_gdn_state_index_gpu.py
 ```
 
 ## MiniMax indexer compatibility

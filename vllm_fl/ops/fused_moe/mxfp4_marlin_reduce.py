@@ -44,3 +44,33 @@ def safe_moe_sum(gems, input, output):
     )
     for start, end in _balanced_row_ranges(num_tokens):
         gems.moe_sum(input[start:end], output[start:end])
+
+
+def masked_moe_sum(gems, input, route_mask, output):
+    """Fuse dummy-route masking into the same pinned FP32 accumulation order."""
+    if (
+        input.is_cuda
+        and input.dim() == 3
+        and output.dim() == 2
+        and input.is_contiguous()
+        and output.is_contiguous()
+        and route_mask.is_contiguous()
+        and tuple(route_mask.shape) == tuple(input.shape[:2])
+        and input.shape[1] <= 16
+        and input.shape[1] >= 1
+        and input.shape[2] % (16 // input.element_size()) == 0
+    ):
+        from .mxfp4_marlin_masked_reduce import masked_sum
+
+        assert tuple(output.shape) == (input.shape[0], input.shape[2])
+        assert (
+            input.dtype == output.dtype
+            and input.device == output.device == route_mask.device
+        )
+        import torch
+
+        assert route_mask.dtype == torch.bool
+        assert input.dtype in (torch.bfloat16, torch.float16, torch.float32)
+        return masked_sum(input, route_mask, output)
+    input.masked_fill_(~route_mask.unsqueeze(-1), 0)
+    return safe_moe_sum(gems, input, output)
