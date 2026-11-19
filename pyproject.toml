@@ -52,6 +52,7 @@ fl = "vllm_fl:register"
 
 [project.entry-points."vllm.general_plugins"]
 fl = "vllm_fl:register_model"
+fl_qwen_cp = "vllm_fl.cp:register"
 
 [project.urls]
 Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"

@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-13",
+  "scope": "PCP 65536-token single-request prefill plus first token",
+  "captures_per_backend": 3,
+  "ranks": 4,
+  "gdn_layers": 30,
+  "core_gpu_ms_flashinfer": 98.41026808333334,
+  "core_gpu_ms_triton": 70.01896408333333,
+  "core_gpu_ms_saved": 28.391304000000005,
+  "core_gpu_reduction_pct": 28.849940715493616,
+  "core_span_ms_saved": 27.943195583333335,
+  "prior_unprofiled_wall_ms_saved": 28.87735841795802,
+  "flashinfer_fused_kernel_grid": [
+    8,
+    1,
+    1
+  ],
+  "triton_state_grid": [
+    4,
+    8,
+    1
+  ],
+  "triton_state_ms": 39.955673166666664,
+  "triton_state_fraction": 0.5706407355457769,
+  "triton_stages_ms": {
+    "chunk_fwd_o": 8.787703916666667,
+    "chunk_gated_delta_rule_fwd_h": 39.955673166666664,
+    "chunk_local_cumsum": 0.25373291666666664,
+    "chunk_scaled_dot_kkt_fwd": 3.17687475,
+    "recompute_w_u_fwd": 6.713871583333333,
+    "solve_tril": 11.13110775
+  },
+  "flashinfer_adapter_ms": 0.13390199999999197,
+  "interpretation": "Observed grids and timings support insufficient sequence/head parallelism in this FlashInfer SM90 path. Hardware counter occupancy was not measured."
+}

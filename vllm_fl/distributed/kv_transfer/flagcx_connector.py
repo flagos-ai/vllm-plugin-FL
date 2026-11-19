@@ -566,8 +566,8 @@ class FlagCXConnectorWorker:
         assert vllm_config.kv_transfer_config
         self.kv_role = vllm_config.kv_transfer_config.kv_role
         self.num_workers = vllm_config.kv_transfer_config.kv_connector_extra_config.get(
-            "num_workers", 10
-        )
+            "num_workers", 64
+        )  # >= max_num_seqs: each per-request pull holds a worker until ready
 
         self.kv_caches_base_addr: list[int] = []
         self.device_kv_caches: dict[str, torch.Tensor] = {}
@@ -705,8 +705,10 @@ class FlagCXConnectorWorker:
                     "Skipping layer %s: no KV cache spec present.", layer_name
                 )
                 continue
-            # Dispatch on the spec: Mamba/GDN → [conv] (ssm dropped, recomputed
-            # on D via the N-1 trick); split_k_and_v → [K, V]; else → [cache].
+            # Mamba/GDN uses the conv view at the start of a shared page.
+            # Its block stride includes both conv and SSM state, so both are
+            # transferred. N-1 leaves the state ready for D's last-token replay.
+            # Other layouts use [K, V] when split_k_and_v, else [cache].
             cache_list = self.kv_topo.get_transfer_cache_regions(
                 cache_or_caches, layer_spec
             )
@@ -1265,9 +1267,6 @@ class FlagCXConnectorWorker:
         loop; populates ``_pull_pending`` and launches the per-peer pulls
         without an intervening await, so it is atomic w.r.t. other coroutines.
         """
-        kv_pulls: dict[
-            str, dict[ReqId, tuple[TransferId, list[list[int]]]]
-        ] = defaultdict(dict)
         for req_id, meta in reqs_to_recv.items():
             remote_tp_size = meta.remote_tp_size or self.tp_size
             target_p_ranks = self.kv_topo.handshake_target_ranks(remote_tp_size)
@@ -1276,12 +1275,14 @@ class FlagCXConnectorWorker:
                 path = make_zmq_path(
                     "tcp", meta.remote_host, meta.remote_port + p_rank
                 )
-                kv_pulls[path][req_id] = (
-                    meta.transfer_id,
-                    meta.local_block_ids,
+                # One pull per request: Prefill's sender waits for every
+                # request in a pull before writing, so batching all requests
+                # scheduled in one Decode step makes each wait for the slowest.
+                asyncio.ensure_future(
+                    self._receive_kv(
+                        path, {req_id: (meta.transfer_id, meta.local_block_ids)}
+                    )
                 )
-        for path, req_blocks in kv_pulls.items():
-            asyncio.ensure_future(self._receive_kv(path, req_blocks))
 
     async def _fetch_finished_recving(self) -> set[ReqId]:
         async with self.finished_recving_reqs.lock:

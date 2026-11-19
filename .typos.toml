@@ -48,4 +48,6 @@ extend-exclude = [
     "vllm_fl/**",
     "tests/",
     "tests/**",
+    # Preserve upstream identifiers in the archived runtime source.
+    "qwen35_runtime_source.txt",
 ]
