@@ -81,6 +81,9 @@ def test_default_installer_keeps_shared_pin(monkeypatch):
     import runpy
     from pathlib import Path
 
+    # The target branch deliberately removed this legacy vendor override.
+    # A stale CI environment must not silently switch the shared source pin.
+    monkeypatch.setenv("CI_FLAGGEMS_VLLM_VENDOR", "iluvatar")
     root = Path(__file__).resolve().parents[2]
     namespace = runpy.run_path(str(root / ".github/scripts/install_flaggems_vllm.py"))
     main = namespace["main"]

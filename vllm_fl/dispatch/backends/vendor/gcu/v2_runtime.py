@@ -23,10 +23,20 @@ def install_gcu_v2_runtime():
         @contextmanager
         def graph_capture(device):
             device_fn = current_platform.torch_device_fn
+            previous_stream = device_fn.current_stream()
             stream = device_fn.Stream(device=device)
-            stream.wait_stream(device_fn.current_stream())
+            stream.wait_stream(previous_stream)
+            # TorchGCU can replace CUDA aliases after vLLM's interceptor is
+            # installed. Keep its thread-local cache scoped to native capture.
+            from vllm.utils.torch_utils import _current_stream_tls
+
+            previous_cached_stream = getattr(_current_stream_tls, "value", None)
             with device_fn.stream(stream):
-                yield GraphCaptureContext(stream)
+                _current_stream_tls.value = stream
+                try:
+                    yield GraphCaptureContext(stream)
+                finally:
+                    _current_stream_tls.value = previous_cached_stream
 
         graph_capture._fl_gcu_graph = True
         cudagraph_utils.graph_capture = graph_capture
