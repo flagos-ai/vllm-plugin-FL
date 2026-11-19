@@ -92,6 +92,23 @@ SPLITTING_OPS: dict[str, tuple[str, ...]] = {
         "_c10d_functional::reduce_scatter_tensor",
         "_c10d_functional::wait_tensor",
     ),
+    # MetaX runs MCCL behind the ``nccl`` backend name. Capturing an MCCL
+    # collective inside a piecewise segment makes the ranks disagree on the
+    # collective sequence number (measured on C550: a captured
+    # ``all_gather_into_tensor`` never completes and the watchdog fires), so the
+    # TP communication ops must stay eager between captured segments. Keyed by
+    # vendor name because MetaX reports ``device_type == "cuda"``, which it
+    # shares with other CUDA vendors.
+    "metax": (
+        "vllm::all_reduce",
+        "vllm::all_gather",
+        "vllm::reduce_scatter",
+        "vllm::patched_fused_scaled_matmul_reduce_scatter",
+        "_c10d_functional::all_reduce",
+        "_c10d_functional::all_gather_into_tensor",
+        "_c10d_functional::reduce_scatter_tensor",
+        "_c10d_functional::wait_tensor",
+    ),
 }
 
 # Keep the vLLM base-class no-op for platforms not validated by this change.

@@ -37,9 +37,7 @@ def _flaggems_query_quantizer(implementation):
 
 def get_operator(name):
     if name == "per_token_group_quant_fp8":
-        import flag_gems
-
-        fn = getattr(flag_gems, name, None)
+        fn = get_flaggems_vllm_operator(name)
         return _flaggems_query_quantizer(fn) if callable(fn) else None
     if name == "mla_prefill_backend":
         from vllm_fl.attention.mla_prefill import FlagGemsMLAPrefillBackend
@@ -55,7 +53,7 @@ def get_operator(name):
 def is_available(name):
     from vllm.platforms import current_platform
 
-    if not current_platform.is_cuda() or not use_flaggems_op(name):
+    if not (current_platform.is_cuda() or current_platform.is_cuda_alike()) or not use_flaggems_op(name):
         return False
     if name == "mla_prefill_backend":
         return is_available("flash_attn_varlen_func")

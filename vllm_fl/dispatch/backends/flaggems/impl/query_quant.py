@@ -8,18 +8,19 @@ import torch
 def flaggems_per_token_group_quant_fp8(
     x: torch.Tensor, group_size: int, scale_ue8m0: bool
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    import flag_gems
+    from vllm_fl.dispatch.capabilities import get_flaggems_vllm_operator
 
-    return flag_gems.per_token_group_quant_fp8(x, group_size, scale_ue8m0=scale_ue8m0)
+    return get_flaggems_vllm_operator("per_token_group_quant_fp8")(
+        x, group_size, scale_ue8m0=scale_ue8m0
+    )
 
 
 @flaggems_per_token_group_quant_fp8.register_fake
 def _fake_query_quant(x, group_size, scale_ue8m0):
-    from flag_gems.ops.per_token_group_quant_fp8 import SUPPORTED_FP8_DTYPE
-
     assert group_size > 0 and x.shape[-1] % group_size == 0
     assert x.stride(-1) == 1
-    quantized = torch.empty_like(x, dtype=SUPPORTED_FP8_DTYPE)
+    # HY4 folds query scales into the per-head weights and requires E4M3FN.
+    quantized = torch.empty_like(x, dtype=torch.float8_e4m3fn)
     scales = torch.empty(
         x.shape[:-1] + (x.shape[-1] // group_size,),
         device=x.device,

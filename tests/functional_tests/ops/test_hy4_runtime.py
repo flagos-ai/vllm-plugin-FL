@@ -8,13 +8,14 @@ import torch
 
 from vllm.platforms import current_platform
 
-from vllm_fl.dispatch.backends.flaggems.impl.mla_ops import _flaggems_query_quantizer
+from vllm_fl.dispatch.backends.flaggems.impl.mla_ops import get_operator
 from vllm_fl.models.hy4 import runtime
 
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(
-        not current_platform.is_cuda(), reason="HY4 currently supports NVIDIA only"
+        not (current_platform.is_cuda() or current_platform.is_cuda_alike()),
+        reason="HY4 requires a CUDA or CUDA-alike runtime",
     ),
 ]
 
@@ -66,36 +67,35 @@ def test_portable_prefill_matches_torch_at_mla_dimensions(causal, qk_width, v_wi
 
 @pytest.mark.parametrize("ue8m0", [False, True])
 def test_planned_query_quantizer_matches_torch(ue8m0):
-    # FlagGems defaults to FP32 output before Hopper; that is not the HY4
-    # FP8 query path exercised by this numerical reference.
-    if not current_platform.has_device_capability(90):
-        pytest.skip("HY4 FP8 query quantization is validated on Hopper or newer")
+    from flaggems_vllm.utils.device_info import kernel_supports_fp8_e4m3
 
-    import flag_gems
+    if not kernel_supports_fp8_e4m3():
+        pytest.skip("HY4 FP8 query quantization requires an E4M3FN kernel")
 
-    quantizer = _flaggems_query_quantizer(flag_gems.per_token_group_quant_fp8)
+    quantizer = get_operator("per_token_group_quant_fp8")
     torch.manual_seed(29)
-    x = torch.randn(5, 256, dtype=torch.bfloat16, device="cuda")
-    quantized, scales = quantizer(x, 128, use_ue8m0=ue8m0)
-    assert quantized.dtype == torch.float8_e4m3fn
-    xr = x.cpu().float().reshape(5, 2, 128)
-    expected_scale = (
-        xr.abs().amax(-1).clamp_min(1e-10) / torch.finfo(quantized.dtype).max
-    )
-    if ue8m0:
-        expected_scale = torch.exp2(torch.ceil(torch.log2(expected_scale)))
-    expected = (
-        (xr / expected_scale[..., None]).to(quantized.dtype).float().reshape_as(x)
-    )
-    torch.testing.assert_close(scales.cpu(), expected_scale, rtol=1e-6, atol=0)
-    torch.testing.assert_close(quantized.cpu().float(), expected, rtol=0, atol=0)
+    for rows in (1, 5, 16, 17, 32):
+        x = torch.randn(rows, 256, dtype=torch.bfloat16, device="cuda")
+        quantized, scales = quantizer(x, 128, use_ue8m0=ue8m0)
+        assert quantized.dtype == torch.float8_e4m3fn
+        xr = x.cpu().float().reshape(rows, 2, 128)
+        # Keep scale construction in FP32; division before multiplication can
+        # move a value across an FP8 rounding boundary on MetaX.
+        expected_scale = xr.abs().amax(-1).clamp_min(1e-10) * (
+            1.0 / torch.finfo(quantized.dtype).max
+        )
+        if ue8m0:
+            expected_scale = torch.exp2(torch.ceil(torch.log2(expected_scale)))
+        expected = (
+            (xr / expected_scale[..., None]).to(quantized.dtype).float().reshape_as(x)
+        )
+        torch.testing.assert_close(scales.cpu(), expected_scale, rtol=0, atol=0)
+        torch.testing.assert_close(quantized.cpu().float(), expected, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("ue8m0", [False, True])
 def test_query_quantizer_fullgraph_matches_eager_with_refreshed_inputs(ue8m0):
-    import flag_gems
-
-    quantizer = _flaggems_query_quantizer(flag_gems.per_token_group_quant_fp8)
+    quantizer = get_operator("per_token_group_quant_fp8")
     compiled = torch.compile(quantizer, backend="eager", fullgraph=True)
     for rows in (1, 7):
         x = torch.randn(rows, 256, dtype=torch.bfloat16, device="cuda")
