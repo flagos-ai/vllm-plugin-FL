@@ -176,6 +176,35 @@ Marlin; future performance work must skip foreign GEMM work while retaining
 safe zero outputs and native EP contracts. Likewise, Pro's compact I192/K64
 storage feasibility does not imply a 25% compute or throughput improvement.
 
+### Marlin profile observations
+
+A separate Flash TP8 diagnosis collected 48 raw CPU/CUDA traces: both provider
+arms, three bounded windows and all eight ranks. This uses functional batches
+rather than the official throughput load. In the warmed 12-step, M64 decode
+window, summed GEMM kernel durations are 59.74–60.12 ms per native rank and
+58.62–59.47 ms per adapter rank. The corresponding GPU activity span is about
+158.3 versus 170.8 ms. Thus this window does not support a general claim that
+the adapter GEMM itself is slower; extra work and launch gaps also matter.
+Cumulative attention key lengths differ slightly between these windows.
+
+The long-input windows have matching execute annotations, but the adapter
+launches 50455–52148 GEMMs and 40702–42058 zeroing kernels per rank, versus
+1376 GEMMs in the native arm. The large additional launch count is consistent
+with the pinned autotuner's benchmark/reset path. Its tuning key includes
+`EM_BUCKET`, supplied with the actual aligned token-slot allocation length
+except for the singleton specialization, and uses an align32 key strategy.
+A controlled tuning-policy counterfactual is still needed to isolate its
+contribution. These observations do not establish the original PRs' individual
+benefits, a critical-path percentage, or the cause of the EP16 regression.
+
+The adapter's long diagnostic request timed out after raw trace export;
+sampled worker stacks showed optional profiler CPU table aggregation.
+That request is retained as failed, with no completed usage claim. Earlier
+same-runtime official rounds remain separate successful evidence. Future
+profiling disables the optional table while retaining raw CPU/CUDA traces.
+The functional diagnostic's different request count and output length cannot
+replace the formal C64/N256 comparison or qualify an optimization's throughput.
+
 ## Existing unquantized MoE path
 
 The pinned dependency already contains
