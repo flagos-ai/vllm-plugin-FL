@@ -1,0 +1,10 @@
+{
+  "completed": true,
+  "all14_identities_match": true,
+  "accuracy_cases": 14,
+  "profile_cases": 5,
+  "ranges": 30,
+  "per_backend_per_case_calls": 3,
+  "formal_gate": "not evaluated",
+  "no_source_yaml_probe_or_threshold_change": true
+}

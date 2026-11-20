@@ -1,0 +1,1291 @@
+{
+  "formal_gate": false,
+  "cases": [
+    {
+      "case": "int8-T1-E8-H4096-I14336-K2",
+      "formal_gate": false,
+      "backends": {
+        "native": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "void vllm::moe::moe_align_block_size_small_batch_expert_kernel<long, (int)256>(const T1 *, int *, int *, int *, int *, int, int, unsigned long, int, int, bool, int *)",
+              "samples_us": [
+                3.2,
+                3.2,
+                3.392
+              ],
+              "median_us": 3.2,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                288,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 1092,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.020487473830453348
+            },
+            {
+              "index": 1,
+              "kernel": "void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<int>, std::array<char *, (unsigned long)1>>(int, T2, T3)",
+              "samples_us": [
+                0.832,
+                0.832,
+                0.8
+              ],
+              "median_us": 0.832,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 16,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.005326743195917871
+            },
+            {
+              "index": 2,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)1125899923621888, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)8, (int)4, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                92.576,
+                93.505,
+                92.704
+              ],
+              "median_us": 92.704,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 127,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.5935221168682334
+            },
+            {
+              "index": 3,
+              "kernel": "void vllm::act_and_mul_kernel<c10::BFloat16, __nv_bfloat162, &vllm::silu_kernel<c10::BFloat16>, &vllm::packed_silu_kernel<__nv_bfloat162>, (bool)1, (bool)1, (bool)0, (bool)0>(T1 *, const T1 *, int, float, float, float)",
+              "samples_us": [
+                3.585,
+                4.192,
+                4.128
+              ],
+              "median_us": 4.128,
+              "grid": [
+                2,
+                1,
+                1
+              ],
+              "block": [
+                1024,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.02642884124128482
+            },
+            {
+              "index": 4,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)1125899923621888, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)4, (int)8, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                50.208,
+                49.984,
+                50.721
+              ],
+              "median_us": 50.208,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 124,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.321448464399813
+            },
+            {
+              "index": 5,
+              "kernel": "void at::native::reduce_kernel<(int)128, (int)4, at::native::ReduceOp<c10::BFloat16, at::native::func_wrapper_t<c10::BFloat16, at::native::sum_functor<c10::BFloat16, float, c10::BFloat16>::operator ()(at::TensorIterator &)::[lambda(float, float) (instance 1)]>, unsigned int, c10::BFloat16, (int)4, (int)8>>(T3)",
+              "samples_us": [
+                4.32,
+                4.48,
+                4.448
+              ],
+              "median_us": 4.448,
+              "grid": [
+                8,
+                1,
+                1
+              ],
+              "block": [
+                64,
+                2,
+                1
+              ],
+              "registers": 54,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.028477588624330155
+            }
+          ],
+          "median_kernel_sum_us": 156.193,
+          "median_gpu_empty_intervals_us": 137.216,
+          "median_prefix_us": 62.722,
+          "median_suffix_us": 7.033
+        },
+        "gems": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "_w8a16_int8_route_gemv",
+              "samples_us": [
+                120.928,
+                120.801,
+                120.544
+              ],
+              "median_us": 120.801,
+              "grid": [
+                2,
+                896,
+                1
+              ],
+              "block": [
+                256,
+                1,
+                1
+              ],
+              "registers": 64,
+              "dynamic_shared_bytes": 32,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.6065251118396939
+            },
+            {
+              "index": 1,
+              "kernel": "_w8a16_int8_route_gemv",
+              "samples_us": [
+                78.656,
+                78.368,
+                78.304
+              ],
+              "median_us": 78.368,
+              "grid": [
+                2,
+                256,
+                1
+              ],
+              "block": [
+                256,
+                1,
+                1
+              ],
+              "registers": 39,
+              "dynamic_shared_bytes": 32,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.393474888160306
+            }
+          ],
+          "median_kernel_sum_us": 199.169,
+          "median_gpu_empty_intervals_us": 1.152,
+          "median_prefix_us": 104.237,
+          "median_suffix_us": 6.038
+        }
+      }
+    },
+    {
+      "case": "int8-T4-E8-H4096-I14336-K2",
+      "formal_gate": false,
+      "backends": {
+        "native": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "void vllm::moe::moe_align_block_size_small_batch_expert_kernel<long, (int)256>(const T1 *, int *, int *, int *, int *, int, int, unsigned long, int, int, bool, int *)",
+              "samples_us": [
+                3.392,
+                3.168,
+                3.392
+              ],
+              "median_us": 3.392,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                288,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 1092,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.012181064047546371
+            },
+            {
+              "index": 1,
+              "kernel": "void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<int>, std::array<char *, (unsigned long)1>>(int, T2, T3)",
+              "samples_us": [
+                0.864,
+                0.864,
+                0.832
+              ],
+              "median_us": 0.864,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 16,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.003102723861167472
+            },
+            {
+              "index": 2,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)1125899923621888, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)8, (int)4, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                177.024,
+                178.304,
+                176.961
+              ],
+              "median_us": 177.024,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 127,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.6357136444436465
+            },
+            {
+              "index": 3,
+              "kernel": "void vllm::act_and_mul_kernel<c10::BFloat16, __nv_bfloat162, &vllm::silu_kernel<c10::BFloat16>, &vllm::packed_silu_kernel<__nv_bfloat162>, (bool)1, (bool)1, (bool)0, (bool)0>(T1 *, const T1 *, int, float, float, float)",
+              "samples_us": [
+                3.936,
+                3.872,
+                3.904
+              ],
+              "median_us": 3.904,
+              "grid": [
+                8,
+                1,
+                1
+              ],
+              "block": [
+                1024,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.014019715224534502
+            },
+            {
+              "index": 4,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)1125899923621888, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)8, (int)4, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                88.417,
+                88.673,
+                88.672
+              ],
+              "median_us": 88.672,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 127,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.318431400714632
+            },
+            {
+              "index": 5,
+              "kernel": "void at::native::reduce_kernel<(int)128, (int)4, at::native::ReduceOp<c10::BFloat16, at::native::func_wrapper_t<c10::BFloat16, at::native::sum_functor<c10::BFloat16, float, c10::BFloat16>::operator ()(at::TensorIterator &)::[lambda(float, float) (instance 1)]>, unsigned int, c10::BFloat16, (int)4, (int)8>>(T3)",
+              "samples_us": [
+                4.832,
+                4.864,
+                4.384
+              ],
+              "median_us": 4.832,
+              "grid": [
+                32,
+                1,
+                1
+              ],
+              "block": [
+                64,
+                2,
+                1
+              ],
+              "registers": 54,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.01735227048282549
+            }
+          ],
+          "median_kernel_sum_us": 278.465,
+          "median_gpu_empty_intervals_us": 120.704,
+          "median_prefix_us": 53.49,
+          "median_suffix_us": 6.567
+        },
+        "gems": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "_moe_align_block_size_singleton_kernel",
+              "samples_us": [
+                0.992,
+                0.864,
+                0.992
+              ],
+              "median_us": 0.992,
+              "grid": [
+                8,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 16,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.0011536989892340812
+            },
+            {
+              "index": 1,
+              "kernel": "_unpack_w8a16_routing",
+              "samples_us": [
+                1.792,
+                1.376,
+                2.016
+              ],
+              "median_us": 1.792,
+              "grid": [
+                64,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 24,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.002084101399906727
+            },
+            {
+              "index": 2,
+              "kernel": "fused_moe_kernel_w8a16_gateup_silu",
+              "samples_us": [
+                637.505,
+                624.45,
+                636.418
+              ],
+              "median_us": 636.418,
+              "grid": [
+                8,
+                112,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 199,
+              "dynamic_shared_bytes": 16384,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.7401560517443301
+            },
+            {
+              "index": 3,
+              "kernel": "fused_moe_kernel_w8a16_down",
+              "samples_us": [
+                220.673,
+                219.616,
+                220.417
+              ],
+              "median_us": 220.417,
+              "grid": [
+                8,
+                64,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 72,
+              "dynamic_shared_bytes": 9216,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.2563456351915408
+            }
+          ],
+          "median_kernel_sum_us": 859.843,
+          "median_gpu_empty_intervals_us": 130.976,
+          "median_prefix_us": 96.395,
+          "median_suffix_us": 6.378
+        }
+      }
+    },
+    {
+      "case": "int8-T16-E8-H4096-I14336-K2",
+      "formal_gate": false,
+      "backends": {
+        "native": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "void vllm::moe::moe_align_block_size_small_batch_expert_kernel<long, (int)256>(const T1 *, int *, int *, int *, int *, int, int, unsigned long, int, int, bool, int *)",
+              "samples_us": [
+                3.232,
+                3.232,
+                3.36
+              ],
+              "median_us": 3.232,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                288,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 1092,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.006151772917352683
+            },
+            {
+              "index": 1,
+              "kernel": "void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<int>, std::array<char *, (unsigned long)1>>(int, T2, T3)",
+              "samples_us": [
+                0.864,
+                0.928,
+                1.024
+              ],
+              "median_us": 0.928,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 16,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.0017663506396359187
+            },
+            {
+              "index": 2,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)1125899923621888, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)8, (int)4, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                342.177,
+                342.305,
+                340.225
+              ],
+              "median_us": 342.177,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 127,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.6512980202787714
+            },
+            {
+              "index": 3,
+              "kernel": "void vllm::act_and_mul_kernel<c10::BFloat16, __nv_bfloat162, &vllm::silu_kernel<c10::BFloat16>, &vllm::packed_silu_kernel<__nv_bfloat162>, (bool)1, (bool)1, (bool)0, (bool)0>(T1 *, const T1 *, int, float, float, float)",
+              "samples_us": [
+                4.0,
+                4.32,
+                4.192
+              ],
+              "median_us": 4.192,
+              "grid": [
+                32,
+                1,
+                1
+              ],
+              "block": [
+                1024,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.007979032199734669
+            },
+            {
+              "index": 4,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)1125899923621888, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)8, (int)4, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                171.52,
+                169.472,
+                168.704
+              ],
+              "median_us": 169.472,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 127,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.3225721719831664
+            },
+            {
+              "index": 5,
+              "kernel": "void at::native::reduce_kernel<(int)128, (int)4, at::native::ReduceOp<c10::BFloat16, at::native::func_wrapper_t<c10::BFloat16, at::native::sum_functor<c10::BFloat16, float, c10::BFloat16>::operator ()(at::TensorIterator &)::[lambda(float, float) (instance 1)]>, unsigned int, c10::BFloat16, (int)4, (int)8>>(T3)",
+              "samples_us": [
+                5.121,
+                5.12,
+                5.184
+              ],
+              "median_us": 5.121,
+              "grid": [
+                128,
+                1,
+                1
+              ],
+              "block": [
+                64,
+                2,
+                1
+              ],
+              "registers": 54,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.009747286234456401
+            }
+          ],
+          "median_kernel_sum_us": 525.377,
+          "median_gpu_empty_intervals_us": 128.992,
+          "median_prefix_us": 55.647,
+          "median_suffix_us": 6.673
+        },
+        "gems": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "_moe_align_block_size_small_grouped_kernel",
+              "samples_us": [
+                4.192,
+                4.0,
+                4.0
+              ],
+              "median_us": 4.0,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 32,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.005505137669730276
+            },
+            {
+              "index": 1,
+              "kernel": "_unpack_w8a16_routing",
+              "samples_us": [
+                1.44,
+                1.568,
+                1.632
+              ],
+              "median_us": 1.568,
+              "grid": [
+                256,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 24,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.002158013966534268
+            },
+            {
+              "index": 2,
+              "kernel": "fused_moe_kernel_w8a16_gateup",
+              "samples_us": [
+                433.281,
+                433.761,
+                433.889
+              ],
+              "median_us": 433.761,
+              "grid": [
+                32,
+                448,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 72,
+              "dynamic_shared_bytes": 10240,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.5969785051899685
+            },
+            {
+              "index": 3,
+              "kernel": "silu_and_mul_kernel_kernel_rank_2",
+              "samples_us": [
+                9.984,
+                9.344,
+                9.376
+              ],
+              "median_us": 9.376,
+              "grid": [
+                7168,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 20,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.012904042697847765
+            },
+            {
+              "index": 4,
+              "kernel": "fused_moe_kernel_w8a16_down",
+              "samples_us": [
+                276.609,
+                278.145,
+                277.697
+              ],
+              "median_us": 277.697,
+              "grid": [
+                32,
+                32,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 110,
+              "dynamic_shared_bytes": 18432,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.38219005386777205
+            }
+          ],
+          "median_kernel_sum_us": 726.594,
+          "median_gpu_empty_intervals_us": 138.208,
+          "median_prefix_us": 100.342,
+          "median_suffix_us": 7.035
+        }
+      }
+    },
+    {
+      "case": "fp8-T1-E8-H4096-I14336-K2",
+      "formal_gate": false,
+      "backends": {
+        "native": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "void vllm::moe::moe_align_block_size_small_batch_expert_kernel<long, (int)256>(const T1 *, int *, int *, int *, int *, int, int, unsigned long, int, int, bool, int *)",
+              "samples_us": [
+                3.392,
+                3.169,
+                3.52
+              ],
+              "median_us": 3.392,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                288,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 1092,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.02367111663189041
+            },
+            {
+              "index": 1,
+              "kernel": "void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<int>, std::array<char *, (unsigned long)1>>(int, T2, T3)",
+              "samples_us": [
+                0.864,
+                0.832,
+                0.832
+              ],
+              "median_us": 0.832,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 16,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.005806122947444817
+            },
+            {
+              "index": 2,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)2814749767172868, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)8, (int)4, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                84.097,
+                83.776,
+                83.872
+              ],
+              "median_us": 83.872,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 120,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.5853018555866487
+            },
+            {
+              "index": 3,
+              "kernel": "void vllm::act_and_mul_kernel<c10::BFloat16, __nv_bfloat162, &vllm::silu_kernel<c10::BFloat16>, &vllm::packed_silu_kernel<__nv_bfloat162>, (bool)1, (bool)1, (bool)0, (bool)0>(T1 *, const T1 *, int, float, float, float)",
+              "samples_us": [
+                3.872,
+                3.872,
+                3.936
+              ],
+              "median_us": 3.872,
+              "grid": [
+                2,
+                1,
+                1
+              ],
+              "block": [
+                1024,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.02702080294772396
+            },
+            {
+              "index": 4,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)2814749767172868, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)4, (int)8, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                46.816,
+                47.072,
+                46.688
+              ],
+              "median_us": 46.816,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 124,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.3267060720042988
+            },
+            {
+              "index": 5,
+              "kernel": "void at::native::reduce_kernel<(int)128, (int)4, at::native::ReduceOp<c10::BFloat16, at::native::func_wrapper_t<c10::BFloat16, at::native::sum_functor<c10::BFloat16, float, c10::BFloat16>::operator ()(at::TensorIterator &)::[lambda(float, float) (instance 1)]>, unsigned int, c10::BFloat16, (int)4, (int)8>>(T3)",
+              "samples_us": [
+                4.64,
+                4.576,
+                4.448
+              ],
+              "median_us": 4.576,
+              "grid": [
+                8,
+                1,
+                1
+              ],
+              "block": [
+                64,
+                2,
+                1
+              ],
+              "registers": 54,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.03193367621094649
+            }
+          ],
+          "median_kernel_sum_us": 143.297,
+          "median_gpu_empty_intervals_us": 131.968,
+          "median_prefix_us": 58.886,
+          "median_suffix_us": 6.701
+        },
+        "gems": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "_moe_align_block_size_singleton_kernel",
+              "samples_us": [
+                1.056,
+                0.832,
+                1.024
+              ],
+              "median_us": 1.024,
+              "grid": [
+                2,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 16,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.003957457333663122
+            },
+            {
+              "index": 1,
+              "kernel": "_unpack_w8a16_routing",
+              "samples_us": [
+                1.408,
+                1.28,
+                1.504
+              ],
+              "median_us": 1.408,
+              "grid": [
+                16,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 20,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.005441503833786792
+            },
+            {
+              "index": 2,
+              "kernel": "fused_moe_kernel_w8a16_unified_moe",
+              "samples_us": [
+                262.209,
+                255.744,
+                256.224
+              ],
+              "median_us": 256.224,
+              "grid": [
+                2,
+                448,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 80,
+              "dynamic_shared_bytes": 4096,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.9902300272075191
+            }
+          ],
+          "median_kernel_sum_us": 258.752,
+          "median_gpu_empty_intervals_us": 140.705,
+          "median_prefix_us": 88.577,
+          "median_suffix_us": 6.268
+        }
+      }
+    },
+    {
+      "case": "fp8-T4-E8-H4096-I14336-K2",
+      "formal_gate": false,
+      "backends": {
+        "native": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "void vllm::moe::moe_align_block_size_small_batch_expert_kernel<long, (int)256>(const T1 *, int *, int *, int *, int *, int, int, unsigned long, int, int, bool, int *)",
+              "samples_us": [
+                3.392,
+                3.328,
+                3.456
+              ],
+              "median_us": 3.392,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                288,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 1092,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.009275438409393568
+            },
+            {
+              "index": 1,
+              "kernel": "void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<int>, std::array<char *, (unsigned long)1>>(int, T2, T3)",
+              "samples_us": [
+                0.832,
+                0.864,
+                0.864
+              ],
+              "median_us": 0.864,
+              "grid": [
+                1,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 16,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.00236261167031723
+            },
+            {
+              "index": 2,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)2814749767172868, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)8, (int)4, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                235.457,
+                235.04,
+                234.817
+              ],
+              "median_us": 235.04,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 120,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.6427178784622242
+            },
+            {
+              "index": 3,
+              "kernel": "void vllm::act_and_mul_kernel<c10::BFloat16, __nv_bfloat162, &vllm::silu_kernel<c10::BFloat16>, &vllm::packed_silu_kernel<__nv_bfloat162>, (bool)1, (bool)1, (bool)0, (bool)0>(T1 *, const T1 *, int, float, float, float)",
+              "samples_us": [
+                3.776,
+                3.808,
+                4.032
+              ],
+              "median_us": 3.808,
+              "grid": [
+                8,
+                1,
+                1
+              ],
+              "block": [
+                1024,
+                1,
+                1
+              ],
+              "registers": 31,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.010412992176583346
+            },
+            {
+              "index": 4,
+              "kernel": "void marlin_moe_wna16::Marlin<(long)1125899906909960, (long)2814749767172868, (long)1125899906909960, (long)1125899906909960, (int)128, (int)1, (int)8, (int)4, (bool)1, (int)4, (int)8, (bool)0>(const int4 *, const int4 *, int4 *, int4 *, const int4 *, const float *, const int4 *, const float *, const int4 *, const int *, const int *, const int *, const float *, int, bool, int, int, int, int *, bool, bool, bool)",
+              "samples_us": [
+                118.144,
+                116.897,
+                118.016
+              ],
+              "median_us": 118.016,
+              "grid": [
+                312,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 120,
+              "dynamic_shared_bytes": 57088,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.32271525333814605
+            },
+            {
+              "index": 5,
+              "kernel": "void at::native::reduce_kernel<(int)128, (int)4, at::native::ReduceOp<c10::BFloat16, at::native::func_wrapper_t<c10::BFloat16, at::native::sum_functor<c10::BFloat16, float, c10::BFloat16>::operator ()(at::TensorIterator &)::[lambda(float, float) (instance 1)]>, unsigned int, c10::BFloat16, (int)4, (int)8>>(T3)",
+              "samples_us": [
+                4.736,
+                4.384,
+                4.512
+              ],
+              "median_us": 4.512,
+              "grid": [
+                32,
+                1,
+                1
+              ],
+              "block": [
+                64,
+                2,
+                1
+              ],
+              "registers": 54,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.012338083167212199
+            }
+          ],
+          "median_kernel_sum_us": 365.697,
+          "median_gpu_empty_intervals_us": 127.392,
+          "median_prefix_us": 55.28,
+          "median_suffix_us": 6.215
+        },
+        "gems": {
+          "stages": [
+            {
+              "index": 0,
+              "kernel": "_moe_align_block_size_singleton_kernel",
+              "samples_us": [
+                0.992,
+                0.928,
+                0.992
+              ],
+              "median_us": 0.992,
+              "grid": [
+                8,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 16,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.0022512657696401378
+            },
+            {
+              "index": 1,
+              "kernel": "_unpack_w8a16_routing",
+              "samples_us": [
+                1.792,
+                1.76,
+                1.664
+              ],
+              "median_us": 1.76,
+              "grid": [
+                64,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 24,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.003994181204200245
+            },
+            {
+              "index": 2,
+              "kernel": "fused_moe_kernel_w8a16_gateup",
+              "samples_us": [
+                262.753,
+                262.305,
+                262.816
+              ],
+              "median_us": 262.753,
+              "grid": [
+                8,
+                224,
+                1
+              ],
+              "block": [
+                256,
+                1,
+                1
+              ],
+              "registers": 56,
+              "dynamic_shared_bytes": 34816,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.5962972124700152
+            },
+            {
+              "index": 3,
+              "kernel": "silu_and_mul_kernel_kernel_rank_2",
+              "samples_us": [
+                2.08,
+                2.08,
+                2.336
+              ],
+              "median_us": 2.08,
+              "grid": [
+                896,
+                1,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 20,
+              "dynamic_shared_bytes": 0,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.004720395968600289
+            },
+            {
+              "index": 4,
+              "kernel": "fused_moe_kernel_w8a16_down",
+              "samples_us": [
+                173.025,
+                172.672,
+                172.833
+              ],
+              "median_us": 172.833,
+              "grid": [
+                8,
+                64,
+                1
+              ],
+              "block": [
+                128,
+                1,
+                1
+              ],
+              "registers": 63,
+              "dynamic_shared_bytes": 9216,
+              "local_memory_per_thread": 0,
+              "share_of_median_kernel_sum": 0.39223086367360277
+            }
+          ],
+          "median_kernel_sum_us": 440.641,
+          "median_gpu_empty_intervals_us": 125.729,
+          "median_prefix_us": 76.343,
+          "median_suffix_us": 6.588
+        }
+      }
+    }
+  ]
+}

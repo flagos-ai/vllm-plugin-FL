@@ -1,0 +1,12 @@
+{
+  "formal_gate": false,
+  "identity_cases": 14,
+  "accuracy_cases": 14,
+  "max_diff": 0.03223933279514313,
+  "profile_ranges": 30,
+  "post_trace_cases": 5,
+  "report_bytes": 244150,
+  "report_sha256": "1b3bd90eae3a2575c55178726f6651e3a8ded876ebe0784860b0b95ec4a78548",
+  "source_yaml_compiler_hashes_match": true,
+  "qualification": "PASS"
+}

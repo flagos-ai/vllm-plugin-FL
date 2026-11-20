@@ -1,0 +1,170 @@
+[
+  {
+    "precision": "int8",
+    "shape": [
+      1,
+      4,
+      512,
+      512,
+      2
+    ],
+    "max_diff": 0.007972333580255508,
+    "profile_selected": false
+  },
+  {
+    "precision": "int8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.004793734289705753,
+    "profile_selected": true
+  },
+  {
+    "precision": "int8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.004344399552792311,
+    "profile_selected": true
+  },
+  {
+    "precision": "int8",
+    "shape": [
+      16,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.003019393654540181,
+    "profile_selected": true
+  },
+  {
+    "precision": "int8",
+    "shape": [
+      64,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.003048928454518318,
+    "profile_selected": false
+  },
+  {
+    "precision": "int8",
+    "shape": [
+      256,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.004416962619870901,
+    "profile_selected": false
+  },
+  {
+    "precision": "int8",
+    "shape": [
+      1024,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.004452146589756012,
+    "profile_selected": false
+  },
+  {
+    "precision": "fp8",
+    "shape": [
+      1,
+      4,
+      512,
+      512,
+      2
+    ],
+    "max_diff": 0.008043487556278706,
+    "profile_selected": false
+  },
+  {
+    "precision": "fp8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.03223933279514313,
+    "profile_selected": true
+  },
+  {
+    "precision": "fp8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.005031808279454708,
+    "profile_selected": true
+  },
+  {
+    "precision": "fp8",
+    "shape": [
+      16,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.005176147911697626,
+    "profile_selected": false
+  },
+  {
+    "precision": "fp8",
+    "shape": [
+      64,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.005181437358260155,
+    "profile_selected": false
+  },
+  {
+    "precision": "fp8",
+    "shape": [
+      256,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.005145757459104061,
+    "profile_selected": false
+  },
+  {
+    "precision": "fp8",
+    "shape": [
+      1024,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "max_diff": 0.004910568241029978,
+    "profile_selected": false
+  }
+]

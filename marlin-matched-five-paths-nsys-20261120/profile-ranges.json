@@ -1,0 +1,392 @@
+[
+  {
+    "label": "marlin-five/int8-T1-E8-H4096-I14336-K2/pair0/native",
+    "precision": "int8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T1-E8-H4096-I14336-K2/pair0/gems",
+    "precision": "int8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/int8-T1-E8-H4096-I14336-K2/pair1/gems",
+    "precision": "int8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/int8-T1-E8-H4096-I14336-K2/pair1/native",
+    "precision": "int8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T1-E8-H4096-I14336-K2/pair2/native",
+    "precision": "int8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T1-E8-H4096-I14336-K2/pair2/gems",
+    "precision": "int8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/int8-T4-E8-H4096-I14336-K2/pair0/native",
+    "precision": "int8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T4-E8-H4096-I14336-K2/pair0/gems",
+    "precision": "int8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/int8-T4-E8-H4096-I14336-K2/pair1/gems",
+    "precision": "int8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/int8-T4-E8-H4096-I14336-K2/pair1/native",
+    "precision": "int8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T4-E8-H4096-I14336-K2/pair2/native",
+    "precision": "int8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T4-E8-H4096-I14336-K2/pair2/gems",
+    "precision": "int8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/int8-T16-E8-H4096-I14336-K2/pair0/native",
+    "precision": "int8",
+    "shape": [
+      16,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T16-E8-H4096-I14336-K2/pair0/gems",
+    "precision": "int8",
+    "shape": [
+      16,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/int8-T16-E8-H4096-I14336-K2/pair1/gems",
+    "precision": "int8",
+    "shape": [
+      16,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/int8-T16-E8-H4096-I14336-K2/pair1/native",
+    "precision": "int8",
+    "shape": [
+      16,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T16-E8-H4096-I14336-K2/pair2/native",
+    "precision": "int8",
+    "shape": [
+      16,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/int8-T16-E8-H4096-I14336-K2/pair2/gems",
+    "precision": "int8",
+    "shape": [
+      16,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/fp8-T1-E8-H4096-I14336-K2/pair0/native",
+    "precision": "fp8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/fp8-T1-E8-H4096-I14336-K2/pair0/gems",
+    "precision": "fp8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/fp8-T1-E8-H4096-I14336-K2/pair1/gems",
+    "precision": "fp8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/fp8-T1-E8-H4096-I14336-K2/pair1/native",
+    "precision": "fp8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/fp8-T1-E8-H4096-I14336-K2/pair2/native",
+    "precision": "fp8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/fp8-T1-E8-H4096-I14336-K2/pair2/gems",
+    "precision": "fp8",
+    "shape": [
+      1,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/fp8-T4-E8-H4096-I14336-K2/pair0/native",
+    "precision": "fp8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/fp8-T4-E8-H4096-I14336-K2/pair0/gems",
+    "precision": "fp8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 0,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/fp8-T4-E8-H4096-I14336-K2/pair1/gems",
+    "precision": "fp8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "gems"
+  },
+  {
+    "label": "marlin-five/fp8-T4-E8-H4096-I14336-K2/pair1/native",
+    "precision": "fp8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 1,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/fp8-T4-E8-H4096-I14336-K2/pair2/native",
+    "precision": "fp8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "native"
+  },
+  {
+    "label": "marlin-five/fp8-T4-E8-H4096-I14336-K2/pair2/gems",
+    "precision": "fp8",
+    "shape": [
+      4,
+      8,
+      4096,
+      14336,
+      2
+    ],
+    "pair": 2,
+    "backend": "gems"
+  }
+]

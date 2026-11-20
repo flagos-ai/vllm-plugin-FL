@@ -1,0 +1,1620 @@
+{
+  "phase": "after unchanged helper returned; capture stopped and qualification complete",
+  "formal_gate": false,
+  "new_operator_calls": 0,
+  "new_rng_calls": 0,
+  "added_device_transfers": "selected5 topk_ids and topk_weights to CPU only, after capture",
+  "qualification_sha256": "1850daa5e0d9bfd90d54fae5b8739914ad82c2db0de4f51d4074e9dd4973c50d",
+  "frozen_profile_path": "/probe/profile-five.py",
+  "frozen_profile_sha256": "985fdafbe4cdd020bf1d7b5cb93414a565df0c94cfb99823f36a79dbbf71c5d5",
+  "records": [
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "top_k": 2,
+      "route_ids": [
+        [
+          5,
+          4
+        ]
+      ],
+      "route_weights": [
+        [
+          0.6381234526634216,
+          0.36187657713890076
+        ]
+      ],
+      "expert_route_counts": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      "expert_route_indices": [
+        [],
+        [],
+        [],
+        [],
+        [
+          1
+        ],
+        [
+          0
+        ],
+        [],
+        []
+      ],
+      "nonempty_experts": 2,
+      "gems_weight_input_slots": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "native_marlin_weight_input_slots": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "input_metadata": {
+        "hidden_states": {
+          "tuple_slot": 0,
+          "shape": [
+            1,
+            4096
+          ],
+          "stride": [
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 8192
+        },
+        "w1_q_wna16": {
+          "tuple_slot": 1,
+          "shape": [
+            8,
+            28672,
+            4096
+          ],
+          "stride": [
+            117440512,
+            4096,
+            1
+          ],
+          "dtype": "torch.uint8",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_wna16": {
+          "tuple_slot": 2,
+          "shape": [
+            8,
+            4096,
+            14336
+          ],
+          "stride": [
+            58720256,
+            14336,
+            1
+          ],
+          "dtype": "torch.uint8",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_wna16": {
+          "tuple_slot": 3,
+          "shape": [
+            8,
+            28672,
+            32
+          ],
+          "stride": [
+            917504,
+            32,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_wna16": {
+          "tuple_slot": 4,
+          "shape": [
+            8,
+            4096,
+            112
+          ],
+          "stride": [
+            458752,
+            112,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "w1_q_marlin": {
+          "tuple_slot": 5,
+          "shape": [
+            8,
+            256,
+            114688
+          ],
+          "stride": [
+            29360128,
+            114688,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_marlin": {
+          "tuple_slot": 6,
+          "shape": [
+            8,
+            896,
+            16384
+          ],
+          "stride": [
+            14680064,
+            16384,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_marlin": {
+          "tuple_slot": 7,
+          "shape": [
+            8,
+            32,
+            28672
+          ],
+          "stride": [
+            917504,
+            28672,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_marlin": {
+          "tuple_slot": 8,
+          "shape": [
+            8,
+            112,
+            4096
+          ],
+          "stride": [
+            458752,
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "topk_weights": {
+          "tuple_slot": 9,
+          "shape": [
+            1,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.float32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 8
+        },
+        "topk_ids": {
+          "tuple_slot": 10,
+          "shape": [
+            1,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.int64",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 16
+        }
+      },
+      "gems_routing_derived": {
+        "kind": "scalar route GEMV; no shared routing adapter",
+        "route_programs": 2,
+        "block_m": null,
+        "expert_counts_are_unique_weight_reuse_opportunity": true
+      },
+      "native_selected_block_m": "unknown; inspect installed source and captured specialization"
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "top_k": 2,
+      "route_ids": [
+        [
+          4,
+          3
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          4,
+          0
+        ]
+      ],
+      "route_weights": [
+        [
+          0.5352998971939087,
+          0.4647001326084137
+        ],
+        [
+          0.7660638689994812,
+          0.23393617570400238
+        ],
+        [
+          0.6343806982040405,
+          0.3656193017959595
+        ],
+        [
+          0.6014040112495422,
+          0.39859598875045776
+        ]
+      ],
+      "expert_route_counts": [
+        2,
+        0,
+        2,
+        1,
+        3,
+        0,
+        0,
+        0
+      ],
+      "expert_route_indices": [
+        [
+          2,
+          7
+        ],
+        [],
+        [
+          3,
+          5
+        ],
+        [
+          1
+        ],
+        [
+          0,
+          4,
+          6
+        ],
+        [],
+        [],
+        []
+      ],
+      "nonempty_experts": 4,
+      "gems_weight_input_slots": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "native_marlin_weight_input_slots": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "input_metadata": {
+        "hidden_states": {
+          "tuple_slot": 0,
+          "shape": [
+            4,
+            4096
+          ],
+          "stride": [
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 32768
+        },
+        "w1_q_wna16": {
+          "tuple_slot": 1,
+          "shape": [
+            8,
+            28672,
+            4096
+          ],
+          "stride": [
+            117440512,
+            4096,
+            1
+          ],
+          "dtype": "torch.uint8",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_wna16": {
+          "tuple_slot": 2,
+          "shape": [
+            8,
+            4096,
+            14336
+          ],
+          "stride": [
+            58720256,
+            14336,
+            1
+          ],
+          "dtype": "torch.uint8",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_wna16": {
+          "tuple_slot": 3,
+          "shape": [
+            8,
+            28672,
+            32
+          ],
+          "stride": [
+            917504,
+            32,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_wna16": {
+          "tuple_slot": 4,
+          "shape": [
+            8,
+            4096,
+            112
+          ],
+          "stride": [
+            458752,
+            112,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "w1_q_marlin": {
+          "tuple_slot": 5,
+          "shape": [
+            8,
+            256,
+            114688
+          ],
+          "stride": [
+            29360128,
+            114688,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_marlin": {
+          "tuple_slot": 6,
+          "shape": [
+            8,
+            896,
+            16384
+          ],
+          "stride": [
+            14680064,
+            16384,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_marlin": {
+          "tuple_slot": 7,
+          "shape": [
+            8,
+            32,
+            28672
+          ],
+          "stride": [
+            917504,
+            28672,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_marlin": {
+          "tuple_slot": 8,
+          "shape": [
+            8,
+            112,
+            4096
+          ],
+          "stride": [
+            458752,
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "topk_weights": {
+          "tuple_slot": 9,
+          "shape": [
+            4,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.float32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 32
+        },
+        "topk_ids": {
+          "tuple_slot": 10,
+          "shape": [
+            4,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.int64",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 64
+        }
+      },
+      "gems_routing_derived": {
+        "kind": "singleton: one padded block per route",
+        "block_m": 4,
+        "host_capacity_rows": 32,
+        "launched_m_blocks": 8,
+        "effective_m_blocks": 8,
+        "early_return_m_blocks": 0,
+        "effective_padded_rows": 32,
+        "useful_rows": 8,
+        "useful_row_fraction_of_effective_padding": 0.25,
+        "useful_row_fraction_of_host_capacity": 0.25,
+        "note": "Derived from frozen routing source and retained IDs; no second GPU routing execution."
+      },
+      "native_selected_block_m": "unknown; inspect installed source and captured specialization"
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "top_k": 2,
+      "route_ids": [
+        [
+          7,
+          4
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          3,
+          5
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          0,
+          7
+        ],
+        [
+          7,
+          1
+        ]
+      ],
+      "route_weights": [
+        [
+          0.5656237006187439,
+          0.4343763291835785
+        ],
+        [
+          0.5966832041740417,
+          0.40331682562828064
+        ],
+        [
+          0.5032756924629211,
+          0.49672427773475647
+        ],
+        [
+          0.8003270030021667,
+          0.19967299699783325
+        ],
+        [
+          0.5224946737289429,
+          0.47750529646873474
+        ],
+        [
+          0.6778817176818848,
+          0.32211825251579285
+        ],
+        [
+          0.7439375519752502,
+          0.25606241822242737
+        ],
+        [
+          0.6711829900741577,
+          0.3288169801235199
+        ],
+        [
+          0.6036978363990784,
+          0.396302193403244
+        ],
+        [
+          0.5630038976669312,
+          0.43699613213539124
+        ],
+        [
+          0.5891405344009399,
+          0.41085946559906006
+        ],
+        [
+          0.5084218978881836,
+          0.4915781319141388
+        ],
+        [
+          0.5008220076560974,
+          0.4991779625415802
+        ],
+        [
+          0.6523489356040955,
+          0.34765106439590454
+        ],
+        [
+          0.520056426525116,
+          0.47994354367256165
+        ],
+        [
+          0.8661840558052063,
+          0.1338159739971161
+        ]
+      ],
+      "expert_route_counts": [
+        5,
+        5,
+        4,
+        3,
+        4,
+        7,
+        1,
+        3
+      ],
+      "expert_route_indices": [
+        [
+          15,
+          17,
+          23,
+          27,
+          28
+        ],
+        [
+          3,
+          7,
+          16,
+          21,
+          31
+        ],
+        [
+          4,
+          9,
+          10,
+          12
+        ],
+        [
+          13,
+          18,
+          22
+        ],
+        [
+          1,
+          5,
+          25,
+          26
+        ],
+        [
+          2,
+          6,
+          8,
+          11,
+          19,
+          20,
+          24
+        ],
+        [
+          14
+        ],
+        [
+          0,
+          29,
+          30
+        ]
+      ],
+      "nonempty_experts": 8,
+      "gems_weight_input_slots": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "native_marlin_weight_input_slots": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "input_metadata": {
+        "hidden_states": {
+          "tuple_slot": 0,
+          "shape": [
+            16,
+            4096
+          ],
+          "stride": [
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 131072
+        },
+        "w1_q_wna16": {
+          "tuple_slot": 1,
+          "shape": [
+            8,
+            28672,
+            4096
+          ],
+          "stride": [
+            117440512,
+            4096,
+            1
+          ],
+          "dtype": "torch.uint8",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_wna16": {
+          "tuple_slot": 2,
+          "shape": [
+            8,
+            4096,
+            14336
+          ],
+          "stride": [
+            58720256,
+            14336,
+            1
+          ],
+          "dtype": "torch.uint8",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_wna16": {
+          "tuple_slot": 3,
+          "shape": [
+            8,
+            28672,
+            32
+          ],
+          "stride": [
+            917504,
+            32,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_wna16": {
+          "tuple_slot": 4,
+          "shape": [
+            8,
+            4096,
+            112
+          ],
+          "stride": [
+            458752,
+            112,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "w1_q_marlin": {
+          "tuple_slot": 5,
+          "shape": [
+            8,
+            256,
+            114688
+          ],
+          "stride": [
+            29360128,
+            114688,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_marlin": {
+          "tuple_slot": 6,
+          "shape": [
+            8,
+            896,
+            16384
+          ],
+          "stride": [
+            14680064,
+            16384,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_marlin": {
+          "tuple_slot": 7,
+          "shape": [
+            8,
+            32,
+            28672
+          ],
+          "stride": [
+            917504,
+            28672,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_marlin": {
+          "tuple_slot": 8,
+          "shape": [
+            8,
+            112,
+            4096
+          ],
+          "stride": [
+            458752,
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "topk_weights": {
+          "tuple_slot": 9,
+          "shape": [
+            16,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.float32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 128
+        },
+        "topk_ids": {
+          "tuple_slot": 10,
+          "shape": [
+            16,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.int64",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 256
+        }
+      },
+      "gems_routing_derived": {
+        "kind": "small_grouped: actual expert count, padded capacity grid",
+        "block_m": 8,
+        "host_capacity_rows": 256,
+        "launched_m_blocks": 32,
+        "effective_m_blocks": 8,
+        "early_return_m_blocks": 24,
+        "effective_padded_rows": 64,
+        "useful_rows": 32,
+        "useful_row_fraction_of_effective_padding": 0.5,
+        "useful_row_fraction_of_host_capacity": 0.125,
+        "note": "Derived from frozen routing source and retained IDs; no second GPU routing execution."
+      },
+      "native_selected_block_m": "unknown; inspect installed source and captured specialization"
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "top_k": 2,
+      "route_ids": [
+        [
+          5,
+          4
+        ]
+      ],
+      "route_weights": [
+        [
+          0.6381234526634216,
+          0.36187657713890076
+        ]
+      ],
+      "expert_route_counts": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      "expert_route_indices": [
+        [],
+        [],
+        [],
+        [],
+        [
+          1
+        ],
+        [
+          0
+        ],
+        [],
+        []
+      ],
+      "nonempty_experts": 2,
+      "gems_weight_input_slots": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "native_marlin_weight_input_slots": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "input_metadata": {
+        "hidden_states": {
+          "tuple_slot": 0,
+          "shape": [
+            1,
+            4096
+          ],
+          "stride": [
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 8192
+        },
+        "w1_q_marlin": {
+          "tuple_slot": 1,
+          "shape": [
+            8,
+            256,
+            114688
+          ],
+          "stride": [
+            29360128,
+            114688,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_marlin": {
+          "tuple_slot": 2,
+          "shape": [
+            8,
+            896,
+            16384
+          ],
+          "stride": [
+            14680064,
+            16384,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_marlin": {
+          "tuple_slot": 3,
+          "shape": [
+            8,
+            32,
+            28672
+          ],
+          "stride": [
+            917504,
+            28672,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_marlin": {
+          "tuple_slot": 4,
+          "shape": [
+            8,
+            112,
+            4096
+          ],
+          "stride": [
+            458752,
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "w1_q_fp8": {
+          "tuple_slot": 5,
+          "shape": [
+            8,
+            28672,
+            4096
+          ],
+          "stride": [
+            117440512,
+            4096,
+            1
+          ],
+          "dtype": "torch.float8_e4m3fn",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_fp8": {
+          "tuple_slot": 6,
+          "shape": [
+            8,
+            4096,
+            14336
+          ],
+          "stride": [
+            58720256,
+            14336,
+            1
+          ],
+          "dtype": "torch.float8_e4m3fn",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_fp8": {
+          "tuple_slot": 7,
+          "shape": [
+            8,
+            28672,
+            32
+          ],
+          "stride": [
+            917504,
+            32,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_fp8": {
+          "tuple_slot": 8,
+          "shape": [
+            8,
+            4096,
+            112
+          ],
+          "stride": [
+            458752,
+            112,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "topk_weights": {
+          "tuple_slot": 9,
+          "shape": [
+            1,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.float32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 8
+        },
+        "topk_ids": {
+          "tuple_slot": 10,
+          "shape": [
+            1,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.int64",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 16
+        }
+      },
+      "gems_routing_derived": {
+        "kind": "unified split-I",
+        "adapter": {
+          "kind": "singleton routing preparation",
+          "block_m": 2,
+          "note": "Adapter metadata only; this does not specify the unified kernel grid."
+        },
+        "actual_i_tile": "unknown; correlate exported compiled resources",
+        "partials_per_output": "unknown; depends on actual I tile and route count",
+        "note": "CTA count includes the I-slice dimension; adapter blocks are not reported as kernel blocks."
+      },
+      "native_selected_block_m": "unknown; inspect installed source and captured specialization"
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "top_k": 2,
+      "route_ids": [
+        [
+          4,
+          7
+        ],
+        [
+          2,
+          7
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          5
+        ]
+      ],
+      "route_weights": [
+        [
+          0.7080867886543274,
+          0.2919131815433502
+        ],
+        [
+          0.8050637245178223,
+          0.19493627548217773
+        ],
+        [
+          0.5193301439285278,
+          0.48066985607147217
+        ],
+        [
+          0.7426378130912781,
+          0.25736215710639954
+        ]
+      ],
+      "expert_route_counts": [
+        1,
+        0,
+        1,
+        1,
+        2,
+        1,
+        0,
+        2
+      ],
+      "expert_route_indices": [
+        [
+          5
+        ],
+        [],
+        [
+          2
+        ],
+        [
+          4
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          7
+        ],
+        [],
+        [
+          1,
+          3
+        ]
+      ],
+      "nonempty_experts": 6,
+      "gems_weight_input_slots": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "native_marlin_weight_input_slots": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "input_metadata": {
+        "hidden_states": {
+          "tuple_slot": 0,
+          "shape": [
+            4,
+            4096
+          ],
+          "stride": [
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 32768
+        },
+        "w1_q_marlin": {
+          "tuple_slot": 1,
+          "shape": [
+            8,
+            256,
+            114688
+          ],
+          "stride": [
+            29360128,
+            114688,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_marlin": {
+          "tuple_slot": 2,
+          "shape": [
+            8,
+            896,
+            16384
+          ],
+          "stride": [
+            14680064,
+            16384,
+            1
+          ],
+          "dtype": "torch.int32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_marlin": {
+          "tuple_slot": 3,
+          "shape": [
+            8,
+            32,
+            28672
+          ],
+          "stride": [
+            917504,
+            28672,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_marlin": {
+          "tuple_slot": 4,
+          "shape": [
+            8,
+            112,
+            4096
+          ],
+          "stride": [
+            458752,
+            4096,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "w1_q_fp8": {
+          "tuple_slot": 5,
+          "shape": [
+            8,
+            28672,
+            4096
+          ],
+          "stride": [
+            117440512,
+            4096,
+            1
+          ],
+          "dtype": "torch.float8_e4m3fn",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 939524096
+        },
+        "w2_q_fp8": {
+          "tuple_slot": 6,
+          "shape": [
+            8,
+            4096,
+            14336
+          ],
+          "stride": [
+            58720256,
+            14336,
+            1
+          ],
+          "dtype": "torch.float8_e4m3fn",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 469762048
+        },
+        "w1_scale_fp8": {
+          "tuple_slot": 7,
+          "shape": [
+            8,
+            28672,
+            32
+          ],
+          "stride": [
+            917504,
+            32,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 14680064
+        },
+        "w2_scale_fp8": {
+          "tuple_slot": 8,
+          "shape": [
+            8,
+            4096,
+            112
+          ],
+          "stride": [
+            458752,
+            112,
+            1
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 7340032
+        },
+        "topk_weights": {
+          "tuple_slot": 9,
+          "shape": [
+            4,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.float32",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 32
+        },
+        "topk_ids": {
+          "tuple_slot": 10,
+          "shape": [
+            4,
+            2
+          ],
+          "stride": [
+            2,
+            1
+          ],
+          "dtype": "torch.int64",
+          "device": "cuda:0",
+          "layout": "torch.strided",
+          "contiguous": true,
+          "storage_offset": 0,
+          "logical_bytes": 64
+        }
+      },
+      "gems_routing_derived": {
+        "kind": "singleton: one padded block per route",
+        "block_m": 4,
+        "host_capacity_rows": 32,
+        "launched_m_blocks": 8,
+        "effective_m_blocks": 8,
+        "early_return_m_blocks": 0,
+        "effective_padded_rows": 32,
+        "useful_rows": 8,
+        "useful_row_fraction_of_effective_padding": 0.25,
+        "useful_row_fraction_of_host_capacity": 0.25,
+        "note": "Derived from frozen routing source and retained IDs; no second GPU routing execution."
+      },
+      "native_selected_block_m": "unknown; inspect installed source and captured specialization"
+    }
+  ]
+}
