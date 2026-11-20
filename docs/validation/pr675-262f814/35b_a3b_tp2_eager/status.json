@@ -1,6 +1,0 @@
-{
-  "case": "35b_a3b_tp2_eager",
-  "devices": "4,5",
-  "client_exit": 0,
-  "server_exit_before_cleanup": null
-}

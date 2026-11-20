@@ -19,8 +19,6 @@
 extend-ignore-re = [
     # Hex-encoded strings and hashes
     "[0-9a-fA-F]{32,}",
-    # Machine-generated completion IDs in unmodified validation evidence
-    '\bchatcmpl-[0-9a-fA-F]+\b',
 ]
 
 [default.extend-identifiers]

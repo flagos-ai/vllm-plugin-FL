@@ -1,3 +1,0 @@
- pytest-regex selected 13 tests to run for regex: .*
-............                                                             [100%]
-12 passed, 1 deselected in 0.10s
