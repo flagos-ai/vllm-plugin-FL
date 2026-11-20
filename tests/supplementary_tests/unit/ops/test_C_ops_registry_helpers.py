@@ -187,7 +187,9 @@ class TestOptionalNativeOnlyOps:
         # None of the excluded ops should be registered by the fragment path.
         assert _OPTIONAL_NATIVE_ONLY_OPS & defined  # the set is meaningful
         # And _C_ops_present ignores them (they are absent on empty wheels).
-        assert registry._C_ops_present() is False or True  # no crash either way
+        # CPU-only environments have no compiled wheel, so _C is absent; a
+        # GPU build would see True and this pin would fail loudly there.
+        assert registry._C_ops_present() is False
 
     @pytest.mark.supplementary
     def test_optional_set_members(self):
