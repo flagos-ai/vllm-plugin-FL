@@ -24,6 +24,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 | Model | Status | Reference |
 |-------|--------|-----------|
+| MiniMax-M3 (BF16) | Merging (Ascend A3; two-node DP2 × TP16 / EP32) | [example](./examples/minimax_m3_bf16.md) |
 | Qwen3.5-397B-A17B | Supported | [example](./examples/qwen3_5_offline_inference.py) |
 | Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
 | Qwen3.8-Flash-Next / Qwen4Exp | Supported | [implementation](./vllm_fl/models/qwen3_8_flash_next/) |

@@ -84,7 +84,7 @@ def register_builtins(registry: OpRegistry) -> None:
         ),
     ]
 
-    for op_name in ("gdn_decode", "gdn_prefill"):
+    for op_name in ("gdn_decode", "gdn_prefill", "bf16_grouped_experts", "minimax_m3_kernels", "topk_bias"):
         impls.append(OpImpl(
             op_name=op_name,
             impl_id="vendor.ascend",

@@ -24,16 +24,23 @@ def add_fused_quantization_mapping(model_cls: type) -> None:
 
 
 def register_minimax_m3_support() -> None:
-    """Keep model imports lazy and register only available CUDA architectures."""
+    """Keep vendor model imports lazy and register available architectures."""
     from vllm.model_executor.models import ModelRegistry
     from vllm.platforms import current_platform
 
-    if not current_platform.is_cuda():
+    if (
+        getattr(current_platform, "vendor_name", None) == "ascend"
+        and current_platform.device_type == "npu"
+    ):
+        module = "vllm_fl.models.minimax_m3_ascend"
+    elif current_platform.is_cuda():
+        module = "vllm_fl.models.minimax_m3"
+    else:
         return
 
     supported = ModelRegistry.get_supported_archs()
     for architecture in _ARCHITECTURES:
         if architecture in supported:
             ModelRegistry.register_model(
-                architecture, f"vllm_fl.models.minimax_m3:{architecture}"
+                architecture, f"{module}:{architecture}"
             )
