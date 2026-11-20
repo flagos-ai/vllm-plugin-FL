@@ -1,0 +1,187 @@
+{
+  "reviewer": "root",
+  "raw_files_checked": 74,
+  "raw_byte_hashes_match": true,
+  "full14_order_and_154_fingerprints_match": true,
+  "finite_latency_ratio_recomputed": true,
+  "numerical_cases": 14,
+  "performance_passed": 9,
+  "performance_total": 14,
+  "source_check_exit": 0,
+  "probe_exit": 0,
+  "aggregate_and_task_exit": 2,
+  "cleanup_exit": 0,
+  "result": "FAIL_PERFORMANCE",
+  "metrics": [
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      "median": 1.0920656194250136,
+      "pass": true
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 0.8089745415932871,
+      "pass": false
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 0.3292028466226474,
+      "pass": false
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 0.751382539001576,
+      "pass": false
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 1.0770643750548292,
+      "pass": true
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 1.4638712379641243,
+      "pass": true
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 1.6089921167187458,
+      "pass": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      "median": 1.0654722783653316,
+      "pass": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 0.5658803644384788,
+      "pass": false
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 0.8134228677367635,
+      "pass": false
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 0.9814936409757453,
+      "pass": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 1.3115757916257673,
+      "pass": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 1.6027350349462837,
+      "pass": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median": 1.4937220348682196,
+      "pass": true
+    }
+  ],
+  "raw_archive_sha256": "04a253fce1823ee3c467a82486e43565be3a3333b84f972f7e2fef2c50724e53",
+  "boundary": "A fresh complete compiler baseline; not evidence that all Marlin Gate conditions passed."
+}

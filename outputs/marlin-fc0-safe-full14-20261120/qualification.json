@@ -1,0 +1,11 @@
+{
+  "status": "ALL14_IDENTITIES_AND_SLOW5_METADATA_COMPLETE",
+  "input_records": 14,
+  "full_tensor_fingerprints": 154,
+  "original_order": true,
+  "slow5_actual_winner_records": 5,
+  "original_probes_unchanged": true,
+  "native_actual_binary_identity_recorded": true,
+  "new_g1_runtime": "new-g1-runtime.json",
+  "performance_aggregation": "separate; no pass inferred here"
+}

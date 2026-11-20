@@ -1,0 +1,255 @@
+[
+  {
+    "case": "int8-T1",
+    "launches": [
+      {
+        "wrapper": [
+          "_w8a16_int8_route_gemv"
+        ],
+        "kernel": "_w8a16_int8_route_gemv",
+        "selected_parameters": {
+          "num_warps": 8,
+          "num_stages": 1,
+          "num_ctas": 1,
+          "BLOCK_N": 16,
+          "BLOCK_K": 128
+        },
+        "metadata_stages": 1,
+        "metadata_warps": 8,
+        "n_regs": 64,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 0
+        }
+      },
+      {
+        "wrapper": [
+          "_w8a16_int8_route_gemv"
+        ],
+        "kernel": "_w8a16_int8_route_gemv",
+        "selected_parameters": {
+          "num_warps": 8,
+          "num_stages": 1,
+          "num_ctas": 1,
+          "BLOCK_N": 16,
+          "BLOCK_K": 128
+        },
+        "metadata_stages": 1,
+        "metadata_warps": 8,
+        "n_regs": 39,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 0
+        }
+      }
+    ]
+  },
+  {
+    "case": "int8-T4",
+    "launches": [
+      {
+        "wrapper": [
+          "_fused_moe_kernel_w8a16_gateup_silu_int8"
+        ],
+        "kernel": "fused_moe_kernel_w8a16_gateup_silu",
+        "selected_parameters": {
+          "num_warps": 4,
+          "num_stages": 1,
+          "num_ctas": 1,
+          "BLOCK_SIZE_N": 128,
+          "BLOCK_SIZE_K": 128
+        },
+        "metadata_stages": 1,
+        "metadata_warps": 4,
+        "n_regs": 199,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 32
+        }
+      },
+      {
+        "wrapper": [
+          "_fused_moe_kernel_w8a16_down_int8"
+        ],
+        "kernel": "fused_moe_kernel_w8a16_down",
+        "selected_parameters": {
+          "num_warps": 4,
+          "num_stages": 1,
+          "num_ctas": 1,
+          "BLOCK_SIZE_N": 64,
+          "BLOCK_SIZE_K": 128
+        },
+        "metadata_stages": 1,
+        "metadata_warps": 4,
+        "n_regs": 72,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 8
+        }
+      }
+    ]
+  },
+  {
+    "case": "int8-T16",
+    "launches": [
+      {
+        "wrapper": [
+          "_fused_moe_kernel_w8a16_gateup_int8"
+        ],
+        "kernel": "fused_moe_kernel_w8a16_gateup",
+        "selected_parameters": {
+          "num_warps": 4,
+          "num_stages": 1,
+          "num_ctas": 1,
+          "BLOCK_SIZE_N": 64,
+          "BLOCK_SIZE_K": 128
+        },
+        "metadata_stages": 1,
+        "metadata_warps": 4,
+        "n_regs": 72,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 8
+        }
+      },
+      {
+        "wrapper": [],
+        "kernel": "silu_and_mul_kernel_kernel_rank_2",
+        "selected_parameters": {},
+        "metadata_stages": 3,
+        "metadata_warps": 4,
+        "n_regs": 20,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 0
+        }
+      },
+      {
+        "wrapper": [
+          "_fused_moe_kernel_w8a16_down_int8"
+        ],
+        "kernel": "fused_moe_kernel_w8a16_down",
+        "selected_parameters": {
+          "num_warps": 4,
+          "num_stages": 1,
+          "num_ctas": 1,
+          "BLOCK_SIZE_N": 128,
+          "BLOCK_SIZE_K": 128
+        },
+        "metadata_stages": 1,
+        "metadata_warps": 4,
+        "n_regs": 110,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 16
+        }
+      }
+    ]
+  },
+  {
+    "case": "fp8-T1",
+    "launches": [
+      {
+        "wrapper": [
+          "_fused_moe_kernel_w8a16_unified_moe_fp8"
+        ],
+        "kernel": "fused_moe_kernel_w8a16_unified_moe",
+        "selected_parameters": {
+          "num_warps": 4,
+          "num_stages": 1,
+          "num_ctas": 1,
+          "BLOCK_SIZE_N": 128,
+          "BLOCK_I_TILE": 32,
+          "BLOCK_K_H": 128
+        },
+        "metadata_stages": 1,
+        "metadata_warps": 4,
+        "n_regs": 80,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 24
+        }
+      }
+    ]
+  },
+  {
+    "case": "fp8-T4",
+    "launches": [
+      {
+        "wrapper": [
+          "_fused_moe_kernel_w8a16_gateup_fp8"
+        ],
+        "kernel": "fused_moe_kernel_w8a16_gateup",
+        "selected_parameters": {
+          "num_warps": 4,
+          "num_stages": 3,
+          "num_ctas": 1,
+          "BLOCK_SIZE_N": 64,
+          "BLOCK_SIZE_K": 128
+        },
+        "metadata_stages": 3,
+        "metadata_warps": 4,
+        "n_regs": 56,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 23,
+          "wgmma": 0,
+          "mma_sync": 8
+        }
+      },
+      {
+        "wrapper": [],
+        "kernel": "silu_and_mul_kernel_kernel_rank_2",
+        "selected_parameters": {},
+        "metadata_stages": 3,
+        "metadata_warps": 4,
+        "n_regs": 20,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 0
+        }
+      },
+      {
+        "wrapper": [
+          "_fused_moe_kernel_w8a16_down_fp8"
+        ],
+        "kernel": "fused_moe_kernel_w8a16_down",
+        "selected_parameters": {
+          "num_warps": 4,
+          "num_stages": 1,
+          "num_ctas": 1,
+          "BLOCK_SIZE_N": 64,
+          "BLOCK_SIZE_K": 128,
+          "pipeline_hoist_copy": true
+        },
+        "metadata_stages": 1,
+        "metadata_warps": 4,
+        "n_regs": 63,
+        "n_spills": 0,
+        "ptx_counts": {
+          "cp_async": 0,
+          "wgmma": 0,
+          "mma_sync": 8
+        }
+      }
+    ]
+  }
+]

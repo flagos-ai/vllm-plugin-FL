@@ -1,0 +1,30 @@
+{
+  "status": "NEW_G1_IDENTITIES_PASS_GPU_G5_G6_PENDING",
+  "source": {
+    "blobs": 1520,
+    "symlinks": 3,
+    "source_commit": "e84e05be1eef0054d21f90071ad44f41c2eec7a4"
+  },
+  "torch": "2.13.0+cu130",
+  "vllm": "0.32.0",
+  "flagtree": "0.7.0+gitfc0ec83b",
+  "triton": "3.6.0",
+  "compiler_core_sha256": "8a3d05127b3b29d66effdf54692b57610e20b5b397ac60e3d0bbbcf1fc767433",
+  "flagcx_runtime_sha256": "c768f5fa077c6d932eb23542131bc3a5ae436b0beebb96bac9581aed58279b48",
+  "native_custom_ops_sha256": "36428c27bad9bf5ffe5debf9e34bccbc888adb68ad3eb972f6c9ff080e7f683e",
+  "native_registered_op": "_moe_C::moe_wna16_marlin_gemm",
+  "original_three_probes_unchanged": true,
+  "provider_reference": "Native Python code is under installed vLLM; vllm_fl absent; native CUDA binary/schema identities additionally recorded after actual native execution.",
+  "timer": {
+    "warmup_ms": 10,
+    "rep_ms": 50,
+    "rounds": 3,
+    "order": "native/gems, gems/native, native/gems",
+    "gate": 0.9
+  },
+  "cold_cache": true,
+  "extra_outside_timer_diagnostics": "One natural Gems replay per slow5 case after all three original timing pairs, with transient LibEntry observer only during that replay",
+  "compiler_source": "fc0ec83b8478231436bf293219ca9d90fe52e33b",
+  "compiler_wheel_sha256": "e918f0507c1d3616c0e6bc7a5cb2c48f683d167e65262810511b0501829a06d1",
+  "image": "sha256:bd8a5d7a8774800c92d714c0c226b32c1863f929150f36efd610aebcd12a335d"
+}
