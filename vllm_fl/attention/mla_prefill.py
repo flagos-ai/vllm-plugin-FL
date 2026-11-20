@@ -26,16 +26,9 @@ class FlagGemsMLAPrefillBackend(MLAPrefillBackend):
 
     @classmethod
     def is_available(cls) -> bool:
-        from vllm.platforms import current_platform
+        from vllm_fl.dispatch.backends.flaggems.impl.mla_ops import is_available
 
-        from vllm_fl.dispatch.capabilities import get_flaggems_vllm_operator
-        from vllm_fl.utils import use_flaggems_op
-
-        return (
-            current_platform.is_cuda()
-            and use_flaggems_op("flash_attn_varlen_func")
-            and callable(get_flaggems_vllm_operator("flash_attn_varlen_func"))
-        )
+        return is_available("flash_attn_varlen_func")
 
     @classmethod
     def validate_configuration(cls, device_capability, selector_config):
