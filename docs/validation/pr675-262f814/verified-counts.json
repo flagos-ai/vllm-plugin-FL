@@ -1,0 +1,294 @@
+{
+  "27b_tp2_eager": {
+    "requests": 26,
+    "checks": 260,
+    "checks_passed": 260,
+    "complete_pass": true,
+    "scenarios": [
+      {
+        "scenario": "text_single",
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 1,
+        "checks": 10,
+        "checks_passed": 10,
+        "path": "27b_tp2_eager/results/Qwen3.6-27B/port-18400/text_single.json"
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "27b_tp2_eager/results/Qwen3.6-27B/port-18400/text_concurrent_8.json"
+      },
+      {
+        "scenario": "image_single",
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 1,
+        "checks": 10,
+        "checks_passed": 10,
+        "path": "27b_tp2_eager/results/Qwen3.6-27B/port-18400/image_single.json"
+      },
+      {
+        "scenario": "image_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "27b_tp2_eager/results/Qwen3.6-27B/port-18400/image_concurrent_8.json"
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "27b_tp2_eager/results/Qwen3.6-27B/port-18400/mixed_concurrent_8.json"
+      }
+    ]
+  },
+  "27b_tp2_graph": {
+    "requests": 26,
+    "checks": 260,
+    "checks_passed": 260,
+    "complete_pass": true,
+    "scenarios": [
+      {
+        "scenario": "text_single",
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 1,
+        "checks": 10,
+        "checks_passed": 10,
+        "path": "27b_tp2_graph/results/Qwen3.6-27B/port-18401/text_single.json"
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "27b_tp2_graph/results/Qwen3.6-27B/port-18401/text_concurrent_8.json"
+      },
+      {
+        "scenario": "image_single",
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 1,
+        "checks": 10,
+        "checks_passed": 10,
+        "path": "27b_tp2_graph/results/Qwen3.6-27B/port-18401/image_single.json"
+      },
+      {
+        "scenario": "image_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "27b_tp2_graph/results/Qwen3.6-27B/port-18401/image_concurrent_8.json"
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "27b_tp2_graph/results/Qwen3.6-27B/port-18401/mixed_concurrent_8.json"
+      }
+    ]
+  },
+  "35b_a3b_tp2_eager": {
+    "requests": 26,
+    "checks": 260,
+    "checks_passed": 260,
+    "complete_pass": true,
+    "scenarios": [
+      {
+        "scenario": "text_single",
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 1,
+        "checks": 10,
+        "checks_passed": 10,
+        "path": "35b_a3b_tp2_eager/results/Qwen3.6-35B-A3B/port-18402/text_single.json"
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "35b_a3b_tp2_eager/results/Qwen3.6-35B-A3B/port-18402/text_concurrent_8.json"
+      },
+      {
+        "scenario": "image_single",
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 1,
+        "checks": 10,
+        "checks_passed": 10,
+        "path": "35b_a3b_tp2_eager/results/Qwen3.6-35B-A3B/port-18402/image_single.json"
+      },
+      {
+        "scenario": "image_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "35b_a3b_tp2_eager/results/Qwen3.6-35B-A3B/port-18402/image_concurrent_8.json"
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "35b_a3b_tp2_eager/results/Qwen3.6-35B-A3B/port-18402/mixed_concurrent_8.json"
+      }
+    ]
+  },
+  "35b_a3b_tp2_graph": {
+    "requests": 26,
+    "checks": 260,
+    "checks_passed": 260,
+    "complete_pass": true,
+    "scenarios": [
+      {
+        "scenario": "text_single",
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 1,
+        "checks": 10,
+        "checks_passed": 10,
+        "path": "35b_a3b_tp2_graph/results/Qwen3.6-35B-A3B/port-18403/text_single.json"
+      },
+      {
+        "scenario": "text_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "35b_a3b_tp2_graph/results/Qwen3.6-35B-A3B/port-18403/text_concurrent_8.json"
+      },
+      {
+        "scenario": "image_single",
+        "summary": {
+          "request_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 1,
+        "checks": 10,
+        "checks_passed": 10,
+        "path": "35b_a3b_tp2_graph/results/Qwen3.6-35B-A3B/port-18403/image_single.json"
+      },
+      {
+        "scenario": "image_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "35b_a3b_tp2_graph/results/Qwen3.6-35B-A3B/port-18403/image_concurrent_8.json"
+      },
+      {
+        "scenario": "mixed_concurrent_8",
+        "summary": {
+          "request_count": 8,
+          "passed_count": 8,
+          "failed_count": 0,
+          "passed": true
+        },
+        "requests": 8,
+        "checks": 80,
+        "checks_passed": 80,
+        "path": "35b_a3b_tp2_graph/results/Qwen3.6-35B-A3B/port-18403/mixed_concurrent_8.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "case": "27b_tp2_eager",
+  "devices": "0,1",
+  "client_exit": 0,
+  "server_exit_before_cleanup": null
+}

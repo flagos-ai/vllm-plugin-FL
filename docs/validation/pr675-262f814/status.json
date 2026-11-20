@@ -1,0 +1,26 @@
+[
+  {
+    "case": "27b_tp2_eager",
+    "devices": "0,1",
+    "client_exit": 0,
+    "server_exit_before_cleanup": null
+  },
+  {
+    "case": "27b_tp2_graph",
+    "devices": "2,3",
+    "client_exit": 0,
+    "server_exit_before_cleanup": null
+  },
+  {
+    "case": "35b_a3b_tp2_eager",
+    "devices": "4,5",
+    "client_exit": 0,
+    "server_exit_before_cleanup": null
+  },
+  {
+    "case": "35b_a3b_tp2_graph",
+    "devices": "6,7",
+    "client_exit": 0,
+    "server_exit_before_cleanup": null
+  }
+]
