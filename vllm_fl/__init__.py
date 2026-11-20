@@ -244,6 +244,53 @@ def _patch_ascend_torch_accelerator() -> None:
         patch_torch_accelerator()
 
 
+def _patch_multi_stream_capture_guard():
+    """Plugin-side capture guard for both multi-stream helpers (Path C fix).
+
+    aux streams 的 fork/join 事件在 CUDA graph 捕获期间会让下游 MoE 的首调/
+    tuner 异常并静默走未融合路径, 退化形态被冻进图里永久复放 (2026-09-11
+    T2/T3/T5 对照实验)。此守卫只约束捕获期, 不保证运行期多流正确性。
+    同时覆盖 R128 compressor 使用的 maybe_execute_in_parallel。替代对
+    vllm/utils/multi_stream_utils.py 的源码修改 —— 插件内完成, 不动 vllm。
+    VLLM_MULTI_STREAM_DURING_CAPTURE=1 可关掉守卫(实验用)。
+    """
+    if getattr(_patch_multi_stream_capture_guard, "_installed", False):
+        return
+    import torch
+    from vllm.utils import multi_stream_utils
+
+    _orig = multi_stream_utils.execute_in_parallel
+    _orig_maybe = multi_stream_utils.maybe_execute_in_parallel
+
+    def _disable_capture_aux():
+        return (
+            torch.cuda.is_current_stream_capturing()
+            and os.environ.get("VLLM_MULTI_STREAM_DURING_CAPTURE", "0") != "1"
+        )
+
+    def _guarded(default_fn, aux_fns, start_event, done_events, aux_streams=None, enable=False):
+        if (
+            aux_streams is not None
+            and enable
+            and _disable_capture_aux()
+        ):
+            enable = False
+        return _orig(
+            default_fn, aux_fns, start_event, done_events,
+            aux_streams=aux_streams, enable=enable,
+        )
+
+    def _guarded_maybe(fn0, fn1, event0, event1, aux_stream=None):
+        if aux_stream is not None and _disable_capture_aux():
+            aux_stream = None
+        return _orig_maybe(fn0, fn1, event0, event1, aux_stream)
+
+    multi_stream_utils.execute_in_parallel = _guarded
+    multi_stream_utils.maybe_execute_in_parallel = _guarded_maybe
+    _patch_multi_stream_capture_guard._installed = True
+    logger.info("Patched both multi-stream helpers with CUDA graph capture guard")
+
+
 def register_model():
     """Register FL-specific models not yet upstream."""
     _patch_ascend_torch_accelerator()
@@ -316,6 +363,27 @@ def register_model():
 
     _register_gdn_packed_decode_patch()
 
+    # DeepSeek-V4 is available upstream, but Hygon needs a compile-friendly
+    # orchestration layer around its validated ROCm attention and MHC kernels.
+    # Keep the registration lazy and vendor-scoped so other FL platforms
+    # continue to use the upstream architecture unchanged.
+    from vllm import ModelRegistry
+    from vllm.platforms import current_platform
+
+    use_hygon_dv4_model = os.environ.get(
+        "VLLM_FL_HYGON_DV4_COMPILE_MODEL", "1"
+    ).lower() not in {"0", "false", "off"}
+    if (
+        str(getattr(current_platform, "vendor_name", "")).lower() == "hygon"
+        and use_hygon_dv4_model
+    ):
+        ModelRegistry.register_model(
+            "DeepseekV4ForCausalLM",
+            "vllm_fl.models.hygon.deepseek_v4:DeepseekV4ForCausalLM",
+        )
+        _patch_multi_stream_capture_guard()
+        logger.info("Registered Hygon compile-friendly DeepseekV4ForCausalLM")
+
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
@@ -328,3 +396,7 @@ def register_model():
         # glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+
+    if os.environ.get("VLLM_FL_HYGON_FP8_HCU") == "1":
+        from vllm_fl.dispatch.backends.vendor.hygon.patches.fp8_hcu import install
+        install()

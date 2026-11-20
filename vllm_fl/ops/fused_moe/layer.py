@@ -8,18 +8,39 @@ import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
 # so calling _fused_moe_pkg.FusedMoE() inside FusedMoEFL would recurse
 # infinitely.  Capturing it here breaks the cycle.
 _OrigFusedMoE = _fused_moe_pkg.FusedMoE
-from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
+from vllm.model_executor.layers.fused_moe.config import (
+    FusedMoEConfig,
+    FusedMoEQuantConfig,
+    int8_w8a8_moe_quant_config,
+)
+from vllm.model_executor.layers.fused_moe.routed_experts import RoutedExperts
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
     UnquantizedFusedMoEMethod,
 )
 from vllm.logger import init_logger
 
-from .fused_moe_utils import select_unquantized_moe_backend_oot
+from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 import (  # noqa: E501
+    CompressedTensorsW8A8Int8MoEMethod,
+)
+
 from vllm_fl.ops.fused_moe.router import replace_router_with_fl
+from .fused_moe_utils import select_unquantized_moe_backend_oot
 
 
 logger = init_logger(__name__)
+
+
+def _make_dynamic_int8_moe_quant_config(
+    layer: RoutedExperts,
+) -> FusedMoEQuantConfig:
+    return int8_w8a8_moe_quant_config(
+        w1_scale=layer.w13_weight_scale,
+        w2_scale=layer.w2_weight_scale,
+        a1_scale=layer.w13_input_scale,
+        a2_scale=layer.w2_input_scale,
+        per_act_token_quant=True,
+    )
 
 
 class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
@@ -44,35 +65,131 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
         return self.moe_kernel.is_monolithic
 
 
+class CompressedTensorsW8A8Int8MoEMethodFL(
+    CompressedTensorsW8A8Int8MoEMethod
+):
+    """FL W8A8 INT8 method preserving the upstream weight/scale lifecycle."""
+
+    def __init__(
+        self,
+        weight_quant,
+        input_quant,
+        moe,
+        layer_name=None,
+        hygon_moe_backend: str = "triton",
+    ):
+        # Keep the official validation and INT8 backend oracle. In particular,
+        # create_weights(), process_weights_after_loading(), quant config
+        # construction, and apply() remain owned by the upstream method.
+        super().__init__(weight_quant, input_quant, moe, layer_name)
+        self.hygon_moe_backend = hygon_moe_backend
+
+        from vllm.platforms import current_platform
+
+        if str(getattr(current_platform, "vendor_name", "")).lower() == "hygon":
+            from vllm_fl.dispatch.backends.vendor.hygon.impl.moe.triton_experts import (
+                HygonTritonExpertsFL,
+            )
+
+            self.experts_cls = HygonTritonExpertsFL
+
+        # Other platforms retain the experts class selected by the official
+        # INT8 backend oracle (see install_fl_w8a8_moe_selector).
+
+    def get_fused_moe_quant_config(
+        self, layer: RoutedExperts
+    ) -> FusedMoEQuantConfig:
+        """Keep dynamic-token compressed-tensors MoE on the W8A8 path.
+
+        vLLM 0.24's ``make_int8_moe_quant_config`` interprets missing static
+        activation-scale tensors as W8A16.  Dynamic per-token quantization
+        intentionally has no checkpoint activation scales, so that helper
+        silently changes compressed-tensors W8A8 into W8A16.  FL backends
+        perform dynamic quantization at runtime and therefore need an explicit
+        INT8 activation descriptor even though ``a1_scale``/``a2_scale`` are
+        both ``None``.  This is quantization semantics, not a vendor policy.
+        """
+        return _make_dynamic_int8_moe_quant_config(layer)
+
+    # VLLM_FL_MOE_DEBUG_ONLY_BEGIN: remove before production
+    def process_weights_after_loading(self, layer: RoutedExperts) -> None:
+        super().process_weights_after_loading(layer)
+
+        from vllm.platforms import current_platform
+
+        if str(getattr(current_platform, "vendor_name", "")).lower() == "hygon":
+            from vllm_fl.dispatch.backends.vendor.hygon.impl.moe.debug import (
+                log_moe_setup,
+            )
+
+            log_moe_setup(self, layer)
+    # VLLM_FL_MOE_DEBUG_ONLY_END
+
+
+class RoutedExpertsFL(RoutedExperts):
+    """Select FL MoE methods before RoutedExperts creates any weights."""
+
+    def _get_quant_method(self, prefix, quant_config, moe_config):
+        quant_method = super()._get_quant_method(prefix, quant_config, moe_config)
+
+        if isinstance(quant_method, CompressedTensorsW8A8Int8MoEMethod):
+            from vllm.platforms import current_platform
+
+            if str(getattr(current_platform, "vendor_name", "")).lower() == "hygon":
+                from vllm_fl.dispatch.backends.vendor.hygon.impl.moe import (
+                    lightop_marlin,
+                )
+
+                if (
+                    lightop_marlin.get_hygon_w8a8_moe_backend()
+                    == lightop_marlin.HYGON_W8A8_MOE_BACKEND_LIGHTOP
+                ):
+                    return lightop_marlin.HygonLightOpMarlinMoEMethodFL(
+                        quant_method.weight_quant,
+                        quant_method.input_quant,
+                        moe_config,
+                        layer_name=prefix,
+                    )
+
+            return CompressedTensorsW8A8Int8MoEMethodFL(
+                quant_method.weight_quant,
+                quant_method.input_quant,
+                moe_config,
+                layer_name=prefix,
+            )
+
+        if isinstance(quant_method, UnquantizedFusedMoEMethod):
+            return UnquantizedFusedMoEMethodFL(moe_config)
+
+        # Quantization schemes without a validated FL method retain the exact
+        # method selected by the upstream quantization config.
+        return quant_method
+
+
 def FusedMoEFL(*args, **kwargs) -> MoERunner:
     """
     OOT factory replacement for FusedMoE (vllm >= 0.24.0).
 
     In vllm 0.24.0, FusedMoE changed from a class to a factory function that
     returns a MoERunner instance.  FusedMoEFL mirrors this pattern: it
-    delegates to the standard FusedMoE() factory, replaces the router, and
-    substitutes the FL experts only for unquantized MoE.
+    delegates to the standard FusedMoE() factory after injecting an FL
+    RoutedExperts class, then replaces the router implementation.
 
     Registration: op_registry_oot maps FusedMoE -> FusedMoEFL so that all
     MoE layers in a model use the FL router transparently.
     """
-    # 1. Build the standard MoERunner via the upstream factory.
+    # 1. Inject the FL RoutedExperts class before the upstream factory creates
+    #    the quant method and its weights. The factory has no direct
+    #    ``quant_method`` argument; ``routed_experts_cls`` is its supported
+    #    construction-time extension point.
+    if kwargs.get("routed_experts_cls") is None:
+        kwargs["routed_experts_cls"] = RoutedExpertsFL
+
+    # 2. Build the standard MoERunner via the upstream factory.
     #    Use _OrigFusedMoE (captured at import time, before monkey-patching)
     #    to avoid infinite recursion when custom_ops.py has already replaced
     #    _fused_moe_pkg.FusedMoE with FusedMoEFL.
     runner: MoERunner = _OrigFusedMoE(*args, **kwargs)
-
-    # 2. Replace only an upstream unquantized method with the FL version.
-    # Quantized methods own their weight/activation scaling metadata and must
-    # remain attached to the runner.
-    if isinstance(runner._quant_method, UnquantizedFusedMoEMethod):
-        fl_quant_method = UnquantizedFusedMoEMethodFL(runner.moe_config)
-        runner._replace_quant_method(fl_quant_method)
-    else:
-        logger.info_once(
-            "Preserving upstream quantized MoE method %s in FusedMoEFL.",
-            type(runner._quant_method).__name__,
-        )
 
     # 3. Replace router _compute_routing with FL version via monkey-patch.
     #    replace_router_with_fl() patches the class method so the router
@@ -84,4 +201,9 @@ def FusedMoEFL(*args, **kwargs) -> MoERunner:
     return runner
 
 
-__all__ = ["FusedMoEFL", "UnquantizedFusedMoEMethodFL"]
+__all__ = [
+    "CompressedTensorsW8A8Int8MoEMethodFL",
+    "FusedMoEFL",
+    "RoutedExpertsFL",
+    "UnquantizedFusedMoEMethodFL",
+]

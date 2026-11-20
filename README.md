@@ -307,3 +307,7 @@ If you want to use the original CUDA operators, you can set the following enviro
 ```sh
 export USE_FLAGGEMS=0
 ```
+
+## GLM-5.2 on Hygon
+
+See [GLM integration and runtime selection](deployment/glm52-hygon/README.md) for the integrated INT8, Graph, FP8 KV and optional Triton/Gluon MLA paths.

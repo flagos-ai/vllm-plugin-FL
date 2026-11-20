@@ -1,0 +1,123 @@
+diff --git a/src/flag_gems/fused/flashmla_sparse.py b/src/flag_gems/fused/flashmla_sparse.py
+index 7b5e4e9a7..4e8cd3f89 100644
+--- a/src/flag_gems/fused/flashmla_sparse.py
++++ b/src/flag_gems/fused/flashmla_sparse.py
+@@ -42,6 +42,7 @@ TLE_FLASHMLA_PREFILL_WORKER_NUM_WARPS = 4
+ 
+ @triton.autotune(
+     configs=[
++        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=1),
+         triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=2),
+         triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=4),
+     ],
+diff --git a/src/flag_gems/ops/fp8_paged_mqa_logits.py b/src/flag_gems/ops/fp8_paged_mqa_logits.py
+index ecc3a3c31..3dc5e0bd7 100644
+--- a/src/flag_gems/ops/fp8_paged_mqa_logits.py
++++ b/src/flag_gems/ops/fp8_paged_mqa_logits.py
+@@ -28,7 +28,12 @@ def cdiv(x: int, y: int) -> int:
+ 
+ 
+ @triton.autotune(
+-    configs=runtime.get_tuned_config("fp8_paged_mqa_logits"),
++    configs=[
++        triton.Config(
++            {"BLOCK_KV": 64, "BLOCK_D": 128, "NUM_D_TILES": 1, "BLOCK_H": 32},
++            num_warps=4, num_stages=1,
++        )
++    ] if runtime.device.vendor_name == "hygon" else runtime.get_tuned_config("fp8_paged_mqa_logits"),
+     key=["heads", "dim", "block_size"],
+ )
+ @triton.jit
+@@ -116,27 +121,32 @@ def fp8_paged_mqa_logits_kernel(
+         load_mask = valid_mask[:, None] & d_mask[None, :]
+         kv_u8 = tl.load(kv_byte_ptrs, mask=load_mask, other=0)
+         kv_fp8 = kv_u8.to(tl.float8e4nv, bitcast=True)
+-        kv_f32 = kv_fp8.to(tl.float32)
+ 
+         for h_tile in tl.static_range(0, heads, BLOCK_H):
+             offs_h = h_tile + tl.arange(0, BLOCK_H)
+             h_mask = offs_h < heads
+-
+             q_ptrs = q_base + offs_h[:, None] * stride_qh + offs_d[None, :] * stride_qd
+             q_vals = tl.load(
+                 q_ptrs, mask=h_mask[:, None] & d_mask[None, :], other=0.0
+-            ).to(tl.float32)
++            )
+             weights = tl.load(
+                 weights_ptr + pid_row * stride_wrow + offs_h * stride_wh,
+                 mask=h_mask,
+                 other=0.0,
+             )
+ 
+-            q_tile = tl.trans(q_vals)
+-            partial_dot = tl.dot(kv_f32, q_tile, out_dtype=tl.float32)
+-            partial_dot = partial_dot * scale_f32[:, None]
++            # Match AITER's Hygon-compatible FP8 MQA orientation: [H,D] @ [D,K].
++            # The inverse [K,D] @ [D,H] layout falls back to an inaccurate FP32
++            # dot implementation on gfx936.
++            partial_dot = tl.dot(
++                q_vals,
++                tl.trans(kv_fp8),
++                input_precision="ieee",
++                out_dtype=tl.float32,
++            )
++            partial_dot = partial_dot * scale_f32[None, :]
+             partial_dot = tl.maximum(partial_dot, 0.0)
+-            logit_accum += tl.sum(partial_dot * weights[None, :], axis=1)
++            logit_accum += tl.sum(partial_dot * weights[:, None], axis=0)
+ 
+     else:
+         d_offs0 = offs_d
+@@ -148,13 +158,11 @@ def fp8_paged_mqa_logits_kernel(
+         load_mask0 = valid_mask[:, None] & d_mask0[None, :]
+         kv_u80 = tl.load(kv_byte_ptrs0, mask=load_mask0, other=0)
+         kv_fp80 = kv_u80.to(tl.float8e4nv, bitcast=True)
+-        kv_f320 = kv_fp80.to(tl.float32)
+ 
+         kv_byte_ptrs1 = kv_ptr + kv_base[:, None] + d_offs1[None, :] * stride_kvbyte
+         load_mask1 = valid_mask[:, None] & d_mask1[None, :]
+         kv_u81 = tl.load(kv_byte_ptrs1, mask=load_mask1, other=0)
+         kv_fp81 = kv_u81.to(tl.float8e4nv, bitcast=True)
+-        kv_f321 = kv_fp81.to(tl.float32)
+ 
+         for h_tile in tl.static_range(0, heads, BLOCK_H):
+             offs_h = h_tile + tl.arange(0, BLOCK_H)
+@@ -165,14 +173,14 @@ def fp8_paged_mqa_logits_kernel(
+             )
+             q_vals0 = tl.load(
+                 q_ptrs0, mask=h_mask[:, None] & d_mask0[None, :], other=0.0
+-            ).to(tl.float32)
++            )
+ 
+             q_ptrs1 = (
+                 q_base + offs_h[:, None] * stride_qh + d_offs1[None, :] * stride_qd
+             )
+             q_vals1 = tl.load(
+                 q_ptrs1, mask=h_mask[:, None] & d_mask1[None, :], other=0.0
+-            ).to(tl.float32)
++            )
+ 
+             weights = tl.load(
+                 weights_ptr + pid_row * stride_wrow + offs_h * stride_wh,
+@@ -183,8 +191,19 @@ def fp8_paged_mqa_logits_kernel(
+             q_T0 = tl.trans(q_vals0)
+             q_T1 = tl.trans(q_vals1)
+ 
+-            partial_dot = tl.dot(kv_f320, q_T0, out_dtype=tl.float32)
+-            partial_dot = tl.dot(kv_f321, q_T1, acc=partial_dot, out_dtype=tl.float32)
++            partial_dot = tl.dot(
++                kv_fp80,
++                q_T0,
++                input_precision="ieee",
++                out_dtype=tl.float32,
++            )
++            partial_dot = tl.dot(
++                kv_fp81,
++                q_T1,
++                acc=partial_dot,
++                input_precision="ieee",
++                out_dtype=tl.float32,
++            )
+ 
+             partial_dot = partial_dot * scale_f32[:, None]
+             partial_dot = tl.maximum(partial_dot, 0.0)
