@@ -38,7 +38,9 @@ FLAGGEMS_VLLM_COMMIT = "622f5bf0e476dcdb861e50ea49cc94b0852c2619"
 FLAGGEMS_VLLM_ARCHIVE = (
     f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{FLAGGEMS_VLLM_COMMIT}"
 )
-FLAGGEMS_VLLM_SHA256 = "9dc791f6c8ef66291bab751805c35a4bee7477f81cca90baf4fb6c2d3f00a7fe"
+FLAGGEMS_VLLM_SHA256 = (
+    "9dc791f6c8ef66291bab751805c35a4bee7477f81cca90baf4fb6c2d3f00a7fe"
+)
 
 
 def validate_flaggems_vllm_provenance(version, source):
