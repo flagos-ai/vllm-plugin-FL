@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install the same FlagGems-vllm release in every platform's CI interpreter."""
+"""Install the FlagGems-vllm source pinned for the CI interpreter."""
 
 import argparse
 import json
@@ -12,6 +12,18 @@ RELEASE = "v0.2.0"
 COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
 SUNRISE_COMMIT = "3b0f3880b2a781699462eacb7dd3e00cc24f2d43"
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
+SOURCE_ARCHIVE = f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"
+SOURCE_ARCHIVE_SHA256 = (
+    "1b47e1eb7982acc606e2fc920561d169e2a17fac7c92ff65c5f11cafa6b8b16e"
+)
+if os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "kunlunxin":
+    COMMIT = "8ae5c22f5af6d650216f881c329c4dff20c182e1"
+    SOURCE_ARCHIVE = (
+        f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"
+    )
+    SOURCE_ARCHIVE_SHA256 = (
+        "eab3544a5a6a2efaf7b3465a04ea0f867f77cfbe144ed7f2b8ad20c7b28bb36c"
+    )
 RUNTIME_PACKAGES = ("torch", "flagtree", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
 
@@ -29,6 +41,13 @@ def release_is_installed(commit=COMMIT, source_archive=None, archive_sha256=None
         source = json.loads(text or "{}")
     except (PackageNotFoundError, ValueError):
         return False
+    if (
+        source_archive is None
+        and commit == COMMIT
+        and SOURCE_ARCHIVE is not None
+        and source.get("url") == SOURCE_ARCHIVE
+    ):
+        source_archive, archive_sha256 = SOURCE_ARCHIVE, SOURCE_ARCHIVE_SHA256
     if source_archive is not None:
         digest = source.get("archive_info", {}).get("hashes", {}).get("sha256")
         return source.get("url") == source_archive and digest == archive_sha256
@@ -75,11 +94,17 @@ def main(*, commit=COMMIT, source_archive=None, archive_sha256=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sunrise", action="store_true")
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument("--sunrise", action="store_true")
+    source_group.add_argument("--source-archive", action="store_true")
     parser.add_argument("--print-commit", action="store_true")
     args = parser.parse_args()
     commit = SUNRISE_COMMIT if args.sunrise else COMMIT
     if args.print_commit:
         print(commit)
+    elif args.source_archive:
+        if SOURCE_ARCHIVE is None:
+            parser.error("--source-archive is unavailable for the selected provider")
+        main(source_archive=SOURCE_ARCHIVE, archive_sha256=SOURCE_ARCHIVE_SHA256)
     else:
         main(commit=commit)

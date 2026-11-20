@@ -141,6 +141,18 @@ dist_backend_dict = {
 }
 
 
+def _use_flagcx(vendor_name: str) -> bool:
+    if "FLAGCX_PATH" in os.environ:
+        return True
+    if vendor_name != "kunlunxin":
+        return False
+    try:
+        from flagcx.api import FLAGCXLibrary
+    except (ImportError, OSError):
+        return False
+    return callable(FLAGCXLibrary)
+
+
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
@@ -192,7 +204,7 @@ class PlatformFL(Platform):
     ]
     dist_backend: str = (
         "flagcx"
-        if "FLAGCX_PATH" in os.environ
+        if _use_flagcx(device_info.vendor_name)
         else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
@@ -361,15 +373,20 @@ class PlatformFL(Platform):
 
     @classmethod
     def apply_config_platform_defaults(cls, vllm_config: "VllmConfig") -> None:
-        """Set native platform graph defaults before capture sizes are derived.
+        """Install vendor defaults before vLLM resolves compilation and graphs.
 
-        Sunrise uses native decode graphs without model compilation and rejects
-        unsupported explicit modes. MetaX retains its piecewise graph defaults.
-        Setting defaults here preserves eager requests and explicit graph modes
-        before vLLM finalizes its compilation configuration.
+        MetaX keeps explicit eager, optimization-level and graph settings.
+        Sunrise and Kunlunxin use native decode graphs without torch.compile.
         """
         if cls.device_type == "ptpu":
             _configure_sunrise_compilation_defaults(vllm_config)
+            return
+        if cls.device_type == "cuda" and cls.vendor_name == "kunlunxin":
+            from vllm.config.compilation import CompilationMode
+
+            # Resolve native kernel defaults before vLLM enables compile-only
+            # custom-op and IR behavior. Native decode graphs do not need it.
+            vllm_config.compilation_config.mode = CompilationMode.NONE
             return
         if cls.vendor_name != "metax":
             return
@@ -486,6 +503,20 @@ class PlatformFL(Platform):
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
+        if (
+            cls.vendor_name == "kunlunxin"
+            and getattr(vllm_config, "speculative_config", None) is not None
+            and (
+                getattr(model_config, "is_hybrid", False)
+                or getattr(model_config, "is_attention_free", False)
+            )
+            and vllm_config.cache_config.mamba_cache_mode == "align"
+        ):
+            raise ValueError(
+                "Kunlunxin does not support speculative decoding with Mamba "
+                "cache mode 'align'. Disable speculative decoding or use "
+                "--no-enable-prefix-caching."
+            )
         parallel_config = vllm_config.parallel_config
         if cls.device_type == "txda":
             if getattr(vllm_config, "speculative_config", None) is not None:
@@ -693,35 +724,41 @@ class PlatformFL(Platform):
             )
             scheduler_config.async_scheduling = False
 
-        # `mode` is a real CompilationConfig field, but test stand-ins may omit it.
-        compilation_mode = getattr(compilation_config, "mode", CompilationMode.NONE)
-        if (
-            cls.device_type == "cuda"
-            and cls.vendor_name == "kunlunxin"
-            and (
-                compilation_config.cudagraph_mode != CUDAGraphMode.NONE
-                or compilation_mode != CompilationMode.NONE
-            )
-        ):
-            # P800: every cudagraph mode tested latches an `illegal memory
-            # access` (status= 700) on the first real request of a compiled
-            # model -- FULL (qwen3_6/35b_a3b_tp4_graph, job 120760210560) and
-            # PIECEWISE (qwen3_6/27b_tp4_graph and qwen3_6/35b_a3b_tp4_graph,
-            # jobs 120818798034 / 120818797949).  The report lands on whichever
-            # device op runs first, so the line number only follows that op.
-            # The eager configuration is the one that passes on P800
-            # (qwen3_6/27b_tp4_eager), and compile-without-cudagraph is
-            # untested here, so fall back to eager for the whole vendor.
-            logger.warning(
-                "Kunlunxin: disabling torch.compile and cudagraphs (mode %s, "
-                "cudagraph %s) for %s; compiled cudagraphs latch an illegal "
-                "memory access on P800.",
-                compilation_mode,
-                compilation_config.cudagraph_mode,
-                getattr(model_config, "model", "?"),
-            )
-            compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+        if cls.device_type == "cuda" and cls.vendor_name == "kunlunxin":
+            # P800 uses native decode graphs. Inductor and PIECEWISE capture
+            # can fault on the first real request on this runtime.
             compilation_config.mode = CompilationMode.NONE
+            compilation_config.cudagraph_mm_encoder = False
+            if kernel_config := getattr(vllm_config, "kernel_config", None):
+                # The upstream slot-mapping JIT warmup registers a Triton
+                # kernel that the vendor replaces with a Torch implementation.
+                kernel_config.enable_jit_warmup = False
+
+            graph_mode = compilation_config.cudagraph_mode
+            if graph_mode != CUDAGraphMode.NONE:
+                # Capture a bounded set of decode descriptors. Each descriptor
+                # has a private graph pool; uncaptured sizes run eagerly.
+                sizes = [
+                    size
+                    for size in compilation_config.cudagraph_capture_sizes or ()
+                    if size <= 8
+                ]
+                if graph_mode.has_full_cudagraphs() and sizes:
+                    compilation_config.cudagraph_mode = CUDAGraphMode.FULL_DECODE_ONLY
+                    compilation_config.cudagraph_capture_sizes = sizes
+                    compilation_config.max_cudagraph_capture_size = max(sizes)
+                    logger.info("Kunlunxin: capturing decode graph sizes %s", sizes)
+                else:
+                    if graph_mode.has_full_cudagraphs():
+                        logger.warning(
+                            "Kunlunxin graph capture disabled because none of the "
+                            "requested sizes %s fit the supported range of 1 to 8. "
+                            "Falling back to eager execution.",
+                            compilation_config.cudagraph_capture_sizes,
+                        )
+                    compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+                    compilation_config.cudagraph_capture_sizes = []
+                    compilation_config.max_cudagraph_capture_size = 0
 
         # --------------------------------------------------------
         # maca specific config updates
@@ -1183,9 +1220,8 @@ class PlatformFL(Platform):
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
-        if cls.device_type == "ptpu":
-            # Select only providers registered by the empty/PTPU build; do not
-            # advertise NVIDIA extension kernels that cannot execute here.
+        if cls.device_type == "ptpu" or cls.vendor_name == "kunlunxin":
+            # The PTPU and P800 empty wheels have no vllm_c IR providers.
             return IrOpPriorityConfig.with_default(["native"])
 
         cc = vllm_config.compilation_config

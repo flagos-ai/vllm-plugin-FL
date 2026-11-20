@@ -103,7 +103,7 @@ def test_communicator_loads_matched_api_and_library(monkeypatch, api, explicit_l
         Group(), "ptpu:0", library_path=explicit_library
     )
     assert module._flagcx_available
-    assert module._flagcx_wheel_api is (api == "wheel")
+    assert module._flagcx_packaged_library is (api == "wheel")
     assert not communicator.disabled
     expected_path = explicit_library
     if expected_path is None and api == "legacy":
@@ -128,7 +128,7 @@ def test_wheel_fallback_is_not_enabled_on_other_platforms(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert not module._flagcx_available
-    assert not module._flagcx_wheel_api
+    assert not module._flagcx_packaged_library
 
 
 @pytest.fixture

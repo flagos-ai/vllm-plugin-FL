@@ -329,9 +329,10 @@ def _device_graph_capture(
         yield graph_capture_context
 
 
-if current_platform.dist_backend == "flagcx" or current_platform.device_type in (
-    "musa",
-    "npu",
+if (
+    current_platform.dist_backend == "flagcx"
+    or current_platform.device_type in ("musa", "npu")
+    or getattr(current_platform, "vendor_name", None) == "kunlunxin"
 ):
     graph_capture = _device_graph_capture
 

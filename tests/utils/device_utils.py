@@ -117,6 +117,7 @@ def get_backend() -> str:
         return {
             "hygon": "hygon",
             "iluvatar": "tianshu",
+            "kunlunxin": "kunlunxin",
             "tianshu": "tianshu",
             "thead": "thead",
         }.get(vendor, "nvidia")
@@ -157,7 +158,7 @@ def is_accelerator_available() -> bool:
 def get_device(index: int = 0) -> torch.device:
     """Get torch device for current backend."""
     backend = get_backend()
-    if backend in ("nvidia", "hygon", "tianshu", "metax", "thead"):
+    if backend in ("nvidia", "hygon", "kunlunxin", "tianshu", "metax", "thead"):
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
@@ -190,7 +191,7 @@ def get_device_count() -> int:
         return 0
 
     backend = get_backend()
-    if backend in ("nvidia", "hygon", "tianshu", "metax", "thead"):
+    if backend in ("nvidia", "hygon", "kunlunxin", "tianshu", "metax", "thead"):
         return torch.cuda.device_count()
     elif backend == "tsingmicro":
         txda = _txda_runtime()
