@@ -34,7 +34,14 @@ from vllm_fl.utils import (
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch, clean_fl_env):
-    """Keep every VLLM_FL_* / whitelist var unset around each test."""
+    """Keep every VLLM_FL_* / whitelist var unset around each test.
+
+    ``_load_op_config_from_env`` is called directly below, which mutates the
+    ``utils._OP_CONFIG`` module global; without restoring it, the value
+    loaded by one test (e.g. ``{"op_a": "ref"}``) leaks into every later
+    ``get_policy()`` in the same process and kills unrelated files with
+    ``ValueError: Unsupported backend``. Snapshot and restore it here.
+    """
     for var in (
         "VLLM_FL_OP_CONFIG",
         "VLLM_FL_OOT_WHITELIST",
@@ -49,7 +56,9 @@ def _clean_env(monkeypatch, clean_fl_env):
         "FLAGOS_DEVICE_CONTROL_ENV_VAR",
     ):
         monkeypatch.delenv(var, raising=False)
+    saved_config = utils._OP_CONFIG
     yield
+    utils._OP_CONFIG = saved_config
 
 
 class TestLoadOpConfigFromEnv:
