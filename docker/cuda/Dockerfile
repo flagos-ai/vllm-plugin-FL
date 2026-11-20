@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG BUILD_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-nvidia-cuda13.3:2.3.0
+ARG BUILD_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-nvidia-cuda13.0.3:2.3.0
 ARG FLAGOS_DAILY_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-daily/simple
 # ARG FLAGOS_NVIDIA_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-nvidia/simple
 
@@ -20,24 +20,26 @@ ARG FLAGOS_DAILY_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-da
 FROM ${BUILD_BASE_IMAGE} AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
-# Expose CUDA headers installed via Python nvidia packages (e.g. cublas_v2.h)
-# so that source builds (DeepGEMM, etc.) can find them without system -dev packages.
-ENV CPATH=/flagos/lib/python3.12/site-packages/nvidia/cu13/include:${CPATH}
 SHELL ["/bin/bash", "-c"]
 
-ARG CUDA_VERSION_DASH=13-3
+ARG CUDA_VERSION=13.0.3
 ARG VLLM_VERSION=0.32.0
-ARG FLAGGEMS_VLLM_VERSION=0.3.0.dev20261118
+ARG FLAGGEMS_VLLM_VERSION=0.3.0.dev20261119
 ARG FLAGOS_DAILY_INDEX_URL
 
-# System dependencies
-RUN apt-get update && \
+# System dependencies and CUDA development tools for JIT compilation
+RUN CUDA_VERSION_DASH=$(echo $CUDA_VERSION | cut -d. -f1,2 | tr '.' '-') && \
+    apt-get update && \
     apt-get install -y --no-install-recommends apt-utils && \
     apt-get install -y --no-install-recommends --allow-change-held-packages \
         cuda-nvcc-${CUDA_VERSION_DASH} \
+        cuda-cudart-${CUDA_VERSION_DASH} \
+        cuda-nvrtc-${CUDA_VERSION_DASH} \
         cuda-nvrtc-dev-${CUDA_VERSION_DASH} \
         cuda-cuobjdump-${CUDA_VERSION_DASH} \
         libcurand-dev-${CUDA_VERSION_DASH} \
+        libcublas-dev-${CUDA_VERSION_DASH} \
+        libcusolver-dev-${CUDA_VERSION_DASH} \
         libcusparse-dev-${CUDA_VERSION_DASH} \
         # Required by fastsafetensors
         libnuma-dev \
@@ -53,6 +55,13 @@ RUN apt-get update && \
         libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Ensures nvcc/ptxas (installed above, needed at runtime for FlashInfer/
+# DeepGEMM/EP kernel JIT compilation) are reachable on PATH. Harmless no-op
+# if already set by FINAL_BASE_IMAGE.
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH="${CUDA_HOME}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
+
 # Install FlagGems-vLLM and vLLM
 RUN PYTHONPATH=/opt/triton \
     pip install --no-cache-dir \
@@ -60,7 +69,11 @@ RUN PYTHONPATH=/opt/triton \
         "vllm==${VLLM_VERSION}"
 
 # Install DeepGEMM
-
+RUN PYTHONPATH=/opt/triton \
+    TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
+    bash -c 'git clone --recursive https://github.com/deepseek-ai/DeepGEMM /workspace/DeepGEMM && \
+    cd /workspace/DeepGEMM && \
+    ./install.sh'
 
 WORKDIR /workspace
 
