@@ -1,0 +1,37 @@
+{
+  "pr": "https://github.com/flagos-ai/vllm-plugin-FL/pull/697",
+  "source_before": "80a83d78099e6a3df74e9d6d80d83d1a24490336",
+  "base": "77f141a961d75e54c0cf209de80c99a7c7eec04b",
+  "submitted_commit": "171348d950867cc2779e77bbe78283cdbd211979",
+  "tree": "89b555abbee19ad3bbf95ec8e1c295018f4f5b33",
+  "review": "https://github.com/flagos-ai/vllm-plugin-FL/pull/697#discussion_r4639095661",
+  "historical_repro_files_removed": 89,
+  "remaining_tracked_tools_repro_files": 0,
+  "archive": "https://github.com/physics31415926/vllm-plugin-FL/tree/80a83d78099e6a3df74e9d6d80d83d1a24490336/tools/repro/sunrise_032",
+  "archive_ref": "codex/archive-pr697-repro-20261121",
+  "archive_tar_sha256": "ef1d67c3498ab921222c750f3767ff2740ea3a6e33b84f9e1667386fa10b6ce4",
+  "cpu_existing_tests": {
+    "discovered": 171,
+    "passed": 171,
+    "failed": 0,
+    "skipped": 0,
+    "exit": 0
+  },
+  "original_log_sha256": "4b67e9dd7f789fef63dd516e25033e9b7c361aa8c6489ef29ecad5b423bdea47",
+  "public_log_redaction": "Only the local checkout directory path is replaced with <checkout>.",
+  "validation": {
+    "flagcx_all_base_functions_and_communicator_class_ast_identical": true,
+    "installer_all_base_functions_ast_identical": true,
+    "protected_non_sunrise_vendor_paths_match_base": true,
+    "formal_sunrise_gate_scripts_and_docker_runtime_match_head": true,
+    "deleted_directory_not_in_index": true,
+    "two_readmes_no_deleted_link": true,
+    "eleven_installer_cli_contracts": true,
+    "changed_python_ast_parse": true
+  },
+  "limits": [
+    "CPU validation only on this commit; no new hardware Gate was run.",
+    "Historical model and image results retain their original tested revisions.",
+    "Full CI must pass separately on the submitted merge commit."
+  ]
+}
