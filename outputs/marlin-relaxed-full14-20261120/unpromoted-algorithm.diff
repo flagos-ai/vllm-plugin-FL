@@ -1,0 +1,27 @@
+commit 7845e327b4d8def5a2d34e3f2a2de01b227c7837
+Author:     Physics <3150105638@zju.edu.cn>
+AuthorDate: Fri Nov 20 19:29:01 2026 +0800
+Commit:     Physics <3150105638@zju.edu.cn>
+CommitDate: Fri Nov 20 19:29:01 2026 +0800
+
+    Relax FP8 decode output atomics
+
+diff --git a/src/flaggems_vllm/ops/fused_marlin_moe.py b/src/flaggems_vllm/ops/fused_marlin_moe.py
+index 86d6de0..03bbc64 100644
+--- a/src/flaggems_vllm/ops/fused_marlin_moe.py
++++ b/src/flaggems_vllm/ops/fused_marlin_moe.py
+@@ -3481,7 +3481,13 @@ def fused_moe_kernel_w8a16_unified_moe(
+             OUT + token_ids[:, None] * stride_out_t + offs_n[None, :] * stride_out_n
+         )
+         out_mask = token_mask[:, None] & n_mask[None, :]
+-        tl.atomic_add(out_ptrs, partial.to(compute_type), mask=out_mask)
++        # FP8 decode only combines OUT; initialization and consumers are stream-ordered.
++        tl.atomic_add(
++            out_ptrs,
++            partial.to(compute_type),
++            mask=out_mask,
++            sem="relaxed" if use_fp8_w8a16 else "acq_rel",
++        )
+ 
+ 
+ def _prune_w8a16_int8_gateup_configs(configs, named_args, **kwargs):

@@ -1,0 +1,514 @@
+{
+  "CPU_only": true,
+  "performed_after_both_full14_timers": true,
+  "tool": "/toolkit/bin/cuobjdump",
+  "tool_sha256": "bce9e37cc2b344a62f1c43b678f8aab0780b2a5807f69fdd699d7bd440d5c8c6",
+  "version": "cuobjdump: NVIDIA (R) fat binary listing tool\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Wed_Jul__2_10:42:27_AM_PDT_2025\nCuda compilation tools, release 13.0, V13.0.39\nBuild cuda_13.0.r13.0/compiler.36195134_0\n",
+  "records": [
+    {
+      "variant": "baseline",
+      "cubin": "fp8-T1-launch0.cubin",
+      "cubin_sha256": "e1e3b01ff48e3034c19b2883c885450eb499adf58689f26f86deace69434a42d",
+      "sass": "fp8-T1-launch0.sass",
+      "sass_sha256": "f45bca3bbd47493c5c559e1498ee00e9b61d9450ea5fcf95537b4b18a8af3e6a",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_unified_moe"
+        ],
+        "actual_instruction_lines": 872
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "fp8-T4-launch0.cubin",
+      "cubin_sha256": "51a9e33d04b081082defe93c744810aad31d7c10030c345102c9f189e317ed93",
+      "sass": "fp8-T4-launch0.sass",
+      "sass_sha256": "d5bfda27c708ea5f6a0300e07817dac9ccb0aed88a20b4190c175b98b0da501a",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_gateup"
+        ],
+        "actual_instruction_lines": 488
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "fp8-T4-launch1.cubin",
+      "cubin_sha256": "f05fe5c630fbb6065ac0fb5a21b7ad24257c98ca9e3d4a6c68a22b55a0fb0613",
+      "sass": "fp8-T4-launch1.sass",
+      "sass_sha256": "2ef42a5f7921b0aa97016dfe5cac4d6ad1511004d929784435082a81a6aed6e0",
+      "sass_contract": {
+        "functions": [
+          "silu_and_mul_kernel_kernel_rank_2"
+        ],
+        "actual_instruction_lines": 144
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "fp8-T4-launch2.cubin",
+      "cubin_sha256": "408cfa2a45b6afcbccb1926f1d743cf6f52ded4441314da2ff604942c7a28663",
+      "sass": "fp8-T4-launch2.sass",
+      "sass_sha256": "1eed5dfe6001bb63e18ab37ef847afab64ca93e989d930f81245114af8f2bc9d",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_down"
+        ],
+        "actual_instruction_lines": 432
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "int8-T1-launch0.cubin",
+      "cubin_sha256": "221f423a6aafb533b0b37622d7b5e2a8a7150dac36149ef5d123dc3d9791c09c",
+      "sass": "int8-T1-launch0.sass",
+      "sass_sha256": "6cf205a212bbca0c2e1cb3876c69e4ea056738466323db9587ffcce87f7b7962",
+      "sass_contract": {
+        "functions": [
+          "_w8a16_int8_route_gemv"
+        ],
+        "actual_instruction_lines": 416
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "int8-T1-launch1.cubin",
+      "cubin_sha256": "5ff724d80633308ce27d6051c11b3dc520275827ddcf5a24c208e06c48843c99",
+      "sass": "int8-T1-launch1.sass",
+      "sass_sha256": "59908a7a285029c6923a9e0fc333cb9d1053aed854eb08539891cb7347a9b2dc",
+      "sass_contract": {
+        "functions": [
+          "_w8a16_int8_route_gemv"
+        ],
+        "actual_instruction_lines": 264
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "int8-T16-launch0.cubin",
+      "cubin_sha256": "9285a08c60ab10a0b0b6ab5784e0cb8cbe1aa41acf40bc60933449cd7bdf50f7",
+      "sass": "int8-T16-launch0.sass",
+      "sass_sha256": "86288940a9f63123ea037c7b51528c1610f79bdac42adc1478015fce8a1a03c5",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_gateup"
+        ],
+        "actual_instruction_lines": 496
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "int8-T16-launch1.cubin",
+      "cubin_sha256": "f05fe5c630fbb6065ac0fb5a21b7ad24257c98ca9e3d4a6c68a22b55a0fb0613",
+      "sass": "int8-T16-launch1.sass",
+      "sass_sha256": "2ef42a5f7921b0aa97016dfe5cac4d6ad1511004d929784435082a81a6aed6e0",
+      "sass_contract": {
+        "functions": [
+          "silu_and_mul_kernel_kernel_rank_2"
+        ],
+        "actual_instruction_lines": 144
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "int8-T16-launch2.cubin",
+      "cubin_sha256": "5c4a854f810355a92855f65864a10d4bf3c59dfc514c0f1fcc78617f9bcfb7fa",
+      "sass": "int8-T16-launch2.sass",
+      "sass_sha256": "cf97ad36579ea3fb8a13304315a51158960a9ad07e6fd6fd36a845d965800e56",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_down"
+        ],
+        "actual_instruction_lines": 792
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "int8-T4-launch0.cubin",
+      "cubin_sha256": "5b1150a351743b12e4bc5935a9f8d54ff424c0fba76c9b3ae0143b4d1b926607",
+      "sass": "int8-T4-launch0.sass",
+      "sass_sha256": "eb5227512b8c09db939ff3c6cf6508eab41dc5377dbbd3817b5eef7ed1f9cc9d",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_gateup_silu"
+        ],
+        "actual_instruction_lines": 1496
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "int8-T4-launch1.cubin",
+      "cubin_sha256": "26f04d676dcf14ca8d8aec7c8381e5ce6037c8f11ff33a1e188a8a08c82d0c46",
+      "sass": "int8-T4-launch1.sass",
+      "sass_sha256": "db07cd40eb770dda968499f70fd05daefd76fbdd9e9fa1b142432ff41eeb244d",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_down"
+        ],
+        "actual_instruction_lines": 496
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "baseline",
+      "cubin": "int8-unified-post-0.cubin",
+      "cubin_sha256": "eae3d6179e2797b55d7d9b533bebf268a01f95d0bf26fc5cb5b10d1bf7ef07a5",
+      "sass": "int8-unified-post-0.sass",
+      "sass_sha256": "5a4201243b73cb2616ecc78c4bc7cd2b9fa0666808447b7c5004dab983dd89d8",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_unified_moe"
+        ],
+        "actual_instruction_lines": 1072
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "fp8-T1-launch0.cubin",
+      "cubin_sha256": "892bf8493f9f7133f60a956741c2c37dda9baebfbe9e0bd2a4b7337030dd5558",
+      "sass": "fp8-T1-launch0.sass",
+      "sass_sha256": "47f1412e31b5b9618d855b8694bcb7645fa55fd6dc8bff258bb4531ab6f451b5",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_unified_moe"
+        ],
+        "actual_instruction_lines": 872
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 1,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "fp8-T4-launch0.cubin",
+      "cubin_sha256": "f209b685befb8bec0c5fb4aee1c0dd8855926dadd39d206021124450671c23d7",
+      "sass": "fp8-T4-launch0.sass",
+      "sass_sha256": "d5bfda27c708ea5f6a0300e07817dac9ccb0aed88a20b4190c175b98b0da501a",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_gateup"
+        ],
+        "actual_instruction_lines": 488
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "fp8-T4-launch1.cubin",
+      "cubin_sha256": "9658a4a78ef2a1175fbcf942ea7e40bbea0c0a78647d4fae02bc7925bf1b9193",
+      "sass": "fp8-T4-launch1.sass",
+      "sass_sha256": "2ef42a5f7921b0aa97016dfe5cac4d6ad1511004d929784435082a81a6aed6e0",
+      "sass_contract": {
+        "functions": [
+          "silu_and_mul_kernel_kernel_rank_2"
+        ],
+        "actual_instruction_lines": 144
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "fp8-T4-launch2.cubin",
+      "cubin_sha256": "cf04b5fb03e06d7743361503b4f9f548b5d4d2b79e584af6a3151a2dc991e836",
+      "sass": "fp8-T4-launch2.sass",
+      "sass_sha256": "1eed5dfe6001bb63e18ab37ef847afab64ca93e989d930f81245114af8f2bc9d",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_down"
+        ],
+        "actual_instruction_lines": 432
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "int8-T1-launch0.cubin",
+      "cubin_sha256": "5ddbe133e4ef356e628a1a80867e9c69b914782fed2018ae26fb2dcdae02c616",
+      "sass": "int8-T1-launch0.sass",
+      "sass_sha256": "6cf205a212bbca0c2e1cb3876c69e4ea056738466323db9587ffcce87f7b7962",
+      "sass_contract": {
+        "functions": [
+          "_w8a16_int8_route_gemv"
+        ],
+        "actual_instruction_lines": 416
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "int8-T1-launch1.cubin",
+      "cubin_sha256": "bf017ffce46f6334db5f373d880046d4c7d178598ceb0d52c2e0bd6387f19772",
+      "sass": "int8-T1-launch1.sass",
+      "sass_sha256": "59908a7a285029c6923a9e0fc333cb9d1053aed854eb08539891cb7347a9b2dc",
+      "sass_contract": {
+        "functions": [
+          "_w8a16_int8_route_gemv"
+        ],
+        "actual_instruction_lines": 264
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "int8-T16-launch0.cubin",
+      "cubin_sha256": "8759e616075bfd938a2d5736f4c6547513ea033c1ff3175874d57de27275b400",
+      "sass": "int8-T16-launch0.sass",
+      "sass_sha256": "86288940a9f63123ea037c7b51528c1610f79bdac42adc1478015fce8a1a03c5",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_gateup"
+        ],
+        "actual_instruction_lines": 496
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "int8-T16-launch1.cubin",
+      "cubin_sha256": "9658a4a78ef2a1175fbcf942ea7e40bbea0c0a78647d4fae02bc7925bf1b9193",
+      "sass": "int8-T16-launch1.sass",
+      "sass_sha256": "2ef42a5f7921b0aa97016dfe5cac4d6ad1511004d929784435082a81a6aed6e0",
+      "sass_contract": {
+        "functions": [
+          "silu_and_mul_kernel_kernel_rank_2"
+        ],
+        "actual_instruction_lines": 144
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "int8-T16-launch2.cubin",
+      "cubin_sha256": "2ed2b1579f886a7b851ec479b3c2bbd21eb0f0d80dde4ddf2415304b2cf7fec8",
+      "sass": "int8-T16-launch2.sass",
+      "sass_sha256": "cf97ad36579ea3fb8a13304315a51158960a9ad07e6fd6fd36a845d965800e56",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_down"
+        ],
+        "actual_instruction_lines": 792
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "int8-T4-launch0.cubin",
+      "cubin_sha256": "b3d0625f3fbc01c3b6184d22d645de15d1b78bab3bc7aa942e27f2ba90224519",
+      "sass": "int8-T4-launch0.sass",
+      "sass_sha256": "eb5227512b8c09db939ff3c6cf6508eab41dc5377dbbd3817b5eef7ed1f9cc9d",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_gateup_silu"
+        ],
+        "actual_instruction_lines": 1496
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 0,
+        "ERRBAR": 0,
+        "CGAERRBAR": 0,
+        "ATOMG": 0,
+        "REDG": 0,
+        "CCTL": 0
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "int8-T4-launch1.cubin",
+      "cubin_sha256": "4abb90d73362cb340b9dec63d582f9e6e6af5f37f1e894c8fbcbad5134294cd1",
+      "sass": "int8-T4-launch1.sass",
+      "sass_sha256": "db07cd40eb770dda968499f70fd05daefd76fbdd9e9fa1b142432ff41eeb244d",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_down"
+        ],
+        "actual_instruction_lines": 496
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    },
+    {
+      "variant": "candidate",
+      "cubin": "int8-unified-post-0.cubin",
+      "cubin_sha256": "faf2b2813d80e213e43fb2ef442d62a04957167bf32395e1eccd209cbc38cbd4",
+      "sass": "int8-unified-post-0.sass",
+      "sass_sha256": "5a4201243b73cb2616ecc78c4bc7cd2b9fa0666808447b7c5004dab983dd89d8",
+      "sass_contract": {
+        "functions": [
+          "fused_moe_kernel_w8a16_unified_moe"
+        ],
+        "actual_instruction_lines": 1072
+      },
+      "static_instruction_counts": {
+        "MEMBAR": 1,
+        "ERRBAR": 1,
+        "CGAERRBAR": 1,
+        "ATOMG": 1,
+        "REDG": 0,
+        "CCTL": 1
+      }
+    }
+  ],
+  "hardware_counter_measurement": false
+}

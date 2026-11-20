@@ -1,0 +1,1321 @@
+{
+  "status": "FAIL_PERFORMANCE",
+  "results": {
+    "baseline": {
+      "status": "FAIL_PERFORMANCE",
+      "actual_cases": 14,
+      "passed_cases": 9,
+      "failed_cases": 5,
+      "threshold": 0.9,
+      "cases": [
+        {
+          "precision": "int8",
+          "shape": [
+            1,
+            4,
+            512,
+            512,
+            2
+          ],
+          "max_diff": 0.007515952456742525,
+          "rounds": [
+            {
+              "native": 0.10512000322341919,
+              "gems": 0.09520000219345093,
+              "speedup": 1.1042016890904094
+            },
+            {
+              "gems": 0.09487999975681305,
+              "native": 0.10332799702882767,
+              "speedup": 1.089038757311
+            },
+            {
+              "native": 0.1029760017991066,
+              "gems": 0.09441599994897842,
+              "speedup": 1.0906626192038842
+            }
+          ],
+          "paired_ratios": [
+            1.1042016890904094,
+            1.089038757311,
+            1.0906626192038842
+          ],
+          "primary_median_paired_ratio": 1.0906626192038842,
+          "secondary_ratio_of_latency_medians": 1.089038757311,
+          "passed": true
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            1,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004793734289705753,
+          "rounds": [
+            {
+              "native": 0.16382399946451187,
+              "gems": 0.2024960070848465,
+              "speedup": 0.809023357166095
+            },
+            {
+              "gems": 0.2025279998779297,
+              "native": 0.1642720028758049,
+              "speedup": 0.8111076146252225
+            },
+            {
+              "native": 0.16432000696659088,
+              "gems": 0.2025279998779297,
+              "speedup": 0.8113446390900615
+            }
+          ],
+          "paired_ratios": [
+            0.809023357166095,
+            0.8111076146252225,
+            0.8113446390900615
+          ],
+          "primary_median_paired_ratio": 0.8111076146252225,
+          "secondary_ratio_of_latency_medians": 0.8111076146252225,
+          "passed": false
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            4,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004344399552792311,
+          "rounds": [
+            {
+              "native": 0.2864319980144501,
+              "gems": 0.8699679970741272,
+              "speedup": 0.3292442928679871
+            },
+            {
+              "gems": 0.8689599931240082,
+              "native": 0.2874239981174469,
+              "speedup": 0.33076781484970963
+            },
+            {
+              "native": 0.29095999896526337,
+              "gems": 0.8712000250816345,
+              "speedup": 0.33397611408241107
+            }
+          ],
+          "paired_ratios": [
+            0.3292442928679871,
+            0.33076781484970963,
+            0.33397611408241107
+          ],
+          "primary_median_paired_ratio": 0.33076781484970963,
+          "secondary_ratio_of_latency_medians": 0.33038456481630374,
+          "passed": false
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            16,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.003019393654540181,
+          "rounds": [
+            {
+              "native": 0.5625920295715332,
+              "gems": 0.7845919728279114,
+              "speedup": 0.7170504530447566
+            },
+            {
+              "gems": 0.7518559992313385,
+              "native": 0.5820479989051819,
+              "speedup": 0.7741482404878591
+            },
+            {
+              "native": 0.5836000144481659,
+              "gems": 0.7735040187835693,
+              "speedup": 0.7544886649276226
+            }
+          ],
+          "paired_ratios": [
+            0.7170504530447566,
+            0.7741482404878591,
+            0.7544886649276226
+          ],
+          "primary_median_paired_ratio": 0.7544886649276226,
+          "secondary_ratio_of_latency_medians": 0.7524821911339572,
+          "passed": false
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            64,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.003048928454518318,
+          "rounds": [
+            {
+              "native": 1.275231957435608,
+              "gems": 1.1943680047988892,
+              "speedup": 1.0677043861789774
+            },
+            {
+              "gems": 1.196079969406128,
+              "native": 1.2784960269927979,
+              "speedup": 1.0689051398691936
+            },
+            {
+              "native": 1.2750719785690308,
+              "gems": 1.1957600116729736,
+              "speedup": 1.0663276628435607
+            }
+          ],
+          "paired_ratios": [
+            1.0677043861789774,
+            1.0689051398691936,
+            1.0663276628435607
+          ],
+          "primary_median_paired_ratio": 1.0677043861789774,
+          "secondary_ratio_of_latency_medians": 1.0664614512835615,
+          "passed": true
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            256,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004416962619870901,
+          "rounds": [
+            {
+              "native": 3.2413439750671387,
+              "gems": 2.219007968902588,
+              "speedup": 1.4607175911450863
+            },
+            {
+              "gems": 2.216480016708374,
+              "native": 3.2435519695281982,
+              "speedup": 1.4633797485551425
+            },
+            {
+              "native": 3.252095937728882,
+              "gems": 2.2125439643859863,
+              "speedup": 1.4698446630105209
+            }
+          ],
+          "paired_ratios": [
+            1.4607175911450863,
+            1.4633797485551425,
+            1.4698446630105209
+          ],
+          "primary_median_paired_ratio": 1.4633797485551425,
+          "secondary_ratio_of_latency_medians": 1.4633797485551425,
+          "passed": true
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            1024,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004452127497643232,
+          "rounds": [
+            {
+              "native": 10.812479972839355,
+              "gems": 6.757279872894287,
+              "speedup": 1.6001231525442412
+            },
+            {
+              "gems": 6.724095821380615,
+              "native": 10.804143905639648,
+              "speedup": 1.6067801816990321
+            },
+            {
+              "native": 10.841951847076416,
+              "gems": 6.739327907562256,
+              "speedup": 1.6087586174447117
+            }
+          ],
+          "paired_ratios": [
+            1.6001231525442412,
+            1.6067801816990321,
+            1.6087586174447117
+          ],
+          "primary_median_paired_ratio": 1.6067801816990321,
+          "secondary_ratio_of_latency_medians": 1.604385499733079,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            1,
+            4,
+            512,
+            512,
+            2
+          ],
+          "max_diff": 0.007405414711683989,
+          "rounds": [
+            {
+              "native": 0.10400000214576721,
+              "gems": 0.09756799787282944,
+              "speedup": 1.0659232987574603
+            },
+            {
+              "gems": 0.0958079993724823,
+              "native": 0.10438399761915207,
+              "speedup": 1.0895123403352576
+            },
+            {
+              "native": 0.1045599989593029,
+              "gems": 0.09700800105929375,
+              "speedup": 1.0778492270487379
+            }
+          ],
+          "paired_ratios": [
+            1.0659232987574603,
+            1.0895123403352576,
+            1.0778492270487379
+          ],
+          "primary_median_paired_ratio": 1.0778492270487379,
+          "secondary_ratio_of_latency_medians": 1.076034929895627,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            1,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.03194785863161087,
+          "rounds": [
+            {
+              "native": 0.15276800096035004,
+              "gems": 0.2688640058040619,
+              "speedup": 0.5681980393897786
+            },
+            {
+              "gems": 0.26924800872802734,
+              "native": 0.15263999998569489,
+              "speedup": 0.5669122706117374
+            },
+            {
+              "native": 0.1520639955997467,
+              "gems": 0.26867198944091797,
+              "speedup": 0.5659838076763346
+            }
+          ],
+          "paired_ratios": [
+            0.5681980393897786,
+            0.5669122706117374,
+            0.5659838076763346
+          ],
+          "primary_median_paired_ratio": 0.5669122706117374,
+          "secondary_ratio_of_latency_medians": 0.5677219586504757,
+          "passed": false
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            4,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.005031808279454708,
+          "rounds": [
+            {
+              "native": 0.3729120045900345,
+              "gems": 0.48262399435043335,
+              "speedup": 0.7726760562162664
+            },
+            {
+              "gems": 0.4898880124092102,
+              "native": 0.40400001406669617,
+              "speedup": 0.8246783016385169
+            },
+            {
+              "native": 0.393887996673584,
+              "gems": 0.47779199481010437,
+              "speedup": 0.8243922061317341
+            }
+          ],
+          "paired_ratios": [
+            0.7726760562162664,
+            0.8246783016385169,
+            0.8243922061317341
+          ],
+          "primary_median_paired_ratio": 0.8243922061317341,
+          "secondary_ratio_of_latency_medians": 0.8161384458386084,
+          "passed": false
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            16,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.005176147911697626,
+          "rounds": [
+            {
+              "native": 0.5254719853401184,
+              "gems": 0.5607199966907501,
+              "speedup": 0.9371379448590064
+            },
+            {
+              "gems": 0.5594559907913208,
+              "native": 0.5373759865760803,
+              "speedup": 0.9605330811025734
+            },
+            {
+              "native": 0.5314880013465881,
+              "gems": 0.5663520097732544,
+              "speedup": 0.9384410970120429
+            }
+          ],
+          "paired_ratios": [
+            0.9371379448590064,
+            0.9605330811025734,
+            0.9384410970120429
+          ],
+          "primary_median_paired_ratio": 0.9384410970120429,
+          "secondary_ratio_of_latency_medians": 0.947867036102363,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            64,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.005181437358260155,
+          "rounds": [
+            {
+              "native": 1.240768015384674,
+              "gems": 0.9564800262451172,
+              "speedup": 1.297223132045522
+            },
+            {
+              "gems": 0.9542400240898132,
+              "native": 1.240336000919342,
+              "speedup": 1.29981552817638
+            },
+            {
+              "native": 1.2406880259513855,
+              "gems": 0.9574400186538696,
+              "speedup": 1.2958389056013697
+            }
+          ],
+          "paired_ratios": [
+            1.297223132045522,
+            1.29981552817638,
+            1.2958389056013697
+          ],
+          "primary_median_paired_ratio": 1.297223132045522,
+          "secondary_ratio_of_latency_medians": 1.297139503081933,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            256,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.005145757459104061,
+          "rounds": [
+            {
+              "native": 3.498960018157959,
+              "gems": 2.2180800437927246,
+              "speedup": 1.5774723856110444
+            },
+            {
+              "gems": 2.235424041748047,
+              "native": 3.4936320781707764,
+              "speedup": 1.5628498275606098
+            },
+            {
+              "native": 3.4898879528045654,
+              "gems": 2.231264114379883,
+              "speedup": 1.564085546983523
+            }
+          ],
+          "paired_ratios": [
+            1.5774723856110444,
+            1.5628498275606098,
+            1.564085546983523
+          ],
+          "primary_median_paired_ratio": 1.564085546983523,
+          "secondary_ratio_of_latency_medians": 1.5657635757485093,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            1024,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004910569172352552,
+          "rounds": [
+            {
+              "native": 10.41371202468872,
+              "gems": 7.2486560344696045,
+              "speedup": 1.4366403889449706
+            },
+            {
+              "gems": 7.232959985733032,
+              "native": 10.456063747406006,
+              "speedup": 1.4456133820773964
+            },
+            {
+              "native": 10.40831995010376,
+              "gems": 7.252255916595459,
+              "speedup": 1.4351837648594594
+            }
+          ],
+          "paired_ratios": [
+            1.4366403889449706,
+            1.4456133820773964,
+            1.4351837648594594
+          ],
+          "primary_median_paired_ratio": 1.4366403889449706,
+          "secondary_ratio_of_latency_medians": 1.4366403889449706,
+          "passed": true
+        }
+      ],
+      "primary": "per-case median of three original alternating native/Gems paired ratios"
+    },
+    "candidate": {
+      "status": "FAIL_PERFORMANCE",
+      "actual_cases": 14,
+      "passed_cases": 9,
+      "failed_cases": 5,
+      "threshold": 0.9,
+      "cases": [
+        {
+          "precision": "int8",
+          "shape": [
+            1,
+            4,
+            512,
+            512,
+            2
+          ],
+          "max_diff": 0.008178306743502617,
+          "rounds": [
+            {
+              "native": 0.10454399883747101,
+              "gems": 0.09494400024414062,
+              "speedup": 1.1011122195046004
+            },
+            {
+              "gems": 0.09516800194978714,
+              "native": 0.10374400019645691,
+              "speedup": 1.090114303872794
+            },
+            {
+              "native": 0.10307200253009796,
+              "gems": 0.09484799951314926,
+              "speedup": 1.0867071847499383
+            }
+          ],
+          "paired_ratios": [
+            1.1011122195046004,
+            1.090114303872794,
+            1.0867071847499383
+          ],
+          "primary_median_paired_ratio": 1.090114303872794,
+          "secondary_ratio_of_latency_medians": 1.092686214291454,
+          "passed": true
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            1,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004793734289705753,
+          "rounds": [
+            {
+              "native": 0.1653439998626709,
+              "gems": 0.20313599705696106,
+              "speedup": 0.8139571629754377
+            },
+            {
+              "gems": 0.20336000621318817,
+              "native": 0.16592000424861908,
+              "speedup": 0.8158929936040636
+            },
+            {
+              "native": 0.1653120070695877,
+              "gems": 0.20319999754428864,
+              "speedup": 0.8135433517097213
+            }
+          ],
+          "paired_ratios": [
+            0.8139571629754377,
+            0.8158929936040636,
+            0.8135433517097213
+          ],
+          "primary_median_paired_ratio": 0.8139571629754377,
+          "secondary_ratio_of_latency_medians": 0.8137007965594744,
+          "passed": false
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            4,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004344399552792311,
+          "rounds": [
+            {
+              "native": 0.286655992269516,
+              "gems": 0.8710080087184906,
+              "speedup": 0.32910833126697814
+            },
+            {
+              "gems": 0.8708319962024689,
+              "native": 0.2871840000152588,
+              "speedup": 0.3297811762402083
+            },
+            {
+              "native": 0.29574400186538696,
+              "gems": 0.8738560080528259,
+              "speedup": 0.3384356222764664
+            }
+          ],
+          "paired_ratios": [
+            0.32910833126697814,
+            0.3297811762402083,
+            0.3384356222764664
+          ],
+          "primary_median_paired_ratio": 0.3297811762402083,
+          "secondary_ratio_of_latency_medians": 0.3297145343563385,
+          "passed": false
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            16,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.003019393654540181,
+          "rounds": [
+            {
+              "native": 0.5540159940719604,
+              "gems": 0.7778239846229553,
+              "speedup": 0.7122639633445037
+            },
+            {
+              "gems": 0.7796159982681274,
+              "native": 0.5837439894676208,
+              "speedup": 0.7487583512451962
+            },
+            {
+              "native": 0.5841440260410309,
+              "gems": 0.7654399871826172,
+              "speedup": 0.7631480401110361
+            }
+          ],
+          "paired_ratios": [
+            0.7122639633445037,
+            0.7487583512451962,
+            0.7631480401110361
+          ],
+          "primary_median_paired_ratio": 0.7487583512451962,
+          "secondary_ratio_of_latency_medians": 0.7504834011393807,
+          "passed": false
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            64,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.003048928454518318,
+          "rounds": [
+            {
+              "native": 1.278432011604309,
+              "gems": 1.195024013519287,
+              "speedup": 1.0697960853852548
+            },
+            {
+              "gems": 1.193008005619049,
+              "native": 1.2777279615402222,
+              "speedup": 1.0710137363053251
+            },
+            {
+              "native": 1.2790080308914185,
+              "gems": 1.1933919787406921,
+              "speedup": 1.071741769406789
+            }
+          ],
+          "paired_ratios": [
+            1.0697960853852548,
+            1.0710137363053251,
+            1.071741769406789
+          ],
+          "primary_median_paired_ratio": 1.0710137363053251,
+          "secondary_ratio_of_latency_medians": 1.071259095400787,
+          "passed": true
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            256,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004416962619870901,
+          "rounds": [
+            {
+              "native": 3.24399995803833,
+              "gems": 2.216736078262329,
+              "speedup": 1.4634128031070166
+            },
+            {
+              "gems": 2.2182719707489014,
+              "native": 3.2523839473724365,
+              "speedup": 1.466179075541586
+            },
+            {
+              "native": 3.2503039836883545,
+              "gems": 2.2153921127319336,
+              "speedup": 1.4671461386039732
+            }
+          ],
+          "paired_ratios": [
+            1.4634128031070166,
+            1.466179075541586,
+            1.4671461386039732
+          ],
+          "primary_median_paired_ratio": 1.466179075541586,
+          "secondary_ratio_of_latency_medians": 1.4662566354025446,
+          "passed": true
+        },
+        {
+          "precision": "int8",
+          "shape": [
+            1024,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004452152643352747,
+          "rounds": [
+            {
+              "native": 10.844544410705566,
+              "gems": 6.7142720222473145,
+              "speedup": 1.6151482059071864
+            },
+            {
+              "gems": 6.725664138793945,
+              "native": 10.810335636138916,
+              "speedup": 1.607326118737389
+            },
+            {
+              "native": 10.835968017578125,
+              "gems": 6.718560218811035,
+              "speedup": 1.6128407969372545
+            }
+          ],
+          "paired_ratios": [
+            1.6151482059071864,
+            1.607326118737389,
+            1.6128407969372545
+          ],
+          "primary_median_paired_ratio": 1.6128407969372545,
+          "secondary_ratio_of_latency_medians": 1.6128407969372545,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            1,
+            4,
+            512,
+            512,
+            2
+          ],
+          "max_diff": 0.007813363336026669,
+          "rounds": [
+            {
+              "native": 0.598800003528595,
+              "gems": 0.09372799843549728,
+              "speedup": 6.388699359036067
+            },
+            {
+              "gems": 0.09359999746084213,
+              "native": 0.10195200145244598,
+              "speedup": 1.0892308142967413
+            },
+            {
+              "native": 0.1013759970664978,
+              "gems": 0.09350399672985077,
+              "speedup": 1.0841889182490305
+            }
+          ],
+          "paired_ratios": [
+            6.388699359036067,
+            1.0892308142967413,
+            1.0841889182490305
+          ],
+          "primary_median_paired_ratio": 1.0892308142967413,
+          "secondary_ratio_of_latency_medians": 1.0892308142967413,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            1,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.032156430184841156,
+          "rounds": [
+            {
+              "native": 0.15382400155067444,
+              "gems": 0.24137599766254425,
+              "speedup": 0.6372796095729788
+            },
+            {
+              "gems": 0.24128000438213348,
+              "native": 0.15372799336910248,
+              "speedup": 0.6371352394607543
+            },
+            {
+              "native": 0.15377599745988846,
+              "gems": 0.243087999522686,
+              "speedup": 0.632593948536474
+            }
+          ],
+          "paired_ratios": [
+            0.6372796095729788,
+            0.6371352394607543,
+            0.632593948536474
+          ],
+          "primary_median_paired_ratio": 0.6371352394607543,
+          "secondary_ratio_of_latency_medians": 0.6370807327532003,
+          "passed": false
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            4,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.005031808279454708,
+          "rounds": [
+            {
+              "native": 0.3752000033855438,
+              "gems": 0.468095988035202,
+              "speedup": 0.8015450099463954
+            },
+            {
+              "gems": 0.49007999897003174,
+              "native": 0.40249599516391754,
+              "speedup": 0.8212863124588157
+            },
+            {
+              "native": 0.3910079896450043,
+              "gems": 0.47328001260757446,
+              "speedup": 0.8261662847131747
+            }
+          ],
+          "paired_ratios": [
+            0.8015450099463954,
+            0.8212863124588157,
+            0.8261662847131747
+          ],
+          "primary_median_paired_ratio": 0.8212863124588157,
+          "secondary_ratio_of_latency_medians": 0.8261662847131747,
+          "passed": false
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            16,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.005176147911697626,
+          "rounds": [
+            {
+              "native": 0.5291200280189514,
+              "gems": 0.5480960011482239,
+              "speedup": 0.9653783769822821
+            },
+            {
+              "gems": 0.5608960092067719,
+              "native": 0.5368319749832153,
+              "speedup": 0.9570971555715144
+            },
+            {
+              "native": 0.5448479950428009,
+              "gems": 0.5682880282402039,
+              "speedup": 0.9587532518149487
+            }
+          ],
+          "paired_ratios": [
+            0.9653783769822821,
+            0.9570971555715144,
+            0.9587532518149487
+          ],
+          "primary_median_paired_ratio": 0.9587532518149487,
+          "secondary_ratio_of_latency_medians": 0.9570971555715144,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            64,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.005181437358260155,
+          "rounds": [
+            {
+              "native": 1.2414080500602722,
+              "gems": 0.9622079730033875,
+              "speedup": 1.2901660398691186
+            },
+            {
+              "gems": 0.9636800289154053,
+              "native": 1.241424024105072,
+              "speedup": 1.288211840918048
+            },
+            {
+              "native": 1.239359974861145,
+              "gems": 0.9616000056266785,
+              "speedup": 1.2888518797932507
+            }
+          ],
+          "paired_ratios": [
+            1.2901660398691186,
+            1.288211840918048,
+            1.2888518797932507
+          ],
+          "primary_median_paired_ratio": 1.2888518797932507,
+          "secondary_ratio_of_latency_medians": 1.2901660398691186,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            256,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.005145757459104061,
+          "rounds": [
+            {
+              "native": 3.495136022567749,
+              "gems": 2.2225279808044434,
+              "speedup": 1.5725948346903087
+            },
+            {
+              "gems": 2.2288320064544678,
+              "native": 3.4919679164886475,
+              "speedup": 1.5667254895731344
+            },
+            {
+              "native": 3.496559977531433,
+              "gems": 2.225600004196167,
+              "speedup": 1.571063969688617
+            }
+          ],
+          "paired_ratios": [
+            1.5725948346903087,
+            1.5667254895731344,
+            1.571063969688617
+          ],
+          "primary_median_paired_ratio": 1.571063969688617,
+          "secondary_ratio_of_latency_medians": 1.57042416246315,
+          "passed": true
+        },
+        {
+          "precision": "fp8",
+          "shape": [
+            1024,
+            8,
+            4096,
+            14336,
+            2
+          ],
+          "max_diff": 0.004910597112029791,
+          "rounds": [
+            {
+              "native": 10.415215969085693,
+              "gems": 7.241199970245361,
+              "speedup": 1.4383273506991388
+            },
+            {
+              "gems": 7.217664003372192,
+              "native": 10.445871829986572,
+              "speedup": 1.4472649080237203
+            },
+            {
+              "native": 10.418399810791016,
+              "gems": 7.234320163726807,
+              "speedup": 1.440135296061311
+            }
+          ],
+          "paired_ratios": [
+            1.4383273506991388,
+            1.4472649080237203,
+            1.440135296061311
+          ],
+          "primary_median_paired_ratio": 1.440135296061311,
+          "secondary_ratio_of_latency_medians": 1.440135296061311,
+          "passed": true
+        }
+      ],
+      "primary": "per-case median of three original alternating native/Gems paired ratios"
+    }
+  },
+  "qualifications": {
+    "baseline": {
+      "runtime": {
+        "source_variant": "baseline",
+        "source_commit": "e84e05be1eef0054d21f90071ad44f41c2eec7a4",
+        "torch": "2.13.0+cu130",
+        "torch_git_version": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+        "vllm": "0.32.0",
+        "triton": "3.6.0",
+        "core_sha256": "385c1089a702a71df0ce847bdac0e71234d411396ac1bbdfe5d74bbd6528f43f",
+        "op_sha256": "77739b56a594b408732bed9605bd802a48dd49c7957b4510290c3ddd7486231e",
+        "native_python": {
+          "int8": {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/experts/marlin_moe.py",
+            "sha256": "e048731e130ecc3100be0ab4a168777a7697131b41538f9d9b6a73c4f66e14ff"
+          },
+          "fp8": {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/experts/marlin_moe.py",
+            "sha256": "e048731e130ecc3100be0ab4a168777a7697131b41538f9d9b6a73c4f66e14ff"
+          }
+        },
+        "TRITON_CACHE_DIR": "/cache/baseline/triton",
+        "FLAGGEMS_CACHE_DIR": "/cache/baseline/gems",
+        "VLLM_PLUGINS": "",
+        "device": "NVIDIA H20-3e",
+        "compiler_tool_assets": {
+          "assembler_sm90": {
+            "path": "/compiler/triton/backends/nvidia/bin/ptxas",
+            "resolved_path": "/compiler/triton/backends/nvidia/bin/ptxas",
+            "sha256": "c960a4f238b17d5c5d3c01ad2bbc1ebd2c5aecc459cb4d223bff10b45f9b8fca",
+            "version": "ptxas: NVIDIA (R) Ptx optimizing assembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:21:21_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0\n"
+          },
+          "CLANG": {
+            "path": "/clang-toolchain/clang",
+            "resolved_path": "/clang-toolchain/clang",
+            "sha256": "d003e96471bfe1614f62c2cb00b24af2c1ead6138f215f17ee8844b96a59563a",
+            "version": "Ubuntu clang version 22.1.8 (++20260613092327+e80beda6e255-1~exp1~20260613092437.81)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /clang-toolchain/usr/lib/llvm-22/bin\n"
+          },
+          "CLANG_delegate": {
+            "path": "/clang-toolchain/usr/lib/llvm-22/bin/clang",
+            "resolved_path": "/clang-toolchain/usr/lib/llvm-22/bin/clang",
+            "sha256": "ebced28c19b0f18b7cea5c1c8b05ad2e47ec45a138cecacab9a25a85003574d1"
+          },
+          "FlagCX_DSO": {
+            "path": "/compiler/flagcx/lib/libflagcx.so",
+            "resolved_path": "/compiler/flagcx/lib/libflagcx.so",
+            "sha256": "c768f5fa077c6d932eb23542131bc3a5ae436b0beebb96bac9581aed58279b48"
+          },
+          "mapped_FlagCX_DSOs": [
+            {
+              "path": "/compiler/flagcx/lib/libflagcx.so",
+              "resolved_path": "/compiler/flagcx/lib/libflagcx.so",
+              "sha256": "c768f5fa077c6d932eb23542131bc3a5ae436b0beebb96bac9581aed58279b48"
+            }
+          ],
+          "TRITON_environment_except_per_variant_cache": {
+            "TRITON_CACHE_AUTOTUNING": "1",
+            "TRITON_PTXAS_BLACKWELL_PATH": "/usr/local/cuda/bin/ptxas"
+          },
+          "tool_dependency_environment": {
+            "CLANG": "/clang-toolchain/clang",
+            "CC": null,
+            "CXX": null,
+            "CUDA_HOME": "/usr/local/cuda",
+            "CPATH": null,
+            "FLAGCX_MODULE_PATH": null,
+            "FLAGCX_LIB_PATH": null,
+            "FLAGCX_BITCODE_PATH": null
+          }
+        },
+        "case_order": "baseline full14, then candidate full14; independent normal fresh caches"
+      },
+      "native": {
+        "actual_libraries": [
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/_C_stable_libtorch.abi3.so",
+            "bytes": 78786064,
+            "sha256": "ae9c8a293020e422e0b6b61d1024263dc476a772337f5d39d46d18baa7ce0ad9"
+          },
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/_moe_C_stable_libtorch.abi3.so",
+            "bytes": 45448928,
+            "sha256": "321127292e0bcac5f90845cc94085475f1859db82d8e8a0985f833f29922f23f"
+          },
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/_qutlass_C.abi3.so",
+            "bytes": 1426016,
+            "sha256": "fe01010ecabe95b179acaa6817ac7771f66f0fd2fef99caf44f607f0cf737ebe"
+          },
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/vllm_flash_attn/_vllm_fa2_C.abi3.so",
+            "bytes": 307955360,
+            "sha256": "3a0c7b066b55301f5446089f6398b21f18fbd70e578f33d7ea00e310ca89e15d"
+          },
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/vllm_flash_attn/_vllm_fa3_C.abi3.so",
+            "bytes": 172634312,
+            "sha256": "bd6e26c0947cc28b805f2e0a35b3a58355ab91dad74c109f69d8b2ad36e97429"
+          }
+        ],
+        "marlin_operators": {
+          "_C::gptq_marlin_repack": {
+            "schema": "_C::gptq_marlin_repack(Tensor b_q_weight, SymInt size_k, SymInt size_n, int num_bits, bool is_a_8bit) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/quantization/marlin/gptq_marlin_repack.cu:286 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/torch/library.py:1003 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "_moe_C::moe_wna16_marlin_gemm": {
+            "schema": "_moe_C::moe_wna16_marlin_gemm(Tensor($0! -> ) a, Tensor? c_or_none, Tensor($1! -> ) b_q_weight, Tensor? b_bias_or_none, Tensor($2! -> ) b_scales, Tensor? a_scales, Tensor? global_scale, Tensor? b_zeros_or_none, Tensor($3! -> ) workspace, Tensor sorted_token_ids, Tensor($4! -> ) expert_ids, Tensor($5! -> ) num_tokens_past_padded, Tensor($6! -> ) topk_weights, int moe_block_size, int top_k, bool mul_topk_weights, int b_type_id, int size_m, int size_n, int size_k, bool use_atomic_add, bool use_fp32_reduce, bool is_zp_float, int thread_k, int thread_n, int blocks_per_sm) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/moe/marlin_moe_wna16/ops.cu:704 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/torch/library.py:1003 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "vllm::marlin_gemm": {
+            "schema": "vllm::marlin_gemm(Tensor a, Tensor b_q_weight, Tensor? b_bias, Tensor b_scales, Tensor? a_scales, Tensor? global_scale, Tensor? b_zeros, Tensor? workspace, SymInt b_q_type_id, SymInt size_m, SymInt size_n, SymInt size_k, bool use_atomic_add=False, bool use_fp32_reduce=False, bool is_zp_float=False) -> Tensor",
+            "dispatch_table": "CUDA: registered at /usr/local/lib/python3.12/dist-packages/vllm/utils/torch_utils.py:1065 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/vllm/utils/torch_utils.py:1065 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "_C::marlin_gemm": {
+            "schema": "_C::marlin_gemm(Tensor a, Tensor? c_or_none, Tensor b_q_weight, Tensor? b_bias_or_none, Tensor b_scales, Tensor? a_scales, Tensor? global_scale, Tensor? b_zeros_or_none, Tensor workspace, int b_type_id, SymInt size_m, SymInt size_n, SymInt size_k, bool use_atomic_add, bool use_fp32_reduce, bool is_zp_float) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/quantization/marlin/marlin.cu:733 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/torch/library.py:1003 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "_C::awq_marlin_repack": {
+            "schema": "_C::awq_marlin_repack(Tensor b_q_weight, SymInt size_k, SymInt size_n, int num_bits, bool is_a_8bit) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/quantization/marlin/awq_marlin_repack.cu:292 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/torch/library.py:1003 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "_C::marlin_int4_fp8_preprocess": {
+            "schema": "_C::marlin_int4_fp8_preprocess(Tensor qweight, Tensor? qzeros_or_none, bool inplace) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/quantization/marlin/marlin_int4_fp8_preprocess.cu:120 [kernel]\nMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/MetaFallbackKernel.cpp:23 [backend fallback]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          }
+        },
+        "vllm_provider_imported": false,
+        "legacy_binary_expected_hash": null,
+        "legacy_receipt_only_recorded_python_source": true
+      },
+      "fp8_unified_entries": 1,
+      "int8_acq_rel_entries": 1
+    },
+    "candidate": {
+      "runtime": {
+        "source_variant": "candidate",
+        "source_commit": "7845e327b4d8def5a2d34e3f2a2de01b227c7837",
+        "torch": "2.13.0+cu130",
+        "torch_git_version": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+        "vllm": "0.32.0",
+        "triton": "3.6.0",
+        "core_sha256": "385c1089a702a71df0ce847bdac0e71234d411396ac1bbdfe5d74bbd6528f43f",
+        "op_sha256": "f057c47f5e192d63bcf46dc66dc33a7269668a3d37f89bf6b0ed6797754f8f7a",
+        "native_python": {
+          "int8": {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/experts/marlin_moe.py",
+            "sha256": "e048731e130ecc3100be0ab4a168777a7697131b41538f9d9b6a73c4f66e14ff"
+          },
+          "fp8": {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/experts/marlin_moe.py",
+            "sha256": "e048731e130ecc3100be0ab4a168777a7697131b41538f9d9b6a73c4f66e14ff"
+          }
+        },
+        "TRITON_CACHE_DIR": "/cache/candidate/triton",
+        "FLAGGEMS_CACHE_DIR": "/cache/candidate/gems",
+        "VLLM_PLUGINS": "",
+        "device": "NVIDIA H20-3e",
+        "compiler_tool_assets": {
+          "assembler_sm90": {
+            "path": "/compiler/triton/backends/nvidia/bin/ptxas",
+            "resolved_path": "/compiler/triton/backends/nvidia/bin/ptxas",
+            "sha256": "c960a4f238b17d5c5d3c01ad2bbc1ebd2c5aecc459cb4d223bff10b45f9b8fca",
+            "version": "ptxas: NVIDIA (R) Ptx optimizing assembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:21:21_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0\n"
+          },
+          "CLANG": {
+            "path": "/clang-toolchain/clang",
+            "resolved_path": "/clang-toolchain/clang",
+            "sha256": "d003e96471bfe1614f62c2cb00b24af2c1ead6138f215f17ee8844b96a59563a",
+            "version": "Ubuntu clang version 22.1.8 (++20260613092327+e80beda6e255-1~exp1~20260613092437.81)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /clang-toolchain/usr/lib/llvm-22/bin\n"
+          },
+          "CLANG_delegate": {
+            "path": "/clang-toolchain/usr/lib/llvm-22/bin/clang",
+            "resolved_path": "/clang-toolchain/usr/lib/llvm-22/bin/clang",
+            "sha256": "ebced28c19b0f18b7cea5c1c8b05ad2e47ec45a138cecacab9a25a85003574d1"
+          },
+          "FlagCX_DSO": {
+            "path": "/compiler/flagcx/lib/libflagcx.so",
+            "resolved_path": "/compiler/flagcx/lib/libflagcx.so",
+            "sha256": "c768f5fa077c6d932eb23542131bc3a5ae436b0beebb96bac9581aed58279b48"
+          },
+          "mapped_FlagCX_DSOs": [
+            {
+              "path": "/compiler/flagcx/lib/libflagcx.so",
+              "resolved_path": "/compiler/flagcx/lib/libflagcx.so",
+              "sha256": "c768f5fa077c6d932eb23542131bc3a5ae436b0beebb96bac9581aed58279b48"
+            }
+          ],
+          "TRITON_environment_except_per_variant_cache": {
+            "TRITON_CACHE_AUTOTUNING": "1",
+            "TRITON_PTXAS_BLACKWELL_PATH": "/usr/local/cuda/bin/ptxas"
+          },
+          "tool_dependency_environment": {
+            "CLANG": "/clang-toolchain/clang",
+            "CC": null,
+            "CXX": null,
+            "CUDA_HOME": "/usr/local/cuda",
+            "CPATH": null,
+            "FLAGCX_MODULE_PATH": null,
+            "FLAGCX_LIB_PATH": null,
+            "FLAGCX_BITCODE_PATH": null
+          }
+        },
+        "case_order": "baseline full14, then candidate full14; independent normal fresh caches"
+      },
+      "native": {
+        "actual_libraries": [
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/_C_stable_libtorch.abi3.so",
+            "bytes": 78786064,
+            "sha256": "ae9c8a293020e422e0b6b61d1024263dc476a772337f5d39d46d18baa7ce0ad9"
+          },
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/_moe_C_stable_libtorch.abi3.so",
+            "bytes": 45448928,
+            "sha256": "321127292e0bcac5f90845cc94085475f1859db82d8e8a0985f833f29922f23f"
+          },
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/_qutlass_C.abi3.so",
+            "bytes": 1426016,
+            "sha256": "fe01010ecabe95b179acaa6817ac7771f66f0fd2fef99caf44f607f0cf737ebe"
+          },
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/vllm_flash_attn/_vllm_fa2_C.abi3.so",
+            "bytes": 307955360,
+            "sha256": "3a0c7b066b55301f5446089f6398b21f18fbd70e578f33d7ea00e310ca89e15d"
+          },
+          {
+            "path": "/usr/local/lib/python3.12/dist-packages/vllm/vllm_flash_attn/_vllm_fa3_C.abi3.so",
+            "bytes": 172634312,
+            "sha256": "bd6e26c0947cc28b805f2e0a35b3a58355ab91dad74c109f69d8b2ad36e97429"
+          }
+        ],
+        "marlin_operators": {
+          "_C::gptq_marlin_repack": {
+            "schema": "_C::gptq_marlin_repack(Tensor b_q_weight, SymInt size_k, SymInt size_n, int num_bits, bool is_a_8bit) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/quantization/marlin/gptq_marlin_repack.cu:286 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/torch/library.py:1003 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "_moe_C::moe_wna16_marlin_gemm": {
+            "schema": "_moe_C::moe_wna16_marlin_gemm(Tensor($0! -> ) a, Tensor? c_or_none, Tensor($1! -> ) b_q_weight, Tensor? b_bias_or_none, Tensor($2! -> ) b_scales, Tensor? a_scales, Tensor? global_scale, Tensor? b_zeros_or_none, Tensor($3! -> ) workspace, Tensor sorted_token_ids, Tensor($4! -> ) expert_ids, Tensor($5! -> ) num_tokens_past_padded, Tensor($6! -> ) topk_weights, int moe_block_size, int top_k, bool mul_topk_weights, int b_type_id, int size_m, int size_n, int size_k, bool use_atomic_add, bool use_fp32_reduce, bool is_zp_float, int thread_k, int thread_n, int blocks_per_sm) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/moe/marlin_moe_wna16/ops.cu:704 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/torch/library.py:1003 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "vllm::marlin_gemm": {
+            "schema": "vllm::marlin_gemm(Tensor a, Tensor b_q_weight, Tensor? b_bias, Tensor b_scales, Tensor? a_scales, Tensor? global_scale, Tensor? b_zeros, Tensor? workspace, SymInt b_q_type_id, SymInt size_m, SymInt size_n, SymInt size_k, bool use_atomic_add=False, bool use_fp32_reduce=False, bool is_zp_float=False) -> Tensor",
+            "dispatch_table": "CUDA: registered at /usr/local/lib/python3.12/dist-packages/vllm/utils/torch_utils.py:1065 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/vllm/utils/torch_utils.py:1065 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "_C::marlin_gemm": {
+            "schema": "_C::marlin_gemm(Tensor a, Tensor? c_or_none, Tensor b_q_weight, Tensor? b_bias_or_none, Tensor b_scales, Tensor? a_scales, Tensor? global_scale, Tensor? b_zeros_or_none, Tensor workspace, int b_type_id, SymInt size_m, SymInt size_n, SymInt size_k, bool use_atomic_add, bool use_fp32_reduce, bool is_zp_float) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/quantization/marlin/marlin.cu:733 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/torch/library.py:1003 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "_C::awq_marlin_repack": {
+            "schema": "_C::awq_marlin_repack(Tensor b_q_weight, SymInt size_k, SymInt size_n, int num_bits, bool is_a_8bit) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/quantization/marlin/awq_marlin_repack.cu:292 [kernel]\nMeta: registered at /usr/local/lib/python3.12/dist-packages/torch/library.py:1003 [kernel]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          },
+          "_C::marlin_int4_fp8_preprocess": {
+            "schema": "_C::marlin_int4_fp8_preprocess(Tensor qweight, Tensor? qzeros_or_none, bool inplace) -> Tensor",
+            "dispatch_table": "CUDA: registered at /workspace/csrc/quantization/marlin/marlin_int4_fp8_preprocess.cu:120 [kernel]\nMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/MetaFallbackKernel.cpp:23 [backend fallback]\nBackendSelect: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/BackendSelectFallbackKernel.cpp:3 [backend fallback]\nPython: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:192 [backend fallback]\nFuncTorchDynamicLayerBackMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:479 [backend fallback]\nFunctionalize: registered at /__w/pytorch/pytorch/aten/src/ATen/FunctionalizeFallbackKernel.cpp:411 [backend fallback]\nConjugate: registered at /__w/pytorch/pytorch/aten/src/ATen/ConjugateFallback.cpp:17 [backend fallback]\nNegative: registered at /__w/pytorch/pytorch/aten/src/ATen/native/NegateFallback.cpp:18 [backend fallback]\nZeroTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/ZeroTensorFallback.cpp:115 [backend fallback]\nADInplaceOrView: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:103 [backend fallback]\nAutogradOther: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:62 [backend fallback]\nAutogradCPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:66 [backend fallback]\nAutogradCUDA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:74 [backend fallback]\nAutogradXLA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:86 [backend fallback]\nAutogradMPS: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:94 [backend fallback]\nAutogradXPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:70 [backend fallback]\nAutogradHPU: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:107 [backend fallback]\nAutogradLazy: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:90 [backend fallback]\nAutogradMTIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:78 [backend fallback]\nAutogradMAIA: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:82 [backend fallback]\nAutogradPrivateUse1: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:111 [backend fallback]\nAutogradMeta: registered at /__w/pytorch/pytorch/aten/src/ATen/core/VariableFallbackKernel.cpp:98 [backend fallback]\nTracer: registered at /__w/pytorch/pytorch/torch/csrc/autograd/TraceTypeManual.cpp:296 [backend fallback]\nAutocastCPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:330 [backend fallback]\nAutocastMTIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:472 [backend fallback]\nAutocastMAIA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:510 [backend fallback]\nAutocastXPU: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:548 [backend fallback]\nAutocastMPS: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:221 [backend fallback]\nAutocastCUDA: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/autocast_mode.cpp:177 [backend fallback]\nFuncTorchBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:730 [backend fallback]\nBatchedNestedTensor: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/LegacyBatchingRegistrations.cpp:757 [backend fallback]\nFuncTorchVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/VmapModeRegistrations.cpp:22 [backend fallback]\nBatched: registered at /__w/pytorch/pytorch/aten/src/ATen/LegacyBatchingRegistrations.cpp:1072 [backend fallback]\nVmapMode: fallthrough registered at /__w/pytorch/pytorch/aten/src/ATen/VmapModeRegistrations.cpp:32 [backend fallback]\nFuncTorchGradWrapper: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/TensorWrapper.cpp:210 [backend fallback]\nPythonTLSSnapshot: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:200 [backend fallback]\nFuncTorchDynamicLayerFrontMode: registered at /__w/pytorch/pytorch/aten/src/ATen/functorch/DynamicLayer.cpp:475 [backend fallback]\nPreDispatch: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:204 [backend fallback]\nPythonDispatcher: registered at /__w/pytorch/pytorch/aten/src/ATen/core/PythonFallbackKernel.cpp:196 [backend fallback]\n"
+          }
+        },
+        "vllm_provider_imported": false,
+        "legacy_binary_expected_hash": null,
+        "legacy_receipt_only_recorded_python_source": true
+      },
+      "fp8_unified_entries": 1,
+      "int8_acq_rel_entries": 1
+    }
+  },
+  "fixed_variant_order": [
+    "baseline",
+    "candidate"
+  ],
+  "all14_both_variants_complete": true,
+  "formal_gate": true,
+  "source_after_all": {
+    "cpu_only_source_preflight": "PASS",
+    "records": [
+      {
+        "variant": "baseline",
+        "source_blobs": 1520,
+        "real_symlinks": 3
+      },
+      {
+        "variant": "candidate",
+        "source_blobs": 1520,
+        "real_symlinks": 3
+      }
+    ],
+    "package_files_verified": 28
+  }
+}

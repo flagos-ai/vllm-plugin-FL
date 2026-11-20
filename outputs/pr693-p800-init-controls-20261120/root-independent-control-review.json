@@ -1,0 +1,103 @@
+{
+  "reviewer": "root",
+  "archive_sha256": "4a00bc61ecbc24c7e05f5741e8b7930258c61db8f286ed8f9f4b2e7240688283",
+  "eight_rank_event_chains_independently_verified": true,
+  "source_tracked_blobs": 827,
+  "source_symlinks": 1,
+  "generated_build_metadata": "vllm_fl/_version.py; private plugin distribution0.0.0 versus CI synthetic-git version; not claimed byte-identical build metadata.",
+  "groups": {
+    "native": {
+      "original_once": true,
+      "ranks": [
+        {
+          "rank": 0,
+          "actual_mask": "0,1,2,3",
+          "count": 4,
+          "mapped": 0,
+          "current_after": 0,
+          "natural_cuda_initialized_before_setter": false,
+          "tiny_sum": 1024
+        },
+        {
+          "rank": 1,
+          "actual_mask": "0,1,2,3",
+          "count": 4,
+          "mapped": 1,
+          "current_after": 1,
+          "natural_cuda_initialized_before_setter": false,
+          "tiny_sum": 1024
+        },
+        {
+          "rank": 2,
+          "actual_mask": "0,1,2,3",
+          "count": 4,
+          "mapped": 2,
+          "current_after": 2,
+          "natural_cuda_initialized_before_setter": false,
+          "tiny_sum": 1024
+        },
+        {
+          "rank": 3,
+          "actual_mask": "0,1,2,3",
+          "count": 4,
+          "mapped": 3,
+          "current_after": 3,
+          "natural_cuda_initialized_before_setter": false,
+          "tiny_sum": 1024
+        }
+      ],
+      "duration_seconds": 3.8619816810823977
+    },
+    "fullFL": {
+      "original_once": true,
+      "ranks": [
+        {
+          "rank": 0,
+          "actual_mask": "0,1,2,3",
+          "count": 4,
+          "mapped": 0,
+          "current_after": 0,
+          "natural_cuda_initialized_before_setter": true,
+          "tiny_sum": 1024
+        },
+        {
+          "rank": 1,
+          "actual_mask": "0,1,2,3",
+          "count": 4,
+          "mapped": 1,
+          "current_after": 1,
+          "natural_cuda_initialized_before_setter": true,
+          "tiny_sum": 1024
+        },
+        {
+          "rank": 2,
+          "actual_mask": "0,1,2,3",
+          "count": 4,
+          "mapped": 2,
+          "current_after": 2,
+          "natural_cuda_initialized_before_setter": true,
+          "tiny_sum": 1024
+        },
+        {
+          "rank": 3,
+          "actual_mask": "0,1,2,3",
+          "count": 4,
+          "mapped": 3,
+          "current_after": 3,
+          "natural_cuda_initialized_before_setter": true,
+          "tiny_sum": 1024
+        }
+      ],
+      "duration_seconds": 39.415012668818235
+    }
+  },
+  "source_after_and_post_resource_checks": "PASS",
+  "conclusion": "Local fresh-spawn native and fullFL both pass; original CI invalid ordinal NOT reproduced.",
+  "boundaries": [
+    "Not a model Gate",
+    "Not a collective or NoC Gate",
+    "Native SDK also maps FlagCX but creates no communicator",
+    "FullFL naturally initializes CUDA during original imports/runtime before setter; helper does not prime it.",
+    "Original CI child masks/ordinals/DSOs and actual host are not captured; no public worker patch justified."
+  ]
+}

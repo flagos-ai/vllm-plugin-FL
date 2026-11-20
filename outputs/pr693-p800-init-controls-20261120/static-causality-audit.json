@@ -1,0 +1,94 @@
+{
+  "scope": "CPU-only source/AST/wrapper proof, no Torch import/native GPU API; not a hardware cause confirmation",
+  "base": "77f141a961d75e54c0cf209de80c99a7c7eec04b",
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "CI_merge_ref": {
+    "sha": "22f0573d2d6b77ce1ab5a2aa277bff980d9b8307",
+    "parents": [
+      "77f141a961d75e54c0cf209de80c99a7c7eec04b",
+      "982739fd5d68ff19955c7ff975756960abe1cce7"
+    ],
+    "tree": "18ef555579c9ee8911255f2fa3cbc5cf1b1be366",
+    "same_tree_as_head": true
+  },
+  "worker_init_to_set_device_AST_equal": true,
+  "platform_methods_AST_equal": {
+    "set_device": true,
+    "is_cuda_alike": true
+  },
+  "unchanged_blob_files": {
+    "vllm_fl/utils.py": true,
+    "tests/platforms/kunlunxin.yaml": true,
+    ".github/configs/kunlunxin.yml": true,
+    ".github/scripts/kunlunxin/setup.sh": true,
+    "docker/kunlunxin/install-vllm.sh": true,
+    ".github/scripts/install_flaggems_vllm.py": true
+  },
+  "kunlun_backend_or_e2e_delta": [],
+  "upstream_v032_mapping_CPU_scenarios_passed": 200,
+  "SDK_image_python_explicit_index_controls": [
+    {
+      "rank": 0,
+      "form": "int",
+      "ordinal": 0
+    },
+    {
+      "rank": 0,
+      "form": "Device",
+      "ordinal": 0
+    },
+    {
+      "rank": 0,
+      "form": "str",
+      "ordinal": 0
+    },
+    {
+      "rank": 1,
+      "form": "int",
+      "ordinal": 1
+    },
+    {
+      "rank": 1,
+      "form": "Device",
+      "ordinal": 1
+    },
+    {
+      "rank": 1,
+      "form": "str",
+      "ordinal": 1
+    },
+    {
+      "rank": 2,
+      "form": "int",
+      "ordinal": 2
+    },
+    {
+      "rank": 2,
+      "form": "Device",
+      "ordinal": 2
+    },
+    {
+      "rank": 2,
+      "form": "str",
+      "ordinal": 2
+    },
+    {
+      "rank": 3,
+      "form": "int",
+      "ordinal": 3
+    },
+    {
+      "rank": 3,
+      "form": "Device",
+      "ordinal": 3
+    },
+    {
+      "rank": 3,
+      "form": "str",
+      "ordinal": 3
+    }
+  ],
+  "actual_child_device_value_and_mask_in_artifact": "not logged; standard DP0 inherited-mask inference is cuda:0 but needs runtime capture",
+  "known_preinit_rank0_only_behavior": "_initialize_fl_runtime(rank) uses FlagGems record=(rank==0), unchanged in base; include in controls",
+  "source_fix_currently_justified": false
+}

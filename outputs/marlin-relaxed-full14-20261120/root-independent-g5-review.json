@@ -1,0 +1,15 @@
+{
+  "reviewer": "root",
+  "archive_sha256": "19876a15612a202b85bae1cb89dcb1b88a07cdf650856a2556c329d06ac31a93",
+  "independent_verifier": "PASS",
+  "target_full14_154_each": true,
+  "complete492_each_runtime": "316passed/176originalSkip",
+  "packing_each": "37/37",
+  "boundary_each": "60/60",
+  "source_and_package_after_both_checks": "PASS",
+  "FP8_baseline_acq_rel_candidate_relaxed": "PASS",
+  "INT8_acq_rel": "PASS",
+  "runtime_native_limit": "G5 records binary hashes/schemas but not provider module state or full dispatch tables; the stronger G6 native guard is separate.",
+  "G5": "PASS",
+  "performance": "NOT_RUN"
+}

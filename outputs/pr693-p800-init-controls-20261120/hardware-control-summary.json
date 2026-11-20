@@ -1,0 +1,269 @@
+{
+  "source_head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "image_source_digest": "db1cceff13d438142abfd695500ac0820ebfe6ae13d909017a2ce073ac607b17",
+  "prepared_image": "sha256:d97021a298bfc4da9c8dd994f189810195a68f04285e769ab04e97b29a76c9f0",
+  "cpu_preparation_passed": true,
+  "G1_dry_attempt1": "setup-only failure because direct Python skipped original FlagTree profile; preserved",
+  "G1_dry_attempt2": "passed after restoring original image profile; module stand-ins, not runtime evidence",
+  "groups": {
+    "native": {
+      "passed": true,
+      "result": {
+        "mode": "native",
+        "started": "2026-11-20T12:33:25.019477+00:00",
+        "ended": "2026-11-20T12:33:28.881437+00:00",
+        "duration_seconds": 3.8619816810823977,
+        "timed_out": false,
+        "exitcodes": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "live_owned_children_after_cleanup": [],
+        "passed": true,
+        "diagnostic_only_not_model_gate": true
+      },
+      "ranks": [
+        {
+          "rank": 0,
+          "mask": "0,1,2,3",
+          "count_before": 4,
+          "mapped_ordinal": 0,
+          "target": "cuda:0",
+          "current_device_after": 0,
+          "cuda_initialized_before_setter": false,
+          "cuda_initialized_after_setter": true,
+          "recording_expected": null,
+          "setter_passed": true,
+          "tiny_32x32_sum_1024_passed": true
+        },
+        {
+          "rank": 1,
+          "mask": "0,1,2,3",
+          "count_before": 4,
+          "mapped_ordinal": 1,
+          "target": "cuda:1",
+          "current_device_after": 1,
+          "cuda_initialized_before_setter": false,
+          "cuda_initialized_after_setter": true,
+          "recording_expected": null,
+          "setter_passed": true,
+          "tiny_32x32_sum_1024_passed": true
+        },
+        {
+          "rank": 2,
+          "mask": "0,1,2,3",
+          "count_before": 4,
+          "mapped_ordinal": 2,
+          "target": "cuda:2",
+          "current_device_after": 2,
+          "cuda_initialized_before_setter": false,
+          "cuda_initialized_after_setter": true,
+          "recording_expected": null,
+          "setter_passed": true,
+          "tiny_32x32_sum_1024_passed": true
+        },
+        {
+          "rank": 3,
+          "mask": "0,1,2,3",
+          "count_before": 4,
+          "mapped_ordinal": 3,
+          "target": "cuda:3",
+          "current_device_after": 3,
+          "cuda_initialized_before_setter": false,
+          "cuda_initialized_after_setter": true,
+          "recording_expected": null,
+          "setter_passed": true,
+          "tiny_32x32_sum_1024_passed": true
+        }
+      ],
+      "hostconfig_matches_reviewed_CI_flags": true,
+      "actual_image_id_from_exact_CID_events": [
+        "sha256:d97021a298bfc4da9c8dd994f189810195a68f04285e769ab04e97b29a76c9f0"
+      ],
+      "source_before_after_verified": true,
+      "owned_container_absent_and_post_bank_idle": true
+    },
+    "fullFL": {
+      "passed": true,
+      "result": {
+        "mode": "fullFL",
+        "started": "2026-11-20T12:34:12.369790+00:00",
+        "ended": "2026-11-20T12:34:51.784780+00:00",
+        "duration_seconds": 39.415012668818235,
+        "timed_out": false,
+        "exitcodes": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "live_owned_children_after_cleanup": [],
+        "passed": true,
+        "diagnostic_only_not_model_gate": true
+      },
+      "ranks": [
+        {
+          "rank": 0,
+          "mask": "0,1,2,3",
+          "count_before": 4,
+          "mapped_ordinal": 0,
+          "target": "cuda:0",
+          "current_device_after": 0,
+          "cuda_initialized_before_setter": true,
+          "cuda_initialized_after_setter": true,
+          "recording_expected": true,
+          "setter_passed": true,
+          "tiny_32x32_sum_1024_passed": true
+        },
+        {
+          "rank": 1,
+          "mask": "0,1,2,3",
+          "count_before": 4,
+          "mapped_ordinal": 1,
+          "target": "cuda:1",
+          "current_device_after": 1,
+          "cuda_initialized_before_setter": true,
+          "cuda_initialized_after_setter": true,
+          "recording_expected": false,
+          "setter_passed": true,
+          "tiny_32x32_sum_1024_passed": true
+        },
+        {
+          "rank": 2,
+          "mask": "0,1,2,3",
+          "count_before": 4,
+          "mapped_ordinal": 2,
+          "target": "cuda:2",
+          "current_device_after": 2,
+          "cuda_initialized_before_setter": true,
+          "cuda_initialized_after_setter": true,
+          "recording_expected": false,
+          "setter_passed": true,
+          "tiny_32x32_sum_1024_passed": true
+        },
+        {
+          "rank": 3,
+          "mask": "0,1,2,3",
+          "count_before": 4,
+          "mapped_ordinal": 3,
+          "target": "cuda:3",
+          "current_device_after": 3,
+          "cuda_initialized_before_setter": true,
+          "cuda_initialized_after_setter": true,
+          "recording_expected": false,
+          "setter_passed": true,
+          "tiny_32x32_sum_1024_passed": true
+        }
+      ],
+      "hostconfig_matches_reviewed_CI_flags": true,
+      "actual_image_id_from_exact_CID_events": [
+        "sha256:d97021a298bfc4da9c8dd994f189810195a68f04285e769ab04e97b29a76c9f0"
+      ],
+      "source_before_after_verified": true,
+      "owned_container_absent_and_post_bank_idle": true
+    }
+  },
+  "common_actual_loaded_SDK_DSOs_same_hash": {
+    "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so": {
+      "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934",
+      "bytes": 20451256
+    },
+    "/flagos/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so": {
+      "sha256": "145c6d7b38f7e6fa98e162300df413e79dfc06c63b8a3782330ad87405075fb6",
+      "bytes": 1475967737
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/_XMLIRC.cpython-310-x86_64-linux-gnu.so": {
+      "sha256": "f4cc9b4010ba6586194a36b123c5f8ecc434000fb0a13bb19461f9001c56bdd3",
+      "bytes": 43538784
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libXMLIRRuntime.so": {
+      "sha256": "19898533f9697eedaea75e40a96b599fcd7b58f2b4e318d177e4d1160a77ed1e",
+      "bytes": 1403464
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libeager_fallback.so": {
+      "sha256": "83ada3371eb3cb16bb39c882a775a18106383822bd5c04268903bbf4ada7866e",
+      "bytes": 496400
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libomp.so": {
+      "sha256": "2effa0288091949fb6e296f2ca11ac24360885759cac0147c4719c6e3a606aa5",
+      "bytes": 1330464
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxdnn_pytorch.so": {
+      "sha256": "cc41635848b35aad26fffd9da13e3f71d4d168225f86df1de2fb33dd683e394b",
+      "bytes": 248036072
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxlog_adapter.so": {
+      "sha256": "d59ff49b514a460f9eec3d4c4b1ffa9da7454d25854c564603bc035aa6272c00",
+      "bytes": 718440
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxmlir_custom_ops.so": {
+      "sha256": "6d5edc5a9c1174ab2d4cb914f6038ef47364f13a0f2729c68e37544ccbec4128",
+      "bytes": 7409096
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxpu_blas.so": {
+      "sha256": "c24fdeb6ab08afd609a52bbe8c232c8dd9ea2b234ee80c1435131d83f194c4ca",
+      "bytes": 639038280
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxpu_dnn.so": {
+      "sha256": "3627e0e057d646b482de40774f3ba3c39d33927d522f17fc693b46e98d875ccd",
+      "bytes": 162863024
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxpu_flash_attention.so": {
+      "sha256": "3a7258b19f97b26651a21c38e19ef14409d9d37418748ce940974111e8f3232d",
+      "bytes": 170349680
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxpuapi.so": {
+      "sha256": "e7d6d7c32f5f163bf0f9c023950679df2f35af3e1667ab8237c159b01ba051a0",
+      "bytes": 687011264
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxpujitc.so": {
+      "sha256": "66af702f607d2110955e728a26263a56e0784f98fad7c79b216155ac869b2e8d",
+      "bytes": 691928
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/libxpytorch.so": {
+      "sha256": "9b843fbb316cdd021f9cc24d53f040d209cbf928a388c7f0030f643c9862d276",
+      "bytes": 3745880
+    },
+    "/flagos/lib/python3.10/site-packages/torch_xmlir/op_deregister_C.so": {
+      "sha256": "9df01e31db082a706bb8809cab014d6a55b1d3a85ef1ff88068bf60f3404580d",
+      "bytes": 223032
+    },
+    "/usr/local/xcudart/lib/libcupti.so.12.9": {
+      "sha256": "7925cbcf2354dc52448a967abffd5692ae293663af2d8a78a4a28f9248f979ad",
+      "bytes": 143560
+    },
+    "/usr/local/xcudart/lib/libxpucuda.so.515.58.kunlun": {
+      "sha256": "dea5bc6deabad610a31b9024b90489e539d7eefaf5ea2e9fa13c9735c01763aa",
+      "bytes": 1956424
+    },
+    "/usr/local/xcudart/lib/libxpuml.so.515.58.kunlun": {
+      "sha256": "8e008e293943719f81d62cefd197d8c24091f006f27225c3750b7ef85561e19f",
+      "bytes": 1722256
+    },
+    "/usr/local/xcudart/lib/libxpunvidia-ml.so.515.58.kunlun": {
+      "sha256": "c79665bfc43bdfa5ab9cd636e7c5b11545d5b410dd51be6d0a222a0bebb5b2d2",
+      "bytes": 1717776
+    },
+    "/usr/local/xpu-5.37.1.0/so/libcudart.so.12.9.1.kunlun": {
+      "sha256": "7d28eca6610387d531c54284c5d145cec5e2195c09fcfb0c5245214d8d5ceb4d",
+      "bytes": 290496
+    },
+    "/usr/local/xpu-5.37.1.0/so/libxpurt.so.12.9.1.kunlun": {
+      "sha256": "cb9155c1f9b298e8349aba076081a7665b03f5c95e581e67e5154f8a5250aa56",
+      "bytes": 269856
+    }
+  },
+  "all_hardware_controls_passed": true,
+  "no_model_or_collective_or_graph_was_executed": true,
+  "limitations": [
+    "CI synthetic plugin metadata0.0.0+g22f0573d2 versus canonical-source editable0.0.0; tracked source tree exact982.",
+    "Control node is p800_4, not evidence that the original CI host is healthy.",
+    "fullFL imports initialize CUDA before the tested setter; SDK-only native path remains uninitialized until that setter. No extra manual priming is added.",
+    "Published SDK itself loads libflagcx.so even in native control; no communicator is constructed.",
+    "FullFL additionally loads torchvision bundled CUDA runtime; common SDK DSOs match, and no causal claim follows from coexisting libraries.",
+    "Actual failing CI child mask/ordinal/count/DSO map were not printed in original artifact.",
+    "Both local controls passing do not resolve the original CI failure or substitute a model Gate. No public worker source patch is justified by current evidence."
+  ]
+}

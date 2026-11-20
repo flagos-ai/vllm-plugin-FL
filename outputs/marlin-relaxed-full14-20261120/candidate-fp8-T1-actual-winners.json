@@ -1,0 +1,144 @@
+{
+  "case": "fp8-T1",
+  "shape": [
+    1,
+    8,
+    4096,
+    14336,
+    2
+  ],
+  "precision": "fp8",
+  "status": "ACTUAL_NATURAL_DISPATCH_AFTER_TIMER",
+  "actual_launches": [
+    {
+      "actual_wrapper_aliases": [
+        "_fused_moe_kernel_w8a16_unified_moe_fp8"
+      ],
+      "compiled_metadata": {
+        "allowed_dot_input_precisions": [
+          "tf32",
+          "tf32x3",
+          "ieee",
+          "bf16x3",
+          "bf16x6"
+        ],
+        "arch": "sm90",
+        "backend_name": "cuda",
+        "cluster_dims": [
+          1,
+          1,
+          1
+        ],
+        "debug": false,
+        "default_dot_input_precision": "tf32",
+        "deprecated_fp8_dot_operand_dtypes": [
+          "fp8e4b15"
+        ],
+        "enable_fp_fusion": true,
+        "enable_reflect_ftz": true,
+        "extern_libs": [
+          [
+            "libdevice",
+            "/compiler/triton/backends/nvidia/lib/libdevice.10.bc"
+          ],
+          [
+            "libflagcx",
+            "/compiler/flagcx/lib/libflagcx_device.bc"
+          ]
+        ],
+        "global_scratch_align": 1,
+        "global_scratch_size": 0,
+        "hash": "5a82298158afdec94df3ec6b7ba33a9c8f4188b68c3b895caf786e9936c045b8",
+        "instrumentation_mode": "",
+        "ir_override": null,
+        "kernel_init_hooks": [],
+        "launch_cooperative_grid": false,
+        "launch_pdl": false,
+        "max_num_imprecise_acc_default": 1073741824,
+        "maxnreg": null,
+        "name": "fused_moe_kernel_w8a16_unified_moe",
+        "num_ctas": 1,
+        "num_stages": 1,
+        "num_warps": 4,
+        "profile_scratch_align": 1,
+        "profile_scratch_size": 0,
+        "ptx_options": null,
+        "ptx_version": null,
+        "sanitize_overflow": true,
+        "shared": 4096,
+        "supported_fp8_dtypes": [
+          "fp8e4b15",
+          "fp8e4nv",
+          "fp8e5"
+        ],
+        "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+        "tensordesc_meta": [],
+        "tle_node_buffer_bindings": "",
+        "tmem_size": 0,
+        "triton_version": "3.6.0",
+        "warp_size": 32
+      },
+      "actual_returned_launch_constexprs": {
+        "num_warps": 4,
+        "num_stages": 1,
+        "num_ctas": 1,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_I_TILE": 32,
+        "BLOCK_K_H": 128
+      },
+      "compiled_constants": {
+        "T": "1",
+        "stride_a_k": "1",
+        "stride_w1_k": "1",
+        "stride_s1_k": "1",
+        "stride_zp1_k": "1",
+        "stride_w2_k": "1",
+        "stride_s2_k": "1",
+        "stride_zp2_k": "1",
+        "stride_out_n": "1",
+        "group_size": "128",
+        "BLOCK_SIZE_M": "2",
+        "BLOCK_SIZE_N": "128",
+        "BLOCK_I_TILE": "32",
+        "BLOCK_K_H": "128",
+        "has_zp_w1": "False",
+        "has_zp_w2": "False",
+        "use_fp8_w8a16": "True",
+        "compute_type": "bf16"
+      },
+      "n_regs": 80,
+      "n_spills": 0,
+      "artifacts": {
+        "ttir": {
+          "path": "fp8-T1-launch0.ttir",
+          "bytes": 33630,
+          "sha256": "44be37272ff3d895f457cde2ba5cd4a27d32d199995693c37a8472639f1b26e2"
+        },
+        "ttgir": {
+          "path": "fp8-T1-launch0.ttgir",
+          "bytes": 44212,
+          "sha256": "66fb143fdf9f7bd986bcd77e1c98ce06e2f2c0fed243551bb903d01edcadd520"
+        },
+        "llir": {
+          "path": "fp8-T1-launch0.llir",
+          "bytes": 79825,
+          "sha256": "e9b1ec2825df4719ab7998c1e8efb2f33407303e225af8b3f58bf4b5d0f10769"
+        },
+        "ptx": {
+          "path": "fp8-T1-launch0.ptx",
+          "bytes": 58676,
+          "sha256": "a9f7dc52b4a60095d060912f77cec7816f86a4bc2ffbbbb3afa7fb4a3947beaf"
+        },
+        "cubin": {
+          "path": "fp8-T1-launch0.cubin",
+          "bytes": 58264,
+          "sha256": "892bf8493f9f7133f60a956741c2c37dda9baebfbe9e0bd2a4b7337030dd5558"
+        }
+      }
+    }
+  ],
+  "extra_call_max_diff": 0.031475722789764404,
+  "observer_installed_during_timer": false,
+  "config_forcing": false,
+  "case_regenerated": false
+}

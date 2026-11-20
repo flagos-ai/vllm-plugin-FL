@@ -1,0 +1,16 @@
+{
+  "reviewer": "root",
+  "raw_archive_sha256": "8ae7aafa79c0a43a16fc8e99230e3ad14777ef47229fa63da49955bf2d92303b",
+  "strict_aggregate_recomputed": true,
+  "full14_and_154_inputs_each_exact": true,
+  "all_per_case_paired_medians_recomputed": true,
+  "actual_native_binary_dispatch_and_tool_assets_equal": true,
+  "PTX_SASS_artifact_hashes_and_real_instruction_contracts": "PASS",
+  "source_after": "PASS",
+  "work_exit": 2,
+  "cleanup_exit": 0,
+  "baseline": "14 numerical/9 performance",
+  "candidate": "14 numerical/9 performance",
+  "result": "FAIL_PERFORMANCE",
+  "no_case_waived": true
+}
