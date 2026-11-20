@@ -1,0 +1,236 @@
+{
+  "schema": 1,
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "node_identity": "NODE_A ranks0/1;NODE_B ranks2/3;matches immutable prior snapshot",
+  "documents": [
+    {
+      "path": "matrix.json",
+      "kind": "sanitized_original",
+      "source_id": "matrix-982-results.json",
+      "original_sha256": "44cc4b1500077e0fa15e615e51217faa305d5140bad8eff85ed9c4cc805cc2d2",
+      "sanitized_sha256": "0d7faecbf777a4d2e73e8e951ded1d63efd845f569c12820ba0603ee7ec6d713",
+      "size_bytes": 3107
+    },
+    {
+      "path": "official-982-35b-graph-receipt.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-35b-graph-receipt.json",
+      "original_sha256": "f5a6db7dac4b6bef4c68b8cac284bc8e2aee7be07268b7962314b5dbd716f9fb",
+      "sanitized_sha256": "ee0bc4ecaf3f82014cff09610085bdb64ca67f368bdaa41058c5371d785cbb65",
+      "size_bytes": 3458
+    },
+    {
+      "path": "official-982-35b-graph-canonical-manifest.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-35b-graph-canonical-manifest.json",
+      "original_sha256": "3c70430099a220af100562e4300224879e41ef67bbf655745ec0e4c09d20ff67",
+      "sanitized_sha256": "dd8444f01ed77edbeaf7459338337e266c77e611cbf2081522a76d998931fe42",
+      "size_bytes": 723
+    },
+    {
+      "path": "official-982-35b-graph-lifecycle-witness.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-35b-graph-lifecycle-witness.json",
+      "original_sha256": "6adc9757e9e0256e7c1342c7a35abd9dca4754f93191f257f665ca31026cc222",
+      "sanitized_sha256": "d7a7900238de579e7414189008b02503b3dc1b30f3477930e2fa80f1930f6cf5",
+      "size_bytes": 1639
+    },
+    {
+      "path": "official-982-resume2-35b-eager-receipt.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-resume2-35b-eager-receipt.json",
+      "original_sha256": "fb2b633d88f3c63ad085a851494d00ce38aabf9296562cc9f1085f60548f64dc",
+      "sanitized_sha256": "99fe22f7a3eee78e27c77952e2286a20539528295d78818558be68c48232302a",
+      "size_bytes": 3460
+    },
+    {
+      "path": "official-982-resume2-35b-eager-canonical-manifest.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-resume2-35b-eager-canonical-manifest.json",
+      "original_sha256": "87c3afa508cd03f97f36bb5648e2ff585d2ccd98f6df86c731bc4cac2e8c9154",
+      "sanitized_sha256": "50bdf75916b78c392430f1b20232dbbbd4d271d70def2d7d05e1f3657e7acbc8",
+      "size_bytes": 731
+    },
+    {
+      "path": "official-982-resume2-35b-eager-lifecycle-witness.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-resume2-35b-eager-lifecycle-witness.json",
+      "original_sha256": "edfe64650133bae78e73fb0f9499f336f2ae117da13a85ef7e0bb370a0b05507",
+      "sanitized_sha256": "36e985f782e238e76b4f46b0a53dad13db0124f0cf50c5c24bccd97bf92a39da",
+      "size_bytes": 1635
+    },
+    {
+      "path": "official-982-27b-graph-receipt.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-27b-graph-receipt.json",
+      "original_sha256": "88dc7ebabe407f5a6beb001fbefc1de2539c2148d71a9babd9e63703bb6c40a4",
+      "sanitized_sha256": "d42d0943599d4b53ce9ed2aafce0c475142c38e07ad7047454be486af85844df",
+      "size_bytes": 3458
+    },
+    {
+      "path": "official-982-27b-graph-canonical-manifest.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-27b-graph-canonical-manifest.json",
+      "original_sha256": "8781bf91474d4c944f75b63b810cfdb07a088105477cc43c56c00d502ed9583f",
+      "sanitized_sha256": "9360b9329b67d8a3de42314d1d873add94d3d546c94969c8384fe32f8be6b47a",
+      "size_bytes": 715
+    },
+    {
+      "path": "official-982-27b-graph-lifecycle-witness.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-27b-graph-lifecycle-witness.json",
+      "original_sha256": "6cd8842afbd7ace1132ef33e599b1bcf342b37fe8083f0cb487eea2fbfee9ea6",
+      "sanitized_sha256": "710e7110145feb059c561f3051bf1914c39d5bc806f40cdee3f2376d32775bc1",
+      "size_bytes": 1639
+    },
+    {
+      "path": "official-982-27b-eager-receipt.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-27b-eager-receipt.json",
+      "original_sha256": "4f09f5ab090b3d744db925ce1ae3a02fe7bc8e96d2ec45b156fa6793d27b74ff",
+      "sanitized_sha256": "3d386065456b4620e6cf21fc1291661d8477734f868bbc3c7d3313ffac2fdb8a",
+      "size_bytes": 3444
+    },
+    {
+      "path": "official-982-27b-eager-canonical-manifest.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-27b-eager-canonical-manifest.json",
+      "original_sha256": "e15f716db8da7ef09814442f6ad6e3dd0521a3d32cc7270f3d8a3d0d93575934",
+      "sanitized_sha256": "c3bccfaa8dc29288cafc1de7e973b8d11667552fb4718a87f9ca720aa15d0cef",
+      "size_bytes": 715
+    },
+    {
+      "path": "official-982-27b-eager-lifecycle-witness.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/official-982-27b-eager-lifecycle-witness.json",
+      "original_sha256": "9aad95fd1b0858bdd70244f560c9f06206df4a4e57b4a7b7386e7e5cadcdd837",
+      "sanitized_sha256": "4c519fe38b617b6e01f3094d80fcabe83b77ffdd9344d9607c41ede4304413c5",
+      "size_bytes": 1627
+    },
+    {
+      "path": "README.md",
+      "kind": "generated_summary",
+      "source_id": null,
+      "original_sha256": null,
+      "input_hashes": [
+        {
+          "source_id": "matrix-982-results.json",
+          "sha256": "44cc4b1500077e0fa15e615e51217faa305d5140bad8eff85ed9c4cc805cc2d2"
+        },
+        {
+          "source_id": "outputs/official-982-35b-graph-receipt.json",
+          "sha256": "f5a6db7dac4b6bef4c68b8cac284bc8e2aee7be07268b7962314b5dbd716f9fb"
+        },
+        {
+          "source_id": "outputs/official-982-35b-graph-canonical-manifest.json",
+          "sha256": "3c70430099a220af100562e4300224879e41ef67bbf655745ec0e4c09d20ff67"
+        },
+        {
+          "source_id": "outputs/official-982-35b-graph-lifecycle-witness.json",
+          "sha256": "6adc9757e9e0256e7c1342c7a35abd9dca4754f93191f257f665ca31026cc222"
+        },
+        {
+          "source_id": "outputs/official-982-resume2-35b-eager-receipt.json",
+          "sha256": "fb2b633d88f3c63ad085a851494d00ce38aabf9296562cc9f1085f60548f64dc"
+        },
+        {
+          "source_id": "outputs/official-982-resume2-35b-eager-canonical-manifest.json",
+          "sha256": "87c3afa508cd03f97f36bb5648e2ff585d2ccd98f6df86c731bc4cac2e8c9154"
+        },
+        {
+          "source_id": "outputs/official-982-resume2-35b-eager-lifecycle-witness.json",
+          "sha256": "edfe64650133bae78e73fb0f9499f336f2ae117da13a85ef7e0bb370a0b05507"
+        },
+        {
+          "source_id": "outputs/official-982-27b-graph-receipt.json",
+          "sha256": "88dc7ebabe407f5a6beb001fbefc1de2539c2148d71a9babd9e63703bb6c40a4"
+        },
+        {
+          "source_id": "outputs/official-982-27b-graph-canonical-manifest.json",
+          "sha256": "8781bf91474d4c944f75b63b810cfdb07a088105477cc43c56c00d502ed9583f"
+        },
+        {
+          "source_id": "outputs/official-982-27b-graph-lifecycle-witness.json",
+          "sha256": "6cd8842afbd7ace1132ef33e599b1bcf342b37fe8083f0cb487eea2fbfee9ea6"
+        },
+        {
+          "source_id": "outputs/official-982-27b-eager-receipt.json",
+          "sha256": "4f09f5ab090b3d744db925ce1ae3a02fe7bc8e96d2ec45b156fa6793d27b74ff"
+        },
+        {
+          "source_id": "outputs/official-982-27b-eager-canonical-manifest.json",
+          "sha256": "e15f716db8da7ef09814442f6ad6e3dd0521a3d32cc7270f3d8a3d0d93575934"
+        },
+        {
+          "source_id": "outputs/official-982-27b-eager-lifecycle-witness.json",
+          "sha256": "9aad95fd1b0858bdd70244f560c9f06206df4a4e57b4a7b7386e7e5cadcdd837"
+        }
+      ],
+      "sanitized_sha256": "57566a68b95cc76e9bd58195bb405e0053694934c6c041d0ad5bb267dedbabab",
+      "size_bytes": 3712
+    },
+    {
+      "path": "QA.json",
+      "kind": "generated_summary",
+      "source_id": null,
+      "original_sha256": null,
+      "input_hashes": [
+        {
+          "source_id": "matrix-982-results.json",
+          "sha256": "44cc4b1500077e0fa15e615e51217faa305d5140bad8eff85ed9c4cc805cc2d2"
+        },
+        {
+          "source_id": "outputs/official-982-35b-graph-receipt.json",
+          "sha256": "f5a6db7dac4b6bef4c68b8cac284bc8e2aee7be07268b7962314b5dbd716f9fb"
+        },
+        {
+          "source_id": "outputs/official-982-35b-graph-canonical-manifest.json",
+          "sha256": "3c70430099a220af100562e4300224879e41ef67bbf655745ec0e4c09d20ff67"
+        },
+        {
+          "source_id": "outputs/official-982-35b-graph-lifecycle-witness.json",
+          "sha256": "6adc9757e9e0256e7c1342c7a35abd9dca4754f93191f257f665ca31026cc222"
+        },
+        {
+          "source_id": "outputs/official-982-resume2-35b-eager-receipt.json",
+          "sha256": "fb2b633d88f3c63ad085a851494d00ce38aabf9296562cc9f1085f60548f64dc"
+        },
+        {
+          "source_id": "outputs/official-982-resume2-35b-eager-canonical-manifest.json",
+          "sha256": "87c3afa508cd03f97f36bb5648e2ff585d2ccd98f6df86c731bc4cac2e8c9154"
+        },
+        {
+          "source_id": "outputs/official-982-resume2-35b-eager-lifecycle-witness.json",
+          "sha256": "edfe64650133bae78e73fb0f9499f336f2ae117da13a85ef7e0bb370a0b05507"
+        },
+        {
+          "source_id": "outputs/official-982-27b-graph-receipt.json",
+          "sha256": "88dc7ebabe407f5a6beb001fbefc1de2539c2148d71a9babd9e63703bb6c40a4"
+        },
+        {
+          "source_id": "outputs/official-982-27b-graph-canonical-manifest.json",
+          "sha256": "8781bf91474d4c944f75b63b810cfdb07a088105477cc43c56c00d502ed9583f"
+        },
+        {
+          "source_id": "outputs/official-982-27b-graph-lifecycle-witness.json",
+          "sha256": "6cd8842afbd7ace1132ef33e599b1bcf342b37fe8083f0cb487eea2fbfee9ea6"
+        },
+        {
+          "source_id": "outputs/official-982-27b-eager-receipt.json",
+          "sha256": "4f09f5ab090b3d744db925ce1ae3a02fe7bc8e96d2ec45b156fa6793d27b74ff"
+        },
+        {
+          "source_id": "outputs/official-982-27b-eager-canonical-manifest.json",
+          "sha256": "e15f716db8da7ef09814442f6ad6e3dd0521a3d32cc7270f3d8a3d0d93575934"
+        },
+        {
+          "source_id": "outputs/official-982-27b-eager-lifecycle-witness.json",
+          "sha256": "9aad95fd1b0858bdd70244f560c9f06206df4a4e57b4a7b7386e7e5cadcdd837"
+        }
+      ],
+      "sanitized_sha256": "d6f5634a2bf2e0c0bab27fa9514a3b5ffb0d9af6b4f182ae92e42f3bf58bb2b7",
+      "size_bytes": 689
+    }
+  ],
+  "not_recomputed_fields": "Embedded original manifest/config hashes refer to original unsanitized documents. File-level sanitized_sha256 validates the anonymized bytes."
+}

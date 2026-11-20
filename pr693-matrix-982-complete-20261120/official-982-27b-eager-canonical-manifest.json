@@ -1,0 +1,21 @@
+{
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "phase": "official-982-27b-eager",
+  "passed": true,
+  "nodes": [
+    {
+      "node": "NODE_A",
+      "case": "27b_tp4_eager",
+      "manifest_sha256": "d9ed66abcaac1c24e9f3085d1474af8cdb78995f435e38fafd8daea0a598b486",
+      "canonical_config_sha256": "871df14a48075da3d59c2c188a204c20a1bb21e9dea2261d9169c79d3b1a8d65",
+      "exact_argv_match": true
+    },
+    {
+      "node": "NODE_B",
+      "case": "27b_tp4_eager",
+      "manifest_sha256": "d9e54e846478cfdb181766952794b641d4874072af10429134bd02702c619fc4",
+      "canonical_config_sha256": "871df14a48075da3d59c2c188a204c20a1bb21e9dea2261d9169c79d3b1a8d65",
+      "exact_argv_match": true
+    }
+  ]
+}

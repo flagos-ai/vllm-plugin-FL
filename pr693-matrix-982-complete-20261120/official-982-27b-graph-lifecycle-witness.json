@@ -1,0 +1,53 @@
+{
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "phase": "official-982-27b-graph",
+  "original_gate_and_cleanup_passed": true,
+  "ranks": [
+    {
+      "node": "NODE_A",
+      "rank": 0,
+      "process_token": "1795155481345518662",
+      "captured_native_ar_submissions": 2304,
+      "successful_native_destroy": 1,
+      "failed_native_destroy": 0,
+      "ordered_native_close_verified": true,
+      "server_tracebacks": 0,
+      "resource_tracker_warnings": []
+    },
+    {
+      "node": "NODE_A",
+      "rank": 1,
+      "process_token": "1795155481305710798",
+      "captured_native_ar_submissions": 2304,
+      "successful_native_destroy": 1,
+      "failed_native_destroy": 0,
+      "ordered_native_close_verified": true,
+      "server_tracebacks": 0,
+      "resource_tracker_warnings": []
+    },
+    {
+      "node": "NODE_B",
+      "rank": 2,
+      "process_token": "1795155481298074695",
+      "captured_native_ar_submissions": 2304,
+      "successful_native_destroy": 1,
+      "failed_native_destroy": 0,
+      "ordered_native_close_verified": true,
+      "server_tracebacks": 0,
+      "resource_tracker_warnings": []
+    },
+    {
+      "node": "NODE_B",
+      "rank": 3,
+      "process_token": "1795155481335052256",
+      "captured_native_ar_submissions": 2304,
+      "successful_native_destroy": 1,
+      "failed_native_destroy": 0,
+      "ordered_native_close_verified": true,
+      "server_tracebacks": 0,
+      "resource_tracker_warnings": []
+    }
+  ],
+  "passed": true,
+  "boundary": "Read-only witness supplements original26/260 and60s-grace receipt. It does not infer correctness from wrapper returns alone."
+}

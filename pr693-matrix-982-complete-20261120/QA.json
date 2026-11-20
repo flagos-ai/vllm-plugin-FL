@@ -1,0 +1,16 @@
+{
+  "kind": "generated_read_only_validation",
+  "snapshot_time_utc": "2026-11-20T06:32:52.927816+00:00",
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "json_inputs_validated": 13,
+  "four_canonical_groups_passed": true,
+  "requests": "104/104",
+  "checks": "1040/1040",
+  "both_node_normal_cleanup_all_groups": true,
+  "graph_native_close_exactly_once_per_rank": true,
+  "server_traceback_and_resource_tracker_warning_count": 0,
+  "privacy_scan_violations": [],
+  "fresh_singlehost_regression": "running; pending original9/90 and60s actual exit",
+  "complete_ci": "pending, includes devicepreflight timeout awaiting successful retry",
+  "original_source_hashes_verified": true
+}

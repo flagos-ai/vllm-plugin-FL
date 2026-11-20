@@ -1,0 +1,106 @@
+{
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "phase": "official-982-27b-eager",
+  "gate": {
+    "scenarios": 5,
+    "requests": 26,
+    "passed_requests": 26,
+    "checks": 260,
+    "passed_checks": 260,
+    "passed": true,
+    "failures": []
+  },
+  "nodes": [
+    {
+      "node": "NODE_A",
+      "manifest_sha256": "d9ed66abcaac1c24e9f3085d1474af8cdb78995f435e38fafd8daea0a598b486",
+      "case": "27b_tp4_eager",
+      "engine": {
+        "tensor_parallel_size": 4,
+        "pipeline_parallel_size": 1,
+        "max_model_len": 8192,
+        "gpu_memory_utilization": 0.9,
+        "enforce_eager": true,
+        "trust_remote_code": true,
+        "disable_custom_all_reduce": true
+      },
+      "runtime": [
+        {
+          "rank": 0,
+          "host_boot_id_sha256": "9c88018c1d727c588eadb05729925c9f6a7d17dc9cbbb5ceb853b029baa410a0",
+          "available_enabled": true,
+          "native_returned_call_deltas": {
+            "flagcxAllReduce": 45696,
+            "flagcxAllGather": 353
+          },
+          "request_time_flagcx_graph_replay_returns": 0
+        },
+        {
+          "rank": 1,
+          "host_boot_id_sha256": "9c88018c1d727c588eadb05729925c9f6a7d17dc9cbbb5ceb853b029baa410a0",
+          "available_enabled": true,
+          "native_returned_call_deltas": {
+            "flagcxAllReduce": 45696,
+            "flagcxAllGather": 353
+          },
+          "request_time_flagcx_graph_replay_returns": 0
+        }
+      ],
+      "native_runner_v2": true,
+      "cleanup": {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      }
+    },
+    {
+      "node": "NODE_B",
+      "manifest_sha256": "d9e54e846478cfdb181766952794b641d4874072af10429134bd02702c619fc4",
+      "case": "27b_tp4_eager",
+      "engine": {
+        "tensor_parallel_size": 4,
+        "pipeline_parallel_size": 1,
+        "max_model_len": 8192,
+        "gpu_memory_utilization": 0.9,
+        "enforce_eager": true,
+        "trust_remote_code": true,
+        "disable_custom_all_reduce": true
+      },
+      "runtime": [
+        {
+          "rank": 2,
+          "host_boot_id_sha256": "a5398684f9571c2f611fd4c7fef4db67763e0cdf4c118ac47accd358eceb0c9c",
+          "available_enabled": true,
+          "native_returned_call_deltas": {
+            "flagcxAllReduce": 45696,
+            "flagcxAllGather": 353
+          },
+          "request_time_flagcx_graph_replay_returns": 0
+        },
+        {
+          "rank": 3,
+          "host_boot_id_sha256": "a5398684f9571c2f611fd4c7fef4db67763e0cdf4c118ac47accd358eceb0c9c",
+          "available_enabled": true,
+          "native_returned_call_deltas": {
+            "flagcxAllReduce": 45696,
+            "flagcxAllGather": 353
+          },
+          "request_time_flagcx_graph_replay_returns": 0
+        }
+      ],
+      "native_runner_v2": true,
+      "cleanup": {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      }
+    }
+  ],
+  "two_physical_hosts": true,
+  "passed": true,
+  "counter_boundary": "Returned native wrappers and CUDAGraph.replay enqueues alone do not establish GPU completion; the independent original Gate response assertions provide end-to-end correctness."
+}

@@ -1,0 +1,21 @@
+{
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "phase": "official-982-resume2-35b-eager",
+  "passed": true,
+  "nodes": [
+    {
+      "node": "NODE_A",
+      "case": "35b_a3b_tp4_eager",
+      "manifest_sha256": "94dceeb16d90ea6938bf0cdf8c4ce046f54c3088b2ed1ab462a52308534d027e",
+      "canonical_config_sha256": "f016ecb7e0157b8796bd23ea40041fb26658d709c2dfbcef69889c4b96ce45d1",
+      "exact_argv_match": true
+    },
+    {
+      "node": "NODE_B",
+      "case": "35b_a3b_tp4_eager",
+      "manifest_sha256": "5f9ae42b5d4486abbecbe8109b4d8e67085ae7177f5f8f2ed50c3079c1ffc943",
+      "canonical_config_sha256": "f016ecb7e0157b8796bd23ea40041fb26658d709c2dfbcef69889c4b96ce45d1",
+      "exact_argv_match": true
+    }
+  ]
+}
