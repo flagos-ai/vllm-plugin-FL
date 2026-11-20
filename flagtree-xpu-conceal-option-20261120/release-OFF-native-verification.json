@@ -1,0 +1,85 @@
+{
+  "role": "WIRED_DEBUG_CONTROL_NOT_NUMERIC_PATCH",
+  "manifest_sha256": "d49b34c100c5307fffd5b3558d8ed12a34ee5674215551ab978bc0ed573a2842",
+  "source_commit": "49ce384960a4f716a82445ff49b42549f4d15b23",
+  "source_base": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9",
+  "CMake_wiring_only_source_delta": true,
+  "production_image_sdk_and_compiler_unchanged": true,
+  "numeric_cpp_patch_applied": false,
+  "original_fixture_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb",
+  "mismatch_count": 225,
+  "row_sums_actual": [
+    1024,
+    1024
+  ],
+  "row_sums_expected": [
+    50,
+    103
+  ],
+  "packed_inactive_padding_exact": true,
+  "exit": 1,
+  "elf_xpubin_identical_to_official071_and_unmodified_control": true,
+  "standard_pass_dump": {
+    "bytes": 980018,
+    "sha256": "1e3ee2c5426bc7f2edefe663887eee0c15b22c31730d3b73fa9e1c18969469a6"
+  },
+  "actual_output_path_selector": {
+    "GM2LM": {
+      "count": 2,
+      "atomicSim": true,
+      "element_type": "i32",
+      "physical_elements": 1,
+      "len": "tensor<1xi1>",
+      "syncMode": 2,
+      "state": "ASYNC, explicit common mfence follows"
+    },
+    "LM2GM": {
+      "count": 1,
+      "atomicSim": true,
+      "element_type": "i32",
+      "physical_elements": 1,
+      "len": "tensor<1xi1>",
+      "syncMode": 1,
+      "state": "SYNC"
+    }
+  },
+  "prototype27bce_scope_gap": "!async excludes both observed GM2LM reads. Do not apply unchanged and accept counts-only repair while invalid async DMA remains.",
+  "kernel_files": {
+    "_bincount_kernel.asm": {
+      "sha256": "3560077206732197ce9b94c7e9f99023a0f2d4fe9cd6d43cd42bfc654471a1d2",
+      "bytes": 12222
+    },
+    "_bincount_kernel.elf": {
+      "sha256": "0d964b4dbbd35fcfe409382d20180e493d6adaa39680e40b272d89810b8ddd86",
+      "bytes": 2472
+    },
+    "_bincount_kernel.json": {
+      "sha256": "2c49eaa10bad6aa096c3dc7376a64b7dc82040f4fe313359f0b505a76af2b009",
+      "bytes": 1846
+    },
+    "_bincount_kernel.llir": {
+      "sha256": "26a4695ebd2df5168cdb0e6d7fa4b7bf64f303387f8f21b198c85da5d4557171",
+      "bytes": 9150
+    },
+    "_bincount_kernel.source": {
+      "sha256": "948357c2c3e0a5a5559951d502fe2bd5464235e668bf258e6aaced67605e1b6e",
+      "bytes": 16033
+    },
+    "_bincount_kernel.ttir": {
+      "sha256": "fb9e4fd85f77c327bf827188b2432979e9e5a3f57adcdb351fa0845b0f029b37",
+      "bytes": 11197
+    },
+    "_bincount_kernel.ttxir": {
+      "sha256": "2db35f1a08c9bc861bfacf88650bf449c3dd702fa6e4f8fc6e2a58ebcbe6c2ca",
+      "bytes": 20653
+    },
+    "_bincount_kernel.xpubin": {
+      "sha256": "47711da2dc7e20fdaf637f1a9860966d70aafc4eb841beb3261b7c39f1696868",
+      "bytes": 1416
+    },
+    "__grp___bincount_kernel.json": {
+      "sha256": "f0a6fb537718f16664b2c4a25496a478768df38cfd55b4f49899f21c2bba04fd",
+      "bytes": 928
+    }
+  }
+}

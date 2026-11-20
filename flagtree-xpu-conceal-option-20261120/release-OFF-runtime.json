@@ -1,0 +1,74 @@
+{
+  "purpose": "diagnostic-e6a-control",
+  "source_commit": "49ce384960a4f716a82445ff49b42549f4d15b23",
+  "pin_mismatch": true,
+  "llvm19_archive_actual_sha256": "9b9b088d925cc885d7ae6af2d93e57c84a27c55b02829327677c059678ecc9c7",
+  "llvm19_archive_actual_md5": "87e03d05123cf01ec246ad54c1ac57a9",
+  "llvm19_archive_source_md5_prefix": "d1eb1e77",
+  "compiler_py_sha256": "8971d25e7145279bc330d3bd3e4080a020b15d2208d2886bbbb13ee95b23f6e2",
+  "source_files_sha256": {
+    "third_party/xpu/lib/Conversion/TritonXPUToLLVM/LoadStoreOpToLLVM.cpp": "6df3e93825f0728d83a4d8d52f4af3a5f058b675a3045ba9cd6ce3b68d78aef8",
+    "third_party/xpu/lib/Dialect/TritonXPU/Transforms/Mask.cpp": "c10e95ececa542bfd10f349594a0f46623428089b142079eb99ac572b8a0725d",
+    "python/setup_tools/utils/xpu.py": "8e0f98c40eb97338949db9a382795dbc747b7a1acd83b386eb5450d7e46241e3",
+    "python/setup_tools/setup_helper.py": "87d404730778f6b6dca1b608b29f0b31a997696f5243158494b245618e7b1da2",
+    "cmake/FlagTreeOptions.cmake": "153b9a03188f332340ada4dd60ea5e2bc718a3b931d519acd703146a6b7a0ddd"
+  },
+  "flagtree_version": "0.7.0+xpu.git49ce3849",
+  "wheel_sha256": "4ac5619fa3de248e3a914d796806f323c179975be9dffa0c98b6f58c73b916f3",
+  "core_sha256": "f0595fad9acba49694e3de3d545d210ce5e4134aefa06c6583214b842a78caba",
+  "core_bytes": 785398720,
+  "assets_sha256": {
+    "llvm_trust": "09c1746c272c98872bdeb0aee0806423c95c88305aa1bbaee8c9c97bde7d810a",
+    "llvm-pub22": "b6ca59dd2a057f4b760fe8c91471575cd2b8d8d9176f9e4a931dcd8bb30c85a6",
+    "xre-Linux-x86_64": "c08e6175aff8d764408899a28c25a17f2a3ce890dfbae7312705e7d9183b6077",
+    "xpu-device-libs": "5e86cbc3083ec59f304111336097614685628998a38f80e22de684dcdcd2bb3d",
+    "xpu-sdnn-objects_v0.3.6.9.1": "7e318ccf05757845610239bd64d7a69735dc0cf7e49cdb9b96958a0c62812927",
+    "xpu-python-impl-so_v0.3.6.9.2": "dcb8b8e49600f3f8e22d503b0c6b68a0551fe9eb95636f1c7400896337259e7f",
+    "xtdk-llvm19_20261013": "9b9b088d925cc885d7ae6af2d93e57c84a27c55b02829327677c059678ecc9c7",
+    "xtdk-llvm19-printf": "05a7608c3584296cd695f29599317bc84ec7b967b79f696af9ccea349787aebb",
+    "xpu-runtime-so": "1331e351fa6997f9d3083cde42abe7c50c05ee75fa2f49729efa6049339951d9"
+  },
+  "source_base_commit": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9",
+  "diagnostic_cmake_delta_sha256": "85287cef5755a9ed21fc63a4dd2649d8e3ba12e0146f8909f276e1dde75d46ee",
+  "cmake_options": {
+    "TRITON_XPU_CONCEAL_IR": "OFF"
+  },
+  "numeric_cpp_source_unchanged_from_base": true,
+  "compile_commands_sha256": "073ae4482c0b018c9526c19014268ade658bbcb45d0d098da0f334df93d23d81",
+  "default_ON_compile_contract_passed": true,
+  "OFF_compile_contract_passed": true,
+  "wheel_bytes": 3262404991,
+  "all_RECORD_hashes_verified": true,
+  "prefix": "/data/pr1701-flagtree071-build-20261120/prefix-debug-wired",
+  "source_prefix": "/data/pr1701-flagtree071-build-20261120/source-debug-wired",
+  "source_git_status_after_build": "clean",
+  "exact_official_release_rebuild_claimed": false,
+  "build_environment": {
+    "python": "3.10.20 (main, Jul 18 2026, 17:02:35) [Clang 22.1.3 ]",
+    "executable": "/task/build-venv-control/bin/python",
+    "pybind11": "3.0.1",
+    "pybind11_path": "/task/build-venv-control/lib/python3.10/site-packages/pybind11/__init__.py",
+    "tools": {
+      "gcc": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
+      "g++": "g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
+      "cmake": "cmake version 3.22.1",
+      "ninja": "1.13.0.git.kitware.jobserver-pipe-1"
+    },
+    "installed_dependencies": {
+      "setuptools": "79.0.1",
+      "wheel": "0.48.0",
+      "pybind11-stubgen": "3.0.0"
+    }
+  },
+  "task_only_libz_development_link": {
+    "path": "/lib/x86_64-linux-gnu/libz.so.1",
+    "resolved": "/usr/lib/x86_64-linux-gnu/libz.so.1.2.11",
+    "sha256": "64c206f0146cc58bbddc4f22054436f4ff278f5a554aa3ce6921ddf7e9133370",
+    "bytes": 108936,
+    "development_link": "/task/build-dev-linker/libz.so",
+    "system_modified": false,
+    "source_modified": false
+  },
+  "source_expected_pin": "d1eb1e77",
+  "actual_md5": "87e03d05123cf01ec246ad54c1ac57a9"
+}

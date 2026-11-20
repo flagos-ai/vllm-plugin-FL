@@ -1,0 +1,89 @@
+{
+  "status": "PASS",
+  "base_commit": "bb8a53cc427fb426b65e38bfdd00d0f4217af686",
+  "scope": "Real current-main CMake target macro with compiled tiny target; not a full current-main compiler build",
+  "full_compiler_build_validation": "Separate release-e6a8799c control and one-line49ce3849 build, see attached receipts",
+  "inputs": {
+    "base.cmake": "61ea3c8e83fc923587f939d1d361e4ab21bb00f74bf8623dc21b6fd247c25525",
+    "fixed.cmake": "8609b5869351ffcbb917cabe0d7bf9fbdd9ee7c67a2df4928be299eae7f2bd71",
+    "CMakeLists.txt": "1bc74c92e36fa03997f8c4ff09cf3e1d043f507c14ff8f8bea25b1f121329509",
+    "probe.cpp": "f261678e33df2ddddbe5b74fa81472f2da13006eff5fa33ff7f834c988d05de4"
+  },
+  "cmake_version": "cmake version 3.22.1",
+  "rows": [
+    {
+      "variant": "base",
+      "backend": "xpu",
+      "option": "OFF",
+      "expected_conceal": false,
+      "negative_control": true,
+      "configure_exit": 1
+    },
+    {
+      "variant": "fixed",
+      "backend": "xpu",
+      "option": "default ON",
+      "expected_conceal": true,
+      "negative_control": false,
+      "configure_exit": 0,
+      "build_exit": 0,
+      "actual_compile_command": "/usr/bin/c++ -DTRITON_CONCEAL_IR=1 -D__TRITON_VERSION_MAJOR__=3 -D__TRITON_VERSION_MINOR__=6 -Dtriton_EXPORTS -fPIC -o CMakeFiles/triton.dir/probe.cpp.o -c /data/codex/flagtree-conceal-option-cmake-20261120/probe.cpp",
+      "actual_target_definitions": "TRITON_CONCEAL_IR=1"
+    },
+    {
+      "variant": "fixed",
+      "backend": "xpu",
+      "option": "ON",
+      "expected_conceal": true,
+      "negative_control": false,
+      "configure_exit": 0,
+      "build_exit": 0,
+      "actual_compile_command": "/usr/bin/c++ -DTRITON_CONCEAL_IR=1 -D__TRITON_VERSION_MAJOR__=3 -D__TRITON_VERSION_MINOR__=6 -Dtriton_EXPORTS -fPIC -o CMakeFiles/triton.dir/probe.cpp.o -c /data/codex/flagtree-conceal-option-cmake-20261120/probe.cpp",
+      "actual_target_definitions": "TRITON_CONCEAL_IR=1"
+    },
+    {
+      "variant": "fixed",
+      "backend": "xpu",
+      "option": "OFF",
+      "expected_conceal": false,
+      "negative_control": false,
+      "configure_exit": 0,
+      "build_exit": 0,
+      "actual_compile_command": "/usr/bin/c++ -D__TRITON_VERSION_MAJOR__=3 -D__TRITON_VERSION_MINOR__=6 -Dtriton_EXPORTS -fPIC -o CMakeFiles/triton.dir/probe.cpp.o -c /data/codex/flagtree-conceal-option-cmake-20261120/probe.cpp",
+      "actual_target_definitions": "actual-NOTFOUND"
+    },
+    {
+      "variant": "fixed",
+      "backend": "nvidia",
+      "option": "ON",
+      "expected_conceal": false,
+      "negative_control": false,
+      "configure_exit": 0,
+      "build_exit": 0,
+      "actual_compile_command": "/usr/bin/c++ -D__TRITON_VERSION_MAJOR__=3 -D__TRITON_VERSION_MINOR__=6 -Dtriton_EXPORTS -fPIC -o CMakeFiles/triton.dir/probe.cpp.o -c /data/codex/flagtree-conceal-option-cmake-20261120/probe.cpp",
+      "actual_target_definitions": "actual-NOTFOUND"
+    },
+    {
+      "variant": "fixed",
+      "backend": "nvidia",
+      "option": "OFF",
+      "expected_conceal": false,
+      "negative_control": false,
+      "configure_exit": 0,
+      "build_exit": 0,
+      "actual_compile_command": "/usr/bin/c++ -D__TRITON_VERSION_MAJOR__=3 -D__TRITON_VERSION_MINOR__=6 -Dtriton_EXPORTS -fPIC -o CMakeFiles/triton.dir/probe.cpp.o -c /data/codex/flagtree-conceal-option-cmake-20261120/probe.cpp",
+      "actual_target_definitions": "actual-NOTFOUND"
+    },
+    {
+      "variant": "fixed",
+      "backend": "ascend",
+      "option": "ON",
+      "expected_conceal": false,
+      "negative_control": false,
+      "configure_exit": 0,
+      "build_exit": 0,
+      "actual_compile_command": "/usr/bin/c++ -D__TRITON_VERSION_MAJOR__=3 -D__TRITON_VERSION_MINOR__=6 -Dtriton_EXPORTS -fPIC -o CMakeFiles/triton.dir/probe.cpp.o -c /data/codex/flagtree-conceal-option-cmake-20261120/probe.cpp",
+      "actual_target_definitions": "actual-NOTFOUND"
+    }
+  ]
+}

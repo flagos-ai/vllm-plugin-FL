@@ -1,0 +1,7 @@
+{
+  "release-source-one-line.patch": {
+    "source_sha256": "8b5cd0617ab02973b18bdaf783b964a1290d672ecc2b2f4ba402b36ae000b57e",
+    "public_sha256": "a367314eac6b0b310f51877fdb2c556147b79d92ccf1e537e53b1b366ba37db8",
+    "transformation": "Removed git-format-patch email footer; source commit header and code hunk unchanged."
+  }
+}

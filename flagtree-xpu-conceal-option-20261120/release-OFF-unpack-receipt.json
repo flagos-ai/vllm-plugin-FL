@@ -1,0 +1,41 @@
+{
+  "wheel": "/data/pr1701-flagtree071-build-20261120/wheels-debug-wired/flagtree-0.7.0+xpu.git49ce3849-cp310-cp310-linux_x86_64.whl",
+  "wheel_sha256": "4ac5619fa3de248e3a914d796806f323c179975be9dffa0c98b6f58c73b916f3",
+  "wheel_bytes": 3262404991,
+  "diagnostic_source_commit": "49ce384960a4f716a82445ff49b42549f4d15b23",
+  "source_base": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9",
+  "TRITON_XPU_CONCEAL_IR": "OFF",
+  "CMake_option_wiring_fixed": true,
+  "prefix": "/data/pr1701-flagtree071-build-20261120/prefix-debug-wired",
+  "all_RECORD_hashes_verified": true,
+  "file_count": 1234,
+  "uncompressed_bytes": 7227567616,
+  "important_files": {
+    "triton/__init__.py": {
+      "path": "triton/__init__.py",
+      "bytes": 1661,
+      "sha256": "96e68192cab5dd11fa30d5dc95d56c29ceecda53477fc3af8f37bee026b7a021"
+    },
+    "triton/_C/libtriton.so": {
+      "path": "triton/_C/libtriton.so",
+      "bytes": 785398720,
+      "sha256": "f0595fad9acba49694e3de3d545d210ce5e4134aefa06c6583214b842a78caba"
+    },
+    "triton/backends/xpu/compiler.py": {
+      "path": "triton/backends/xpu/compiler.py",
+      "bytes": 50455,
+      "sha256": "8971d25e7145279bc330d3bd3e4080a020b15d2208d2886bbbb13ee95b23f6e2"
+    },
+    "flagtree-0.7.0+xpu.git49ce3849.dist-info/METADATA": {
+      "path": "flagtree-0.7.0+xpu.git49ce3849.dist-info/METADATA",
+      "bytes": 20091,
+      "sha256": "c44cbcb9f69da6646fe67863e3bca70a593675bc1dffdf086ca0de49947d0bb1"
+    }
+  },
+  "installed_or_overwritten_existing_environment": false,
+  "GPU_test_run": false,
+  "pin_mismatch": true,
+  "source_expected_pin": "d1eb1e77",
+  "llvm19_actual_md5": "87e03d05123cf01ec246ad54c1ac57a9",
+  "exact_official_release_rebuild_claimed": false
+}
