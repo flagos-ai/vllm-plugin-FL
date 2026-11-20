@@ -1232,10 +1232,13 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        # Eager execution permits runtime JIT compilation. Match the 0.32
-        # worker and monitor only when kernel warmup was enabled.
+        # Ascend and Kunlunxin allow runtime JIT when kernel warmup is disabled.
+        jit_monitor_requires_warmup = (
+            self.device.type == "npu"
+            or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+        )
         if (
-            self.device.type != "npu"
+            not jit_monitor_requires_warmup
             or self.vllm_config.kernel_config.enable_jit_warmup
         ):
             activate_jit_monitor(
