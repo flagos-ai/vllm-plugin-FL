@@ -20,7 +20,7 @@ flagtree==0.6.1a2+mthreads3.6
 decorator
 pyyaml
 scipy
-modelscope>=1.18.1
+modelscope==1.35.3
 setuptools <= 79.0.1
 setuptools-scm
 scikit-build-core==0.11
