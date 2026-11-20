@@ -11,7 +11,7 @@ from __future__ import annotations
 import functools
 import importlib
 
-from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
 def _native_ops_available(hardware_available, *qualified_names: str) -> bool:
@@ -60,8 +60,26 @@ def register_builtins(registry) -> None:
 
     backend = MacaBackend()
     is_avail = backend.is_available
+    from .impl.w4a8_moe import is_available as w4a8_available, w4a8_moe_experts
+    from .impl.w8a8_linear import is_available as w8a8_available, w8a8_scaled_mm
 
     impls = [
+        OpImpl(
+            op_name="w8a8_scaled_mm",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(w8a8_scaled_mm, w8a8_available),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="w4a8_moe_experts",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(w4a8_moe_experts, w4a8_available),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
         # Activation
         OpImpl(
             op_name="silu_and_mul",

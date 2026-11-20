@@ -1,0 +1,45 @@
+# Eco-Tech 1017 W4A8, two 8-GPU C550 nodes.
+served-model-name: dsv41-flash-eco-metax
+tensor-parallel-size: 2
+pipeline-parallel-size: 1
+data-parallel-size: 8
+data-parallel-size-local: 4
+nnodes: 2
+enable-expert-parallel: true
+all2all-backend: allgather_reducescatter
+distributed-executor-backend: mp
+engram-config:
+  cpu_offload: true
+  embedding_across_dp: true
+  dp_shared_memory: false
+dtype: bfloat16
+load-format: safetensors
+generation-config: auto
+mm-encoder-attn-backend: TORCH_SDPA
+kv-cache-dtype: fp8_ds_mla
+block-size: 64
+gpu-memory-utilization: 0.78
+max-model-len: 1048576
+max-num-batched-tokens: 4096
+max-num-seqs: 8
+max-num-active-seqs: 8
+additional-config:
+  deepseek_v41_indexer_max_context: 66560
+enable-chunked-prefill: true
+no-async-scheduling: true
+no-enable-prefix-caching: true
+disable-custom-all-reduce: true
+seed: 1017
+cudagraph-metrics: true
+speculative-config:
+  method: dspark
+  num_speculative_tokens: 5
+  draft_sample_method: probabilistic
+  rejection_sample_method: standard
+  enable_adaptive_verification: true
+compilation-config:
+  mode: 0
+  cudagraph_mode: FULL_DECODE_ONLY
+  cudagraph_capture_sizes: [1, 6, 12, 20, 24, 40, 48, 80, 96, 160, 192]
+  cudagraph_num_of_warmups: 1
+reasoning-parser: deepseek_v4

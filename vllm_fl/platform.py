@@ -377,6 +377,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if "deepseek_v41_indexer_max_context" in (vllm_config.additional_config or {}):
+            from vllm_fl.models.deepseek_v41.config import indexer_workspace_tokens
+
+            if cls.vendor_name != "metax" or not vllm_config.use_v2_model_runner:
+                raise ValueError("The bounded V4.1 indexer profile requires MetaX V2")
+            indexer_workspace_tokens(vllm_config)
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(
@@ -998,6 +1004,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
+        if cls.vendor_name == "metax":
+            from vllm_fl.quantization.modelslim import register_modelslim_format
+
+            register_modelslim_format()
         if cls.device_name == "npu":
             # Upstream breakable graph wrappers are CUDA-specific. Ascend uses
             # vLLM's piecewise GraphWrapper path until those wrappers are made

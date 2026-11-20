@@ -585,10 +585,20 @@ class WorkerFL(WorkerBase):
                     GPUModelRunner as GPUModelRunnerV2,
                 )
 
-            if getattr(current_platform, "vendor_name", None) == "iluvatar":
+            if vendor == "iluvatar":
                 from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
                     IluvatarGPUModelRunnerV2 as GPUModelRunnerV2,
                 )
+            elif (
+                vendor == "metax"
+                and self.model_config.hf_config.model_type == "deepseek_v41"
+            ):
+                from vllm_fl.models.deepseek_v41.config import indexer_max_context
+
+                if indexer_max_context(self.vllm_config) is not None:
+                    from vllm_fl.worker.deepseek_v41 import (
+                        DeepseekV41ModelRunner as GPUModelRunnerV2,
+                    )
 
             # HACK(woosuk): This is a temporary fix to avoid type errors.
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
@@ -1032,7 +1042,18 @@ class WorkerFL(WorkerBase):
                 logger.warning("kernel_warmup skipped: %s", e)
 
         cuda_graph_memory_bytes = 0
+        sampler_prepared_before_capture = False
         if not self.model_config.enforce_eager:
+            if (
+                self.use_v2_model_runner
+                and getattr(current_platform, "vendor_name", None) == "metax"
+                and self.model_config.hf_config.model_type == "deepseek_v41"
+            ):
+                from vllm_fl.worker.deepseek_v41 import prepare_v41_graph_kernels
+
+                sampler_prepared_before_capture = prepare_v41_graph_kernels(
+                    self, warmup_kernels
+                )
             cuda_graph_memory_bytes = self.model_runner.capture_model()
 
         # Compare actual vs estimated CUDA graph memory (if we did profiling)
@@ -1111,7 +1132,10 @@ class WorkerFL(WorkerBase):
 
         if self.use_v2_model_runner:
             # V2: Run full execute_model + sample_tokens to JIT compile triton kernels.
-            warmup_kernels(self.model_runner, self.execute_model, self.sample_tokens)
+            if not sampler_prepared_before_capture:
+                warmup_kernels(
+                    self.model_runner, self.execute_model, self.sample_tokens
+                )
         elif get_pp_group().is_last_rank:
             # V1: Warm up sampler and preallocate memory buffer for logits and other
             # sampling related tensors of max possible shape to avoid memory

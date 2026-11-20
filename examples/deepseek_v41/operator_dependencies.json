@@ -1,0 +1,45 @@
+{
+  "description": "Base commits plus companion source changes used by the validated deployment. The base commits alone do not contain the complete APIs. File digests are SHA256. The src tree digest covers sorted src-relative-to-repository paths and file hashes in compact JSON.",
+  "dependencies": {
+    "FlagGems": {
+      "repository": "https://github.com/flagos-ai/FlagGems",
+      "upstream_base": "63d484c8cbcb7f4cf18bc30a663644fa500509a2",
+      "src_sha256": "34b805c6a4998126669f597d82d8a5bb5004beec0b402a06b7946f10e682ec29",
+      "changed_source_files": {
+        "src/flag_gems/__init__.py": "861fd6cb2fde749b69cc64779bf7301672fa1463a082c123012dea360faafd73",
+        "src/flag_gems/ops/composite_hadamard_transform.py": "6f1ea04a6a14df36d73527a621453df2a85696365732820c0d43ead89e4f8235"
+      },
+      "removed_source_files": []
+    },
+    "FlagGems-vllm": {
+      "repository": "https://github.com/flagos-ai/FlagGems-vllm",
+      "upstream_base": "b434eafb1715849d1019ddcd480c5fc39461665c",
+      "src_sha256": "96e69875428dca4d50f8963a71ff6969f5ae40dcccb28294934c061d8290c880",
+      "changed_source_files": {
+        "src/flaggems_vllm/__init__.py": "917bc489b9b9de08c4d8fc7f1bb6100e4ab37d73c372065f19159c4e32cf4b5e",
+        "src/flaggems_vllm/ops/__init__.py": "613d9e7418a8502c9f5a3639671ac47da33a676cf935aae6cd20546be2f0c9de",
+        "src/flaggems_vllm/ops/deepseek_v41_candidates.py": "0c869413d7ccdf67a6007182ae4d26ed6e719b7d1db6320eaf11600792ce9e8a",
+        "src/flaggems_vllm/ops/deepseek_v41_compress_norm.py": "cf0d62ed19aeeb71685965c9763d23aa32f0ac2fa89df2a9a4b08f46aece2548",
+        "src/flaggems_vllm/ops/deepseek_v41_indexer_k_store.py": "b5369e20b1cc37c5d4ff3b15719e4a2e3a1ea9fd08104ba44c9181868819c771",
+        "src/flaggems_vllm/ops/engram.py": "ab616052e87b2b2f194206b1911826f9a3728cb01cd76592bab9ee6a536fa466",
+        "src/flaggems_vllm/ops/flash_mla_with_kvcache.py": "eb04fae40600c547df47dc082a6bbb75907e5fdf710079878274b4cd584b6771",
+        "src/flaggems_vllm/ops/fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert.py": "bab9a0df0aa4039e84935012f934394eac61d6275aa9decbae840c5d7b189c05",
+        "src/flaggems_vllm/ops/fused_experts_w4a8.py": "85ba4b0196377dcdea906461954cb4e6fece8637c2136420c1dcb0bc4f38b48c",
+        "src/flaggems_vllm/ops/mhc_pre_delayed.py": "0ec3f605f8e8022489c37c38eb6a1d2f38d78b41ba7d98ca0326d7e52c40480c",
+        "src/flaggems_vllm/ops/mhc_with_norm.py": "eafded0b8bf9742bfd5b4845409f6fc8877997259d220598a22a79c331df1018",
+        "src/flaggems_vllm/ops/persistent_topk.py": "c6941d02aeb8aa3d32fa1d82754bc451f6bc24af6caba61d9ecd0baa3bc6dee9",
+        "src/flaggems_vllm/ops/quantized_weight_formats.py": "38ba1d732a19f57751913b7ea81f7fcc2f2bc928c11912440253eef5ca35389b",
+        "src/flaggems_vllm/ops/sqrtsoftplus_topk.py": "c1715d4a16b6823a2e1ab7b77960ec45497516b4999d2d1f7e73b1a661342e9b",
+        "src/flaggems_vllm/ops/triton_scaled_mm.py": "4fc78667fd407e9608289431e9c28f15ffa21b487b00d45b65e9bf1ffe52ab29",
+        "src/flaggems_vllm/runtime/backend/_metax/fused/fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert.py": "d46ff354be454eaf3b68b083282c960427ad6c19dedd4c5b570b8059baf1ce79",
+        "src/flaggems_vllm/runtime/backend/_metax/ops/__init__.py": "a87aaef708f15f12deef698861d19fdc80f3c34b3cfdda523cba4403756eb9dc",
+        "src/flaggems_vllm/runtime/backend/_metax/ops/fused_experts_w4a8.py": "05d6f3ce4f47181c7fea5f0ccdfb1c3932b5e0949e50e6c85e31ab6db58831fc",
+        "src/flaggems_vllm/runtime/backend/_metax/ops/moe_align_block_size.py": "a549d5b5005b5dfe1ebdf65f92342790aa2f8e4492e29271837695b761eec9b2",
+        "src/flaggems_vllm/runtime/backend/_metax/ops/persistent_topk.py": "bcb97f3390709fe6f58178a6d57dc96bd1d6cb6e544aedecb851cbc6c97b7a05",
+        "src/flaggems_vllm/runtime/backend/_metax/tune_configs.yaml": "099160edae5c5b05db9b7e18766595c0beba45f5a9a87ad300326d572086ac46",
+        "src/flaggems_vllm/runtime/backend/_nvidia/tune_configs.yaml": "a308b3c17b5075c338c4b79965459fdee103e71b71de0772684e813ea9a0f947"
+      },
+      "removed_source_files": []
+    }
+  }
+}
