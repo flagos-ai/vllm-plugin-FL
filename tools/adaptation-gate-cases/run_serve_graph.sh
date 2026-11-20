@@ -35,6 +35,9 @@ compilation_args=()
 if [[ -n ${GRAPH_COMPILATION_CONFIG:-} ]]; then
     compilation_args+=(--compilation-config "$GRAPH_COMPILATION_CONFIG")
 fi
+if [[ -n ${MAX_NUM_SEQS:-} ]]; then
+    compilation_args+=(--max-num-seqs "$MAX_NUM_SEQS")
+fi
 
 exec vllm serve "$model_path" \
     --served-model-name "$served_model_name" \

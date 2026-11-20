@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install the FlagGems-vllm source pinned for the CI interpreter."""
+"""Install the CI source pin without changing runtime dependencies."""
 
 import argparse
 import json
@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 
 RELEASE = "v0.2.0"
 COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
+ENFLAME_COMMIT = "93fd1b0c1dc3b084dbf6872630fc9bb6113218ed"
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
 SOURCE_ARCHIVE = f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"
 SOURCE_ARCHIVE_SHA256 = (
@@ -61,7 +62,23 @@ def pip_install(*args):
     subprocess.run([sys.executable, "-m", "pip", "install", *args], env=env, check=True)
 
 
-def main(*, commit=COMMIT, source_archive=None, archive_sha256=None):
+def main(argv=None, *, commit=None, source_archive=None, archive_sha256=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--platform", default="", help="Use Enflame-specific source pin"
+    )
+    parser.add_argument("--source-archive", action="store_true")
+    args = parser.parse_args(argv)
+    if args.source_archive:
+        if args.platform == "enflame":
+            parser.error("--source-archive is unavailable for the Enflame pin")
+        if source_archive is None:
+            source_archive, archive_sha256 = SOURCE_ARCHIVE, SOURCE_ARCHIVE_SHA256
+        if not source_archive or not archive_sha256:
+            parser.error("--source-archive requires a pinned archive and SHA256")
+    if commit is None:
+        commit = ENFLAME_COMMIT if args.platform == "enflame" else COMMIT
+    release = "0.3.0.dev1" if args.platform == "enflame" else RELEASE
     source = (
         f"{source_archive}#sha256={archive_sha256}"
         if source_archive is not None
@@ -72,7 +89,7 @@ def main(*, commit=COMMIT, source_archive=None, archive_sha256=None):
     if missing:
         pip_install(*missing)
     if not release_is_installed(commit, source_archive, archive_sha256):
-        # Metadata still says 0.1.0; force replacement of another 0.1.0 source.
+        # Metadata may conceal a different source commit or archive.
         # Reuse the build tools already used by this platform's plugin setup.
         pip_install(
             "--no-deps",
@@ -86,18 +103,10 @@ def main(*, commit=COMMIT, source_archive=None, archive_sha256=None):
     if after != before:
         raise RuntimeError(f"CI runtime dependencies changed: {before} -> {after}")
     print(
-        f"FlagGems-vllm: source commit {commit}, "
+        f"FlagGems-vllm: {release}, source commit {commit}, "
         f"package metadata {package_version('flaggems-vllm')}"
     )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-archive", action="store_true")
-    args = parser.parse_args()
-    if args.source_archive:
-        if SOURCE_ARCHIVE is None:
-            parser.error("--source-archive is unavailable for the selected provider")
-        main(source_archive=SOURCE_ARCHIVE, archive_sha256=SOURCE_ARCHIVE_SHA256)
-    else:
-        main()
+    main()

@@ -120,7 +120,8 @@ platforms:
       - vllm_fl/dispatch/config/musa.yaml
       - vllm_fl/dispatch/backends/vendor/musa/
   enflame:
-    enabled: false
+    # setup.sh uses image-provided vLLM 0.32 and installs the plugin checkout.
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/

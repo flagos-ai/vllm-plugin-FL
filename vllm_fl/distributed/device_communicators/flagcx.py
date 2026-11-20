@@ -55,8 +55,6 @@ def _load_flagcx_wheel_bindings(api_path):
         else:
             sys.modules[name] = previous
         raise
-
-
 def _load_amd_flagcx_api(api_path: Path):
     """Load the pinned source API without initializing the Torch ProcessGroup."""
     name = f"{__name__}._amd_api"
@@ -223,7 +221,8 @@ class PyFlagcxCommunicator:
             assert dist.is_initialized()
             ### TODO(lms)
             assert dist.get_backend(group) != dist.Backend.NCCL, (
-                "PyNcclCommunicator should be attached to a non-NCCL group.")
+                "PyNcclCommunicator should be attached to a non-NCCL group."
+            )
             # note: this rank is the rank in the group
             self.rank = dist.get_rank(group)
             self.world_size = dist.get_world_size(group)
@@ -260,9 +259,8 @@ class PyFlagcxCommunicator:
         self.available = True
         self.disabled = False
 
-        self._legacy_unique_id_api = (
-            hasattr(self.flagcx, "handler")
-            and not hasattr(self.flagcx, "devHandle")
+        self._legacy_unique_id_api = hasattr(self.flagcx, "handler") and not hasattr(
+            self.flagcx, "devHandle"
         )
 
         if self.rank == 0:
@@ -299,6 +297,8 @@ class PyFlagcxCommunicator:
             device_ctx = torch.musa.device(self.device)
         elif self.device.type == "npu":
             device_ctx = torch.npu.device(self.device)
+        elif self.device.type == "gcu":
+            device_ctx = torch.gcu.device(self.device)
         elif self.device.type == "ptpu":
             device_ctx = torch.device(self.device)
         elif self.device.type == "txda":
@@ -311,10 +311,12 @@ class PyFlagcxCommunicator:
         with device_ctx:
             if self._legacy_unique_id_api:
                 self.comm = self.flagcx.flagcxCommInitRank(
-                    self.world_size, ctypes.pointer(self.unique_id), self.rank)
+                    self.world_size, ctypes.pointer(self.unique_id), self.rank
+                )
             else:
                 self.comm = self.flagcx.flagcxCommInitRank(
-                    self.world_size, self.unique_id, self.rank)
+                    self.world_size, self.unique_id, self.rank
+                )
 
             if self.device.type == "npu" and _flagcx_wheel_library is not None:
                 from vllm_fl.dispatch.backends.vendor.ascend.patches.flagcx import (
@@ -407,6 +409,8 @@ class PyFlagcxCommunicator:
     def _current_stream(self):
         if self.device.type == "npu":
             return torch.npu.current_stream(self.device)
+        if self.device.type == "gcu":
+            return torch.gcu.current_stream(self.device)
         if self.device.type == "txda":
             # The upstream helper may cache the default stream while TXDA
             # graph preparation selects a side stream for model execution.
@@ -420,13 +424,18 @@ class PyFlagcxCommunicator:
         if self.device.type == "npu":
             # FlagCX v0.13.0's wrapper reads cuda_stream even for NPU streams.
             stream = SimpleNamespace(cuda_stream=stream.npu_stream)
+        elif self.device.type == "gcu":
+            # FlagCX's Python wrapper does not recognize gcu_stream.
+            stream = SimpleNamespace(cuda_stream=stream.gcu_stream)
         return self.flagcx.adaptor_stream_copy(stream)
 
-    def all_reduce(self,
-                   in_tensor: torch.Tensor,
-                   out_tensor: torch.Tensor = None,
-                   op: ReduceOp = ReduceOp.SUM,
-                   stream=None) -> torch.Tensor:
+    def all_reduce(
+        self,
+        in_tensor: torch.Tensor,
+        out_tensor: torch.Tensor = None,
+        op: ReduceOp = ReduceOp.SUM,
+        stream=None,
+    ) -> torch.Tensor:
         if self.disabled:
             return None
         if is_trace_tensor(in_tensor) or is_trace_tensor(out_tensor):
@@ -438,7 +447,8 @@ class PyFlagcxCommunicator:
         # otherwise it will cause "illegal memory access"
         assert in_tensor.device == self.device, (
             f"this flagcx communicator is created to work on {self.device}, "
-            f"but the input tensor is on {in_tensor.device}")
+            f"but the input tensor is on {in_tensor.device}"
+        )
 
         if out_tensor is None:
             out_tensor = torch.empty_like(in_tensor)
@@ -469,10 +479,9 @@ class PyFlagcxCommunicator:
         finally:
             self.flagcx.adaptor_stream_free(flagcx_stream)
 
-    def all_gather(self,
-                   output_tensor: torch.Tensor,
-                   input_tensor: torch.Tensor,
-                   stream=None):
+    def all_gather(
+        self, output_tensor: torch.Tensor, input_tensor: torch.Tensor, stream=None
+    ):
         if self.disabled:
             return
         if is_trace_tensor(input_tensor) or is_trace_tensor(output_tensor):
@@ -484,15 +493,19 @@ class PyFlagcxCommunicator:
         # otherwise it will cause "illegal memory access"
         assert input_tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {input_tensor.device}")
+            f"but the input tensor is on {input_tensor.device}"
+        )
         if stream is None:
             stream = self._current_stream()
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxAllGather(
             buffer_type(input_tensor.data_ptr()),
-            buffer_type(output_tensor.data_ptr()), input_tensor.numel(),
-            flagcxDataTypeEnum.from_torch(input_tensor.dtype), self.comm,
-            flagcx_stream)
+            buffer_type(output_tensor.data_ptr()),
+            input_tensor.numel(),
+            flagcxDataTypeEnum.from_torch(input_tensor.dtype),
+            self.comm,
+            flagcx_stream,
+        )
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def all_gatherv(
@@ -509,7 +522,8 @@ class PyFlagcxCommunicator:
         # otherwise it will cause "illegal memory access"
         assert input_tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {input_tensor.device}")
+            f"but the input tensor is on {input_tensor.device}"
+        )
         if stream is None:
             stream = self._current_stream()
         if is_trace_tensor(input_tensor) or is_trace_tensor(output_tensor):
@@ -522,7 +536,7 @@ class PyFlagcxCommunicator:
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.group_start()
         for root, split_size in enumerate(sizes):
-            dst_slice = output_tensor[split_offset:split_offset + split_size]
+            dst_slice = output_tensor[split_offset : split_offset + split_size]
             self.flagcx.flagcxBroadcast(
                 buffer_type(input_tensor.data_ptr()),
                 buffer_type(dst_slice.data_ptr()),
@@ -537,17 +551,20 @@ class PyFlagcxCommunicator:
         if self.device.type == "npu":
             # FlagCX v0.13's Ascend broadcast copies only `count` bytes to the
             # root's distinct receive buffer, so fill its own slice here.
-            own_offset = sum(sizes[:self.rank])
+            own_offset = sum(sizes[: self.rank])
             with torch.npu.stream(stream):
-                output_tensor[own_offset:own_offset + sizes[self.rank]].copy_(
-                    input_tensor)
+                output_tensor[own_offset : own_offset + sizes[self.rank]].copy_(
+                    input_tensor
+                )
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
-    def reduce_scatter(self,
-                       output_tensor: torch.Tensor,
-                       input_tensor: torch.Tensor,
-                       op: ReduceOp = ReduceOp.SUM,
-                       stream=None):
+    def reduce_scatter(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        op: ReduceOp = ReduceOp.SUM,
+        stream=None,
+    ):
         if self.disabled:
             return
         # nccl communicator created on a specific device
@@ -555,7 +572,8 @@ class PyFlagcxCommunicator:
         # otherwise it will cause "illegal memory access"
         assert input_tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {input_tensor.device}")
+            f"but the input tensor is on {input_tensor.device}"
+        )
         if stream is None:
             stream = self._current_stream()
         if is_trace_tensor(input_tensor) or is_trace_tensor(output_tensor):
@@ -564,10 +582,13 @@ class PyFlagcxCommunicator:
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxReduceScatter(
             buffer_type(input_tensor.data_ptr()),
-            buffer_type(output_tensor.data_ptr()), output_tensor.numel(),
+            buffer_type(output_tensor.data_ptr()),
+            output_tensor.numel(),
             flagcxDataTypeEnum.from_torch(input_tensor.dtype),
-            flagcxRedOpTypeEnum.from_torch(op), self.comm,
-            flagcx_stream)
+            flagcxRedOpTypeEnum.from_torch(op),
+            self.comm,
+            flagcx_stream,
+        )
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def reduce_scatterv(
@@ -585,7 +606,8 @@ class PyFlagcxCommunicator:
         # otherwise it will cause "illegal memory access"
         assert input_tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {input_tensor.device}")
+            f"but the input tensor is on {input_tensor.device}"
+        )
         if stream is None:
             stream = self._current_stream()
 
@@ -596,13 +618,17 @@ class PyFlagcxCommunicator:
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.group_start()
         for root, split_size in enumerate(sizes):
-            chunk = input_tensor[split_offset:split_offset + split_size, ...]
+            chunk = input_tensor[split_offset : split_offset + split_size, ...]
             self.flagcx.flagcxReduce(
                 buffer_type(chunk.data_ptr()),
-                buffer_type(output_tensor.data_ptr()), chunk.numel(),
+                buffer_type(output_tensor.data_ptr()),
+                chunk.numel(),
                 flagcxDataTypeEnum.from_torch(input_tensor.dtype),
-                flagcxRedOpTypeEnum.from_torch(op), root, self.comm,
-                flagcx_stream)
+                flagcxRedOpTypeEnum.from_torch(op),
+                root,
+                self.comm,
+                flagcx_stream,
+            )
             split_offset += split_size
         self.group_end()
         self.flagcx.adaptor_stream_free(flagcx_stream)
@@ -612,16 +638,22 @@ class PyFlagcxCommunicator:
             return
         assert tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {tensor.device}")
+            f"but the input tensor is on {tensor.device}"
+        )
         if stream is None:
             stream = self._current_stream()
         if is_trace_tensor(tensor):
             # torch.compile tracing: no real storage to hand to FlagCX.
             return
         flagcx_stream = self._copy_flagcx_stream(stream)
-        self.flagcx.flagcxSend(buffer_type(tensor.data_ptr()), tensor.numel(),
-                           flagcxDataTypeEnum.from_torch(tensor.dtype), dst,
-                           self.comm, flagcx_stream)
+        self.flagcx.flagcxSend(
+            buffer_type(tensor.data_ptr()),
+            tensor.numel(),
+            flagcxDataTypeEnum.from_torch(tensor.dtype),
+            dst,
+            self.comm,
+            flagcx_stream,
+        )
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def recv(self, tensor: torch.Tensor, src: int, stream=None):
@@ -629,16 +661,22 @@ class PyFlagcxCommunicator:
             return
         assert tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {tensor.device}")
+            f"but the input tensor is on {tensor.device}"
+        )
         if stream is None:
             stream = self._current_stream()
         if is_trace_tensor(tensor):
             # torch.compile tracing: no real storage to hand to FlagCX.
             return
         flagcx_stream = self._copy_flagcx_stream(stream)
-        self.flagcx.flagcxRecv(buffer_type(tensor.data_ptr()), tensor.numel(),
-                           flagcxDataTypeEnum.from_torch(tensor.dtype), src,
-                           self.comm, flagcx_stream)
+        self.flagcx.flagcxRecv(
+            buffer_type(tensor.data_ptr()),
+            tensor.numel(),
+            flagcxDataTypeEnum.from_torch(tensor.dtype),
+            src,
+            self.comm,
+            flagcx_stream,
+        )
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def broadcast(self, tensor: torch.Tensor, src: int, stream=None):
@@ -646,7 +684,8 @@ class PyFlagcxCommunicator:
             return
         assert tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {tensor.device}")
+            f"but the input tensor is on {tensor.device}"
+        )
         if stream is None:
             stream = self._current_stream()
         if is_trace_tensor(tensor):
@@ -660,9 +699,15 @@ class PyFlagcxCommunicator:
             sendbuff = buffer_type()
             recvbuff = buffer_type(tensor.data_ptr())
         flagcx_stream = self._copy_flagcx_stream(stream)
-        self.flagcx.flagcxBroadcast(sendbuff, recvbuff, tensor.numel(),
-                                flagcxDataTypeEnum.from_torch(tensor.dtype), src,
-                                self.comm, flagcx_stream)
+        self.flagcx.flagcxBroadcast(
+            sendbuff,
+            recvbuff,
+            tensor.numel(),
+            flagcxDataTypeEnum.from_torch(tensor.dtype),
+            src,
+            self.comm,
+            flagcx_stream,
+        )
         self.flagcx.adaptor_stream_free(flagcx_stream)
 
     def group_start(self):

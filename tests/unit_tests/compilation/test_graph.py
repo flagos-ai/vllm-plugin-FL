@@ -130,19 +130,20 @@ def test_npu_weak_ref_preserves_view_without_owning_storage():
     assert torch.npu.memory_allocated() <= baseline
 
 
-def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
+@pytest.mark.parametrize("device_type", ["npu", "musa", "gcu"])
+def test_native_graph_capture_uses_active_accelerator_stream(monkeypatch, device_type):
     from types import SimpleNamespace
 
     graph_module = import_module("vllm_fl.compilation.graph")
 
     active_stream = object()
     stale_vllm_stream = MagicMock(return_value=object())
-    npu_current_stream = MagicMock(return_value=active_stream)
-    monkeypatch.setattr(graph_module.current_platform, "device_type", "npu")
+    native_current_stream = MagicMock(return_value=active_stream)
+    monkeypatch.setattr(graph_module.current_platform, "device_type", device_type)
     monkeypatch.setattr(
         graph_module.current_platform,
         "torch_device_fn",
-        SimpleNamespace(current_stream=npu_current_stream),
+        SimpleNamespace(current_stream=native_current_stream),
     )
     monkeypatch.setattr(
         import_module("vllm_fl.compilation.graph"),
@@ -151,7 +152,7 @@ def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
     )
 
     assert graph_module._graph_capture_stream() is active_stream
-    npu_current_stream.assert_called_once_with()
+    native_current_stream.assert_called_once_with()
     stale_vllm_stream.assert_not_called()
 
 
@@ -172,17 +173,20 @@ def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
 
 
 @pytest.mark.gpu
+@pytest.mark.parametrize("device_type", ["npu", "gcu"])
 @pytest.mark.parametrize("weak_ref_output", [False, True])
-def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
+def test_native_graph_wrapper_capture_and_replay(
+    monkeypatch, weak_ref_output, device_type
+):
     """Capture the real wrapper, then replay changed inputs into poisoned output."""
     import torch
 
     from vllm.config import CUDAGraphMode
 
     graph_module = import_module("vllm_fl.compilation.graph")
-    if graph_module.current_platform.device_type != "npu":
-        pytest.skip("Requires an Ascend NPU")
-    import torch_npu  # noqa: F401 - registers torch.npu
+    if graph_module.current_platform.device_type != device_type:
+        pytest.skip(f"Requires {device_type}")
+    device_fn = graph_module.current_platform.torch_device_fn
 
     mode = CUDAGraphMode.FULL
     descriptor = object()
@@ -220,36 +224,38 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
         mode,
         graph_module.GraphOptions(weak_ref_output=weak_ref_output),
     )
-    static_input = torch.arange(-4, 4, device="npu", dtype=torch.float32).reshape(2, 4)
-    capture_stream = torch.npu.Stream()
-    capture_stream.wait_stream(torch.npu.current_stream())
-    with torch.npu.stream(capture_stream):
+    static_input = torch.arange(-4, 4, device=device_type, dtype=torch.float32).reshape(
+        2, 4
+    )
+    capture_stream = device_fn.Stream()
+    capture_stream.wait_stream(device_fn.current_stream())
+    with device_fn.stream(capture_stream):
         captured_output = wrapper(static_input)
-    torch.npu.current_stream().wait_stream(capture_stream)
-    torch.npu.synchronize()
+    device_fn.current_stream().wait_stream(capture_stream)
+    device_fn.synchronize()
 
     entry = wrapper.concrete_graph_entries[descriptor]
-    assert isinstance(entry.graph, torch.npu.NPUGraph)
+    assert isinstance(entry.graph, graph_module.Graph.graph)
     assert len(calls) == 1
 
     # NPU capture need not materialize its output until the first replay.
     captured_output.fill_(-999)
-    torch.npu.synchronize()
+    device_fn.synchronize()
     initial_replay = wrapper(static_input)
-    torch.npu.synchronize()
+    device_fn.synchronize()
     torch.testing.assert_close(initial_replay, eager_reference(static_input))
     assert len(calls) == 1
 
     for values in (
         torch.full_like(static_input, -2),
-        torch.arange(8, device="npu", dtype=torch.float32).reshape(2, 4),
+        torch.arange(8, device=device_type, dtype=torch.float32).reshape(2, 4),
     ):
         static_input.copy_(values)
         captured_output.fill_(-999)
-        torch.npu.synchronize()
+        device_fn.synchronize()
 
         replayed_output = wrapper(static_input)
-        torch.npu.synchronize()
+        device_fn.synchronize()
         expected = eager_reference(values)
         torch.testing.assert_close(replayed_output, expected)
         assert not torch.all(replayed_output == -999).item()

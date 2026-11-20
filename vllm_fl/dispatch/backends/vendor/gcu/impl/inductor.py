@@ -2,12 +2,18 @@
 
 """Adapt TorchGCU compilation metadata to the installed Torch interfaces."""
 
+import ast
 import inspect
+import logging
 import os
+import re
 import sys
+import textwrap
 from collections.abc import Mapping
 from functools import wraps
 from types import ModuleType
+
+logger = logging.getLogger(__name__)
 
 _PARAMETERS = ("size_hints", "reduction_hint", "inductor_meta", "triton_meta")
 _ADAPTER_MARKER = "_fl_gcu_persistent_reduction_adapter"
@@ -22,40 +28,74 @@ def _install_gcu_resource_errors(heuristics) -> None:
     autotuner = getattr(heuristics, "CachingAutotuner", None)
     original = getattr(autotuner, "_precompile_config", None)
     if original is None:
-        raise RuntimeError("Torch CachingAutotuner precompile interface is missing")
+        logger.warning(
+            "Skipping GCU resource-error adapter: Torch CachingAutotuner precompile interface is missing"
+        )
+        return
     if getattr(original, _RESOURCE_ERROR_MARKER, False) is True:
         return
     if tuple(inspect.signature(original).parameters) != ("self", "cfg"):
-        raise RuntimeError("Unknown Torch CachingAutotuner precompile ABI")
+        logger.warning(
+            "Skipping GCU resource-error adapter: Unknown Torch CachingAutotuner precompile ABI"
+        )
+        return
     resource_error = getattr(heuristics, "OutOfResources", None)
     try:
         resource_parameters = tuple(inspect.signature(resource_error).parameters)
-    except (TypeError, ValueError) as error:
-        raise RuntimeError("Unknown Triton OutOfResources ABI") from error
+    except (TypeError, ValueError):
+        logger.warning(
+            "Skipping GCU resource-error adapter: unknown OutOfResources ABI"
+        )
+        return
     if (
         not isinstance(resource_error, type)
         or not issubclass(resource_error, Exception)
         or resource_parameters != ("required", "limit", "name")
     ):
-        raise RuntimeError("Unknown Triton OutOfResources ABI")
+        logger.warning(
+            "Skipping GCU resource-error adapter: Unknown Triton OutOfResources ABI"
+        )
+        return
+
+    compiler_error = getattr(heuristics, "PTXASError", None)
+    try:
+        compiler_parameters = tuple(inspect.signature(compiler_error).parameters)
+    except (TypeError, ValueError):
+        logger.warning("Skipping GCU resource-error adapter: unknown PTXASError ABI")
+        return
+    if (
+        not isinstance(compiler_error, type)
+        or not issubclass(compiler_error, Exception)
+        or compiler_parameters != ("error_message",)
+    ):
+        logger.warning(
+            "Skipping GCU resource-error adapter: Unknown Triton PTXASError ABI"
+        )
+        return
 
     @wraps(original)
     def precompile_gcu_config(self, cfg):
         try:
             return original(self, cfg)
         except Exception as error:
-            # The observed GCU compiler reports this resource failure as a
-            # plain Exception. Torch only skips OutOfResources candidates;
-            # one failed tile must not discard other valid configurations.
-            if (
-                self.device_props.type != "gcu"
-                or type(error) is not Exception
-                or str(error).splitlines()[:1] != [_REGISTER_ERROR]
-            ):
+            if self.device_props.type != "gcu" or type(error) is not Exception:
                 raise
-            # The compiler reports neither count. Preserve the original
-            # diagnostic as the cause instead of inventing register counts.
-            raise resource_error("unknown", "unknown", "GCU registers") from error
+            first_line = str(error).splitlines()[:1]
+            if first_line == [_REGISTER_ERROR]:
+                logger.warning("Rejecting GCU autotune candidate %s: %s", cfg, error)
+                raise resource_error("unknown", "unknown", "GCU registers") from error
+            # The symbol and preceding diagnostic context vary by kernel.
+            # Only reject the known ICALL relocation/PIC failure; other linker
+            # errors must still propagate instead of hiding compiler defects.
+            linker_failure = re.search(
+                r"ld\.lld: error: relocation R_DTU_ADDR16_(?:LO|HI)_ICALL "
+                r"cannot be used against symbol [^;\n]+; recompile with -fPIC",
+                str(error),
+            )
+            if linker_failure is not None:
+                logger.warning("Rejecting GCU autotune candidate %s: %s", cfg, error)
+                raise compiler_error(str(error)) from error
+            raise
 
     setattr(precompile_gcu_config, _RESOURCE_ERROR_MARKER, True)
     autotuner._precompile_config = precompile_gcu_config
@@ -85,12 +125,9 @@ def _install_gcu_i64_compile_options(heuristics) -> None:
         }
         if explicit:
             return {**options, **explicit}
-        signature = compile_meta.get("signature")
-        if not isinstance(signature, Mapping) or not any(
-            isinstance(dtype, str) and dtype in _I64_SIGNATURES
-            for dtype in signature.values()
-        ):
-            return options
+        # Even an all-i32 signature can contain internal i64 arithmetic:
+        # Inductor embedding explicitly widens token indices before lookup.
+        # Argument signatures alone cannot establish that i64 is unused.
         # Torch keeps dynamic sizes as i64 to avoid overflow. Its compiler
         # option whitelist drops GCU's flag, so pass it at the actual options
         # boundary. The GCU backend requires an explicit option; setting only
@@ -209,13 +246,74 @@ def _loaded_gcu_inductor_providers(provider: ModuleType) -> list[ModuleType]:
     return [provider, alias]
 
 
+def gcu_codegen_mode() -> str:
+    value = os.environ.get("FL_GCU_PRESERVE_DTYPE_CODEGEN", "1")
+    if value not in ("0", "1"):
+        raise ValueError("FL_GCU_PRESERVE_DTYPE_CODEGEN must be 0 or 1")
+    return "preserve_integer_abi_v2" if value == "1" else "vendor_v1"
+
+
+def _install_gcu_dtype_preserving_codegen(provider) -> None:
+    if gcu_codegen_mode() == "vendor_v1":
+        return
+    helper = provider.GCUCompileHelper
+    original = helper.compile_to_module
+    marker = "_fl_gcu_dtype_preserving_codegen"
+    if getattr(original, marker, False) is True:
+        return
+    if tuple(inspect.signature(original).parameters) != ("graph_lowering_self",):
+        logger.warning("Skipping GCU dtype codegen adapter: unknown vendor ABI")
+        return
+    # Retain the vendor's cache, logging, float64 lowering and module loading.
+    # Remove only the four observed integer ABI/limit rewrites. Unknown source
+    # is never silently substituted with Torch's entire implementation.
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(original)))
+        function = tree.body[0]
+        expected = {
+            'wrapper_code.value = wrapper_code.value.replace("int64", "int32")',
+            'wrapper_code.value = wrapper_code.value.replace("i64", "i32")',
+            'wrapper_code.value = wrapper_code.value.replace("9223372036854775808", str(2**31))',
+            'wrapper_code.value = wrapper_code.value.replace("9223372036854775807", str(2**31 - 1))',
+        }
+        patterns = {ast.dump(ast.parse(line).body[0]): line for line in expected}
+        matches = [node for node in function.body if ast.dump(node) in patterns]
+        if len(matches) != len(patterns) or len({ast.dump(n) for n in matches}) != len(
+            patterns
+        ):
+            raise ValueError("unrecognized integer source rewrites")
+        function.body = [node for node in function.body if node not in matches]
+        function.decorator_list = []
+        if original.__closure__:
+            raise ValueError("vendor helper has closure state")
+        namespace = dict(original.__globals__)
+        exec(
+            compile(ast.fix_missing_locations(tree), inspect.getfile(original), "exec"),
+            namespace,
+        )
+        adapted = wraps(original)(namespace[function.name])
+    except (OSError, TypeError, SyntaxError, ValueError) as error:
+        logger.warning("Skipping GCU dtype codegen adapter: %s", error)
+        return
+    setattr(adapted, marker, True)
+    helper.compile_to_module = staticmethod(adapted)
+
+
 def apply_inductor_gcu_patch() -> None:
     from vllm.platforms import current_platform
 
     if getattr(current_platform, "vendor_name", None) != "enflame":
         return
+    # A changed code generator must not reuse artifacts with corrupted ABIs.
+    # Preserve a caller's cache tag while adding a versioned backend salt.
+    import torch.compiler.config as compiler_config
     from torch._inductor.runtime import triton_heuristics
     from torch_gcu.gcu.inductor import backend_register
 
+    salt = "fl_gcu_" + gcu_codegen_mode()
+    tag = compiler_config.cache_key_tag
+    if salt not in tag.split(":"):
+        compiler_config.cache_key_tag = f"{tag}:{salt}" if tag else salt
     for provider in _loaded_gcu_inductor_providers(backend_register):
+        _install_gcu_dtype_preserving_codegen(provider)
         _install_gcu_inductor_hooks(provider, triton_heuristics)
