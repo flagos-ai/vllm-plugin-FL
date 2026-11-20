@@ -1,0 +1,15 @@
+LLVM (http://llvm.org/):
+  LLVM version 19.1.7
+  Optimized build with assertions.
+  Default target: x86_64-baidu-linux-gnu
+  Host CPU: znver4
+
+  Registered Targets:
+    amdgcn  - AMD GCN GPUs
+    nvptx   - NVIDIA PTX 32-bit
+    nvptx64 - NVIDIA PTX 64-bit
+    r600    - AMD GPUs HD2XXX-HD6XXX
+    x86     - 32-bit X86: Pentium-Pro and above
+    x86-64  - 64-bit X86: EM64T and AMD64
+    xcn     - XCNTCG
+    xpu     - 32-bit xpu

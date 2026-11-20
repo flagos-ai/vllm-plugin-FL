@@ -1,0 +1,20 @@
+{
+  "purpose": "Public SDK normal CPU compile capability checks, not a GPU or performance gate",
+  "SDK_archive_sha256": "9b9b088d925cc885d7ae6af2d93e57c84a27c55b02829327677c059678ecc9c7",
+  "llc_sha256": "f71c69f9c9811c854b27cb5b2cd0d70215293754665575540985ce636132ac8a",
+  "device_library_sha256": "df625f4efce22fb659d1be8483d649a42a7d972b23e5068dd9aed526941254ea",
+  "public_SDK_archive": "https://klx-sdk-release-public.su.bcebos.com/xtdk_llvm19/trust/20261013/xtdk-llvm19-ubuntu2004_x86_64.tar.gz",
+  "source_content_pin_mismatch": true,
+  "related_pin_issue": 1703,
+  "status": {
+    "atomic_add_acq_rel": -6,
+    "atomic_add_monotonic": -6,
+    "atomic_or_monotonic": -6,
+    "empty_control": 0,
+    "ordinary_DMA_RMW_control": 0
+  },
+  "scope": "Standard LLVM INT32 addrspace1 ADD/OR lowering on this exact public XPU19 backend; no claim about physical hardware capability",
+  "compiler_or_SDK_modified": false,
+  "GPU_execution": false,
+  "proof_of_global_atomic_repair": false
+}

@@ -1,0 +1,37 @@
+LLVM ERROR: Cannot select: t7: i32,ch = AtomicLoadAdd<(load store acq_rel (s32) on %ir.p, addrspace 1)> t0, t3, Constant:i32<1>
+  t3: i64,ch = load<(load (s64) from %fixed-stack.1)> t0, FrameIndex:i32<-1>, undef:i32
+    t1: i32 = FrameIndex<-1>
+    t2: i32 = undef
+  t6: i32 = Constant<1>
+In function: atomic_add_acq_rel
+PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace.
+Stack dump:
+0.	Program arguments: /toolchain/bin/llc -mtriple=xpu3-baidu-none-gnu -mcpu=xpu3 -O2 -filetype=asm /probe/atomic_add_acq_rel.ll -o /results/atomic_add_acq_rel.s
+1.	Running pass 'Function Pass Manager' on module '/probe/atomic_add_acq_rel.ll'.
+2.	Running pass 'XPU v2 DAG->DAG Pattern Instruction Selection' on function '@atomic_add_acq_rel'
+Stack dump without symbol names (ensure you have llvm-symbolizer in your PATH or set the environment var `LLVM_SYMBOLIZER_PATH` to point to it):
+0  libLLVM.so.19.1 0x00007fc82807818f llvm::sys::PrintStackTrace(llvm::raw_ostream&, int) + 63
+1  libLLVM.so.19.1 0x00007fc8280756d4
+2  libc.so.6       0x00007fc8271b9520
+3  libc.so.6       0x00007fc82720d9bc pthread_kill + 300
+4  libc.so.6       0x00007fc8271b9476 raise + 22
+5  libc.so.6       0x00007fc82719f7f3 abort + 211
+6  libLLVM.so.19.1 0x00007fc827dc3860
+7  libLLVM.so.19.1 0x00007fc828d6443b llvm::SelectionDAGISel::CannotYetSelect(llvm::SDNode*) + 491
+8  libLLVM.so.19.1 0x00007fc828d6aa2a llvm::SelectionDAGISel::SelectCodeCommon(llvm::SDNode*, unsigned char const*, unsigned int) + 11898
+9  libLLVM.so.19.1 0x00007fc82b192c97
+10 libLLVM.so.19.1 0x00007fc828d610bc llvm::SelectionDAGISel::DoInstructionSelection() + 988
+11 libLLVM.so.19.1 0x00007fc828d70534 llvm::SelectionDAGISel::CodeGenAndEmitDAG() + 2900
+12 libLLVM.so.19.1 0x00007fc828d735cd llvm::SelectionDAGISel::SelectAllBasicBlocks(llvm::Function const&) + 3629
+13 libLLVM.so.19.1 0x00007fc828d74aaf llvm::SelectionDAGISel::runOnMachineFunction(llvm::MachineFunction&) + 239
+14 libLLVM.so.19.1 0x00007fc82b19631c
+15 libLLVM.so.19.1 0x00007fc828d65d33 llvm::SelectionDAGISelLegacy::runOnMachineFunction(llvm::MachineFunction&) + 179
+16 libLLVM.so.19.1 0x00007fc828643b75
+17 libLLVM.so.19.1 0x00007fc82825eafb llvm::FPPassManager::runOnFunction(llvm::Function&) + 891
+18 libLLVM.so.19.1 0x00007fc82825ed49 llvm::FPPassManager::runOnModule(llvm::Module&) + 57
+19 libLLVM.so.19.1 0x00007fc82825f5f5 llvm::legacy::PassManagerImpl::run(llvm::Module&) + 965
+20 llc             0x000055732276a749
+21 llc             0x00005573227603f6 main + 1910
+22 libc.so.6       0x00007fc8271a0d90
+23 libc.so.6       0x00007fc8271a0e40 __libc_start_main + 128
+24 llc             0x0000557322760f3e _start + 46

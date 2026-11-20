@@ -1,0 +1,140 @@
+{
+  "purpose": "CPU-only normal public SDK compiler capability probes, not GPU numerical verification",
+  "llc_sha256": "f71c69f9c9811c854b27cb5b2cd0d70215293754665575540985ce636132ac8a",
+  "device_library_sha256": "df625f4efce22fb659d1be8483d649a42a7d972b23e5068dd9aed526941254ea",
+  "toolchain_archive_sha256": "9b9b088d925cc885d7ae6af2d93e57c84a27c55b02829327677c059678ecc9c7",
+  "source_pin_mismatch_disclosed": true,
+  "probes": [
+    {
+      "name": "atomic_add_acq_rel",
+      "source_sha256": "592ab297e36f2f8e9d52b36aea3fcb4872d9b64c031f48c272a37f99e15fbd9a",
+      "command": [
+        "/toolchain/bin/llc",
+        "-mtriple=xpu3-baidu-none-gnu",
+        "-mcpu=xpu3",
+        "-O2",
+        "-filetype=asm",
+        "/probe/atomic_add_acq_rel.ll",
+        "-o",
+        "/results/atomic_add_acq_rel.s"
+      ],
+      "exit_code": -6,
+      "elapsed_seconds": 0.08082106290385127,
+      "diagnostic_first_lines": [
+        "LLVM ERROR: Cannot select: t7: i32,ch = AtomicLoadAdd<(load store acq_rel (s32) on %ir.p, addrspace 1)> t0, t3, Constant:i32<1>",
+        "  t3: i64,ch = load<(load (s64) from %fixed-stack.1)> t0, FrameIndex:i32<-1>, undef:i32",
+        "    t1: i32 = FrameIndex<-1>",
+        "    t2: i32 = undef",
+        "  t6: i32 = Constant<1>",
+        "In function: atomic_add_acq_rel",
+        "PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace.",
+        "Stack dump:",
+        "0.\tProgram arguments: /toolchain/bin/llc -mtriple=xpu3-baidu-none-gnu -mcpu=xpu3 -O2 -filetype=asm /probe/atomic_add_acq_rel.ll -o /results/atomic_add_acq_rel.s",
+        "1.\tRunning pass 'Function Pass Manager' on module '/probe/atomic_add_acq_rel.ll'.",
+        "2.\tRunning pass 'XPU v2 DAG->DAG Pattern Instruction Selection' on function '@atomic_add_acq_rel'",
+        "Stack dump without symbol names (ensure you have llvm-symbolizer in your PATH or set the environment var `LLVM_SYMBOLIZER_PATH` to point to it):"
+      ]
+    },
+    {
+      "name": "atomic_add_monotonic",
+      "source_sha256": "92d1cb5335f1a717308638c377844782c23d916c09f51eaf19094cf4af94d39e",
+      "command": [
+        "/toolchain/bin/llc",
+        "-mtriple=xpu3-baidu-none-gnu",
+        "-mcpu=xpu3",
+        "-O2",
+        "-filetype=asm",
+        "/probe/atomic_add_monotonic.ll",
+        "-o",
+        "/results/atomic_add_monotonic.s"
+      ],
+      "exit_code": -6,
+      "elapsed_seconds": 0.08280332665890455,
+      "diagnostic_first_lines": [
+        "LLVM ERROR: Cannot select: t7: i32,ch = AtomicLoadAdd<(load store monotonic (s32) on %ir.p, addrspace 1)> t0, t3, Constant:i32<1>",
+        "  t3: i64,ch = load<(load (s64) from %fixed-stack.1)> t0, FrameIndex:i32<-1>, undef:i32",
+        "    t1: i32 = FrameIndex<-1>",
+        "    t2: i32 = undef",
+        "  t6: i32 = Constant<1>",
+        "In function: atomic_add_monotonic",
+        "PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace.",
+        "Stack dump:",
+        "0.\tProgram arguments: /toolchain/bin/llc -mtriple=xpu3-baidu-none-gnu -mcpu=xpu3 -O2 -filetype=asm /probe/atomic_add_monotonic.ll -o /results/atomic_add_monotonic.s",
+        "1.\tRunning pass 'Function Pass Manager' on module '/probe/atomic_add_monotonic.ll'.",
+        "2.\tRunning pass 'XPU v2 DAG->DAG Pattern Instruction Selection' on function '@atomic_add_monotonic'",
+        "Stack dump without symbol names (ensure you have llvm-symbolizer in your PATH or set the environment var `LLVM_SYMBOLIZER_PATH` to point to it):"
+      ]
+    },
+    {
+      "name": "atomic_or_monotonic",
+      "source_sha256": "65c90434337578c72987dc3dec51cf81c850392a40aa7941c038d89a40729617",
+      "command": [
+        "/toolchain/bin/llc",
+        "-mtriple=xpu3-baidu-none-gnu",
+        "-mcpu=xpu3",
+        "-O2",
+        "-filetype=asm",
+        "/probe/atomic_or_monotonic.ll",
+        "-o",
+        "/results/atomic_or_monotonic.s"
+      ],
+      "exit_code": -6,
+      "elapsed_seconds": 0.08009612513706088,
+      "diagnostic_first_lines": [
+        "LLVM ERROR: Cannot select: t7: i32,ch = AtomicLoadOr<(load store monotonic (s32) on %ir.p, addrspace 1)> t0, t3, Constant:i32<1>",
+        "  t3: i64,ch = load<(load (s64) from %fixed-stack.1)> t0, FrameIndex:i32<-1>, undef:i32",
+        "    t1: i32 = FrameIndex<-1>",
+        "    t2: i32 = undef",
+        "  t6: i32 = Constant<1>",
+        "In function: atomic_or_monotonic",
+        "PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace.",
+        "Stack dump:",
+        "0.\tProgram arguments: /toolchain/bin/llc -mtriple=xpu3-baidu-none-gnu -mcpu=xpu3 -O2 -filetype=asm /probe/atomic_or_monotonic.ll -o /results/atomic_or_monotonic.s",
+        "1.\tRunning pass 'Function Pass Manager' on module '/probe/atomic_or_monotonic.ll'.",
+        "2.\tRunning pass 'XPU v2 DAG->DAG Pattern Instruction Selection' on function '@atomic_or_monotonic'",
+        "Stack dump without symbol names (ensure you have llvm-symbolizer in your PATH or set the environment var `LLVM_SYMBOLIZER_PATH` to point to it):"
+      ]
+    },
+    {
+      "name": "empty_control",
+      "source_sha256": "1076cb42857f1171dbcdee41c77136e7c8fc7edd14f354e6856915372ccafaa1",
+      "command": [
+        "/toolchain/bin/llc",
+        "-mtriple=xpu3-baidu-none-gnu",
+        "-mcpu=xpu3",
+        "-O2",
+        "-filetype=asm",
+        "/probe/empty_control.ll",
+        "-o",
+        "/results/empty_control.s"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.011934034992009401,
+      "diagnostic_first_lines": []
+    },
+    {
+      "name": "ordinary_DMA_RMW_control",
+      "source_sha256": "d0566fd3062584b2c272e583c9d2b1077f8644c62bbb341f18668a734c160cc4",
+      "command": [
+        "/toolchain/bin/llc",
+        "-mtriple=xpu3-baidu-none-gnu",
+        "-mcpu=xpu3",
+        "-O2",
+        "-filetype=asm",
+        "/probe/ordinary_DMA_RMW_control.ll",
+        "-o",
+        "/results/ordinary_DMA_RMW_control.s"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.01177570829167962,
+      "diagnostic_first_lines": []
+    }
+  ],
+  "atomic_named_exports": [
+    "-------- d _ZL14atomic_sm_lock",
+    "-------- T _ZN3xpu9atomicAddEPU3AS1DF16_DF16_",
+    "-------- T _ZN3xpu9atomicAddEPU3AS1ff",
+    "-------- T _ZN3xpu9atomicMulEPU3AS1DF16_DF16_",
+    "-------- T _ZN3xpu9atomicMulEPU3AS1ff"
+  ]
+}
