@@ -6,6 +6,7 @@ import ctypes
 import hashlib
 import importlib
 import importlib.metadata as metadata
+import importlib.util
 import json
 import os
 import sys
@@ -74,15 +75,14 @@ def protected_snapshot():
     return facts
 
 
-def module_fact(project, module, relative=None):
+def module_fact(project, name, origin, relative=None):
     dist = metadata.distribution(project)
-    path = Path(module.__file__).resolve()
+    require(origin, f"Cannot locate {name}")
+    path = Path(origin).resolve()
     if relative is None:
-        relative = module.__name__.replace(".", "/") + "/__init__.py"
+        relative = name.replace(".", "/") + "/__init__.py"
     expected = Path(dist.locate_file(relative)).resolve()
-    require(
-        path == expected, f"{module.__name__} loaded from {path}, expected {expected}"
-    )
+    require(path == expected, f"{name} comes from {path}, expected {expected}")
     return {
         "version": dist.version,
         "path": str(path),
@@ -162,7 +162,8 @@ def check_stack(with_devices):
     facts = {
         "python": sys.version_info[:2],
         "executable": sys.executable,
-        "vllm": module_fact("vllm", vllm),
+        "device_dependent_imports_checked": with_devices,
+        "vllm": module_fact("vllm", vllm.__name__, vllm.__file__),
         "vllm_module_version": vllm.__version__,
         "flagtree_version": metadata.version("flagtree"),
         "flagcx": flagcx_fact(),
@@ -171,23 +172,32 @@ def check_stack(with_devices):
             "version": triton.__version__,
         },
         "flash-attn-3": module_fact(
-            "flash-attn-3", flash, "flash_attn_3/" + Path(flash.__file__).name
+            "flash-attn-3",
+            flash.__name__,
+            flash.__file__,
+            "flash_attn_3/" + Path(flash.__file__).name,
         ),
         "flash_op_registered": hasattr(torch.ops.flash_attn_3, "fwd"),
         "plugin_registered": [entry.value for entry in ep] == ["vllm_fl:register"],
     }
-    for name in (
-        "torch",
-        "torchvision",
-        "torchaudio",
-        "numpy",
-        "flag-gems",
-        "flaggems-vllm",
+    for name in ("torch", "torchvision", "torchaudio", "numpy"):
+        module = importlib.import_module(name)
+        facts[name] = module_fact(name, name, module.__file__)
+
+    # Device-specific FlagGems operators can create a Triton driver during
+    # import. BuildKit has no PPU, so check the origins here and import them
+    # normally in the real-device check.
+    for project, name in (
+        ("flag-gems", "flag_gems"),
+        ("flaggems-vllm", "flaggems_vllm"),
+        ("vllm-plugin-fl", "vllm_fl"),
     ):
-        module = importlib.import_module(name.replace("-", "_"))
-        facts[name] = module_fact(name, module)
-    plugin_module = importlib.import_module("vllm_fl")
-    facts["plugin"] = module_fact("vllm-plugin-fl", plugin_module)
+        if with_devices:
+            origin = importlib.import_module(name).__file__
+        else:
+            spec = importlib.util.find_spec(name)
+            origin = spec.origin if spec is not None else None
+        facts[project] = module_fact(project, name, origin)
     facts["regex"] = importlib.import_module("regex").__file__
     validate_imports(facts)
 
