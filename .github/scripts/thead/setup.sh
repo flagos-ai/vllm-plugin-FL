@@ -1,12 +1,17 @@
 #!/bin/bash
 # Copyright 2026 FlagOS Contributors
-# The managed image supplies the fixed SDK/Torch/empty-vLLM/Gems/Tree stack
-# and runtime/test/build dependencies. Never resolve upstream Torch 2.13.
+# Build the checkout wheel with the dependency set provided by the CI image.
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd -- "$HERE/../../.." && pwd)"
 BASE_PYTHON=python3
 if [[ -n "${THEAD_BASE_PYTHON:-}" ]]; then BASE_PYTHON="$THEAD_BASE_PYTHON"; fi
+RUNTIME_PROVENANCE=/opt/thead-ci
+PYTHON_FLAGS=(-I -B)
+if [[ -f "$RUNTIME_PROVENANCE/plugin-source.ref" ]]; then
+  BASE_PYTHON=/flagos/bin/python
+  PYTHON_FLAGS=(-B)
+fi
 if [[ -n "${THEAD_CI_WORK_DIR:-}" ]]; then
   test ! -e "$THEAD_CI_WORK_DIR" || { echo "Refusing to reuse CI environment" >&2; exit 1; }
   mkdir -p "$THEAD_CI_WORK_DIR"
@@ -23,17 +28,24 @@ export TORCH_DEVICE_BACKEND_AUTOLOAD=1
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_VENDOR="" VLLM_TARGET_DEVICE=empty
 export VLLM_PLUGINS=fl GEMS_VENDOR=thead USE_FLAGGEMS=1
-unset FL_BACKEND PYTHONPATH PYTHONHOME
+unset FL_BACKEND PYTHONHOME
+if [[ -f "$RUNTIME_PROVENANCE/plugin-source.ref" ]]; then
+  export PYTHONPATH=/opt/flagtree
+else
+  unset PYTHONPATH
+fi
 export HOME="$WORK/home" XDG_CACHE_HOME="$WORK/cache"
 export FLAGGEMS_CACHE_DIR="$WORK/cache/flaggems" TRITON_CACHE_DIR="$WORK/cache/triton"
 export HF_HOME="$WORK/cache/huggingface"
 TMPDIR="$(mktemp -d /tmp/thead-build.XXXXXXXX)"
 export TMPDIR
 mkdir -p "$HOME" "$TMPDIR" "$FLAGGEMS_CACHE_DIR" "$TRITON_CACHE_DIR" "$HF_HOME" "$WORK/wheels"
-"$BASE_PYTHON" -I -B "$HERE/stack.py" snapshot > "$WORK/vendor-before.json"
+if [[ ! -f "$RUNTIME_PROVENANCE/plugin-source.ref" ]]; then
+  "$BASE_PYTHON" -I -B "$HERE/stack.py" snapshot > "$WORK/vendor-before.json"
+fi
 # A child venv does not inherit its parent venv's packages. Bind only the
 # image-owned ordinary package directory, after rejecting editable providers.
-"$BASE_PYTHON" -I -B - "$WORK" <<'PY'
+"$BASE_PYTHON" "${PYTHON_FLAGS[@]}" - "$WORK" <<'PY'
 import json
 import sys
 import sysconfig
@@ -49,11 +61,11 @@ for direct in site.glob("*.dist-info/direct_url.json"):
         raise RuntimeError("Editable distribution is not allowed in the CI image")
 (Path(sys.argv[1]) / "base-site.json").write_text(json.dumps({"site": str(site)}))
 PY
-"$BASE_PYTHON" -I -B -m venv --system-site-packages "$WORK/env"
+"$BASE_PYTHON" "${PYTHON_FLAGS[@]}" -m venv --system-site-packages "$WORK/env"
 PY="$WORK/env/bin/python"
 export THEAD_CI_PYTHON="$PY" VIRTUAL_ENV="$WORK/env"
 export PATH="$VIRTUAL_ENV/bin:$PATH"
-"$PY" -I -B - "$WORK/base-site.json" <<'PY'
+"$PY" "${PYTHON_FLAGS[@]}" - "$WORK/base-site.json" <<'PY'
 import json
 import sys
 import sysconfig
@@ -80,7 +92,7 @@ EOF
 chmod +x "$WORK/env/bin/vllm"
 
 # Build and install an ordinary wheel of this checkout in the fresh venv only.
-"$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir wheel \
+"$PY" "${PYTHON_FLAGS[@]}" -m pip --isolated --disable-pip-version-check --no-cache-dir wheel \
   --no-index --no-deps --no-build-isolation --wheel-dir "$WORK/wheels" "$REPO"
 "$PY" -I -S -B - "$WORK/wheels" <<'PY' > "$WORK/plugin-wheel.txt"
 import sys
@@ -90,15 +102,25 @@ if len(wheels) != 1:
     raise RuntimeError("Expected one newly built plugin wheel")
 print(wheels[0])
 PY
-"$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
+"$PY" "${PYTHON_FLAGS[@]}" -m pip --isolated --disable-pip-version-check --no-cache-dir install \
   --ignore-installed --no-index --no-deps --no-compile "$(cat "$WORK/plugin-wheel.txt")"
-"$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
-  "pytest-xdist>=3.0.0" \
-  "pytest-cov>=7.0.0" \
-  "pytest-json-report>=1.5.0"
-"$PY" -I -B "$HERE/../install_flaggems_vllm.py"
-"$PY" -I -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
+if [[ -f "$RUNTIME_PROVENANCE/plugin-source.ref" ]]; then
+  sha256sum "$(cat "$WORK/plugin-wheel.txt")" > "$WORK/plugin-wheel.sha256"
+  git -C "$REPO" rev-parse HEAD > "$WORK/plugin-source.ref"
+  "$PY" -B -m pip check
+  "$PY" -B "$HERE/runtime_stack.py" check > "$WORK/stack.json"
+else
+  "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
+    "pytest-xdist>=3.0.0" \
+    "pytest-cov>=7.0.0" \
+    "pytest-json-report>=1.5.0"
+  "$PY" -I -B "$HERE/../install_flaggems_vllm.py"
+  "$PY" -I -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
+fi
 if [[ -n "${GITHUB_ENV:-}" ]]; then
+  if [[ -f "$RUNTIME_PROVENANCE/plugin-source.ref" ]]; then
+    printf 'PYTHONPATH=%s\n' "$PYTHONPATH" >> "$GITHUB_ENV"
+  fi
   for name in THEAD_CI_WORK_DIR THEAD_CI_PYTHON VIRTUAL_ENV PATH HOME XDG_CACHE_HOME \
     FLAGGEMS_CACHE_DIR TRITON_CACHE_DIR HF_HOME TMPDIR PIP_CONFIG_FILE \
     TORCH_DEVICE_BACKEND_AUTOLOAD VLLM_PLUGINS GEMS_VENDOR USE_FLAGGEMS \
