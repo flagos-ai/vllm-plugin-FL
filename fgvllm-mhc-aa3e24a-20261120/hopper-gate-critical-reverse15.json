@@ -1,0 +1,67 @@
+{
+  "label": "critical-reverse15",
+  "torch": "2.13.0+cu130",
+  "triton": "3.6.0",
+  "triton_path": "/compiler/triton/__init__.py",
+  "vllm": "0.32.0",
+  "tle": true,
+  "source_sha256": "7d2413678bdc6ce4ad6c230e484c629a321d0fb8446fd92c18fd37a620b1f19b",
+  "yaml_sha256": "45114b05ea8c261525641401d1bd51a445e2b014660780d55b1db2aa67a4c657",
+  "native": "vllm.model_executor.kernels.mhc.tilelang.mhc_pre_tilelang",
+  "tuner": "AnonymousLibTunerImpl",
+  "protocol": {
+    "scope": "original12 pinned shapes; critical reverse rerun independent process",
+    "timing": "repository kernel do_bench",
+    "warmup_ms": 30,
+    "rep_ms": 80,
+    "paired_repeats": 3,
+    "order": "candidate,native",
+    "coefficient_rtol": 2e-05,
+    "coefficient_atol": 2e-05,
+    "native_rtol": 0.01,
+    "native_atol": 0.01,
+    "weights": "normal version-tracked fn created outside inference mode",
+    "versionless_limit": "repacking cost is outside frozen benchmark inputs; no performance claim for versionless weights",
+    "production_state": "no function/config/cache injection; automatic actual source tuning"
+  },
+  "rows": [
+    {
+      "shape": [
+        8192,
+        1280
+      ],
+      "split": 2,
+      "candidate_us": 102.94400155544281,
+      "candidate_samples_us": [
+        102.84800082445145,
+        102.94400155544281,
+        103.00800204277039
+      ],
+      "native_us": 97.51999750733376,
+      "native_samples_us": [
+        97.47199714183807,
+        97.51999750733376,
+        97.53599762916565
+      ],
+      "speedup": 0.9473111209380389,
+      "selected_config": "BLOCK_M: 64, BLOCK_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "launch_consts": {
+        "num_warps": 4,
+        "num_stages": 1,
+        "num_ctas": 1,
+        "BLOCK_M": 64,
+        "BLOCK_K": 64
+      },
+      "metadata_maxnreg": null,
+      "n_regs": 94,
+      "n_spills": 0,
+      "shared": 12288,
+      "accuracy": "passed"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "total": 1,
+    "minimum": 0.9473111209380389
+  }
+}

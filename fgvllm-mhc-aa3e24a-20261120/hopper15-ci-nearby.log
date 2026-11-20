@@ -1,0 +1,42 @@
+........................................................................ [ 33%]
+....................................................................ssss [ 67%]
+sssssssssssss...................................................ssssss   [100%]
+=============================== warnings summary ===============================
+../../../work/source/.venv/lib/python3.12/site-packages/flashinfer/fused_moe/cute_dsl/blackwell/blockscaled_contiguous_gather_grouped_gemm_swiglu_fusion.py:3032
+  /work/source/.venv/lib/python3.12/site-packages/flashinfer/fused_moe/cute_dsl/blackwell/blockscaled_contiguous_gather_grouped_gemm_swiglu_fusion.py:3032: DeprecationWarning: cutlass.utils.LayoutEnum is deprecated; use cutlass.tensor_utils.LayoutEnum instead. It will be removed in a future release.
+    c_layout: utils.LayoutEnum,
+
+../../../work/source/.venv/lib/python3.12/site-packages/flashinfer/gemm/kernels/grouped_gemm_masked_blackwell.py:2059
+  /work/source/.venv/lib/python3.12/site-packages/flashinfer/gemm/kernels/grouped_gemm_masked_blackwell.py:2059: DeprecationWarning: tcgen05.OperandMajorMode is deprecated, use cute.nvgpu.OperandMajorMode instead
+    a_major_mode: tcgen05.OperandMajorMode,
+
+../../../work/source/.venv/lib/python3.12/site-packages/flashinfer/gemm/kernels/grouped_gemm_masked_blackwell.py:2061
+  /work/source/.venv/lib/python3.12/site-packages/flashinfer/gemm/kernels/grouped_gemm_masked_blackwell.py:2061: DeprecationWarning: tcgen05.OperandMajorMode is deprecated, use cute.nvgpu.OperandMajorMode instead
+    b_major_mode: tcgen05.OperandMajorMode,
+
+../../../work/source/.venv/lib/python3.12/site-packages/flashinfer/gemm/kernels/grouped_gemm_masked_blackwell.py:2064
+  /work/source/.venv/lib/python3.12/site-packages/flashinfer/gemm/kernels/grouped_gemm_masked_blackwell.py:2064: DeprecationWarning: cutlass.utils.LayoutEnum is deprecated; use cutlass.tensor_utils.LayoutEnum instead. It will be removed in a future release.
+    c_layout: utils.LayoutEnum,
+
+../../../work/source/.venv/lib/python3.12/site-packages/flashinfer/gdn_kernels/blackwell/gated_delta_net_chunked.py:95
+../../../work/source/.venv/lib/python3.12/site-packages/flashinfer/gdn_kernels/blackwell/gated_delta_net_chunked.py:95
+  /work/source/.venv/lib/python3.12/site-packages/flashinfer/gdn_kernels/blackwell/gated_delta_net_chunked.py:95: DeprecationWarning: cutlass.utils.TensorMapUpdateMode is deprecated; use cutlass.tensor_utils.TensorMapUpdateMode instead. It will be removed in a future release.
+    from cutlass.utils import TensorMapManager, TensorMapUpdateMode
+
+../../../work/source/.venv/lib/python3.12/site-packages/flashinfer/gdn_kernels/blackwell/gated_delta_net_chunked.py:99
+../../../work/source/.venv/lib/python3.12/site-packages/flashinfer/gdn_kernels/blackwell/gated_delta_net_chunked.py:99
+  /work/source/.venv/lib/python3.12/site-packages/flashinfer/gdn_kernels/blackwell/gated_delta_net_chunked.py:99: DeprecationWarning: tcgen05.OperandMajorMode is deprecated, use cute.nvgpu.OperandMajorMode instead
+    from cutlass.cute.nvgpu.tcgen05 import OperandMajorMode
+
+tests/test_mhc_ops.py::test_hc_head_fused_kernel_vs_vllm[n1_h1280_hc4]
+tests/test_mhc_ops.py::test_hc_head_fused_kernel_vs_vllm[n4_h2560_hc4]
+tests/test_mhc_ops.py::test_hc_head_fused_kernel_vs_vllm[n16_h4096_hc4]
+tests/test_mhc_ops.py::test_hc_head_fused_kernel_vs_vllm[n64_h7168_hc4]
+tests/test_mhc_ops.py::test_hc_head_fused_kernel_vs_vllm[n256_h1280_hc2]
+tests/test_mhc_ops.py::test_hc_head_fused_kernel_vs_vllm[n512_h2560_hc2]
+tests/test_mhc_ops.py::test_hc_head_fused_kernel_vs_vllm[n2048_h4096_hc2]
+  /work/source/.venv/lib/python3.12/site-packages/tilelang/cache/kernel_cache.py:345: DeprecationWarning: `tl.disable_tma_lower` is deprecated and will be removed in v0.1.10. Use `T.copy(..., disable_tma=True)` per-copy instead.
+    kernel = JITKernel(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+191 passed, 23 skipped, 15 warnings in 374.82s (0:06:14)

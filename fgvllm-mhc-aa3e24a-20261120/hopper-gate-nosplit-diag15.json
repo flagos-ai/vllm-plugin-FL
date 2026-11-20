@@ -1,0 +1,133 @@
+{
+  "label": "nosplit-diag15",
+  "torch": "2.13.0+cu130",
+  "triton": "3.6.0",
+  "triton_path": "/compiler/triton/__init__.py",
+  "vllm": "0.32.0",
+  "tle": true,
+  "source_sha256": "e43b1161a9a6f64e1c3e1e67c171a148c89583ef4a616702cc56833ffe2652c3",
+  "yaml_sha256": "45114b05ea8c261525641401d1bd51a445e2b014660780d55b1db2aa67a4c657",
+  "native": "vllm.model_executor.kernels.mhc.tilelang.mhc_pre_tilelang",
+  "tuner": "AnonymousLibTunerImpl",
+  "protocol": {
+    "scope": "three original failing shapes, source ablation diagnostic",
+    "timing": "repository kernel do_bench",
+    "warmup_ms": 30,
+    "rep_ms": 80,
+    "paired_repeats": 3,
+    "order": "native,candidate",
+    "coefficient_rtol": 2e-05,
+    "coefficient_atol": 2e-05,
+    "native_rtol": 0.01,
+    "native_atol": 0.01,
+    "weights": "normal version-tracked fn created outside inference mode",
+    "versionless_limit": "repacking cost is outside frozen benchmark inputs; no performance claim for versionless weights",
+    "production_state": "no function/config/cache injection; automatic actual source tuning"
+  },
+  "rows": [
+    {
+      "shape": [
+        2048,
+        2560
+      ],
+      "split": 5,
+      "candidate_us": 62.20800057053566,
+      "candidate_samples_us": [
+        62.272001057863235,
+        62.20800057053566,
+        62.111999839544296
+      ],
+      "native_us": 53.31199988722801,
+      "native_samples_us": [
+        53.408000618219376,
+        53.31199988722801,
+        53.15199866890907
+      ],
+      "speedup": 0.8569958751009726,
+      "selected_config": "BLOCK_M: 64, BLOCK_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "launch_consts": {
+        "num_warps": 4,
+        "num_stages": 1,
+        "num_ctas": 1,
+        "BLOCK_M": 64,
+        "BLOCK_K": 64
+      },
+      "metadata_maxnreg": null,
+      "n_regs": 94,
+      "n_spills": 0,
+      "shared": 12288,
+      "accuracy": "passed"
+    },
+    {
+      "shape": [
+        2048,
+        4096
+      ],
+      "split": 4,
+      "candidate_us": 87.82399818301201,
+      "candidate_samples_us": [
+        87.77599781751633,
+        87.8399983048439,
+        87.82399818301201
+      ],
+      "native_us": 76.99199765920639,
+      "native_samples_us": [
+        76.89599692821503,
+        77.02399790287018,
+        76.99199765920639
+      ],
+      "speedup": 0.8766624072245793,
+      "selected_config": "BLOCK_M: 128, BLOCK_K: 128, num_warps: 8, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "launch_consts": {
+        "num_warps": 8,
+        "num_stages": 1,
+        "num_ctas": 1,
+        "BLOCK_M": 128,
+        "BLOCK_K": 128
+      },
+      "metadata_maxnreg": null,
+      "n_regs": 143,
+      "n_spills": 0,
+      "shared": 40960,
+      "accuracy": "passed"
+    },
+    {
+      "shape": [
+        8192,
+        1280
+      ],
+      "split": 1,
+      "candidate_us": 119.1679984331131,
+      "candidate_samples_us": [
+        119.1679984331131,
+        119.10399794578552,
+        119.19999867677689
+      ],
+      "native_us": 97.28000313043594,
+      "native_samples_us": [
+        97.120001912117,
+        97.28000313043594,
+        97.34400361776352
+      ],
+      "speedup": 0.8163265676148576,
+      "selected_config": "BLOCK_M: 128, BLOCK_K: 128, num_warps: 8, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "launch_consts": {
+        "num_warps": 8,
+        "num_stages": 1,
+        "num_ctas": 1,
+        "BLOCK_M": 128,
+        "BLOCK_K": 128
+      },
+      "metadata_maxnreg": null,
+      "n_regs": 143,
+      "n_spills": 0,
+      "shared": 40960,
+      "accuracy": "passed"
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "total": 3,
+    "minimum": 0.8163265676148576
+  }
+}
