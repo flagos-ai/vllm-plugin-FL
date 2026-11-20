@@ -27,7 +27,12 @@ class TestTopkSoftmax:
 
     @pytest.mark.supplementary
     def test_basic_routing_matches_softmax_topk_oracle(self, backend):
-        """Weights come from raw softmax over the logits, gathered at top-k."""
+        """Weights come from raw softmax over the logits, gathered at top-k.
+
+        Row 1's logits are all equal, so its top-2 tie order is unspecified
+        (torch.topk returns different orders per version/backend); selection
+        is therefore asserted as a set, not a sequence.
+        """
         gating = torch.tensor(
             [[0.1, 2.0, -1.0, 0.5], [1.0, 1.0, 1.0, 1.0]], dtype=torch.float32
         )
@@ -44,10 +49,19 @@ class TestTopkSoftmax:
             denom = sum(exps)
             probs = [e / denom for e in exps]
             order = sorted(range(4), key=lambda j: -probs[j])[:topk]
-            for slot, j in enumerate(order):
-                assert out_i[row, slot].item() == j
+            # Ties (row 1) may surface in any order; distinct values (row 0)
+            # must match slot-for-slot. Either way the gathered weight for a
+            # reported index must equal that index's raw softmax probability.
+            if len(set(probs[j] for j in order)) == topk:
+                assert out_i[row].tolist() == order
+            else:
+                assert set(out_i[row].tolist()) == set(order)
+            for slot in range(topk):
                 torch.testing.assert_close(
-                    out_w[row, slot].item(), probs[j], rtol=1e-5, atol=1e-6
+                    out_w[row, slot].item(),
+                    probs[out_i[row, slot].item()],
+                    rtol=1e-5,
+                    atol=1e-6,
                 )
 
     @pytest.mark.supplementary
