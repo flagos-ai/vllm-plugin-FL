@@ -1,0 +1,129 @@
+{
+  "status": "GPU_NUMERIC_PASS; NO_PERFORMANCE_CLAIM",
+  "hardware": "NVIDIA H20-3e, SM90",
+  "runtime": {
+    "torch": "2.13.0+cu130",
+    "vllm": "0.32.0",
+    "triton": "3.6.0",
+    "flagtree": "0.7.0+git6ed3ec13",
+    "tle": true
+  },
+  "operator": {
+    "snapshot_commit": "15282e3b",
+    "file": "src/flaggems_vllm/ops/mhc/mhc_pre.py",
+    "sha256": "f880bc9a1a526f91ac868b5b7b5c493962a641b7cea665347fd385c1e355f9b1",
+    "production_safe15_table_changed": false,
+    "single_config_forcing_only_in_isolated_validation_harness": true
+  },
+  "compiler": {
+    "repository": "https://github.com/flagos-ai/FlagTree",
+    "pr_head": "c0e8d152cde3194ce4a4c09fe3596abf7e36535b",
+    "merge_commit": "6ed3ec1307eb37c6f4f00f92c6018b15e1b4f1ee",
+    "source_tree": "11ad7f04bdae38cfc3e195f717c850ae91fc90d7",
+    "source_patches": [],
+    "llvm_source_pin": "f6ded0be897e2878612dd903f7e8bb85448269e5",
+    "libtriton_sha256": "9026d97c42075b0c0125bfbedf6e375a1fa16bc65fa37de26eaae03add51db78",
+    "complete_wheel_sha256": "fe97e2d3931a583e27e9d907866c5a055d26989568ab73d6467d11d21db8049c",
+    "complete_wheel_bytes": 407551897,
+    "external_cuda13_flagcx_sha256": "c768f5fa077c6d932eb23542131bc3a5ae436b0beebb96bac9581aed58279b48"
+  },
+  "active_sm90_assets": {
+    "ptxas": {
+      "package_relative_path": "triton/backends/nvidia/bin/ptxas",
+      "version": "12.8.93",
+      "sha256": "c960a4f238b17d5c5d3c01ad2bbc1ebd2c5aecc459cb4d223bff10b45f9b8fca"
+    },
+    "cuda_header": {
+      "package_relative_path": "triton/backends/nvidia/include/cuda.h",
+      "sha256": "4568cc9e7a321e47707cd6403980f21ac2e2e55170500d0e0a3f54feb03a9acb"
+    },
+    "asset_hash_provenance": "Frozen complete-package inventory; all copied hashes and wheel RECORD verified during packaging.",
+    "external_header_or_active_sm90_tool_override_used": false
+  },
+  "validation": {
+    "reference": "Independent FP64 projection of BF16 operands, materialized FP32 before gate math.",
+    "seed": 731,
+    "tokens": 512,
+    "raw_K": [
+      5120,
+      10240,
+      16384,
+      32768
+    ],
+    "raw_splits": [
+      10,
+      16,
+      16,
+      16
+    ],
+    "strong_hidden": [
+      1280,
+      2560,
+      4096,
+      8192
+    ],
+    "configs": [
+      "BLOCK_M64/BLOCK_K64/warps4/stages2",
+      "BLOCK_M64/BLOCK_K32/warps8/stages3"
+    ],
+    "strong_sinkhorn_repeats": 10,
+    "projection_and_coefficients_rtol_atol": [
+      2e-05,
+      2e-05
+    ],
+    "bf16_value_rtol_atol": [
+      0.01,
+      0.01
+    ],
+    "processes": {
+      "cold": {
+        "groups": 16,
+        "raw_projection_groups": 8,
+        "raw_repeats_per_group": 5,
+        "strong_post_pre_groups": 8,
+        "strong_repeats_per_group": 3,
+        "raw_launch_checks": 40,
+        "strong_launch_checks": 24,
+        "failed_elements": 0,
+        "nonfinite_elements": 0,
+        "max_projection_abs_error": 5.245208740234375e-06,
+        "max_post_abs_error": 2.980232238769531e-07,
+        "max_comb_abs_error": 2.384185791015625e-07,
+        "max_bf16_value_abs_error": 0.0078125,
+        "active_sm90_ptxas_uses_complete_prefix": true
+      },
+      "warm": {
+        "groups": 16,
+        "raw_projection_groups": 8,
+        "raw_repeats_per_group": 5,
+        "strong_post_pre_groups": 8,
+        "strong_repeats_per_group": 3,
+        "raw_launch_checks": 40,
+        "strong_launch_checks": 24,
+        "failed_elements": 0,
+        "nonfinite_elements": 0,
+        "max_projection_abs_error": 5.245208740234375e-06,
+        "max_post_abs_error": 2.980232238769531e-07,
+        "max_comb_abs_error": 2.384185791015625e-07,
+        "max_bf16_value_abs_error": 0.0078125,
+        "active_sm90_ptxas_uses_complete_prefix": true
+      }
+    }
+  },
+  "preflight_and_runtime_notes": [
+    "Two initial preflight-only attempts stopped before any kernel launch because the harness incorrectly treated an import-generated unused Blackwell tool variable as a user override. These are setup attempts, not numeric failures.",
+    "Initial container asset-override environment was empty. A library import sets TRITON_PTXAS_BLACKWELL_PATH to the CUDA installation tool; SM90 does not use this Blackwell tool.",
+    "The cold process cleared only that unused import-generated Blackwell variable; the independent warm process preserves normal import behavior. Both use the same packaged SM90 ptxas and libtriton. Exact distinctions remain in raw runtime receipts.",
+    "Cold uses a new isolated cache; warm is a new process reusing only that cache. No TLE numeric/compiler optimization switches or tolerances were changed."
+  ],
+  "limits": [
+    "This exact merged-source build passes the original S2/S3 reproductions and larger-K numeric checks; it does not isolate PR1540 as the sole causal change because the rebuilt LLVM toolchain differs from the original CI compiler.",
+    "No production tuning table was reopened or replaced, no G6 timing was run, and FlagCX collective/Python-extension ABI qualification is outside this single-GPU test."
+  ],
+  "evidence_sha256": {
+    "numeric-cold.json": "8b97424d59e2374f356341975362a503d30bb9b7d25364478ad8d1d50ab6a53b",
+    "numeric-warm.json": "f0b3506b86c2d6917b7fdd2563c29b00c951c437524bb17c04d37cdfe4e57533",
+    "numeric-cold.log": "ab5b65c04362b61aa22e1d7cf45853374892f67ee369133a1a9ceb3088e78c8d",
+    "numeric-warm.log": "1253ea55123bc2135b8e2e489b14f93e0b010547a56548483f020e73d9c5ab3a"
+  }
+}

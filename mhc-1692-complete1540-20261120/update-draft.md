@@ -1,0 +1,6 @@
+Exact-build NVIDIA SM90 numeric follow-up for #1692:
+
+- Runtime: vLLM 0.32.0 / PyTorch 2.13.0+cu130 / FlagTree 0.7.0+git6ed3ec13 (Triton 3.6, TLE enabled). Exact merged source `6ed3ec13`, complete wheel SHA256 `fe97e2d3931a583e27e9d907866c5a055d26989568ab73d6467d11d21db8049c`; core SHA256 `9026d97c42075b0c0125bfbedf6e375a1fa16bc65fa37de26eaae03add51db78`.
+- Original S2 (`M64/K64/W4`) and S3 (`M64/K32/W8`) configurations pass at flattened K=5120, 10240, 16384 and 32768. Cold and fresh-process warm-cache runs each pass 16 groups: 8 raw projection groups ×5 repeats plus 8 post→pre coefficient/BF16-value groups ×3 repeats. All comparisons report zero bad/nonfinite elements at unchanged 2e-5 coefficient and 0.01 BF16 tolerances.
+- Active SM90 ptxas 12.8.93 and CUDA headers come from the complete package. Initial override environment is empty. The unused Blackwell variable created during import was removed only in the cold diagnostic; the independent warm process retains normal import behavior. The two earlier stops were harness preflight errors before any GPU kernel, not numeric failures.
+- This exact build resolves these reproductions. It does not establish PR1540 alone as the cause: the isolated rebuild also uses the repository-pinned LLVM f6ded0be toolchain. No performance Gate is claimed, and the production safe 15-config table remains unchanged.
