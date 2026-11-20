@@ -42,6 +42,9 @@ device_overrides:
 env_defaults:
   GEMS_VENDOR: "iluvatar"
   VLLM_PLUGINS: "fl"
+  # Qwen3.6 emits a <think> block; 64 tokens (the concurrent smoke default)
+  # are consumed by the reasoning preamble before the answer appears.
+  FL_CONCURRENT_MAX_TOKENS: "512"
   VLLM_ENGINE_ITERATION_TIMEOUT_S: "72000"
   VLLM_RPC_TIMEOUT: "72000000"
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "7200"
@@ -91,7 +94,13 @@ bi_v150:
     unit:
       include: "*"
     benchmark:
+      # The unified CoreX 5.0.1 image ships the vllm bench entry points, so
+      # the throughput/latency/serve smoke runs in PR and nightly CI.
       pr:
-        enabled: false
+        enabled: true
+        types: [throughput, latency, serve]
+        config: tests/benchmarks/configs/smoke_iluvatar.yaml
       nightly:
-        enabled: false
+        enabled: true
+        types: [throughput, latency, serve]
+        config: tests/benchmarks/configs/smoke_iluvatar.yaml
