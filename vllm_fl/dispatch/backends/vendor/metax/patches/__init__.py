@@ -27,6 +27,7 @@ _PATCH_MODULES = (
     "cuda_wrapper",
     "chunk_delta_h",
     "moe_topk_compat",
+    "triton_kv_cache",
     "gdn_linear_attn",
 )
 

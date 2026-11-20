@@ -764,6 +764,21 @@ class PlatformFL(Platform):
         backend_path = call_op(
             "attention_backend", use_mla=use_mla, use_sparse=use_sparse
         )
+        if cls.vendor_name == "metax" and getattr(attn_selector_config, "use_rswa", False):
+            from vllm.utils.import_utils import resolve_obj_by_qualname
+
+            if not resolve_obj_by_qualname(backend_path).supports_rswa():
+                rswa_backend = selected_backend or AttentionBackendEnum.TRITON_ATTN
+                invalid_reasons = rswa_backend.get_class().validate_configuration(
+                    device_capability=cls.get_device_capability(),
+                    **attn_selector_config._asdict(),
+                )
+                if invalid_reasons:
+                    raise ValueError(
+                        f"MetaX attention backend {rswa_backend.name} cannot satisfy "
+                        f"R-SWA requirements: {', '.join(invalid_reasons)}"
+                    )
+                backend_path = rswa_backend.get_path()
 
         logger.info_once(
             "Using attention backend via dispatch (use_mla=%s, use_sparse=%s): %s",
