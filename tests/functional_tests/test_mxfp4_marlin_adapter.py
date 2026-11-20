@@ -65,6 +65,9 @@ def test_hopper_split_mxfp4_matches_native_activation(m, shape, weight_input):
     raw_copies = [p.clone() for p in (w1, w2, s1, s2)]
     raw_storage_refs = [p.untyped_storage()._weak_ref() for p in (w1, w2, s1, s2)]
     experts.process_weights_after_loading(layer)
+    from vllm_fl.ops.fused_moe.mxfp4_marlin_invoke import _invoke_w4a16_mxfp4_moe_gemm
+
+    assert experts.gemm1 is _invoke_w4a16_mxfp4_moe_gemm
     assert all(torch.UntypedStorage._expired(r) for r in raw_storage_refs)
     for ref in raw_storage_refs:
         torch.UntypedStorage._free_weak_ref(ref)
@@ -192,14 +195,14 @@ def test_hopper_split_mxfp4_matches_native_activation(m, shape, weight_input):
         local_experts.process_weights_after_loading(local_layer)
         partial = torch.empty_like(x)
         captured = {}
-        original_gemm = local_experts.gems._invoke_w4a16_mxfp4_moe_gemm
+        original_gemm = local_experts.gemm1
 
         def trace_gemm(_gemm=original_gemm, _captured=captured, **kw):
             _gemm(**kw)
             if kw["C"].ndim == 3:
                 _captured["routes"] = kw["C"].clone()
 
-        local_experts.gems._invoke_w4a16_mxfp4_moe_gemm = trace_gemm
+        local_experts.gemm1 = trace_gemm
         local_experts.apply(
             partial,
             x,
@@ -217,7 +220,7 @@ def test_hopper_split_mxfp4_matches_native_activation(m, shape, weight_input):
             None,
             weight_input,
         )
-        local_experts.gems._invoke_w4a16_mxfp4_moe_gemm = original_gemm
+        local_experts.gemm1 = original_gemm
         partials.append(partial)
         owned_mask = (ids.remainder(2) == rank).unsqueeze(-1)
         local_reference = reference_routes.masked_fill(~owned_mask, 0).sum(1)

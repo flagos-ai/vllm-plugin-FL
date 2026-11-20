@@ -131,7 +131,8 @@ def test_unpadded_i192_clamp_scale_groups_and_graph(m, weight_input, fold, monke
         )
 
     captured = {}
-    original_native_gemm = baseline.gems._invoke_w4a16_mxfp4_moe_gemm
+    original_native_gemm = baseline.gemm1
+    original_first_gemm = experts.gemm1
     original_k64_gemm = experts.gemm2
 
     def trace_native(**kw):
@@ -142,7 +143,7 @@ def test_unpadded_i192_clamp_scale_groups_and_graph(m, weight_input, fold, monke
             captured["native_first"] = kw["C"].clone()
 
     def trace_first(**kw):
-        original_native_gemm(**kw)
+        original_first_gemm(**kw)
         if kw["C"].ndim == 2:
             captured["first"] = kw["C"].clone()
 
@@ -150,14 +151,15 @@ def test_unpadded_i192_clamp_scale_groups_and_graph(m, weight_input, fold, monke
         original_k64_gemm(**kw)
         captured["k64"] = kw["C"].clone()
 
-    baseline.gems._invoke_w4a16_mxfp4_moe_gemm = trace_first
+    experts.gemm1 = trace_first
     experts.gemm2 = trace_k64
     try:
         apply(experts, out, layer)
-        baseline.gems._invoke_w4a16_mxfp4_moe_gemm = trace_native
+        baseline.gemm1 = trace_native
         apply(baseline, native, reference_layer)
     finally:
-        baseline.gems._invoke_w4a16_mxfp4_moe_gemm = original_native_gemm
+        baseline.gemm1 = original_native_gemm
+        experts.gemm1 = original_first_gemm
         experts.gemm2 = original_k64_gemm
     expected = torch.empty_like(x)
     reference_routes = torch.empty((m, topk, h), device=device, dtype=dtype)

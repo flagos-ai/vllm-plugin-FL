@@ -16,11 +16,11 @@ from types import MethodType
 import torch
 
 from .mxfp4_marlin_align import align_mxfp4_tokens
-from .mxfp4_marlin_reduce import safe_moe_sum, masked_moe_sum
+from .mxfp4_marlin_reduce import masked_moe_sum, safe_moe_sum
 from .raw_retirement import (
     assert_retired_aliases,
-    retire_raw_parameters,
     compact_raw_intermediate,
+    retire_raw_parameters,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,17 @@ def localize_routing(
     zero. This deliberately trades extra compute for safe local partial sums;
     the original vLLM prepare/finalize still dispatches/combines across ranks.
     """
+    if topk_ids.is_cuda:
+        from .mxfp4_marlin_route import localize_routing as localize_gpu
+
+        return localize_gpu(
+            topk_weights,
+            topk_ids,
+            expert_map,
+            local_experts=local_experts,
+            global_experts=global_experts,
+            return_valid_mask=return_valid_mask,
+        )
     if expert_map is None:
         if global_experts not in (-1, local_experts):
             raise RuntimeError("EP requires the original global-to-local expert_map")
@@ -128,6 +139,7 @@ def execute_split_gemms(
     route_mask=None,
     second_block_k=128,
     gemm2=None,
+    gemm1=None,
 ):
     """Use #4483/#4943 GEMMs, with vLLM's exact activation callback between them.
 
@@ -165,7 +177,7 @@ def execute_split_gemms(
         swap_ab=True,
         fold_scale=fold_scale,
     )
-    gems._invoke_w4a16_mxfp4_moe_gemm(
+    (gemm1 or gems._invoke_w4a16_mxfp4_moe_gemm)(
         A=hidden,
         B=w1,
         C=first,
@@ -177,7 +189,7 @@ def execute_split_gemms(
     )
     # This is vLLM's native activation, including clamp/SITU parameters.
     activation(activated, first)
-    (gemm2 or gems._invoke_w4a16_mxfp4_moe_gemm)(
+    (gemm2 or gemm1 or gems._invoke_w4a16_mxfp4_moe_gemm)(
         A=activated,
         B=w2,
         C=second,
@@ -261,6 +273,9 @@ def _make_experts_class():
 
                 self.gemm2 = invoke_down_k64
             self.gems = importlib.import_module("flaggems_vllm.ops.fused_marlin_moe")
+            from .mxfp4_marlin_invoke import _invoke_w4a16_mxfp4_moe_gemm
+
+            self.gemm1 = _invoke_w4a16_mxfp4_moe_gemm
             validate_raw_weights(
                 layer.w13_weight,
                 layer.w2_weight,
@@ -381,6 +396,7 @@ def _make_experts_class():
                 route_mask=route_mask,
                 second_block_k=self.second_block_k,
                 gemm2=self.gemm2,
+                gemm1=self.gemm1,
             )
 
     return FlagGemsMxfp4Experts

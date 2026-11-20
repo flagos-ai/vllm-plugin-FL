@@ -280,8 +280,9 @@ at actual shapes, not captured model tensors.
 A separate Flash TP8 official comparison then completes all 18 rounds for
 1K/4K/16K. Both arms use the original adapter; only the key helper and its
 installation differ. No route fusion, mask/reduction fusion, observer or
-profiler is included. This candidate is **not integrated into this PR's
-runtime**. Original rounds 2/3 output-throughput means are:
+profiler is included. The key policy is now integrated through the adapter's
+own GEMM callable after separate combined qualification; this table remains
+the earlier key-only experiment. Original rounds 2/3 means are:
 
 | Input tokens | Original key output tok/s | Bucketed key output tok/s | Change | Retained spread before / after |
 | --- | ---: | ---: | ---: | ---: |
@@ -333,9 +334,47 @@ gain. No gaps or slow rounds are removed from the throughput calculation.
 Allocation remains 22.93 GiB/rank; reported KV capacity is 789040 versus
 801443 tokens, so this is not fixed KV. The two arms have separate initially
 empty task caches populated by initialization and identical probes. This
-route candidate is not part of the current PR runtime. A combined production
-integration is undergoing separate qualification; individual candidate
-results do not establish combined correctness or performance.
+route policy is now integrated through the adapter's CUDA routing entry point
+after the separate combined qualification below. These individual candidate
+results do not establish combined performance.
+
+### Combined production integration
+
+The adapter now calls the bucketed GEMM helper and fused CUDA routing helper
+directly. It preserves the CPU routing reference, the separate K64 down
+projection and the existing masked reduction. There are no process-wide
+FlagGems function replacements or experimental observer hooks. The provider
+remains opt-in. Real EM, launch grid, tensor strides and kernel arguments
+remain identical to the pinned dependency; 540 CPU launch-contract cases
+check this independently of the tuning-key change.
+
+The exact combined runtime passes 103 CPU tests with no skips. GPU validation
+uses the real adapter entry points: 8 adapter cases and 12 K64 cases pass with
+unchanged references/tolerances; 16 observed-EM synthetic cases pass 48
+full-output numerical checks and 48 changed-input/index graph replays.
+Routing covers 48 nonempty cases with 144 numerical and 144 changed-value,
+index and expert-map graph checks, plus 12 empty boundary cases. Empty cases
+are not counted as GPU graph validation. Masked reduction passes 36 cases,
+108 eager numerical phases and 132 changed-mask graph phases.
+
+The combined Flash TP8 service passes three semantic responses, serial
+1K/4K/16K probes with 8 output tokens, and C64 batches at each input length
+with 128 output tokens. Each concurrent batch returns all 64 choices and
+8192 completion tokens. Its original adapter messages lacked rank identity,
+so aggregate READY/HIT counts were not used as per-rank dispatch proof.
+A separate, smaller check uses the identical runtime and standard vLLM
+logging configuration to attach PID/worker identity to the existing messages.
+It passes the same semantic responses and one C64/1K/8-output batch; all eight
+worker PIDs have READY, HIT and graph-completion records. The original full
+functional results and this supplemental evidence are audited together,
+without replacing the original results or changing numerical code.
+
+A new official three-length comparison of the original adapter against this
+combined runtime has started after qualification and resource checks. It
+keeps the original TP8, FP8 KV, model context and load, with separate task
+caches. It includes the accumulated production fixes and is not a single
+variable intervention. No combined throughput result is available yet;
+individual key, route and reduction percentages must not be added together.
 
 ### Masked top-k reduction
 
