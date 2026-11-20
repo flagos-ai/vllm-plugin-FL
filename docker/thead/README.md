@@ -10,7 +10,7 @@ bash docker/build.sh --platform thead --target ci \
 
 The Dockerfile pins the official FlagOS Runtime 2.3.0 by digest.
 `requirements-ci.txt` pins exact wheel URLs and SHA256 hashes, and
-`plugin-source.ref` selects the complete FL commit for the image wheel.
+the T-Head branch of `docker/build.sh` pins the FL commit for the image wheel.
 Set `THEAD_WHEELS_DIR` to reuse an optional local wheel cache. Pip verifies
 each wheel against the lock before the offline install.
 

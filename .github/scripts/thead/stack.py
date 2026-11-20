@@ -13,17 +13,64 @@ import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote, urlsplit
 
-STACK = json.loads(Path(__file__).with_name("stack.json").read_text())
+from packaging.utils import parse_wheel_filename
+
 ATTENTION = (
     "vllm_fl.dispatch.backends.vendor.thead.impl.attention.TheadFlashAttentionBackend"
 )
 PROVIDER_WHEELS = ("vllm", "flash-attn-3", "flaggems-vllm", "flagcx", "flag-gems")
+PROTECTED_PACKAGES = (
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "numpy",
+    "flagtree",
+    "triton",
+)
 
 
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
+
+
+def load_stack(lock_dir):
+    versions = dict(
+        line.split("==", 1)
+        for line in (lock_dir / "constraints.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line and not line.startswith("#")
+    )
+    stack = {"protected": {name: versions[name] for name in PROTECTED_PACKAGES}}
+    lock = (lock_dir / "requirements-ci.txt").read_text(encoding="utf-8")
+    for line in lock.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        name, _, url, hash_option = line.split()
+        if name in PROVIDER_WHEELS:
+            filename = Path(unquote(urlsplit(url).path)).name
+            project, version, _, _ = parse_wheel_filename(filename)
+            digest = hash_option.removeprefix("--hash=sha256:")
+            require(
+                project == name and len(digest) == 64, f"Invalid wheel pin for {name}"
+            )
+            require(name not in stack, f"Duplicate wheel pin for {name}")
+            stack[name] = {"version": str(version), "sha256": digest}
+    missing = set(PROVIDER_WHEELS) - stack.keys()
+    require(not missing, f"Missing wheel pins: {', '.join(sorted(missing))}")
+    return stack
+
+
+HERE = Path(__file__).resolve().parent
+LOCK_DIR = (
+    HERE
+    if (HERE / "requirements-ci.txt").is_file()
+    else HERE.parents[2] / "docker/thead"
+)
+STACK = load_stack(LOCK_DIR)
 
 
 def wheel_digest(data):

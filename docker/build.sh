@@ -357,7 +357,7 @@ elif [[ "${PLATFORM}" == "thead" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
     BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-    read -r source_sha < "${SCRIPT_DIR}/thead/plugin-source.ref"
+    source_sha=77f141a961d75e54c0cf209de80c99a7c7eec04b
     [[ "${source_sha}" =~ ^[0-9a-f]{40}$ ]] || err "The T-Head plugin source must be a full commit SHA."
     source_epoch="$(git -C "${BUILD_CONTEXT}" show -s --format=%ct "${source_sha}")"
     thead_source="$(mktemp -d)"
@@ -372,7 +372,7 @@ elif [[ "${PLATFORM}" == "thead" ]]; then
     for arg in "${EXTRA_BUILD_ARGS[@]}"; do
         case "${arg}" in
             PLUGIN_SOURCE_SHA|PLUGIN_SOURCE_SHA=*|SOURCE_DATE_EPOCH|SOURCE_DATE_EPOCH=*)
-                err "T-Head plugin build arguments come from plugin-source.ref." ;;
+                err "T-Head plugin build arguments come from the pinned commit." ;;
         esac
     done
     if [[ -n "${THEAD_WHEELS_DIR:-}" ]]; then
