@@ -421,6 +421,9 @@ def test_replaced_maybe_get_flash_backend_returns_varlen_func(
 
     selector = stubs.mm.maybe_get_vit_flash_attn_backend
     assert selector(enum.FLASH_ATTN) is fake_varlen
-    assert selector(enum.ROCM_AITER_FA) is None if False else True
+    # The ROCM_AITER_FA branch imports from aiter (absent here): ImportError,
+    # matching upstream behaviour, not a silent None.
+    with pytest.raises(ImportError):
+        selector(enum.ROCM_AITER_FA)
     # Unknown backends map to None.
     assert selector("UNKNOWN") is None

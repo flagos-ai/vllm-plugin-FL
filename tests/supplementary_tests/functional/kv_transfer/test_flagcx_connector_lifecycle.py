@@ -50,9 +50,9 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-import zmq
 
 pytest.importorskip("vllm")
+pytest.importorskip("zmq")
 
 # Importing the connector requires the FlagCX wrapper; resolve it via
 # FLAGCX_PATH exactly like the module does, and skip when unavailable.
@@ -66,6 +66,7 @@ if not (
         allow_module_level=True,
     )
 
+import zmq  # noqa: E402
 from plugin.interservice.flagcx_wrapper import FLAGCXLibrary  # noqa: E402
 
 from vllm_fl.distributed.kv_transfer.flagcx_connector import (  # noqa: E402
