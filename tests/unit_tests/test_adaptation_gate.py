@@ -28,20 +28,12 @@ from tests.e2e_tests.adaptation_gate.gate_contract import (
     QUALITY_CHECKS,
     SCENARIOS,
     append_loopback_no_proxy,
-    build_server_args,
-    format_gate_progress,
+    ensure_gate_server_alive,
     gate_results_root,
     resolve_request_timeout,
-    summarize_gate_progress,
     temporary_environment,
     validate_gate_documents,
     validate_scenario_documents,
-)
-from tests.e2e_tests.verification_cases import (
-    ADAPTATION_GATE_SOURCE,
-    ensure_server_alive,
-    validate_case_selection,
-    verification_results_root,
 )
 from tests.run import _MODEL_E2E_TASKS, TestCase, TestRunner
 from tests.utils.platform_config import E2eTestConfig, PlatformConfig
@@ -208,45 +200,16 @@ def test_request_timeout_rejects_invalid_values(value):
 
 
 def test_gate_progress_is_log_friendly_for_complete_contract(tmp_path):
-    _write_valid_documents(tmp_path)
+    """The live total log line reports the real counters."""
+    from tests.e2e_tests.adaptation_gate.gate_contract import format_gate_total_log
 
-    summary = summarize_gate_progress(tmp_path)
+    _write_valid_documents(tmp_path)
+    summary = validate_gate_documents(tmp_path)
 
     assert summary["passed"] is True
-    assert format_gate_progress("total", summary) == (
-        "[Gate] total: PASS; scenarios=5/5; requests=26/26 passed "
-        "(26 observed); checks=260/260 passed (260 observed)"
+    assert format_gate_total_log("serving", summary) == (
+        "[Gate] serving total: PASS; requests=26/26; checks=260/260"
     )
-
-
-def test_gate_progress_exposes_missing_checks_without_asserting(tmp_path):
-    _write_valid_documents(tmp_path)
-    document = _document(tmp_path, "text_single")
-    document["output"][0]["passed"] = False
-    document["output"][0]["checks"] = {}
-    _replace_document(tmp_path, "text_single", document)
-
-    assert summarize_gate_progress(tmp_path) == {
-        "expected_scenarios": 5,
-        "observed_scenarios": 5,
-        "expected_requests": 26,
-        "observed_requests": 26,
-        "passed_requests": 25,
-        "expected_checks": 260,
-        "observed_checks": 250,
-        "passed_checks": 250,
-        "passed": False,
-    }
-
-
-def test_gate_progress_can_report_one_scenario(tmp_path):
-    _write_valid_documents(tmp_path)
-
-    summary = summarize_gate_progress(tmp_path, "image_concurrent_8")
-
-    assert summary["observed_scenarios"] == 1
-    assert summary["passed_requests"] == 8
-    assert summary["passed_checks"] == 80
 
 
 def test_gate_results_root_uses_safe_unique_components(tmp_path):
@@ -276,52 +239,7 @@ def test_gate_results_root_uses_safe_unique_components(tmp_path):
     )
 
 
-def _fake_model_config(extra_args=None):
-    serve = SimpleNamespace(
-        extra_engine={"dtype": "bfloat16"},
-        extra_args=list(extra_args or ["--reasoning-parser", "qwen3"]),
-    )
-
-    class Config:
-        def __init__(self):
-            self.serve = serve
-
-        def serve_args(self, **overrides):
-            assert overrides == {"dtype": "bfloat16"}
-            return ["--max-model-len", "8192", "--dtype", "bfloat16"]
-
-    return Config()
-
-
-def test_build_server_args_preserves_config_and_allows_gate_images(tmp_path):
-    image_dir = tmp_path / "images"
-
-    args = build_server_args(_fake_model_config(), image_dir)
-
-    assert args == [
-        "--max-model-len",
-        "8192",
-        "--dtype",
-        "bfloat16",
-        "--reasoning-parser",
-        "qwen3",
-        "--allowed-local-media-path",
-        str(image_dir.resolve()),
-    ]
-
-
-@pytest.mark.parametrize(
-    "value",
-    ["--allowed-local-media-path", "--allowed-local-media-path=/other/images"],
-)
-def test_build_server_args_rejects_duplicate_media_path(tmp_path, value):
-    config = _fake_model_config([value])
-
-    with pytest.raises(ValueError, match="must be supplied only"):
-        build_server_args(config, tmp_path)
-
-
-def test_runner_routes_verification_cases_through_standard_jobs(monkeypatch):
+def test_runner_routes_standard_tasks_through_smoke_files(monkeypatch):
     config = SimpleNamespace(
         platform="demo",
         device="card",
@@ -364,7 +282,7 @@ def test_runner_routes_verification_cases_through_standard_jobs(monkeypatch):
     ("case_count", "expected_quiet"),
     [(1, False), (2, True)],
 )
-def test_e2e_runner_streams_single_sharded_case_live(
+def test_e2e_runner_streams_single_case_live(
     monkeypatch, case_count, expected_quiet
 ):
     runner = object.__new__(TestRunner)
@@ -465,51 +383,42 @@ def test_e2e_workflow_uploads_gate_documents():
         for path in (Path(__file__).parents[1] / "models/qwen3_6").glob("*.yaml")
     ),
 )
-def test_qwen36_yaml_references_tools_cases_without_copying_requests(case):
+def test_qwen36_yamls_carry_explicit_inventory_without_verification(case):
+    import yaml
+
     from tests.utils.model_config import ModelConfig
 
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / f"models/qwen3_6/{case}.yaml").read_text()
+    )
+    assert "verification" not in raw, case
+    assert len(raw["serve"]["chat_cases"]) == 26, case
+
     config = ModelConfig.load("qwen3_6", case)
-
-    assert config.verification.source == ADAPTATION_GATE_SOURCE
-    assert config.verification.serving_scenarios == ["text_single", "image_single"]
-    assert config.verification.concurrent_scenarios == [
-        "text_concurrent_8",
-        "image_concurrent_8",
-        "mixed_concurrent_8",
-    ]
-
-
-def test_case_selection_rejects_unknown_sources_scenarios_and_duplicates():
-    with pytest.raises(ValueError, match="Unsupported verification"):
-        validate_case_selection("other", ["text_single"])
-    with pytest.raises(ValueError, match="Unknown adaptation"):
-        validate_case_selection(ADAPTATION_GATE_SOURCE, ["unknown"])
-    with pytest.raises(ValueError, match="duplicates"):
-        validate_case_selection(ADAPTATION_GATE_SOURCE, ["text_single", "text_single"])
+    assert not hasattr(config, "verification"), case
+    assert len(config.serve.chat_cases) == 26, case
 
 
 def test_phase_results_use_distinct_paths(tmp_path):
-    serving = verification_results_root(
+    serving = gate_results_root(
         tmp_path,
-        phase="serving",
         platform="demo",
         device="card",
         model="qwen3_6",
-        case="27b_tp2_eager",
+        case="27b_tp2_eager-serving",
     )
-    concurrent = verification_results_root(
+    concurrent = gate_results_root(
         tmp_path,
-        phase="concurrent",
         platform="demo",
         device="card",
         model="qwen3_6",
-        case="27b_tp2_eager",
+        case="27b_tp2_eager-concurrent",
     )
 
     assert serving != concurrent
 
 
-def test_dead_verification_server_fails_without_waiting_for_client_timeout():
+def test_dead_gate_server_fails_without_waiting_for_client_timeout():
     process = SimpleNamespace(poll=lambda: 42)
     server = SimpleNamespace(
         _process=process,
@@ -517,4 +426,4 @@ def test_dead_verification_server_fails_without_waiting_for_client_timeout():
     )
 
     with pytest.raises(RuntimeError, match="exited before the concurrent"):
-        ensure_server_alive(server, "concurrent")
+        ensure_gate_server_alive(server, "concurrent")
