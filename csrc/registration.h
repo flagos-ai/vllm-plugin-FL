@@ -9,7 +9,10 @@
 #define _STRINGIFY(A) #A
 #define STRINGIFY(A) _STRINGIFY(A)
 
-#define TORCH_LIBRARY_EXPAND(NAME, MODULE) TORCH_LIBRARY(NAME, MODULE)
+// FRAGMENT, not TORCH_LIBRARY: only one definition-counting registration per
+// namespace is allowed, and MetaX's mcoplib._C already claims `_C` with a
+// plain TORCH_LIBRARY — the two aborted each other at import.
+#define TORCH_LIBRARY_EXPAND(NAME, MODULE) TORCH_LIBRARY_FRAGMENT(NAME, MODULE)
 #define TORCH_LIBRARY_IMPL_EXPAND(NAME, DEVICE, MODULE) \
   TORCH_LIBRARY_IMPL(NAME, DEVICE, MODULE)
 
