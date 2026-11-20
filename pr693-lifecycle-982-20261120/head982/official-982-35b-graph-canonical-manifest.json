@@ -1,0 +1,21 @@
+{
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "phase": "official-982-35b-graph",
+  "passed": true,
+  "nodes": [
+    {
+      "node": "NODE_A",
+      "case": "35b_a3b_tp4_graph",
+      "manifest_sha256": "872d5ec79f9f57defc7c144c50a7fb17a8cfa379c7ce137d4d002c70d5098806",
+      "canonical_config_sha256": "8aea55e472235cb4c2f118459418f8cb47ee4fce89d5bfacf2487e971861464e",
+      "exact_argv_match": true
+    },
+    {
+      "node": "NODE_B",
+      "case": "35b_a3b_tp4_graph",
+      "manifest_sha256": "409490043daab61f4c940574f6cd5619193f536722d21e58d953d03484fe99ef",
+      "canonical_config_sha256": "8aea55e472235cb4c2f118459418f8cb47ee4fce89d5bfacf2487e971861464e",
+      "exact_argv_match": true
+    }
+  ]
+}

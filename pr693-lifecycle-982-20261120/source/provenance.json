@@ -1,0 +1,84 @@
+{
+  "heads": {
+    "81a893db3414056f66b8064edd998ba143efeba9": {
+      "tree": "cfc64df8897e91d74a1f46f5098497921c879774",
+      "parents": [
+        "d55547de8bfe8ec42565898a70975e77292de4f0"
+      ],
+      "subject": "fix(metax): release V2 graphs before native communicator teardown"
+    },
+    "982739fd5d68ff19955c7ff975756960abe1cce7": {
+      "tree": "18ef555579c9ee8911255f2fa3cbc5cf1b1be366",
+      "parents": [
+        "81a893db3414056f66b8064edd998ba143efeba9",
+        "77f141a961d75e54c0cf209de80c99a7c7eec04b"
+      ],
+      "subject": "merge: sync MetaX upgrade with latest 0.5.0-dev"
+    },
+    "77f141a961d75e54c0cf209de80c99a7c7eec04b": {
+      "tree": "90e03ca49741ee69df95f01080440313441084bd",
+      "parents": [
+        "045afdc496e33cbbf803235632b32303f0452d0c"
+      ],
+      "subject": "feat(kunlunxin): support P800 on vLLM 0.32 (#726)"
+    },
+    "d55547de8bfe8ec42565898a70975e77292de4f0": {
+      "tree": "85489e4d5df104f2972b132545ea812d07616349",
+      "parents": [
+        "6edfd406e4ad3ec166ca28d6f041a6e2e8ac45e3"
+      ],
+      "subject": "fix(metax): cancel remote V2 queues during multinode shutdown"
+    }
+  },
+  "communicator_file": "vllm_fl/distributed/metax_communicator.py",
+  "communicator_same_blob_at_head81_and_head982": true,
+  "communicator_sha256": "73dd1a0585edacf1ae0cbc59384b74955b9c7fd2cc9dbe9d839056b77e9f54ed",
+  "communicator_git_blob": "67c661d42f3ddb7bc01fe613ac0fbb1a7747b158",
+  "lifecycle_change": "18 inserted lines in MetaX V2 class; no shared FlagCX or other backend production changes in lifecycle commit.",
+  "upstream_issue": "https://github.com/flagos-ai/FlagCX/issues/730",
+  "scope": "Current TP4/PP1 model acceptance; no qualification claim for EP or other topologies.",
+  "gate_script_hashes": [
+    {
+      "path": "tools/adaptation-gate-cases/case_utils.py",
+      "head81_sha256": "c8554aac662742a3f7aa1421044b017a2e60cece301fe92d5144b19e8a6bffd5",
+      "head982_sha256": "c8554aac662742a3f7aa1421044b017a2e60cece301fe92d5144b19e8a6bffd5",
+      "identical": true
+    },
+    {
+      "path": "tools/adaptation-gate-cases/generate_images.py",
+      "head81_sha256": "7251d0f01f1e8c605bd1df40e85e3d57a99010f289326806246e1a274742f84a",
+      "head982_sha256": "7251d0f01f1e8c605bd1df40e85e3d57a99010f289326806246e1a274742f84a",
+      "identical": true
+    },
+    {
+      "path": "tools/adaptation-gate-cases/test_image.py",
+      "head81_sha256": "650ba67da5bd90834ddf4a2fa2aafd65cb41b02793881436cd214333ad5fa092",
+      "head982_sha256": "650ba67da5bd90834ddf4a2fa2aafd65cb41b02793881436cd214333ad5fa092",
+      "identical": true
+    },
+    {
+      "path": "tools/adaptation-gate-cases/test_mix_text_image.py",
+      "head81_sha256": "d69113a0069558a940bd1e45c230a4baff00c58467d261f72e9377d20f57f0fd",
+      "head982_sha256": "d69113a0069558a940bd1e45c230a4baff00c58467d261f72e9377d20f57f0fd",
+      "identical": true
+    },
+    {
+      "path": "tools/adaptation-gate-cases/test_text.py",
+      "head81_sha256": "a24193d43458cb699606bf1caeff3b45c28e4cf3bc9dc3583b67d19d99554b21",
+      "head982_sha256": "a24193d43458cb699606bf1caeff3b45c28e4cf3bc9dc3583b67d19d99554b21",
+      "identical": true
+    },
+    {
+      "path": "tools/adaptation-gate-cases/run_test.sh",
+      "head81_sha256": "ecdb52f2e78a4918ab17f766c274e91e24dc174a29accd105eae17cd87bda3f7",
+      "head982_sha256": "ecdb52f2e78a4918ab17f766c274e91e24dc174a29accd105eae17cd87bda3f7",
+      "identical": true
+    },
+    {
+      "path": "tests/unit_tests/distributed/test_metax_communicator.py",
+      "head81_sha256": "132d6902a084ebd8eb3a1219bff474a663963b4218bb4cf9b5155b3e0a3c5df7",
+      "head982_sha256": "132d6902a084ebd8eb3a1219bff474a663963b4218bb4cf9b5155b3e0a3c5df7",
+      "identical": true
+    }
+  ]
+}

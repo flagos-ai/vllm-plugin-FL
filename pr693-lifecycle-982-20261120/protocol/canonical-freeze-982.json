@@ -1,0 +1,212 @@
+{
+  "35b_a3b_tp4_graph": {
+    "engine": {
+      "tensor_parallel_size": 4,
+      "pipeline_parallel_size": 1,
+      "max_model_len": 8192,
+      "gpu_memory_utilization": 0.9,
+      "enforce_eager": false,
+      "trust_remote_code": true,
+      "disable_custom_all_reduce": true
+    },
+    "model": "/data/models/Qwen/Qwen3.6-35B-A3B",
+    "served_model_name": "qwen",
+    "extra_args": [
+      "--pipeline-parallel-size",
+      "1",
+      "--max-model-len",
+      "8192",
+      "--gpu-memory-utilization",
+      "0.9",
+      "--trust-remote-code",
+      "--disable-custom-all-reduce",
+      "--allowed-local-media-path",
+      "/src/tools/adaptation-gate-cases/images"
+    ],
+    "sources": {
+      "tests/models/qwen3_6/35b_a3b_tp4_graph.yaml": "02e3b7ea51be30c005606e322ba81fde451b3d077e4b67cb3f872a8183be5490",
+      "tests/platforms/metax.yaml": "c02cfdb16a8014818be68ca8d7b8949b4b3bf7812d18298a1ecfea9bc9b91494",
+      "vllm_fl/platform.py": "efc486e029c349d8cb2bef69920b588cc3b9d50e3ed0a77d57da43aa8083032e"
+    },
+    "seed": "vLLM default 0; no seed override",
+    "request_timeout": 300,
+    "sdk_automatic_retries": 2,
+    "graph": "upstream/platform defaults; no compilation override",
+    "topology_additions": [
+      "--distributed-executor-backend",
+      "mp",
+      "--nnodes",
+      "2",
+      "--master-addr",
+      "NODE_A",
+      "--master-port",
+      "29692",
+      "--node-rank",
+      "<0 or 1>"
+    ],
+    "cleanup_addition": [
+      "--shutdown-timeout",
+      "90"
+    ],
+    "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+    "config_sha256": "8aea55e472235cb4c2f118459418f8cb47ee4fce89d5bfacf2487e971861464e"
+  },
+  "35b_a3b_tp4_eager": {
+    "engine": {
+      "tensor_parallel_size": 4,
+      "pipeline_parallel_size": 1,
+      "max_model_len": 8192,
+      "gpu_memory_utilization": 0.9,
+      "enforce_eager": true,
+      "trust_remote_code": true,
+      "disable_custom_all_reduce": true
+    },
+    "model": "/data/models/Qwen/Qwen3.6-35B-A3B",
+    "served_model_name": "qwen",
+    "extra_args": [
+      "--pipeline-parallel-size",
+      "1",
+      "--max-model-len",
+      "8192",
+      "--gpu-memory-utilization",
+      "0.9",
+      "--enforce-eager",
+      "--trust-remote-code",
+      "--disable-custom-all-reduce",
+      "--allowed-local-media-path",
+      "/src/tools/adaptation-gate-cases/images"
+    ],
+    "sources": {
+      "tests/models/qwen3_6/35b_a3b_tp4_eager.yaml": "f396bfcc26b73bc7b1d297027ecfbfeba915a8418b767b0ecf32059d970efecd",
+      "tests/platforms/metax.yaml": "c02cfdb16a8014818be68ca8d7b8949b4b3bf7812d18298a1ecfea9bc9b91494",
+      "vllm_fl/platform.py": "efc486e029c349d8cb2bef69920b588cc3b9d50e3ed0a77d57da43aa8083032e"
+    },
+    "seed": "vLLM default 0; no seed override",
+    "request_timeout": 300,
+    "sdk_automatic_retries": 2,
+    "graph": "upstream/platform defaults; no compilation override",
+    "topology_additions": [
+      "--distributed-executor-backend",
+      "mp",
+      "--nnodes",
+      "2",
+      "--master-addr",
+      "NODE_A",
+      "--master-port",
+      "29692",
+      "--node-rank",
+      "<0 or 1>"
+    ],
+    "cleanup_addition": [
+      "--shutdown-timeout",
+      "90"
+    ],
+    "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+    "config_sha256": "f016ecb7e0157b8796bd23ea40041fb26658d709c2dfbcef69889c4b96ce45d1"
+  },
+  "27b_tp4_graph": {
+    "engine": {
+      "tensor_parallel_size": 4,
+      "pipeline_parallel_size": 1,
+      "max_model_len": 8192,
+      "gpu_memory_utilization": 0.9,
+      "enforce_eager": false,
+      "trust_remote_code": true,
+      "disable_custom_all_reduce": true
+    },
+    "model": "/data/models/Qwen/Qwen3.6-27B",
+    "served_model_name": "qwen",
+    "extra_args": [
+      "--pipeline-parallel-size",
+      "1",
+      "--max-model-len",
+      "8192",
+      "--gpu-memory-utilization",
+      "0.9",
+      "--trust-remote-code",
+      "--disable-custom-all-reduce",
+      "--allowed-local-media-path",
+      "/src/tools/adaptation-gate-cases/images"
+    ],
+    "sources": {
+      "tests/models/qwen3_6/27b_tp4_graph.yaml": "3557c3be73d7b2de5de66377859478a100bbf566f4f7da060edf6730cd64949b",
+      "tests/platforms/metax.yaml": "c02cfdb16a8014818be68ca8d7b8949b4b3bf7812d18298a1ecfea9bc9b91494",
+      "vllm_fl/platform.py": "efc486e029c349d8cb2bef69920b588cc3b9d50e3ed0a77d57da43aa8083032e"
+    },
+    "seed": "vLLM default 0; no seed override",
+    "request_timeout": 300,
+    "sdk_automatic_retries": 2,
+    "graph": "upstream/platform defaults; no compilation override",
+    "topology_additions": [
+      "--distributed-executor-backend",
+      "mp",
+      "--nnodes",
+      "2",
+      "--master-addr",
+      "NODE_A",
+      "--master-port",
+      "29692",
+      "--node-rank",
+      "<0 or 1>"
+    ],
+    "cleanup_addition": [
+      "--shutdown-timeout",
+      "90"
+    ],
+    "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+    "config_sha256": "a8b4496177fcc3702e03e9a0d3d36c65c2f65c5be7d8784e4a67d39a96b5b16a"
+  },
+  "27b_tp4_eager": {
+    "engine": {
+      "tensor_parallel_size": 4,
+      "pipeline_parallel_size": 1,
+      "max_model_len": 8192,
+      "gpu_memory_utilization": 0.9,
+      "enforce_eager": true,
+      "trust_remote_code": true,
+      "disable_custom_all_reduce": true
+    },
+    "model": "/data/models/Qwen/Qwen3.6-27B",
+    "served_model_name": "qwen",
+    "extra_args": [
+      "--pipeline-parallel-size",
+      "1",
+      "--max-model-len",
+      "8192",
+      "--gpu-memory-utilization",
+      "0.9",
+      "--enforce-eager",
+      "--trust-remote-code",
+      "--disable-custom-all-reduce",
+      "--allowed-local-media-path",
+      "/src/tools/adaptation-gate-cases/images"
+    ],
+    "sources": {
+      "tests/models/qwen3_6/27b_tp4_eager.yaml": "ea1bc2e1b36be9798f9d059366761883b406dc93d4c019af21e8e57f41cbe738",
+      "tests/platforms/metax.yaml": "c02cfdb16a8014818be68ca8d7b8949b4b3bf7812d18298a1ecfea9bc9b91494",
+      "vllm_fl/platform.py": "efc486e029c349d8cb2bef69920b588cc3b9d50e3ed0a77d57da43aa8083032e"
+    },
+    "seed": "vLLM default 0; no seed override",
+    "request_timeout": 300,
+    "sdk_automatic_retries": 2,
+    "graph": "upstream/platform defaults; no compilation override",
+    "topology_additions": [
+      "--distributed-executor-backend",
+      "mp",
+      "--nnodes",
+      "2",
+      "--master-addr",
+      "NODE_A",
+      "--master-port",
+      "29692",
+      "--node-rank",
+      "<0 or 1>"
+    ],
+    "cleanup_addition": [
+      "--shutdown-timeout",
+      "90"
+    ],
+    "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+    "config_sha256": "871df14a48075da3d59c2c188a204c20a1bb21e9dea2261d9169c79d3b1a8d65"
+  }
+}

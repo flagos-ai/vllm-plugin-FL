@@ -1,0 +1,122 @@
+[
+  {
+    "phase": "official-81-35b-graph",
+    "head": "81a893db3414056f66b8064edd998ba143efeba9",
+    "passed": true,
+    "gate": {
+      "scenarios": 5,
+      "requests": 26,
+      "passed_requests": 26,
+      "checks": 260,
+      "passed_checks": 260,
+      "passed": true,
+      "failures": []
+    },
+    "cleanup": [
+      {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      },
+      {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      }
+    ]
+  },
+  {
+    "phase": "official-81-35b-eager",
+    "head": "81a893db3414056f66b8064edd998ba143efeba9",
+    "passed": true,
+    "gate": {
+      "scenarios": 5,
+      "requests": 26,
+      "passed_requests": 26,
+      "checks": 260,
+      "passed_checks": 260,
+      "passed": true,
+      "failures": []
+    },
+    "cleanup": [
+      {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      },
+      {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      }
+    ]
+  },
+  {
+    "phase": "official-81-27b-graph",
+    "head": "81a893db3414056f66b8064edd998ba143efeba9",
+    "passed": true,
+    "gate": {
+      "scenarios": 5,
+      "requests": 26,
+      "passed_requests": 26,
+      "checks": 260,
+      "passed_checks": 260,
+      "passed": true,
+      "failures": []
+    },
+    "cleanup": [
+      {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      },
+      {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      }
+    ]
+  },
+  {
+    "phase": "official-81-27b-eager",
+    "head": "81a893db3414056f66b8064edd998ba143efeba9",
+    "passed": true,
+    "gate": {
+      "scenarios": 5,
+      "requests": 26,
+      "passed_requests": 26,
+      "checks": 260,
+      "passed_checks": 260,
+      "passed": true,
+      "failures": []
+    },
+    "cleanup": [
+      {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      },
+      {
+        "launcher_exit": 0,
+        "workers_exited_gracefully": true,
+        "forced_worker_termination": false,
+        "selected_gpu_processes_remaining": false,
+        "mccl_destroy_complete": true
+      }
+    ]
+  }
+]

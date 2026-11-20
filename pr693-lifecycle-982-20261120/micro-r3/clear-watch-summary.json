@@ -1,0 +1,26 @@
+{
+  "scope": "two-GPU lifecycle micro-repro, not model Gate",
+  "natural_exit": true,
+  "cleanup_elapsed_seconds": 18.617289543151855,
+  "final_state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-20T04:12:22.104733839Z",
+    "FinishedAt": "2026-11-20T04:13:13.963155474Z"
+  },
+  "original_cleanup_deadline_seconds": 60,
+  "sampled_stages": [
+    3,
+    10
+  ],
+  "exact_3_live_replays_both_ranks": true,
+  "explicit_destroy_returned_both_ranks": true,
+  "registries_cleared_both_ranks": true
+}

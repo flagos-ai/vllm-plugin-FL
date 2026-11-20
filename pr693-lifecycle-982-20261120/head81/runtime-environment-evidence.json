@@ -1,0 +1,1605 @@
+{
+  "scope": "Derived from actual worker observer snapshots; env_whitelist is the observer field name for recorded environment variables, not an enabled operator allowlist. Runner V2 selection is automatic.",
+  "snapshots": [
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_A",
+      "rank": 0,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-35b-graph/before-http/observer/flagcx-observer-NODE_A-763-1795148783210533744.json",
+        "sha256": "5dbb4fd3f8d3d3a33c4367b61a2f5d74eccdf83290837165f06bc466f3ff73da"
+      }
+    },
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_A",
+      "rank": 1,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-35b-graph/before-http/observer/flagcx-observer-NODE_A-764-1795148783181411850.json",
+        "sha256": "6686c6f80c869c6a4e126ab8c2d3364011cbeb8b2b631855a2640bf4f9d66a28"
+      }
+    },
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_A",
+      "rank": 0,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-35b-graph/after-http/observer/flagcx-observer-NODE_A-763-1795148783210533744.json",
+        "sha256": "24a404c241851e55fe9c8dd8ea2fe33a78eac13aeda7ca21da73f6159cc617af"
+      }
+    },
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_A",
+      "rank": 1,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-35b-graph/after-http/observer/flagcx-observer-NODE_A-764-1795148783181411850.json",
+        "sha256": "3795d0f58398aabd1c821f211312e9e71186af9173515dd581a52fdb8526baab"
+      }
+    },
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_B",
+      "rank": 2,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-35b-graph/before-http/observer/flagcx-observer-NODE_B-391-1795148783227945206.json",
+        "sha256": "29e0ad35fa25feedc8b14b439efccee7627d143401a43a2a6b5df23cfacfde6a"
+      }
+    },
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_B",
+      "rank": 3,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-35b-graph/before-http/observer/flagcx-observer-NODE_B-392-1795148783228126385.json",
+        "sha256": "113645086027db1fa001ac9aaacfcb4c4c9d6c3a65acc29aa15be7b67e33398d"
+      }
+    },
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_B",
+      "rank": 2,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-35b-graph/after-http/observer/flagcx-observer-NODE_B-391-1795148783227945206.json",
+        "sha256": "1d3e14da02ead31d31268fa68b050caef420b3b15fa333dd9ece27a7b0cf798b"
+      }
+    },
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_B",
+      "rank": 3,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-35b-graph/after-http/observer/flagcx-observer-NODE_B-392-1795148783228126385.json",
+        "sha256": "e5262552ff715b6c08059212934747d0a5619811a1a3956b40146aadbe1fc645"
+      }
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_A",
+      "rank": 0,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-35b-eager/before-http/observer/flagcx-observer-NODE_A-764-1795149080913436490.json",
+        "sha256": "af56da27c6d1953edf26d2b1d02241504523ce15418074e79f2931967cffba00"
+      }
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_A",
+      "rank": 1,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-35b-eager/before-http/observer/flagcx-observer-NODE_A-765-1795149080879671908.json",
+        "sha256": "868a1273bd21c0ea91ae1dd40a1baff74da6f04a1281c3d74048dd74b3e60e69"
+      }
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_A",
+      "rank": 0,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-35b-eager/after-http/observer/flagcx-observer-NODE_A-764-1795149080913436490.json",
+        "sha256": "8eefdad51ecfd32a055e763450086d727b0f5854a5f800cbff42724e4def966b"
+      }
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_A",
+      "rank": 1,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-35b-eager/after-http/observer/flagcx-observer-NODE_A-765-1795149080879671908.json",
+        "sha256": "03d67ed9906bad86126e441d079f2384053503ed90e1879d1db41b3684b4042f"
+      }
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_B",
+      "rank": 2,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-35b-eager/before-http/observer/flagcx-observer-NODE_B-391-1795149080925135171.json",
+        "sha256": "c14d64c30046964889838312e4b79ed0350abda5fe8c3e26904cf44743f4dd12"
+      }
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_B",
+      "rank": 3,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-35b-eager/before-http/observer/flagcx-observer-NODE_B-392-1795149080925616840.json",
+        "sha256": "2783c4a3e2c913b15e50758c771d486cacc1158f2f0d567a1a4d358e5dcb3456"
+      }
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_B",
+      "rank": 2,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-35b-eager/after-http/observer/flagcx-observer-NODE_B-391-1795149080925135171.json",
+        "sha256": "8ccbb9e22ff85640a73ffaa8c62a1d6febe6b19d16b717d89465633d1e9b00d6"
+      }
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_B",
+      "rank": 3,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-35b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        },
+        "library_2": {
+          "comm_id": "comm_2",
+          "library_id": "library_2",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-35b-eager/after-http/observer/flagcx-observer-NODE_B-392-1795149080925616840.json",
+        "sha256": "d609215d8c4253818a61a427f7afa4a88167982264c0cfe4af7f8ac26ae226f2"
+      }
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_A",
+      "rank": 0,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-27b-graph/before-http/observer/flagcx-observer-NODE_A-763-1795149680942368955.json",
+        "sha256": "7009f1157b241e46d9174fd51c925304bd88d568245c4f7c149d5c4634925603"
+      }
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_A",
+      "rank": 1,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-27b-graph/before-http/observer/flagcx-observer-NODE_A-764-1795149680918886249.json",
+        "sha256": "fc05d90bd381cf3958b0e69fa30f11d55e528fef618b3c45e4fa74c602a67a22"
+      }
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_A",
+      "rank": 0,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-27b-graph/after-http/observer/flagcx-observer-NODE_A-763-1795149680942368955.json",
+        "sha256": "b0b788294aada2068f3acbe7520afe46b132222c87250c2921e2d9be6745b236"
+      }
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_A",
+      "rank": 1,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-27b-graph/after-http/observer/flagcx-observer-NODE_A-764-1795149680918886249.json",
+        "sha256": "15a6076d2b4c7d30880d914e9f68c491270124b9e714a6e4abc990a01da1e91b"
+      }
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_B",
+      "rank": 2,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-27b-graph/before-http/observer/flagcx-observer-NODE_B-391-1795149680921720183.json",
+        "sha256": "a860075861400e51f9e80bf57952ccf5633b3bd5bfdcfbf675f41987929a167d"
+      }
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_B",
+      "rank": 3,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-27b-graph/before-http/observer/flagcx-observer-NODE_B-392-1795149680940173535.json",
+        "sha256": "499344ffc011ffdf641022fb71b7a80ecefa45bf3f0aa1dca874be8f378c433b"
+      }
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_B",
+      "rank": 2,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-27b-graph/after-http/observer/flagcx-observer-NODE_B-391-1795149680921720183.json",
+        "sha256": "0036da6fd79ccdc68a1a5e89e3e7fa7a4085eacea8f0ef1c6cd41d4fe6726323"
+      }
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_B",
+      "rank": 3,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-graph",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-27b-graph/after-http/observer/flagcx-observer-NODE_B-392-1795149680940173535.json",
+        "sha256": "3f0331024e7efc7ed3f2b6d055d8055f1e35c05c62d115c98d271275f4295ea5"
+      }
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_A",
+      "rank": 0,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-27b-eager/before-http/observer/flagcx-observer-NODE_A-764-1795150206077626700.json",
+        "sha256": "631e9a5920a92f427db661e1782cc3ef21883d64a69d2e18ed37f7d1b4d2fcb8"
+      }
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_A",
+      "rank": 1,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-27b-eager/before-http/observer/flagcx-observer-NODE_A-765-1795150206052243703.json",
+        "sha256": "715b7bae02da1df713bc1eefac92742eafd1b537288a4f05730c13879ca4a2b9"
+      }
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_A",
+      "rank": 0,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-27b-eager/after-http/observer/flagcx-observer-NODE_A-764-1795150206077626700.json",
+        "sha256": "d07192d822b295d7232a50a0b7036f65d09823a970a4dbb96d72a0b3c9c83b0d"
+      }
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_A",
+      "rank": 1,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_A",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_A/official-81-27b-eager/after-http/observer/flagcx-observer-NODE_A-765-1795150206052243703.json",
+        "sha256": "0c9bdfa35d9c2005132c43e48cdff54d4a2cd1fe1e3dab14453885a6721cde15"
+      }
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_B",
+      "rank": 2,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-27b-eager/before-http/observer/flagcx-observer-NODE_B-391-1795150206076708929.json",
+        "sha256": "b41947c4751679ae370ab52db30533153fe6aca0d1771564e66ed159a0812a1c"
+      }
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_B",
+      "rank": 3,
+      "point": "before-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-27b-eager/before-http/observer/flagcx-observer-NODE_B-392-1795150206076273438.json",
+        "sha256": "53d219a13a2c057958edd8babdc7b1691215799b9f55fd3971c2022ba52cdc64"
+      }
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_B",
+      "rank": 2,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-27b-eager/after-http/observer/flagcx-observer-NODE_B-391-1795150206076708929.json",
+        "sha256": "e24ca69dd5d87d425c89e6b9aefb487c6c52596582f6bf8461ba1668fc54f6c2"
+      }
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_B",
+      "rank": 3,
+      "point": "after-http",
+      "recorded_environment": {
+        "CODEX_FLAGCX_PHASE": "official-81-27b-eager",
+        "FLAGCX_DEBUG": "INFO",
+        "FLAGCX_DEBUG_SUBSYS": "INIT,COLL,NET,BOOTSTRAP,GRAPH",
+        "FLAGCX_PATH": "/opt/FlagCX",
+        "FLAGCX_SOCKET_IFNAME": "=inbond1",
+        "GEMS_VENDOR": "metax",
+        "GLOO_SOCKET_IFNAME": "inbond1",
+        "MACA_VISIBLE_DEVICES": "6,7",
+        "MASTER_ADDR": "NODE_A",
+        "MASTER_PORT": "29691",
+        "MCCL_IB_DISABLE": "1",
+        "MCCL_SOCKET_IFNAME": "=inbond1",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+        "VLLM_HOST_IP": "NODE_B",
+        "VLLM_PLUGINS": "fl",
+        "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+      },
+      "operator_whitelist_variable_present": false,
+      "forced_runner_v2_variable_present": false,
+      "native_libraries": {
+        "library_1": {
+          "comm_id": "comm_1",
+          "library_id": "library_1",
+          "native_library": {
+            "path": "/opt/FlagCX/build/lib/libflagcx.so",
+            "sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad"
+          },
+          "python_wrapper": {
+            "path": "/opt/FlagCX/plugin/interservice/flagcx_wrapper.py",
+            "sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+          }
+        }
+      },
+      "source_snapshot": {
+        "source_id": "collected/NODE_B/official-81-27b-eager/after-http/observer/flagcx-observer-NODE_B-392-1795150206076273438.json",
+        "sha256": "b6108ac88342e0d13213179abf956b898f114f28d2a91bca6e287f4a2d581de8"
+      }
+    }
+  ]
+}

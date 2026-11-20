@@ -1,0 +1,22 @@
+{
+  "checked_at_utc": "2026-11-20T06:00:15.262024+00:00",
+  "privacy_scan_findings": 0,
+  "scan_categories": [
+    "private physical addresses",
+    "private machine hostnames",
+    "SSH/configuration and credential indicators",
+    "URL credentials",
+    "GPU UUIDs",
+    "private local paths",
+    "unrelated workload content"
+  ],
+  "loopback127_0_0_1_intentionally_retained": true,
+  "json_documents_parsed_before_audit": 34,
+  "relative_links_verified": 16,
+  "same_r3_reproducer_sha_verified": true,
+  "current_head_pending_count": 4,
+  "cpu_archive_827_blobs_verified_against_exact_tree": true,
+  "original_archives_not_exported": true,
+  "no_hardware_or_network_access_for_export": true,
+  "hash_check_policy": "All exported entries and SHA256SUMS are refreshed together after this audit, then independently verified read-only. Generated summaries explicitly preserve original input hashes."
+}

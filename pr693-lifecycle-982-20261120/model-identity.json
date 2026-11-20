@@ -1,0 +1,443 @@
+{
+  "scope": "Derived only from existing archived identity/provenance/shard records; no new hardware or network access. Missing independent provenance is marked unknown.",
+  "models": [
+    {
+      "model_repository": "Qwen/Qwen3.6-27B",
+      "official_repository_url": "https://huggingface.co/Qwen/Qwen3.6-27B",
+      "repository_card_titles": {
+        "NODE_A": "Qwen3.6-27B",
+        "NODE_B": "Qwen3.6-27B"
+      },
+      "all_metadata_file_hashes_equal_between_nodes": true,
+      "metadata_sha256": {
+        "config.json": "69db4eb7196bc8190813231b3018ca05d8c2e3abc7b1af19d55c157af44a9d9c",
+        "model.safetensors.index.json": "a8ad2c26fb707ff8c245806315b03e3b4b74595528492423af5dae0ce39b4d9b",
+        "tokenizer.json": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+        "tokenizer_config.json": "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b"
+      },
+      "config_architectures": [
+        "Qwen3_5ForConditionalGeneration"
+      ],
+      "config_model_type": "qwen3_5",
+      "text_config_model_type": "qwen3_5_text",
+      "architecture_label_explanation": "Qwen3.6 checkpoints retain Qwen3_5 architecture/model_type names. These names and historical3.5 directory aliases do not establish the checkpoint release; repository-card and recorded hash provenance establish the3.6 identity.",
+      "canonical_model_argument": "/data/models/Qwen/Qwen3.6-27B",
+      "shard_count": 15,
+      "total_shard_file_bytes": 55563006400,
+      "all_shard_sha256_and_sizes_equal_between_nodes": true,
+      "shards": [
+        {
+          "file": "model-00001-of-00015.safetensors",
+          "bytes": 3968861352,
+          "sha256": "5f21d4e349aef6c74bedef7b3835dc8c11a16dd5ce72f4437e2284f1e83736e9",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "5f21d4e349aef6c74bedef7b3835dc8c11a16dd5ce72f4437e2284f1e83736e9",
+          "official_expected_bytes": 3968861352,
+          "matches_official": true
+        },
+        {
+          "file": "model-00002-of-00015.safetensors",
+          "bytes": 3921677136,
+          "sha256": "03de44dc7e933025498d72f8d7ea32d5cde16eb7a85b35ff1fa49a737f4b2242",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "03de44dc7e933025498d72f8d7ea32d5cde16eb7a85b35ff1fa49a737f4b2242",
+          "official_expected_bytes": 3921677136,
+          "matches_official": true
+        },
+        {
+          "file": "model-00003-of-00015.safetensors",
+          "bytes": 3921677128,
+          "sha256": "5c3a68304dabeaa5a0eb70a5e383d2b8134997ef6d5c1e8afdcd236091c847f2",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "5c3a68304dabeaa5a0eb70a5e383d2b8134997ef6d5c1e8afdcd236091c847f2",
+          "official_expected_bytes": 3921677128,
+          "matches_official": true
+        },
+        {
+          "file": "model-00004-of-00015.safetensors",
+          "bytes": 3921677128,
+          "sha256": "ba8b0849cb4c4c97e674709bfe56a9c008d7563a68ac57120ceb2855a73a9944",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "ba8b0849cb4c4c97e674709bfe56a9c008d7563a68ac57120ceb2855a73a9944",
+          "official_expected_bytes": 3921677128,
+          "matches_official": true
+        },
+        {
+          "file": "model-00005-of-00015.safetensors",
+          "bytes": 3921677112,
+          "sha256": "a5abc1d5e9583409193e2cd58a671a4ed98467a6eaf883cd4377e3cc02021c22",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "a5abc1d5e9583409193e2cd58a671a4ed98467a6eaf883cd4377e3cc02021c22",
+          "official_expected_bytes": 3921677112,
+          "matches_official": true
+        },
+        {
+          "file": "model-00006-of-00015.safetensors",
+          "bytes": 3900710888,
+          "sha256": "160d914e2e4704a401a3eab9e9eec3380e5723a35981c9169bedfb82ea32e6d6",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "160d914e2e4704a401a3eab9e9eec3380e5723a35981c9169bedfb82ea32e6d6",
+          "official_expected_bytes": 3900710888,
+          "matches_official": true
+        },
+        {
+          "file": "model-00007-of-00015.safetensors",
+          "bytes": 3994391976,
+          "sha256": "0bcd0ce28c7d2cc6f5ab2c21902cd032fec0cc5f29e0897e3bb0967add388e47",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "0bcd0ce28c7d2cc6f5ab2c21902cd032fec0cc5f29e0897e3bb0967add388e47",
+          "official_expected_bytes": 3994391976,
+          "matches_official": true
+        },
+        {
+          "file": "model-00008-of-00015.safetensors",
+          "bytes": 3879219776,
+          "sha256": "584a0ed8018d3b19ce8e533d08a460454650027901be6323b50b591da143dca6",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "584a0ed8018d3b19ce8e533d08a460454650027901be6323b50b591da143dca6",
+          "official_expected_bytes": 3879219776,
+          "matches_official": true
+        },
+        {
+          "file": "model-00009-of-00015.safetensors",
+          "bytes": 3921677136,
+          "sha256": "e7e3e1a17a2673340eb6bba95c3c6f07b12e7746ee738dde56551cbde27656f5",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "e7e3e1a17a2673340eb6bba95c3c6f07b12e7746ee738dde56551cbde27656f5",
+          "official_expected_bytes": 3921677136,
+          "matches_official": true
+        },
+        {
+          "file": "model-00010-of-00015.safetensors",
+          "bytes": 3921677128,
+          "sha256": "e8934789f4742c11da88f937da84bdbb8764c8a7f7ebe9e7b056bcbd41b14285",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "e8934789f4742c11da88f937da84bdbb8764c8a7f7ebe9e7b056bcbd41b14285",
+          "official_expected_bytes": 3921677128,
+          "matches_official": true
+        },
+        {
+          "file": "model-00011-of-00015.safetensors",
+          "bytes": 3921677136,
+          "sha256": "44e8fe06d2d609bf20b16b1d2f42348ca2dc99179721f76035ff50db678f9a8a",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "44e8fe06d2d609bf20b16b1d2f42348ca2dc99179721f76035ff50db678f9a8a",
+          "official_expected_bytes": 3921677136,
+          "matches_official": true
+        },
+        {
+          "file": "model-00012-of-00015.safetensors",
+          "bytes": 3921677136,
+          "sha256": "33c5d7d18e1b3f661334dff736fc7d00561f1f1bb9d2970c669b40d2e582974e",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "33c5d7d18e1b3f661334dff736fc7d00561f1f1bb9d2970c669b40d2e582974e",
+          "official_expected_bytes": 3921677136,
+          "matches_official": true
+        },
+        {
+          "file": "model-00013-of-00015.safetensors",
+          "bytes": 3995081848,
+          "sha256": "68db2ebb03231238c2a114f3642df967a970a1d96b029adc427838cb5cf7f27a",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "68db2ebb03231238c2a114f3642df967a970a1d96b029adc427838cb5cf7f27a",
+          "official_expected_bytes": 3995081848,
+          "matches_official": true
+        },
+        {
+          "file": "model-00014-of-00015.safetensors",
+          "bytes": 3942652952,
+          "sha256": "26c114fb6d5d4131ab227552d489d7a97c8c958a9ed94f6d3d1584f6cfe4b9fb",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "26c114fb6d5d4131ab227552d489d7a97c8c958a9ed94f6d3d1584f6cfe4b9fb",
+          "official_expected_bytes": 3942652952,
+          "matches_official": true
+        },
+        {
+          "file": "model-00015-of-00015.safetensors",
+          "bytes": 508670568,
+          "sha256": "b84b5b1315e865c9a19a444045d422a73e3e2e31ce3766797cffd3507c68c9c9",
+          "NODE_A_equals_NODE_B": true,
+          "official_expected_sha256": "b84b5b1315e865c9a19a444045d422a73e3e2e31ce3766797cffd3507c68c9c9",
+          "official_expected_bytes": 508670568,
+          "matches_official": true
+        }
+      ],
+      "repository_snapshot_revision": "cea40373b9214dd387123e68841890af30dcd469",
+      "all_shards_match_official_pinned_manifest": true
+    },
+    {
+      "model_repository": "Qwen/Qwen3.6-35B-A3B",
+      "official_repository_url": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+      "repository_card_titles": {
+        "NODE_A": "Qwen3.6-35B-A3B",
+        "NODE_B": "Qwen3.6-35B-A3B"
+      },
+      "all_metadata_file_hashes_equal_between_nodes": true,
+      "metadata_sha256": {
+        "config.json": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+        "model.safetensors.index.json": "41b9356101ebf8e7519e150dc811f80c4226e727301fbb032b890f006ed0be83",
+        "tokenizer.json": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+        "tokenizer_config.json": "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b"
+      },
+      "config_architectures": [
+        "Qwen3_5MoeForConditionalGeneration"
+      ],
+      "config_model_type": "qwen3_5_moe",
+      "text_config_model_type": "qwen3_5_moe_text",
+      "architecture_label_explanation": "Qwen3.6 checkpoints retain Qwen3_5 architecture/model_type names. These names and historical3.5 directory aliases do not establish the checkpoint release; repository-card and recorded hash provenance establish the3.6 identity.",
+      "canonical_model_argument": "/data/models/Qwen/Qwen3.6-35B-A3B",
+      "shard_count": 26,
+      "total_shard_file_bytes": 71903776776,
+      "all_shard_sha256_and_sizes_equal_between_nodes": true,
+      "shards": [
+        {
+          "file": "model-00001-of-00026.safetensors",
+          "bytes": 3996199712,
+          "sha256": "adee7bcb930aed22e0677e58d4873b48dadb1ed8001cb5c6a0487286eadb3478",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00002-of-00026.safetensors",
+          "bytes": 1284907696,
+          "sha256": "88f2dfd2b9e73e4b70be533dbf61bcfa3c9a0003758900fcbc9d9b96f5751d4b",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00003-of-00026.safetensors",
+          "bytes": 3357898360,
+          "sha256": "8f7d72178d3f4431864978e5bcfa4c6cb1c204bc00590644d90bb19d6d522eeb",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00004-of-00026.safetensors",
+          "bytes": 3370808712,
+          "sha256": "12d7db38689ba3c8af74b23ef8523eca41e0cd95db870583d0663a3ee8a6bd60",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00005-of-00026.safetensors",
+          "bytes": 3357898360,
+          "sha256": "a836047305d0f7a7b50f0815d09d5c03ec03d59ec2c763fcdc4bf7e9936bf902",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00006-of-00026.safetensors",
+          "bytes": 3959424904,
+          "sha256": "c9080d718e9c5f9e337443225aa417d4c24d00ae7995d76ee3f1cc296b557d15",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00007-of-00026.safetensors",
+          "bytes": 1096788232,
+          "sha256": "e8c05e23131b1dd45a455ec38cfac7db14667358268623c3938d00cf3e959a68",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00008-of-00026.safetensors",
+          "bytes": 3946842008,
+          "sha256": "4b6a6d495053089f4a80e7cbc82e848fba44e2c0c60122233d8fdff79fa7b296",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00009-of-00026.safetensors",
+          "bytes": 1096460848,
+          "sha256": "a31a954bb72d1c714e751bf0aabf2ff533f5a509693ebf7dd22ad6e90be46f67",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00010-of-00026.safetensors",
+          "bytes": 3946841992,
+          "sha256": "246560e66570fe746653b8443e245dc334c9b8b831ea43d2d9f1b7d98623994e",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00011-of-00026.safetensors",
+          "bytes": 1096460752,
+          "sha256": "7180392817fe3ecb3a27a1da43b7ff22c1a94806bac49975f9f122c3126df675",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00012-of-00026.safetensors",
+          "bytes": 3409971080,
+          "sha256": "043fb525f6625c2f2acb75e65a9959ee3fa7b6e3fdd2034b5cfe1859b01d3cfb",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00013-of-00026.safetensors",
+          "bytes": 1633331664,
+          "sha256": "33a20fb20a21379bf43c84a43105f9c0cc35bd50d740b1c302dcbe4b700f5425",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00014-of-00026.safetensors",
+          "bytes": 3422553872,
+          "sha256": "be823e33c5cb6120ad3769d081f34a2449dc2358041fca7c29d636c1ba19130d",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00015-of-00026.safetensors",
+          "bytes": 1633659224,
+          "sha256": "a89d547c6f9d0b535ee5ea2f2478f163089539f3f0dd330cb23d278a19d76123",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00016-of-00026.safetensors",
+          "bytes": 3946842136,
+          "sha256": "69fc3ae0316482288afdcdd0b9eb7d626703ae26f7567e89aa3fc8d1ffd4ff5b",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00017-of-00026.safetensors",
+          "bytes": 1096460608,
+          "sha256": "e356e3943cf3852b76bb8992e674f3256013e27d54b78e8250514151cdc29637",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00018-of-00026.safetensors",
+          "bytes": 3946841992,
+          "sha256": "9e5e63fd1cc7d6848330c1fa363dfcb661bbc2ac87e672d0e28b71c9cb7f3c7f",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00019-of-00026.safetensors",
+          "bytes": 1096460808,
+          "sha256": "708644ad34f1de727bf484f396944d8ec628645d52c183e9a992e65671685e21",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00020-of-00026.safetensors",
+          "bytes": 3409971072,
+          "sha256": "ca083a1d1aa64f8e8a785998f543a43374f13436dc85d396eee4e72c7a84e1ae",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00021-of-00026.safetensors",
+          "bytes": 1633331744,
+          "sha256": "ada4ae48f3d48fe01b4c53f2f82bce25e798a9631fd33959c881156fef2ccbce",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00022-of-00026.safetensors",
+          "bytes": 3370808752,
+          "sha256": "def207fb42d7db31efb512755557763c23233c6e4d4c433027cb5102a7bce2f7",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00023-of-00026.safetensors",
+          "bytes": 3357898392,
+          "sha256": "864d52ca7768a36f514069222e8de8626264ae124097ba8fcce5b5da2c6e2ed7",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00024-of-00026.safetensors",
+          "bytes": 3370808752,
+          "sha256": "391acd27420cdce5935ff18152423c70620d19dac3c39a5ef1a81d369f82d737",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00025-of-00026.safetensors",
+          "bytes": 3832888256,
+          "sha256": "778e7f76602f05042b69ba7f3ec91f1fdffef390540b16074041c258fb81d154",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        },
+        {
+          "file": "model-00026-of-00026.safetensors",
+          "bytes": 2231416848,
+          "sha256": "1a97404220077ed3d4182e10385b152004cab608377f50cec9f54a6b8d28b613",
+          "NODE_A_equals_NODE_B": true,
+          "official_pinned_remote_match": "unknown: no independent remote shard-hash manifest in these archived identity inputs"
+        }
+      ],
+      "recorded_modelscope_weight_file_revision": "1a5ae24e867f8d82388070d3f61590158a01d15c",
+      "repository_snapshot_revision": "unknown: file revision is recorded; do not promote it to a separately verified repository snapshot",
+      "all_shards_match_independent_pinned_official_remote_manifest": "unknown in these archived identity inputs"
+    }
+  ],
+  "source_inputs": [
+    {
+      "source_id": "model27-identity-NODE_A.json",
+      "sha256": "40fe82f292fbd18d8d10f412f9190d1c0bc53735865971b078cf21fd8f7202c8"
+    },
+    {
+      "source_id": "model27-shards-NODE_A.json",
+      "sha256": "51ef597fe62cd6175766b3f39389fd2066851bf2a5630d42be87637b73ffd1c0"
+    },
+    {
+      "source_id": "model27-provenance-NODE_A.json",
+      "sha256": "78ac3a2493a1d44bcad243f666e3188a9c6ff55abff6a636440f90db46489300"
+    },
+    {
+      "source_id": "model27-identity-NODE_B.json",
+      "sha256": "f304d790fe82566eb1a7a91fc1afc811c0d194f4b1ea1f093c6823ecc94a1e0c"
+    },
+    {
+      "source_id": "model27-shards-NODE_B.json",
+      "sha256": "5120df5549de205d9b2627dde5dc329271eefee286c8cdb3590cf16a3e32fe79"
+    },
+    {
+      "source_id": "model27-provenance-NODE_B.json",
+      "sha256": "78ac3a2493a1d44bcad243f666e3188a9c6ff55abff6a636440f90db46489300"
+    },
+    {
+      "source_id": "model27-shard-verification.json",
+      "sha256": "49f5f9662bc241f58f39af38bf18e2d411b4ac41bbf0547e239ac32cab0c8b64"
+    },
+    {
+      "source_id": "model27-modelscope-pinned-manifest.json",
+      "sha256": "5558d344fdda5b204f54708ed56a7f30e974b8b6aa9fe91768ebc903047146fd"
+    },
+    {
+      "source_id": "model35-identity-NODE_A.json",
+      "sha256": "9b0b26715ca037bce7d60c45370142cc9235beff5e75eabf563f75337e02dca5"
+    },
+    {
+      "source_id": "model35-shards-NODE_A.json",
+      "sha256": "205fc38923b9d411e773d23c8401dc707b4c48a592fbcd89ea065969fa0b70d0"
+    },
+    {
+      "source_id": "model35-provenance-NODE_A.json",
+      "sha256": "fb739818f873d4497765051ede213264d58b8a3432d70d9a44d3d2d0e0599a92"
+    },
+    {
+      "source_id": "model35-identity-NODE_B.json",
+      "sha256": "3af17fdba1cbdb96a28428da2877c8054fb2225e8f2cd9d43c0a01d004c908a3"
+    },
+    {
+      "source_id": "model35-shards-NODE_B.json",
+      "sha256": "009a05afa38934015cb681fb1879799e76d56301d97445e3d21a49200f7ce884"
+    },
+    {
+      "source_id": "model35-provenance-NODE_B.json",
+      "sha256": "308cb7fb10af4c7d4498a887f9b31421c7dff325b8df0e6199e65dbe307b5290"
+    },
+    {
+      "source_id": "model35-shard-verification.json",
+      "sha256": "c805ddbea2551dfa47ef45f79c4493069c78f658ae99e976ec24ecf2dd2fd778"
+    }
+  ]
+}

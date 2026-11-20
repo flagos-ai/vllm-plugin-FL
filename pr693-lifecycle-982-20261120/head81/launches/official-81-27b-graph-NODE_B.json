@@ -1,0 +1,62 @@
+{
+  "case": "27b_tp4_graph",
+  "source_sha256": {
+    "tests/models/qwen3_6/27b_tp4_graph.yaml": "3557c3be73d7b2de5de66377859478a100bbf566f4f7da060edf6730cd64949b",
+    "tests/platforms/metax.yaml": "c02cfdb16a8014818be68ca8d7b8949b4b3bf7812d18298a1ecfea9bc9b91494",
+    "vllm_fl/platform.py": "4caa8e180a69ddf704eadf70bfabea85c883de4ee6093531249cc753b27ed330"
+  },
+  "model": "/data/models/Qwen/Qwen3.6-27B",
+  "engine": {
+    "tensor_parallel_size": 4,
+    "pipeline_parallel_size": 1,
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.9,
+    "enforce_eager": false,
+    "trust_remote_code": true,
+    "disable_custom_all_reduce": true
+  },
+  "argv": [
+    "vllm",
+    "serve",
+    "/data/models/Qwen/Qwen3.6-27B",
+    "--tensor-parallel-size",
+    "4",
+    "--served-model-name",
+    "qwen",
+    "--pipeline-parallel-size",
+    "1",
+    "--max-model-len",
+    "8192",
+    "--gpu-memory-utilization",
+    "0.9",
+    "--trust-remote-code",
+    "--disable-custom-all-reduce",
+    "--allowed-local-media-path",
+    "/src/tools/adaptation-gate-cases/images",
+    "--distributed-executor-backend",
+    "mp",
+    "--nnodes",
+    "2",
+    "--master-addr",
+    "NODE_A",
+    "--master-port",
+    "29692",
+    "--node-rank",
+    "1",
+    "--shutdown-timeout",
+    "90",
+    "--headless"
+  ],
+  "startup_retries": 300,
+  "startup_poll_interval_seconds": 10,
+  "request": {
+    "temperature": 0.0,
+    "max_tokens_long_text": 512,
+    "max_tokens_default": 128,
+    "enable_thinking": false,
+    "seed": "request unset; vLLM default0",
+    "sdk_timeout": 300,
+    "sdk_retries": 2
+  },
+  "manifest_sha256": "049798204ee2dd035e765d03439529dd7405ad273b5f2fa7f6eb58f453f926b7"
+}

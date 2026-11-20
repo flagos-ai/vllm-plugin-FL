@@ -1,0 +1,148 @@
+{
+  "script_sha256": "2ad469100b4785d022bd7471ab55bf9721650ec6f6b447ea7152280e6240928d",
+  "scope": "Two real GPUs on NODE_B; three live replays per rank with independent exact numerical oracle; lifecycle diagnostic, not a model Gate.",
+  "no_extra_gc_after_registry_clear": true,
+  "same_script_for_both_variants": true,
+  "rows": [
+    {
+      "mode": "destroy",
+      "summary": {
+        "scope": "two-GPU lifecycle micro-repro, not model Gate",
+        "natural_exit": false,
+        "cleanup_elapsed_seconds": 64.6438045501709,
+        "final_state": {
+          "Status": "exited",
+          "Running": false,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 0,
+          "ExitCode": 137,
+          "Error": "",
+          "StartedAt": "2026-11-20T04:18:53.76913274Z",
+          "FinishedAt": "2026-11-20T04:20:31.237508751Z"
+        },
+        "original_cleanup_deadline_seconds": 60,
+        "sampled_stages": [
+          3,
+          10,
+          25,
+          45
+        ],
+        "exact_3_live_replays_both_ranks": true,
+        "explicit_destroy_returned_both_ranks": false,
+        "registries_cleared_both_ranks": false
+      },
+      "ranks": [
+        {
+          "rank": 0,
+          "three_live_input_replays_exact": true,
+          "retained_after_del_and_gc": {
+            "native_wrappers": 1,
+            "native_graphs": 1,
+            "breakable_wrappers": 0,
+            "live_graph_objects": 1
+          },
+          "native_destroy_returned": false,
+          "destroy_seconds": null
+        },
+        {
+          "rank": 1,
+          "three_live_input_replays_exact": true,
+          "retained_after_del_and_gc": {
+            "native_wrappers": 1,
+            "native_graphs": 1,
+            "breakable_wrappers": 0,
+            "live_graph_objects": 1
+          },
+          "native_destroy_returned": false,
+          "destroy_seconds": null
+        }
+      ]
+    },
+    {
+      "mode": "clear",
+      "summary": {
+        "scope": "two-GPU lifecycle micro-repro, not model Gate",
+        "natural_exit": true,
+        "cleanup_elapsed_seconds": 18.617289543151855,
+        "final_state": {
+          "Status": "exited",
+          "Running": false,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 0,
+          "ExitCode": 0,
+          "Error": "",
+          "StartedAt": "2026-11-20T04:12:22.104733839Z",
+          "FinishedAt": "2026-11-20T04:13:13.963155474Z"
+        },
+        "original_cleanup_deadline_seconds": 60,
+        "sampled_stages": [
+          3,
+          10
+        ],
+        "exact_3_live_replays_both_ranks": true,
+        "explicit_destroy_returned_both_ranks": true,
+        "registries_cleared_both_ranks": true
+      },
+      "ranks": [
+        {
+          "rank": 0,
+          "three_live_input_replays_exact": true,
+          "retained_after_del_and_gc": {
+            "native_wrappers": 1,
+            "native_graphs": 1,
+            "breakable_wrappers": 0,
+            "live_graph_objects": 1
+          },
+          "native_destroy_returned": true,
+          "registries_cleared": {
+            "native_wrappers": 1,
+            "native_graphs": 0,
+            "breakable_wrappers": 0,
+            "live_graph_objects": 0
+          },
+          "destroy_seconds": 0.02310967445373535
+        },
+        {
+          "rank": 1,
+          "three_live_input_replays_exact": true,
+          "retained_after_del_and_gc": {
+            "native_wrappers": 1,
+            "native_graphs": 1,
+            "breakable_wrappers": 0,
+            "live_graph_objects": 1
+          },
+          "native_destroy_returned": true,
+          "registries_cleared": {
+            "native_wrappers": 1,
+            "native_graphs": 0,
+            "breakable_wrappers": 0,
+            "live_graph_objects": 0
+          },
+          "destroy_seconds": 0.02235722541809082
+        }
+      ]
+    }
+  ],
+  "sustained_destroy_stack_at_seconds": [
+    3,
+    10,
+    25,
+    45
+  ],
+  "stack_chain": "flagcxCommDestroy -> mcclAdaptorCommDestroy -> mcclCommDestroy -> commReclaim -> commFinalize -> commDestroySync -> mcclIntruQueueMpscDequeueAll -> condition_variable::wait -> pthread_cond_wait",
+  "interpretation": "The live-graph direct native-Destroy variant remains blocked through the original60s deadline; administrative cleanup follows. Clearing native and breakable registries before close exits naturally. Do not classify administrative cleanup as a natural exit.",
+  "negative_control_boundary": "A separate implicit-r2 run naturally exited; it used a different harness revision and is not counted as the same-script R3 A/B. Live Python graph retention alone is not claimed to always hang.",
+  "issue": "https://github.com/flagos-ai/FlagCX/issues/730",
+  "separate_implicit_r2_negative_control": {
+    "natural_exit": true,
+    "elapsed_seconds": 18.57395076751709,
+    "same_r3_script": false,
+    "source_sha256": "45183d6db8be558b5ef4a1f2f7cfe8759b90a7fc9a7a3298665e1801de008d58"
+  }
+}

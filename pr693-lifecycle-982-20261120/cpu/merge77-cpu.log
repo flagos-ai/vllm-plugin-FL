@@ -1,0 +1,29 @@
+Processing /tmp/plugin
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: vllm-plugin-fl
+  Building wheel for vllm-plugin-fl (pyproject.toml): started
+  Building wheel for vllm-plugin-fl (pyproject.toml): finished with status 'done'
+  Created wheel for vllm-plugin-fl: filename=vllm_plugin_fl-0.0.0-py3-none-any.whl size=777201 sha256=2b99f72993fc5c4216b62bbc83bc8b1f31face9f3a0d271127e6c201e7635c2c
+  Stored in directory: /tmp/pip-ephem-wheel-cache-cqjtwwpt/wheels/d6/34/36/bbc8a3967e671f19494c7054926dcebee28d2e6f65aab5ab81
+Successfully built vllm-plugin-fl
+Installing collected packages: vllm-plugin-fl
+Successfully installed vllm-plugin-fl-0.0.0
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+rootdir: /tmp/plugin
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 174 items
+
+tests/unit_tests/distributed/test_metax_communicator.py ................ [  9%]
+.............                                                            [ 16%]
+tests/unit_tests/dispatch/test_metax_remote_queue_shutdown.py .......... [ 22%]
+..                                                                       [ 23%]
+tests/unit_tests/worker/test_metax_v2_contracts.py ..................... [ 35%]
+.....                                                                    [ 38%]
+tests/unit_tests/test_runner_selection.py .............................. [ 55%]
+........................................................................ [ 97%]
+.....                                                                    [100%]
+
+============================= 174 passed in 11.93s =============================

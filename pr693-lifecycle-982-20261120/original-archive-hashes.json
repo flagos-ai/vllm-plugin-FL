@@ -1,0 +1,101 @@
+{
+  "boundary": "Original archives remain private and unchanged; this file preserves exact original archive hashes without publishing raw archives.",
+  "archives": [
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_A",
+      "archive_name": "official-81-35b-graph-evidence-NODE_A.tar.gz",
+      "original_sha256": "1fb4e2b8fe405a968b82316e7cea8f1fc968e56c2bb072f40b2dd7d3030d7d42",
+      "bytes": 172297,
+      "published": false
+    },
+    {
+      "phase": "official-81-35b-graph",
+      "node": "NODE_B",
+      "archive_name": "official-81-35b-graph-evidence-NODE_B.tar.gz",
+      "original_sha256": "dc804c3818557432919445b8b7642e921d2acf2ae6110bd397e1cf1935badf64",
+      "bytes": 118601,
+      "published": false
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_A",
+      "archive_name": "official-81-35b-eager-evidence-NODE_A.tar.gz",
+      "original_sha256": "cee5739802c588f023d8e48692f728755abcf9520eed68b7de229c27e3f01d3a",
+      "bytes": 69237,
+      "published": false
+    },
+    {
+      "phase": "official-81-35b-eager",
+      "node": "NODE_B",
+      "archive_name": "official-81-35b-eager-evidence-NODE_B.tar.gz",
+      "original_sha256": "e486a4189ffd1b2f66ca76dd1d51c8060fdbecf46120d4b72f997e252c50124e",
+      "bytes": 53167,
+      "published": false
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_A",
+      "archive_name": "official-81-27b-graph-evidence-NODE_A.tar.gz",
+      "original_sha256": "836819646b0e7026d400e12ac99b21d795a276fe1fa6fd53d3feb2ae04e8b8a2",
+      "bytes": 238219,
+      "published": false
+    },
+    {
+      "phase": "official-81-27b-graph",
+      "node": "NODE_B",
+      "archive_name": "official-81-27b-graph-evidence-NODE_B.tar.gz",
+      "original_sha256": "557879b4a662370e1f7b68f4e92d5b358252a1d9f6495367d5ff1974cec81f1e",
+      "bytes": 166671,
+      "published": false
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_A",
+      "archive_name": "official-81-27b-eager-evidence-NODE_A.tar.gz",
+      "original_sha256": "42e33e73d8868e505ef8130253d05653192bdaa05272023a3f122ce6fe82f16c",
+      "bytes": 60288,
+      "published": false
+    },
+    {
+      "phase": "official-81-27b-eager",
+      "node": "NODE_B",
+      "archive_name": "official-81-27b-eager-evidence-NODE_B.tar.gz",
+      "original_sha256": "f33a4de0e07a576fad9b6afea1d2601bb8a2de4e3d5e0619be23cea0cf9c3c10",
+      "bytes": 44819,
+      "published": false
+    },
+    {
+      "phase": "official-982-35b-graph",
+      "node": "NODE_A",
+      "archive_name": "official-982-35b-graph-evidence-NODE_A.tar.gz",
+      "original_sha256": "72c8ecd42a9a289f84b1c19003dafd61fc6c80dee7962e53846ffc6b8a20f815",
+      "bytes": 171702,
+      "published": false
+    },
+    {
+      "phase": "official-982-35b-graph",
+      "node": "NODE_B",
+      "archive_name": "official-982-35b-graph-evidence-NODE_B.tar.gz",
+      "original_sha256": "bd9f1749098cc0d633682db603369ff05e35d41ccf84b6d494c2e3d9745585ca",
+      "bytes": 118072,
+      "published": false
+    },
+    {
+      "phase": "probe-graph-lifecycle-destroy-r3",
+      "node": "NODE_B",
+      "archive_name": "probe-graph-lifecycle-destroy-r3-evidence-NODE_B.tar.gz",
+      "original_sha256": "d879585614980e399290558d596f45e73e1af75a252376e63986a981b9b0973d",
+      "bytes": 15291,
+      "published": false
+    },
+    {
+      "phase": "probe-graph-lifecycle-clear-r3",
+      "node": "NODE_B",
+      "archive_name": "probe-graph-lifecycle-clear-r3-evidence-NODE_B.tar.gz",
+      "original_sha256": "4e4615ae4777f38bfbac78c85a49c9ba8711c165a05f61c70000812a31d499dc",
+      "bytes": 14045,
+      "published": false
+    }
+  ]
+}

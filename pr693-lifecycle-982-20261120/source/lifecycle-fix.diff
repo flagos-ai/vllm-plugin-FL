@@ -1,0 +1,29 @@
+diff --git a/vllm_fl/distributed/metax_communicator.py b/vllm_fl/distributed/metax_communicator.py
+index efa5be2d..67c661d4 100644
+--- a/vllm_fl/distributed/metax_communicator.py
++++ b/vllm_fl/distributed/metax_communicator.py
+@@ -22,6 +22,24 @@ class MetaxCommunicatorFL(CudaFlagcxCommunicatorFL):
+     # not re-enter all_reduce, so this is not a per-replay completion tracker.
+     _flagcx_capture_seen = False
+ 
++    def destroy(self):
++        native = self.pyflagcx_comm
++        if self._flagcx_capture_seen and native is not None and native.comm is not None:
++            from vllm.compilation.breakable_cudagraph import BreakableCUDAGraphWrapper
++            from vllm.compilation.cuda_graph import CUDAGraphWrapper
++
++            # V2's compiled cache can retain graph wrappers after runner shutdown.
++            # Release their MCCL callbacks before closing the native communicator.
++            torch.cuda.synchronize(self.device)
++            CUDAGraphWrapper.clear_all_graphs()
++            BreakableCUDAGraphWrapper.clear_all_graphs()
++            handle = native.comm
++            native.comm = None
++            native.available = False
++            native.disabled = True
++            native.flagcx.flagcxCommDestroy(handle)
++        super().destroy()
++
+     def _uses_real_flagcx(self, input_: torch.Tensor) -> bool:
+         return (
+             not torch.compiler.is_compiling()

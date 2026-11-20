@@ -1,0 +1,41 @@
+{
+  "source_head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "snapshot_at_utc": "2026-11-20T05:55:15.648922+00:00",
+  "completed_current_head": [
+    {
+      "case": "35b_a3b_tp4_graph",
+      "physical_nodes": 2,
+      "requests": "26/26",
+      "checks": "260/260",
+      "natural_cleanup_both_nodes": true
+    }
+  ],
+  "pending_current_head": [
+    {
+      "case": "35b_a3b_tp4_eager",
+      "scope": "two physical nodes TP4,2GPUs/node",
+      "status": "awaiting safe hardware availability"
+    },
+    {
+      "case": "27b_tp4_graph",
+      "scope": "two physical nodes TP4,2GPUs/node",
+      "status": "awaiting safe hardware availability"
+    },
+    {
+      "case": "27b_tp4_eager",
+      "scope": "two physical nodes TP4,2GPUs/node",
+      "status": "awaiting safe hardware availability"
+    },
+    {
+      "case": "27b_tp4_graph",
+      "scope": "NODE_B single physical node TP4; independent empty cache; original text single+concurrent8 only9requests/90checks; original60s shutdown grace with native witness",
+      "status": "required matching original-failure regression pending; run after all four canonical current-head groups complete"
+    }
+  ],
+  "boundary": "Head81 cached matrix and microR3 do not replace current-head canonical reruns or the fresh-cache real-model regression. This snapshot is not a merge-readiness approval.",
+  "complete_ci": {
+    "url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822",
+    "status": "incomplete; hardware Gate results and a peer-backend preflight-timeout retry are still pending",
+    "full_current_head_ci_pass_claimed": false
+  }
+}

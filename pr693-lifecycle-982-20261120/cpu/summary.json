@@ -1,0 +1,20 @@
+{
+  "source_tree": "18ef555579c9ee8911255f2fa3cbc5cf1b1be366",
+  "passed": 174,
+  "skipped": 0,
+  "elapsed_seconds": 11.93,
+  "environment": "Fixed qualified MetaX image, CPU-only isolated container; no GPU access for this test run.",
+  "test_files": [
+    "tests/unit_tests/distributed/test_metax_communicator.py",
+    "tests/unit_tests/dispatch/test_metax_remote_queue_shutdown.py",
+    "tests/unit_tests/worker/test_metax_v2_contracts.py",
+    "tests/unit_tests/test_runner_selection.py"
+  ],
+  "result_line": "174 passed in 11.93s",
+  "cpu_source_archive": {
+    "source_id": "merge77-candidate.tar",
+    "sha256": "2d6c934ffa0b6511373b653598c4930c97e470183a18b42dba086a19f97000d4",
+    "all_archive_blob_hashes_match_git_tree": "18ef555579c9ee8911255f2fa3cbc5cf1b1be366",
+    "verified_files": 827
+  }
+}

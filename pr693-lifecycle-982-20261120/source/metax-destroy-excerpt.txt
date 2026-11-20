@@ -1,0 +1,18 @@
+    def destroy(self):
+        native = self.pyflagcx_comm
+        if self._flagcx_capture_seen and native is not None and native.comm is not None:
+            from vllm.compilation.breakable_cudagraph import BreakableCUDAGraphWrapper
+            from vllm.compilation.cuda_graph import CUDAGraphWrapper
+
+            # V2's compiled cache can retain graph wrappers after runner shutdown.
+            # Release their MCCL callbacks before closing the native communicator.
+            torch.cuda.synchronize(self.device)
+            CUDAGraphWrapper.clear_all_graphs()
+            BreakableCUDAGraphWrapper.clear_all_graphs()
+            handle = native.comm
+            native.comm = None
+            native.available = False
+            native.disabled = True
+            native.flagcx.flagcxCommDestroy(handle)
+        super().destroy()
+
