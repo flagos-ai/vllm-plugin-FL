@@ -1,0 +1,116 @@
+[
+  {
+    "main_head": "fc0ec83b8478231436bf293219ca9d90fe52e33b",
+    "workflow_run_url": "https://github.com/flagos-ai/FlagTree/actions/runs/44718665503",
+    "raw_log_sha256": "bbce9a980f78e0faee49828208d0e5f720fa62ae9ca4d82487176b52c22c082e",
+    "workflow_conclusion": "success",
+    "actual_test_counts": {
+      "passed": 576,
+      "failed": 6,
+      "skipped": 18,
+      "total": 600
+    },
+    "compare_verdict": "REJECT",
+    "failed_case_names": [
+      "test_mm[False-dtype2-1-1-32]",
+      "test_mm_broadcast_stride_zero[dtype2]",
+      "test_mm_out_vllm_tma_column_major_weight",
+      "test_mm_self_transpose[dtype2-1-32]",
+      "test_mm_out_self_transpose[dtype2-1-32]",
+      "test_swiglu[dtype2-shape0]"
+    ],
+    "selected_original_summary_lines": [
+      "[INFO] Total test cases: 600",
+      "[INFO] Skipped operators: 1",
+      "[INFO] Skipped test patterns: 7",
+      "[INFO] Skipped test files: 1",
+      "[WARN]   - mm: 4 failed, 0 errors",
+      "[WARN]       - test_mm[False-dtype2-1-1-32]",
+      "[WARN]       - test_mm_broadcast_stride_zero[dtype2]",
+      "[WARN]       - test_mm_out_vllm_tma_column_major_weight",
+      "[WARN]       - test_mm_self_transpose[dtype2-1-32]",
+      "[WARN]   - mm_out: 1 failed, 0 errors",
+      "[WARN]       - test_mm_out_self_transpose[dtype2-1-32]",
+      "[WARN]   - swiglu: 1 failed, 0 errors",
+      "[WARN]       - test_swiglu[dtype2-shape0]",
+      "[INFO] baseline-fc0ec83b8478-nvidia kind=baseline status=regression passed=576/600 pass_rate_run=0.989691 verdict=REJECT"
+    ],
+    "traceback_or_dependency_identity_available": false
+  },
+  {
+    "main_head": "343d64c05cdf45556e182d269690a98806f2e4b4",
+    "workflow_run_url": "https://github.com/flagos-ai/FlagTree/actions/runs/44741404769",
+    "raw_log_sha256": "8c4d92daca671d5ef61b3d17c3acecd27c917647dc4f91a2f0fb3093e22bdcd9",
+    "workflow_conclusion": "success",
+    "actual_test_counts": {
+      "passed": 576,
+      "failed": 6,
+      "skipped": 18,
+      "total": 600
+    },
+    "compare_verdict": "REJECT",
+    "failed_case_names": [
+      "test_mm[False-dtype2-1-1-32]",
+      "test_mm_broadcast_stride_zero[dtype2]",
+      "test_mm_out_vllm_tma_column_major_weight",
+      "test_mm_self_transpose[dtype2-1-32]",
+      "test_mm_out_self_transpose[dtype2-1-32]",
+      "test_swiglu[dtype2-shape0]"
+    ],
+    "selected_original_summary_lines": [
+      "[INFO] Total test cases: 600",
+      "[INFO] Skipped operators: 1",
+      "[INFO] Skipped test patterns: 7",
+      "[INFO] Skipped test files: 1",
+      "[WARN]   - mm: 4 failed, 0 errors",
+      "[WARN]       - test_mm[False-dtype2-1-1-32]",
+      "[WARN]       - test_mm_broadcast_stride_zero[dtype2]",
+      "[WARN]       - test_mm_out_vllm_tma_column_major_weight",
+      "[WARN]       - test_mm_self_transpose[dtype2-1-32]",
+      "[WARN]   - mm_out: 1 failed, 0 errors",
+      "[WARN]       - test_mm_out_self_transpose[dtype2-1-32]",
+      "[WARN]   - swiglu: 1 failed, 0 errors",
+      "[WARN]       - test_swiglu[dtype2-shape0]",
+      "[INFO] baseline-343d64c05cdf-nvidia kind=baseline status=regression passed=576/600 pass_rate_run=0.989691 verdict=REJECT"
+    ],
+    "traceback_or_dependency_identity_available": false
+  },
+  {
+    "main_head": "9a782d9f49532da4737d1f2d332ee6b93d822a31",
+    "workflow_run_url": "https://github.com/flagos-ai/FlagTree/actions/runs/44741656486",
+    "raw_log_sha256": "75199cad8bc521f17217492d2e45d071f1fa55046ca36d4eebd4ef495d273daa",
+    "workflow_conclusion": "success",
+    "actual_test_counts": {
+      "passed": 576,
+      "failed": 6,
+      "skipped": 18,
+      "total": 600
+    },
+    "compare_verdict": "REJECT",
+    "failed_case_names": [
+      "test_mm[False-dtype2-1-1-32]",
+      "test_mm_broadcast_stride_zero[dtype2]",
+      "test_mm_out_vllm_tma_column_major_weight",
+      "test_mm_self_transpose[dtype2-1-32]",
+      "test_mm_out_self_transpose[dtype2-1-32]",
+      "test_swiglu[dtype2-shape0]"
+    ],
+    "selected_original_summary_lines": [
+      "[INFO] Total test cases: 600",
+      "[INFO] Skipped operators: 1",
+      "[INFO] Skipped test patterns: 7",
+      "[INFO] Skipped test files: 1",
+      "[WARN]   - mm: 4 failed, 0 errors",
+      "[WARN]       - test_mm[False-dtype2-1-1-32]",
+      "[WARN]       - test_mm_broadcast_stride_zero[dtype2]",
+      "[WARN]       - test_mm_out_vllm_tma_column_major_weight",
+      "[WARN]       - test_mm_self_transpose[dtype2-1-32]",
+      "[WARN]   - mm_out: 1 failed, 0 errors",
+      "[WARN]       - test_mm_out_self_transpose[dtype2-1-32]",
+      "[WARN]   - swiglu: 1 failed, 0 errors",
+      "[WARN]       - test_swiglu[dtype2-shape0]",
+      "[INFO] baseline-9a782d9f4953-nvidia kind=baseline status=regression passed=576/600 pass_rate_run=0.989691 verdict=REJECT"
+    ],
+    "traceback_or_dependency_identity_available": false
+  }
+]

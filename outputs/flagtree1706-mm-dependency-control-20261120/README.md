@@ -1,5 +1,19 @@
 # FlagTree #1706: local MM dependency control
 
+The dependency-complete local control now passes all original five cases on
+both compilers, using the exact first-attempt inputs/RNG and unchanged oracle.
+Real GEMV/TMA kernels and compiler artifacts are recorded in
+`official-extras-paired-five-pass.json`. The task ended naturally in53.944s;
+source, owned-container removal, device idle/PID0 and both released locks were
+verified. The original dependency-blocked attempt below remains a failure.
+
+Three independent main-branch baseline runs (fc0ec83b,343d64c0,9a782d9f)
+reproduce the same five MM regressions:576pass/6fail/18skip out of600, versus
+the stored best581pass/1fail/18skip. See `main-baseline-reproductions.json`.
+Those workflows report success while their comparison records REJECT; this is
+not full-Gate acceptance. Their logs do not expose tracebacks or dependency
+identity, so the local missing-extra cause is not proven to be the CI cause.
+
 The NVIDIA CI comparison reported five new MM/MM-out failures against a stored
 baseline (576 pass, six fail, 18 skip). Its log has no tracebacks or runtime core
 identity. This local experiment does not establish that CI has the same cause.

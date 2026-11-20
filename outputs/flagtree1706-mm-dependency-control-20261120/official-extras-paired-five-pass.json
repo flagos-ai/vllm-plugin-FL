@@ -1,0 +1,3554 @@
+{
+  "root_independent_status": "FOCUSED_5_BOTH_COMPILERS_PASS",
+  "archive_sha256": "930dc16f01d0c769d350dab4ec549417f1cc3b761b9c11af87f76ae1af33ef9f",
+  "all_archive_files_sha_verified": 111,
+  "same_original_first_attempt_inputs_and_rng": true,
+  "native_oracle_outputs_equal_across_compilers": true,
+  "variant_results": {
+    "fc0": {
+      "compiler_source": "fc0ec83b8478231436bf293219ca9d90fe52e33b",
+      "core_sha256": "8a3d05127b3b29d66effdf54692b57610e20b5b397ac60e3d0bbbcf1fc767433",
+      "source": {
+        "source_commit": "a7620cc191a0b42e040194622c5758b22a7a25dc",
+        "blobs": 4780,
+        "original_source_exact_except_explicit_CI_conftest_overlay": true,
+        "conftest_sha256": "c10ce2bcdf74f09b21d82709f5f51328e1e541e29d30566a5d4b61a5b040985e"
+      },
+      "extra_deps": {
+        "receipt_sha256": "c31458926289041b3070c3a5c910ccd1da3ea55116e011b1531bb62f45a95da5",
+        "files_verified": 6112,
+        "imports": {
+          "numpy": {
+            "path": "/extra-deps/numpy/__init__.py",
+            "version": "1.26.4"
+          },
+          "scipy": {
+            "path": "/extra-deps/scipy/__init__.py",
+            "version": "1.17.1"
+          },
+          "sklearn": {
+            "path": "/extra-deps/sklearn/__init__.py",
+            "version": "1.9.1"
+          },
+          "xgboost": {
+            "path": "/extra-deps/xgboost/__init__.py",
+            "version": "3.3.0"
+          },
+          "yaml": {
+            "path": "/extra-deps/yaml/__init__.py",
+            "version": "6.0.3"
+          }
+        },
+        "known_untouched_image_metadata_conflicts": [
+          {
+            "package": "cupy-cuda13x",
+            "version": "14.2.0",
+            "requires_numpy": ">=2.0,<2.6"
+          },
+          {
+            "package": "ml-dtypes",
+            "version": "0.6.0",
+            "requires_numpy": ">=2.0.0"
+          },
+          {
+            "package": "opencv-python-headless",
+            "version": "5.0.0.93",
+            "requires_numpy": ">=2"
+          }
+        ],
+        "whole_image_dependency_consistency_claimed": false
+      },
+      "actual_mapped_extra_prefix_libraries": [
+        {
+          "path": "/extra-deps/numpy/core/_multiarray_tests.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0b2cbb7419ffc2f712987aabaf518a3b1d9de8406093f79dcb1d712a34ab6057"
+        },
+        {
+          "path": "/extra-deps/numpy/core/_multiarray_umath.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "6a650810a8735cbdb988f74729973740a337645dd1585fef696e73e2dbc65beb"
+        },
+        {
+          "path": "/extra-deps/numpy/fft/_pocketfft_internal.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "38d22249f351b1d50e9269c596889ffc638639ebc150c1e75fc9f55a0f331ab5"
+        },
+        {
+          "path": "/extra-deps/numpy/linalg/_umath_linalg.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8822e772d743d405983f1b9c6b34b704dd297780890dc245454f1081adf50a4c"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_bounded_integers.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b39f7e2b4ccfd6904ae60fe1517f6bda8be7835b5bf69d54dec0d693c5e8b793"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_common.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "abd88ca8f447f22c4f51f226734d34732966bae61edd2aa25f74bfec954bee28"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_generator.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5b3ef2ac8b78aa83bc869b70e30e2a70fbd3ab373c5253ed6eba9982a55fd7e2"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_mt19937.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "3619f7f91b9ee7197c2902c0e197e69b2e5dd45fb11cd22e572e9b0b886514a9"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_pcg64.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "577c1468f4fb40bb23184343e2c1b645a17d1d493641ea92c052f286dc6eb556"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_philox.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2c9b1fe53ef119e3ed2acb73c802cf2996502b0fd51d4926d4047576cea57514"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_sfc64.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5883302ce33afd54db6631adbf5e000297b8eb42c0ec894bbec318b5e6b14268"
+        },
+        {
+          "path": "/extra-deps/numpy/random/bit_generator.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "87c5c730887943c603b16c53cf213398336ee410ef46595518093977afd5b0cb"
+        },
+        {
+          "path": "/extra-deps/numpy/random/mtrand.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8d866b4b6107401ab9546044564208e0a5899c3903da09277d1c4875d98bcf0f"
+        },
+        {
+          "path": "/extra-deps/numpy.libs/libgfortran-040039e1.so.5.0.0",
+          "sha256": "14afb3129b1a8b50bc40a3b0820c7f1152ea9bc10121aab152943f7057472886"
+        },
+        {
+          "path": "/extra-deps/numpy.libs/libopenblas64_p-r0-0cf96a72.3.23.dev.so",
+          "sha256": "9254d0854dd7615e11de28d771ae408878ca8123a7ac204f21e4cc7a376cc2e5"
+        },
+        {
+          "path": "/extra-deps/numpy.libs/libquadmath-96973f99.so.0.0.0",
+          "sha256": "934c22ded0e7d169c4d4678876c96051adf3d94545da962f60b41659b075da3b"
+        },
+        {
+          "path": "/extra-deps/nvidia/nccl/lib/libnccl.so.2",
+          "sha256": "f90198d76c8dfba9b4764c29f32fae83be6a396a357c1e2ccb10a7f68ff6df0d"
+        },
+        {
+          "path": "/extra-deps/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+          "sha256": "a43904e4fa297301d4640dc1bb3c8a3480b406f99e498eba9b1914b68aab604a"
+        },
+        {
+          "path": "/extra-deps/scipy/_cyutility.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b2db4000073aadfe6ba6e02dac053872c069f1e9df6e36105ef2f1a9de81311f"
+        },
+        {
+          "path": "/extra-deps/scipy/_lib/_ccallback_c.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "bbf5afe1395eb9a1a580d25c6b2af38e709070aa2661b525578dba12cbd0f6bb"
+        },
+        {
+          "path": "/extra-deps/scipy/_lib/_uarray/_uarray.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "dcea488a187210d41a96c4283fd677d5c2a602e5b29c66bd43bca288a84755d2"
+        },
+        {
+          "path": "/extra-deps/scipy/_lib/messagestream.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f27e436e615d7ba8d3b6f15768a92023eb2f77510bb791c901c835a22c8a1cf3"
+        },
+        {
+          "path": "/extra-deps/scipy/fft/_pocketfft/pypocketfft.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "9083bc6446e9408c6b5b90c8923e230e36ed80945854387b70249c6b8a06c138"
+        },
+        {
+          "path": "/extra-deps/scipy/integrate/_dop.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0c4809a8ead8fabb3c6f15b361f6c1ff2d139b54184b7b233b61cac17e8c2f9c"
+        },
+        {
+          "path": "/extra-deps/scipy/integrate/_odepack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "54238b21b48d4fa2fbd1cfc6cff601bb6fe4cba4c4579615c366e17205eeec83"
+        },
+        {
+          "path": "/extra-deps/scipy/integrate/_quadpack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f0d7d5e5f18f87fb68c9626c1ecc64194c24138f54b3b5729a7c88fd88a99c7b"
+        },
+        {
+          "path": "/extra-deps/scipy/integrate/_vode.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "27bf06e837caa49587df8ea76c3a10ed4f839c0e50789c7c05a4077be9bbf909"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_dfitpack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "886e5924b50b6c6576bfb3bf72e50ccd9d1373e828cccc13125d46d138b3b006"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_dierckx.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "25dd630feb4699908030ffa11b7ed4dfc49e70ef2cc5633c5d8ce4f34f5ed3f8"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_fitpack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7e6d72b4f94406ed1192a4f848c03b82c90ec4d3faaca88f1a41b6c956069afe"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_interpnd.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "ddd01fa3670762b4bb88030743c208ab0ce145785d6739c84a6a71eeefd4984a"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_ppoly.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "98b0ec9a4538125faa9bc0d88bd0d167862f25c9fbfdca0418a990cfc6fe377a"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_rbfinterp_pythran.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7701cbe3eb67a6711e0c865fbdd9c5d2f65b1ce02c147b5c42cde910dc14d131"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_rgi_cython.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "46e19c31db76e015664450388719a3c0a31e7a3c953c57bcae07d846c08bf077"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_batched_linalg.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "e5c3c7a8c6ef685701a32557c67a582cccdd8e31ff7225c7caba64d8b4278c37"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_cythonized_array_utils.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "e7a1dc128b814415ec9a40a373a3f983b9e54629a8489ae241c8f4742c52ead8"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_decomp_interpolative.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2615a1b4ef47cf06f297f86277f649d367bc0e3b61f388a13a190e5fe9b9cef9"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_decomp_lu_cython.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "3d2b7f91bed2bb372bf3b4f28b1e417b6abf982dc659fb9aac5745ac40ea1714"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_decomp_update.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2fca0fcb78e10974bf87322ff61db810308b5cde14aebe46873d901eb3a8af98"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_fblas.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "820f853f2ad2c33df694bebdcb09731e12b23dbbfb3c908f6f19f264c445baf2"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_flapack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "bcf38228b3b47caa3143836137d8176fc56a63f6758964804d388c7523c76e3a"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_linalg_pythran.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "271c437d186ccacad419a2b59b38d1ac434771207c612e972b9c029aec26b497"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_matfuncs_expm.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "c3b0f51595e73e1ef080b79dd420c7c5643503bc6f5998ef8a788dce37633b6e"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_matfuncs_schur_sqrtm.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "952f3db167ad104b4570458751d653a2fc7b08c9d5a093c237ba7d1ac899e263"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_solve_toeplitz.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "d250989739cbc53d5b64a15be6fe790df9020b0c488625a04859c5ee143a910e"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/cython_blas.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5a770e0b90ad7bd0ec173b3dcdb132e6da8ac24b43a976bcace543a174a412cf"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/cython_lapack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "aaddde84bdcade6f7acddd089b857ac3daa6a17d90c6185bba7ca827375563ea"
+        },
+        {
+          "path": "/extra-deps/scipy/ndimage/_nd_image.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "abdf9d423a9afd4ab528d86ade65b86f363de6327ee5451809670f6dc17566bd"
+        },
+        {
+          "path": "/extra-deps/scipy/ndimage/_ni_label.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "a9fcd790a4dbf594b8eb9c10385f6ab8e2d8c0c6d0c460d733d9b377deee9d90"
+        },
+        {
+          "path": "/extra-deps/scipy/ndimage/_rank_filter_1d.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "798bb6c0103222f9deda578d55a8ce0d127adb7723f90210bc7cc9ab63566726"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_bglu_dense.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f0ef9705e6759083423cca225b81f8361a700b5d76de47aa5f566100d9df0516"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_direct.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "ab0bdce5b22d24a1939156ae630fa1d06c6980d74bb53627d74461f5edc8256c"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_group_columns.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "66ccededa9482eaac2edc1790418b1b87a51c198867fc0f239798f3590f12dc8"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_highspy/_core.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "63338935d7a42ad8c469c967dc2d903524f60304d369693f852eecf1fb7c2e9b"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_highspy/_highs_options.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7db3c3cbb45c278a864fe7734c2b7dd6118f5b2c87ae77cf075205eef8d005b7"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_lbfgsb.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "6c10bdfcdd8f2904af8632b8b2dc5e85d84ff1dd05914f108dd608de27829513"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_lsap.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "85bfe0413de99fc7ee0009cc12b22e4884ea8924638b38f37b4212e841e178fb"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_lsq/givens_elimination.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0aa2c26a4bcd1842f28b347c3bec8c8ee6eb370aae41a888112bea82f6d47eb1"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_minpack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "bc68dd6fc4d48b24b340bb4cb42e4bd2f3e41171a7e43be46fa7e6e2d17f57f9"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_moduleTNC.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "cdb50918946a744631ece8c4c89a9f318cfaec418014f033f1152ea1378c1178"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_pava_pybind.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8bb3d80c1757849e4c6425b34bab7916316446176dc894fb458466e6de9c8cbf"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_slsqplib.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5b4ccb5ffcbd92b70b1e04ba13464ee5b9b08c6ca4b56f675c0d68996f736556"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_trlib/_trlib.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0ac494421abdf683e726edcbc9c78baf910f8e0f409f1965f1c377ea04616016"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_zeros.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "a3ad9ddbc1bd584848f32d27b149d15d9d99ca78a2fe4c6cacc50db98e17c4dd"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/_csparsetools.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8e06040987bc32ff4e7a7d3df94b827386ca5591d18b907666528f3f7cfbd598"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/_sparsetools.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "439c7c1ed1729d81bf4a6d01647ff6e9f1965dbff2505848e36247aabec46131"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_flow.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "9c4cb80d9aaf224e2b7fa2e51e808485405442dfdb6296b6c383a143b482f8e0"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_matching.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "6fb1a7d3b01dcd19218ecbcc764090a39b59080b9f1e57bc1ac672fdec36231c"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_min_spanning_tree.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "549b0484c733be4d40bab991ca5199497b7428e90d08f0642271ca09ad9e6266"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_reordering.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "e5e780148d63480d969eb452d7136540e8c8d82522a8e50d36df14281ede6ab3"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_shortest_path.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "014ebcc480fb0c30fc7f0d6b56db9539d1d40c9f16ecf1f60c26ec1c532fec97"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_tools.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "51f071cab0235313415c0d1bf0f959ccccca3ce4f63bd6c05b0d1e29e29f38db"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_traversal.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "3bba7379d246041c77fc7ed9e41e68f450c6d44d4150b1edf68689f7ac09a253"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/linalg/_dsolve/_superlu.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8bc863fc723ee3bc4d603bf2cdf540fa728ce5df35302686588f0ee926dae261"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/linalg/_eigen/arpack/_arpacklib.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "4a6d9274ff6def64476bc9de26eff1ea5a0967287abe0f7eb7421d37b20981a4"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/linalg/_propack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "d9934cad70b4767edb54160d068c0688bf729b85fbce9cbb07e6cebc154b8a77"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_ckdtree.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "a456943d3d677013b5756c17c51930d608d1fc799161208df9bf3662997a7c92"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_distance_pybind.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "82e41e6e6417536f93adfd96f8c009039ef9fcb408d77651f38f59708c6a3553"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_distance_wrap.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "c15803536f4c2367838ec03a1e723f3e36a24caee858c3e82e025c7485179371"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_hausdorff.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1ade9aa6ee51ad9bc3b62b108f9549ddc15ec1da3e977430433309354926a506"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_qhull.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5df5562a562d36ff0d5e5222b2dce1c34684cf4e81d222d796da8827998f381d"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_voronoi.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "cc40b9dc63b3958d1fea29f75a1b05a99b47659f7820c4fbe8000161f95ee465"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/transform/_rigid_transform_cy.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "e5672286429f426e47f1d9f96c3c95c83d98f160ed7178de46337ee3a67968ba"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/transform/_rotation_cy.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "ab2fc51376cd70db5a23e11981c8cff6fc075d674936a5a1cae90117d00bdd61"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_comb.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1b805327ce1b95ccd11be838e843ae2b12c79ba14ee11b4df816dfcbcf3ff547"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_ellip_harm_2.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b2b9cf339152862237629304193b599f9f614c28430d52b878b204dd42e9fd02"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_gufuncs.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0a508e084ba7e1aeb762e9a33ab2ce97ce542efad685f9e88f9367d16c33fee1"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_specfun.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "c21a2594301a59ac53c640b0a664fb9b13d2abd7864973574b13a9af56fd7785"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_special_ufuncs.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "6dfa3fcabac8d89d15df4f005b667741841dd9054713bbca93267f5249d2fb57"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_ufuncs.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "3013f3e2797e50dd415c37e517ff803d651b88633e797895585bd6dd8a9c5da7"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_ufuncs_cxx.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "00961fe529ec3f656db4c373b37cf3df2ff640c70b463a5458ed3d2bc0c7af6a"
+        },
+        {
+          "path": "/extra-deps/scipy/special/cython_special.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1849d2c6a6b14cd03c992d25bebda90d1b63561d58b0452c4b623a8fbaeedb9c"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_ansari_swilk_statistics.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "944be5c14c5149886e7efe1b7138fdc044398fab90c8405d8c81efea7772cb86"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_biasedurn.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7c86c81dff6d6dbe15671c14b36e5ce54126b211fd5e6ab92aeb8639c5ca202a"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_levy_stable/levyst.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b3b22557da8ce8e5c3b16eab700063b2878ea96789ac311a3969cd043072f88c"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_qmc_cy.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f808de32dbe61aa066d29ada0d8bbc85591ed27702d94916e94065913f274e10"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_qmvnt_cy.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "4c4f8bd43d116226fc878f25bc91189acc45abc63180af93faede7d705869f80"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_rcont/rcont.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "30f1aae6357283adef92ab929b9543663cc6bf1a8b86ab9991a7b21c9db13785"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_sobol.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b2a7d1acba1550a204078aca871fb0ccb50a3a3b086ac26a7c348fc64d676c76"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_stats.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1ab5ade77822e6cb305126cd78848b4765b0dab771de978df9cb61cb9c6bd9d4"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_stats_pythran.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8a9f7ae908388f2f56726945993c602dcb7485f2f2b1748045189dc9aa6de498"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libgfortran-040039e1-0352e75f.so.5.0.0",
+          "sha256": "c6090048eccc763522c12ef016f81da6b627cb3a044f55cf0479a839c41c0980"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libgfortran-8f1e9814.so.5.0.0",
+          "sha256": "a95cc4ac4afad889f2d83088f46b5e6fa6cd5efd729db887e1e639147ec55b73"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libquadmath-828275a7.so.0.0.0",
+          "sha256": "71bdc2ec57ab2fc939360597968f73230426b1c6764048e62a2cb6c8d8c3a1fd"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libquadmath-96973f99-934c22de.so.0.0.0",
+          "sha256": "6ed5137f412781ad7863439fb543613f620b43c32b63292a0029246162f5bbc6"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+          "sha256": "8fb864c29cac4b25f6e2c139491ea96f2724dde42d51394f84e9c4a622e34790"
+        },
+        {
+          "path": "/extra-deps/sklearn/__check_build/_check_build.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "681b31a45b5a7d026ae78e5fad03a73453650476e4feee23da53cd6703f0d842"
+        },
+        {
+          "path": "/extra-deps/sklearn/_cyutility.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2473d93f951685d446b9fdd82f06c9cd4a602d564dd3ecffc3601c648a07bf83"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_dist_metrics.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7a2dbe3973a22eba2e32c472d2d1ddc15ac23b125b9393cbb834ffb16040d2bb"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_argkmin.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "761e334251e271794691a679a27262f7c65b03a8c04bba78fc1d534ea9200e38"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_argkmin_classmode.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2726f1377a06a3dc4b7144c1da245cfca6e9d882bccfbdfc8575039e84df454b"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_base.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2d0ab47afbf8bb241d72e9d4f17c9247b31578124268fae56eb35643b3d26e06"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_datasets_pair.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1f5004ca5faba33c4d2f3da7e1b3b5d7f635619f2e5f56c64c11f2642c2c8428"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_middle_term_computer.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "876c7eef359b7da4f634f467d78d519cc7a1402a71bb7c468eea2243a2dafc4f"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_radius_neighbors.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "cb11929260271363321badc04c6fa6a7bdd28b82c7ce1322b50c34b1ff876ed8"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_radius_neighbors_classmode.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5ba7c62cf6e201d367134aa268f38c5992f6aa46e163842edee11be5d8e30365"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_fast.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "487c0dc7b0c40ceff49d37a388646936b98a1596ec262644dd82928513f5b952"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/cluster/_expected_mutual_info_fast.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "aa31f3e65b0ecbe6ad2b6020861fca200e326330104b4ef1e50abc7ed808372e"
+        },
+        {
+          "path": "/extra-deps/sklearn/preprocessing/_csr_polynomial_expansion.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2ed3c5b9ccd2ac81b020fe6c75816043e2d530cc3a3b34ae7a3abce5ed5e798f"
+        },
+        {
+          "path": "/extra-deps/sklearn/preprocessing/_target_encoder_fast.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "14eef2690cc9fdab3cf08f7d5e2e36e91b2c854ac69ab53e8f5d4e1971de3940"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_cython_blas.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "282756467afb7abaeefc01950805a9ecbcb4333c773b1d8d5958366dfc4b78ec"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_heap.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "abfec7ec29a620ac8ddec7425ccc0f30111f482ffc0ec3e827f2a0ab3abeb722"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_isfinite.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "44060c2b6b2d3a2f1cd9a587b6c7a838a52539e6c901155fe8bacbf8f149dc7b"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_openmp_helpers.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "05bd1a4de7d6bb345c8e80227748fb4cb5b27a7499a140a983a7b17119899a84"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_random.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "cf3f61e573f4a613a38e87b664e25444bb99c10ba9f8cce275d0323e0c27e917"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_sorting.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f5f36335238e18e813ae1f577ea5f9be81662872f3b1323be0452fb4da78a545"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_vector_sentinel.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "384daf0c3724aaaf9c08d875ed4fd021e3f37d28938a290d6ec6a1e355fbb474"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/murmurhash.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2d9284f556f0da9ebe98d08ededbff2f2c1c65d18e8b943c2039b40c5802dcac"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/sparsefuncs_fast.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "ab34e6f235e78f2693b8f8cb3915ad502740d069538ae7158c9bcf675749d6d4"
+        },
+        {
+          "path": "/extra-deps/xgboost/lib/libxgboost.so",
+          "sha256": "528a3f97676e67977c29483868a3be5b4dd9da2a8766bdb7145f24adb06764a2"
+        },
+        {
+          "path": "/extra-deps/yaml/_yaml.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "957a099a4521c1f7669306fb6f79ca63fa4b9a0b4c463f7cac833a65a5c5c0cb"
+        }
+      ],
+      "conflicting_optional_modules_already_loaded": {
+        "cupy": null,
+        "ml_dtypes": null,
+        "cv2": null
+      },
+      "actual_cases": {
+        "tests/test_mm.py::test_mm[False-dtype2-1-1-32]": {
+          "index": 0,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [
+                1,
+                32
+              ],
+              "stride": [
+                32,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "e3f1e9704d4e6fdf7c9154879d52c904d03e456f20f6aa907cf76c7f712e12c9"
+            },
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "56386830a01dd63721efcf3bc034b484bfc31a35d79828814eed757d12a39a75"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "413a317253b3cbe3c335732f9af4e12c3a27e36a84e1277e0edc27221b6a1e56"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "f2b108eb8906dd883e39c3064163f7198334bb3343d5cacb6e6420ac4fb6f761"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-0-launch-0.ttir",
+                  "bytes": 9022,
+                  "sha256": "9a3f651f31c6d3ec9b7f3687422ed48bc35a74bc1bf39548e5a129fec2fac497"
+                },
+                "ttgir": {
+                  "path": "case-0-launch-0.ttgir",
+                  "bytes": 11802,
+                  "sha256": "48db81cfe0130e978fbcfdefc9265f5614ff7c1f52a1abe67b08a0b167079307"
+                },
+                "llir": {
+                  "path": "case-0-launch-0.llir",
+                  "bytes": 39578,
+                  "sha256": "2ad497656e1ccf243bfa587a99d42ffe1314de01688c1538d78258906f1da083"
+                },
+                "ptx": {
+                  "path": "case-0-launch-0.ptx",
+                  "bytes": 30243,
+                  "sha256": "288e444f72011d01250873af4afec19172832debffba60040885c412cd1c2dc1"
+                },
+                "cubin": {
+                  "path": "case-0-launch-0.cubin",
+                  "bytes": 28824,
+                  "sha256": "622f01d75d9d6782cdb5bcb79c56ec787585638292288ef3517449de55984fc5"
+                }
+              },
+              "name": "gemv_kernel",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-fc0/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "9d0e0da2b3baca779bec821ce8411eb695fbc845f713c80240bbc279565f8194",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "gemv_kernel",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 512,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 4,
+                "num_stages": 3,
+                "num_ctas": 1,
+                "BLOCK_M": 32,
+                "BLOCK_K": 256,
+                "IS_FP64": false
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "871dcb8019321e9628fd9688f261df41d70174f6060ddcede4bcad8c20c691d5"
+            },
+            "reference_upcast": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 8,
+              "sha256": "5eee042cd3631f62100d3a7f64106825da0a1b0966dffe5e5d1de9247d44b57c"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 32,
+              "atol": 0.0001
+            }
+          }
+        },
+        "tests/test_mm.py::test_mm_broadcast_stride_zero[dtype2]": {
+          "index": 1,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [],
+              "stride": [],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "0e78c53b37287378c3b829f4988dd6ea5fb813e7d8016091129feb61759b8e1e"
+            },
+            {
+              "shape": [
+                256,
+                256
+              ],
+              "stride": [
+                256,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 131072,
+              "sha256": "d0dd09718fd351dcffd7dd47ae28526206028603e43fc3180ef137b7cb760662"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "413a317253b3cbe3c335732f9af4e12c3a27e36a84e1277e0edc27221b6a1e56"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "fb92106b84bd735e2b02d88d09fc1f450aea06af484789d49aa8500362103e3d"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-1-launch-0.ttir",
+                  "bytes": 7530,
+                  "sha256": "b7c4e4253ddc1633b4ad6fb02979236df1ce57d86d79e68b0105d83a38b96797"
+                },
+                "ttgir": {
+                  "path": "case-1-launch-0.ttgir",
+                  "bytes": 8468,
+                  "sha256": "8e6dd844db34385eb6167e181a0fc1f7ec00d61a61c3b1060d919299733b6fa1"
+                },
+                "llir": {
+                  "path": "case-1-launch-0.llir",
+                  "bytes": 5785,
+                  "sha256": "60fa7f6811d139f3d18a1eda78e5e22d3dfa14011cda9e245e99c8e9f8ba6f03"
+                },
+                "ptx": {
+                  "path": "case-1-launch-0.ptx",
+                  "bytes": 11749,
+                  "sha256": "ba59764deec25d4ffef210b70cefb179708d81483ccc02916a97526a42fbb9c5"
+                },
+                "cubin": {
+                  "path": "case-1-launch-0.cubin",
+                  "bytes": 8216,
+                  "sha256": "2730858521d876e6920ce0aa924a1df359c7233abd2fae4c104fbff8efc1c93e"
+                }
+              },
+              "name": "_copy_kernel_kernel_rank_2",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-fc0/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "de7da65e14963faded801c70dc514354a5fbf680e276ebb1f04684b0c838082a",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "_copy_kernel_kernel_rank_2",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 0,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {}
+            },
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-1-launch-1.ttir",
+                  "bytes": 7425,
+                  "sha256": "c0283ac341274c5d49d5c5802ede1ae920c606a13057a0b0b48286a357a21cae"
+                },
+                "ttgir": {
+                  "path": "case-1-launch-1.ttgir",
+                  "bytes": 14606,
+                  "sha256": "536eab5dd1fac71216b4332d08109b4f83dc59fbfbbe01f52449aa773cb5338f"
+                },
+                "llir": {
+                  "path": "case-1-launch-1.llir",
+                  "bytes": 35814,
+                  "sha256": "387554bb40daa598a984e2472783cc215347772e616851480a03b64436dbd34c"
+                },
+                "ptx": {
+                  "path": "case-1-launch-1.ptx",
+                  "bytes": 22953,
+                  "sha256": "8a7016bedcd88e04514f99fd5a318b25133ff0513992346f3379511422207591"
+                },
+                "cubin": {
+                  "path": "case-1-launch-1.cubin",
+                  "bytes": 25696,
+                  "sha256": "e931f0d4ff05378c13a69e8f783481a76d42fb9640e21d8b5b097c1caf9f2861"
+                }
+              },
+              "name": "mm_kernel_general_host_tma",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-fc0/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "19c07e0b9bc3c2b7453b4a634fd809f260fd383caa35694688a49a1ab255062a",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "mm_kernel_general_host_tma",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 32784,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [
+                  {
+                    "swizzle": 3,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      32,
+                      64
+                    ],
+                    "fp4_padded": false
+                  },
+                  {
+                    "swizzle": 2,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      128,
+                      32
+                    ],
+                    "fp4_padded": false
+                  },
+                  {
+                    "swizzle": 2,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      32,
+                      32
+                    ],
+                    "fp4_padded": false
+                  }
+                ],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 4,
+                "num_stages": 3,
+                "num_ctas": 1,
+                "BLOCK_M": 32,
+                "BLOCK_N": 32,
+                "BLOCK_K": 128,
+                "GROUP_M": 8
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                128,
+                256
+              ],
+              "stride": [
+                256,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 65536,
+              "sha256": "0fd95da894405e34bb30d58b9faab60ba8a1c0c341e07c212bce8bf8e4adf9e2"
+            },
+            "reference_upcast": {
+              "shape": [
+                128,
+                256
+              ],
+              "stride": [
+                256,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 262144,
+              "sha256": "c18e8ffbcde7dfd611b591f6b04d81b4f87f3a85a3b54cced36bba4657ac95fe"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 256,
+              "atol": 0.0001
+            }
+          }
+        },
+        "tests/test_mm.py::test_mm_out_vllm_tma_column_major_weight": {
+          "index": 2,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [
+                4096,
+                4096
+              ],
+              "stride": [
+                4096,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 33554432,
+              "sha256": "9dd09348375ff03dbb345ddbd476c3c920daae91b1b38214ed385e7b7c877383"
+            },
+            {
+              "shape": [
+                3328,
+                4096
+              ],
+              "stride": [
+                4096,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 27262976,
+              "sha256": "c7edebab4e8da7b63074454e575040ecf8aaacfb7d3dd0c135dd77778f3de6f8"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "9361df19a7dba8ecbaf3672d56a618df1e16228e53c82b716272ba93f2b48b9a"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-2-launch-0.ttir",
+                  "bytes": 7490,
+                  "sha256": "8be93be0b7713d57e32cdaf487e8c336fe382f38af624c518a5b9a41bb6802c7"
+                },
+                "ttgir": {
+                  "path": "case-2-launch-0.ttgir",
+                  "bytes": 16669,
+                  "sha256": "14b4c8fbbedae54ac43d2f7f01d25924b77e50247e043f513184c077226bdebb"
+                },
+                "llir": {
+                  "path": "case-2-launch-0.llir",
+                  "bytes": 37512,
+                  "sha256": "ae81950493f0cf93930adb8c829718c3f4ced37d97983044f19e6ef566f81dc9"
+                },
+                "ptx": {
+                  "path": "case-2-launch-0.ptx",
+                  "bytes": 20758,
+                  "sha256": "670ba6eb914c6409ca544cf95b5ac370310a8fbe5f1bd2dbb698134cef94158c"
+                },
+                "cubin": {
+                  "path": "case-2-launch-0.cubin",
+                  "bytes": 24160,
+                  "sha256": "63ce31130528dd5deca41e03346670d3e75a262696e47670f19a14247cfe64b1"
+                }
+              },
+              "name": "mm_kernel_general_host_tma",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-fc0/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "3b094233ba946515eb94aee0f6937c281fc31cfb7a48fe9b90c8eda6e0f25e79",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "mm_kernel_general_host_tma",
+                "num_ctas": 1,
+                "num_stages": 4,
+                "num_warps": 8,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 65568,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [
+                  {
+                    "swizzle": 3,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      64,
+                      64
+                    ],
+                    "fp4_padded": false
+                  },
+                  {
+                    "swizzle": 3,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      64,
+                      64
+                    ],
+                    "fp4_padded": false
+                  },
+                  {
+                    "swizzle": 3,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      64,
+                      64
+                    ],
+                    "fp4_padded": false
+                  }
+                ],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 8,
+                "num_stages": 4,
+                "num_ctas": 1,
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 64,
+                "GROUP_M": 8
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                4096,
+                3328
+              ],
+              "stride": [
+                3328,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 27262976,
+              "sha256": "590b5277e40486b2ec8c3679bbd7e84026f942e350f55f6327a4d7dc19b96a0b"
+            },
+            "reference_upcast": {
+              "shape": [
+                4096,
+                3328
+              ],
+              "stride": [
+                3328,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 109051904,
+              "sha256": "992ffb04492b7ebc5fc040a4763f829d1618064f8e993ec32f4bec5e63f98d8a"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 4096,
+              "atol": 0.0001
+            }
+          }
+        },
+        "tests/test_mm.py::test_mm_self_transpose[dtype2-1-32]": {
+          "index": 3,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "0ca209ced48518b7f9386b4b40ffdb9e972209cdb41265ff8ce13b4c44a7f2f6"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "e44501a9d134006508a07061e66cd37974284b2d8f90e7da55dfe1bcf60ff6c3"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-3-launch-0.ttir",
+                  "bytes": 8645,
+                  "sha256": "176d22bd0b4f0b9968cf0666dd1d5aee251246a18869ef199747ed48bb0ff0f9"
+                },
+                "ttgir": {
+                  "path": "case-3-launch-0.ttgir",
+                  "bytes": 11409,
+                  "sha256": "ed6500a0666d7776d716194f92c96005dde6c225a398021d54785594e229ea68"
+                },
+                "llir": {
+                  "path": "case-3-launch-0.llir",
+                  "bytes": 87879,
+                  "sha256": "8ca51c32a4eb87222555a3c94da3af98655ba4df9a4ae30bd816f2d7bdb37e5b"
+                },
+                "ptx": {
+                  "path": "case-3-launch-0.ptx",
+                  "bytes": 79348,
+                  "sha256": "0e9efe6eb1c477a0d8292d14090fcd10958f4b162f8d8e0c917a905a6fad0ad9"
+                },
+                "cubin": {
+                  "path": "case-3-launch-0.cubin",
+                  "bytes": 61464,
+                  "sha256": "06004a14a04e3cbe140d3bebbe1991a6a6ef17bdbbb10aeef524b90b14caaf28"
+                }
+              },
+              "name": "gemv_kernel",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-fc0/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "5e781382a9b754ca40929957f76c914ffe69534f02fc6f5075e15dfa652ecea3",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "gemv_kernel",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 512,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 4,
+                "num_stages": 3,
+                "num_ctas": 1,
+                "BLOCK_M": 32,
+                "BLOCK_K": 256,
+                "IS_FP64": false
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "2feb9af9094b3d16c16df94f2a792e68d192c891048ebce6647c8b3c7c864e77"
+            },
+            "reference_upcast": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 8,
+              "sha256": "e30e47d781d870f83fc69a24d11c8c39dc1927ee24c5652e9020a0a4fb9b5c4a"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 32,
+              "atol": 0.0001
+            }
+          }
+        },
+        "tests/test_mm.py::test_mm_out_self_transpose[dtype2-1-32]": {
+          "index": 4,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "0ca209ced48518b7f9386b4b40ffdb9e972209cdb41265ff8ce13b4c44a7f2f6"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "f7548c023e431138b11357593f5cceb9dd35eb0b0a2041f0b1560212eeb6f13e"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-4-launch-0.ttir",
+                  "bytes": 8645,
+                  "sha256": "176d22bd0b4f0b9968cf0666dd1d5aee251246a18869ef199747ed48bb0ff0f9"
+                },
+                "ttgir": {
+                  "path": "case-4-launch-0.ttgir",
+                  "bytes": 11409,
+                  "sha256": "ed6500a0666d7776d716194f92c96005dde6c225a398021d54785594e229ea68"
+                },
+                "llir": {
+                  "path": "case-4-launch-0.llir",
+                  "bytes": 87879,
+                  "sha256": "8ca51c32a4eb87222555a3c94da3af98655ba4df9a4ae30bd816f2d7bdb37e5b"
+                },
+                "ptx": {
+                  "path": "case-4-launch-0.ptx",
+                  "bytes": 79348,
+                  "sha256": "0e9efe6eb1c477a0d8292d14090fcd10958f4b162f8d8e0c917a905a6fad0ad9"
+                },
+                "cubin": {
+                  "path": "case-4-launch-0.cubin",
+                  "bytes": 61464,
+                  "sha256": "06004a14a04e3cbe140d3bebbe1991a6a6ef17bdbbb10aeef524b90b14caaf28"
+                }
+              },
+              "name": "gemv_kernel",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-fc0/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "5e781382a9b754ca40929957f76c914ffe69534f02fc6f5075e15dfa652ecea3",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "gemv_kernel",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 512,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 4,
+                "num_stages": 3,
+                "num_ctas": 1,
+                "BLOCK_M": 32,
+                "BLOCK_K": 256,
+                "IS_FP64": false
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "2feb9af9094b3d16c16df94f2a792e68d192c891048ebce6647c8b3c7c864e77"
+            },
+            "reference_upcast": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 8,
+              "sha256": "e30e47d781d870f83fc69a24d11c8c39dc1927ee24c5652e9020a0a4fb9b5c4a"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 32,
+              "atol": 0.0001
+            }
+          }
+        }
+      }
+    },
+    "6ed3": {
+      "compiler_source": "6ed3ec1307eb37c6f4f00f92c6018b15e1b4f1ee",
+      "core_sha256": "9026d97c42075b0c0125bfbedf6e375a1fa16bc65fa37de26eaae03add51db78",
+      "source": {
+        "source_commit": "a7620cc191a0b42e040194622c5758b22a7a25dc",
+        "blobs": 4780,
+        "original_source_exact_except_explicit_CI_conftest_overlay": true,
+        "conftest_sha256": "c10ce2bcdf74f09b21d82709f5f51328e1e541e29d30566a5d4b61a5b040985e"
+      },
+      "extra_deps": {
+        "receipt_sha256": "c31458926289041b3070c3a5c910ccd1da3ea55116e011b1531bb62f45a95da5",
+        "files_verified": 6112,
+        "imports": {
+          "numpy": {
+            "path": "/extra-deps/numpy/__init__.py",
+            "version": "1.26.4"
+          },
+          "scipy": {
+            "path": "/extra-deps/scipy/__init__.py",
+            "version": "1.17.1"
+          },
+          "sklearn": {
+            "path": "/extra-deps/sklearn/__init__.py",
+            "version": "1.9.1"
+          },
+          "xgboost": {
+            "path": "/extra-deps/xgboost/__init__.py",
+            "version": "3.3.0"
+          },
+          "yaml": {
+            "path": "/extra-deps/yaml/__init__.py",
+            "version": "6.0.3"
+          }
+        },
+        "known_untouched_image_metadata_conflicts": [
+          {
+            "package": "cupy-cuda13x",
+            "version": "14.2.0",
+            "requires_numpy": ">=2.0,<2.6"
+          },
+          {
+            "package": "ml-dtypes",
+            "version": "0.6.0",
+            "requires_numpy": ">=2.0.0"
+          },
+          {
+            "package": "opencv-python-headless",
+            "version": "5.0.0.93",
+            "requires_numpy": ">=2"
+          }
+        ],
+        "whole_image_dependency_consistency_claimed": false
+      },
+      "actual_mapped_extra_prefix_libraries": [
+        {
+          "path": "/extra-deps/numpy/core/_multiarray_tests.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0b2cbb7419ffc2f712987aabaf518a3b1d9de8406093f79dcb1d712a34ab6057"
+        },
+        {
+          "path": "/extra-deps/numpy/core/_multiarray_umath.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "6a650810a8735cbdb988f74729973740a337645dd1585fef696e73e2dbc65beb"
+        },
+        {
+          "path": "/extra-deps/numpy/fft/_pocketfft_internal.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "38d22249f351b1d50e9269c596889ffc638639ebc150c1e75fc9f55a0f331ab5"
+        },
+        {
+          "path": "/extra-deps/numpy/linalg/_umath_linalg.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8822e772d743d405983f1b9c6b34b704dd297780890dc245454f1081adf50a4c"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_bounded_integers.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b39f7e2b4ccfd6904ae60fe1517f6bda8be7835b5bf69d54dec0d693c5e8b793"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_common.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "abd88ca8f447f22c4f51f226734d34732966bae61edd2aa25f74bfec954bee28"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_generator.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5b3ef2ac8b78aa83bc869b70e30e2a70fbd3ab373c5253ed6eba9982a55fd7e2"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_mt19937.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "3619f7f91b9ee7197c2902c0e197e69b2e5dd45fb11cd22e572e9b0b886514a9"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_pcg64.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "577c1468f4fb40bb23184343e2c1b645a17d1d493641ea92c052f286dc6eb556"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_philox.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2c9b1fe53ef119e3ed2acb73c802cf2996502b0fd51d4926d4047576cea57514"
+        },
+        {
+          "path": "/extra-deps/numpy/random/_sfc64.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5883302ce33afd54db6631adbf5e000297b8eb42c0ec894bbec318b5e6b14268"
+        },
+        {
+          "path": "/extra-deps/numpy/random/bit_generator.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "87c5c730887943c603b16c53cf213398336ee410ef46595518093977afd5b0cb"
+        },
+        {
+          "path": "/extra-deps/numpy/random/mtrand.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8d866b4b6107401ab9546044564208e0a5899c3903da09277d1c4875d98bcf0f"
+        },
+        {
+          "path": "/extra-deps/numpy.libs/libgfortran-040039e1.so.5.0.0",
+          "sha256": "14afb3129b1a8b50bc40a3b0820c7f1152ea9bc10121aab152943f7057472886"
+        },
+        {
+          "path": "/extra-deps/numpy.libs/libopenblas64_p-r0-0cf96a72.3.23.dev.so",
+          "sha256": "9254d0854dd7615e11de28d771ae408878ca8123a7ac204f21e4cc7a376cc2e5"
+        },
+        {
+          "path": "/extra-deps/numpy.libs/libquadmath-96973f99.so.0.0.0",
+          "sha256": "934c22ded0e7d169c4d4678876c96051adf3d94545da962f60b41659b075da3b"
+        },
+        {
+          "path": "/extra-deps/nvidia/nccl/lib/libnccl.so.2",
+          "sha256": "f90198d76c8dfba9b4764c29f32fae83be6a396a357c1e2ccb10a7f68ff6df0d"
+        },
+        {
+          "path": "/extra-deps/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+          "sha256": "a43904e4fa297301d4640dc1bb3c8a3480b406f99e498eba9b1914b68aab604a"
+        },
+        {
+          "path": "/extra-deps/scipy/_cyutility.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b2db4000073aadfe6ba6e02dac053872c069f1e9df6e36105ef2f1a9de81311f"
+        },
+        {
+          "path": "/extra-deps/scipy/_lib/_ccallback_c.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "bbf5afe1395eb9a1a580d25c6b2af38e709070aa2661b525578dba12cbd0f6bb"
+        },
+        {
+          "path": "/extra-deps/scipy/_lib/_uarray/_uarray.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "dcea488a187210d41a96c4283fd677d5c2a602e5b29c66bd43bca288a84755d2"
+        },
+        {
+          "path": "/extra-deps/scipy/_lib/messagestream.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f27e436e615d7ba8d3b6f15768a92023eb2f77510bb791c901c835a22c8a1cf3"
+        },
+        {
+          "path": "/extra-deps/scipy/fft/_pocketfft/pypocketfft.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "9083bc6446e9408c6b5b90c8923e230e36ed80945854387b70249c6b8a06c138"
+        },
+        {
+          "path": "/extra-deps/scipy/integrate/_dop.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0c4809a8ead8fabb3c6f15b361f6c1ff2d139b54184b7b233b61cac17e8c2f9c"
+        },
+        {
+          "path": "/extra-deps/scipy/integrate/_odepack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "54238b21b48d4fa2fbd1cfc6cff601bb6fe4cba4c4579615c366e17205eeec83"
+        },
+        {
+          "path": "/extra-deps/scipy/integrate/_quadpack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f0d7d5e5f18f87fb68c9626c1ecc64194c24138f54b3b5729a7c88fd88a99c7b"
+        },
+        {
+          "path": "/extra-deps/scipy/integrate/_vode.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "27bf06e837caa49587df8ea76c3a10ed4f839c0e50789c7c05a4077be9bbf909"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_dfitpack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "886e5924b50b6c6576bfb3bf72e50ccd9d1373e828cccc13125d46d138b3b006"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_dierckx.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "25dd630feb4699908030ffa11b7ed4dfc49e70ef2cc5633c5d8ce4f34f5ed3f8"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_fitpack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7e6d72b4f94406ed1192a4f848c03b82c90ec4d3faaca88f1a41b6c956069afe"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_interpnd.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "ddd01fa3670762b4bb88030743c208ab0ce145785d6739c84a6a71eeefd4984a"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_ppoly.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "98b0ec9a4538125faa9bc0d88bd0d167862f25c9fbfdca0418a990cfc6fe377a"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_rbfinterp_pythran.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7701cbe3eb67a6711e0c865fbdd9c5d2f65b1ce02c147b5c42cde910dc14d131"
+        },
+        {
+          "path": "/extra-deps/scipy/interpolate/_rgi_cython.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "46e19c31db76e015664450388719a3c0a31e7a3c953c57bcae07d846c08bf077"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_batched_linalg.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "e5c3c7a8c6ef685701a32557c67a582cccdd8e31ff7225c7caba64d8b4278c37"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_cythonized_array_utils.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "e7a1dc128b814415ec9a40a373a3f983b9e54629a8489ae241c8f4742c52ead8"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_decomp_interpolative.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2615a1b4ef47cf06f297f86277f649d367bc0e3b61f388a13a190e5fe9b9cef9"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_decomp_lu_cython.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "3d2b7f91bed2bb372bf3b4f28b1e417b6abf982dc659fb9aac5745ac40ea1714"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_decomp_update.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2fca0fcb78e10974bf87322ff61db810308b5cde14aebe46873d901eb3a8af98"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_fblas.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "820f853f2ad2c33df694bebdcb09731e12b23dbbfb3c908f6f19f264c445baf2"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_flapack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "bcf38228b3b47caa3143836137d8176fc56a63f6758964804d388c7523c76e3a"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_linalg_pythran.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "271c437d186ccacad419a2b59b38d1ac434771207c612e972b9c029aec26b497"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_matfuncs_expm.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "c3b0f51595e73e1ef080b79dd420c7c5643503bc6f5998ef8a788dce37633b6e"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_matfuncs_schur_sqrtm.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "952f3db167ad104b4570458751d653a2fc7b08c9d5a093c237ba7d1ac899e263"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/_solve_toeplitz.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "d250989739cbc53d5b64a15be6fe790df9020b0c488625a04859c5ee143a910e"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/cython_blas.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5a770e0b90ad7bd0ec173b3dcdb132e6da8ac24b43a976bcace543a174a412cf"
+        },
+        {
+          "path": "/extra-deps/scipy/linalg/cython_lapack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "aaddde84bdcade6f7acddd089b857ac3daa6a17d90c6185bba7ca827375563ea"
+        },
+        {
+          "path": "/extra-deps/scipy/ndimage/_nd_image.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "abdf9d423a9afd4ab528d86ade65b86f363de6327ee5451809670f6dc17566bd"
+        },
+        {
+          "path": "/extra-deps/scipy/ndimage/_ni_label.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "a9fcd790a4dbf594b8eb9c10385f6ab8e2d8c0c6d0c460d733d9b377deee9d90"
+        },
+        {
+          "path": "/extra-deps/scipy/ndimage/_rank_filter_1d.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "798bb6c0103222f9deda578d55a8ce0d127adb7723f90210bc7cc9ab63566726"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_bglu_dense.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f0ef9705e6759083423cca225b81f8361a700b5d76de47aa5f566100d9df0516"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_direct.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "ab0bdce5b22d24a1939156ae630fa1d06c6980d74bb53627d74461f5edc8256c"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_group_columns.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "66ccededa9482eaac2edc1790418b1b87a51c198867fc0f239798f3590f12dc8"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_highspy/_core.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "63338935d7a42ad8c469c967dc2d903524f60304d369693f852eecf1fb7c2e9b"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_highspy/_highs_options.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7db3c3cbb45c278a864fe7734c2b7dd6118f5b2c87ae77cf075205eef8d005b7"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_lbfgsb.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "6c10bdfcdd8f2904af8632b8b2dc5e85d84ff1dd05914f108dd608de27829513"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_lsap.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "85bfe0413de99fc7ee0009cc12b22e4884ea8924638b38f37b4212e841e178fb"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_lsq/givens_elimination.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0aa2c26a4bcd1842f28b347c3bec8c8ee6eb370aae41a888112bea82f6d47eb1"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_minpack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "bc68dd6fc4d48b24b340bb4cb42e4bd2f3e41171a7e43be46fa7e6e2d17f57f9"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_moduleTNC.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "cdb50918946a744631ece8c4c89a9f318cfaec418014f033f1152ea1378c1178"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_pava_pybind.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8bb3d80c1757849e4c6425b34bab7916316446176dc894fb458466e6de9c8cbf"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_slsqplib.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5b4ccb5ffcbd92b70b1e04ba13464ee5b9b08c6ca4b56f675c0d68996f736556"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_trlib/_trlib.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0ac494421abdf683e726edcbc9c78baf910f8e0f409f1965f1c377ea04616016"
+        },
+        {
+          "path": "/extra-deps/scipy/optimize/_zeros.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "a3ad9ddbc1bd584848f32d27b149d15d9d99ca78a2fe4c6cacc50db98e17c4dd"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/_csparsetools.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8e06040987bc32ff4e7a7d3df94b827386ca5591d18b907666528f3f7cfbd598"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/_sparsetools.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "439c7c1ed1729d81bf4a6d01647ff6e9f1965dbff2505848e36247aabec46131"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_flow.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "9c4cb80d9aaf224e2b7fa2e51e808485405442dfdb6296b6c383a143b482f8e0"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_matching.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "6fb1a7d3b01dcd19218ecbcc764090a39b59080b9f1e57bc1ac672fdec36231c"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_min_spanning_tree.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "549b0484c733be4d40bab991ca5199497b7428e90d08f0642271ca09ad9e6266"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_reordering.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "e5e780148d63480d969eb452d7136540e8c8d82522a8e50d36df14281ede6ab3"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_shortest_path.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "014ebcc480fb0c30fc7f0d6b56db9539d1d40c9f16ecf1f60c26ec1c532fec97"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_tools.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "51f071cab0235313415c0d1bf0f959ccccca3ce4f63bd6c05b0d1e29e29f38db"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/csgraph/_traversal.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "3bba7379d246041c77fc7ed9e41e68f450c6d44d4150b1edf68689f7ac09a253"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/linalg/_dsolve/_superlu.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8bc863fc723ee3bc4d603bf2cdf540fa728ce5df35302686588f0ee926dae261"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/linalg/_eigen/arpack/_arpacklib.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "4a6d9274ff6def64476bc9de26eff1ea5a0967287abe0f7eb7421d37b20981a4"
+        },
+        {
+          "path": "/extra-deps/scipy/sparse/linalg/_propack.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "d9934cad70b4767edb54160d068c0688bf729b85fbce9cbb07e6cebc154b8a77"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_ckdtree.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "a456943d3d677013b5756c17c51930d608d1fc799161208df9bf3662997a7c92"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_distance_pybind.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "82e41e6e6417536f93adfd96f8c009039ef9fcb408d77651f38f59708c6a3553"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_distance_wrap.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "c15803536f4c2367838ec03a1e723f3e36a24caee858c3e82e025c7485179371"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_hausdorff.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1ade9aa6ee51ad9bc3b62b108f9549ddc15ec1da3e977430433309354926a506"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_qhull.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5df5562a562d36ff0d5e5222b2dce1c34684cf4e81d222d796da8827998f381d"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/_voronoi.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "cc40b9dc63b3958d1fea29f75a1b05a99b47659f7820c4fbe8000161f95ee465"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/transform/_rigid_transform_cy.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "e5672286429f426e47f1d9f96c3c95c83d98f160ed7178de46337ee3a67968ba"
+        },
+        {
+          "path": "/extra-deps/scipy/spatial/transform/_rotation_cy.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "ab2fc51376cd70db5a23e11981c8cff6fc075d674936a5a1cae90117d00bdd61"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_comb.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1b805327ce1b95ccd11be838e843ae2b12c79ba14ee11b4df816dfcbcf3ff547"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_ellip_harm_2.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b2b9cf339152862237629304193b599f9f614c28430d52b878b204dd42e9fd02"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_gufuncs.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "0a508e084ba7e1aeb762e9a33ab2ce97ce542efad685f9e88f9367d16c33fee1"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_specfun.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "c21a2594301a59ac53c640b0a664fb9b13d2abd7864973574b13a9af56fd7785"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_special_ufuncs.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "6dfa3fcabac8d89d15df4f005b667741841dd9054713bbca93267f5249d2fb57"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_ufuncs.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "3013f3e2797e50dd415c37e517ff803d651b88633e797895585bd6dd8a9c5da7"
+        },
+        {
+          "path": "/extra-deps/scipy/special/_ufuncs_cxx.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "00961fe529ec3f656db4c373b37cf3df2ff640c70b463a5458ed3d2bc0c7af6a"
+        },
+        {
+          "path": "/extra-deps/scipy/special/cython_special.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1849d2c6a6b14cd03c992d25bebda90d1b63561d58b0452c4b623a8fbaeedb9c"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_ansari_swilk_statistics.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "944be5c14c5149886e7efe1b7138fdc044398fab90c8405d8c81efea7772cb86"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_biasedurn.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7c86c81dff6d6dbe15671c14b36e5ce54126b211fd5e6ab92aeb8639c5ca202a"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_levy_stable/levyst.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b3b22557da8ce8e5c3b16eab700063b2878ea96789ac311a3969cd043072f88c"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_qmc_cy.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f808de32dbe61aa066d29ada0d8bbc85591ed27702d94916e94065913f274e10"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_qmvnt_cy.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "4c4f8bd43d116226fc878f25bc91189acc45abc63180af93faede7d705869f80"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_rcont/rcont.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "30f1aae6357283adef92ab929b9543663cc6bf1a8b86ab9991a7b21c9db13785"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_sobol.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "b2a7d1acba1550a204078aca871fb0ccb50a3a3b086ac26a7c348fc64d676c76"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_stats.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1ab5ade77822e6cb305126cd78848b4765b0dab771de978df9cb61cb9c6bd9d4"
+        },
+        {
+          "path": "/extra-deps/scipy/stats/_stats_pythran.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "8a9f7ae908388f2f56726945993c602dcb7485f2f2b1748045189dc9aa6de498"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libgfortran-040039e1-0352e75f.so.5.0.0",
+          "sha256": "c6090048eccc763522c12ef016f81da6b627cb3a044f55cf0479a839c41c0980"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libgfortran-8f1e9814.so.5.0.0",
+          "sha256": "a95cc4ac4afad889f2d83088f46b5e6fa6cd5efd729db887e1e639147ec55b73"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libquadmath-828275a7.so.0.0.0",
+          "sha256": "71bdc2ec57ab2fc939360597968f73230426b1c6764048e62a2cb6c8d8c3a1fd"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libquadmath-96973f99-934c22de.so.0.0.0",
+          "sha256": "6ed5137f412781ad7863439fb543613f620b43c32b63292a0029246162f5bbc6"
+        },
+        {
+          "path": "/extra-deps/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+          "sha256": "8fb864c29cac4b25f6e2c139491ea96f2724dde42d51394f84e9c4a622e34790"
+        },
+        {
+          "path": "/extra-deps/sklearn/__check_build/_check_build.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "681b31a45b5a7d026ae78e5fad03a73453650476e4feee23da53cd6703f0d842"
+        },
+        {
+          "path": "/extra-deps/sklearn/_cyutility.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2473d93f951685d446b9fdd82f06c9cd4a602d564dd3ecffc3601c648a07bf83"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_dist_metrics.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "7a2dbe3973a22eba2e32c472d2d1ddc15ac23b125b9393cbb834ffb16040d2bb"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_argkmin.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "761e334251e271794691a679a27262f7c65b03a8c04bba78fc1d534ea9200e38"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_argkmin_classmode.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2726f1377a06a3dc4b7144c1da245cfca6e9d882bccfbdfc8575039e84df454b"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_base.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2d0ab47afbf8bb241d72e9d4f17c9247b31578124268fae56eb35643b3d26e06"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_datasets_pair.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "1f5004ca5faba33c4d2f3da7e1b3b5d7f635619f2e5f56c64c11f2642c2c8428"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_middle_term_computer.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "876c7eef359b7da4f634f467d78d519cc7a1402a71bb7c468eea2243a2dafc4f"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_radius_neighbors.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "cb11929260271363321badc04c6fa6a7bdd28b82c7ce1322b50c34b1ff876ed8"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_distances_reduction/_radius_neighbors_classmode.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "5ba7c62cf6e201d367134aa268f38c5992f6aa46e163842edee11be5d8e30365"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/_pairwise_fast.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "487c0dc7b0c40ceff49d37a388646936b98a1596ec262644dd82928513f5b952"
+        },
+        {
+          "path": "/extra-deps/sklearn/metrics/cluster/_expected_mutual_info_fast.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "aa31f3e65b0ecbe6ad2b6020861fca200e326330104b4ef1e50abc7ed808372e"
+        },
+        {
+          "path": "/extra-deps/sklearn/preprocessing/_csr_polynomial_expansion.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2ed3c5b9ccd2ac81b020fe6c75816043e2d530cc3a3b34ae7a3abce5ed5e798f"
+        },
+        {
+          "path": "/extra-deps/sklearn/preprocessing/_target_encoder_fast.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "14eef2690cc9fdab3cf08f7d5e2e36e91b2c854ac69ab53e8f5d4e1971de3940"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_cython_blas.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "282756467afb7abaeefc01950805a9ecbcb4333c773b1d8d5958366dfc4b78ec"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_heap.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "abfec7ec29a620ac8ddec7425ccc0f30111f482ffc0ec3e827f2a0ab3abeb722"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_isfinite.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "44060c2b6b2d3a2f1cd9a587b6c7a838a52539e6c901155fe8bacbf8f149dc7b"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_openmp_helpers.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "05bd1a4de7d6bb345c8e80227748fb4cb5b27a7499a140a983a7b17119899a84"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_random.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "cf3f61e573f4a613a38e87b664e25444bb99c10ba9f8cce275d0323e0c27e917"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_sorting.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "f5f36335238e18e813ae1f577ea5f9be81662872f3b1323be0452fb4da78a545"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/_vector_sentinel.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "384daf0c3724aaaf9c08d875ed4fd021e3f37d28938a290d6ec6a1e355fbb474"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/murmurhash.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "2d9284f556f0da9ebe98d08ededbff2f2c1c65d18e8b943c2039b40c5802dcac"
+        },
+        {
+          "path": "/extra-deps/sklearn/utils/sparsefuncs_fast.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "ab34e6f235e78f2693b8f8cb3915ad502740d069538ae7158c9bcf675749d6d4"
+        },
+        {
+          "path": "/extra-deps/xgboost/lib/libxgboost.so",
+          "sha256": "528a3f97676e67977c29483868a3be5b4dd9da2a8766bdb7145f24adb06764a2"
+        },
+        {
+          "path": "/extra-deps/yaml/_yaml.cpython-312-x86_64-linux-gnu.so",
+          "sha256": "957a099a4521c1f7669306fb6f79ca63fa4b9a0b4c463f7cac833a65a5c5c0cb"
+        }
+      ],
+      "conflicting_optional_modules_already_loaded": {
+        "cupy": null,
+        "ml_dtypes": null,
+        "cv2": null
+      },
+      "actual_cases": {
+        "tests/test_mm.py::test_mm[False-dtype2-1-1-32]": {
+          "index": 0,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [
+                1,
+                32
+              ],
+              "stride": [
+                32,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "e3f1e9704d4e6fdf7c9154879d52c904d03e456f20f6aa907cf76c7f712e12c9"
+            },
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "56386830a01dd63721efcf3bc034b484bfc31a35d79828814eed757d12a39a75"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "413a317253b3cbe3c335732f9af4e12c3a27e36a84e1277e0edc27221b6a1e56"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "f2b108eb8906dd883e39c3064163f7198334bb3343d5cacb6e6420ac4fb6f761"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-0-launch-0.ttir",
+                  "bytes": 9025,
+                  "sha256": "d8ba8d44a3e65fefde07cda9e95e53cfe5fa0934ff4e6123bbbee67bf0abd42b"
+                },
+                "ttgir": {
+                  "path": "case-0-launch-0.ttgir",
+                  "bytes": 11804,
+                  "sha256": "d42716ca3d7b5b0e91ad8df6e87ba882163ec70014ed107e090836497789147a"
+                },
+                "llir": {
+                  "path": "case-0-launch-0.llir",
+                  "bytes": 39579,
+                  "sha256": "9d9efac870119c98655cbf38080b7a4a6df68de260c84fc7ce32800d0711d65d"
+                },
+                "ptx": {
+                  "path": "case-0-launch-0.ptx",
+                  "bytes": 30244,
+                  "sha256": "1500859485ddd5d80daf7a556d30c0e7c2acbd5395076ac6dcd039753e34d4e0"
+                },
+                "cubin": {
+                  "path": "case-0-launch-0.cubin",
+                  "bytes": 28824,
+                  "sha256": "68b1247f36f54c3fa0b828889ef10b46fec8a26e099cdd5a78f3d71b7e973118"
+                }
+              },
+              "name": "gemv_kernel",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-6ed3/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "2875e9856c9abd51531edb6e8227260592e1036f2bf2f8bd656d1ad7d2813b7b",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "gemv_kernel",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 512,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 4,
+                "num_stages": 3,
+                "num_ctas": 1,
+                "BLOCK_M": 32,
+                "BLOCK_K": 256,
+                "IS_FP64": false
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "871dcb8019321e9628fd9688f261df41d70174f6060ddcede4bcad8c20c691d5"
+            },
+            "reference_upcast": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 8,
+              "sha256": "5eee042cd3631f62100d3a7f64106825da0a1b0966dffe5e5d1de9247d44b57c"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 32,
+              "atol": 0.0001
+            }
+          }
+        },
+        "tests/test_mm.py::test_mm_broadcast_stride_zero[dtype2]": {
+          "index": 1,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [],
+              "stride": [],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "0e78c53b37287378c3b829f4988dd6ea5fb813e7d8016091129feb61759b8e1e"
+            },
+            {
+              "shape": [
+                256,
+                256
+              ],
+              "stride": [
+                256,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 131072,
+              "sha256": "d0dd09718fd351dcffd7dd47ae28526206028603e43fc3180ef137b7cb760662"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "413a317253b3cbe3c335732f9af4e12c3a27e36a84e1277e0edc27221b6a1e56"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "fb92106b84bd735e2b02d88d09fc1f450aea06af484789d49aa8500362103e3d"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-1-launch-0.ttir",
+                  "bytes": 7545,
+                  "sha256": "c2dd4f9de349379fd90f7587a4d4afc413d4eceb554469219613ef7b854d74a5"
+                },
+                "ttgir": {
+                  "path": "case-1-launch-0.ttgir",
+                  "bytes": 8483,
+                  "sha256": "2bb340561d5c282bca06541d9de37617f9e30248ed42103bb0f90bb7ae2a69a5"
+                },
+                "llir": {
+                  "path": "case-1-launch-0.llir",
+                  "bytes": 5787,
+                  "sha256": "6fa3825cf00744993ab7d97d5edd8c1ea9305470427e0effda728807cab419db"
+                },
+                "ptx": {
+                  "path": "case-1-launch-0.ptx",
+                  "bytes": 11759,
+                  "sha256": "b6edcc8f25cb673ceb5269b668264d6693e02c8440b6d07afdf95b5884054f0c"
+                },
+                "cubin": {
+                  "path": "case-1-launch-0.cubin",
+                  "bytes": 8216,
+                  "sha256": "2192b524b4037d936893b272215547f24d686f1bbf8b78a1d593805ff0ab2c41"
+                }
+              },
+              "name": "_copy_kernel_kernel_rank_2",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-6ed3/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "aa1bb51d4c90db7a1a98e226e9c63dba8811f28186718bc0acfeaaee77ae3b56",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "_copy_kernel_kernel_rank_2",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 0,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {}
+            },
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-1-launch-1.ttir",
+                  "bytes": 7428,
+                  "sha256": "37065416f267dd91de5b2a68a43b04d03fb7cfb8f02a9de884132e1511d164c2"
+                },
+                "ttgir": {
+                  "path": "case-1-launch-1.ttgir",
+                  "bytes": 14608,
+                  "sha256": "4aee1c44c112151b278acb74b92c7107aa58128a9c93d25e3a7f484e4b59e3f3"
+                },
+                "llir": {
+                  "path": "case-1-launch-1.llir",
+                  "bytes": 35815,
+                  "sha256": "85980b17978122251b370614a68fd6b33f23a94cf1023e08c178cd785774533d"
+                },
+                "ptx": {
+                  "path": "case-1-launch-1.ptx",
+                  "bytes": 22954,
+                  "sha256": "26247803ea959eb82865ba8598657cc46051754a4985c834d91f4cc1e878fde5"
+                },
+                "cubin": {
+                  "path": "case-1-launch-1.cubin",
+                  "bytes": 25696,
+                  "sha256": "6334dada04a597cb3007f6d69d006afa96fe575d4beb2f0156152a8784bfd3ac"
+                }
+              },
+              "name": "mm_kernel_general_host_tma",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-6ed3/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "04476f690e790ac6b4630fc8339034bd3c9b1d5955b1dcbad11e70a66318958c",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "mm_kernel_general_host_tma",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 32784,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [
+                  {
+                    "swizzle": 3,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      32,
+                      64
+                    ],
+                    "fp4_padded": false
+                  },
+                  {
+                    "swizzle": 2,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      128,
+                      32
+                    ],
+                    "fp4_padded": false
+                  },
+                  {
+                    "swizzle": 2,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      32,
+                      32
+                    ],
+                    "fp4_padded": false
+                  }
+                ],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 4,
+                "num_stages": 3,
+                "num_ctas": 1,
+                "BLOCK_M": 32,
+                "BLOCK_N": 32,
+                "BLOCK_K": 128,
+                "GROUP_M": 8
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                128,
+                256
+              ],
+              "stride": [
+                256,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 65536,
+              "sha256": "0fd95da894405e34bb30d58b9faab60ba8a1c0c341e07c212bce8bf8e4adf9e2"
+            },
+            "reference_upcast": {
+              "shape": [
+                128,
+                256
+              ],
+              "stride": [
+                256,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 262144,
+              "sha256": "c18e8ffbcde7dfd611b591f6b04d81b4f87f3a85a3b54cced36bba4657ac95fe"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 256,
+              "atol": 0.0001
+            }
+          }
+        },
+        "tests/test_mm.py::test_mm_out_vllm_tma_column_major_weight": {
+          "index": 2,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [
+                4096,
+                4096
+              ],
+              "stride": [
+                4096,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 33554432,
+              "sha256": "9dd09348375ff03dbb345ddbd476c3c920daae91b1b38214ed385e7b7c877383"
+            },
+            {
+              "shape": [
+                3328,
+                4096
+              ],
+              "stride": [
+                4096,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 27262976,
+              "sha256": "c7edebab4e8da7b63074454e575040ecf8aaacfb7d3dd0c135dd77778f3de6f8"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "9361df19a7dba8ecbaf3672d56a618df1e16228e53c82b716272ba93f2b48b9a"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-2-launch-0.ttir",
+                  "bytes": 7493,
+                  "sha256": "38111397d85b83c42180ed6f2266a76a47263cd71f2562683ab8864d0d95c9c1"
+                },
+                "ttgir": {
+                  "path": "case-2-launch-0.ttgir",
+                  "bytes": 16671,
+                  "sha256": "ac40f1b9af25965dc49e9632d212c82794f1ab3effa7e8bd972c07194f5e390c"
+                },
+                "llir": {
+                  "path": "case-2-launch-0.llir",
+                  "bytes": 37933,
+                  "sha256": "b5951260e029c7effb3c13f3e29872780f7a175be6964c696e2b5b430852555b"
+                },
+                "ptx": {
+                  "path": "case-2-launch-0.ptx",
+                  "bytes": 21215,
+                  "sha256": "bc596380d2dcfd6b5b469a121c8c3e818af4a627bc029dc1a395654bb9000653"
+                },
+                "cubin": {
+                  "path": "case-2-launch-0.cubin",
+                  "bytes": 24544,
+                  "sha256": "e232d8590508bdc34997728daf0be853a7b107c4d0983923156dbee2fbb3a4bf"
+                }
+              },
+              "name": "mm_kernel_general_host_tma",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-6ed3/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "663f5dd8e749ca34ed76ca9cc67166559eb65056cef0b9d5e6786ef525d52c44",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "mm_kernel_general_host_tma",
+                "num_ctas": 1,
+                "num_stages": 4,
+                "num_warps": 8,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 65568,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [
+                  {
+                    "swizzle": 3,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      64,
+                      64
+                    ],
+                    "fp4_padded": false
+                  },
+                  {
+                    "swizzle": 3,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      64,
+                      64
+                    ],
+                    "fp4_padded": false
+                  },
+                  {
+                    "swizzle": 3,
+                    "elem_size": 2,
+                    "elem_type": 10,
+                    "block_size": [
+                      64,
+                      64
+                    ],
+                    "fp4_padded": false
+                  }
+                ],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 8,
+                "num_stages": 4,
+                "num_ctas": 1,
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 64,
+                "GROUP_M": 8
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                4096,
+                3328
+              ],
+              "stride": [
+                3328,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 27262976,
+              "sha256": "590b5277e40486b2ec8c3679bbd7e84026f942e350f55f6327a4d7dc19b96a0b"
+            },
+            "reference_upcast": {
+              "shape": [
+                4096,
+                3328
+              ],
+              "stride": [
+                3328,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 109051904,
+              "sha256": "992ffb04492b7ebc5fc040a4763f829d1618064f8e993ec32f4bec5e63f98d8a"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 4096,
+              "atol": 0.0001
+            }
+          }
+        },
+        "tests/test_mm.py::test_mm_self_transpose[dtype2-1-32]": {
+          "index": 3,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "0ca209ced48518b7f9386b4b40ffdb9e972209cdb41265ff8ce13b4c44a7f2f6"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "e44501a9d134006508a07061e66cd37974284b2d8f90e7da55dfe1bcf60ff6c3"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-3-launch-0.ttir",
+                  "bytes": 8648,
+                  "sha256": "9d9d0559f76e4f2a508334d70b747e06b8db35a746b9acb3aae17c805c322770"
+                },
+                "ttgir": {
+                  "path": "case-3-launch-0.ttgir",
+                  "bytes": 11411,
+                  "sha256": "ba6279433ab425baf3c92d658a8bd21bb41a8578085e041a95fbbdde71b75be2"
+                },
+                "llir": {
+                  "path": "case-3-launch-0.llir",
+                  "bytes": 87880,
+                  "sha256": "ae3f8ca32a3fd67eebd14bf60e933a752f17640b9bfabc6738458dece4edbe09"
+                },
+                "ptx": {
+                  "path": "case-3-launch-0.ptx",
+                  "bytes": 79349,
+                  "sha256": "03fccb7f597d43c5a165b4797b1e397f483c3331150db77cd4202c5035e138c6"
+                },
+                "cubin": {
+                  "path": "case-3-launch-0.cubin",
+                  "bytes": 61464,
+                  "sha256": "d017835b222dcefd45ee6fb8b3fe6943b9d266e4a494a6544112c0e3282e2bc0"
+                }
+              },
+              "name": "gemv_kernel",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-6ed3/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "ec4818360a8e1e31e3e3f22a77a2a3b32b752343da56eed2af8054724278ca4f",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "gemv_kernel",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 512,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 4,
+                "num_stages": 3,
+                "num_ctas": 1,
+                "BLOCK_M": 32,
+                "BLOCK_K": 256,
+                "IS_FP64": false
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "2feb9af9094b3d16c16df94f2a792e68d192c891048ebce6647c8b3c7c864e77"
+            },
+            "reference_upcast": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 8,
+              "sha256": "e30e47d781d870f83fc69a24d11c8c39dc1927ee24c5652e9020a0a4fb9b5c4a"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 32,
+              "atol": 0.0001
+            }
+          }
+        },
+        "tests/test_mm.py::test_mm_out_self_transpose[dtype2-1-32]": {
+          "index": 4,
+          "status": "PASS",
+          "inputs": [
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "0ca209ced48518b7f9386b4b40ffdb9e972209cdb41265ff8ce13b4c44a7f2f6"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "f7548c023e431138b11357593f5cceb9dd35eb0b0a2041f0b1560212eeb6f13e"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-4-launch-0.ttir",
+                  "bytes": 8648,
+                  "sha256": "9d9d0559f76e4f2a508334d70b747e06b8db35a746b9acb3aae17c805c322770"
+                },
+                "ttgir": {
+                  "path": "case-4-launch-0.ttgir",
+                  "bytes": 11411,
+                  "sha256": "ba6279433ab425baf3c92d658a8bd21bb41a8578085e041a95fbbdde71b75be2"
+                },
+                "llir": {
+                  "path": "case-4-launch-0.llir",
+                  "bytes": 87880,
+                  "sha256": "ae3f8ca32a3fd67eebd14bf60e933a752f17640b9bfabc6738458dece4edbe09"
+                },
+                "ptx": {
+                  "path": "case-4-launch-0.ptx",
+                  "bytes": 79349,
+                  "sha256": "03fccb7f597d43c5a165b4797b1e397f483c3331150db77cd4202c5035e138c6"
+                },
+                "cubin": {
+                  "path": "case-4-launch-0.cubin",
+                  "bytes": 61464,
+                  "sha256": "d017835b222dcefd45ee6fb8b3fe6943b9d266e4a494a6544112c0e3282e2bc0"
+                }
+              },
+              "name": "gemv_kernel",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-6ed3/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "ec4818360a8e1e31e3e3f22a77a2a3b32b752343da56eed2af8054724278ca4f",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "gemv_kernel",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 512,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {
+                "num_warps": 4,
+                "num_stages": 3,
+                "num_ctas": 1,
+                "BLOCK_M": 32,
+                "BLOCK_K": 256,
+                "IS_FP64": false
+              }
+            }
+          ],
+          "oracle": {
+            "actual": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "2feb9af9094b3d16c16df94f2a792e68d192c891048ebce6647c8b3c7c864e77"
+            },
+            "reference_upcast": {
+              "shape": [
+                1,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.float64",
+              "bytes": 8,
+              "sha256": "e30e47d781d870f83fc69a24d11c8c39dc1927ee24c5652e9020a0a4fb9b5c4a"
+            },
+            "args": [
+              "torch.bfloat16"
+            ],
+            "kwargs": {
+              "equal_nan": false,
+              "reduce_dim": 32,
+              "atol": 0.0001
+            }
+          }
+        }
+      }
+    }
+  },
+  "identical_model_payloads": {
+    "manifest.json": {
+      "bytes": 1464,
+      "sha256": "f5cb4ea820a5cc4d647d569465846d246049da60a51e65a4e09eb06f5ac2dbf0"
+    },
+    "packages/nvidia-h20/1.0.0/nvidia-h20_v1.0.0.tar.gz": {
+      "bytes": 25193253,
+      "sha256": "2cc93fa09bcae63d03e1af5eb278110113954219c0c46f8f74e42804af224bbe"
+    }
+  },
+  "original_model_metadata": {
+    "fc0": {
+      "fetched_at": 1795181444.7786763,
+      "source": "remote",
+      "source_url": "https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/flagtune-xgb-manifest-v1.0.0.tar.gz"
+    },
+    "6ed3": {
+      "fetched_at": 1795181469.450326,
+      "source": "remote",
+      "source_url": "https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/flagtune-xgb-manifest-v1.0.0.tar.gz"
+    }
+  },
+  "natural_work_seconds": 53.94434462208301,
+  "work_exit": 0,
+  "cleanup_exit": 0,
+  "owned_container_removed_device_idle_no_PID_and_two_locks_released": true,
+  "original_CI_traceback_or_dependency_identity_available": false,
+  "CI_fixed_or_full_600_or_performance_Gate_claimed": false,
+  "limits": "Official extras change private NumPy to1.26.4; unchanged optional image packages declare NumPy>=2. G1 mapped-library scope is Torch-root/FlagCX/extra-prefix, not full system SDK before/after. Local builds are not CI binary. Focused inputs cannot reconstruct prior600 CI RNG stream."
+}
