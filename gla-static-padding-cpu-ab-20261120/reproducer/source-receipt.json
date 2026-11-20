@@ -1,0 +1,40 @@
+{
+  "base_commit": "14a3602284b86337ffcf9fa7d025f9ff89a411bb",
+  "integration_control": "bc8840d5f6edad9f08e133377d2dda8139ea5842",
+  "source_path": "src/flaggems_vllm/ops/FLA/chunk_gla.py",
+  "main_and_integration_source_byte_identical": true,
+  "base_source_sha256": "7930fdb308d2c81e8f39407110240b854ff3dc530e4a4c5891fd7d962b44b414",
+  "candidate_source_sha256": "5df6ef88f202f1b3241be2de4c79ea1b2f6430ed1b34de3739a0f6d237cf7125",
+  "base_isolated_module_sha256": "5a30db4a46ad5b9b40e7c5be89026c71752361f1275c821cbc04be7784be7697",
+  "candidate_isolated_module_sha256": "58c45ef148c253d0f0116fb790ed4dadbf2a47751b71a119a11815c842b114fc",
+  "extracted_body_ast_identical_to_each_real_source": true,
+  "candidate_reverts_to_original_ast_exactly": true,
+  "change": "one constexpr N_VCHUNKS; two static_range bounds; no config/grid/body arithmetic changes",
+  "configs": 108,
+  "unmodified_config_axes": {
+    "BK": [
+      32,
+      64
+    ],
+    "BV": [
+      64,
+      128
+    ],
+    "B_VCHUNK": [
+      1,
+      2,
+      4
+    ],
+    "num_warps": [
+      2,
+      4,
+      8
+    ],
+    "num_stages": [
+      2,
+      3,
+      4
+    ]
+  },
+  "no_production_edit": true
+}

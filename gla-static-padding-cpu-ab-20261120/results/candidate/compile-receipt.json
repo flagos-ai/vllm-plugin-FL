@@ -1,0 +1,532 @@
+{
+  "phase": "candidate",
+  "started_utc": "2026-11-20T08:59:38Z",
+  "no_nvidia_devices": true,
+  "NVIDIA_VISIBLE_DEVICES": "void",
+  "CUDA_VISIBLE_DEVICES": "",
+  "TRITON_F32_DEFAULT": "ieee",
+  "cpu_only": true,
+  "launch": false,
+  "source_module_sha256": "58c45ef148c253d0f0116fb790ed4dadbf2a47751b71a119a11815c842b114fc",
+  "core_sha256": "385c1089a702a71df0ce847bdac0e71234d411396ac1bbdfe5d74bbd6528f43f",
+  "ptxas_sha256": "c960a4f238b17d5c5d3c01ad2bbc1ebd2c5aecc459cb4d223bff10b45f9b8fca",
+  "python_executable": "/work/source/.venv/bin/python",
+  "python": "3.12.15 (main, Oct 14 2026, 01:05:27) [Clang 23.1.3 ]",
+  "torch_distribution": "2.11.0+cu130",
+  "torch_resolved_source": "/work/source/.venv/lib/python3.12/site-packages/torch/__init__.py",
+  "USE_FLAGCX": "OFF (unchanged original CI runtime setting)",
+  "flagcx_original_package": {
+    "path": "/work/source/.venv/lib/python3.12/site-packages/flagcx",
+    "libflagcx_sha256": "c768f5fa077c6d932eb23542131bc3a5ae436b0beebb96bac9581aed58279b48",
+    "extension_sha256": "1aec627e4603cf993f189c5159c50446a724829a01c53ae3629fa7e718884086",
+    "selected_for_communication": false
+  },
+  "runtime_environment": {
+    "FLAGGEMS_VENV": "/work/source/.venv",
+    "GITHUB_WORKSPACE": "/probe",
+    "FLAGGEMS_VENDOR": "nvidia",
+    "USE_FLAGCX": "OFF",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "/probe",
+    "PATH": "/usr/local/cuda/bin:/usr/local/cuda/bin:/work/source/.venv/bin:/usr/local/cuda/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LD_LIBRARY_PATH": "/usr/local/cuda/lib64:/usr/local/cuda/lib64:/usr/local/nvidia/lib64:/usr/local/cuda/lib64:/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64",
+    "CLANG": "/toolchain/clang",
+    "XDG_CACHE_HOME": "/probe/xdg/candidate",
+    "TRITON_CACHE_DIR": "/probe/cache/candidate",
+    "FLAGGEMS_CACHE_DIR": "/probe/gems/candidate",
+    "TORCH_EXTENSIONS_DIR": "/probe/extensions/candidate",
+    "TMPDIR": "/probe/tmp/candidate",
+    "TRITON_F32_DEFAULT": "ieee",
+    "NVIDIA_VISIBLE_DEVICES": "void",
+    "CUDA_VISIBLE_DEVICES": ""
+  },
+  "runtime_environment_scope": "Original CI interpreter/FlagTree/core/ptxas/FlagCX/clang and USE_FLAGCX=OFF; isolated-module PYTHONPATH/workspace/cache paths replace repository/pytest paths, CPU-only visibility/resources intentionally differ. No pytest or auto-tune launcher imported.",
+  "compiler_python_hashes": {
+    "compiler/compiler.py": "f9646f23963160af7856e6f725df7af01c2bf0fc0ee98afeb7987f552507e5fd",
+    "compiler/code_generator.py": "8edcdd2395cbf36c04824e3cac23fbcf1bbebcdabe9dcadeaa6df09b9fa77eb7",
+    "backends/nvidia/compiler.py": "d5f1abf028029de5f77f461c3efa13453bb9e0e9a2dec9dfe174e67d3ba14bb0",
+    "backends/nvidia/distributed.py": "b1356c9f779098e5ad945be891243a4a6de5ac4168da433952f1fe523f97eff8",
+    "experimental/tle/language/communication.py": "8fa4f556dcc3f85bee5f6df0928f5025d6a3a9a2a18b870bdbd07856fa6b977e"
+  },
+  "torch_import_chain": [
+    {
+      "file": "/probe/compile-one.py",
+      "line": 191,
+      "source": "module = importlib.import_module(PHASE + \"_kernel\")"
+    },
+    {
+      "file": "/work/uv-python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/importlib/__init__.py",
+      "line": 90,
+      "source": "return _bootstrap._gcd_import(name[level:], package, level)"
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1387,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1360,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1331,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 935,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 999,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 488,
+      "source": ""
+    },
+    {
+      "file": "/probe/candidate_kernel.py",
+      "line": 3,
+      "source": "import triton.experimental.tle.language as tle"
+    },
+    {
+      "file": "/probe/compile-one.py",
+      "line": 123,
+      "source": "return original_import(name, globals, locals, fromlist, level)"
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1360,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1310,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 488,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1360,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1331,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 935,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 999,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 488,
+      "source": ""
+    },
+    {
+      "file": "/work/source/.venv/lib/python3.12/site-packages/triton/experimental/tle/__init__.py",
+      "line": 147,
+      "source": "from . import raw"
+    },
+    {
+      "file": "/probe/compile-one.py",
+      "line": 123,
+      "source": "return original_import(name, globals, locals, fromlist, level)"
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1415,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 488,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1360,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1331,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 935,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 999,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 488,
+      "source": ""
+    },
+    {
+      "file": "/work/source/.venv/lib/python3.12/site-packages/triton/experimental/tle/raw/__init__.py",
+      "line": 21,
+      "source": "from .runtime import dialect"
+    },
+    {
+      "file": "/probe/compile-one.py",
+      "line": 123,
+      "source": "return original_import(name, globals, locals, fromlist, level)"
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1360,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1331,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 935,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 999,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 488,
+      "source": ""
+    },
+    {
+      "file": "/work/source/.venv/lib/python3.12/site-packages/triton/experimental/tle/raw/runtime.py",
+      "line": 54,
+      "source": "from .cuda import CUDAJITFunction"
+    },
+    {
+      "file": "/probe/compile-one.py",
+      "line": 123,
+      "source": "return original_import(name, globals, locals, fromlist, level)"
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1360,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1331,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 935,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 999,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 488,
+      "source": ""
+    },
+    {
+      "file": "/work/source/.venv/lib/python3.12/site-packages/triton/experimental/tle/raw/cuda/__init__.py",
+      "line": 21,
+      "source": "from .runtime import CUDAJITFunction"
+    },
+    {
+      "file": "/probe/compile-one.py",
+      "line": 123,
+      "source": "return original_import(name, globals, locals, fromlist, level)"
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1360,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1331,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 935,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 999,
+      "source": ""
+    },
+    {
+      "file": "<frozen importlib._bootstrap>",
+      "line": 488,
+      "source": ""
+    },
+    {
+      "file": "/work/source/.venv/lib/python3.12/site-packages/triton/experimental/tle/raw/cuda/runtime.py",
+      "line": 34,
+      "source": "import torch"
+    }
+  ],
+  "after_compiler_import": {
+    "torch_transitively_imported": false,
+    "torch_cuda_initialized": false,
+    "driver_active": null,
+    "driver_default": null,
+    "file_descriptors": {
+      "0": "/dev/null",
+      "1": "pipe:[OWNED_PIPE]",
+      "2": "pipe:[OWNED_PIPE]"
+    },
+    "no_nvidia_devices": true,
+    "gems_imported": false
+  },
+  "after_kernel_import": {
+    "torch_transitively_imported": true,
+    "torch_cuda_initialized": false,
+    "driver_active": null,
+    "driver_default": null,
+    "file_descriptors": {
+      "0": "/dev/null",
+      "1": "pipe:[OWNED_PIPE]",
+      "2": "pipe:[OWNED_PIPE]"
+    },
+    "no_nvidia_devices": true,
+    "gems_imported": false
+  },
+  "offline_selector": {
+    "module": "triton._flagtree_backend",
+    "original_constant": "",
+    "selected_constant": "nvidia",
+    "marker_exists": true,
+    "marker_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "method": "in-memory existing constant only; both A/B phases; not a normal GPU Gate",
+    "call_path": "code_generator._require_tle_primitive -> require_tle(get_active_backend_name(), name); exact standard TLE load function retained; explicit CUDA90 backend unchanged",
+    "tle_load_module": "triton.experimental.tle.language.core",
+    "tle_load_source_sha256": "0ad4c98356930f2b5bdd34f5b394d4130722914cca40816cbe1941fa73d9bd44",
+    "standard_cuda_backend": "triton.backends.nvidia.compiler.CUDABackend",
+    "future_gpu_validation": "original automatic detection, no selector override"
+  },
+  "after_offline_selector": {
+    "torch_transitively_imported": true,
+    "torch_cuda_initialized": false,
+    "driver_active": null,
+    "driver_default": null,
+    "file_descriptors": {
+      "0": "/dev/null",
+      "1": "pipe:[OWNED_PIPE]",
+      "2": "pipe:[OWNED_PIPE]"
+    },
+    "no_nvidia_devices": true,
+    "gems_imported": false
+  },
+  "signature": {
+    "q": "*fp32",
+    "v": "*fp32",
+    "g": "*fp32",
+    "h": "*fp32",
+    "o": "*fp32",
+    "A": "*fp32",
+    "scale": "fp32",
+    "T": "i32"
+  },
+  "constexprs": {
+    "cu_seqlens": null,
+    "chunk_indices": null,
+    "H": 4,
+    "HV": 4,
+    "K": 64,
+    "V": 64,
+    "BT": 64,
+    "BK": 32,
+    "BV": 128,
+    "B_VCHUNK": 4,
+    "STATE_V_FIRST": false,
+    "IS_VARLEN": false
+  },
+  "attrs": {
+    "(0,)": [
+      [
+        "tt.divisibility",
+        16
+      ]
+    ],
+    "(1,)": [
+      [
+        "tt.divisibility",
+        16
+      ]
+    ],
+    "(2,)": [
+      [
+        "tt.divisibility",
+        16
+      ]
+    ],
+    "(3,)": [
+      [
+        "tt.divisibility",
+        16
+      ]
+    ],
+    "(4,)": [
+      [
+        "tt.divisibility",
+        16
+      ]
+    ],
+    "(5,)": [
+      [
+        "tt.divisibility",
+        16
+      ]
+    ]
+  },
+  "target": {
+    "backend": "cuda",
+    "arch": 90,
+    "warp_size": 32
+  },
+  "options": {
+    "num_warps": 2,
+    "num_stages": 2
+  },
+  "compile_started_utc": "2026-11-20T08:59:40Z",
+  "completed": true,
+  "wall_seconds": 4.525772338034585,
+  "metadata": {
+    "TRITON_F32_DEFAULT": "ieee",
+    "allowed_dot_input_precisions": [
+      "tf32",
+      "tf32x3",
+      "ieee",
+      "bf16x3",
+      "bf16x6"
+    ],
+    "arch": "sm90",
+    "backend_name": "cuda",
+    "cluster_dims": [
+      1,
+      1,
+      1
+    ],
+    "debug": false,
+    "default_dot_input_precision": "tf32",
+    "deprecated_fp8_dot_operand_dtypes": [
+      "fp8e4b15"
+    ],
+    "enable_fp_fusion": true,
+    "enable_reflect_ftz": true,
+    "extern_libs": [
+      [
+        "libdevice",
+        "/work/source/.venv/lib/python3.12/site-packages/triton/backends/nvidia/lib/libdevice.10.bc"
+      ]
+    ],
+    "global_scratch_align": 1,
+    "global_scratch_size": 0,
+    "hash": "6e6ad0293433fd1dcfee47d4257050b5d37a26677f0008df7a26fd5e1ad2b4d1",
+    "instrumentation_mode": "",
+    "ir_override": null,
+    "kernel_init_hooks": [],
+    "launch_cooperative_grid": false,
+    "launch_pdl": false,
+    "max_num_imprecise_acc_default": 1073741824,
+    "maxnreg": null,
+    "name": "chunk_gla_fwd_kernel_o_tle",
+    "num_ctas": 1,
+    "num_stages": 2,
+    "num_warps": 2,
+    "profile_scratch_align": 1,
+    "profile_scratch_size": 0,
+    "ptx_options": null,
+    "ptx_version": null,
+    "sanitize_overflow": true,
+    "shared": 49152,
+    "supported_fp8_dtypes": [
+      "fp8e4b15",
+      "fp8e4nv",
+      "fp8e5"
+    ],
+    "target": {
+      "backend": "cuda",
+      "arch": 90,
+      "warp_size": 32
+    },
+    "tensordesc_meta": [],
+    "tle_node_buffer_bindings": "",
+    "tmem_size": 0,
+    "triton_version": "3.6.0",
+    "warp_size": 32
+  },
+  "physical_registers": "not queried; no GPU initialization",
+  "no_nvidia_devices_after": true,
+  "after_compilation": {
+    "torch_transitively_imported": true,
+    "torch_cuda_initialized": false,
+    "driver_active": null,
+    "driver_default": null,
+    "file_descriptors": {
+      "0": "/dev/null",
+      "1": "pipe:[OWNED_PIPE]",
+      "2": "pipe:[OWNED_PIPE]"
+    },
+    "no_nvidia_devices": true,
+    "gems_imported": false
+  },
+  "ir": {
+    "ttir": {
+      "bytes": 17749,
+      "sha256": "50c8d4b8b1917d7f31daa680d16a06b530e9697494cf26d7cb8f02a39b4d75b3"
+    },
+    "ttgir": {
+      "bytes": 29478,
+      "sha256": "d881afe4cadada920326800aeb3b4fc725a27f2f109f17cee53340ae25aa3ebe"
+    },
+    "llir": {
+      "bytes": 2301374,
+      "sha256": "2f72191af5425d7647f2a0b0928e76e8712b284028e0d1f97ca9866492b9612a"
+    },
+    "ptx": {
+      "bytes": 707430,
+      "sha256": "c85aade9b7eb6d82d678a8c12582aea101106ff47fd509ecb0bf051cba0bb1c7"
+    },
+    "cubin": {
+      "bytes": 1064376,
+      "sha256": "f4d6884270c0c9ff3596a0b1adbcf3e53a3735eb4a702ceed69de5822ab83b38"
+    }
+  },
+  "ptx_declared_virtual_registers": 17084,
+  "ptx_virtual_register_declarations": [
+    157,
+    16554,
+    373
+  ]
+}

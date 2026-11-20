@@ -1,0 +1,142 @@
+[
+  {
+    "file": "reproducer/source-receipt.json",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::source-receipt.json",
+    "original_sha256": "1efd49f05d4402a120e2b27eec578af772d1967269323fdb19eb0073c673a89c",
+    "sanitized_sha256": "1efd49f05d4402a120e2b27eec578af772d1967269323fdb19eb0073c673a89c",
+    "bytes": 1214
+  },
+  {
+    "file": "reproducer/candidate.diff",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::candidate.diff",
+    "original_sha256": "6b7a07a9d53332e0e66e31b47a8c0faea7b1430878b1be152354c39571cedc3f",
+    "sanitized_sha256": "6b7a07a9d53332e0e66e31b47a8c0faea7b1430878b1be152354c39571cedc3f",
+    "bytes": 1059
+  },
+  {
+    "file": "reproducer/base_kernel.py",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::base_kernel.py",
+    "original_sha256": "5a30db4a46ad5b9b40e7c5be89026c71752361f1275c821cbc04be7784be7697",
+    "sanitized_sha256": "5a30db4a46ad5b9b40e7c5be89026c71752361f1275c821cbc04be7784be7697",
+    "bytes": 6177
+  },
+  {
+    "file": "reproducer/candidate_kernel.py",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::candidate_kernel.py",
+    "original_sha256": "58c45ef148c253d0f0116fb790ed4dadbf2a47751b71a119a11815c842b114fc",
+    "sanitized_sha256": "58c45ef148c253d0f0116fb790ed4dadbf2a47751b71a119a11815c842b114fc",
+    "bytes": 6243
+  },
+  {
+    "file": "reproducer/compile-one.py",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::compile-one.py",
+    "original_sha256": "5d46adaa57499747fdd06775c0e850f05a825880d04d4697baccdd43f58e8c09",
+    "sanitized_sha256": "5d46adaa57499747fdd06775c0e850f05a825880d04d4697baccdd43f58e8c09",
+    "bytes": 11652
+  },
+  {
+    "file": "reproducer/inside.sh",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::inside.sh",
+    "original_sha256": "e9a3f6675cda21b11f675f509a1204c5508bf0c069f86817a0cd9b208cb71d09",
+    "sanitized_sha256": "e9a3f6675cda21b11f675f509a1204c5508bf0c069f86817a0cd9b208cb71d09",
+    "bytes": 1086
+  },
+  {
+    "file": "reproducer/launch.sh",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::launch.sh",
+    "original_sha256": "23de7c58acb8cf4c6bbad64895df7def4349c9f65c783d3ae49899ed18bbb352",
+    "sanitized_sha256": "23de7c58acb8cf4c6bbad64895df7def4349c9f65c783d3ae49899ed18bbb352",
+    "bytes": 1974
+  },
+  {
+    "file": "results/base/compile-receipt.json",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/base/compile-receipt.json",
+    "original_sha256": "e611b517b66e686faa0eb824b512476866b5c9572cddbc84be444ae5bfbe9306",
+    "sanitized_sha256": "7079d1c6ac74adffc20bd2bc0fe89216c50f366e1b9a499de091fd93250d9c75",
+    "bytes": 14543
+  },
+  {
+    "file": "results/base/invocation.json",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/base/invocation.json",
+    "original_sha256": "0aadc3dc2494f5b11c5dec857b53d68ee94a380d3241a111f62fec691363f7f9",
+    "sanitized_sha256": "ff6e537431c3dc4b57376a47756a04d567da2b7e9d2405eaf2fde10e117b829f",
+    "bytes": 11708
+  },
+  {
+    "file": "results/base/kernel.ttir",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/base/kernel.ttir",
+    "original_sha256": "bafd5f3e5737ee3708bdbba198746822b56d0218d16051364bad28cd98b41cad",
+    "sanitized_sha256": "bafd5f3e5737ee3708bdbba198746822b56d0218d16051364bad28cd98b41cad",
+    "bytes": 26910
+  },
+  {
+    "file": "results/base/kernel.ttgir",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/base/kernel.ttgir",
+    "original_sha256": "cbe392b96fa8e4e33d62881f5601834638ab9250d637a67c80a0897de435e26a",
+    "sanitized_sha256": "cbe392b96fa8e4e33d62881f5601834638ab9250d637a67c80a0897de435e26a",
+    "bytes": 44705
+  },
+  {
+    "file": "results/base/kernel.ptx",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/base/kernel.ptx",
+    "original_sha256": "d9bb80eba4e7cb7f150a1cc236dafb3f1df7611a9d0c4a858a125359b96427e5",
+    "sanitized_sha256": "d9bb80eba4e7cb7f150a1cc236dafb3f1df7611a9d0c4a858a125359b96427e5",
+    "bytes": 2621908
+  },
+  {
+    "file": "results/candidate/compile-receipt.json",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/candidate/compile-receipt.json",
+    "original_sha256": "c8c3040fd8c3abc16f14e5a240e749a58417986eabd6d0699aaf4a49c23d8b8a",
+    "sanitized_sha256": "7709b6a2b4015795794b3a5477c460375fe138e07779cb8722fa5050585e19c2",
+    "bytes": 14577
+  },
+  {
+    "file": "results/candidate/invocation.json",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/candidate/invocation.json",
+    "original_sha256": "2a5cfa1803c5f3f7544e6eef077407b89e78b7420011cd356e79ece58d6f8dc9",
+    "sanitized_sha256": "143502cea7ca16c9cb515529531ab8097fdcfdfe5a2e8bedfa6513b6238cb081",
+    "bytes": 11743
+  },
+  {
+    "file": "results/candidate/kernel.ttir",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/candidate/kernel.ttir",
+    "original_sha256": "50c8d4b8b1917d7f31daa680d16a06b530e9697494cf26d7cb8f02a39b4d75b3",
+    "sanitized_sha256": "50c8d4b8b1917d7f31daa680d16a06b530e9697494cf26d7cb8f02a39b4d75b3",
+    "bytes": 17749
+  },
+  {
+    "file": "results/candidate/kernel.ttgir",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/candidate/kernel.ttgir",
+    "original_sha256": "d881afe4cadada920326800aeb3b4fc725a27f2f109f17cee53340ae25aa3ebe",
+    "sanitized_sha256": "d881afe4cadada920326800aeb3b4fc725a27f2f109f17cee53340ae25aa3ebe",
+    "bytes": 29478
+  },
+  {
+    "file": "results/candidate/kernel.ptx",
+    "origin": "attempt7-controlled-cpu-ab.tar.gz::outputs/candidate/kernel.ptx",
+    "original_sha256": "c85aade9b7eb6d82d678a8c12582aea101106ff47fd509ecb0bf051cba0bb1c7",
+    "sanitized_sha256": "c85aade9b7eb6d82d678a8c12582aea101106ff47fd509ecb0bf051cba0bb1c7",
+    "bytes": 707430
+  },
+  {
+    "file": "controlled-ab-summary.json",
+    "origin": "outputs/controlled-ab-summary.json",
+    "original_sha256": "c44a91fa75d7137f68fc61e67da5cef76cbe7d8ab585fb28965608dcde8dbe57",
+    "sanitized_sha256": "c44a91fa75d7137f68fc61e67da5cef76cbe7d8ab585fb28965608dcde8dbe57",
+    "bytes": 2470
+  },
+  {
+    "file": "LICENSE.MIT-FLA.txt",
+    "origin": "official FLA commit413ad2c655ece57b94bc9ddc51fdbd43cf09d984:LICENSE",
+    "original_sha256": "41a83c8187efc1e3ccc21909e806a9e52338e69448554d9754706c3d1cd610e7",
+    "sanitized_sha256": "41a83c8187efc1e3ccc21909e806a9e52338e69448554d9754706c3d1cd610e7",
+    "bytes": 1096
+  },
+  {
+    "file": "SOURCE-ATTRIBUTION.md",
+    "origin": "bundle-level attribution; captured modules unchanged",
+    "original_sha256": "5ff1bd0d526a72e34dc82ea692dc93f4fd5658960b0b46059e816adbb1e6c158",
+    "sanitized_sha256": "5ff1bd0d526a72e34dc82ea692dc93f4fd5658960b0b46059e816adbb1e6c158",
+    "bytes": 2350
+  }
+]

@@ -1,0 +1,28 @@
+--- a/src/flaggems_vllm/ops/FLA/chunk_gla.py
++++ b/src/flaggems_vllm/ops/FLA/chunk_gla.py
+@@ -558,6 +558,7 @@
+     ):
+         i_vg, i_t, i_bh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+         i_v_base = i_vg * B_VCHUNK
++        N_VCHUNKS: tl.constexpr = min(B_VCHUNK, triton.cdiv(V, BV))
+         i_b, i_hv = i_bh // HV, i_bh % HV
+         i_h = i_hv // (HV // H)
+         if IS_VARLEN:
+@@ -650,7 +651,7 @@
+                 b_g = tle.load(p_g, boundary_check=(0, 1), is_async=True).to(tl.float32)
+                 b_qg = (b_q * exp2(b_g)).to(b_q.dtype)
+ 
+-                for d in tl.static_range(B_VCHUNK):
++                for d in tl.static_range(N_VCHUNKS):
+                     i_v = i_v_base + d
+ 
+                     if STATE_V_FIRST:
+@@ -684,7 +685,7 @@
+             b_A = tle.load(p_A, boundary_check=(0, 1), is_async=True)
+             b_A = tl.where(m_s, b_A, 0.0)
+ 
+-            for d in tl.static_range(B_VCHUNK):
++            for d in tl.static_range(N_VCHUNKS):
+                 i_v = i_v_base + d
+ 
+                 if d == 0:

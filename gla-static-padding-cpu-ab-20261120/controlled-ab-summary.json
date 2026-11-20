@@ -1,0 +1,70 @@
+{
+  "scope": "CPU-only controlled ASTSource compilation, not normal GPU G1/G5/G6",
+  "archive_sha256": "bd73e1aeeb9ee450b1e746bfd66175ee263af80e359294a22135c4a5462812b7",
+  "same_compile_inputs_options_and_compiler_across_phases": true,
+  "both_completed": true,
+  "both_no_gpu_or_driver_initialization": true,
+  "rows": [
+    {
+      "phase": "candidate",
+      "wall_seconds": 4.525772338034585,
+      "ptx_declared_virtual_registers": 17084,
+      "ir": {
+        "ttir": {
+          "bytes": 17749,
+          "sha256": "50c8d4b8b1917d7f31daa680d16a06b530e9697494cf26d7cb8f02a39b4d75b3"
+        },
+        "ttgir": {
+          "bytes": 29478,
+          "sha256": "d881afe4cadada920326800aeb3b4fc725a27f2f109f17cee53340ae25aa3ebe"
+        },
+        "llir": {
+          "bytes": 2301374,
+          "sha256": "2f72191af5425d7647f2a0b0928e76e8712b284028e0d1f97ca9866492b9612a"
+        },
+        "ptx": {
+          "bytes": 707430,
+          "sha256": "c85aade9b7eb6d82d678a8c12582aea101106ff47fd509ecb0bf051cba0bb1c7"
+        },
+        "cubin": {
+          "bytes": 1064376,
+          "sha256": "f4d6884270c0c9ff3596a0b1adbcf3e53a3735eb4a702ceed69de5822ab83b38"
+        }
+      },
+      "source_module_sha256": "58c45ef148c253d0f0116fb790ed4dadbf2a47751b71a119a11815c842b114fc",
+      "compile_started_utc": "2026-11-20T08:59:40Z"
+    },
+    {
+      "phase": "base",
+      "wall_seconds": 262.3112407538574,
+      "ptx_declared_virtual_registers": 56752,
+      "ir": {
+        "ttir": {
+          "bytes": 26910,
+          "sha256": "bafd5f3e5737ee3708bdbba198746822b56d0218d16051364bad28cd98b41cad"
+        },
+        "ttgir": {
+          "bytes": 44705,
+          "sha256": "cbe392b96fa8e4e33d62881f5601834638ab9250d637a67c80a0897de435e26a"
+        },
+        "llir": {
+          "bytes": 7625662,
+          "sha256": "75270e4513ef5d1c3e353fd3884e6ee4ca15a6c42e222befafdef99601859a5d"
+        },
+        "ptx": {
+          "bytes": 2621908,
+          "sha256": "d9bb80eba4e7cb7f150a1cc236dafb3f1df7611a9d0c4a858a125359b96427e5"
+        },
+        "cubin": {
+          "bytes": 6678200,
+          "sha256": "5805a02113d3c8dc99883d53d5a2adadb21272347d6180ced11d8013ce931ea7"
+        }
+      },
+      "source_module_sha256": "5a30db4a46ad5b9b40e7c5be89026c71752361f1275c821cbc04be7784be7697",
+      "compile_started_utc": "2026-11-20T08:59:47Z"
+    }
+  ],
+  "wall_speedup": 57.95944231427509,
+  "no_gpu_numeric_or_performance_claim": true,
+  "production_push": false
+}
