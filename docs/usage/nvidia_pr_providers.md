@@ -369,12 +369,46 @@ worker PIDs have READY, HIT and graph-completion records. The original full
 functional results and this supplemental evidence are audited together,
 without replacing the original results or changing numerical code.
 
-A new official three-length comparison of the original adapter against this
-combined runtime has started after qualification and resource checks. It
-keeps the original TP8, FP8 KV, model context and load, with separate task
-caches. It includes the accumulated production fixes and is not a single
-variable intervention. No combined throughput result is available yet;
-individual key, route and reduction percentages must not be added together.
+The official three-length comparison of the original adapter against the
+combined runtime completes all 18 original rounds. Every round passes the
+256-request, fixed-input/output-length and detailed-result audit; both
+37-file archives match the remote originals byte for byte. Original rounds
+2/3 output-throughput means are:
+
+| Input tokens | Original adapter output tok/s | Combined output tok/s | Change | Retained spread before / after |
+| --- | ---: | ---: | ---: | ---: |
+| 1024 | 927.625 | 2604.310 | +180.75% | 47.44% / 20.24% |
+| 4096 | 1634.335 | 1839.770 | +12.57% | 0.15% / 0.28% |
+| 16384 | 572.720 | 668.230 | +16.68% | 0.35% / 0.71% |
+
+At 1K, cumulative global token-arrival gaps longer than one second fall from
+285.077/141.648 seconds in the retained baseline rounds to 32.834/13.155
+seconds in the candidate. The candidate's first round still contains
+127.819 seconds. Stalls are reduced but remain, and its 20.24% retained
+spread does not establish a stable +180.75% deployment gain. At 4K, neither
+arm's retained rounds has such gaps. At 16K, both baseline retained rounds
+have none; the candidate's second round has one 1.032-second gap and its
+third has none. The 4K/16K improvements are therefore also observed in
+retained rounds without large global arrival stalls. These client gaps do
+not identify individual tuning keys, pure compilation or kernel critical
+paths. No gap time is subtracted from throughput and no slow round is removed.
+
+Both arms retain TP8, FP8 KV, max context 67584, max sequences 64, batch tokens
+4096 and memory utilization 0.85, with the official RUNS3/SKIP_FIRST1,
+OSL1024/C64/N256 load. Separate task caches start empty and are populated by
+initialization and identical semantic probes; they are not cold per round.
+Model allocation is 22.93 GiB/rank on both sides, but reported KV capacity is
+800902 versus 802191 tokens, so this is not fixed KV. There are only two
+retained samples and no formal observer, profiler or logging override.
+
+This is original-adapter to accumulated production integration, not native
+versus adapter or a single-variable intervention. Individual key, route and
+reduction percentages must not be added together or used to apportion older
+regressions. The unchanged candidate source has separate per-rank dispatch
+qualification above; the formal run's unlabelled aggregate READY/HIT counts
+are not used as per-rank proof. All eight ranks complete graphs, both arms
+pass the same three semantic responses, and both services exit after their
+original rounds. Earlier slow and failed cases remain intact.
 
 ### Masked top-k reduction
 
