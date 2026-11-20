@@ -98,3 +98,29 @@ def test_prewarm_does_not_freeze_when_io_dump_is_enabled(
 
     assert dispatch.prewarm_cached_ops() == 1
     assert cached._frozen is False
+
+
+def test_default_cached_op_retains_legacy_error_fallback(isolated_dispatch):
+    manager, registry = isolated_dispatch
+    calls = []
+
+    def broken(value):
+        calls.append("broken")
+        raise RuntimeError("expected failure")
+
+    def alternate(value):
+        calls.append("alternate")
+        return value * 2
+
+    registry.register_many(
+        [
+            OpImpl("test_op", "first", BackendImplKind.DEFAULT, broken, priority=200),
+            OpImpl(
+                "test_op", "second", BackendImplKind.DEFAULT, alternate, priority=100
+            ),
+        ]
+    )
+    cached = dispatch.CachedOp("test_op")
+    assert cached.allows_error_fallback is True
+    assert cached(3) == 6
+    assert calls == ["broken", "alternate"]

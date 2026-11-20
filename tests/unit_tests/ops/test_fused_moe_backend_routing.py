@@ -147,6 +147,7 @@ def test_explicit_non_triton_backend_remains_authoritative(monkeypatch):
     selected_backend, experts_cls = fused_moe_utils.select_unquantized_moe_backend_oot(
         _moe_config("aiter"),
         prefer_flaggems_experts=True,
+        triton_experts_cls=type("CustomExperts", (), {}),
     )
 
     assert selected_backend is fused_moe_utils.UnquantizedMoeBackend.AITER
@@ -232,3 +233,41 @@ def test_fused_moe_factory_obeys_oot_policy(
         patch_factory.assert_not_called()
         patch_oracle.assert_called_once_with(prefer_flaggems_experts=False)
     return None
+
+
+@pytest.mark.parametrize("backend", ["auto", "triton"])
+def test_explicit_experts_class_is_scoped_to_flaggems_selection(monkeypatch, backend):
+    module = _import_fused_moe_utils()
+    monkeypatch.setattr(module, "_get_current_platform", _oot_platform)
+    monkeypatch.setattr(module, "use_flaggems", lambda: True)
+    custom_experts = type("CustomExperts", (), {})
+    selected, experts = module.select_unquantized_moe_backend_oot(
+        _moe_config(backend),
+        prefer_flaggems_experts=True,
+        triton_experts_cls=custom_experts,
+    )
+    assert selected is module.UnquantizedMoeBackend.TRITON
+    assert experts is custom_experts
+
+
+def test_activation_hook_preserves_clamp_and_scale_parameters(monkeypatch):
+    module = _import_fused_moe_utils()
+    apply = Mock()
+    monkeypatch.setattr(module, "apply_moe_activation", apply)
+    experts = SimpleNamespace(
+        quant_config=SimpleNamespace(gemm1_clamp_limit=7.0),
+        gemm1_alpha=1.25,
+        gemm1_beta=0.5,
+    )
+    output, input = object(), object()
+    module.TritonExpertsFL.apply_activation(
+        experts, module.MoEActivation.SILU, output, input
+    )
+    apply.assert_called_once_with(
+        module.MoEActivation.SILU,
+        output,
+        input,
+        clamp_limit=7.0,
+        alpha=1.25,
+        beta=0.5,
+    )
