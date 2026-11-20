@@ -643,7 +643,13 @@ class WorkerFL(WorkerBase):
             # runtime activations and fail with OOM.
             cudagraph_memory_estimate = 0
             if (
-                current_platform.is_cuda()
+                (
+                    current_platform.is_cuda()
+                    or (
+                        current_platform.device_type == "cuda"
+                        and current_platform.vendor_name == "thead"
+                    )
+                )
                 and self.vllm_config.compilation_config.cudagraph_mode
                 != CUDAGraphMode.NONE
             ):
