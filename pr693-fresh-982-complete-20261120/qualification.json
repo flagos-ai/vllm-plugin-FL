@@ -1,0 +1,58 @@
+{
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "phase": "regression-982-singlehost-fresh-27b-graph",
+  "scope": "single physical host TP4 original cold-cache regression; two original text tests only",
+  "exact_canonical_engine_and_argv": true,
+  "independent_empty_cache_verified": true,
+  "gate": {
+    "requests": 9,
+    "passed_requests": 9,
+    "checks": 90,
+    "passed_checks": 90,
+    "client_exit": 0
+  },
+  "ranks": [
+    {
+      "rank": 0,
+      "captured_native_ar_submissions": 2304,
+      "request_time_graph_replay_returns": 20864,
+      "successful_native_destroy": 1,
+      "failed_native_destroy": 0,
+      "passed": true
+    },
+    {
+      "rank": 1,
+      "captured_native_ar_submissions": 2304,
+      "request_time_graph_replay_returns": 20864,
+      "successful_native_destroy": 1,
+      "failed_native_destroy": 0,
+      "passed": true
+    },
+    {
+      "rank": 2,
+      "captured_native_ar_submissions": 2304,
+      "request_time_graph_replay_returns": 20864,
+      "successful_native_destroy": 1,
+      "failed_native_destroy": 0,
+      "passed": true
+    },
+    {
+      "rank": 3,
+      "captured_native_ar_submissions": 2304,
+      "request_time_graph_replay_returns": 20864,
+      "successful_native_destroy": 1,
+      "failed_native_destroy": 0,
+      "passed": true
+    }
+  ],
+  "cleanup": {
+    "launcher_exit": 0,
+    "normal_workers": true,
+    "forced_worker_shutdown": false,
+    "selected_gpu_processes_remaining": false,
+    "server_tracebacks": 0,
+    "resource_tracker_warnings": []
+  },
+  "passed": true,
+  "boundary": "Native wrapper/replay counters are witnesses; original9/90 assertions establish numeric correctness. Original60s grace unchanged."
+}

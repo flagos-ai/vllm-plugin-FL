@@ -1,0 +1,112 @@
+{
+  "kind": "generated_protocol_and_provenance",
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "tree": "18ef555579c9ee8911255f2fa3cbc5cf1b1be366",
+  "physical_node": "NODE_B",
+  "topology": "one physical node; TP4/PP1; all ranks0-3 on NODE_B",
+  "engine": {
+    "tensor_parallel_size": 4,
+    "pipeline_parallel_size": 1,
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.9,
+    "enforce_eager": false,
+    "trust_remote_code": true,
+    "disable_custom_all_reduce": true
+  },
+  "empty_cache_proof": {
+    "files_before_start": 0,
+    "new_root_must_not_preexist": true,
+    "mounted_empty_directories": [
+      "/root/.cache",
+      "/root/.triton",
+      "/root/.flaggems"
+    ],
+    "cache_mechanisms_enabled": true
+  },
+  "budgets": {
+    "startup_seconds": 3000,
+    "client_seconds": 2400,
+    "sdk_request_seconds": 300,
+    "sdk_automatic_retries": 2,
+    "worker_shutdown_grace_seconds": 60,
+    "outer_seconds": 18000
+  },
+  "cases": {
+    "original_text_single_requests": 1,
+    "original_text_concurrent_requests": 8,
+    "total_requests": 9,
+    "quality_checks": 90,
+    "pytest_cases_passed": 2,
+    "pytest_seconds": 32.73
+  },
+  "original_prompts_token_budgets_checkers_thresholds_unchanged": true,
+  "graph": "original PIECEWISE9 sizes1,2,4,8,16,32,64,128,256; cold first capture then final capture",
+  "raw_archive_sha256": "ad7f19f53908a0a6d7af004f0ba95ffdbfbb2ef910feb2a484ac89f0f2b2dec6",
+  "raw_archive_published": false,
+  "inputs": [
+    {
+      "source_id": "outputs/regression-982-singlehost-fresh-27b-graph-qualification.json",
+      "sha256": "6b734877209a95a76a6f8dbe63649ee26cf9bbd141373fac9026eedd795dfae1"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/server-launch.json",
+      "sha256": "14c7c0163280258605aa077710fb5f6928133f7f2b1a14fd30410083de416c07"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_single.json",
+      "sha256": "acf4b17c692e8c7a8b3ea6f2ba67d4c1f1db8604c5d2f5ff6ac2ddb33c175cd5"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_concurrent_8.json",
+      "sha256": "72c9f2d6b65d40d0a949880df377a0137d01774f5faa379ee3816e9b9caaae26"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-files.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-tree.txt",
+      "sha256": "302db88d272100023215b511e2d329699d628e14aa8fc00dacce60badda96f4e"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/candidate.sha256",
+      "sha256": "079eb5cea9afb310ae1f368f873e90aa96dfca32eb8cd50a527c8a748d84cc53"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/harness.sha256",
+      "sha256": "39f02f50462748b6371102fcfc15659344a4d2631bcff593180c384e5f35d9f6"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/term-sent",
+      "sha256": "d0eec6e83964afef3f98d3d434ba9944835d3acdac82123c95733aab8c4c7c3e"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/client-exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-932-1795156342947652073.json",
+      "sha256": "347e18d970b7cd820cbb334154cdebb8f21d090768f801239ca2918aaed31d80"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-933-1795156342947463472.json",
+      "sha256": "87d20d8d7985cf1cfc1b41d333de5ed6586dc0bfa50b9238ec0f0a6145955f03"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-934-1795156342947625153.json",
+      "sha256": "997daf571410d37000e4af579e1c1a7eeb04db3386e884c499b40de9bbb4e1a6"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-935-1795156342947604069.json",
+      "sha256": "092c471a3706253b85b29ca15de3ddb09ead17397b6aa521041326d7223329f4"
+    },
+    {
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph.log",
+      "sha256": "07cdacc45d342f90ffcc27f5ee3be8fdde657202d1a4ec7feef0a3c8c4c5e6ed"
+    }
+  ]
+}

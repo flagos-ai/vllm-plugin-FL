@@ -1,0 +1,57 @@
+{
+  "scope": "one physical host TP4 cleanup diagnostic, not two-host Gate",
+  "source": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "case": "27b_tp4_graph",
+  "source_sha256": {
+    "tests/models/qwen3_6/27b_tp4_graph.yaml": "3557c3be73d7b2de5de66377859478a100bbf566f4f7da060edf6730cd64949b",
+    "tests/platforms/metax.yaml": "c02cfdb16a8014818be68ca8d7b8949b4b3bf7812d18298a1ecfea9bc9b91494",
+    "vllm_fl/platform.py": "efc486e029c349d8cb2bef69920b588cc3b9d50e3ed0a77d57da43aa8083032e"
+  },
+  "model": "/data/models/Qwen/Qwen3.6-27B",
+  "engine": {
+    "tensor_parallel_size": 4,
+    "pipeline_parallel_size": 1,
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.9,
+    "enforce_eager": false,
+    "trust_remote_code": true,
+    "disable_custom_all_reduce": true
+  },
+  "argv": [
+    "vllm",
+    "serve",
+    "/data/models/Qwen/Qwen3.6-27B",
+    "--tensor-parallel-size",
+    "4",
+    "--served-model-name",
+    "qwen",
+    "--pipeline-parallel-size",
+    "1",
+    "--max-model-len",
+    "8192",
+    "--gpu-memory-utilization",
+    "0.9",
+    "--trust-remote-code",
+    "--disable-custom-all-reduce",
+    "--allowed-local-media-path",
+    "/src/tools/adaptation-gate-cases/images",
+    "--distributed-executor-backend",
+    "mp",
+    "--shutdown-timeout",
+    "90",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "18693"
+  ],
+  "request": {
+    "original_scenarios": [
+      "text_single",
+      "text_concurrent_8"
+    ],
+    "sdk_timeout": 300,
+    "sdk_retries": 2,
+    "seed": "request unset; server default0"
+  },
+  "manifest_sha256": "a4d2fb5e449060d3f43bb7ac5acf51d8dd2c8f385ce8a5ce6a03631c8e8e5b75"
+}

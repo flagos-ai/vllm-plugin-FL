@@ -1,0 +1,462 @@
+{
+  "schema": 1,
+  "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "scope": "required cold-cache single-node original9/90/60s matching regression",
+  "documents": [
+    {
+      "path": "qualification.json",
+      "kind": "sanitized_original",
+      "source_id": "outputs/regression-982-singlehost-fresh-27b-graph-qualification.json",
+      "original_sha256": "6b734877209a95a76a6f8dbe63649ee26cf9bbd141373fac9026eedd795dfae1",
+      "sanitized_sha256": "bb283aa47368a4ec2d801ee7471c36d72444d0e1e33ca5bcb0e1eff8938a0e9b",
+      "bytes": 1704
+    },
+    {
+      "path": "server-launch.json",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/server-launch.json",
+      "original_sha256": "14c7c0163280258605aa077710fb5f6928133f7f2b1a14fd30410083de416c07",
+      "sanitized_sha256": "8430ca85f26b0ecb6bdc1092b3fbbed219c79c0a18b2d0dd5cd6e9ac69b6f965",
+      "bytes": 1625
+    },
+    {
+      "path": "text_single.json",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_single.json",
+      "original_sha256": "acf4b17c692e8c7a8b3ea6f2ba67d4c1f1db8604c5d2f5ff6ac2ddb33c175cd5",
+      "sanitized_sha256": "acf4b17c692e8c7a8b3ea6f2ba67d4c1f1db8604c5d2f5ff6ac2ddb33c175cd5",
+      "bytes": 6852
+    },
+    {
+      "path": "text_concurrent_8.json",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_concurrent_8.json",
+      "original_sha256": "72c9f2d6b65d40d0a949880df377a0137d01774f5faa379ee3816e9b9caaae26",
+      "sanitized_sha256": "ae23a4a0eead66674f7d1675c0885d09a8a61a0d3e9eaff4a9f26692f6622535",
+      "bytes": 16779
+    },
+    {
+      "path": "cache-before-files.txt",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-files.txt",
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sanitized_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "cache-before-tree.txt",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-tree.txt",
+      "original_sha256": "302db88d272100023215b511e2d329699d628e14aa8fc00dacce60badda96f4e",
+      "sanitized_sha256": "302db88d272100023215b511e2d329699d628e14aa8fc00dacce60badda96f4e",
+      "bytes": 31
+    },
+    {
+      "path": "candidate.sha256",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/candidate.sha256",
+      "original_sha256": "079eb5cea9afb310ae1f368f873e90aa96dfca32eb8cd50a527c8a748d84cc53",
+      "sanitized_sha256": "66835c6706392a7b962b03e71c43fe9c6d71fc88c63584689faeacc0fc859b57",
+      "bytes": 360
+    },
+    {
+      "path": "harness.sha256",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/harness.sha256",
+      "original_sha256": "39f02f50462748b6371102fcfc15659344a4d2631bcff593180c384e5f35d9f6",
+      "sanitized_sha256": "39f02f50462748b6371102fcfc15659344a4d2631bcff593180c384e5f35d9f6",
+      "bytes": 429
+    },
+    {
+      "path": "term-sent",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/term-sent",
+      "original_sha256": "d0eec6e83964afef3f98d3d434ba9944835d3acdac82123c95733aab8c4c7c3e",
+      "sanitized_sha256": "d0eec6e83964afef3f98d3d434ba9944835d3acdac82123c95733aab8c4c7c3e",
+      "bytes": 26
+    },
+    {
+      "path": "exit",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/exit",
+      "original_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "sanitized_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    {
+      "path": "client-exit",
+      "kind": "sanitized_original",
+      "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/client-exit",
+      "original_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "sanitized_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    {
+      "path": "native-cleanup-timeline.json",
+      "kind": "generated_summary",
+      "original_sha256": null,
+      "input_hashes": [
+        {
+          "source_id": "outputs/regression-982-singlehost-fresh-27b-graph-qualification.json",
+          "sha256": "6b734877209a95a76a6f8dbe63649ee26cf9bbd141373fac9026eedd795dfae1"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/server-launch.json",
+          "sha256": "14c7c0163280258605aa077710fb5f6928133f7f2b1a14fd30410083de416c07"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_single.json",
+          "sha256": "acf4b17c692e8c7a8b3ea6f2ba67d4c1f1db8604c5d2f5ff6ac2ddb33c175cd5"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_concurrent_8.json",
+          "sha256": "72c9f2d6b65d40d0a949880df377a0137d01774f5faa379ee3816e9b9caaae26"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-files.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-tree.txt",
+          "sha256": "302db88d272100023215b511e2d329699d628e14aa8fc00dacce60badda96f4e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/candidate.sha256",
+          "sha256": "079eb5cea9afb310ae1f368f873e90aa96dfca32eb8cd50a527c8a748d84cc53"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/harness.sha256",
+          "sha256": "39f02f50462748b6371102fcfc15659344a4d2631bcff593180c384e5f35d9f6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/term-sent",
+          "sha256": "d0eec6e83964afef3f98d3d434ba9944835d3acdac82123c95733aab8c4c7c3e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/client-exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-932-1795156342947652073.json",
+          "sha256": "347e18d970b7cd820cbb334154cdebb8f21d090768f801239ca2918aaed31d80"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-933-1795156342947463472.json",
+          "sha256": "87d20d8d7985cf1cfc1b41d333de5ed6586dc0bfa50b9238ec0f0a6145955f03"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-934-1795156342947625153.json",
+          "sha256": "997daf571410d37000e4af579e1c1a7eeb04db3386e884c499b40de9bbb4e1a6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-935-1795156342947604069.json",
+          "sha256": "092c471a3706253b85b29ca15de3ddb09ead17397b6aa521041326d7223329f4"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph.log",
+          "sha256": "07cdacc45d342f90ffcc27f5ee3be8fdde657202d1a4ec7feef0a3c8c4c5e6ed"
+        }
+      ],
+      "sanitized_sha256": "ab6fac0397a77d5e2c4fd21bdd0cc3769e1eab1b8d1c194c6273c80ff0bf78c5",
+      "bytes": 3074
+    },
+    {
+      "path": "worker-env-evidence.json",
+      "kind": "generated_summary",
+      "original_sha256": null,
+      "input_hashes": [
+        {
+          "source_id": "outputs/regression-982-singlehost-fresh-27b-graph-qualification.json",
+          "sha256": "6b734877209a95a76a6f8dbe63649ee26cf9bbd141373fac9026eedd795dfae1"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/server-launch.json",
+          "sha256": "14c7c0163280258605aa077710fb5f6928133f7f2b1a14fd30410083de416c07"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_single.json",
+          "sha256": "acf4b17c692e8c7a8b3ea6f2ba67d4c1f1db8604c5d2f5ff6ac2ddb33c175cd5"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_concurrent_8.json",
+          "sha256": "72c9f2d6b65d40d0a949880df377a0137d01774f5faa379ee3816e9b9caaae26"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-files.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-tree.txt",
+          "sha256": "302db88d272100023215b511e2d329699d628e14aa8fc00dacce60badda96f4e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/candidate.sha256",
+          "sha256": "079eb5cea9afb310ae1f368f873e90aa96dfca32eb8cd50a527c8a748d84cc53"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/harness.sha256",
+          "sha256": "39f02f50462748b6371102fcfc15659344a4d2631bcff593180c384e5f35d9f6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/term-sent",
+          "sha256": "d0eec6e83964afef3f98d3d434ba9944835d3acdac82123c95733aab8c4c7c3e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/client-exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-932-1795156342947652073.json",
+          "sha256": "347e18d970b7cd820cbb334154cdebb8f21d090768f801239ca2918aaed31d80"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-933-1795156342947463472.json",
+          "sha256": "87d20d8d7985cf1cfc1b41d333de5ed6586dc0bfa50b9238ec0f0a6145955f03"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-934-1795156342947625153.json",
+          "sha256": "997daf571410d37000e4af579e1c1a7eeb04db3386e884c499b40de9bbb4e1a6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-935-1795156342947604069.json",
+          "sha256": "092c471a3706253b85b29ca15de3ddb09ead17397b6aa521041326d7223329f4"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph.log",
+          "sha256": "07cdacc45d342f90ffcc27f5ee3be8fdde657202d1a4ec7feef0a3c8c4c5e6ed"
+        }
+      ],
+      "sanitized_sha256": "1b0d054a393dddc353ecdf4d50866fabc2944b304120a379c45103fe134bc02f",
+      "bytes": 3595
+    },
+    {
+      "path": "method.json",
+      "kind": "generated_summary",
+      "original_sha256": null,
+      "input_hashes": [
+        {
+          "source_id": "outputs/regression-982-singlehost-fresh-27b-graph-qualification.json",
+          "sha256": "6b734877209a95a76a6f8dbe63649ee26cf9bbd141373fac9026eedd795dfae1"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/server-launch.json",
+          "sha256": "14c7c0163280258605aa077710fb5f6928133f7f2b1a14fd30410083de416c07"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_single.json",
+          "sha256": "acf4b17c692e8c7a8b3ea6f2ba67d4c1f1db8604c5d2f5ff6ac2ddb33c175cd5"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_concurrent_8.json",
+          "sha256": "72c9f2d6b65d40d0a949880df377a0137d01774f5faa379ee3816e9b9caaae26"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-files.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-tree.txt",
+          "sha256": "302db88d272100023215b511e2d329699d628e14aa8fc00dacce60badda96f4e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/candidate.sha256",
+          "sha256": "079eb5cea9afb310ae1f368f873e90aa96dfca32eb8cd50a527c8a748d84cc53"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/harness.sha256",
+          "sha256": "39f02f50462748b6371102fcfc15659344a4d2631bcff593180c384e5f35d9f6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/term-sent",
+          "sha256": "d0eec6e83964afef3f98d3d434ba9944835d3acdac82123c95733aab8c4c7c3e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/client-exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-932-1795156342947652073.json",
+          "sha256": "347e18d970b7cd820cbb334154cdebb8f21d090768f801239ca2918aaed31d80"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-933-1795156342947463472.json",
+          "sha256": "87d20d8d7985cf1cfc1b41d333de5ed6586dc0bfa50b9238ec0f0a6145955f03"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-934-1795156342947625153.json",
+          "sha256": "997daf571410d37000e4af579e1c1a7eeb04db3386e884c499b40de9bbb4e1a6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-935-1795156342947604069.json",
+          "sha256": "092c471a3706253b85b29ca15de3ddb09ead17397b6aa521041326d7223329f4"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph.log",
+          "sha256": "07cdacc45d342f90ffcc27f5ee3be8fdde657202d1a4ec7feef0a3c8c4c5e6ed"
+        }
+      ],
+      "sanitized_sha256": "0df40af35fa20a2c9d9825dc66340ad34c15f09467c6d4c152124945a316569b",
+      "bytes": 4842
+    },
+    {
+      "path": "README.md",
+      "kind": "generated_summary",
+      "original_sha256": null,
+      "input_hashes": [
+        {
+          "source_id": "outputs/regression-982-singlehost-fresh-27b-graph-qualification.json",
+          "sha256": "6b734877209a95a76a6f8dbe63649ee26cf9bbd141373fac9026eedd795dfae1"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/server-launch.json",
+          "sha256": "14c7c0163280258605aa077710fb5f6928133f7f2b1a14fd30410083de416c07"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_single.json",
+          "sha256": "acf4b17c692e8c7a8b3ea6f2ba67d4c1f1db8604c5d2f5ff6ac2ddb33c175cd5"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_concurrent_8.json",
+          "sha256": "72c9f2d6b65d40d0a949880df377a0137d01774f5faa379ee3816e9b9caaae26"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-files.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-tree.txt",
+          "sha256": "302db88d272100023215b511e2d329699d628e14aa8fc00dacce60badda96f4e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/candidate.sha256",
+          "sha256": "079eb5cea9afb310ae1f368f873e90aa96dfca32eb8cd50a527c8a748d84cc53"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/harness.sha256",
+          "sha256": "39f02f50462748b6371102fcfc15659344a4d2631bcff593180c384e5f35d9f6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/term-sent",
+          "sha256": "d0eec6e83964afef3f98d3d434ba9944835d3acdac82123c95733aab8c4c7c3e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/client-exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-932-1795156342947652073.json",
+          "sha256": "347e18d970b7cd820cbb334154cdebb8f21d090768f801239ca2918aaed31d80"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-933-1795156342947463472.json",
+          "sha256": "87d20d8d7985cf1cfc1b41d333de5ed6586dc0bfa50b9238ec0f0a6145955f03"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-934-1795156342947625153.json",
+          "sha256": "997daf571410d37000e4af579e1c1a7eeb04db3386e884c499b40de9bbb4e1a6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-935-1795156342947604069.json",
+          "sha256": "092c471a3706253b85b29ca15de3ddb09ead17397b6aa521041326d7223329f4"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph.log",
+          "sha256": "07cdacc45d342f90ffcc27f5ee3be8fdde657202d1a4ec7feef0a3c8c4c5e6ed"
+        }
+      ],
+      "sanitized_sha256": "863c699de5aab7b64cd37d59e17f5403b0fb68a0781ef5cdf2dbb8796b0f8c82",
+      "bytes": 3845
+    },
+    {
+      "path": "QA.json",
+      "kind": "generated_summary",
+      "original_sha256": null,
+      "input_hashes": [
+        {
+          "source_id": "outputs/regression-982-singlehost-fresh-27b-graph-qualification.json",
+          "sha256": "6b734877209a95a76a6f8dbe63649ee26cf9bbd141373fac9026eedd795dfae1"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/server-launch.json",
+          "sha256": "14c7c0163280258605aa077710fb5f6928133f7f2b1a14fd30410083de416c07"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_single.json",
+          "sha256": "acf4b17c692e8c7a8b3ea6f2ba67d4c1f1db8604c5d2f5ff6ac2ddb33c175cd5"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/reports/Qwen3.6-27B/port-18693/text_concurrent_8.json",
+          "sha256": "72c9f2d6b65d40d0a949880df377a0137d01774f5faa379ee3816e9b9caaae26"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-files.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/cache-before-tree.txt",
+          "sha256": "302db88d272100023215b511e2d329699d628e14aa8fc00dacce60badda96f4e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/candidate.sha256",
+          "sha256": "079eb5cea9afb310ae1f368f873e90aa96dfca32eb8cd50a527c8a748d84cc53"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/harness.sha256",
+          "sha256": "39f02f50462748b6371102fcfc15659344a4d2631bcff593180c384e5f35d9f6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/term-sent",
+          "sha256": "d0eec6e83964afef3f98d3d434ba9944835d3acdac82123c95733aab8c4c7c3e"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/client-exit",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-932-1795156342947652073.json",
+          "sha256": "347e18d970b7cd820cbb334154cdebb8f21d090768f801239ca2918aaed31d80"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-933-1795156342947463472.json",
+          "sha256": "87d20d8d7985cf1cfc1b41d333de5ed6586dc0bfa50b9238ec0f0a6145955f03"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-934-1795156342947625153.json",
+          "sha256": "997daf571410d37000e4af579e1c1a7eeb04db3386e884c499b40de9bbb4e1a6"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-935-1795156342947604069.json",
+          "sha256": "092c471a3706253b85b29ca15de3ddb09ead17397b6aa521041326d7223329f4"
+        },
+        {
+          "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph.log",
+          "sha256": "07cdacc45d342f90ffcc27f5ee3be8fdde657202d1a4ec7feef0a3c8c4c5e6ed"
+        }
+      ],
+      "sanitized_sha256": "9f8f86b2558f7f3ef07563b3d0ecb988c718c308afc34db92181c4a2b93bac17",
+      "bytes": 626
+    }
+  ],
+  "raw_archive_sha256": "ad7f19f53908a0a6d7af004f0ba95ffdbfbb2ef910feb2a484ac89f0f2b2dec6",
+  "note": "Original hashes preserve provenance; sanitized file-level hashes validate anonymized bytes. No synthetic original hash is assigned to generated summaries."
+}

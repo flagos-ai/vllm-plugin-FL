@@ -1,0 +1,86 @@
+[
+  {
+    "node": "NODE_B",
+    "rank": 0,
+    "runner_v2_override_key_present": false,
+    "operator_whitelist_key_present": false,
+    "original_key_absence_check": "key not in original environment dictionary; empty strings would be rejected",
+    "recorded_environment": {
+      "GEMS_VENDOR": "metax",
+      "VLLM_PLUGINS": "fl",
+      "MACA_VISIBLE_DEVICES": "4,5,6,7",
+      "MCCL_IB_DISABLE": "1"
+    },
+    "libraries": [
+      {
+        "native_library_sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad",
+        "wrapper_sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+      }
+    ],
+    "source_original_sha256": "347e18d970b7cd820cbb334154cdebb8f21d090768f801239ca2918aaed31d80",
+    "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-932-1795156342947652073.json"
+  },
+  {
+    "node": "NODE_B",
+    "rank": 1,
+    "runner_v2_override_key_present": false,
+    "operator_whitelist_key_present": false,
+    "original_key_absence_check": "key not in original environment dictionary; empty strings would be rejected",
+    "recorded_environment": {
+      "GEMS_VENDOR": "metax",
+      "VLLM_PLUGINS": "fl",
+      "MACA_VISIBLE_DEVICES": "4,5,6,7",
+      "MCCL_IB_DISABLE": "1"
+    },
+    "libraries": [
+      {
+        "native_library_sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad",
+        "wrapper_sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+      }
+    ],
+    "source_original_sha256": "87d20d8d7985cf1cfc1b41d333de5ed6586dc0bfa50b9238ec0f0a6145955f03",
+    "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-933-1795156342947463472.json"
+  },
+  {
+    "node": "NODE_B",
+    "rank": 2,
+    "runner_v2_override_key_present": false,
+    "operator_whitelist_key_present": false,
+    "original_key_absence_check": "key not in original environment dictionary; empty strings would be rejected",
+    "recorded_environment": {
+      "GEMS_VENDOR": "metax",
+      "VLLM_PLUGINS": "fl",
+      "MACA_VISIBLE_DEVICES": "4,5,6,7",
+      "MCCL_IB_DISABLE": "1"
+    },
+    "libraries": [
+      {
+        "native_library_sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad",
+        "wrapper_sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+      }
+    ],
+    "source_original_sha256": "997daf571410d37000e4af579e1c1a7eeb04db3386e884c499b40de9bbb4e1a6",
+    "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-934-1795156342947625153.json"
+  },
+  {
+    "node": "NODE_B",
+    "rank": 3,
+    "runner_v2_override_key_present": false,
+    "operator_whitelist_key_present": false,
+    "original_key_absence_check": "key not in original environment dictionary; empty strings would be rejected",
+    "recorded_environment": {
+      "GEMS_VENDOR": "metax",
+      "VLLM_PLUGINS": "fl",
+      "MACA_VISIBLE_DEVICES": "4,5,6,7",
+      "MCCL_IB_DISABLE": "1"
+    },
+    "libraries": [
+      {
+        "native_library_sha256": "33b3c77248366928f89b6b75ad6b5eb579126512d39381ebd59a4c245896f0ad",
+        "wrapper_sha256": "a791806a0ab36da872cd200b5466c36001ef798c8fb444fc62b1d1f6805ca5cf"
+      }
+    ],
+    "source_original_sha256": "092c471a3706253b85b29ca15de3ddb09ead17397b6aa521041326d7223329f4",
+    "source_id": "collected/NODE_B/regression-982-singlehost-fresh-27b-graph/after-text-observer/flagcx-observer-NODE_B-935-1795156342947604069.json"
+  }
+]

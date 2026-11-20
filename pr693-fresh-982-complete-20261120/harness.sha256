@@ -1,0 +1,3 @@
+88c9f49416aa14b55c37520025a3879f2fee1b4f4648d03f3dfaf5d59b298f1d  regression-982-singlehost-fresh-27b-graph/harness/client-single-fresh-982.sh
+793efe54feba6e814c189ee47be04118ac624c3a509b533dfea3cdbb5b105221  regression-982-singlehost-fresh-27b-graph/harness/inside-single-fresh-982.sh
+ca1915eec723e93eee0e217ad9b721b9c8a5c6b2591c2f9b962e59f42fd6abf8  regression-982-singlehost-fresh-27b-graph/harness/launch-single-fresh-982.py
