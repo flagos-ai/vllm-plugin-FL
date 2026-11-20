@@ -1,0 +1,22 @@
+[
+  "/usr/local/bin/python3.12",
+  "-m",
+  "vllm.entrypoints.cli.main",
+  "serve",
+  "/models/Qwen3-0.6B",
+  "--served-model-name",
+  "qwen",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  "18581",
+  "--tensor-parallel-size",
+  "1",
+  "--enforce-eager",
+  "--max-model-len",
+  "2048",
+  "--max-num-seqs",
+  "32",
+  "--gpu-memory-utilization",
+  "0.80"
+]

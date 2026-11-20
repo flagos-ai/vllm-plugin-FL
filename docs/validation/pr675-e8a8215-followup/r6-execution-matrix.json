@@ -1,0 +1,67 @@
+{
+  "reference": "GCU eager execution consistency only, NOT NVIDIA provider precision",
+  "rows": [
+    {
+      "mode": "compile",
+      "residual": false,
+      "shape": [
+        12,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "max_abs": [
+        0.0
+      ],
+      "mismatches": [
+        0
+      ]
+    },
+    {
+      "mode": "capture_replay",
+      "residual": false,
+      "shape": [
+        12,
+        1024
+      ],
+      "max_abs": [
+        0.0
+      ],
+      "mismatches": [
+        0
+      ]
+    },
+    {
+      "mode": "compile",
+      "residual": true,
+      "shape": [
+        12,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "max_abs": [
+        0.0009765625,
+        0.0
+      ],
+      "mismatches": [
+        1,
+        0
+      ]
+    },
+    {
+      "mode": "capture_replay",
+      "residual": true,
+      "shape": [
+        12,
+        1024
+      ],
+      "max_abs": [
+        0.0009765625,
+        0.0
+      ],
+      "mismatches": [
+        1,
+        0
+      ]
+    }
+  ]
+}

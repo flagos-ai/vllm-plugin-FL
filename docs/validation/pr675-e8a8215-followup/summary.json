@@ -1,0 +1,124 @@
+{
+  "rows": [
+    {
+      "model": "Qwen3-0.6B",
+      "vocab": 151936,
+      "concurrency": 1,
+      "off": {
+        "median_itl": 0.21459854277782142,
+        "p95_itl": 0.21561285527423024,
+        "output_tokens_per_second": 4.627839655969761,
+        "cpu_core_equivalents": 1.0188477717307232
+      },
+      "on": {
+        "median_itl": 0.21553316293284297,
+        "p95_itl": 0.21667734277434647,
+        "output_tokens_per_second": 4.605823571322112,
+        "cpu_core_equivalents": 1.0211974067004728
+      },
+      "itl_change_pct": 0.4355202709783512,
+      "throughput_change_pct": -0.4757313624565329
+    },
+    {
+      "model": "Qwen3-0.6B",
+      "vocab": 151936,
+      "concurrency": 4,
+      "off": {
+        "median_itl": 0.21842726855538785,
+        "p95_itl": 0.21939978701993823,
+        "output_tokens_per_second": 17.33598412169693,
+        "cpu_core_equivalents": 1.0211978146687088
+      },
+      "on": {
+        "median_itl": 0.221253503812477,
+        "p95_itl": 0.2242203711066395,
+        "output_tokens_per_second": 17.09051564539,
+        "cpu_core_equivalents": 1.0254290618442188
+      },
+      "itl_change_pct": 1.293902210919451,
+      "throughput_change_pct": -1.4159477453588254
+    },
+    {
+      "model": "Qwen3-0.6B",
+      "vocab": 151936,
+      "concurrency": 16,
+      "off": {
+        "median_itl": 0.25454135006293654,
+        "p95_itl": 0.2573135488200933,
+        "output_tokens_per_second": 56.66478657749481,
+        "cpu_core_equivalents": 1.0220688691566644
+      },
+      "on": {
+        "median_itl": 0.2628068095073104,
+        "p95_itl": 0.2710898541845381,
+        "output_tokens_per_second": 54.927176862454765,
+        "cpu_core_equivalents": 1.030957362594123
+      },
+      "itl_change_pct": 3.247197141969349,
+      "throughput_change_pct": -3.0664718249025613
+    },
+    {
+      "model": "Qwen3.6-27B",
+      "vocab": 248320,
+      "concurrency": 1,
+      "off": {
+        "median_itl": 0.5009492652025074,
+        "p95_itl": 0.5041863736696541,
+        "output_tokens_per_second": 1.9766907016517545,
+        "cpu_core_equivalents": 3.0419414911342173
+      },
+      "on": {
+        "median_itl": 0.5053738777060062,
+        "p95_itl": 0.5078496434725821,
+        "output_tokens_per_second": 1.9609714510348966,
+        "cpu_core_equivalents": 3.0468572769263123
+      },
+      "itl_change_pct": 0.8832456320122972,
+      "throughput_change_pct": -0.7952306652589947
+    },
+    {
+      "model": "Qwen3.6-27B",
+      "vocab": 248320,
+      "concurrency": 4,
+      "off": {
+        "median_itl": 0.5285790743073449,
+        "p95_itl": 0.5329467486590147,
+        "output_tokens_per_second": 5.228150333303939,
+        "cpu_core_equivalents": 2.8024293830302884
+      },
+      "on": {
+        "median_itl": 0.5311542678391561,
+        "p95_itl": 0.5383135767187923,
+        "output_tokens_per_second": 6.858069590682403,
+        "cpu_core_equivalents": 3.0464785722682652
+      },
+      "itl_change_pct": 0.48719172910614006,
+      "throughput_change_pct": 31.17582994880013
+    },
+    {
+      "model": "Qwen3.6-27B",
+      "vocab": 248320,
+      "concurrency": 16,
+      "off": {
+        "median_itl": 0.5699976567411795,
+        "p95_itl": 0.5754469919484109,
+        "output_tokens_per_second": 22.143939019962332,
+        "cpu_core_equivalents": 2.939874228814106
+      },
+      "on": {
+        "median_itl": 0.5915842364775017,
+        "p95_itl": 0.6058046123944223,
+        "output_tokens_per_second": 16.900440091451422,
+        "cpu_core_equivalents": 2.7327280046565976
+      },
+      "itl_change_pct": 3.7871348208233124,
+      "throughput_change_pct": -23.679160802348655
+    }
+  ],
+  "limitations": [
+    "Two ABBA trials per mode, eager only, fixed prompt and 32 tokens.",
+    "Different models and TP sizes are not a controlled vocabulary-only comparison.",
+    "Client ITL and server-tree CPU do not isolate top-k causal cost.",
+    "Other device compilation jobs may contend for host CPU."
+  ]
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "batch": 1,
+    "vocab": 128,
+    "exact": true,
+    "cold_seconds": 9.826092849019915,
+    "warm_seconds": 0.00022602197714149952
+  },
+  {
+    "batch": 1,
+    "vocab": 151936,
+    "exact": true,
+    "cold_seconds": 590.6520790839568,
+    "warm_seconds": 0.002456239191815257
+  },
+  {
+    "batch": 4,
+    "vocab": 151936,
+    "exact": true,
+    "cold_seconds": 607.9012679308653,
+    "warm_seconds": 0.0068131847307085994
+  }
+]
