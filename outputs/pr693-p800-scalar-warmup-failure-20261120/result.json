@@ -1,0 +1,59 @@
+{
+  "status": "ORIGINAL_LOCAL_27GRAPH_FAILED_BEFORE_MODEL_LOAD",
+  "source_after": {
+    "head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+    "tree": "18ef555579c9ee8911255f2fa3cbc5cf1b1be366",
+    "files_verified": 827,
+    "symlinks": 1
+  },
+  "image": "sha256:d97021a298bfc4da9c8dd994f189810195a68f04285e769ab04e97b29a76c9f0",
+  "CI_base_image": "sha256:db1cceff13d438142abfd695500ac0820ebfe6ae13d909017a2ce073ac607b17",
+  "software_metadata": {
+    "torch": "2.9.0+cu129",
+    "flagtree": "0.7.0+xpu3.6",
+    "flag-gems": "5.4.0",
+    "flagcx": "0.14.1+xre5.37.1",
+    "vllm": "0.32.0+flagos",
+    "flaggems-vllm": "0.1.0",
+    "transformers": "5.19.0"
+  },
+  "FlagCX_source": "6fe36310fb5c9bd2396f531d7bf78c08fc792340",
+  "actual_mapped_libflagcx_SHA256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934",
+  "mask": "4,5,6,7",
+  "phase": "PyFlagcxCommunicator constructor: FP32 count1 zeros all_reduce then stream.synchronize",
+  "rank_error_ownership": {
+    "rank1": {
+      "worker_PID": 1320,
+      "SDK_ordinal": 5,
+      "BDF": "00000000:9c:00.0",
+      "first_visible_error": "kl3 1049290/status702 and launch timeout"
+    },
+    "rank3": {
+      "worker_PID": 1322,
+      "SDK_ordinal": 7,
+      "BDF": "00000000:bb:00.0",
+      "first_visible_error": "kl3 721/status299 and explicit wait for noc idle timeout"
+    }
+  },
+  "selected_original_log_lines": [
+    "XX: (pid 1320,tid 140403576948544)cuda/src/cui/hal/kl3/kl3_gpfifo.cc:183:kl3ChannelCheckErrors kl3ChannelCheckErrors failed, error set to 1049290, status= 702",
+    "XX: (pid 1320,tid 140403576948544)cuda/src/cui/hal/kl3/kl3_gpfifo.cc:183:kl3ChannelCheckErrors kl3ChannelCheckErrors failed, error set to 1049290, status= 702",
+    "(Worker pid=1322) ERROR 11-20 14:53:27 [v1/executor/multiproc_executor.py:954] torch.AcceleratorError: CUDA error: wait for noc idle timeout"
+  ],
+  "case_report": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1,
+    "duration": 1292.11
+  },
+  "outer_cap_minutes": 180,
+  "natural_container_exit": 1,
+  "OOMKilled": false,
+  "monitor_samples_passed": 601,
+  "no_observed_foreign_or_wrong_bank_PID": true,
+  "source_after_verified": true,
+  "exact_CID_absent_and_target_bank_idle_and_five_locks_released": true,
+  "raw_archive_SHA256": "11d4b8125307f03d5fc4912d37c30dcb5a77ca0d11b15a1ae6d6740dcb2d39b1",
+  "original_CI_lower_bank_rank1_error_reproduced_claimed": false,
+  "model_request_or_NoC_gate_pass_claimed": false
+}
