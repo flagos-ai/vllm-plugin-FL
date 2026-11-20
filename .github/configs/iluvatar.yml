@@ -21,6 +21,9 @@ platform: iluvatar
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-Iluvatar-ci@sha256:b43fbf5bda5e123d58f25150d0b717abbe81c026ea05a6cdde989dfac23587e0
 runner_labels:
   - iluvatar-cicd-vllm-plugin
+# Run the dedicated unit job on the BI-V150 runner (the functional job also
+# runs the unit pass; this makes the unit result a first-class PR check).
+unit_devices: [bi_v150]
 
 # The CoreX 5.0.1 runtime image carries its own driver userspace
 # (libcuda.so.1, libixml.so, ixsmi) and requires a 5.0.1 host driver. Never

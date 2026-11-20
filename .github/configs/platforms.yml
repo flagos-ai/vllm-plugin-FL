@@ -84,12 +84,14 @@ platforms:
       # docker/build.sh and platforms.yml for every vendor, so those changes
       # are routed to the vendor platforms that build from them instead of
       # fanning out to every enabled backend.
+      - .github/configs/nvidia.yml
       - .github/configs/platforms.yml
       - docker/build.sh
     exempt_from_global:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
+      - .github/configs/nvidia.yml
       - .github/configs/platforms.yml
       - docker/build.sh
   # Enablement follows the 0.5.0-dev line's own compatibility matrix.
