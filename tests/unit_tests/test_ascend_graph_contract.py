@@ -433,10 +433,25 @@ def _config(enabled=None, *, eager=False):
     options = {} if enabled is None else {"enable_npugraph_ex": enabled}
     return NS(
         additional_config={"ascend_compilation_config": options},
-        model_config=NS(enforce_eager=eager),
+        model_config=NS(enforce_eager=eager, is_encoder_decoder=False),
         parallel_config=NS(use_ubatching=False),
         compilation_config=NS(mode="vllm", cudagraph_mode="decode", pass_config=NS()),
     )
+
+
+def test_whisper_piecewise_keeps_attention_outside_graphs(monkeypatch):
+    monkeypatch.delenv("ASCEND_LAUNCH_BLOCKING", raising=False)
+    config = _config()
+    config.model_config.is_encoder_decoder = True
+    config.model_config.hf_config = NS(model_type="whisper")
+    attention_ops = ["vllm::unified_attention_with_output"]
+    config.compilation_config._attention_ops = attention_ops
+
+    _configure(monkeypatch)(config)
+
+    assert config.compilation_config.cudagraph_mode == "piecewise"
+    assert config.compilation_config.splitting_ops == attention_ops
+    assert config.compilation_config.splitting_ops is not attention_ops
 
 
 @pytest.mark.parametrize("eager", [False, True])

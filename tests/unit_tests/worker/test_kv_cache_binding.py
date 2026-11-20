@@ -196,3 +196,22 @@ def test_upstream_failure_after_mutation_propagates_without_retry(
     assert runner_caches[0] is tensor
     assert context["model.layers.0.attn"].kv_cache is tensor
     extract.assert_not_called()
+
+
+def test_ascend_binds_self_and_cross_attention_caches(monkeypatch):
+    platform = SimpleNamespace(vendor_name="ascend", device_type="npu")
+    monkeypatch.setattr(kv_cache_utils, "current_platform", platform)
+    self_name = "model.decoder.layers.0.self_attn"
+    cross_name = "model.decoder.layers.0.encoder_attn"
+    caches = {self_name: torch.empty(1), cross_name: torch.empty(2)}
+    context = {
+        self_name: SimpleNamespace(attn_type="decoder"),
+        cross_name: SimpleNamespace(attn_type="encoder_decoder"),
+    }
+    runner_caches = []
+
+    kv_cache_utils.bind_kv_cache(caches, context, runner_caches)
+
+    assert len(runner_caches) == 2
+    assert runner_caches[0] is context[self_name].kv_cache is caches[self_name]
+    assert runner_caches[1] is context[cross_name].kv_cache is caches[cross_name]
