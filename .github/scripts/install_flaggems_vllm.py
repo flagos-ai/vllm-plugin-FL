@@ -67,7 +67,15 @@ def main(argv=None, *, commit=None, source_archive=None, archive_sha256=None):
     parser.add_argument(
         "--platform", default="", help="Use Enflame-specific source pin"
     )
+    parser.add_argument("--source-archive", action="store_true")
     args = parser.parse_args(argv)
+    if args.source_archive:
+        if args.platform == "enflame":
+            parser.error("--source-archive is unavailable for the Enflame pin")
+        if source_archive is None:
+            source_archive, archive_sha256 = SOURCE_ARCHIVE, SOURCE_ARCHIVE_SHA256
+        if not source_archive or not archive_sha256:
+            parser.error("--source-archive requires a pinned archive and SHA256")
     if commit is None:
         commit = ENFLAME_COMMIT if args.platform == "enflame" else COMMIT
     release = "0.3.0.dev1" if args.platform == "enflame" else RELEASE
@@ -101,12 +109,4 @@ def main(argv=None, *, commit=None, source_archive=None, archive_sha256=None):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-archive", action="store_true")
-    args = parser.parse_args()
-    if args.source_archive:
-        if SOURCE_ARCHIVE is None:
-            parser.error("--source-archive is unavailable for the selected provider")
-        main(source_archive=SOURCE_ARCHIVE, archive_sha256=SOURCE_ARCHIVE_SHA256)
-    else:
-        main()
+    main()
