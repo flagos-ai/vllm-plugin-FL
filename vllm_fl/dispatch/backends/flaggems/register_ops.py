@@ -199,3 +199,7 @@ def register_builtins(registry) -> None:
     from .impl.mla_ops import register_mla_operators
 
     register_mla_operators(registry, allow=use_flaggems_op)
+
+    from .impl.bge_m3 import register_bge_m3_operators
+
+    register_bge_m3_operators(registry, allow=use_flaggems_op)

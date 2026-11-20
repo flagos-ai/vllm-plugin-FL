@@ -1,0 +1,19 @@
+# MetaX C550 FP16 dense profile; launch with the adjacent serve.sh.
+served-model-name: bge-m3
+runner: pooling
+hf-overrides:
+  architectures: [BgeM3EmbeddingModelFL]
+pooler-config:
+  task: embed
+dtype: float16
+tensor-parallel-size: 1
+distributed-executor-backend: uni
+enforce-eager: true
+max-model-len: 8192
+max-num-seqs: 64
+max-num-batched-tokens: 32768
+gpu-memory-utilization: 0.90
+# vLLM 0.24 YAML omits false values; use explicit negative CLI flags.
+no-enable-prefix-caching: true
+no-enable-chunked-prefill: true
+seed: 20261023
