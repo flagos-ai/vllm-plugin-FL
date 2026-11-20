@@ -337,3 +337,112 @@ def test_metax_handoff_cpu_fullgraph_does_not_query_cuda(monkeypatch):
     for offset in (0, 1, 3):
         values = torch.arange(8, dtype=torch.float32) + offset
         torch.testing.assert_close(compute(values), (values + 1) * 2)
+
+
+@pytest.fixture
+def metax_teardown(monkeypatch):
+    from types import SimpleNamespace
+
+    import torch
+
+    from vllm.compilation.breakable_cudagraph import BreakableCUDAGraphWrapper
+    from vllm.compilation.cuda_graph import CUDAGraphWrapper
+
+    state = SimpleNamespace(inflight=True, graphs={"native", "breakable"}, closed=[])
+    handle = object()
+    native = SimpleNamespace(comm=handle, available=True, disabled=False)
+    communicator = MetaxCommunicatorFL.__new__(MetaxCommunicatorFL)
+    communicator.device = torch.device("cuda:0")
+    communicator.pyflagcx_comm = native
+    communicator._flagcx_capture_seen = True
+    communicator.all2all_manager = None
+
+    def synchronize(device):
+        assert device == communicator.device
+        state.inflight = False
+
+    def clear(name):
+        assert not state.inflight, "graphs were freed before GPU work completed"
+        state.graphs.remove(name)
+
+    def close(pointer):
+        assert not state.graphs, "native close still depends on retained graphs"
+        assert native.comm is None and native.disabled and not native.available
+        state.closed.append(pointer)
+
+    native.flagcx = SimpleNamespace(flagcxCommDestroy=close)
+    monkeypatch.setattr(torch.cuda, "synchronize", synchronize)
+    monkeypatch.setattr(CUDAGraphWrapper, "clear_all_graphs", lambda: clear("native"))
+    monkeypatch.setattr(
+        BreakableCUDAGraphWrapper, "clear_all_graphs", lambda: clear("breakable")
+    )
+    return SimpleNamespace(
+        comm=communicator,
+        native=native,
+        handle=handle,
+        state=state,
+        graph_type=CUDAGraphWrapper,
+        breakable_type=BreakableCUDAGraphWrapper,
+    )
+
+
+def test_metax_teardown_releases_graph_dependencies_before_close(metax_teardown):
+    h = metax_teardown
+    h.comm.destroy()
+    assert not h.state.inflight and not h.state.graphs
+    assert h.state.closed == [h.handle]
+    assert h.comm.pyflagcx_comm is None
+
+
+@pytest.mark.parametrize("absent", ["capture", "communicator", "handle"])
+def test_metax_teardown_keeps_uncaptured_paths_unchanged(metax_teardown, absent):
+    h = metax_teardown
+    if absent == "capture":
+        h.comm._flagcx_capture_seen = False
+    elif absent == "communicator":
+        h.comm.pyflagcx_comm = None
+    else:
+        h.native.comm = None
+    h.comm.destroy()
+    assert h.state.inflight and h.state.graphs == {"native", "breakable"}
+    assert not h.state.closed
+    assert h.comm.pyflagcx_comm is None
+
+
+def test_metax_teardown_cannot_destroy_native_handle_twice(metax_teardown):
+    h = metax_teardown
+    h.comm.destroy()
+    h.comm.destroy()
+    assert h.state.closed == [h.handle]
+
+
+@pytest.mark.parametrize("stage", ["sync", "native_graph", "breakable_graph", "close"])
+def test_metax_teardown_propagates_failure_without_reusing_handle(
+    monkeypatch, metax_teardown, stage
+):
+    import torch
+
+    h = metax_teardown
+
+    def fail(*args):
+        raise RuntimeError(stage)
+
+    if stage == "sync":
+        monkeypatch.setattr(torch.cuda, "synchronize", fail)
+    elif stage == "native_graph":
+        monkeypatch.setattr(h.graph_type, "clear_all_graphs", fail)
+    elif stage == "breakable_graph":
+        monkeypatch.setattr(h.breakable_type, "clear_all_graphs", fail)
+    else:
+        h.native.flagcx.flagcxCommDestroy = fail
+    with pytest.raises(RuntimeError, match=stage):
+        h.comm.destroy()
+    assert h.comm.pyflagcx_comm is h.native
+    if stage == "close":
+        assert h.native.comm is None and h.native.disabled and not h.native.available
+        h.comm.destroy()
+        assert h.comm.pyflagcx_comm is None
+    else:
+        assert (
+            h.native.comm is h.handle and h.native.available and not h.native.disabled
+        )
