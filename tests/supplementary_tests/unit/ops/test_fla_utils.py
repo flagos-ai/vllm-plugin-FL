@@ -97,10 +97,34 @@ def _install_vllm_stubs():
         sys.modules[name] = mod
 
 
-if "vllm" not in sys.modules:
-    _install_vllm_stubs()
+_STUB_ROOTS = ("vllm", "vllm_fl")
 
-from vllm_fl.ops.fla.utils import input_guard  # noqa: E402
+# Snapshot the pre-existing vllm/vllm_fl entries, install the stub graph,
+# import the module under test, then restore: the decorator under test only
+# closes over torch, so it keeps working after the stubs are gone. Without
+# the restore, later files importing vllm_fl (e.g. the fused_moe suite, whose
+# stub graph is keyed on "vllm_fl not yet imported") would collect-fail with
+# ModuleNotFoundError: No module named 'vllm.model_executor.layers'.
+_SAVED = {
+    name: sys.modules.get(name, None)
+    for name in list(sys.modules)
+    if name.split(".")[0] in _STUB_ROOTS
+}
+_install_vllm_stubs()
+try:
+    from vllm_fl.ops.fla.utils import input_guard  # noqa: E402
+finally:
+    for name in [
+        name
+        for name in list(sys.modules)
+        if name.split(".")[0] in _STUB_ROOTS and name not in _SAVED
+    ]:
+        sys.modules.pop(name, None)
+    for name, module in _SAVED.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 
 class TestInputGuard:

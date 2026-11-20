@@ -114,7 +114,10 @@ def gdn(monkeypatch):
     automatic restoration.
     """
     monkeypatch.setenv("TRITON_INTERPRET", "1")
-    import triton
+    # The kernel under test executes through triton's interpreter mode; on
+    # hosts without the package (CPU-only Windows) the whole fixture's
+    # subject matter is unavailable, so the tests skip rather than error.
+    triton = pytest.importorskip("triton")
     import triton.language as tl
 
     if not triton.knobs.runtime.interpret or type(tl.sigmoid).__name__ != (

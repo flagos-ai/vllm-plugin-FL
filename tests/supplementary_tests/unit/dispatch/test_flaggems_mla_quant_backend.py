@@ -47,7 +47,7 @@ import torch
 
 pytestmark = pytest.mark.supplementary
 
-_STUB_ROOTS = ("vllm", "vllm_fl", "flag_gems", "flaggems_vllm")
+_STUB_ROOTS = ("vllm", "vllm_fl", "flag_gems", "flaggems_vllm", "triton")
 _MISSING = object()
 
 
@@ -300,7 +300,11 @@ class _VllmStubTree:
         )
         self._leaf("vllm.v1.kv_cache_interface", AttentionSpec=object)
 
-        self._leaf("vllm.triton_utils", triton=__import__("triton"))
+        # vllm.triton_utils.triton is set after the fake triton module below
+        # is built, so both impl/quantization.py (direct ``import triton``)
+        # and impl/fused_moe.py (``from vllm.triton_utils import triton``)
+        # see the same stubbed module.
+        self._leaf("vllm.triton_utils")
         self._leaf(
             "vllm.utils.math_utils" if False else "vllm.utils.math_utils",
             round_up=lambda value, multiple: (
@@ -332,6 +336,101 @@ class _VllmStubTree:
             torch_device_fn=SimpleNamespace(device=_DeviceCtx),
         )
         self._leaf("flag_gems.utils", libentry=lambda: lambda fn: fn)
+
+        # triton: impl/quantization.py imports it directly and decorates its
+        # kernels with @triton.jit. The real package is GPU-only and absent
+        # on CPU-only hosts; the decorator stand-in is the identity (every
+        # test that reaches a kernel replaces it with a CPU double anyway),
+        # and the tl namespace only needs to support annotation at import.
+        def _identity_jit(fn=None, **kwargs):
+            if fn is None:
+                return lambda f: f
+            return fn
+
+        class _Tl:
+            float32 = "float32"
+            int8 = "int8"
+            constexpr = lambda annotation: annotation  # noqa: E731
+
+            @staticmethod
+            def program_id(axis):
+                return ("program_id", axis)
+
+            @staticmethod
+            def arange(start, end):
+                return ("arange", start, end)
+
+            @staticmethod
+            def load(*args, **kwargs):
+                return ("load", args, kwargs)
+
+            @staticmethod
+            def store(*args, **kwargs):
+                return ("store", args, kwargs)
+
+            @staticmethod
+            def max(value, axis=None):
+                return ("max", value, axis)
+
+            @staticmethod
+            def abs(value):
+                return ("abs", value)
+
+            @staticmethod
+            def where(cond, a, b):
+                return ("where", cond, a, b)
+
+            @staticmethod
+            def floor(value):
+                return ("floor", value)
+
+            @staticmethod
+            def minimum(a, b):
+                return ("minimum", a, b)
+
+            @staticmethod
+            def maximum(a, b):
+                return ("maximum", a, b)
+
+        def _next_power_of_2(value):
+            # Independent oracle: smallest power of two >= value (>= 1).
+            if value <= 1:
+                return 1
+            result = 1
+            while result < value:
+                result *= 2
+            return result
+
+        triton_mod = self._leaf(
+            "triton",
+            jit=_identity_jit,
+            cdiv=lambda x, y: -(-x // y),
+            next_power_of_2=_next_power_of_2,
+        )
+        triton_mod.__path__ = []
+        triton_mod.__file__ = "/fake/triton/__init__.py"
+        # impl/quantization.py does ``import triton.language as tl`` and then
+        # calls ``tl.floor`` / ``tl.constexpr`` / ... on the module itself, so
+        # the language module carries the namespace directly.
+        language_mod = self._leaf("triton.language")
+        for attr in (
+            "float32",
+            "int8",
+            "constexpr",
+            "program_id",
+            "arange",
+            "load",
+            "store",
+            "max",
+            "abs",
+            "where",
+            "floor",
+            "minimum",
+            "maximum",
+        ):
+            setattr(language_mod, attr, getattr(_Tl, attr))
+        triton_mod.language = language_mod
+        self.modules["vllm.triton_utils"].triton = triton_mod
 
         # flaggems_vllm: kernel surface imported by impl/mla.py.  Recording
         # doubles so the call contracts can be asserted on both platforms.

@@ -314,16 +314,39 @@ def _install_stub_vllm_graph() -> None:
         sys.modules[name] = module
 
 
-_NEEDS_GRAPH = (
-    "vllm_fl.ops.fused_moe.fused_moe_utils" not in sys.modules
-    and "vllm_fl.ops.fused_moe.router" not in sys.modules
-)
-if not _HAS_VLLM and _NEEDS_GRAPH:  # pragma: no cover - Windows only
+# Snapshot every pre-existing vllm/vllm_fl entry, install the stub graph
+# when the real vllm is absent, import the three modules under test, then
+# restore. The imports stay alive after the restore because the tested code
+# lives in the vllm_fl modules themselves, which remain in sys.modules; but
+# nothing of the stub graph leaks into sys.modules for later files — without
+# the restore, a later file's ``import vllm`` probe would succeed against the
+# stubs and files gated on HAS_VLLM would collect stale/partial modules
+# (e.g. vllm.model_executor.layers without rotary_embedding).
+_STUB_ROOTS = ("vllm", "vllm_fl")
+_SAVED = {
+    name: sys.modules.get(name, None)
+    for name in list(sys.modules)
+    if name.split(".")[0] in _STUB_ROOTS
+}
+if not _HAS_VLLM:  # pragma: no cover - Windows machines without vllm
     _install_stub_vllm_graph()
-
-import vllm_fl.ops.fused_moe.fused_moe as fl_fused  # noqa: E402
-import vllm_fl.ops.fused_moe.fused_moe_utils as fmu  # noqa: E402
-import vllm_fl.ops.fused_moe.router as fl_router  # noqa: E402
+try:
+    import vllm_fl.ops.fused_moe.fused_moe as fl_fused  # noqa: E402
+    import vllm_fl.ops.fused_moe.fused_moe_utils as fmu  # noqa: E402
+    import vllm_fl.ops.fused_moe.router as fl_router  # noqa: E402
+finally:
+    if not _HAS_VLLM:  # pragma: no cover - restore only what stubs touched
+        for name in [
+            name
+            for name in list(sys.modules)
+            if name.split(".")[0] in _STUB_ROOTS and name not in _SAVED
+        ]:
+            sys.modules.pop(name, None)
+        for name, module in _SAVED.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
 
 def _fl_enum(name: str):
@@ -731,6 +754,18 @@ class TestSelectUnquantizedMoeBackendOot:
     @pytest.mark.supplementary
     def test_lora_with_trtllm_support_selects_trtllm_experts(self, monkeypatch):
         """BF16 LoRA support routes to FLASHINFER_TRTLLM with the LoRA experts."""
+        # select_unquantized_moe_backend_oot imports the experts module
+        # lazily at call time; on stub hosts the stub graph was removed after
+        # the file-scope import, so the lazy target is re-seeded here with
+        # monkeypatch (auto-restored) instead of a permanent install.
+        monkeypatch.setitem(
+            sys.modules,
+            "vllm.model_executor.layers.fused_moe.experts.trtllm_lora_moe",
+            _make_module(
+                "vllm.model_executor.layers.fused_moe.experts.trtllm_lora_moe",
+                TrtLlmBf16LoRAExperts=type("TrtLlmBf16LoRAExperts", (object,), {}),
+            ),
+        )
         monkeypatch.setattr(fmu, "_trtllm_bf16_lora_supported", lambda cfg: True)
         backend, experts = fmu.select_unquantized_moe_backend_oot(
             _fake_moe_config(is_lora_enabled=True)
@@ -2186,9 +2221,14 @@ class TestReplaceRouterWithFl:
     @pytest.mark.supplementary
     def test_patch_assigns_fl_compute_routing_to_all_three(self, monkeypatch):
         """The three upstream router classes receive the FL _compute_routing."""
-        import vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router as m2
-        import vllm.model_executor.layers.fused_moe.router.fused_topk_router as m1
-        import vllm.model_executor.layers.fused_moe.router.grouped_topk_router as m3
+        # The upstream classes are bound in fl_router's own namespace at its
+        # import (the same objects replace_router_with_fl patches), so they
+        # are reached through it rather than a fresh vllm import — which on
+        # stub hosts would fail after the file-scope restore removed the
+        # stub graph.
+        m1 = fl_router
+        m2 = fl_router
+        m3 = fl_router
 
         # Pin the originals through monkeypatch so the patch is auto-reversed.
         for module, cls_name in (
@@ -2269,6 +2309,12 @@ class TestFusedExpertsImplContracts:
             calls["moe_sum"].append((tuple(inp.shape), tuple(out.shape)))
             torch.sum(inp, dim=1, out=out)
 
+        def fake_silu_and_mul(unused, x):
+            # Independent oracle: silu over the first half, multiplied by the
+            # second half — the contract the real dispatched kernel provides.
+            d = x.shape[-1] // 2
+            return torch.nn.functional.silu(x[..., :d]) * x[..., d:]
+
         def fake_config(*args, **kwargs):
             calls["config"].append(args)
             return {"BLOCK_SIZE_M": 16}
@@ -2276,6 +2322,11 @@ class TestFusedExpertsImplContracts:
         monkeypatch.setattr(fl_fused, "_moe_align_block_size", fake_align)
         monkeypatch.setattr(fl_fused, "_invoke_fused_moe_triton_kernel", fake_kernel)
         _replace_cached_op(monkeypatch, fl_fused, "_moe_sum", fake_moe_sum)
+        # _silu_and_mul is a CachedOp too: resolving it initializes the
+        # dispatch system, which probes vllm.platforms and cannot run on a
+        # stub host. Replacing it with the numeric oracle keeps the dispatch
+        # boundary (like the other kernels) out of the contract under test.
+        _replace_cached_op(monkeypatch, fl_fused, "_silu_and_mul", fake_silu_and_mul)
         # vLLM 0.32's _get_config_quant_dtype lacks the ocp_mx_scheme kwarg
         # the FL call site passes, and the config lookup signature differs per
         # vLLM version: pin both to the contract fused_experts_impl expects.
@@ -2335,7 +2386,10 @@ class TestFusedExpertsImplContracts:
     @pytest.mark.supplementary
     def test_compute_type_follows_dtype(self, recorders):
         """The Triton compute type is chosen from the activation dtype."""
-        import vllm.triton_utils as _vtu
+        # fl_fused binds the upstream tl namespace at its own import; the
+        # stub graph is gone by test time on vllm-less hosts, so the bound
+        # reference is used instead of importing vllm.triton_utils.
+        _vtu = fl_fused
 
         hidden, w1, w2, tw, ti = self._make_inputs(dtype=torch.float16)
         fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti)

@@ -308,12 +308,21 @@ class _ArmW4A8Stubs:
 _REAL_VLLM = _vllm_available()
 
 if not _REAL_VLLM:  # pragma: no cover - exercised only without vllm
-    _ArmW4A8Stubs()
+    _stubs = _ArmW4A8Stubs()
 
 import vllm_fl.quantization.arm_cpu_w4a8 as arm_module  # noqa: E402
 from vllm_fl.quantization.w8a8.linear import (  # noqa: E402
     FLW8A8DynamicLinearKernel,
 )
+
+if not _REAL_VLLM:  # pragma: no cover - order-independence for later files
+    # arm_cpu_w4a8 and w8a8.linear hold every vllm symbol they need as
+    # attributes of their own namespaces, so the imports above stay
+    # functional once the stub tree is removed. Leaving the stubs installed
+    # would keep a fake "vllm" in sys.modules: any later file's
+    # ``import vllm`` probe then succeeds and HAS_VLLM-gated files import
+    # against stale partial stubs instead of skipping on vllm-less hosts.
+    _stubs.restore()
 
 # ---------------------------------------------------------------------------
 # Reference-module edges (pure torch; runs everywhere)
@@ -543,6 +552,12 @@ def arm_w4a8(fl_sys_modules, monkeypatch):
     """
     if _REAL_VLLM:
         _patch_real_vllm_w4a8_compat(monkeypatch)
+    else:
+        # install_arm_cpu_packed_w4a8 imports its vLLM graph lazily, and this
+        # fixture's imports below read the same modules, so the stub tree the
+        # file-scope block removed after import is re-installed per test and
+        # removed again in teardown — nothing leaks to later files.
+        stubs = _ArmW4A8Stubs()
     from vllm.model_executor.kernels.linear.mixed_precision.dynamic_4bit import (  # type: ignore[import-not-found]
         Dynamic4bitLinearKernel,
     )
@@ -580,6 +595,8 @@ def arm_w4a8(fl_sys_modules, monkeypatch):
             "install": install,
         }
     finally:
+        if not _REAL_VLLM:
+            stubs.restore()
         for name, (owner, attr) in owners.items():
             setattr(owner, attr, saved[name])
         for owner, attribute in (
