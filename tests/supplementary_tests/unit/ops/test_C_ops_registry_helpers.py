@@ -186,10 +186,49 @@ class TestOptionalNativeOnlyOps:
                 defined.add(op_name)
         # None of the excluded ops should be registered by the fragment path.
         assert _OPTIONAL_NATIVE_ONLY_OPS & defined  # the set is meaningful
-        # And _C_ops_present ignores them (they are absent on empty wheels).
-        # CPU-only environments have no compiled wheel, so _C is absent; a
-        # GPU build would see True and this pin would fail loudly there.
+
+
+class TestCOpsPresentProbe:
+    """_C_ops_present must key on the probe names, never on the machine.
+
+    The probe result depends on whether the active build (empty wheel vs
+    compiled vllm._C / mcoplib._C) already registered ``torch.ops._C``
+    entries, so the environment is pinned via ``torch.ops._C`` fakes rather
+    than asserted on the host: optional native-only ops must NOT count as
+    "present" (the registration skip must not fire for them), while any
+    query/fallback probe name must.
+    """
+
+    @pytest.mark.supplementary
+    def test_optional_native_only_ops_do_not_count(self, monkeypatch):
+        """Optional ops alone leave _C_ops_present False (no skip)."""
+
+        class _FakeOps:
+            dsv3_fused_a_gemm = staticmethod(lambda *a, **k: None)
+            hadacore_transform = staticmethod(lambda *a, **k: None)
+
+        monkeypatch.setattr(torch.ops, "_C", _FakeOps(), raising=False)
         assert registry._C_ops_present() is False
+
+    @pytest.mark.supplementary
+    def test_query_probe_name_counts_as_present(self, monkeypatch):
+        """A cutlass query name flips the probe to True."""
+
+        class _FakeOps:
+            cutlass_scaled_mm_supports_fp8 = staticmethod(lambda cap: False)
+
+        monkeypatch.setattr(torch.ops, "_C", _FakeOps(), raising=False)
+        assert registry._C_ops_present() is True
+
+    @pytest.mark.supplementary
+    def test_fallback_probe_name_counts_as_present(self, monkeypatch):
+        """The CUDA-fallback name flips the probe to True too."""
+
+        class _FakeOps:
+            apply_repetition_penalties_ = staticmethod(lambda *a: None)
+
+        monkeypatch.setattr(torch.ops, "_C", _FakeOps(), raising=False)
+        assert registry._C_ops_present() is True
 
     @pytest.mark.supplementary
     def test_optional_set_members(self):
