@@ -49,13 +49,19 @@ class TestTopkSoftmax:
             denom = sum(exps)
             probs = [e / denom for e in exps]
             order = sorted(range(4), key=lambda j: -probs[j])[:topk]
-            # Ties (row 1) may surface in any order; distinct values (row 0)
-            # must match slot-for-slot. Either way the gathered weight for a
-            # reported index must equal that index's raw softmax probability.
-            if len(set(probs[j] for j in order)) == topk:
-                assert out_i[row].tolist() == order
-            else:
-                assert set(out_i[row].tolist()) == set(order)
+            if len(set(probs)) == 1:
+                # All logits tie (row 1): which two indices win is
+                # unspecified (torch.topk tie order differs per version and
+                # Python's sorted picks another pair). Assert the contract
+                # that IS defined: two distinct indices, each carrying the
+                # shared probability 1/num_experts.
+                assert len(set(out_i[row].tolist())) == topk
+                for slot in range(topk):
+                    torch.testing.assert_close(
+                        out_w[row, slot].item(), 1.0 / 4, rtol=1e-5, atol=1e-6
+                    )
+                continue
+            assert out_i[row].tolist() == order
             for slot in range(topk):
                 torch.testing.assert_close(
                     out_w[row, slot].item(),
