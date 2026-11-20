@@ -3,19 +3,26 @@
 """
 Concurrent generation smoke test driven by model YAML configs.
 
-Adapted from the sglang-plugin-FL concurrent smoke test: N requests are
-submitted to a single engine in one ``LLM.generate`` call, so the scheduler
-runs them through continuous batching concurrently, then every output is
-validated. The ``concurrent`` block in the model YAML is optional —
-defaults keep the CI smoke small (8 requests, 64 tokens each).
+Adapted from the sglang-plugin-FL concurrent smoke test. Two execution
+modes, chosen from the YAML:
+
+1. Explicit ``task: concurrent`` chat cases run as real HTTP concurrency:
+   one shared server, one scenario per pytest parameter, one
+   ``asyncio.gather`` of eight requests per scenario, each response graded
+   with the ten quality checks and written to ``test-results/gate/``.
+2. Otherwise the classic offline smoke runs: N requests are submitted to a
+   single engine in one ``LLM.generate`` call, so the scheduler runs them
+   through continuous batching concurrently, then every output is
+   validated. The ``concurrent`` block in the model YAML is optional —
+   defaults keep the CI smoke small (8 requests, 64 tokens each).
 
 This test file is driven by environment variables set by ``tests/run.py``:
 
 - ``FL_TEST_MODEL``: Model family (e.g. ``qwen3_6``)
-- ``FL_TEST_CASE``: Case name within the family (e.g. ``27b_tp2_eager``)
+- ``FL_TEST_CASE``:  Case name within the family (e.g. ``27b_tp2_eager``)
 - ``FL_TEST_PLATFORM``/``FL_TEST_DEVICE``: Apply platform device overrides
 
-Overrides (optional): ``FL_CONCURRENT_N``, ``FL_CONCURRENT_MAX_TOKENS``.
+Offline-mode overrides (optional): ``FL_CONCURRENT_N``, ``FL_CONCURRENT_MAX_TOKENS``.
 """
 
 import contextlib
@@ -26,19 +33,26 @@ from pathlib import Path
 import pytest
 
 from tests.e2e_tests.adaptation_gate.gate_contract import (
-    build_server_args,
-    format_gate_progress,
-    summarize_gate_progress,
+    append_loopback_no_proxy,
+    ensure_clean_gate_directory,
+    ensure_gate_server_alive,
+    format_gate_scenario_log,
+    format_gate_total_log,
+    gate_failure_details,
+    gate_results_root,
+    resolve_request_timeout,
+    run_concurrent_scenario,
+    temporary_environment,
     validate_scenario_documents,
 )
-from tests.e2e_tests.serving.server_helper import VllmServer
-from tests.e2e_tests.verification_cases import (
-    case_pack_environment,
-    ensure_server_alive,
-    load_case_pack,
-    validate_case_selection,
-    verification_results_root,
+from tests.e2e_tests.chat_cases import (
+    assemble_gate_extra_args,
+    gate_entry,
+    group_concurrent_cases,
+    validate_chat_case_tasks,
+    validate_gate_case,
 )
+from tests.e2e_tests.serving.server_helper import VllmServer
 from tests.utils.device_utils import get_visible_device_env_var
 from tests.utils.model_config import ModelConfig
 from vllm import LLM, SamplingParams
@@ -61,7 +75,20 @@ if not _MODEL or not _CASE:
 
 _CFG = ModelConfig.load(_MODEL, _CASE, platform=_PLATFORM, device=_DEVICE)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_VERIFICATION = _CFG.verification
+
+# Execution mode: explicit task cases take the quality-gate HTTP path;
+# models without them keep the classic offline LLM.generate smoke.
+validate_chat_case_tasks(_CFG.serve.chat_cases)
+_CONCURRENT_CASES = [
+    case for case in _CFG.serve.chat_cases if case.get("task") == "concurrent"
+]
+if _CONCURRENT_CASES:
+    for _gate_case in _CONCURRENT_CASES:
+        validate_gate_case(_gate_case, "concurrent")
+_SCENARIO_GROUPS = (
+    group_concurrent_cases(_CFG.serve.chat_cases) if _CONCURRENT_CASES else {}
+)
+_SCENARIOS = tuple(_SCENARIO_GROUPS)
 
 if not os.path.exists(_CFG.model):
     pytest.fail(
@@ -71,7 +98,7 @@ if not os.path.exists(_CFG.model):
 
 
 # ---------------------------------------------------------------------------
-# Prompt pool and sampling
+# Prompt pool and sampling (offline mode)
 # ---------------------------------------------------------------------------
 
 _DEFAULT_TEXT_CASES = [
@@ -119,6 +146,8 @@ _SAMPLING["max_tokens"] = int(
     os.environ.get("FL_CONCURRENT_MAX_TOKENS", _SAMPLING["max_tokens"])
 )
 
+_REQUEST_MODEL = _CFG.serve.request_model(_CFG.model)
+
 
 def _prepare_cleanup_for_platform() -> None:
     """Apply test-scope cleanup compatibility hooks."""
@@ -140,27 +169,30 @@ def _report(n_req: int, elapsed: float, total_tokens: int) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Mode 1: explicit task:concurrent chat cases over real HTTP
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture(scope="module")
-def verification_server():
-    """Share one HTTP server across the three concurrent Gate scenarios."""
-    if not (_VERIFICATION.source and _VERIFICATION.concurrent_scenarios):
+def gate_concurrent_server():
+    """One shared HTTP server plus one document directory for all scenarios."""
+    if not _CONCURRENT_CASES:
         yield None
         return
-    validate_case_selection(_VERIFICATION.source, _VERIFICATION.concurrent_scenarios)
-    case_utils = load_case_pack(_REPO_ROOT, _VERIFICATION.source)
     serve = _CFG.serve
-    extra_args = build_server_args(_CFG, Path(case_utils.IMAGE_DIR))
-    results_root = verification_results_root(
+    base_args = [*_CFG.serve_args(**serve.extra_engine), *serve.extra_args]
+    extra_args = assemble_gate_extra_args(base_args, _CONCURRENT_CASES, _REPO_ROOT)
+    document_dir = gate_results_root(
         _REPO_ROOT,
-        phase="concurrent",
         platform=_PLATFORM,
         device=_DEVICE,
         model=_MODEL,
-        case=_CASE,
+        case=f"{_CASE}-concurrent",
     )
+    ensure_clean_gate_directory(document_dir)
     scenarios = tuple(
-        (name, len(case_utils.scenario_requests(name)))
-        for name in _VERIFICATION.concurrent_scenarios
+        (scenario, len(_SCENARIO_GROUPS[scenario])) for scenario in _SCENARIOS
     )
     with (
         VllmServer(
@@ -171,49 +203,61 @@ def verification_server():
             max_retries=serve.startup_retries,
             extra_args=extra_args,
         ) as server,
-        case_pack_environment(
-            case_utils=case_utils,
-            config=_CFG,
-            server=server,
-            results_root=results_root,
-        ) as document_dir,
+        temporary_environment(
+            {
+                "NO_PROXY": append_loopback_no_proxy(os.environ.get("NO_PROXY")),
+                "no_proxy": append_loopback_no_proxy(os.environ.get("no_proxy")),
+            }
+        ),
     ):
-        yield server, case_utils, document_dir
-        with server.log_on_failure("Concurrent verification contract failed"):
+        yield server, document_dir
+        with server.log_on_failure("Concurrent gate contract failed"):
             summary = validate_scenario_documents(document_dir, scenarios)
-        print(
-            f"[Gate] concurrent total: PASS; requests={summary['passed_requests']}/"
-            f"{summary['logical_requests']} passed; "
-            f"checks={summary['passed_checks']}/"
-            f"{summary['checks']} passed",
-            flush=True,
+        print(format_gate_total_log("concurrent", summary), flush=True)
+
+
+def _run_gate_scenario(scenario, gate_concurrent_server) -> None:
+    """Eight real HTTP requests for one scenario, gathered once."""
+    server, document_dir = gate_concurrent_server
+    entries = [gate_entry(case, _REPO_ROOT) for case in _SCENARIO_GROUPS[scenario]]
+    with server.log_on_failure(f"Concurrent gate scenario '{scenario}' failed"):
+        ensure_gate_server_alive(server, "concurrent")
+        outputs = run_concurrent_scenario(
+            entries,
+            served_model_name=_REQUEST_MODEL,
+            base_url=server.base_url,
+            api_key=_CFG.serve.api_key,
+            timeout=resolve_request_timeout(os.environ),
+            document_dir=document_dir,
+            scenario=scenario,
+            model_path=_CFG.model,
+            port=server.port,
         )
+    print(format_gate_scenario_log("concurrent", scenario, outputs), flush=True)
+    assert all(output["passed"] for output in outputs), (
+        f"Concurrent gate scenario '{scenario}' failed; "
+        f"details:\n{gate_failure_details(outputs)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unified test: mode dispatch by YAML configuration
+# ---------------------------------------------------------------------------
+
+if _CONCURRENT_CASES:
+    _SCENARIO_PARAMS = list(_SCENARIOS)
+    _SCENARIO_IDS = list(_SCENARIOS)
+else:
+    _SCENARIO_PARAMS = [None]
+    _SCENARIO_IDS = ["offline"]
 
 
 @pytest.mark.e2e
-@pytest.mark.parametrize(
-    "verification_scenario",
-    _VERIFICATION.concurrent_scenarios or [None],
-    ids=_VERIFICATION.concurrent_scenarios or ["offline"],
-)
-def test_concurrent(verification_scenario, verification_server) -> None:
-    """Smoke test: N concurrent requests through one generate call."""
-    if verification_scenario is not None:
-        server, case_utils, document_dir = verification_server
-        with server.log_on_failure(
-            f"Concurrent verification scenario '{verification_scenario}' failed"
-        ):
-            ensure_server_alive(server, "concurrent")
-            try:
-                case_utils.run_case(verification_scenario)
-            finally:
-                print(
-                    format_gate_progress(
-                        f"concurrent/{verification_scenario}",
-                        summarize_gate_progress(document_dir, verification_scenario),
-                    ),
-                    flush=True,
-                )
+@pytest.mark.parametrize("scenario", _SCENARIO_PARAMS, ids=_SCENARIO_IDS)
+def test_concurrent(scenario, gate_concurrent_server) -> None:
+    """Dispatch to the HTTP gate path or the classic offline smoke."""
+    if _CONCURRENT_CASES:
+        _run_gate_scenario(scenario, gate_concurrent_server)
         return
     print(f"\n[{_MODEL}/{_CASE}] concurrent_n: {CONCURRENT_N}")
     print(f"[{_MODEL}/{_CASE}] model: {_CFG.model}")

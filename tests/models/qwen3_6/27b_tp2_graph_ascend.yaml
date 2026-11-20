@@ -49,24 +49,277 @@ serve:
   stream: false
   max_tokens: 256
   chat_cases:
-    - name: text
+    # ---- serving task: text_single (1) ----
+    - name: text-single-llm-details
+      task: serving
+      scenario: text_single
       messages:
         - role: "user"
-          content: "The capital of France is"
-      expected: "Paris"
-    - name: image
-      generated_image: true
-      prompt: "Describe all visible text, colors, and shapes in English."
+          content: "Introduce large language models (LLMs) in detail. Explain what they are, how training and inference work, typical capabilities, limitations, and responsible use. Write a coherent response of at least 256 characters. Do not repeat words or phrases unnecessarily."
       expected:
-        - "Hello VLM"
-        - "blue rectangle"
+        - "large language model"
+        - "training"
+        - "inference"
+        - "limitations"
+      min_length: 256
+      max_tokens: 512
+    # ---- serving task: image_single (1) ----
+    - name: image-single-05
+      task: serving
+      scenario: image_single
+      image_path: "tools/adaptation-gate-cases/images/image_05.png"
+      prompt: "Read the two words. The second word has four letters. Copy every visible character exactly and reply with the text only."
+      expected:
+        - "hello"
+        - "vllm"
+      min_length: 1
+      max_tokens: 128
+    # ---- concurrent task: text_concurrent_8 (8) ----
+    - name: text-concurrent-01
+      task: concurrent
+      scenario: text_concurrent_8
+      messages:
+        - role: "user"
+          content: "Compute 19 + 23. Reply with the number only."
+      expected:
+        - "42"
+      min_length: 1
+      max_tokens: 128
+    - name: text-concurrent-02
+      task: concurrent
+      scenario: text_concurrent_8
+      messages:
+        - role: "user"
+          content: "Name the capital of France. Reply with the city only."
+      expected:
+        - "paris"
+      min_length: 1
+      max_tokens: 128
+    - name: text-concurrent-03
+      task: concurrent
+      scenario: text_concurrent_8
+      messages:
+        - role: "user"
+          content: "Give the opposite of hot. Reply with one word."
+      expected:
+        - "cold"
+      min_length: 1
+      max_tokens: 128
+    - name: text-concurrent-04
+      task: concurrent
+      scenario: text_concurrent_8
+      messages:
+        - role: "user"
+          content: "How many days are in one week? Reply with the number only."
+      expected:
+        - "7"
+      min_length: 1
+      max_tokens: 128
+    - name: text-concurrent-05
+      task: concurrent
+      scenario: text_concurrent_8
+      messages:
+        - role: "user"
+          content: "Give the chemical formula for water. Reply with the formula only."
+      expected:
+        - "h2o"
+      min_length: 1
+      max_tokens: 128
+    - name: text-concurrent-06
+      task: concurrent
+      scenario: text_concurrent_8
+      messages:
+        - role: "user"
+          content: "Name Earth's largest ocean. Reply with the ocean name only."
+      expected:
+        - "pacific"
+      min_length: 1
+      max_tokens: 128
+    - name: text-concurrent-07
+      task: concurrent
+      scenario: text_concurrent_8
+      messages:
+        - role: "user"
+          content: "Compute 5 multiplied by 6. Reply with the number only."
+      expected:
+        - "30"
+      min_length: 1
+      max_tokens: 128
+    - name: text-concurrent-08
+      task: concurrent
+      scenario: text_concurrent_8
+      messages:
+        - role: "user"
+          content: "What color results from mixing blue and yellow paint? Reply with one word."
+      expected:
+        - "green"
+      min_length: 1
+      max_tokens: 128
+    # ---- concurrent task: image_concurrent_8 (8) ----
+    - name: image-concurrent-01
+      task: concurrent
+      scenario: image_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_01.png"
+      prompt: "Name the four quadrant colors in this order: top-left, top-right, bottom-left, bottom-right. Reply with color names only."
+      expected:
+        - "red"
+        - "green"
+        - "blue"
+        - "yellow"
+      min_length: 1
+      max_tokens: 128
+    - name: image-concurrent-02
+      task: concurrent
+      scenario: image_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_02.png"
+      prompt: "Name the four quadrant colors in this order: top-left, top-right, bottom-left, bottom-right. Reply with color names only."
+      expected:
+        - "blue"
+        - "yellow"
+        - "red"
+        - "green"
+      min_length: 1
+      max_tokens: 128
+    - name: image-concurrent-03
+      task: concurrent
+      scenario: image_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_03.png"
+      prompt: "Name the three shapes from left to right. Reply with shape names only."
+      expected:
+        - "circle"
+        - "square"
+        - "triangle"
+      min_length: 1
+      max_tokens: 128
+    - name: image-concurrent-04
+      task: concurrent
+      scenario: image_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_04.png"
+      prompt: "How many triangles are in the image? Reply with the number only."
+      expected:
+        - "3"
+      min_length: 1
+      max_tokens: 128
+    - name: image-concurrent-05
+      task: concurrent
+      scenario: image_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_05.png"
+      prompt: "Does this image contain visible text? Reply yes or no."
+      expected:
+        - "yes"
+      min_length: 1
+      max_tokens: 128
+    - name: image-concurrent-06
+      task: concurrent
+      scenario: image_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_06.png"
+      prompt: "What shape is inside the red circle? Reply with the shape name only."
+      expected:
+        - "square"
+      min_length: 1
+      max_tokens: 128
+    - name: image-concurrent-07
+      task: concurrent
+      scenario: image_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_07.png"
+      prompt: "What color is the triangle? Reply with the color name only."
+      expected:
+        - "yellow"
+      min_length: 1
+      max_tokens: 128
+    - name: image-concurrent-08
+      task: concurrent
+      scenario: image_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_08.png"
+      prompt: "How many blue circles are in the image? Reply with the number only."
+      expected:
+        - "4"
+      min_length: 1
+      max_tokens: 128
+    # ---- concurrent task: mixed_concurrent_8 (4 text + 4 image) ----
+    - name: mixed-text-01
+      task: concurrent
+      scenario: mixed_concurrent_8
+      messages:
+        - role: "user"
+          content: "Compute 19 + 23. Reply with the number only."
+      expected:
+        - "42"
+      min_length: 1
+      max_tokens: 128
+    - name: mixed-text-02
+      task: concurrent
+      scenario: mixed_concurrent_8
+      messages:
+        - role: "user"
+          content: "Name the capital of France. Reply with the city only."
+      expected:
+        - "paris"
+      min_length: 1
+      max_tokens: 128
+    - name: mixed-text-03
+      task: concurrent
+      scenario: mixed_concurrent_8
+      messages:
+        - role: "user"
+          content: "Give the opposite of hot. Reply with one word."
+      expected:
+        - "cold"
+      min_length: 1
+      max_tokens: 128
+    - name: mixed-text-04
+      task: concurrent
+      scenario: mixed_concurrent_8
+      messages:
+        - role: "user"
+          content: "How many days are in one week? Reply with the number only."
+      expected:
+        - "7"
+      min_length: 1
+      max_tokens: 128
+    - name: mixed-image-01
+      task: concurrent
+      scenario: mixed_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_01.png"
+      prompt: "Name the four quadrant colors in this order: top-left, top-right, bottom-left, bottom-right. Reply with color names only."
+      expected:
+        - "red"
+        - "green"
+        - "blue"
+        - "yellow"
+      min_length: 1
+      max_tokens: 128
+    - name: mixed-image-02
+      task: concurrent
+      scenario: mixed_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_02.png"
+      prompt: "Name the four quadrant colors in this order: top-left, top-right, bottom-left, bottom-right. Reply with color names only."
+      expected:
+        - "blue"
+        - "yellow"
+        - "red"
+        - "green"
+      min_length: 1
+      max_tokens: 128
+    - name: mixed-image-03
+      task: concurrent
+      scenario: mixed_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_03.png"
+      prompt: "Name the three shapes from left to right. Reply with shape names only."
+      expected:
+        - "circle"
+        - "square"
+        - "triangle"
+      min_length: 1
+      max_tokens: 128
+    - name: mixed-image-04
+      task: concurrent
+      scenario: mixed_concurrent_8
+      image_path: "tools/adaptation-gate-cases/images/image_04.png"
+      prompt: "How many triangles are in the image? Reply with the number only."
+      expected:
+        - "3"
+      min_length: 1
+      max_tokens: 128
   sampling:
     temperature: 0.0
-
-verification:
-  source: "tools/adaptation-gate-cases"
-  serving_scenarios: ["text_single", "image_single"]
-  concurrent_scenarios:
-    - "text_concurrent_8"
-    - "image_concurrent_8"
-    - "mixed_concurrent_8"
