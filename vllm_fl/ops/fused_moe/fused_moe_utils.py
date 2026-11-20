@@ -7,6 +7,7 @@ import vllm.envs as envs
 import vllm.model_executor.layers.fused_moe.modular_kernel as mk
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+from vllm_fl.ops.fused_moe.activation_support import flaggems_fast_path_supported
 from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEConfig,
 )
@@ -345,7 +346,10 @@ class TritonExpertsFL(TritonExperts):
                 return
 
             # NVIDIA: let FlagGems own both expert GEMMs.
-            if current_platform.is_cuda():
+            # flag_gems.fused_experts_impl asserts silu-only; other activations
+            # (relu2_no_mul on NemotronH, ...) fall through to the
+            # step-by-step path below, which uses apply_moe_activation.
+            if current_platform.is_cuda() and flaggems_fast_path_supported(activation):
                 import flag_gems
 
                 output.copy_(

@@ -257,6 +257,19 @@ class WorkerFL(WorkerBase):
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
 
+            # FlagGems' aten::clone kernel asserts a CUDA device, but vLLM
+            # clones CPU tensors during engine init
+            # (torch._dynamo.utils.preserve_rng_state ->
+            # torch.clone(torch.random.get_rng_state())), aborting with
+            # "Expected a cuda device, but got: cpu" on Ling/Ring-mini.
+            # FlagGems intercepts at the aten layer, so clone has to stay out
+            # of the enable list; on CUDA it is only a memory copy.
+            from vllm_fl.patches.flaggems_ops import (
+                FLAGGEMS_UNUSABLE_OPS,
+                exclude_unusable,
+                with_unusable,
+            )
+
             # Get whitelist and blacklist from environment variables
             whitelist, blacklist = get_flag_gems_whitelist_blacklist()
 
@@ -266,25 +279,34 @@ class WorkerFL(WorkerBase):
 
             # Use whitelist if specified (takes precedence over blacklist)
             if whitelist:
-                logger.info(f"[FlagGems] Enable only the following ops: {whitelist}")
+                include = exclude_unusable(whitelist)
+                if len(include) != len(whitelist):
+                    logger.info(
+                        f"[FlagGems] Keeping {list(FLAGGEMS_UNUSABLE_OPS)} on stock torch"
+                    )
+                logger.info(f"[FlagGems] Enable only the following ops: {include}")
                 flag_gems.only_enable(
-                    include=whitelist,
+                    include=include,
                     record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
             elif blacklist:
-                logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
+                unused = with_unusable(blacklist)
+                logger.info(f"[FlagGems] Disable the following ops: {unused}")
                 flag_gems.enable(
-                    unused=blacklist,
+                    unused=unused,
                     record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
             else:
-                logger.info("[FlagGems] Enable all ops")
+                logger.info(f"[FlagGems] Enable all ops except: {list(FLAGGEMS_UNUSABLE_OPS)}")
                 flag_gems.enable(
-                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
+                    unused=list(FLAGGEMS_UNUSABLE_OPS),
+                    record=should_record,
+                    once=True,
+                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
 
     # def sleep(self, level: int = 1) -> None:
