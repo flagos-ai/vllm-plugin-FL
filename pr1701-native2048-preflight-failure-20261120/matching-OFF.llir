@@ -1,0 +1,215 @@
+; ModuleID = 'LLVMDialectModule'
+source_filename = "LLVMDialectModule"
+target datalayout = "e-m:e-p:32:32-p1:64:64-p2:32:32-p4:32:32-p135:64:64-p134:64:64-p133:32:32-p131:64:64-i1:8:32-i8:8:32-i16:16:32-i64:64:64-f64:64:64-v512:512-a:0:32-n32-S32"
+target triple = "xpu3-baidu-none-gnu"
+
+; Function Attrs: nounwind
+define dso_local amdgpu_gfx_whole_wave void @_bincount_kernel(ptr addrspace(1) %0, ptr addrspace(1) %1, i32 %2, ptr addrspace(1) %3, ptr addrspace(1) %4, ptr addrspace(1) %5, i32 %6, ptr addrspace(1) %7, i32 %8, i32 %9, i32 %10, i32 %11) local_unnamed_addr #0 !dbg !4 {
+  %13 = tail call i32 @llvm.xpu.load_param(i32 0)
+  %14 = tail call i32 @llvm.xpu.load_param(i32 1)
+  %15 = mul i32 %10, %9
+  %16 = mul i32 %15, %11
+  %17 = icmp slt i32 %13, %16
+  br i1 %17, label %.lr.ph, label %._crit_edge
+
+.lr.ph:                                           ; preds = %12
+  %18 = sext i32 %2 to i64
+  %19 = sext i32 %6 to i64
+  %20 = sext i32 %8 to i64
+  br label %21
+
+21:                                               ; preds = %.lr.ph, %.loopexit
+  %22 = phi i32 [ %13, %.lr.ph ], [ %86, %.loopexit ]
+  %23 = sdiv i32 %22, %11
+  %24 = srem i32 %23, %10
+  %25 = sdiv i32 %23, %10
+  %26 = alloca [16 x i32], align 4, !dbg !7
+  %27 = alloca [16 x i32], align 4, !dbg !8
+  %28 = alloca [16 x i32], align 4, !dbg !9
+  %29 = alloca [8 x i64], align 8, !dbg !10
+  %30 = sext i32 %25 to i64, !dbg !11
+  %31 = getelementptr i64, ptr addrspace(1) %0, i64 %30, !dbg !11
+  call void @llvm.xpu.gm2lm_v3(ptr nonnull %29, ptr addrspace(1) %31, i32 0, i32 8), !dbg !10
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !10
+  %32 = load i64, ptr %29, align 8, !dbg !10
+  %33 = getelementptr i32, ptr addrspace(1) %4, i64 %32, !dbg !12
+  call void @llvm.xpu.gm2lm_v3(ptr nonnull %28, ptr addrspace(1) %33, i32 0, i32 4), !dbg !9
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !9
+  %34 = load i32, ptr %28, align 4, !dbg !9
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !9
+  %35 = shl i32 %24, 10, !dbg !13
+  %.not = icmp slt i32 %35, %34, !dbg !14
+  br i1 %.not, label %36, label %.loopexit, !dbg !14
+
+36:                                               ; preds = %21
+  %37 = getelementptr i32, ptr addrspace(1) %3, i64 %32, !dbg !15
+  %38 = add i32 %35, 1024, !dbg !16
+  %39 = mul i64 %32, %18
+  %40 = getelementptr i32, ptr addrspace(1) %1, i64 %39
+  %41 = mul i64 %32, %19
+  %42 = getelementptr i32, ptr addrspace(1) %5, i64 %41
+  %43 = mul i64 %32, %20
+  %44 = getelementptr i32, ptr addrspace(1) %7, i64 %43
+  br label %45
+
+45:                                               ; preds = %36, %84
+  %46 = phi i32 [ 0, %36 ], [ %85, %84 ]
+  call void @llvm.xpu.gm2lm_v3(ptr nonnull %28, ptr addrspace(1) %37, i32 0, i32 4), !dbg !17
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !17
+  %47 = load i32, ptr %28, align 4, !dbg !17
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !17
+  %48 = call i32 @llvm.xpu.load_param(i32 2)
+  %49 = or disjoint i32 %46, %35, !dbg !18
+  %50 = icmp slt i32 %35, %47, !dbg !19
+  %51 = tail call i32 @llvm.xpu.core_id(), !dbg !20
+  %52 = icmp eq i32 %51, 0, !dbg !20
+  %53 = icmp slt i32 %49, %47
+  %54 = and i1 %53, %50, !dbg !20
+  %or.cond = and i1 %54, %52, !dbg !20
+  br i1 %or.cond, label %55, label %66, !dbg !20
+
+55:                                               ; preds = %45
+  %56 = sext i32 %49 to i64, !dbg !21
+  %57 = getelementptr i32, ptr addrspace(1) %40, i64 %56, !dbg !21
+  call void @llvm.xpu.gm2lm_v3(ptr nonnull %27, ptr addrspace(1) %57, i32 0, i32 4), !dbg !8
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !8
+  %58 = load i32, ptr %27, align 4, !dbg !8
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !8
+  %59 = sdiv i32 %58, 32, !dbg !22
+  %60 = and i32 %58, 31, !dbg !23
+  %61 = shl nuw i32 1, %60, !dbg !23
+  %62 = sext i32 %59 to i64, !dbg !24
+  %63 = getelementptr i32, ptr addrspace(1) %42, i64 %62, !dbg !24
+  call void @llvm.xpu.gm2lm_v3(ptr nonnull %26, ptr addrspace(1) %63, i32 0, i32 4), !dbg !7
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !7
+  %64 = load i32, ptr %26, align 4, !dbg !7
+  %65 = or i32 %64, %61, !dbg !7
+  store i32 %65, ptr %27, align 4, !dbg !7
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !7
+  call void @llvm.xpu.lm2gm_v3(ptr addrspace(1) %63, ptr nonnull %27, i32 0, i32 4), !dbg !7
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !7
+  br label %66
+
+66:                                               ; preds = %55, %45
+  %67 = icmp sge i32 %38, %47, !dbg !25
+  %68 = and i1 %67, %52, !dbg !26
+  br i1 %68, label %69, label %84, !dbg !26
+
+69:                                               ; preds = %66
+  %70 = icmp slt i32 %49, %34, !dbg !27
+  %71 = icmp sge i32 %49, %47, !dbg !28
+  %72 = and i1 %70, %71, !dbg !29
+  br i1 %72, label %73, label %.critedge.critedge, !dbg !30
+
+73:                                               ; preds = %69
+  %74 = sext i32 %49 to i64, !dbg !31
+  %75 = getelementptr i32, ptr addrspace(1) %40, i64 %74, !dbg !31
+  call void @llvm.xpu.gm2lm_v3(ptr nonnull %27, ptr addrspace(1) %75, i32 0, i32 4), !dbg !30
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !30
+  %76 = load i32, ptr %27, align 4, !dbg !30
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !30
+  %77 = sext i32 %76 to i64, !dbg !32
+  %78 = getelementptr i32, ptr addrspace(1) %44, i64 %77, !dbg !32
+  call void @llvm.xpu.gm2lm_v3(ptr nonnull %27, ptr addrspace(1) %78, i32 0, i32 4), !dbg !33
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !33
+  %79 = load i32, ptr %27, align 4, !dbg !33
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !33
+  %80 = add i32 %79, 1, !dbg !33
+  store i32 %80, ptr %27, align 4, !dbg !33
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !33
+  call void @llvm.xpu.lm2gm_v3(ptr addrspace(1) %78, ptr nonnull %27, i32 0, i32 4), !dbg !33
+  br label %83, !dbg !33
+
+.critedge.critedge:                               ; preds = %69
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !30
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !30
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !33
+  %81 = load i32, ptr %27, align 4, !dbg !33
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !33
+  %82 = add i32 %81, 1, !dbg !33
+  store i32 %82, ptr %27, align 4, !dbg !33
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !33
+  br label %83, !dbg !33
+
+83:                                               ; preds = %.critedge.critedge, %73
+  call void @llvm.xpu.mfence.v2(i32 1), !dbg !33
+  br label %84, !dbg !26
+
+84:                                               ; preds = %83, %66
+  %85 = add nuw nsw i32 %46, 1
+  %exitcond.not = icmp eq i32 %85, 1024
+  br i1 %exitcond.not, label %.loopexit, label %45
+
+.loopexit:                                        ; preds = %84, %21
+  %86 = add i32 %22, %14
+  %87 = icmp slt i32 %86, %16
+  br i1 %87, label %21, label %._crit_edge
+
+._crit_edge:                                      ; preds = %.loopexit, %12
+  ret void, !dbg !34
+}
+
+; Function Attrs: nofree nosync nounwind memory(none)
+; Unknown intrinsic
+declare i32 @llvm.xpu.load_param(i32) #1
+
+; Function Attrs: nounwind memory(argmem: readwrite)
+; Unknown intrinsic
+declare void @llvm.xpu.gm2lm_v3(ptr, ptr addrspace(1), i32, i32) #2
+
+; Function Attrs: nounwind
+; Unknown intrinsic
+declare void @llvm.xpu.mfence.v2(i32) #3
+
+; Function Attrs: nofree nosync nounwind memory(none)
+; Unknown intrinsic
+declare i32 @llvm.xpu.core_id() #1
+
+; Function Attrs: nounwind memory(argmem: readwrite)
+; Unknown intrinsic
+declare void @llvm.xpu.lm2gm_v3(ptr addrspace(1), ptr, i32, i32) #2
+
+attributes #0 = { nounwind "correctly-rounded-divide-sqrt-fp-math"="false" "disable-tail-calls"="false" "frame-pointer"="all" "less-precise-fpmad"="false" "min-legal-vector-width"="0" "no-infs-fp-math"="false" "no-jump-tables"="false" "no-nans-fp-math"="false" "no-signed-zeros-fp-math"="false" "no-trapping-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="xpu3" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #1 = { nofree nosync nounwind memory(none) }
+attributes #2 = { nounwind memory(argmem: readwrite) }
+attributes #3 = { nounwind }
+
+!llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!2}
+!xpu.annotations = !{!3}
+
+!0 = distinct !DICompileUnit(language: DW_LANG_C, file: !1, producer: "triton", isOptimized: true, runtimeVersion: 0, emissionKind: LineTablesOnly)
+!1 = !DIFile(filename: "penalties.py", directory: "/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample")
+!2 = !{i32 2, !"Debug Info Version", i32 3}
+!3 = !{ptr @_bincount_kernel, !"kernel", i32 1}
+!4 = distinct !DISubprogram(name: "_bincount_kernel", linkageName: "_bincount_kernel", scope: !1, file: !1, line: 217, type: !5, scopeLine: 217, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0)
+!5 = !DISubroutineType(cc: DW_CC_normal, types: !6)
+!6 = !{}
+!7 = !DILocation(line: 249, column: 12, scope: !4)
+!8 = !DILocation(line: 242, column: 12, scope: !4)
+!9 = !DILocation(line: 233, column: 26, scope: !4)
+!10 = !DILocation(line: 231, column: 28, scope: !4)
+!11 = !DILocation(line: 231, column: 55, scope: !4)
+!12 = !DILocation(line: 233, column: 44, scope: !4)
+!13 = !DILocation(line: 234, column: 19, scope: !4)
+!14 = !DILocation(line: 234, column: 33, scope: !4)
+!15 = !DILocation(line: 237, column: 42, scope: !4)
+!16 = !DILocation(line: 253, column: 25, scope: !4)
+!17 = !DILocation(line: 237, column: 25, scope: !4)
+!18 = !DILocation(line: 238, column: 37, scope: !4)
+!19 = !DILocation(line: 239, column: 32, scope: !4)
+!20 = !DILocation(line: 239, column: 7, scope: !4)
+!21 = !DILocation(line: 242, column: 71, scope: !4)
+!22 = !DILocation(line: 244, column: 31, scope: !4)
+!23 = !DILocation(line: 246, column: 53, scope: !4)
+!24 = !DILocation(line: 248, column: 75, scope: !4)
+!25 = !DILocation(line: 253, column: 39, scope: !4)
+!26 = !DILocation(line: 253, column: 7, scope: !4)
+!27 = !DILocation(line: 254, column: 23, scope: !4)
+!28 = !DILocation(line: 255, column: 25, scope: !4)
+!29 = !DILocation(line: 255, column: 16, scope: !4)
+!30 = !DILocation(line: 257, column: 12, scope: !4)
+!31 = !DILocation(line: 257, column: 71, scope: !4)
+!32 = !DILocation(line: 262, column: 14, scope: !4)
+!33 = !DILocation(line: 263, column: 12, scope: !4)
+!34 = !DILocation(line: 235, column: 8, scope: !4)

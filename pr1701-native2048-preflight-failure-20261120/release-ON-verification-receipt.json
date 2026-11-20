@@ -1,0 +1,174 @@
+{
+  "scope": "P800 compiler scalar masked atomic DMA; isolated experimental final ON build, production unchanged",
+  "runtime_manifest_sha256": "b9337e843e8d9e8149dfd797a230dd933b59390f335f61869468b0bf43200b41",
+  "source": "062074712ee9a51f4d900d06ad96363c79fd45e9",
+  "core_sha256": "091beadc8876041fc0dd7edbb00fd8059d78cb799b3d85a2075837995b9bf4e5",
+  "original_native_minimal_cold": "pass exact full backing",
+  "original_native_minimal_warm": "3/3 pass exact; input_identity equal cold; cache11->11",
+  "minimal_device_binary_equal_OFF": {
+    "elf": "8d32f5ce3fd2900afee6f29aef75d2974164f330aa7e1e589b4dcc3a437e922e",
+    "xpubin": "e7b389425f6c1030b44e95bb20ccca101e9e65aefb488e195b180f61b241c319"
+  },
+  "original_four_cold": {
+    "pass": 4,
+    "fail": 0
+  },
+  "original_four_warm": {
+    "pass": 12,
+    "fail": 0,
+    "identities_equal_cold": true
+  },
+  "G6_accuracy_only": {
+    "result": "pass",
+    "paired_functional_checks": 24,
+    "performance_run": false
+  },
+  "G6_formal_attempt": {
+    "result": "BLOCKED_NUMERICAL_PREFLIGHT",
+    "native_pass": 11,
+    "native_fail": 1,
+    "timing_started": false,
+    "failed_case": {
+      "repeat": 0,
+      "vocab": 151939,
+      "max_prefill_len": 2048,
+      "input_identity": {
+        "ids": {
+          "dtype": "torch.int32",
+          "shape": [
+            4,
+            2048
+          ],
+          "stride": [
+            2048,
+            1
+          ],
+          "sha256": "99bfc3a309c7e455194baddbb96fbc894ba0d5fb1bd14ceffb8202721b1c8dea"
+        },
+        "mapping": {
+          "dtype": "torch.int64",
+          "shape": [
+            2
+          ],
+          "stride": [
+            1
+          ],
+          "sha256": "9b768a7138e147b4158a6b26c2e04ee536af084a18f7b751a9439af1a7cc0765"
+        },
+        "prompt_len": {
+          "dtype": "torch.int32",
+          "shape": [
+            4
+          ],
+          "stride": [
+            1
+          ],
+          "sha256": "50bf313b4e91e04e76c269715151fc36fcd1c38c4736a8bc7b5fdb99ea76f7fc"
+        },
+        "prefill_len": {
+          "dtype": "torch.int32",
+          "shape": [
+            4
+          ],
+          "stride": [
+            1
+          ],
+          "sha256": "e6f747d6fb892c1e6835bc0007e4e334626c4b1204a8a2acdf897a1abbf4fb83"
+        }
+      },
+      "packed_view_stride": [
+        4751,
+        1
+      ],
+      "count_view_stride": [
+        151944,
+        1
+      ],
+      "expected_backing_identity": {
+        "expected_packed": {
+          "dtype": "torch.int32",
+          "shape": [
+            4,
+            4751
+          ],
+          "stride": [
+            4751,
+            1
+          ],
+          "sha256": "60901bf0c974318f27c15b2fc3cc38236b7cad61b1feecf279e43e2300d5281f"
+        },
+        "expected_counts": {
+          "dtype": "torch.int32",
+          "shape": [
+            4,
+            151944
+          ],
+          "stride": [
+            151944,
+            1
+          ],
+          "sha256": "e3abe0c90d52a843dcd61e80dc401a4a2ceef4338e010aa472adbc22931b9e90"
+        }
+      },
+      "actual_backing_identity": {
+        "packed_gpu": {
+          "dtype": "torch.int32",
+          "shape": [
+            4,
+            4751
+          ],
+          "stride": [
+            4751,
+            1
+          ],
+          "sha256": "60901bf0c974318f27c15b2fc3cc38236b7cad61b1feecf279e43e2300d5281f"
+        },
+        "counts_gpu": {
+          "dtype": "torch.int32",
+          "shape": [
+            4,
+            151944
+          ],
+          "stride": [
+            151944,
+            1
+          ],
+          "sha256": "0e624cc3f03b2686243ec20b563a5d7806aebb0d113387c68bc85a82111ae0ea"
+        }
+      },
+      "integer_oracle": "fail",
+      "error": {
+        "type": "AssertionError",
+        "message": "Tensor-likes are not equal!\n\nMismatched elements: 1 / 607776 (0.0%)\nGreatest absolute difference: 1 at index (1, 31)\nGreatest relative difference: 0.0833333358168602 at index (1, 31)"
+      },
+      "failed_tensor_snapshot": "/results/failed-contract-snapshots/warm-151939-2048-repeat0.pt",
+      "failed_tensor_snapshot_sha256": "38b048807d058d86829d64f56263463e8beb6bb38c978e31f544cd3b0fc5d01b"
+    },
+    "error": {
+      "type": "AssertionError",
+      "message": "1 native original-contract checks failed; no shape, threshold, or reference changes"
+    }
+  },
+  "failed_kernel_forensics": {
+    "path": "grid2-forensics/forensics-receipt.json",
+    "grid": [
+      2,
+      2
+    ],
+    "actual_ON_llir_concealed_bytes": 0,
+    "previous_OFF_IR_device_binary_equal_to_actual_failed_ON": true
+  },
+  "build_provenance_boundary": {
+    "SDK_pin_mismatch_preserved": true,
+    "official_JSON_header_tree_new": true,
+    "previous_OFF_header_tree_unknown": true,
+    "not_exact_release_reconstruction": true
+  },
+  "unresolved": [
+    "Native multi-tile counting has an observed intermittent 1-count error; G6 timing was not executed",
+    "Original broad 8-case synthetic suite still has preexisting separate core guard/other-mask failures",
+    "Grammar/penalties native baseline compiler layout issue #1700 remains blocked",
+    "Single-GPU numerical work does not validate P800 cross-host FULL/NoC or 35B"
+  ],
+  "no_changed_inputs_thresholds_white_or_black_lists": true
+}

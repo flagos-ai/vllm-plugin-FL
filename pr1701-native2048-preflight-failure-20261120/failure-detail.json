@@ -1,0 +1,55 @@
+{
+  "purpose": "Read-only CPU inspection of already saved failed tensors; no GPU execution or rerun",
+  "snapshot_sha256": "38b048807d058d86829d64f56263463e8beb6bb38c978e31f544cd3b0fc5d01b",
+  "torch": "2.9.0+cu129",
+  "map_location": "cpu",
+  "weights_only": true,
+  "counts_shape": [
+    4,
+    151944
+  ],
+  "mismatch_count": 1,
+  "mismatches": [
+    {
+      "row": 1,
+      "token": 31,
+      "actual": 11,
+      "expected": 12,
+      "actual_minus_expected": -1,
+      "source_positions": [
+        0,
+        1,
+        520,
+        653,
+        786,
+        919,
+        1052,
+        1185,
+        1318,
+        1451,
+        1584,
+        1717,
+        1850,
+        1983
+      ],
+      "output_positions_first_block": [
+        520,
+        653,
+        786,
+        919
+      ],
+      "output_positions_second_block": [
+        1052,
+        1185,
+        1318,
+        1451,
+        1584,
+        1717,
+        1850,
+        1983
+      ]
+    }
+  ],
+  "packed_full_backing_exact": true,
+  "ids_sha256": "99bfc3a309c7e455194baddbb96fbc894ba0d5fb1bd14ceffb8202721b1c8dea"
+}

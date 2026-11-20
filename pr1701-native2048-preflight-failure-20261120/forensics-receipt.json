@@ -1,0 +1,399 @@
+{
+  "purpose": "Read-only preservation of original native grid[2,2] compilation; no rerun or compiler option changes",
+  "groups": [
+    {
+      "role": "actual-failed-ON",
+      "source": "/data/pr1701-bincount-g6-20261120/results-g6/cache-bincount-g6/NVIN6W4BU6DUXE4NZMLFBMXEA3WJYCENPLRQYQMFT7SRD4T2ND6Q",
+      "metadata": {
+        "hash": "6d50df5b81a7874b938dcb1650b2e406ec9c088d7ae30c41859fe511f27a68fd",
+        "target": {
+          "backend": "cuda",
+          "arch": 3,
+          "warp_size": 1
+        },
+        "arch": 3,
+        "grid": [
+          2,
+          2
+        ],
+        "debug": false,
+        "instrumentation_mode": "",
+        "sanitize_overflow": true,
+        "cluster_num": 12,
+        "core_num": 64,
+        "buffer_size_limit": 512,
+        "groups_per_cluster": 1,
+        "unroll_num": 2,
+        "vrf_budget": 24,
+        "budget_tiling": true,
+        "tle_relieve_pressure": false,
+        "pin_unroll_num": 0,
+        "open_decision_entry": false,
+        "per_op_decision": true,
+        "is_use_mask_zero": 0,
+        "extern_libs": [
+          [
+            "libdevice",
+            "/compilerrelease/triton/backends/xpu/xpu3/lib/libdevice-xpu3.bc"
+          ],
+          [
+            "libdevice-sdnn",
+            "/compilerrelease/triton/backends/xpu/xpu3/lib/libdevice-xpu3s.bc"
+          ]
+        ],
+        "is_sdnn": false,
+        "backend_name": "xpu",
+        "cluster_dims": [
+          1,
+          1,
+          1
+        ],
+        "max_num_imprecise_acc_default": 0,
+        "isOpenCmpNan": false,
+        "isCloseOffsetAnalysis": false,
+        "isCloseCoreTiling": false,
+        "isCloseUnrollControl": false,
+        "isCloseVectorization": false,
+        "isCloseMemoryCache": false,
+        "isCloseClusterLoopGrid": false,
+        "isClusterOneCoreActOnly": false,
+        "isCLOSE_TTXPU_O_ATOMIC_SIM": false,
+        "isCloseDtypeConvert": false,
+        "isCloseInterleave": false,
+        "isCloseMemoryAsync": false,
+        "isCloseTLESmemVec": false,
+        "isCloseTLEVec": false,
+        "isAutoCoreTiling": false,
+        "enable_fp_fusion": false,
+        "allow_fp8e4nv": true,
+        "allow_fp8e4b15": false,
+        "supported_fp8_dtypes": [],
+        "default_dot_input_precision": "tf32",
+        "allowed_dot_input_precisions": [
+          "ieee",
+          "tf32"
+        ],
+        "exp_range": ":0",
+        "num_warps": -1,
+        "num_ctas": -1,
+        "num_stages": 1,
+        "use_int4_w4a8": false,
+        "load_tile_size": 131072,
+        "triton_version": "3.6.0",
+        "xpu_arch": 3,
+        "is_tle": false,
+        "tensor_args": [],
+        "shared": -1,
+        "ewtable": "",
+        "tle_raw_payloads": [],
+        "tle_raw_extern_libs": [],
+        "name": "_bincount_kernel",
+        "printf_buf_offset": 0
+      },
+      "files": {
+        "_bincount_kernel.source": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "_bincount_kernel.ttir": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "_bincount_kernel.ttxir": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "_bincount_kernel.llir": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "_bincount_kernel.asm": {
+          "bytes": 12978,
+          "sha256": "ce461552d452acf6e8e71a9b6aea0deed1e9f91c13100b8b1243dcf81b81fa44"
+        },
+        "_bincount_kernel.elf": {
+          "bytes": 2520,
+          "sha256": "8d32f5ce3fd2900afee6f29aef75d2974164f330aa7e1e589b4dcc3a437e922e"
+        },
+        "_bincount_kernel.xpubin": {
+          "bytes": 1460,
+          "sha256": "e7b389425f6c1030b44e95bb20ccca101e9e65aefb488e195b180f61b241c319"
+        },
+        "_bincount_kernel.json": {
+          "bytes": 1762,
+          "sha256": "946bc5173fd552351269b9a7718d4f9d2c1b461138cd7a79825fe1e048fa4f7d"
+        },
+        "__grp___bincount_kernel.json": {
+          "bytes": 935,
+          "sha256": "832b677e77765fa084743802341fac6329504833b9f2f598a0a6c2f921f70074"
+        }
+      },
+      "elf_equal_actual_failed_ON": true,
+      "xpubin_equal_actual_failed_ON": true
+    },
+    {
+      "role": "previous-OFF",
+      "source": "/data/pr1701-native-four-off-20261120/results-four-cold/cache-native-four/M6Q47FVGOBLOGOHTNAIFIMQZXZUZHDAYJS56QDAZBDUSBONZRM7A",
+      "metadata": {
+        "hash": "67a1cf96a67056e338f36810543219be69938c184cbbe80c1908e920b9b98b3e",
+        "target": {
+          "backend": "cuda",
+          "arch": 3,
+          "warp_size": 1
+        },
+        "arch": 3,
+        "grid": [
+          2,
+          2
+        ],
+        "debug": false,
+        "instrumentation_mode": "",
+        "sanitize_overflow": true,
+        "cluster_num": 12,
+        "core_num": 64,
+        "buffer_size_limit": 512,
+        "groups_per_cluster": 1,
+        "unroll_num": 2,
+        "vrf_budget": 24,
+        "budget_tiling": true,
+        "tle_relieve_pressure": false,
+        "pin_unroll_num": 0,
+        "open_decision_entry": false,
+        "per_op_decision": true,
+        "is_use_mask_zero": 0,
+        "extern_libs": [
+          [
+            "libdevice",
+            "/compilercandidate/triton/backends/xpu/xpu3/lib/libdevice-xpu3.bc"
+          ],
+          [
+            "libdevice-sdnn",
+            "/compilercandidate/triton/backends/xpu/xpu3/lib/libdevice-xpu3s.bc"
+          ]
+        ],
+        "is_sdnn": false,
+        "backend_name": "xpu",
+        "cluster_dims": [
+          1,
+          1,
+          1
+        ],
+        "max_num_imprecise_acc_default": 0,
+        "isOpenCmpNan": false,
+        "isCloseOffsetAnalysis": false,
+        "isCloseCoreTiling": false,
+        "isCloseUnrollControl": false,
+        "isCloseVectorization": false,
+        "isCloseMemoryCache": false,
+        "isCloseClusterLoopGrid": false,
+        "isClusterOneCoreActOnly": false,
+        "isCLOSE_TTXPU_O_ATOMIC_SIM": false,
+        "isCloseDtypeConvert": false,
+        "isCloseInterleave": false,
+        "isCloseMemoryAsync": false,
+        "isCloseTLESmemVec": false,
+        "isCloseTLEVec": false,
+        "isAutoCoreTiling": false,
+        "enable_fp_fusion": false,
+        "allow_fp8e4nv": true,
+        "allow_fp8e4b15": false,
+        "supported_fp8_dtypes": [],
+        "default_dot_input_precision": "tf32",
+        "allowed_dot_input_precisions": [
+          "ieee",
+          "tf32"
+        ],
+        "exp_range": ":0",
+        "num_warps": -1,
+        "num_ctas": -1,
+        "num_stages": 1,
+        "use_int4_w4a8": false,
+        "load_tile_size": 131072,
+        "MLIR_DUMP_PATH": "/results/native-four-passes.mlir",
+        "MLIR_ENABLE_DUMP": "_bincount_kernel",
+        "triton_version": "3.6.0",
+        "xpu_arch": 3,
+        "is_tle": false,
+        "tensor_args": [],
+        "shared": -1,
+        "ewtable": "",
+        "tle_raw_payloads": [],
+        "tle_raw_extern_libs": [],
+        "name": "_bincount_kernel",
+        "printf_buf_offset": 0
+      },
+      "files": {
+        "_bincount_kernel.source": {
+          "bytes": 16062,
+          "sha256": "c19739cfe6de8688d3341eea3a6ef7384b21324f87d166bd8e1a1b69daba040b"
+        },
+        "_bincount_kernel.ttir": {
+          "bytes": 11226,
+          "sha256": "66c6851bdebac8a60d0f412b88ca1ac7479a6691fecb133e4a4fd20c1675f738"
+        },
+        "_bincount_kernel.ttxir": {
+          "bytes": 20682,
+          "sha256": "b9f7042581e2e73b0f30d01cd138b1222dc98396a883d39d35a98862236ed4e8"
+        },
+        "_bincount_kernel.llir": {
+          "bytes": 10113,
+          "sha256": "5f71f385e8c07466e24978a46f379a8d4b3f87972477b5baa6c0cb895c209091"
+        },
+        "_bincount_kernel.asm": {
+          "bytes": 12978,
+          "sha256": "ce461552d452acf6e8e71a9b6aea0deed1e9f91c13100b8b1243dcf81b81fa44"
+        },
+        "_bincount_kernel.elf": {
+          "bytes": 2520,
+          "sha256": "8d32f5ce3fd2900afee6f29aef75d2974164f330aa7e1e589b4dcc3a437e922e"
+        },
+        "_bincount_kernel.xpubin": {
+          "bytes": 1460,
+          "sha256": "e7b389425f6c1030b44e95bb20ccca101e9e65aefb488e195b180f61b241c319"
+        },
+        "_bincount_kernel.json": {
+          "bytes": 1860,
+          "sha256": "403dd87143c18484c280faad823ceab587952e6f80e8e579ac3c114c382cc0a5"
+        },
+        "__grp___bincount_kernel.json": {
+          "bytes": 935,
+          "sha256": "b351c1d6fa138a8d57037ce249e019c3c921eacfd047ae15065a979ebfed82d7"
+        }
+      },
+      "elf_equal_actual_failed_ON": true,
+      "xpubin_equal_actual_failed_ON": true
+    },
+    {
+      "role": "previous-ON-four",
+      "source": "/data/pr1701-native-four-on-20261120/results-four-cold/cache-native-four/2TUQ7XAQXBVFIZPQDHRLHQ63CZRK6UNMWNTE3ZKOK5IPJ7JLEK7Q",
+      "metadata": {
+        "hash": "d4e90fdc10b86a5465f019e2b3c3db1662af51acb3664de54e5750f4fd2b22bf",
+        "target": {
+          "backend": "cuda",
+          "arch": 3,
+          "warp_size": 1
+        },
+        "arch": 3,
+        "grid": [
+          2,
+          2
+        ],
+        "debug": false,
+        "instrumentation_mode": "",
+        "sanitize_overflow": true,
+        "cluster_num": 12,
+        "core_num": 64,
+        "buffer_size_limit": 512,
+        "groups_per_cluster": 1,
+        "unroll_num": 2,
+        "vrf_budget": 24,
+        "budget_tiling": true,
+        "tle_relieve_pressure": false,
+        "pin_unroll_num": 0,
+        "open_decision_entry": false,
+        "per_op_decision": true,
+        "is_use_mask_zero": 0,
+        "extern_libs": [
+          [
+            "libdevice",
+            "/compilerrelease/triton/backends/xpu/xpu3/lib/libdevice-xpu3.bc"
+          ],
+          [
+            "libdevice-sdnn",
+            "/compilerrelease/triton/backends/xpu/xpu3/lib/libdevice-xpu3s.bc"
+          ]
+        ],
+        "is_sdnn": false,
+        "backend_name": "xpu",
+        "cluster_dims": [
+          1,
+          1,
+          1
+        ],
+        "max_num_imprecise_acc_default": 0,
+        "isOpenCmpNan": false,
+        "isCloseOffsetAnalysis": false,
+        "isCloseCoreTiling": false,
+        "isCloseUnrollControl": false,
+        "isCloseVectorization": false,
+        "isCloseMemoryCache": false,
+        "isCloseClusterLoopGrid": false,
+        "isClusterOneCoreActOnly": false,
+        "isCLOSE_TTXPU_O_ATOMIC_SIM": false,
+        "isCloseDtypeConvert": false,
+        "isCloseInterleave": false,
+        "isCloseMemoryAsync": false,
+        "isCloseTLESmemVec": false,
+        "isCloseTLEVec": false,
+        "isAutoCoreTiling": false,
+        "enable_fp_fusion": false,
+        "allow_fp8e4nv": true,
+        "allow_fp8e4b15": false,
+        "supported_fp8_dtypes": [],
+        "default_dot_input_precision": "tf32",
+        "allowed_dot_input_precisions": [
+          "ieee",
+          "tf32"
+        ],
+        "exp_range": ":0",
+        "num_warps": -1,
+        "num_ctas": -1,
+        "num_stages": 1,
+        "use_int4_w4a8": false,
+        "load_tile_size": 131072,
+        "MLIR_DUMP_PATH": "/results/native-four-passes.mlir",
+        "MLIR_ENABLE_DUMP": "_bincount_kernel",
+        "triton_version": "3.6.0",
+        "xpu_arch": 3,
+        "is_tle": false,
+        "tensor_args": [],
+        "shared": -1,
+        "ewtable": "",
+        "tle_raw_payloads": [],
+        "tle_raw_extern_libs": [],
+        "name": "_bincount_kernel",
+        "printf_buf_offset": 0
+      },
+      "files": {
+        "_bincount_kernel.source": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "_bincount_kernel.ttir": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "_bincount_kernel.ttxir": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "_bincount_kernel.llir": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "_bincount_kernel.asm": {
+          "bytes": 12978,
+          "sha256": "ce461552d452acf6e8e71a9b6aea0deed1e9f91c13100b8b1243dcf81b81fa44"
+        },
+        "_bincount_kernel.elf": {
+          "bytes": 2520,
+          "sha256": "8d32f5ce3fd2900afee6f29aef75d2974164f330aa7e1e589b4dcc3a437e922e"
+        },
+        "_bincount_kernel.xpubin": {
+          "bytes": 1460,
+          "sha256": "e7b389425f6c1030b44e95bb20ccca101e9e65aefb488e195b180f61b241c319"
+        },
+        "_bincount_kernel.json": {
+          "bytes": 1856,
+          "sha256": "b420437298a69186b920a6d57d5d55fb4759348e508bae0afda13f23abaab743"
+        },
+        "__grp___bincount_kernel.json": {
+          "bytes": 935,
+          "sha256": "0864704b35318b9288fefa5b4cc9e33dec034f863fc13a89237784f83b2ceddf"
+        }
+      },
+      "elf_equal_actual_failed_ON": true,
+      "xpubin_equal_actual_failed_ON": true
+    }
+  ]
+}
