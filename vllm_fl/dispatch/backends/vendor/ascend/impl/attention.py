@@ -27,6 +27,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from itertools import accumulate
 from typing import Any, ClassVar, List, Optional, Tuple, Type
 
 import torch
@@ -1100,6 +1101,53 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
         return output
 
+    def _forward_cross_attention(
+        self, query, key, value, kv_cache, metadata, output
+    ):
+        """Attend to encoder tokens using their own lengths and cache slots."""
+        if getattr(get_forward_context(), "capturing", False):
+            raise NotImplementedError("Ascend cross-attention requires eager execution")
+
+        query_ends = metadata.actual_seq_lengths_q
+        num_queries = query_ends[-1]
+        encoder_lengths = metadata.seq_lens_list
+        block_table = None
+        block_size = 0
+        if len(kv_cache) > 1 and kv_cache[0].numel():
+            key_cache, value_cache = kv_cache[0], kv_cache[1]
+            if key is not None and value is not None and key.shape[0]:
+                torch_npu._npu_reshape_and_cache(
+                    key=key.contiguous(),
+                    value=value.contiguous(),
+                    key_cache=key_cache,
+                    value_cache=value_cache,
+                    slot_indices=metadata.slot_mapping.to(torch.int32),
+                )
+            num_blocks, block_size = key_cache.shape[:2]
+            key = key_cache.view(num_blocks, block_size, -1)
+            value = value_cache.view(num_blocks, block_size, -1)
+            block_table = metadata.block_tables
+        else:
+            # Profiling has encoder outputs but no allocated paged cache.
+            encoder_lengths = list(accumulate(encoder_lengths))
+
+        result, _ = torch_npu.npu_fused_infer_attention_score(
+            query=query[:num_queries],
+            key=key,
+            value=value,
+            block_table=block_table,
+            input_layout="TND",
+            block_size=block_size,
+            actual_seq_lengths=query_ends,
+            actual_seq_lengths_kv=encoder_lengths,
+            num_key_value_heads=self.num_kv_heads,
+            num_heads=self.num_heads,
+            scale=self.scale,
+            sparse_mode=0,
+        )
+        output[:num_queries].copy_(result.view_as(output[:num_queries]))
+        return output
+
     def forward(
         self,
         layer: AttentionLayer,
@@ -1139,17 +1187,17 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
         assert layer._k_scale_float == 1.0 and layer._v_scale_float == 1.0
 
-        attn_type = self.attn_type
-        if attn_type not in [AttentionType.DECODER, AttentionType.ENCODER_ONLY]:
-            raise NotImplementedError(
-                "Encoder/Decoder cross-attention is not implemented for "
-                "AscendAttentionBackendImpl"
-            )
-
-        num_tokens = query.shape[0]
         if attn_metadata is None:
             return output.fill_(0)
 
+        if self.attn_type == AttentionType.ENCODER_DECODER:
+            return self._forward_cross_attention(
+                query, key, value, kv_cache, attn_metadata, output
+            )
+        if self.attn_type not in (AttentionType.DECODER, AttentionType.ENCODER_ONLY):
+            raise NotImplementedError(f"Unsupported Ascend attention type: {self.attn_type}")
+
+        num_tokens = query.shape[0]
         # Reshape and cache KV
         if attn_metadata.attn_state != AscendAttentionState.DecodeOnly:
             kv_cache = [i.contiguous() for i in kv_cache]
