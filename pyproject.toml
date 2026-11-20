@@ -48,7 +48,7 @@ glm5 = [
     "tilelang==0.1.9",
 ]
 hy4-metax = [
-    "flaggems_vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@0a01a95d77672a3041823446e5400af34da3aaf5",
+    "flaggems_vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@9b5dc11715616700bab2c9be5e7ffded31b2b394",
 ]
 test = [
     "pytest",
