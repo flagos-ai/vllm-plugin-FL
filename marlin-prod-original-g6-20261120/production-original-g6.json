@@ -1,0 +1,518 @@
+{
+  "production_head": "e5c1a998ff233a0e5ab09f861fcb150ce4c11f7a",
+  "hardware": "NVIDIA H20-3e SM90",
+  "runtime": {
+    "torch": "2.13.0+cu130",
+    "vllm": "0.32.0",
+    "triton": "3.6.0",
+    "flagtree": "0.7.0",
+    "tle": true,
+    "libtriton_sha256": "385c1089a702a71df0ce847bdac0e71234d411396ac1bbdfe5d74bbd6528f43f"
+  },
+  "file_sha256": {
+    "src/flaggems_vllm/ops/fused_marlin_moe.py": "8332eb9ec26c1a3b8c06d23d409e50b101b8719ba8c7ad8d266037e9a3f3f43d",
+    "src/flaggems_vllm/runtime/backend/_nvidia/tune_configs.yaml": "5bb0986910b7a5c980fad419e5e8f4fb42b32792867fac7c64e38c7f38868c88",
+    "src/flaggems_vllm/runtime/backend/_nvidia/hopper/tune_configs.yaml": "ee6e1152c179e6d5ecd8ea09442483470865121f4d4db973f17fd9de7a396411",
+    "benchmark/test_fused_marlin_moe_w8a16_int8.py": "85b2d227efdfcdfb332badf843d60ef8b63ff9323ffacb672dc0e1da2f3661ee",
+    "benchmark/test_fused_marlin_moe_w8a16_fp8.py": "681359bfe1de7bf7f7f441042a50fe92db68a1cfe0f324a2a7a377f95e479859",
+    "tests/test_fused_marlin_moe.py": "a6ac3a4559d3bcd1bffa0757ac42cefba3c9e2ff44de2bf48bbcc39b85ca53f5"
+  },
+  "probe_sha256": "b3820f03c9c543468cd25dd7eaccd1af20fc2ffdc0c75d9ef631c0312719d21c",
+  "method": {
+    "seed_rule": "20261119 + sum(shape)",
+    "warmup_ms": 10,
+    "rep_ms": 50,
+    "pairs": 3,
+    "ordering": "native/gems, gems/native, native/gems",
+    "gate_speedup_threshold": 0.9,
+    "max_diff_threshold": 0.04,
+    "aggregation": "median of three per-pair speedups; raw rounds also retained",
+    "accuracy_only_precompile": "14/14 numeric PASS;5 native+candidate warm calls per shape",
+    "formal_timing": "Fresh process, warmed isolated cache, no profiler; explicit root quiet window"
+  },
+  "flags": {
+    "FLAGGEMS_VENDOR": "nvidia",
+    "TRITON_CACHE_AUTOTUNING": "1",
+    "TRITON_PTXAS_BLACKWELL_PATH": "/usr/local/cuda/bin/ptxas"
+  },
+  "numeric_passed": 14,
+  "g6_passed_shapes": 9,
+  "shape_count": 14,
+  "g6_all_passed": false,
+  "rows": [
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      "max_diff": 0.008263437077403069,
+      "rounds": [
+        {
+          "native": 0.10710400342941284,
+          "gems": 0.09430400282144547,
+          "speedup": 1.1357312545067977
+        },
+        {
+          "gems": 0.09487999975681305,
+          "native": 0.10623999685049057,
+          "speedup": 1.1197301551727903
+        },
+        {
+          "native": 0.10633599758148193,
+          "gems": 0.09430400282144547,
+          "speedup": 1.1275873176117217
+        }
+      ],
+      "median_native_us": 106.33599758148193,
+      "median_gems_us": 94.30400282144547,
+      "median_pair_speedup": 1.1275873176117217,
+      "ratio_of_median_latencies": 1.1275873176117217,
+      "g6_passed": true
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.004793734289705753,
+      "rounds": [
+        {
+          "native": 0.16441599279642105,
+          "gems": 0.20281599462032318,
+          "speedup": 0.8106658111664815
+        },
+        {
+          "gems": 0.20319999754428864,
+          "native": 0.16390399634838104,
+          "speedup": 0.8066141650058691
+        },
+        {
+          "native": 0.16390399634838104,
+          "gems": 0.20324800163507462,
+          "speedup": 0.8064236549920205
+        }
+      ],
+      "median_native_us": 163.90399634838104,
+      "median_gems_us": 203.19999754428864,
+      "median_pair_speedup": 0.8066141650058691,
+      "ratio_of_median_latencies": 0.8066141650058691,
+      "g6_passed": false
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.004344399552792311,
+      "rounds": [
+        {
+          "native": 0.2845439910888672,
+          "gems": 0.8665919899940491,
+          "speedup": 0.32834828197618254
+        },
+        {
+          "gems": 0.8666560053825378,
+          "native": 0.28543999791145325,
+          "speedup": 0.3293578953341025
+        },
+        {
+          "native": 0.2897599935531616,
+          "gems": 0.8680479824542999,
+          "speedup": 0.33380642477147465
+        }
+      ],
+      "median_native_us": 285.43999791145325,
+      "median_gems_us": 866.6560053825378,
+      "median_pair_speedup": 0.3293578953341025,
+      "ratio_of_median_latencies": 0.3293578953341025,
+      "g6_passed": false
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.003019393654540181,
+      "rounds": [
+        {
+          "native": 0.5343040227890015,
+          "gems": 0.7574080228805542,
+          "speedup": 0.7054375008558141
+        },
+        {
+          "gems": 0.7548480033874512,
+          "native": 0.5435839891433716,
+          "speedup": 0.720123768896503
+        },
+        {
+          "native": 0.5801600217819214,
+          "gems": 0.7787200212478638,
+          "speedup": 0.745017472200395
+        }
+      ],
+      "median_native_us": 543.5839891433716,
+      "median_gems_us": 757.4080228805542,
+      "median_pair_speedup": 0.720123768896503,
+      "ratio_of_median_latencies": 0.7176897692158413,
+      "g6_passed": false
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.003048928454518318,
+      "rounds": [
+        {
+          "native": 1.271008014678955,
+          "gems": 1.1868319511413574,
+          "speedup": 1.0709250062375275
+        },
+        {
+          "gems": 1.1872320175170898,
+          "native": 1.271232008934021,
+          "speedup": 1.0707528016239016
+        },
+        {
+          "native": 1.267199993133545,
+          "gems": 1.1861920356750488,
+          "speedup": 1.0682924476156976
+        }
+      ],
+      "median_native_us": 1271.008014678955,
+      "median_gems_us": 1186.8319511413574,
+      "median_pair_speedup": 1.0707528016239016,
+      "ratio_of_median_latencies": 1.0709250062375275,
+      "g6_passed": true
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.004416962619870901,
+      "rounds": [
+        {
+          "native": 3.2208640575408936,
+          "gems": 2.2041280269622803,
+          "speedup": 1.4612871930038813
+        },
+        {
+          "gems": 2.2028799057006836,
+          "native": 3.2311038970947266,
+          "speedup": 1.466763525661645
+        },
+        {
+          "native": 3.2208640575408936,
+          "gems": 2.2042880058288574,
+          "speedup": 1.461181138319438
+        }
+      ],
+      "median_native_us": 3220.8640575408936,
+      "median_gems_us": 2204.1280269622803,
+      "median_pair_speedup": 1.4612871930038813,
+      "ratio_of_median_latencies": 1.4612871930038813,
+      "g6_passed": true
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.004452156368643045,
+      "rounds": [
+        {
+          "native": 10.735888004302979,
+          "gems": 6.67628812789917,
+          "speedup": 1.6080624141189133
+        },
+        {
+          "gems": 6.6943359375,
+          "native": 10.7324800491333,
+          "speedup": 1.603218026303793
+        },
+        {
+          "native": 10.754240036010742,
+          "gems": 6.664351940155029,
+          "speedup": 1.61369629524106
+        }
+      ],
+      "median_native_us": 10735.888004302979,
+      "median_gems_us": 6676.28812789917,
+      "median_pair_speedup": 1.6080624141189133,
+      "ratio_of_median_latencies": 1.6080624141189133,
+      "g6_passed": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      "max_diff": 0.0076736146584153175,
+      "rounds": [
+        {
+          "native": 0.10864000022411346,
+          "gems": 0.09494400024414062,
+          "speedup": 1.1442534540861424
+        },
+        {
+          "gems": 0.09430400282144547,
+          "native": 0.10768000036478043,
+          "speedup": 1.1418391281721199
+        },
+        {
+          "native": 0.10758399963378906,
+          "gems": 0.09622400254011154,
+          "speedup": 1.1180578316615133
+        }
+      ],
+      "median_native_us": 107.68000036478043,
+      "median_gems_us": 94.94400024414062,
+      "median_pair_speedup": 1.1418391281721199,
+      "ratio_of_median_latencies": 1.1341422321356824,
+      "g6_passed": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.03232588991522789,
+      "rounds": [
+        {
+          "native": 0.1526080071926117,
+          "gems": 0.26929599046707153,
+          "speedup": 0.5666924595792376
+        },
+        {
+          "gems": 0.2690559923648834,
+          "native": 0.15292799472808838,
+          "speedup": 0.56838724677313
+        },
+        {
+          "native": 0.15276800096035004,
+          "gems": 0.26864001154899597,
+          "speedup": 0.5686718075966409
+        }
+      ],
+      "median_native_us": 152.76800096035004,
+      "median_gems_us": 269.0559923648834,
+      "median_pair_speedup": 0.56838724677313,
+      "ratio_of_median_latencies": 0.5677925981784934,
+      "g6_passed": false
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.005031808279454708,
+      "rounds": [
+        {
+          "native": 0.3712320029735565,
+          "gems": 0.48924800753593445,
+          "speedup": 0.7587808172040234
+        },
+        {
+          "gems": 0.4861760139465332,
+          "native": 0.4042240083217621,
+          "speedup": 0.8314355227862317
+        },
+        {
+          "native": 0.3904480040073395,
+          "gems": 0.4656960070133209,
+          "speedup": 0.8384181915396388
+        }
+      ],
+      "median_native_us": 390.4480040073395,
+      "median_gems_us": 486.1760139465332,
+      "median_pair_speedup": 0.8314355227862317,
+      "ratio_of_median_latencies": 0.8031000970983292,
+      "g6_passed": false
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.005176147911697626,
+      "rounds": [
+        {
+          "native": 0.5008000135421753,
+          "gems": 0.567520022392273,
+          "speedup": 0.8824358503355492
+        },
+        {
+          "gems": 0.5597440004348755,
+          "native": 0.5311520099639893,
+          "speedup": 0.9489195231236555
+        },
+        {
+          "native": 0.5373439788818359,
+          "gems": 0.5648959875106812,
+          "speedup": 0.95122640408501
+        }
+      ],
+      "median_native_us": 531.1520099639893,
+      "median_gems_us": 564.8959875106812,
+      "median_pair_speedup": 0.9489195231236555,
+      "ratio_of_median_latencies": 0.9402651491730523,
+      "g6_passed": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.005181437358260155,
+      "rounds": [
+        {
+          "native": 1.238976001739502,
+          "gems": 0.9544320106506348,
+          "speedup": 1.2981291364011294
+        },
+        {
+          "gems": 0.9545279741287231,
+          "native": 1.234447956085205,
+          "speedup": 1.2932548752298099
+        },
+        {
+          "native": 1.2310400009155273,
+          "gems": 0.9546880125999451,
+          "speedup": 1.2894683757083956
+        }
+      ],
+      "median_native_us": 1234.447956085205,
+      "median_gems_us": 954.5279741287231,
+      "median_pair_speedup": 1.2932548752298099,
+      "ratio_of_median_latencies": 1.2932548752298099,
+      "g6_passed": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.005145757459104061,
+      "rounds": [
+        {
+          "native": 3.4676159620285034,
+          "gems": 2.2071681022644043,
+          "speedup": 1.5710701683623307
+        },
+        {
+          "gems": 2.21126389503479,
+          "native": 3.4771039485931396,
+          "speedup": 1.5724509211228423
+        },
+        {
+          "native": 3.468176007270813,
+          "gems": 2.2023680210113525,
+          "speedup": 1.574748622475088
+        }
+      ],
+      "median_native_us": 3468.176007270813,
+      "median_gems_us": 2207.1681022644043,
+      "median_pair_speedup": 1.5724509211228423,
+      "ratio_of_median_latencies": 1.571323907641063,
+      "g6_passed": true
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "max_diff": 0.004910625051707029,
+      "rounds": [
+        {
+          "native": 10.340224266052246,
+          "gems": 7.152719974517822,
+          "speedup": 1.4456352692248797
+        },
+        {
+          "gems": 7.16867208480835,
+          "native": 10.344271659851074,
+          "speedup": 1.4429829593924888
+        },
+        {
+          "native": 10.332704067230225,
+          "gems": 7.1462719440460205,
+          "speedup": 1.4458873309235045
+        }
+      ],
+      "median_native_us": 10340.224266052246,
+      "median_gems_us": 7152.719974517822,
+      "median_pair_speedup": 1.4456352692248797,
+      "ratio_of_median_latencies": 1.4456352692248797,
+      "g6_passed": true
+    }
+  ],
+  "scope_notes": [
+    "Original packaged FlagTree0.7.0, not the isolated complete1540 compiler.",
+    "Read-only packing-G5 snapshot reused; all measured ops/tunes/benchmark/tests files are byte-identical to production e5c1a998.",
+    "No production code, shapes, seeds, reference, tolerance or threshold changed; focused packing microbenchmarks do not replace these14 results.",
+    "Initial metadata-only preflight required mounting the original FlagTree dist-info; no numeric kernel had run in that setup attempt."
+  ],
+  "evidence_sha256": {
+    "accuracy.log": "bcf74beb7090538b94a2f507deea2206a861764e5ca0961bc6f5420c6683f5df",
+    "formal.log": "e3420b8be1a4dd0b8ee7e9e1611122a17a6f7574ca5179434d97b9334d286b4e",
+    "accuracy-preflight.json": "1f89e24b8e17b8a0ac4d17d0e6d90436d2d6081442121f055eaf1c277a3fb73a",
+    "formal-preflight.json": "1f89e24b8e17b8a0ac4d17d0e6d90436d2d6081442121f055eaf1c277a3fb73a"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "head": "e5c1a998ff233a0e5ab09f861fcb150ce4c11f7a",
+  "files": {
+    "src/flaggems_vllm/ops/fused_marlin_moe.py": {
+      "tested_worktree_sha256": "8332eb9ec26c1a3b8c06d23d409e50b101b8719ba8c7ad8d266037e9a3f3f43d",
+      "git_blob_bytes_sha256": "77739b56a594b408732bed9605bd802a48dd49c7957b4510290c3ddd7486231e",
+      "lf_normalized_equal": true
+    },
+    "tests/test_fused_marlin_moe.py": {
+      "tested_worktree_sha256": "a6ac3a4559d3bcd1bffa0757ac42cefba3c9e2ff44de2bf48bbcc39b85ca53f5",
+      "git_blob_bytes_sha256": "b5cb217debe868a257f7ba168d1479350a74105aedb1862c6f4a33b944286578",
+      "lf_normalized_equal": true
+    },
+    "src/flaggems_vllm/runtime/backend/_nvidia/hopper/tune_configs.yaml": {
+      "tested_worktree_sha256": "ee6e1152c179e6d5ecd8ea09442483470865121f4d4db973f17fd9de7a396411",
+      "git_blob_bytes_sha256": "d045934b7cfa768fb62a3e723ba069812d93f54e5540fb9e5c6b87c639b760f6",
+      "lf_normalized_equal": true
+    },
+    "benchmark/test_fused_marlin_moe_w8a16_int8.py": {
+      "tested_worktree_sha256": "85b2d227efdfcdfb332badf843d60ef8b63ff9323ffacb672dc0e1da2f3661ee",
+      "git_blob_bytes_sha256": "c65ba0b30ee2e916084f799e5dc782f5c3ebb64f9ebb65f38cef9f3848cfa37b",
+      "lf_normalized_equal": true
+    },
+    "benchmark/test_fused_marlin_moe_w8a16_fp8.py": {
+      "tested_worktree_sha256": "681359bfe1de7bf7f7f441042a50fe92db68a1cfe0f324a2a7a377f95e479859",
+      "git_blob_bytes_sha256": "01b8427aee2b654c911a27a8b91e07fa1053deda1975e60a827a2925f958a983",
+      "lf_normalized_equal": true
+    }
+  }
+}
