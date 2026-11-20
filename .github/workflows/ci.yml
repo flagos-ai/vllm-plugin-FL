@@ -134,10 +134,13 @@ jobs:
             echo "workflow_dispatch — no diff filtering"
           fi
       - id: detect
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ -n "${{ steps.changed.outputs.file }}" ]; then
             python3 .github/scripts/detect_platforms.py \
-              --changed-files "${{ steps.changed.outputs.file }}"
+              --changed-files "${{ steps.changed.outputs.file }}" \
+              --base-ref "$PR_BASE_SHA"
           else
             python3 .github/scripts/detect_platforms.py
           fi

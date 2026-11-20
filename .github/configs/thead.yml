@@ -15,7 +15,6 @@ container_volumes: ["/mnt/airs-business/cicd/models:/data/models"]
 container_options: >-
   --hostname vllm-plugin-fl
   --env CUDA_VISIBLE_DEVICES=12,13,14,15
-  --env THEAD_BASE_PYTHON=/opt/thead/venv/bin/python
   --shm-size=64g
   --ulimit memlock=-1
   --ulimit stack=67108864

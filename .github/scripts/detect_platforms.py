@@ -37,6 +37,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -54,6 +56,43 @@ THEAD_IMAGE_SUPPORT_FILES = {
     ".github/workflows/ci.yml",
     ".typos.toml",
 }
+BUILD_SCRIPT = "docker/build.sh"
+
+
+def _shared_build_script(source: str) -> str | None:
+    # Strip only the T-Head branch and its platform-specific defaults and help.
+    shared, count = re.subn(
+        r'^elif \[\[ "\$\{PLATFORM\}" == "thead" \]\]; then\n'
+        r'.*?(?=^elif \[\[ "\$\{PLATFORM\}" == )',
+        "",
+        source,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    if count != 1:
+        return None
+    return re.sub(
+        r"^(?:THEAD_[A-Z_]+=|    THEAD_WHEELS_DIR +)[^\n]*\n",
+        "",
+        shared,
+        flags=re.MULTILINE,
+    )
+
+
+def _thead_only_build_change(base_ref: str) -> bool:
+    try:
+        base = subprocess.check_output(
+            ["git", "merge-base", base_ref, "HEAD"], encoding="utf-8"
+        ).strip()
+        source = [
+            subprocess.check_output(
+                ["git", "show", f"{ref}:{BUILD_SCRIPT}"], encoding="utf-8"
+            )
+            for ref in (base, "HEAD")
+        ]
+    except subprocess.CalledProcessError:
+        return False
+    before, after = map(_shared_build_script, source)
+    return before is not None and before == after
 
 
 def _validate_and_collect_exemptions(
@@ -99,7 +138,9 @@ def _validate_and_collect_exemptions(
     return exempt_paths
 
 
-def from_registry(changed_files: list[str] | None = None) -> list[str] | None:
+def from_registry(
+    changed_files: list[str] | None = None, *, base_ref: str | None = None
+) -> list[str] | None:
     """Read platforms.yml and return enabled platform names, filtered by
     diff-based routing when changed_files is provided. Returns None if the
     file does not exist."""
@@ -138,8 +179,19 @@ def from_registry(changed_files: list[str] | None = None) -> list[str] | None:
         return list(enabled.keys())
 
     # Require an image change and check every path before narrowing the matrix.
-    if any(path.startswith("docker/thead/") for path in changed_files) and all(
-        path.startswith(THEAD_IMAGE_DIRS) or path in THEAD_IMAGE_SUPPORT_FILES
+    support_files = THEAD_IMAGE_SUPPORT_FILES
+    thead_build_only = bool(
+        base_ref
+        and BUILD_SCRIPT in changed_files
+        and _thead_only_build_change(base_ref)
+    )
+    if thead_build_only:
+        support_files = support_files | {BUILD_SCRIPT}
+    if (
+        thead_build_only
+        or any(path.startswith("docker/thead/") for path in changed_files)
+    ) and all(
+        path.startswith(THEAD_IMAGE_DIRS) or path in support_files
         for path in changed_files
     ):
         print("[detect] T-Head CI image → T-Head and NVIDIA baseline", file=sys.stderr)
@@ -228,6 +280,9 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="Newline-delimited file of changed paths for diff-based routing",
     )
+    parser.add_argument(
+        "--base-ref", help="PR base for classifying shared build changes"
+    )
     args = parser.parse_args(argv)
 
     changed: list[str] | None = None
@@ -242,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("[detect] No changed files → full run", file=sys.stderr)
 
-    platforms = from_registry(changed)
+    platforms = from_registry(changed, base_ref=args.base_ref)
 
     if platforms is not None:
         source = "platforms.yml"

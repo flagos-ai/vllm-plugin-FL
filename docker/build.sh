@@ -64,12 +64,6 @@ HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.baai.ac.cn/plugin/hygon-dtk26.04-tr
 HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.28.0}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
 HYGON_PYTHON_VERSION="${HYGON_PYTHON_VERSION:-3.10}"
-THEAD_BASE_IMAGE="${THEAD_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/sglang0.5.12-thead-ppu2.1.0:2.2.0-0.2.0@sha256:27de587ef3919caf649128795178ce4e516ee44991305f61d16fa033228c0149}"
-THEAD_VLLM_VERSION="${THEAD_VLLM_VERSION:-0.32.0}"
-THEAD_PYTHON_VERSION="${THEAD_PYTHON_VERSION:-3.12}"
-THEAD_FLAGTREE_VERSION="${THEAD_FLAGTREE_VERSION:-0.7.0+ppu3.6}"
-THEAD_FLAGGEMS_VERSION="${THEAD_FLAGGEMS_VERSION:-5.5.0.dev0+g317b76320}"
-THEAD_WHEELS_DIR="${THEAD_WHEELS_DIR:-}"
 FLAGGEMS_VERSION="${FLAGGEMS_VERSION:-62d70b9e858ec407572153ee8cdf65cc24a637d5}"
 VLLM_PLUGIN_FL_VERSION="${VLLM_PLUGIN_FL_VERSION:-ffa2ee3eb3831f3873dd0966d12fc8e0b4e6e3d4}"
 
@@ -172,7 +166,7 @@ VERSIONS (override via environment variables):
     THEAD_VLLM_VERSION   vLLM empty-mode version (default: ${THEAD_VLLM_VERSION})
     THEAD_FLAGTREE_VERSION PPU FlagTree/Triton wheel version (default: ${THEAD_FLAGTREE_VERSION})
     THEAD_FLAGGEMS_VERSION FlagGems version (default: ${THEAD_FLAGGEMS_VERSION})
-    THEAD_WHEELS_DIR     Required for thead: directory with the vllm/flagtree/flag_gems wheels
+    THEAD_WHEELS_DIR     Optional for thead: cache directory with locked wheels
 
 EXAMPLES:
     # Build CUDA dev image
@@ -356,29 +350,37 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
         IMAGE_TAG="v${HYGON_VLLM_VERSION}-hygon-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "thead" ]]; then
-    PYTHON_VERSION="${THEAD_PYTHON_VERSION}"
-    VLLM_VERSION="${THEAD_VLLM_VERSION}"
+    [[ "${TARGET}" == "ci" ]] || err "The T-Head Dockerfile supports --target ci."
+    PYTHON_VERSION=3.12
+    VLLM_VERSION=0.32.0
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
-        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    read -r source_sha < "${SCRIPT_DIR}/thead/plugin-source.ref"
+    [[ "${source_sha}" =~ ^[0-9a-f]{40}$ ]] || err "The T-Head plugin source must be a full commit SHA."
+    source_epoch="$(git -C "${BUILD_CONTEXT}" show -s --format=%ct "${source_sha}")"
+    thead_source="$(mktemp -d)"
+    trap 'rm -rf -- "$thead_source"' EXIT
+    git -C "${BUILD_CONTEXT}" archive "${source_sha}" | tar -xf - -C "${thead_source}"
     BUILD_ARGS+=(
-        --build-arg "THEAD_BASE_IMAGE=${THEAD_BASE_IMAGE}"
-        --build-arg "VLLM_VERSION=${THEAD_VLLM_VERSION}"
-        --build-arg "FLAGTREE_VERSION=${THEAD_FLAGTREE_VERSION}"
-        --build-arg "FLAGGEMS_VERSION=${THEAD_FLAGGEMS_VERSION}"
-        --build-arg "PLUGIN_SOURCE_SHA=${PLUGIN_SOURCE_SHA:-$(git -C "${SCRIPT_DIR}/.." rev-parse HEAD 2>/dev/null || true)}"
+        --platform linux/amd64
+        --build-context "plugin_source=${thead_source}"
+        --build-arg "PLUGIN_SOURCE_SHA=${source_sha}"
+        --build-arg "SOURCE_DATE_EPOCH=${source_epoch}"
     )
-    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
-    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
-    if [[ -z "${THEAD_WHEELS_DIR}" ]]; then
-        err "THEAD_WHEELS_DIR is required: the thead image installs a prebuilt vllm-${THEAD_VLLM_VERSION}+empty wheel (see docker/thead/README.md)."
+    for arg in "${EXTRA_BUILD_ARGS[@]}"; do
+        case "${arg}" in
+            PLUGIN_SOURCE_SHA|PLUGIN_SOURCE_SHA=*|SOURCE_DATE_EPOCH|SOURCE_DATE_EPOCH=*)
+                err "T-Head plugin build arguments come from plugin-source.ref." ;;
+        esac
+    done
+    if [[ -n "${THEAD_WHEELS_DIR:-}" ]]; then
+        [[ -d "${THEAD_WHEELS_DIR}" ]] || err "THEAD_WHEELS_DIR directory does not exist."
+        BUILD_ARGS+=(--build-context "wheel_seed=${THEAD_WHEELS_DIR}")
     fi
-    [[ -d "${THEAD_WHEELS_DIR}" ]] || err "THEAD_WHEELS_DIR directory does not exist."
-    thead_vllm_wheels=("${THEAD_WHEELS_DIR}"/vllm-"${THEAD_VLLM_VERSION}"+empty-*.whl)
-    [[ -e "${thead_vllm_wheels[0]}" ]] || err "no vllm-${THEAD_VLLM_VERSION}+empty wheel in ${THEAD_WHEELS_DIR}."
-    BUILD_ARGS+=(--build-context "thead_wheels=${THEAD_WHEELS_DIR}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="v${THEAD_VLLM_VERSION}-thead-${TARGET}"
+        IMAGE_TAG="v${VLLM_VERSION}-thead-${TARGET}-dev"
     fi
 elif [[ "${PLATFORM}" == "metax" ]]; then
     PYTHON_VERSION="${METAX_PYTHON_VERSION}"

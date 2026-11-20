@@ -1,13 +1,30 @@
 {
-  "flaggems": {
-    "commit": "317b763204391d530d6024b52b6235de150443d8",
-    "version": "5.5.0.dev0+g317b76320"
+  "protected": {
+    "torch": "2.10.0+v0.1.0.ppu2.1.1",
+    "torchvision": "0.25.0+v0.1.0.ppu2.1.1",
+    "torchaudio": "2.10.0+v0.1.0.ppu2.1.1",
+    "numpy": "1.26.4",
+    "flagtree": "0.7.0+ppu3.6",
+    "triton": "3.5.0+v0.2.0.ppu2.1.1"
   },
-  "flagtree": {
-    "version": "0.7.0+ppu3.6",
-    "filename": "flagtree-0.7.0+ppu3.6-cp312-cp312-linux_x86_64.whl",
-    "url": "https://resource.flagos.net/repository/flagos-pypi-hosted/packages/flagtree/0.7.0+ppu3.6/flagtree-0.7.0+ppu3.6-cp312-cp312-linux_x86_64.whl",
-    "bytes": 363127160,
-    "sha256": "98fa0c4488e06c904adfb55a8059ef64f2c1bddf5938f6faa7edfc8650dead09"
+  "vllm": {
+    "version": "0.32.0+flagos",
+    "sha256": "445821b41d2494c595a89bc476bdbcf18d70e9c1e78ab5b60b587f5c0454580d"
+  },
+  "flash-attn-3": {
+    "version": "2.8.2+v0.1.0.ppu2.1.1",
+    "sha256": "cb549bdcb0e46e0fc94aa7178fd27c7e050fcdbb2a5a3b66f83803e66deb9aa2"
+  },
+  "flaggems-vllm": {
+    "version": "0.3.0.dev20261117",
+    "sha256": "edeff1754a554d226cb07287e59895523faaf5a64e97f7cad246a139279837a2"
+  },
+  "flagcx": {
+    "version": "0.14.1+ppu2.1.0",
+    "sha256": "76a7e19f36ac699f42a841f7a78a2700ab29ab684f2eb6fb7557087667972f5b"
+  },
+  "flag-gems": {
+    "version": "5.5.0.dev20261117",
+    "sha256": "06915796a2fdc24d4559ded6076bba3e04a14db6385a4a59b7de00817286b5ea"
   }
 }

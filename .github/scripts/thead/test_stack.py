@@ -3,7 +3,7 @@
 import copy
 
 import pytest
-from runtime_stack import (
+from stack import (
     ATTENTION,
     PROVIDER_WHEELS,
     STACK,
