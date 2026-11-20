@@ -18,7 +18,7 @@
 # Jobs need a self-hosted runner matching the label below.
 
 platform: iluvatar
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-Iluvatar-ci@sha256:374c6775d470bd0866655ecf4da697f872d019e287719f1a5527c8e78944b0f3
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-Iluvatar-ci@sha256:b43fbf5bda5e123d58f25150d0b717abbe81c026ea05a6cdde989dfac23587e0
 runner_labels:
   - iluvatar-cicd-vllm-plugin
 
