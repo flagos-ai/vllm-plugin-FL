@@ -1,0 +1,101 @@
+{
+  "candidate": "0.7.1+xpu3.6",
+  "source_release_commit": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9",
+  "wheel_sha256_verified": "f99134002d85e4e27b11f860619a01e3385e701d93c541c1fd1515d136424b80",
+  "core_sha256_verified": "863733059925dea5e2b86e9cf8c4f3a192c26e88b623321d5a3b93bbd20c1050",
+  "native_source_sha256": "a5e99c71e6ac50ef025b8a7b0b903a1d2679738d8319af9c98bb200389388b29",
+  "repro_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb",
+  "provider_imported": false,
+  "production_pin_changed": false,
+  "block_size": 1024,
+  "cold_compilation": "pass",
+  "cold_native_execution": "completed",
+  "packed_full_backing_integer_oracle": "pass",
+  "counts_full_backing_integer_oracle": {
+    "result": "fail",
+    "mismatch_elements": 225,
+    "total_elements": 688,
+    "max_absolute_difference": 726,
+    "max_difference_index": [
+      3,
+      7
+    ]
+  },
+  "exit_code": 1,
+  "warm_status": "not run after cold failure",
+  "native_G6": "not passed; no timing",
+  "diagnosis": "pending original-fixture full-output and cached-IR forensics",
+  "repeated_cold_snapshots": "same225mismatch",
+  "output_mismatch_categories": {
+    "active_visible": 225
+  },
+  "packed_exact": true,
+  "input_identity": {
+    "ids": {
+      "dtype": "torch.int32",
+      "shape": [
+        4,
+        190
+      ],
+      "stride": [
+        190,
+        1
+      ],
+      "sha256": "3a68eafe788eea5e85f2f9e62dc3a13721d692cdd692d7c3080d49574a4926c6"
+    },
+    "mapping": {
+      "dtype": "torch.int64",
+      "shape": [
+        2
+      ],
+      "stride": [
+        1
+      ],
+      "sha256": "9b768a7138e147b4158a6b26c2e04ee536af084a18f7b751a9439af1a7cc0765"
+    },
+    "prompt_lengths": {
+      "dtype": "torch.int32",
+      "shape": [
+        4
+      ],
+      "stride": [
+        1
+      ],
+      "sha256": "e6bb1dfbb0281e765ef8e2c7ba9735a001b37fafc079714d02c0bd4f62e72931"
+    },
+    "prefill_lengths": {
+      "dtype": "torch.int32",
+      "shape": [
+        4
+      ],
+      "stride": [
+        1
+      ],
+      "sha256": "acf46cf41b8ab52102bca70df49def15a241e0044452e822d66b4396876e10a7"
+    }
+  },
+  "active_counts_sums": [
+    {
+      "row": 1,
+      "actual": 1024,
+      "expected": 50
+    },
+    {
+      "row": 3,
+      "actual": 1024,
+      "expected": 103
+    }
+  ],
+  "inactive_and_padding_exact": true,
+  "elf_sha256_all_three_runs": "0d964b4dbbd35fcfe409382d20180e493d6adaa39680e40b272d89810b8ddd86",
+  "xpubin_sha256_all_three_runs": "47711da2dc7e20fdaf637f1a9860966d70aafc4eb841beb3261b7c39f1696868",
+  "assembly_sha256": "3560077206732197ce9b94c7e9f99023a0f2d4fe9cd6d43cd42bfc654471a1d2",
+  "assembly_file": "native-bincount071.asm",
+  "successful_ir_string_exports": {
+    "source_bytes": 0,
+    "ttir_bytes": 0,
+    "ttxir_bytes": 0,
+    "llir_bytes": 0
+  },
+  "assembly_observation": "Loop exits after1024 iterations; prompt path has position<prompt_length guard, output path only block-end/prompt-length and core0 branch guards. Output position lower/upper bounds are absent."
+}

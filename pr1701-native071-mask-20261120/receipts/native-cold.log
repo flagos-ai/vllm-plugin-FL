@@ -1,0 +1,59 @@
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+================================================================================
+WARNING: Libraries loaded from different directories!
+This may cause version mismatch issues.
+--------------------------------------------------------------------------------
+Directory: /usr/local/xcudart/lib
+  - libcuda.so.1
+  - libcuda.so.1
+  - libcupti.so.12
+  - libxpuml.so.1
+Directory: /usr/local/xpu/so
+  - libcudart.so.12
+  - libxpurt.so.2
+================================================================================
+{"preflight": {"phase": "cold", "timing_run": false, "production_pin_changed": false, "source_commit_candidate": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9", "whole_wheel_expected_sha256": "f99134002d85e4e27b11f860619a01e3385e701d93c541c1fd1515d136424b80", "wrapper_block_size": 1024, "provider_imported": false, "checks": [], "cache_files_before": 0, "repro_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb", "python": "3.10.20", "torch": "2.9.0+cu129", "triton": "3.6.0", "flagtree": "0.7.1+xpu3.6", "triton_module": "/compiler071/triton/__init__.py", "compiler_module": "/compiler071/triton/backends/xpu/compiler.py", "compiler_py_sha256": "8971d25e7145279bc330d3bd3e4080a020b15d2208d2886bbbb13ee95b23f6e2", "core_module": "/compiler071/triton/_C/libtriton.so", "core_sha256": "863733059925dea5e2b86e9cf8c4f3a192c26e88b623321d5a3b93bbd20c1050", "device_name": "GPU", "cache_directory": "/results/cache-bincount071", "compiler_knobs": {"TRITON_LLVM19_READIN": "0"}}}
+{"op": "bincount", "native_module": "vllm.v1.worker.gpu.sample.penalties", "native_source": "/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py", "native_source_sha256": "a5e99c71e6ac50ef025b8a7b0b903a1d2679738d8319af9c98bb200389388b29", "torch": "2.9.0+cu129", "triton": "3.6.0", "provider_imported": false, "timing_run": false}
+NATIVE_EXECUTION_COMPLETED
+Traceback (most recent call last):
+  File "/probe/native-bincount071-verify.py", line 174, in <module>
+    torch.testing.assert_close(values["counts"].cpu(), expected_c, rtol=0, atol=0)
+  File "/flagos/lib/python3.10/site-packages/torch/testing/_comparison.py", line 1589, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: Tensor-likes are not equal!
+
+Mismatched elements: 225 / 688 (32.7%)
+Greatest absolute difference: 726 at index (3, 7)
+Greatest relative difference: inf at index (1, 0)
+{
+  "phase": "cold",
+  "timing_run": false,
+  "production_pin_changed": false,
+  "source_commit_candidate": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9",
+  "whole_wheel_expected_sha256": "f99134002d85e4e27b11f860619a01e3385e701d93c541c1fd1515d136424b80",
+  "wrapper_block_size": 1024,
+  "provider_imported": false,
+  "checks": [],
+  "cache_files_before": 0,
+  "repro_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb",
+  "python": "3.10.20",
+  "torch": "2.9.0+cu129",
+  "triton": "3.6.0",
+  "flagtree": "0.7.1+xpu3.6",
+  "triton_module": "/compiler071/triton/__init__.py",
+  "compiler_module": "/compiler071/triton/backends/xpu/compiler.py",
+  "compiler_py_sha256": "8971d25e7145279bc330d3bd3e4080a020b15d2208d2886bbbb13ee95b23f6e2",
+  "core_module": "/compiler071/triton/_C/libtriton.so",
+  "core_sha256": "863733059925dea5e2b86e9cf8c4f3a192c26e88b623321d5a3b93bbd20c1050",
+  "device_name": "GPU",
+  "cache_directory": "/results/cache-bincount071",
+  "compiler_knobs": {
+    "TRITON_LLVM19_READIN": "0"
+  },
+  "result": "fail",
+  "error": {
+    "type": "AssertionError",
+    "message": "Tensor-likes are not equal!\n\nMismatched elements: 225 / 688 (32.7%)\nGreatest absolute difference: 726 at index (3, 7)\nGreatest relative difference: inf at index (1, 0)"
+  }
+}

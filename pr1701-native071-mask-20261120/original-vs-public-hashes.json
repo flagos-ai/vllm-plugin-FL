@@ -1,0 +1,77 @@
+{
+  "scope": "Original and published file digests for the synthetic native071 execution evidence. No private transport details are retained.",
+  "files": [
+    {
+      "public_path": "reproduction/native-baseline-repro.py",
+      "original_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb",
+      "public_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "helpers/native-bincount071-verify.py",
+      "original_sha256": "160eb2ad11e4a6b8c519973002b58e12a10278b5541ac5267e7ea99efadbd840",
+      "public_sha256": "160eb2ad11e4a6b8c519973002b58e12a10278b5541ac5267e7ea99efadbd840",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "helpers/native-bincount071-snapshot.py",
+      "original_sha256": "cd80abad929a0286b84d89af2a33f72322b3cc1d68efa498c7f9d32a89af7a66",
+      "public_sha256": "cd80abad929a0286b84d89af2a33f72322b3cc1d68efa498c7f9d32a89af7a66",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "kernel/native-bincount071.asm",
+      "original_sha256": "3560077206732197ce9b94c7e9f99023a0f2d4fe9cd6d43cd42bfc654471a1d2",
+      "public_sha256": "3560077206732197ce9b94c7e9f99023a0f2d4fe9cd6d43cd42bfc654471a1d2",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "receipts/native-cold.json",
+      "original_sha256": "e86d7e1fe7f5c1c3fb3cfb7bec37023a48c40390444a227643604becb09ed27c",
+      "public_sha256": "e86d7e1fe7f5c1c3fb3cfb7bec37023a48c40390444a227643604becb09ed27c",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "receipts/native-cold.log",
+      "original_sha256": "38e9a8068e1fcbbfa9d7b5cca3d4fcc31bdac0c1c0f94f20bcfd4f5bf0743574",
+      "public_sha256": "38e9a8068e1fcbbfa9d7b5cca3d4fcc31bdac0c1c0f94f20bcfd4f5bf0743574",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "receipts/counts-snapshot.json",
+      "original_sha256": "fe15466f3fe1fbbf352cbab20848f7170b5e5e6ed6b5ef04904c8954ceb83949",
+      "public_sha256": "fe15466f3fe1fbbf352cbab20848f7170b5e5e6ed6b5ef04904c8954ceb83949",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "receipts/strict-result.json",
+      "original_sha256": "5944d1d8167cb264689e9d3d3634f5fb03ea0fff5090b83db05c8bab386fb96c",
+      "public_sha256": "5944d1d8167cb264689e9d3d3634f5fb03ea0fff5090b83db05c8bab386fb96c",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "provenance/kernel-metadata.json",
+      "original_sha256": "4cb4dbe0e747141785e677bc16b5c1f703927db2797b07b4c79751cd73f700cd",
+      "public_sha256": "4cb4dbe0e747141785e677bc16b5c1f703927db2797b07b4c79751cd73f700cd",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "provenance/official-wheel.json",
+      "original_sha256": "82298773d50bcf30277b9f3b424ffda0007a8ba3cd48b309ba0a0345e49b1cc7",
+      "public_sha256": "f058bac9e51fbc6e05034470b8253d3976051dfa7e8f949e4da7693065cc67fb",
+      "transformation": "Whitelist package/RECORD/hash fields; remove host absolute wheel/prefix paths; add verified public tag and delivery provenance"
+    },
+    {
+      "public_path": "source-analysis.md",
+      "original_sha256": "6196d32415d168c7c31cf6b16aeefff3be07c0a02e9bfddb2b90db0d556e8518",
+      "public_sha256": "6196d32415d168c7c31cf6b16aeefff3be07c0a02e9bfddb2b90db0d556e8518",
+      "transformation": "No content changes"
+    },
+    {
+      "public_path": "summary.md",
+      "original_sha256": "fe2ae97287d6de6fed17954087ad722474b51666ed8fe2a46de9b0b00b1ffdfe",
+      "public_sha256": "fe2ae97287d6de6fed17954087ad722474b51666ed8fe2a46de9b0b00b1ffdfe",
+      "transformation": "No content changes"
+    }
+  ]
+}
