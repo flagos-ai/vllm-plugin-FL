@@ -1,5 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
+import importlib
 import logging
 
 import torch
@@ -8,6 +9,27 @@ import vllm
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
+
+# vllm 0.24.0 split mamba/gdn_linear_attn.py into mamba/gdn/{qwen,kimi,olmo}_
+# gdn_linear_attn.py. Load whichever paths exist so patches work on both old
+# and new layouts.
+_GDN_MODULE_PATHS = [
+    "vllm.model_executor.layers.mamba.gdn_linear_attn",          # pre-0.24.0
+    "vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn",
+    "vllm.model_executor.layers.mamba.gdn.kimi_gdn_linear_attn",
+    "vllm.model_executor.layers.mamba.gdn.olmo_gdn_linear_attn",
+]
+
+
+def _load_gdn_modules():
+    """Return all importable GDN linear-attn modules."""
+    mods = []
+    for path in _GDN_MODULE_PATHS:
+        try:
+            mods.append(importlib.import_module(path))
+        except ModuleNotFoundError:
+            pass
+    return mods
 
 def apply_ascend_patches():
     """Apply all Ascend-specific patches."""
@@ -127,10 +149,10 @@ def patch_causal_conv1d():
         _qwen3_next_lib.causal_conv1d_fn = causal_conv1d_fn_npu
         _qwen3_next_lib.causal_conv1d_update = causal_conv1d_update_torch
 
-        # Also patch the gdn_linear_attn module's local bindings
-        import vllm.model_executor.layers.mamba.gdn_linear_attn as _gdn_lib
-        _gdn_lib.causal_conv1d_fn = causal_conv1d_fn_npu
-        _gdn_lib.causal_conv1d_update = causal_conv1d_update_torch
+        # Also patch every GDN linear-attn module's local bindings
+        for _gdn_lib in _load_gdn_modules():
+            _gdn_lib.causal_conv1d_fn = causal_conv1d_fn_npu
+            _gdn_lib.causal_conv1d_update = causal_conv1d_update_torch
 
         logger.info("Patched causal_conv1d ops for Ascend (pure-PyTorch)")
     except Exception as e:
@@ -145,12 +167,17 @@ def patch_gdn_warmup():
     Skipping the warmup avoids the stream corruption entirely.
     """
     try:
-        import vllm.model_executor.layers.mamba.gdn_linear_attn as gdn_lib
+        gdn_mods = _load_gdn_modules()
+        if not gdn_mods:
+            logger.warning("No GDN linear-attn modules found; skipping warmup patch")
+            return
 
         def _noop_warmup(self, mixed_qkv):
             pass
 
-        gdn_lib.GatedDeltaNetAttention._warmup_prefill_kernels = _noop_warmup
+        for gdn_lib in gdn_mods:
+            if hasattr(gdn_lib, "GatedDeltaNetAttention"):
+                gdn_lib.GatedDeltaNetAttention._warmup_prefill_kernels = _noop_warmup
         logger.info("Disabled GDN prefill kernel warmup for Ascend NPU")
     except Exception as e:
         logger.warning("Failed to patch GDN warmup: %s", e)
@@ -249,11 +276,7 @@ def patch_fla_ops():
             # do not ship the GDN path; the vllm-local binding above is enough.
             pass
 
-        # Patch the gdn_linear_attn module's local name binding
-        import vllm.model_executor.layers.mamba.gdn_linear_attn as _gdn_lib
-        _gdn_lib.fla_chunk_gated_delta_rule = chunk_gated_delta_rule_proper
-
-        # Patch forward_native and forward_oot on ChunkGatedDeltaRule
+        # Patch every GDN linear-attn module's local name binding
         def _proper_forward_native(
             self, q, k, v, g, beta, initial_state, output_final_state,
             cu_seqlens=None, chunk_indices=None, chunk_offsets=None,
@@ -266,8 +289,12 @@ def patch_fla_ops():
                 cu_seqlens=cu_seqlens,
                 use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
             )
-        _gdn_lib.ChunkGatedDeltaRule.forward_native = _proper_forward_native
-        _gdn_lib.ChunkGatedDeltaRule.forward_oot = _proper_forward_native
+
+        for _gdn_lib in _load_gdn_modules():
+            _gdn_lib.fla_chunk_gated_delta_rule = chunk_gated_delta_rule_proper
+            if hasattr(_gdn_lib, "ChunkGatedDeltaRule"):
+                _gdn_lib.ChunkGatedDeltaRule.forward_native = _proper_forward_native
+                _gdn_lib.ChunkGatedDeltaRule.forward_oot = _proper_forward_native
 
 
         # No error-swallowing wrapper — errors propagate for proper debugging.
@@ -285,7 +312,7 @@ def patch_gdn_triton_ops():
       - fused_sigmoid_gating_delta_rule_update (decode path gating+recurrence)
       - fused_post_conv_prep (prefill path post-conv preparation)
       - fused_recurrent_gated_delta_rule_packed_decode (packed decode)
-      - fused_gdn_gating (gating computation in gdn_linear_attn.py)
+      - fused_gdn_gating (gating computation in GDN linear-attn modules)
       - l2norm_fwd (L2 normalization)
     """
     try:
@@ -422,8 +449,8 @@ def patch_gdn_triton_ops():
         import vllm.model_executor.layers.fla.ops.fused_sigmoid_gating as _fsg_lib
         _fsg_lib.fused_sigmoid_gating_delta_rule_update = _proper_sigmoid_gating_update
 
-        import vllm.model_executor.layers.mamba.gdn_linear_attn as _gdn_lib
-        _gdn_lib.fused_sigmoid_gating_delta_rule_update = _proper_sigmoid_gating_update
+        for _gdn_lib in _load_gdn_modules():
+            _gdn_lib.fused_sigmoid_gating_delta_rule_update = _proper_sigmoid_gating_update
 
         # 2. Patch fused_post_conv_prep
         import vllm.model_executor.layers.fla.ops.fused_gdn_prefill_post_conv as _fpc_lib
@@ -431,7 +458,9 @@ def patch_gdn_triton_ops():
 
         import vllm.model_executor.layers.fla.ops as _fla_ops_lib
         _fla_ops_lib.fused_post_conv_prep = fused_post_conv_prep_torch
-        _gdn_lib.fused_post_conv_prep = fused_post_conv_prep_torch
+        for _gdn_lib in _load_gdn_modules():
+            if hasattr(_gdn_lib, "fused_post_conv_prep"):
+                _gdn_lib.fused_post_conv_prep = fused_post_conv_prep_torch
 
         # 3. Patch fused_recurrent_gated_delta_rule_packed_decode (decode path)
         # Use proper vectorized bmm implementation
@@ -516,17 +545,23 @@ def patch_gdn_triton_ops():
         import vllm.model_executor.layers.fla.ops.fused_recurrent as _fr_lib
         _fr_lib.fused_recurrent_gated_delta_rule_packed_decode = _proper_packed_decode
         _fla_ops_lib.fused_recurrent_gated_delta_rule_packed_decode = _proper_packed_decode
-        _gdn_lib.fused_recurrent_gated_delta_rule_packed_decode = _proper_packed_decode
+        for _gdn_lib in _load_gdn_modules():
+            if hasattr(_gdn_lib, "fused_recurrent_gated_delta_rule_packed_decode"):
+                _gdn_lib.fused_recurrent_gated_delta_rule_packed_decode = _proper_packed_decode
 
-        # 4. Patch fused_gdn_gating (in gdn_linear_attn.py)
-        _gdn_lib.fused_gdn_gating = fused_gdn_gating_torch
+        # 4. Patch fused_gdn_gating (in GDN linear-attn modules)
+        for _gdn_lib in _load_gdn_modules():
+            if hasattr(_gdn_lib, "fused_gdn_gating"):
+                _gdn_lib.fused_gdn_gating = fused_gdn_gating_torch
 
         # 5. Patch l2norm_fwd
         import vllm.model_executor.layers.fla.ops.chunk as _chunk_lib
         import vllm.model_executor.layers.fla.ops.l2norm as _l2norm_lib
         _l2norm_lib.l2norm_fwd = l2norm_fwd_torch
         _chunk_lib.l2norm_fwd = l2norm_fwd_torch
-        _gdn_lib.l2norm_fwd = l2norm_fwd_torch
+        for _gdn_lib in _load_gdn_modules():
+            if hasattr(_gdn_lib, "l2norm_fwd"):
+                _gdn_lib.l2norm_fwd = l2norm_fwd_torch
 
         # Also patch the plugin's own l2norm if present
         try:
@@ -610,25 +645,31 @@ def patch_gdn_state_gather():
     try:
         import inspect
         import textwrap
-        import vllm.model_executor.layers.mamba.gdn_linear_attn as _gdn
 
-        cls = _gdn.GatedDeltaNetAttention
-        src = inspect.getsource(cls._forward_core)
-        broken = "ssm_state[non_spec_state_indices_tensor].contiguous()"
-        fixed = ("torch.index_select(ssm_state, 0, "
-                 "non_spec_state_indices_tensor.long()).contiguous()")
-        if broken not in src:
+        gdn_mods = _load_gdn_modules()
+        patched = False
+        for _gdn in gdn_mods:
+            cls = getattr(_gdn, "GatedDeltaNetAttention", None)
+            if cls is None or not hasattr(cls, "_forward_core"):
+                continue
+            src = inspect.getsource(cls._forward_core)
+            broken = "ssm_state[non_spec_state_indices_tensor].contiguous()"
+            fixed = ("torch.index_select(ssm_state, 0, "
+                     "non_spec_state_indices_tensor.long()).contiguous()")
+            if broken not in src:
+                continue
+            src = textwrap.dedent(src).replace(broken, fixed)
+            ns = {}
+            exec(src, _gdn.__dict__, ns)
+            cls._forward_core = ns["_forward_core"]
+            patched = True
+        if patched:
+            logger.info("Patched GDN _forward_core ssm_state gather for Ascend "
+                        "(index_select).")
+        else:
             logger.warning(
                 "GDN _forward_core gather pattern not found; skipping patch "
                 "(vLLM may already be fixed or changed).")
-            return
-        src = textwrap.dedent(src).replace(broken, fixed)
-        # Exec in the module's namespace so all globals resolve correctly.
-        ns = {}
-        exec(src, _gdn.__dict__, ns)
-        cls._forward_core = ns["_forward_core"]
-        logger.info("Patched GDN _forward_core ssm_state gather for Ascend "
-                    "(index_select).")
     except Exception as e:
         logger.warning("Failed to patch GDN state gather: %s", e)
 
