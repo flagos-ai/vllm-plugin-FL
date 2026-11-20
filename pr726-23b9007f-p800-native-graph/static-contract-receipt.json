@@ -1,0 +1,21 @@
+{
+  "direct_numerical_function_matches": true,
+  "vendor_pg_numerical_function_matches_native_control": true,
+  "excluded_observations": [
+    "print/emit marker calls"
+  ],
+  "cases": [
+    [
+      1,
+      1
+    ],
+    [
+      8,
+      16
+    ]
+  ],
+  "replays_per_case": 12,
+  "expected_sum": 10,
+  "rtol": 0,
+  "atol": 0
+}

@@ -1,0 +1,433 @@
+0000000000c9ffe0 T _ZN2at4cuda9CUDAGraph6replayEv
+
+/flagos/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so:     file format elf64-x86-64
+
+
+Disassembly of section .init:
+
+Disassembly of section .plt:
+
+Disassembly of section .text:
+
+0000000000c9ffe0 <_ZN2at4cuda9CUDAGraph6replayEv>:
+  c9ffe0:	41 57                	push   %r15
+  c9ffe2:	41 56                	push   %r14
+  c9ffe4:	41 55                	push   %r13
+  c9ffe6:	41 54                	push   %r12
+  c9ffe8:	55                   	push   %rbp
+  c9ffe9:	53                   	push   %rbx
+  c9ffea:	48 81 ec c8 01 00 00 	sub    $0x1c8,%rsp
+  c9fff1:	80 7f 11 00          	cmpb   $0x0,0x11(%rdi)
+  c9fff5:	0f 84 26 03 00 00    	je     ca0321 <_ZN2at4cuda9CUDAGraph6replayEv+0x341>
+  c9fffb:	80 7f 12 00          	cmpb   $0x0,0x12(%rdi)
+  c9ffff:	48 89 fd             	mov    %rdi,%rbp
+  ca0002:	75 0f                	jne    ca0013 <_ZN2at4cuda9CUDAGraph6replayEv+0x33>
+  ca0004:	80 7f 61 00          	cmpb   $0x0,0x61(%rdi)
+  ca0008:	0f 84 b7 05 00 00    	je     ca05c5 <_ZN2at4cuda9CUDAGraph6replayEv+0x5e5>
+  ca000e:	e8 fd 20 c7 ff       	call   912110 <_ZN2at4cuda9CUDAGraph11instantiateEv@plt>
+  ca0013:	0f b6 45 31          	movzbl 0x31(%rbp),%eax
+  ca0017:	48 8b 15 4a 69 23 55 	mov    0x5523694a(%rip),%rdx        # 55ed6968 <_ZN3c104impl26device_guard_impl_registryE@Base>
+  ca001e:	4c 8b 6a 08          	mov    0x8(%rdx),%r13
+  ca0022:	4d 85 ed             	test   %r13,%r13
+  ca0025:	0f 84 15 03 00 00    	je     ca0340 <_ZN2at4cuda9CUDAGraph6replayEv+0x360>
+  ca002b:	49 8b 55 00          	mov    0x0(%r13),%rdx
+  ca002f:	3c ff                	cmp    $0xff,%al
+  ca0031:	0f 84 fa 01 00 00    	je     ca0231 <_ZN2at4cuda9CUDAGraph6replayEv+0x251>
+  ca0037:	48 8b 52 08          	mov    0x8(%rdx),%rdx
+  ca003b:	48 8d 0d 8e 23 00 00 	lea    0x238e(%rip),%rcx        # ca23d0 <_ZNK3c104impl16VirtualGuardImpl14exchangeDeviceENS_6DeviceE>
+  ca0042:	48 39 ca             	cmp    %rcx,%rdx
+  ca0045:	0f 85 c6 02 00 00    	jne    ca0311 <_ZN2at4cuda9CUDAGraph6replayEv+0x331>
+  ca004b:	49 8b 7d 08          	mov    0x8(%r13),%rdi
+  ca004f:	ba 01 00 00 00       	mov    $0x1,%edx
+  ca0054:	88 c6                	mov    %al,%dh
+  ca0056:	48 8b 07             	mov    (%rdi),%rax
+  ca0059:	89 d6                	mov    %edx,%esi
+  ca005b:	ff 50 08             	call   *0x8(%rax)
+  ca005e:	41 89 c6             	mov    %eax,%r14d
+  ca0061:	0f be c4             	movsbl %ah,%eax
+  ca0064:	41 89 c4             	mov    %eax,%r12d
+  ca0067:	48 8b 55 40          	mov    0x40(%rbp),%rdx
+  ca006b:	80 3a 00             	cmpb   $0x0,(%rdx)
+  ca006e:	48 89 d3             	mov    %rdx,%rbx
+  ca0071:	79 0e                	jns    ca0081 <_ZN2at4cuda9CUDAGraph6replayEv+0xa1>
+  ca0073:	0f 1f 44 00 00       	nopl   0x0(%rax,%rax,1)
+  ca0078:	48 83 c3 18          	add    $0x18,%rbx
+  ca007c:	80 3b 00             	cmpb   $0x0,(%rbx)
+  ca007f:	78 f7                	js     ca0078 <_ZN2at4cuda9CUDAGraph6replayEv+0x98>
+  ca0081:	48 0f be 45 51       	movsbq 0x51(%rbp),%rax
+  ca0086:	48 03 45 48          	add    0x48(%rbp),%rax
+  ca008a:	48 8d 04 40          	lea    (%rax,%rax,2),%rax
+  ca008e:	4c 8d 3c c2          	lea    (%rdx,%rax,8),%r15
+  ca0092:	49 39 df             	cmp    %rbx,%r15
+  ca0095:	74 27                	je     ca00be <_ZN2at4cuda9CUDAGraph6replayEv+0xde>
+  ca0097:	66 0f 1f 84 00 00 00 	nopw   0x0(%rax,%rax,1)
+  ca009e:	00 00 
+  ca00a0:	48 8b 73 10          	mov    0x10(%rbx),%rsi
+  ca00a4:	48 8b 7b 08          	mov    0x8(%rbx),%rdi
+  ca00a8:	e8 43 b6 ff ff       	call   c9b6f0 <_ZN2at18CUDAGeneratorState15replay_prologueEm>
+  ca00ad:	0f 1f 00             	nopl   (%rax)
+  ca00b0:	48 83 c3 18          	add    $0x18,%rbx
+  ca00b4:	80 3b 00             	cmpb   $0x0,(%rbx)
+  ca00b7:	78 f7                	js     ca00b0 <_ZN2at4cuda9CUDAGraph6replayEv+0xd0>
+  ca00b9:	49 39 df             	cmp    %rbx,%r15
+  ca00bc:	75 e2                	jne    ca00a0 <_ZN2at4cuda9CUDAGraph6replayEv+0xc0>
+  ca00be:	bf ff ff ff ff       	mov    $0xffffffff,%edi
+  ca00c3:	e8 08 3f c8 ff       	call   923fd0 <_ZN3c104cuda20getCurrentCUDAStreamEa@plt>
+  ca00c8:	48 8d 5c 24 40       	lea    0x40(%rsp),%rbx
+  ca00cd:	89 44 24 40          	mov    %eax,0x40(%rsp)
+  ca00d1:	48 89 df             	mov    %rbx,%rdi
+  ca00d4:	48 89 54 24 48       	mov    %rdx,0x48(%rsp)
+  ca00d9:	e8 82 09 c8 ff       	call   920a60 <_ZNK3c104cuda10CUDAStream6streamEv@plt>
+  ca00de:	48 8b 7d 08          	mov    0x8(%rbp),%rdi
+  ca00e2:	48 89 c6             	mov    %rax,%rsi
+  ca00e5:	e8 96 96 c8 ff       	call   929780 <cudaGraphLaunch@plt>
+  ca00ea:	4c 8d 3d 1b e8 da 02 	lea    0x2dae81b(%rip),%r15        # 3a4e90c <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0xac>
+  ca00f1:	48 8d 2d 88 e8 da 02 	lea    0x2dae888(%rip),%rbp        # 3a4e980 <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0x120>
+  ca00f8:	89 c7                	mov    %eax,%edi
+  ca00fa:	41 b8 01 00 00 00    	mov    $0x1,%r8d
+  ca0100:	b9 d4 00 00 00       	mov    $0xd4,%ecx
+  ca0105:	4c 89 fa             	mov    %r15,%rdx
+  ca0108:	48 89 ee             	mov    %rbp,%rsi
+  ca010b:	e8 70 2e c8 ff       	call   922f80 <_ZN3c104cuda29c10_cuda_check_implementationEiPKcS2_ib@plt>
+  ca0110:	48 89 df             	mov    %rbx,%rdi
+  ca0113:	c7 44 24 40 00 00 00 	movl   $0x0,0x40(%rsp)
+  ca011a:	00 
+  ca011b:	e8 40 f1 c8 ff       	call   92f260 <cudaDriverGetVersion@plt>
+  ca0120:	89 c7                	mov    %eax,%edi
+  ca0122:	41 b8 01 00 00 00    	mov    $0x1,%r8d
+  ca0128:	b9 d7 00 00 00       	mov    $0xd7,%ecx
+  ca012d:	4c 89 fa             	mov    %r15,%rdx
+  ca0130:	48 89 ee             	mov    %rbp,%rsi
+  ca0133:	e8 48 2e c8 ff       	call   922f80 <_ZN3c104cuda29c10_cuda_check_implementationEiPKcS2_ib@plt>
+  ca0138:	81 7c 24 40 1f 2b 00 	cmpl   $0x2b1f,0x40(%rsp)
+  ca013f:	00 
+  ca0140:	7f 1d                	jg     ca015f <_ZN2at4cuda9CUDAGraph6replayEv+0x17f>
+  ca0142:	e8 99 5c c8 ff       	call   925de0 <cudaDeviceSynchronize@plt>
+  ca0147:	89 c7                	mov    %eax,%edi
+  ca0149:	41 b8 01 00 00 00    	mov    $0x1,%r8d
+  ca014f:	b9 dd 00 00 00       	mov    $0xdd,%ecx
+  ca0154:	4c 89 fa             	mov    %r15,%rdx
+  ca0157:	48 89 ee             	mov    %rbp,%rsi
+  ca015a:	e8 21 2e c8 ff       	call   922f80 <_ZN3c104cuda29c10_cuda_check_implementationEiPKcS2_ib@plt>
+  ca015f:	49 8b 45 00          	mov    0x0(%r13),%rax
+  ca0163:	48 8d 15 16 1c 00 00 	lea    0x1c16(%rip),%rdx        # ca1d80 <_ZNK3c104impl16VirtualGuardImpl18uncheckedSetDeviceENS_6DeviceE>
+  ca016a:	48 8b 40 20          	mov    0x20(%rax),%rax
+  ca016e:	48 39 d0             	cmp    %rdx,%rax
+  ca0171:	0f 85 87 04 00 00    	jne    ca05fe <_ZN2at4cuda9CUDAGraph6replayEv+0x61e>
+  ca0177:	49 8b 7d 08          	mov    0x8(%r13),%rdi
+  ca017b:	48 8b 17             	mov    (%rdi),%rdx
+  ca017e:	48 8b 52 20          	mov    0x20(%rdx),%rdx
+  ca0182:	48 39 c2             	cmp    %rax,%rdx
+  ca0185:	0f 85 51 01 00 00    	jne    ca02dc <_ZN2at4cuda9CUDAGraph6replayEv+0x2fc>
+  ca018b:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca018f:	48 8b 07             	mov    (%rdi),%rax
+  ca0192:	48 8b 40 20          	mov    0x20(%rax),%rax
+  ca0196:	48 39 d0             	cmp    %rdx,%rax
+  ca0199:	0f 85 14 04 00 00    	jne    ca05b3 <_ZN2at4cuda9CUDAGraph6replayEv+0x5d3>
+  ca019f:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca01a3:	48 8b 17             	mov    (%rdi),%rdx
+  ca01a6:	48 8b 52 20          	mov    0x20(%rdx),%rdx
+  ca01aa:	48 39 c2             	cmp    %rax,%rdx
+  ca01ad:	0f 85 29 01 00 00    	jne    ca02dc <_ZN2at4cuda9CUDAGraph6replayEv+0x2fc>
+  ca01b3:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca01b7:	48 8b 07             	mov    (%rdi),%rax
+  ca01ba:	48 8b 40 20          	mov    0x20(%rax),%rax
+  ca01be:	48 39 d0             	cmp    %rdx,%rax
+  ca01c1:	0f 85 ec 03 00 00    	jne    ca05b3 <_ZN2at4cuda9CUDAGraph6replayEv+0x5d3>
+  ca01c7:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca01cb:	48 8b 17             	mov    (%rdi),%rdx
+  ca01ce:	48 8b 52 20          	mov    0x20(%rdx),%rdx
+  ca01d2:	48 39 c2             	cmp    %rax,%rdx
+  ca01d5:	0f 85 01 01 00 00    	jne    ca02dc <_ZN2at4cuda9CUDAGraph6replayEv+0x2fc>
+  ca01db:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca01df:	48 8b 07             	mov    (%rdi),%rax
+  ca01e2:	48 8b 40 20          	mov    0x20(%rax),%rax
+  ca01e6:	48 39 d0             	cmp    %rdx,%rax
+  ca01e9:	0f 85 c4 03 00 00    	jne    ca05b3 <_ZN2at4cuda9CUDAGraph6replayEv+0x5d3>
+  ca01ef:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca01f3:	48 8b 17             	mov    (%rdi),%rdx
+  ca01f6:	48 8b 52 20          	mov    0x20(%rdx),%rdx
+  ca01fa:	48 39 c2             	cmp    %rax,%rdx
+  ca01fd:	0f 85 d9 00 00 00    	jne    ca02dc <_ZN2at4cuda9CUDAGraph6replayEv+0x2fc>
+  ca0203:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca0207:	48 8b 07             	mov    (%rdi),%rax
+  ca020a:	48 8b 48 20          	mov    0x20(%rax),%rcx
+  ca020e:	41 0f b6 c6          	movzbl %r14b,%eax
+  ca0212:	48 39 d1             	cmp    %rdx,%rcx
+  ca0215:	0f 85 0d 04 00 00    	jne    ca0628 <_ZN2at4cuda9CUDAGraph6replayEv+0x648>
+  ca021b:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca021f:	44 89 e1             	mov    %r12d,%ecx
+  ca0222:	88 cc                	mov    %cl,%ah
+  ca0224:	48 8b 17             	mov    (%rdi),%rdx
+  ca0227:	89 c6                	mov    %eax,%esi
+  ca0229:	ff 52 20             	call   *0x20(%rdx)
+  ca022c:	e9 b8 00 00 00       	jmp    ca02e9 <_ZN2at4cuda9CUDAGraph6replayEv+0x309>
+  ca0231:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca0235:	48 8d 05 54 18 00 00 	lea    0x1854(%rip),%rax        # ca1a90 <_ZNK3c104impl16VirtualGuardImpl9getDeviceEv>
+  ca023c:	48 39 c2             	cmp    %rax,%rdx
+  ca023f:	0f 85 9f 03 00 00    	jne    ca05e4 <_ZN2at4cuda9CUDAGraph6replayEv+0x604>
+  ca0245:	49 8b 7d 08          	mov    0x8(%r13),%rdi
+  ca0249:	48 8b 17             	mov    (%rdi),%rdx
+  ca024c:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca0250:	48 39 c2             	cmp    %rax,%rdx
+  ca0253:	0f 85 9e 03 00 00    	jne    ca05f7 <_ZN2at4cuda9CUDAGraph6replayEv+0x617>
+  ca0259:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca025d:	48 8b 17             	mov    (%rdi),%rdx
+  ca0260:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca0264:	48 39 c2             	cmp    %rax,%rdx
+  ca0267:	0f 85 8e 00 00 00    	jne    ca02fb <_ZN2at4cuda9CUDAGraph6replayEv+0x31b>
+  ca026d:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca0271:	48 8b 17             	mov    (%rdi),%rdx
+  ca0274:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca0278:	48 39 c2             	cmp    %rax,%rdx
+  ca027b:	75 7e                	jne    ca02fb <_ZN2at4cuda9CUDAGraph6replayEv+0x31b>
+  ca027d:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca0281:	48 8b 17             	mov    (%rdi),%rdx
+  ca0284:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca0288:	48 39 c2             	cmp    %rax,%rdx
+  ca028b:	75 6e                	jne    ca02fb <_ZN2at4cuda9CUDAGraph6replayEv+0x31b>
+  ca028d:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca0291:	48 8b 17             	mov    (%rdi),%rdx
+  ca0294:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca0298:	48 39 c2             	cmp    %rax,%rdx
+  ca029b:	75 5e                	jne    ca02fb <_ZN2at4cuda9CUDAGraph6replayEv+0x31b>
+  ca029d:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca02a1:	48 8b 17             	mov    (%rdi),%rdx
+  ca02a4:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca02a8:	48 39 c2             	cmp    %rax,%rdx
+  ca02ab:	75 4e                	jne    ca02fb <_ZN2at4cuda9CUDAGraph6replayEv+0x31b>
+  ca02ad:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca02b1:	48 8b 17             	mov    (%rdi),%rdx
+  ca02b4:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca02b8:	48 39 c2             	cmp    %rax,%rdx
+  ca02bb:	75 3e                	jne    ca02fb <_ZN2at4cuda9CUDAGraph6replayEv+0x31b>
+  ca02bd:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca02c1:	48 8b 17             	mov    (%rdi),%rdx
+  ca02c4:	48 8b 52 10          	mov    0x10(%rdx),%rdx
+  ca02c8:	48 39 c2             	cmp    %rax,%rdx
+  ca02cb:	75 2e                	jne    ca02fb <_ZN2at4cuda9CUDAGraph6replayEv+0x31b>
+  ca02cd:	48 8b 7f 08          	mov    0x8(%rdi),%rdi
+  ca02d1:	48 8b 07             	mov    (%rdi),%rax
+  ca02d4:	ff 50 10             	call   *0x10(%rax)
+  ca02d7:	41 89 c4             	mov    %eax,%r12d
+  ca02da:	eb 24                	jmp    ca0300 <_ZN2at4cuda9CUDAGraph6replayEv+0x320>
+  ca02dc:	41 0f b6 c6          	movzbl %r14b,%eax
+  ca02e0:	44 89 e1             	mov    %r12d,%ecx
+  ca02e3:	88 cc                	mov    %cl,%ah
+  ca02e5:	89 c6                	mov    %eax,%esi
+  ca02e7:	ff d2                	call   *%rdx
+  ca02e9:	48 81 c4 c8 01 00 00 	add    $0x1c8,%rsp
+  ca02f0:	5b                   	pop    %rbx
+  ca02f1:	5d                   	pop    %rbp
+  ca02f2:	41 5c                	pop    %r12
+  ca02f4:	41 5d                	pop    %r13
+  ca02f6:	41 5e                	pop    %r14
+  ca02f8:	41 5f                	pop    %r15
+  ca02fa:	c3                   	ret    
+  ca02fb:	ff d2                	call   *%rdx
+  ca02fd:	41 89 c4             	mov    %eax,%r12d
+  ca0300:	44 89 e0             	mov    %r12d,%eax
+  ca0303:	41 89 c6             	mov    %eax,%r14d
+  ca0306:	0f be c4             	movsbl %ah,%eax
+  ca0309:	41 89 c4             	mov    %eax,%r12d
+  ca030c:	e9 56 fd ff ff       	jmp    ca0067 <_ZN2at4cuda9CUDAGraph6replayEv+0x87>
+  ca0311:	b9 01 00 00 00       	mov    $0x1,%ecx
+  ca0316:	4c 89 ef             	mov    %r13,%rdi
+  ca0319:	88 c5                	mov    %al,%ch
+  ca031b:	89 ce                	mov    %ecx,%esi
+  ca031d:	ff d2                	call   *%rdx
+  ca031f:	eb e2                	jmp    ca0303 <_ZN2at4cuda9CUDAGraph6replayEv+0x323>
+  ca0321:	48 8d 0d 28 e9 da 02 	lea    0x2dae928(%rip),%rcx        # 3a4ec50 <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0x3f0>
+  ca0328:	ba c5 00 00 00       	mov    $0xc5,%edx
+  ca032d:	48 8d 35 4c e6 da 02 	lea    0x2dae64c(%rip),%rsi        # 3a4e980 <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0x120>
+  ca0334:	48 8d 3d d1 e5 da 02 	lea    0x2dae5d1(%rip),%rdi        # 3a4e90c <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0xac>
+  ca033b:	e8 b0 2e c7 ff       	call   9131f0 <_ZN3c106detail14torchCheckFailEPKcS2_jS2_@plt>
+  ca0340:	48 8b 05 41 81 23 55 	mov    0x55238141(%rip),%rax        # 55ed8488 <_ZTVNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEEE@GLIBCXX_3.4.21>
+  ca0347:	4c 8b 25 aa 54 22 55 	mov    0x552254aa(%rip),%r12        # 55ec57f8 <_ZTVNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEEE@GLIBCXX_3.4.21>
+  ca034e:	48 8d 5c 24 40       	lea    0x40(%rsp),%rbx
+  ca0353:	4c 8d ac 24 b0 00 00 	lea    0xb0(%rsp),%r13
+  ca035a:	00 
+  ca035b:	4c 89 ef             	mov    %r13,%rdi
+  ca035e:	48 83 c0 18          	add    $0x18,%rax
+  ca0362:	66 48 0f 6e c0       	movq   %rax,%xmm0
+  ca0367:	49 8d 44 24 10       	lea    0x10(%r12),%rax
+  ca036c:	66 48 0f 6e d8       	movq   %rax,%xmm3
+  ca0371:	48 8b 05 b0 2e 23 55 	mov    0x55232eb0(%rip),%rax        # 55ed3228 <_ZTVSt15basic_streambufIcSt11char_traitsIcEE@GLIBCXX_3.4>
+  ca0378:	66 0f 6f c8          	movdqa %xmm0,%xmm1
+  ca037c:	66 0f 6f d0          	movdqa %xmm0,%xmm2
+  ca0380:	66 0f 6c cb          	punpcklqdq %xmm3,%xmm1
+  ca0384:	48 83 c0 10          	add    $0x10,%rax
+  ca0388:	0f 29 0c 24          	movaps %xmm1,(%rsp)
+  ca038c:	66 48 0f 6e e0       	movq   %rax,%xmm4
+  ca0391:	66 0f 6c d4          	punpcklqdq %xmm4,%xmm2
+  ca0395:	0f 29 54 24 10       	movaps %xmm2,0x10(%rsp)
+  ca039a:	e8 c1 07 c8 ff       	call   920b60 <_ZNSt8ios_baseC2Ev@plt>
+  ca039f:	48 8b 05 e2 56 24 55 	mov    0x552456e2(%rip),%rax        # 55ee5a88 <_ZTVSt9basic_iosIcSt11char_traitsIcEE@GLIBCXX_3.4>
+  ca03a6:	66 0f ef c0          	pxor   %xmm0,%xmm0
+  ca03aa:	31 f6                	xor    %esi,%esi
+  ca03ac:	0f 11 84 24 98 01 00 	movups %xmm0,0x198(%rsp)
+  ca03b3:	00 
+  ca03b4:	48 83 c0 10          	add    $0x10,%rax
+  ca03b8:	0f 11 84 24 a8 01 00 	movups %xmm0,0x1a8(%rsp)
+  ca03bf:	00 
+  ca03c0:	48 89 84 24 b0 00 00 	mov    %rax,0xb0(%rsp)
+  ca03c7:	00 
+  ca03c8:	31 c0                	xor    %eax,%eax
+  ca03ca:	66 89 84 24 90 01 00 	mov    %ax,0x190(%rsp)
+  ca03d1:	00 
+  ca03d2:	48 8b 05 af 10 23 55 	mov    0x552310af(%rip),%rax        # 55ed1488 <_ZTTNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEEE@GLIBCXX_3.4.21>
+  ca03d9:	48 c7 84 24 88 01 00 	movq   $0x0,0x188(%rsp)
+  ca03e0:	00 00 00 00 00 
+  ca03e5:	48 8b 68 08          	mov    0x8(%rax),%rbp
+  ca03e9:	4c 8b 70 10          	mov    0x10(%rax),%r14
+  ca03ed:	48 8b 7d e8          	mov    -0x18(%rbp),%rdi
+  ca03f1:	48 89 6c 24 40       	mov    %rbp,0x40(%rsp)
+  ca03f6:	48 01 df             	add    %rbx,%rdi
+  ca03f9:	4c 89 37             	mov    %r14,(%rdi)
+  ca03fc:	e8 7f d3 c8 ff       	call   92d780 <_ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E@plt>
+  ca0401:	48 8b 05 80 80 23 55 	mov    0x55238080(%rip),%rax        # 55ed8488 <_ZTVNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEEE@GLIBCXX_3.4.21>
+  ca0408:	66 0f 6f 54 24 10    	movdqa 0x10(%rsp),%xmm2
+  ca040e:	66 0f ef c0          	pxor   %xmm0,%xmm0
+  ca0412:	4c 8d bc 24 a0 00 00 	lea    0xa0(%rsp),%r15
+  ca0419:	00 
+  ca041a:	0f 29 44 24 50       	movaps %xmm0,0x50(%rsp)
+  ca041f:	48 83 c0 40          	add    $0x40,%rax
+  ca0423:	0f 29 54 24 40       	movaps %xmm2,0x40(%rsp)
+  ca0428:	48 89 84 24 b0 00 00 	mov    %rax,0xb0(%rsp)
+  ca042f:	00 
+  ca0430:	48 8d 84 24 80 00 00 	lea    0x80(%rsp),%rax
+  ca0437:	00 
+  ca0438:	48 89 c7             	mov    %rax,%rdi
+  ca043b:	48 89 44 24 10       	mov    %rax,0x10(%rsp)
+  ca0440:	0f 29 44 24 60       	movaps %xmm0,0x60(%rsp)
+  ca0445:	0f 29 44 24 70       	movaps %xmm0,0x70(%rsp)
+  ca044a:	e8 41 0c c9 ff       	call   931090 <_ZNSt6localeC1Ev@plt>
+  ca044f:	49 8d 44 24 10       	lea    0x10(%r12),%rax
+  ca0454:	4c 89 ef             	mov    %r13,%rdi
+  ca0457:	4c 8d 64 24 48       	lea    0x48(%rsp),%r12
+  ca045c:	4c 89 e6             	mov    %r12,%rsi
+  ca045f:	48 89 44 24 48       	mov    %rax,0x48(%rsp)
+  ca0464:	c7 84 24 88 00 00 00 	movl   $0x10,0x88(%rsp)
+  ca046b:	10 00 00 00 
+  ca046f:	4c 89 bc 24 90 00 00 	mov    %r15,0x90(%rsp)
+  ca0476:	00 
+  ca0477:	48 c7 84 24 98 00 00 	movq   $0x0,0x98(%rsp)
+  ca047e:	00 00 00 00 00 
+  ca0483:	c6 84 24 a0 00 00 00 	movb   $0x0,0xa0(%rsp)
+  ca048a:	00 
+  ca048b:	e8 f0 d2 c8 ff       	call   92d780 <_ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E@plt>
+  ca0490:	ba 27 00 00 00       	mov    $0x27,%edx
+  ca0495:	48 8d 35 74 e8 da 02 	lea    0x2dae874(%rip),%rsi        # 3a4ed10 <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0x4b0>
+  ca049c:	48 89 df             	mov    %rbx,%rdi
+  ca049f:	e8 3c 74 c7 ff       	call   9178e0 <_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l@plt>
+  ca04a4:	be 01 00 00 00       	mov    $0x1,%esi
+  ca04a9:	48 89 df             	mov    %rbx,%rdi
+  ca04ac:	e8 0f ad c8 ff       	call   92b1c0 <_ZN3c10lsERSoNS_10DeviceTypeE@plt>
+  ca04b1:	ba 08 00 00 00       	mov    $0x8,%edx
+  ca04b6:	48 8d 35 56 e4 da 02 	lea    0x2dae456(%rip),%rsi        # 3a4e913 <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0xb3>
+  ca04bd:	48 89 df             	mov    %rbx,%rdi
+  ca04c0:	e8 1b 74 c7 ff       	call   9178e0 <_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l@plt>
+  ca04c5:	4c 8b 44 24 70       	mov    0x70(%rsp),%r8
+  ca04ca:	48 8d 44 24 30       	lea    0x30(%rsp),%rax
+  ca04cf:	c6 44 24 30 00       	movb   $0x0,0x30(%rsp)
+  ca04d4:	4c 8d 64 24 20       	lea    0x20(%rsp),%r12
+  ca04d9:	48 89 44 24 20       	mov    %rax,0x20(%rsp)
+  ca04de:	48 c7 44 24 28 00 00 	movq   $0x0,0x28(%rsp)
+  ca04e5:	00 00 
+  ca04e7:	4d 85 c0             	test   %r8,%r8
+  ca04ea:	0f 84 23 01 00 00    	je     ca0613 <_ZN2at4cuda9CUDAGraph6replayEv+0x633>
+  ca04f0:	48 8b 44 24 60       	mov    0x60(%rsp),%rax
+  ca04f5:	4c 89 c2             	mov    %r8,%rdx
+  ca04f8:	48 8b 4c 24 68       	mov    0x68(%rsp),%rcx
+  ca04fd:	4c 89 e7             	mov    %r12,%rdi
+  ca0500:	4c 39 c0             	cmp    %r8,%rax
+  ca0503:	4c 0f 43 c0          	cmovae %rax,%r8
+  ca0507:	48 85 c0             	test   %rax,%rax
+  ca050a:	4c 0f 44 c2          	cmove  %rdx,%r8
+  ca050e:	31 d2                	xor    %edx,%edx
+  ca0510:	31 f6                	xor    %esi,%esi
+  ca0512:	49 29 c8             	sub    %rcx,%r8
+  ca0515:	e8 36 ce c7 ff       	call   91d350 <_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceEmmPKcm@plt>
+  ca051a:	48 8b 05 67 7f 23 55 	mov    0x55237f67(%rip),%rax        # 55ed8488 <_ZTVNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEEE@GLIBCXX_3.4.21>
+  ca0521:	66 0f 6f 2c 24       	movdqa (%rsp),%xmm5
+  ca0526:	48 8b bc 24 90 00 00 	mov    0x90(%rsp),%rdi
+  ca052d:	00 
+  ca052e:	48 83 c0 40          	add    $0x40,%rax
+  ca0532:	0f 29 6c 24 40       	movaps %xmm5,0x40(%rsp)
+  ca0537:	48 89 84 24 b0 00 00 	mov    %rax,0xb0(%rsp)
+  ca053e:	00 
+  ca053f:	4c 39 ff             	cmp    %r15,%rdi
+  ca0542:	74 11                	je     ca0555 <_ZN2at4cuda9CUDAGraph6replayEv+0x575>
+  ca0544:	48 8b 84 24 a0 00 00 	mov    0xa0(%rsp),%rax
+  ca054b:	00 
+  ca054c:	48 8d 70 01          	lea    0x1(%rax),%rsi
+  ca0550:	e8 cb ce c7 ff       	call   91d420 <_ZdlPvm@plt>
+  ca0555:	48 8b 05 cc 2c 23 55 	mov    0x55232ccc(%rip),%rax        # 55ed3228 <_ZTVSt15basic_streambufIcSt11char_traitsIcEE@GLIBCXX_3.4>
+  ca055c:	48 8b 7c 24 10       	mov    0x10(%rsp),%rdi
+  ca0561:	48 83 c0 10          	add    $0x10,%rax
+  ca0565:	48 89 44 24 48       	mov    %rax,0x48(%rsp)
+  ca056a:	e8 51 07 c8 ff       	call   920cc0 <_ZNSt6localeD1Ev@plt>
+  ca056f:	48 8b 45 e8          	mov    -0x18(%rbp),%rax
+  ca0573:	48 89 6c 24 40       	mov    %rbp,0x40(%rsp)
+  ca0578:	4c 89 ef             	mov    %r13,%rdi
+  ca057b:	4c 89 74 04 40       	mov    %r14,0x40(%rsp,%rax,1)
+  ca0580:	48 8b 05 01 55 24 55 	mov    0x55245501(%rip),%rax        # 55ee5a88 <_ZTVSt9basic_iosIcSt11char_traitsIcEE@GLIBCXX_3.4>
+  ca0587:	48 83 c0 10          	add    $0x10,%rax
+  ca058b:	48 89 84 24 b0 00 00 	mov    %rax,0xb0(%rsp)
+  ca0592:	00 
+  ca0593:	e8 78 00 c9 ff       	call   930610 <_ZNSt8ios_baseD2Ev@plt>
+  ca0598:	4c 89 e1             	mov    %r12,%rcx
+  ca059b:	ba 6e 01 00 00       	mov    $0x16e,%edx
+  ca05a0:	48 8d 35 91 e7 da 02 	lea    0x2dae791(%rip),%rsi        # 3a4ed38 <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0x4d8>
+  ca05a7:	48 8d 3d 6e e3 da 02 	lea    0x2dae36e(%rip),%rdi        # 3a4e91c <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0xbc>
+  ca05ae:	e8 bd d9 c8 ff       	call   92df70 <_ZN3c106detail14torchCheckFailEPKcS2_jRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE@plt>
+  ca05b3:	41 0f b6 d6          	movzbl %r14b,%edx
+  ca05b7:	44 89 e1             	mov    %r12d,%ecx
+  ca05ba:	88 ce                	mov    %cl,%dh
+  ca05bc:	89 d6                	mov    %edx,%esi
+  ca05be:	ff d0                	call   *%rax
+  ca05c0:	e9 24 fd ff ff       	jmp    ca02e9 <_ZN2at4cuda9CUDAGraph6replayEv+0x309>
+  ca05c5:	48 8d 0d cc e6 da 02 	lea    0x2dae6cc(%rip),%rcx        # 3a4ec98 <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0x438>
+  ca05cc:	ba c9 00 00 00       	mov    $0xc9,%edx
+  ca05d1:	48 8d 35 a8 e3 da 02 	lea    0x2dae3a8(%rip),%rsi        # 3a4e980 <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0x120>
+  ca05d8:	48 8d 3d 2d e3 da 02 	lea    0x2dae32d(%rip),%rdi        # 3a4e90c <_ZTSSt15_Sp_counted_ptrIPN2at17CUDAGeneratorImplELN9__gnu_cxx12_Lock_policyE2EE+0xac>
+  ca05df:	e8 0c 2c c7 ff       	call   9131f0 <_ZN3c106detail14torchCheckFailEPKcS2_jS2_@plt>
+  ca05e4:	4c 89 ef             	mov    %r13,%rdi
+  ca05e7:	ff d2                	call   *%rdx
+  ca05e9:	41 89 c6             	mov    %eax,%r14d
+  ca05ec:	0f be c4             	movsbl %ah,%eax
+  ca05ef:	41 89 c4             	mov    %eax,%r12d
+  ca05f2:	e9 70 fa ff ff       	jmp    ca0067 <_ZN2at4cuda9CUDAGraph6replayEv+0x87>
+  ca05f7:	ff d2                	call   *%rdx
+  ca05f9:	e9 05 fd ff ff       	jmp    ca0303 <_ZN2at4cuda9CUDAGraph6replayEv+0x323>
+  ca05fe:	41 0f b6 d6          	movzbl %r14b,%edx
+  ca0602:	44 89 e1             	mov    %r12d,%ecx
+  ca0605:	4c 89 ef             	mov    %r13,%rdi
+  ca0608:	88 ce                	mov    %cl,%dh
+  ca060a:	89 d6                	mov    %edx,%esi
+  ca060c:	ff d0                	call   *%rax
+  ca060e:	e9 d6 fc ff ff       	jmp    ca02e9 <_ZN2at4cuda9CUDAGraph6replayEv+0x309>
+  ca0613:	48 8d b4 24 90 00 00 	lea    0x90(%rsp),%rsi
+  ca061a:	00 
+  ca061b:	4c 89 e7             	mov    %r12,%rdi
+  ca061e:	e8 cd 76 c7 ff       	call   917cf0 <_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_assignERKS4_@plt>
+  ca0623:	e9 f2 fe ff ff       	jmp    ca051a <_ZN2at4cuda9CUDAGraph6replayEv+0x53a>
+  ca0628:	44 89 e2             	mov    %r12d,%edx
+  ca062b:	88 d4                	mov    %dl,%ah
+  ca062d:	89 c6                	mov    %eax,%esi
+  ca062f:	ff d1                	call   *%rcx
+  ca0631:	e9 b3 fc ff ff       	jmp    ca02e9 <_ZN2at4cuda9CUDAGraph6replayEv+0x309>
+  ca0636:	48 89 c3             	mov    %rax,%rbx
+  ca0639:	e9 86 4b c9 ff       	jmp    9351c4 <_ZN2at4cuda9CUDAGraph6replayEv.cold+0x16>
+  ca063e:	48 89 c3             	mov    %rax,%rbx
+  ca0641:	e9 a1 4b c9 ff       	jmp    9351e7 <_ZN2at4cuda9CUDAGraph6replayEv.cold+0x39>
+  ca0646:	48 89 c5             	mov    %rax,%rbp
+  ca0649:	e9 a9 4b c9 ff       	jmp    9351f7 <_ZN2at4cuda9CUDAGraph6replayEv.cold+0x49>
+  ca064e:	48 89 c3             	mov    %rax,%rbx
+  ca0651:	e9 b9 4b c9 ff       	jmp    93520f <_ZN2at4cuda9CUDAGraph6replayEv.cold+0x61>
+  ca0656:	48 89 c5             	mov    %rax,%rbp
+  ca0659:	e9 a1 4b c9 ff       	jmp    9351ff <_ZN2at4cuda9CUDAGraph6replayEv.cold+0x51>
+  ca065e:	48 89 c3             	mov    %rax,%rbx
+  ca0661:	e9 48 4b c9 ff       	jmp    9351ae <_ZN2at4cuda9CUDAGraph6replayEv.cold>
+
+Disassembly of section .fini:

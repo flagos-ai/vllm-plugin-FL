@@ -1,0 +1,6 @@
+dea5bc6deabad610a31b9024b90489e539d7eefaf5ea2e9fa13c9735c01763aa  /usr/local/xcudart/lib/libcuda.so.1
+7d28eca6610387d531c54284c5d145cec5e2195c09fcfb0c5245214d8d5ceb4d  /usr/local/xpu/so/libcudart.so.12
+cb9155c1f9b298e8349aba076081a7665b03f5c95e581e67e5154f8a5250aa56  /usr/local/xpu/so/libxpurt.so.2
+    Build ID: f6cae684b38c85ea14e51b6a0c98b5b6209f072b
+MLNX_OFED_LINUX-5.8-2.0.3.0:
+Fri Nov 20 01:15:05 AM UTC 2026

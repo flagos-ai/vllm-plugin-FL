@@ -1,0 +1,158 @@
+Processing /tmp/plugin
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: vllm-plugin-fl
+  Building wheel for vllm-plugin-fl (pyproject.toml): started
+  Building wheel for vllm-plugin-fl (pyproject.toml): finished with status 'done'
+  Created wheel for vllm-plugin-fl: filename=vllm_plugin_fl-0.5.0.dev0-py3-none-any.whl size=767975 sha256=df5b9a94c5821db7c6761e0ffd522beaabecafc9de115431a61d3bb2c6f0a525
+  Stored in directory: /tmp/pip-ephem-wheel-cache-7fe6bggl/wheels/2f/15/c1/ff2f7d332b10c43b1e8697dcc330c9c64bd07ef1691fab43c7
+Successfully built vllm-plugin-fl
+Installing collected packages: vllm-plugin-fl
+Successfully installed vllm-plugin-fl-0.5.0.dev0
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+================================================================================
+WARNING: Libraries loaded from different directories!
+This may cause version mismatch issues.
+--------------------------------------------------------------------------------
+Directory: /usr/local/xcudart/lib
+  - libcuda.so.1
+  - libcuda.so.1
+  - libcupti.so.12
+  - libxpuml.so.1
+Directory: /usr/local/xpu/so
+  - libcudart.so.12
+  - libxpurt.so.2
+================================================================================
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+/root/.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/runpy.py:126: RuntimeWarning: 'torch.distributed.run' found in sys.modules after import of package 'torch.distributed', but prior to execution of 'torch.distributed.run'; this may result in unpredictable behaviour
+  warn(RuntimeWarning(msg))
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+================================================================================
+WARNING: Libraries loaded from different directories!
+This may cause version mismatch issues.
+--------------------------------------------------------------------------------
+Directory: /usr/local/xcudart/lib
+  - libcuda.so.1
+  - libcuda.so.1
+  - libcupti.so.12
+  - libxpuml.so.1
+Directory: /usr/local/xpu/so
+  - libcudart.so.12
+  - libxpurt.so.2
+================================================================================
+================================================================================
+WARNING: Libraries loaded from different directories!
+This may cause version mismatch issues.
+--------------------------------------------------------------------------------
+Directory: /usr/local/xcudart/lib
+  - libcuda.so.1
+  - libcuda.so.1
+  - libcupti.so.12
+  - libxpuml.so.1
+Directory: /usr/local/xpu/so
+  - libcudart.so.12
+  - libxpurt.so.2
+================================================================================
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+/flagos/lib/python3.10/site-packages/torch/library.py:364: UserWarning: Warning only once for all operators,  other operators may also be overridden.
+  Overriding a previously registered kernel for the same operator and the same dispatch key
+  operator: aten::range(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+    registered at /pytorch/build/aten/src/ATen/RegisterSchema.cpp:6
+  dispatch key: BackendSelect
+  previous kernel: registered at /pytorch/build/aten/src/ATen/RegisterBackendSelect.cpp:792
+       new kernel: registered at /flagos/lib/python3.10/site-packages/flag_gems/runtime/backend/_kunlunxin/ops/range.py:68 (Triggered internally at /pytorch/aten/src/ATen/core/dispatch/OperatorEntry.cpp:218.)
+  self.m.impl(
+/flagos/lib/python3.10/site-packages/torch/library.py:364: UserWarning: Warning only once for all operators,  other operators may also be overridden.
+  Overriding a previously registered kernel for the same operator and the same dispatch key
+  operator: aten::range(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+    registered at /pytorch/build/aten/src/ATen/RegisterSchema.cpp:6
+  dispatch key: BackendSelect
+  previous kernel: registered at /pytorch/build/aten/src/ATen/RegisterBackendSelect.cpp:792
+       new kernel: registered at /flagos/lib/python3.10/site-packages/flag_gems/runtime/backend/_kunlunxin/ops/range.py:68 (Triggered internally at /pytorch/aten/src/ATen/core/dispatch/OperatorEntry.cpp:218.)
+  self.m.impl(
+WORKER_PID 3 150
+WORKER_PID 2 149
+[Gloo] Rank 2 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
+[Gloo] Rank 3 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
+<NODE_1>:150:150 [0] FLAGCX INFO FLAGCX_SOCKET_IFNAME set by environment to eth0
+<NODE_1>:149:149 [0] FLAGCX INFO FLAGCX_SOCKET_IFNAME set by environment to eth0
+<NODE_1>:150:150 [0] FLAGCX INFO rank 3 nranks 4 - DONE
+<NODE_1>:149:149 [0] FLAGCX INFO rank 2 nranks 4 - DONE
+<NODE_1>:150:150 [0] FLAGCX INFO Intra-node topology: localRank=1 localRanks=2
+<NODE_1>:149:149 [0] FLAGCX INFO Intra-node topology: localRank=0 localRanks=2
+<NODE_1>:150:150 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+<NODE_1>:150:150 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+<NODE_1>:149:149 [0] FLAGCX INFO cluster 0 c2cSchedule[0] sendCluster 0 recvCluster 0
+<NODE_1>:149:149 [0] FLAGCX INFO Flagcx USE_TUNER flag set to 0
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][globals.cpp:303] xccl version: 8185b2f [rdma] [fix Connection reset by peer] build data: May 19 2026 02:23:43
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][globals.cpp:303] xccl version: 8185b2f [rdma] [fix Connection reset by peer] build data: May 19 2026 02:23:43
+[00:36:32][<NODE_1>][149:149][WARN][XCCL][rdma_init.cpp:2148] num_rdma_connect = 1
+[00:36:32][<NODE_1>][150:150][WARN][XCCL][rdma_init.cpp:2148] num_rdma_connect = 1
+[00:36:32][<NODE_1>][150:177][INFO][XCCL][rdma_init.cpp:1608] rank [3] rdma listening on port 33905 addr <RDMA_OR_PRIVATE_ADDR>
+[00:36:32][<NODE_1>][149:178][INFO][XCCL][rdma_init.cpp:1608] rank [2] rdma listening on port 54330 addr <RDMA_OR_PRIVATE_ADDR>
+[00:36:32][<NODE_1>][150:150][WARN][XCCL][rdma_init.cpp:2192] tree_pair size: 0 ring_pair size: 1
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_init.cpp:2214] rdma init hostname:[<RDMA_OR_PRIVATE_ADDR>:50703] rank 3 peer ring rank 1
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_init.cpp:473] local rank/rank [1/3] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:50703
+[00:36:32][<NODE_1>][149:149][WARN][XCCL][rdma_init.cpp:2192] tree_pair size: 0 ring_pair size: 1
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_init.cpp:2214] rdma init hostname:[<RDMA_OR_PRIVATE_ADDR>:56004] rank 2 peer ring rank 0
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_init.cpp:473] local rank/rank [0/2] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:56004
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_4:1 index: 0 gid: <GID> IPv4: NULL VER: IB/RoCE v1
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_6:1 index: 0 gid: <GID> IPv4: NULL VER: IB/RoCE v1
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_4:1 index: 1 gid: <GID> IPv4: NULL VER: RoCE v2
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_6:1 index: 1 gid: <GID> IPv4: NULL VER: RoCE v2
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_4:1 index: 2 gid: <GID> IPv4: <RDMA_OR_PRIVATE_ADDR> VER: IB/RoCE v1
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_6:1 index: 2 gid: <GID> IPv4: <RDMA_OR_PRIVATE_ADDR> VER: IB/RoCE v1
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_6:1 index: 3 gid: <GID> IPv4: <RDMA_OR_PRIVATE_ADDR> VER: RoCE v2
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_4:1 index: 3 gid: <GID> IPv4: <RDMA_OR_PRIVATE_ADDR> VER: RoCE v2
+[00:36:32][<NODE_1>][150:177][INFO][XCCL][rdma_init.cpp:1690] rank [3] rdma server connected
+[00:36:32][<NODE_1>][149:178][INFO][XCCL][rdma_init.cpp:1690] rank [2] rdma server connected
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_init.cpp:804] local rank/rank [1/3] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:56004
+[00:36:32][<NODE_1>][149:178][INFO][XCCL][rdma_init.cpp:960] channel_id 0, dev_id 0 rank [2] rdma server accept peer:64, rdma_ctx:0x7f8f1c051250
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_init.cpp:804] local rank/rank [0/2] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:50703
+[00:36:32][<NODE_1>][150:177][INFO][XCCL][rdma_init.cpp:960] channel_id 1, dev_id 1 rank [3] rdma server accept peer:1, rdma_ctx:0x7f286c051250
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_init.cpp:804] local rank/rank [1/3] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:56004
+[00:36:32][<NODE_1>][149:178][INFO][XCCL][rdma_init.cpp:960] channel_id 2, dev_id 0 rank [2] rdma server accept peer:66, rdma_ctx:0x7f8f1c06b6a0
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_init.cpp:804] local rank/rank [0/2] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:50703
+[00:36:32][<NODE_1>][150:177][INFO][XCCL][rdma_init.cpp:960] channel_id 3, dev_id 1 rank [3] rdma server accept peer:3, rdma_ctx:0x7f286c06b680
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_init.cpp:804] local rank/rank [1/3] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:56004
+[00:36:32][<NODE_1>][149:178][INFO][XCCL][rdma_init.cpp:960] channel_id 4, dev_id 0 rank [2] rdma server accept peer:68, rdma_ctx:0x7f8f1c07ab60
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_init.cpp:804] local rank/rank [0/2] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:50703
+[00:36:32][<NODE_1>][150:177][INFO][XCCL][rdma_init.cpp:960] channel_id 5, dev_id 1 rank [3] rdma server accept peer:5, rdma_ctx:0x7f286c07ab60
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_init.cpp:804] local rank/rank [1/3] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:56004
+[00:36:32][<NODE_1>][149:178][INFO][XCCL][rdma_init.cpp:960] channel_id 6, dev_id 0 rank [2] rdma server accept peer:70, rdma_ctx:0x7f8f1c089e00
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_init.cpp:804] local rank/rank [0/2] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:50703
+[00:36:32][<NODE_1>][150:177][INFO][XCCL][rdma_init.cpp:960] channel_id 7, dev_id 1 rank [3] rdma server accept peer:7, rdma_ctx:0x7f286c089e00
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_init.cpp:804] local rank/rank [1/3] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:56004
+[00:36:32][<NODE_1>][149:178][INFO][XCCL][rdma_init.cpp:960] channel_id 8, dev_id 0 rank [2] rdma server accept peer:72, rdma_ctx:0x7f8f1c099580
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_init.cpp:804] local rank/rank [0/2] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:50703
+[00:36:32][<NODE_1>][150:177][INFO][XCCL][rdma_init.cpp:960] channel_id 9, dev_id 1 rank [3] rdma server accept peer:9, rdma_ctx:0x7f286c099580
+[00:36:32][<NODE_1>][150:150][INFO][XCCL][rdma_init.cpp:804] local rank/rank [1/3] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:56004
+[00:36:32][<NODE_1>][149:178][INFO][XCCL][rdma_init.cpp:960] channel_id 10, dev_id 0 rank [2] rdma server accept peer:74, rdma_ctx:0x7f8f1c0a8860
+[00:36:32][<NODE_1>][149:149][INFO][XCCL][rdma_init.cpp:804] local rank/rank [0/2] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:50703
+[00:36:32][<NODE_1>][150:177][INFO][XCCL][rdma_init.cpp:960] channel_id 11, dev_id 1 rank [3] rdma server accept peer:11, rdma_ctx:0x7f286c0a8860
+{"rank": 3, "backend": "FlagCX direct", "eager_warmup": 10, "library": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so"}
+{"rank": 2, "backend": "FlagCX direct", "eager_warmup": 10, "library": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so"}
+RUNTIME_OBSERVATIONRUNTIME_OBSERVATION  {"flagcx_package": "0.14.1+xre5.37.1", "is_homo": {"available": true, "result": 0, "value": 1}, "libraries": [{"path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so", "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"}, {"path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so", "sha256": "c802af1db0b1c25ff4f839faf52d5709877c57eb50b95a9338141f825f7d9e5e"}], "plugin_imported": true, "rank": 3, "route": "direct"}{"flagcx_package": "0.14.1+xre5.37.1", "is_homo": {"available": true, "result": 0, "value": 1}, "libraries": [{"path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so", "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"}, {"path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so", "sha256": "c802af1db0b1c25ff4f839faf52d5709877c57eb50b95a9338141f825f7d9e5e"}], "plugin_imported": true, "rank": 2, "route": "direct"}
+
+CAPTURE 3 1 1 0
+CAPTURE 2 1 1 0
+STREAMS 3 capture STREAMS94181081863552  caller 2 0 capturemode  94479730655312original 
+caller 0 mode START_REPLAY 3 1 1 1
+original
+START_REPLAY 2 1 1 1
+AFTER_REPLAY_ENQUEUEAFTER_REPLAY_ENQUEUE  32  11  11  11  00
+
+AFTER_SYNCAFTER_SYNC  23  1 11  11 
+1
+DONE_REPLAY 3 1 1 1
+DONE_REPLAY 2 1 1 1
+START_REPLAY 2 1 1 2
+START_REPLAY 3 1 1 2

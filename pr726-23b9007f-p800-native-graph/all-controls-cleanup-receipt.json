@@ -1,0 +1,106 @@
+{
+  "controls": 6,
+  "hosts_per_control": 2,
+  "post_smi_receipts": [
+    {
+      "file": "ibgda-role-0\\direct-original-role-0.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "ibgda-role-1\\direct-original-role-1.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "inference-role-0\\direct-original-role-0.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "inference-role-1\\direct-original-role-1.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "role-0\\direct-original-role-0.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "role-1\\direct-original-role-1.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "vendorbkcl-role-0\\direct-original-role-0.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "vendorbkcl-role-1\\direct-original-role-1.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "vendorpg-role-0\\native-original-role-0.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "vendorpg-role-1\\native-original-role-1.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "vendorpg-sdk-role-0\\native-original-role-0.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    },
+    {
+      "file": "vendorpg-sdk-role-1\\native-original-role-1.post-smi",
+      "selected_card_memory_mib": {
+        "4": 0,
+        "6": 0
+      },
+      "selected_compute_processes": 0
+    }
+  ],
+  "full_gate_passed": false,
+  "production_changed": false,
+  "owned_containers_final": 0,
+  "owned_tmux_sessions_final": 0
+}

@@ -1,0 +1,13 @@
+[Note] No specialized fused operators were found for the nvidia, generic fused operators will be used by default.
+{"event": "runtime", "torch": "2.11.0+cu130", "vllm": "0.20.2", "triton": "3.6.0", "kernel": "/probe/source/src/flaggems_vllm/ops/fused_marlin_moe.py", "source_sha256": "beab14356ede698e7087131e20a7efa7affd70b5bd3fa4d5e8c2bd98adcbdb7c", "shapes": [[1, 4, 512, 512, 2], [1, 8, 4096, 14336, 2], [4, 8, 4096, 14336, 2], [16, 8, 4096, 14336, 2], [64, 8, 4096, 14336, 2], [256, 8, 4096, 14336, 2], [1024, 8, 4096, 14336, 2]], "dtype": "bfloat16", "tolerance": 0.04, "warmup_ms": 10, "rep_ms": 50, "gate": 0.9, "variant": "benchmark-api-compat"}
+INFO 11-20 01:02:29 [nixl_utils.py:20] Setting UCX_RCACHE_MAX_UNRELEASED to '1024' to avoid a rare memory leak in UCX when using NIXL.
+WARNING 11-20 01:02:29 [nixl_utils.py:34] NIXL is not available
+WARNING 11-20 01:02:29 [nixl_utils.py:44] NIXL agent config is not available
+{"event": "accuracy", "precision": "int8", "shape": [1, 4, 512, 512, 2], "max_diff": 0.0075623588636517525}
+{"event": "compiled_accuracy", "precision": "int8", "shape": [1, 4, 512, 512, 2]}
+{"event": "accuracy", "precision": "int8", "shape": [1, 8, 4096, 14336, 2], "max_diff": 0.004793734289705753}
+{"event": "compiled_accuracy", "precision": "int8", "shape": [1, 8, 4096, 14336, 2]}
+{"event": "accuracy", "precision": "fp8", "shape": [1, 4, 512, 512, 2], "max_diff": 0.005166510120034218}
+{"event": "compiled_accuracy", "precision": "fp8", "shape": [1, 4, 512, 512, 2]}
+{"event": "accuracy", "precision": "fp8", "shape": [1, 8, 4096, 14336, 2], "max_diff": 0.0309758260846138}
+{"event": "compiled_accuracy", "precision": "fp8", "shape": [1, 8, 4096, 14336, 2]}

@@ -1,0 +1,123 @@
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+================================================================================
+WARNING: Libraries loaded from different directories!
+This may cause version mismatch issues.
+--------------------------------------------------------------------------------
+Directory: /usr/local/xcudart/lib
+  - libcuda.so.1
+  - libcuda.so.1
+  - libcupti.so.12
+  - libxpuml.so.1
+Directory: /usr/local/xpu/so
+  - libcudart.so.12
+  - libxpurt.so.2
+================================================================================
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+/root/.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/runpy.py:126: RuntimeWarning: 'torch.distributed.run' found in sys.modules after import of package 'torch.distributed', but prior to execution of 'torch.distributed.run'; this may result in unpredictable behaviour
+  warn(RuntimeWarning(msg))
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+================================================================================
+WARNING: Libraries loaded from different directories!
+This may cause version mismatch issues.
+--------------------------------------------------------------------------------
+Directory: /usr/local/xcudart/lib
+  - libcuda.so.1
+  - libcuda.so.1
+  - libcupti.so.12
+  - libxpuml.so.1
+Directory: /usr/local/xpu/so
+  - libcudart.so.12
+  - libxpurt.so.2
+================================================================================
+================================================================================
+WARNING: Libraries loaded from different directories!
+This may cause version mismatch issues.
+--------------------------------------------------------------------------------
+Directory: /usr/local/xcudart/lib
+  - libcuda.so.1
+  - libcuda.so.1
+  - libcupti.so.12
+  - libxpuml.so.1
+Directory: /usr/local/xpu/so
+  - libcudart.so.12
+  - libxpurt.so.2
+================================================================================
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+[Gloo] Rank 0 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
+[Gloo] Rank 1 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
+NATIVE_VENDOR_BACKEND 0 <class 'torch.distributed.ProcessGroupXCCL'>
+NATIVE_VENDOR_BACKEND 1 <class 'torch.distributed.ProcessGroupXCCL'>
+[01:11:07][<NODE_0>][138:138][INFO][XCCL][globals.cpp:346] xccl version: 101c420 [rdma] [[fix] all2allv nranks=1 precision issue] build data: Apr 14 2026 04:43:53
+[01:11:07][<NODE_0>][139:139][INFO][XCCL][globals.cpp:346] xccl version: 101c420 [rdma] [[fix] all2allv nranks=1 precision issue] build data: Apr 14 2026 04:43:53
+[01:11:07][<NODE_0>][139:139][WARN][XCCL][ras_loader.cpp:51] dlopen libras_service.so failed: libras_service.so: cannot open shared object file: No such file or directory, RAS disabled
+[01:11:07][<NODE_0>][138:138][WARN][XCCL][ras_loader.cpp:51] dlopen libras_service.so failed: libras_service.so: cannot open shared object file: No such file or directory, RAS disabled
+[01:11:08][<NODE_0>][139:139][WARN][XCCL][rdma_init.cpp:2158] num_rdma_connect = 1
+[01:11:08][<NODE_0>][138:138][WARN][XCCL][rdma_init.cpp:2158] num_rdma_connect = 1
+[01:11:08][<NODE_0>][139:156][INFO][XCCL][rdma_init.cpp:1616] rank [1] rdma listening on port 35239 addr <RDMA_OR_PRIVATE_ADDR>
+[01:11:08][<NODE_0>][138:155][INFO][XCCL][rdma_init.cpp:1616] rank [0] rdma listening on port 43137 addr <RDMA_OR_PRIVATE_ADDR>
+[01:11:08][<NODE_0>][138:138][WARN][XCCL][rdma_init.cpp:2202] tree_pair size: 0 ring_pair size: 1
+[01:11:08][<NODE_0>][139:139][WARN][XCCL][rdma_init.cpp:2202] tree_pair size: 0 ring_pair size: 1
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_init.cpp:2224] rdma init hostname:[<RDMA_OR_PRIVATE_ADDR>:45945] rank 1 peer ring rank 3
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_init.cpp:2224] rdma init hostname:[<RDMA_OR_PRIVATE_ADDR>:37786] rank 0 peer ring rank 2
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_init.cpp:479] local rank/rank [1/1] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:45945
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_init.cpp:479] local rank/rank [0/0] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:37786
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_4:1 index: 0 gid: <GID> IPv4: NULL VER: IB/RoCE v1
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_6:1 index: 0 gid: <GID> IPv4: NULL VER: IB/RoCE v1
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_6:1 index: 1 gid: <GID> IPv4: NULL VER: RoCE v2
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_4:1 index: 1 gid: <GID> IPv4: NULL VER: RoCE v2
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_4:1 index: 2 gid: <GID> IPv4: <RDMA_OR_PRIVATE_ADDR> VER: IB/RoCE v1
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_6:1 index: 2 gid: <GID> IPv4: <RDMA_OR_PRIVATE_ADDR> VER: IB/RoCE v1
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_6:1 index: 3 gid: <GID> IPv4: <RDMA_OR_PRIVATE_ADDR> VER: RoCE v2
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_common.cpp:799] NET/IB: mlx5_bond_4:1 index: 3 gid: <GID> IPv4: <RDMA_OR_PRIVATE_ADDR> VER: RoCE v2
+[01:11:08][<NODE_0>][138:155][INFO][XCCL][rdma_init.cpp:1698] rank [0] rdma server connected
+[01:11:08][<NODE_0>][139:156][INFO][XCCL][rdma_init.cpp:1698] rank [1] rdma server connected
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_init.cpp:812] local rank/rank [1/1] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:37786
+[01:11:08][<NODE_0>][138:155][INFO][XCCL][rdma_init.cpp:968] channel_id 0, dev_id 0 rank [0] rdma server accept peer:192, rdma_ctx:0x7fcba805cfa0
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_init.cpp:812] local rank/rank [0/0] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:45945
+[01:11:08][<NODE_0>][139:156][INFO][XCCL][rdma_init.cpp:968] channel_id 1, dev_id 1 rank [1] rdma server accept peer:129, rdma_ctx:0x7f0da805cfa0
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_init.cpp:812] local rank/rank [1/1] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:37786
+[01:11:08][<NODE_0>][138:155][INFO][XCCL][rdma_init.cpp:968] channel_id 2, dev_id 0 rank [0] rdma server accept peer:194, rdma_ctx:0x7fcba806b270
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_init.cpp:812] local rank/rank [0/0] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:45945
+[01:11:08][<NODE_0>][139:156][INFO][XCCL][rdma_init.cpp:968] channel_id 3, dev_id 1 rank [1] rdma server accept peer:131, rdma_ctx:0x7f0da806b270
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_init.cpp:812] local rank/rank [1/1] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:37786
+[01:11:08][<NODE_0>][138:155][INFO][XCCL][rdma_init.cpp:968] channel_id 4, dev_id 0 rank [0] rdma server accept peer:196, rdma_ctx:0x7fcba807a580
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_init.cpp:812] local rank/rank [0/0] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:45945
+[01:11:08][<NODE_0>][139:156][INFO][XCCL][rdma_init.cpp:968] channel_id 5, dev_id 1 rank [1] rdma server accept peer:133, rdma_ctx:0x7f0da807a580
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_init.cpp:812] local rank/rank [1/1] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:37786
+[01:11:08][<NODE_0>][138:155][INFO][XCCL][rdma_init.cpp:968] channel_id 6, dev_id 0 rank [0] rdma server accept peer:198, rdma_ctx:0x7fcba8089620
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_init.cpp:812] local rank/rank [0/0] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:45945
+[01:11:08][<NODE_0>][139:156][INFO][XCCL][rdma_init.cpp:968] channel_id 7, dev_id 1 rank [1] rdma server accept peer:135, rdma_ctx:0x7f0da8089580
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_init.cpp:812] local rank/rank [1/1] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:37786
+[01:11:08][<NODE_0>][138:155][INFO][XCCL][rdma_init.cpp:968] channel_id 8, dev_id 0 rank [0] rdma server accept peer:200, rdma_ctx:0x7fcba80987c0
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_init.cpp:812] local rank/rank [0/0] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:45945
+[01:11:08][<NODE_0>][139:156][INFO][XCCL][rdma_init.cpp:968] channel_id 9, dev_id 1 rank [1] rdma server accept peer:137, rdma_ctx:0x7f0da80986f0
+[01:11:08][<NODE_0>][139:139][INFO][XCCL][rdma_init.cpp:812] local rank/rank [1/1] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:37786
+[01:11:08][<NODE_0>][138:155][INFO][XCCL][rdma_init.cpp:968] channel_id 10, dev_id 0 rank [0] rdma server accept peer:202, rdma_ctx:0x7fcba80a7810
+[01:11:08][<NODE_0>][138:138][INFO][XCCL][rdma_init.cpp:812] local rank/rank [0/0] connect from <RDMA_OR_PRIVATE_ADDR> to <RDMA_OR_PRIVATE_ADDR>:45945
+[01:11:08][<NODE_0>][139:156][INFO][XCCL][rdma_init.cpp:968] channel_id 11, dev_id 1 rank [1] rdma server accept peer:139, rdma_ctx:0x7f0da80a7740
+{"rank": 0, "backend": "nccl", "eager_warmup": 10}{"rank": 1, "backend": "nccl", "eager_warmup": 10}
+
+RUNTIME_OBSERVATION {"backend_type": "<class 'torch.distributed.ProcessGroupXCCL'>", "flagcx_imported": false, "libraries": [{"path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so", "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"}], "plugin_imported": false, "rank": 1, "route": "vendor_kccl_pg", "selected_env": {"BKCL_ENABLE_IBGDA": null, "BKCL_ENABLE_XDR": null, "BKCL_INFERENCE": null, "BKCL_USE_RDMA": null, "XMLIR_ENABLE_NEW_PG": null}, "xmlir_package": "1.0.0.1+20260605"}
+RUNTIME_OBSERVATION {"backend_type": "<class 'torch.distributed.ProcessGroupXCCL'>", "flagcx_imported": false, "libraries": [{"path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so", "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"}], "plugin_imported": false, "rank": 0, "route": "vendor_kccl_pg", "selected_env": {"BKCL_ENABLE_IBGDA": null, "BKCL_ENABLE_XDR": null, "BKCL_INFERENCE": null, "BKCL_USE_RDMA": null, "XMLIR_ENABLE_NEW_PG": null}, "xmlir_package": "1.0.0.1+20260605"}
+CAPTURE 0 1 1 0
+CAPTURE 1 1 1 0
+STREAMSSTREAMS  10  capturecapture  9397250646798494571668618160  callercaller  00  modemode original original
+
+START_REPLAY 0 1 1 1
+START_REPLAY 1 1 1 1
+AFTER_REPLAY_ENQUEUE 1AFTER_REPLAY_ENQUEUE  1 01  11  10 
+1 0
+AFTER_SYNC 1AFTER_SYNC  10  11  11
+ 1
+DONE_REPLAY 0 1 1 1
+DONE_REPLAY 1 1 1 1
+START_REPLAY 0 1 1 2
+START_REPLAY 1 1 1 2

@@ -1,0 +1,68 @@
+Get:1 http://archive.ubuntu.com/ubuntu jammy InRelease [270 kB]
+Get:2 http://security.ubuntu.com/ubuntu jammy-security InRelease [129 kB]
+Get:3 http://archive.ubuntu.com/ubuntu jammy-updates InRelease [128 kB]
+Get:4 http://archive.ubuntu.com/ubuntu jammy-backports InRelease [127 kB]
+Get:5 http://security.ubuntu.com/ubuntu jammy-security/restricted amd64 Packages [8111 kB]
+Get:6 http://archive.ubuntu.com/ubuntu jammy/main amd64 Packages [1792 kB]
+Get:7 http://archive.ubuntu.com/ubuntu jammy/universe amd64 Packages [17.5 MB]
+Get:8 http://archive.ubuntu.com/ubuntu jammy/multiverse amd64 Packages [266 kB]
+Get:9 http://archive.ubuntu.com/ubuntu jammy/restricted amd64 Packages [164 kB]
+Get:10 http://archive.ubuntu.com/ubuntu jammy-updates/restricted amd64 Packages [8422 kB]
+Get:11 http://archive.ubuntu.com/ubuntu jammy-updates/multiverse amd64 Packages [104 kB]
+Get:12 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 Packages [1631 kB]
+Get:13 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 Packages [4884 kB]
+Get:14 http://archive.ubuntu.com/ubuntu jammy-backports/universe amd64 Packages [35.6 kB]
+Get:15 http://archive.ubuntu.com/ubuntu jammy-backports/main amd64 Packages [82.9 kB]
+Get:16 http://security.ubuntu.com/ubuntu jammy-security/universe amd64 Packages [1329 kB]
+Get:17 http://security.ubuntu.com/ubuntu jammy-security/main amd64 Packages [4547 kB]
+Get:18 http://security.ubuntu.com/ubuntu jammy-security/multiverse amd64 Packages [96.7 kB]
+Fetched 49.6 MB in 11s (4620 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  libbabeltrace1 libboost-regex1.74.0 libc-dev-bin libc6 libc6-dbg libc6-dev
+  libdebuginfod-common libdebuginfod1 libdw1 libelf1 libglib2.0-0
+  libglib2.0-data libipt2 libsource-highlight-common libsource-highlight4v5
+  shared-mime-info ucf xdg-user-dirs
+Suggested packages:
+  gdb-doc gdbserver glibc-doc locales manpages-dev
+Recommended packages:
+  manpages manpages-dev libc-devtools libnss-nis libnss-nisplus
+The following NEW packages will be installed:
+  gdb libbabeltrace1 libboost-regex1.74.0 libc6-dbg libdebuginfod-common
+  libdebuginfod1 libdw1 libelf1 libglib2.0-0 libglib2.0-data libipt2
+  libsource-highlight-common libsource-highlight4v5 shared-mime-info ucf
+  xdg-user-dirs
+The following packages will be upgraded:
+  libc-dev-bin libc6 libc6-dev
+3 upgraded, 16 newly installed, 0 to remove and 55 not upgraded.
+Need to get 26.4 MB of archives.
+After this operation, 43.9 MB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu jammy/main amd64 ucf all 3.0043 [56.1 kB]
+Get:2 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libdebuginfod-common all 0.186-1ubuntu0.1 [7996 B]
+Get:3 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libc6-dev amd64 2.35-0ubuntu3.18 [2100 kB]
+Get:4 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libc-dev-bin amd64 2.35-0ubuntu3.18 [20.3 kB]
+Get:5 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libc6 amd64 2.35-0ubuntu3.18 [3236 kB]
+Get:6 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libelf1 amd64 0.186-1ubuntu0.1 [51.1 kB]
+Get:7 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libglib2.0-0 amd64 2.72.4-0ubuntu2.11 [1469 kB]
+Get:8 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libglib2.0-data all 2.72.4-0ubuntu2.11 [5602 B]
+Get:9 http://archive.ubuntu.com/ubuntu jammy/main amd64 shared-mime-info amd64 2.1-2 [454 kB]
+Get:10 http://archive.ubuntu.com/ubuntu jammy/main amd64 xdg-user-dirs amd64 0.17-2ubuntu4 [53.9 kB]
+Get:11 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libdw1 amd64 0.186-1ubuntu0.1 [251 kB]
+Get:12 http://archive.ubuntu.com/ubuntu jammy/main amd64 libbabeltrace1 amd64 1.5.8-2build1 [160 kB]
+Get:13 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libdebuginfod1 amd64 0.186-1ubuntu0.1 [12.8 kB]
+Get:14 http://archive.ubuntu.com/ubuntu jammy/main amd64 libipt2 amd64 2.0.5-1 [46.4 kB]
+Get:15 http://archive.ubuntu.com/ubuntu jammy/main amd64 libsource-highlight-common all 3.1.9-4.1build2 [64.5 kB]
+Get:16 http://archive.ubuntu.com/ubuntu jammy/main amd64 libboost-regex1.74.0 amd64 1.74.0-14ubuntu3 [511 kB]
+Get:17 http://archive.ubuntu.com/ubuntu jammy/main amd64 libsource-highlight4v5 amd64 3.1.9-4.1build2 [207 kB]
+Get:18 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gdb amd64 12.1-0ubuntu1~22.04.2 [3920 kB]
+Get:19 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libc6-dbg amd64 2.35-0ubuntu3.18 [13.8 MB]
+Fetched 26.4 MB in 3s (10.2 MB/s)
+Download complete and in download only mode
+GNU gdb (Ubuntu 12.1-0ubuntu1~22.04.2) 12.1
+Copyright (C) 2022 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.

@@ -1,0 +1,113 @@
+{
+  "control": "vendorpg-sdk",
+  "native_pg": true,
+  "passed": false,
+  "roles": [
+    {
+      "role": 0,
+      "observations": [
+        {
+          "backend_type": "<class 'torch.distributed.ProcessGroupXCCL'>",
+          "flagcx_imported": false,
+          "libraries": [
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"
+            }
+          ],
+          "plugin_imported": false,
+          "rank": 1,
+          "route": "vendor_kccl_pg",
+          "selected_env": {
+            "BKCL_ENABLE_IBGDA": null,
+            "BKCL_ENABLE_XDR": null,
+            "BKCL_INFERENCE": null,
+            "BKCL_USE_RDMA": null,
+            "XMLIR_ENABLE_NEW_PG": null
+          },
+          "xmlir_package": "1.0.0.1+20260605"
+        },
+        {
+          "backend_type": "<class 'torch.distributed.ProcessGroupXCCL'>",
+          "flagcx_imported": false,
+          "libraries": [
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"
+            }
+          ],
+          "plugin_imported": false,
+          "rank": 0,
+          "route": "vendor_kccl_pg",
+          "selected_env": {
+            "BKCL_ENABLE_IBGDA": null,
+            "BKCL_ENABLE_XDR": null,
+            "BKCL_INFERENCE": null,
+            "BKCL_USE_RDMA": null,
+            "XMLIR_ENABLE_NEW_PG": null
+          },
+          "xmlir_package": "1.0.0.1+20260605"
+        }
+      ],
+      "completed_replays_each": 1,
+      "requested_replays_first_case": 12,
+      "second_case_reached": false,
+      "exit": 137,
+      "log_sha256": "36d5937bcafd4db1e9f6d3dff871ba7dd070b4b37f8d6ba180ec9f93c38842fd",
+      "selected_cards_post_mib": 0
+    },
+    {
+      "role": 1,
+      "observations": [
+        {
+          "backend_type": "<class 'torch.distributed.ProcessGroupXCCL'>",
+          "flagcx_imported": false,
+          "libraries": [
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"
+            }
+          ],
+          "plugin_imported": false,
+          "rank": 3,
+          "route": "vendor_kccl_pg",
+          "selected_env": {
+            "BKCL_ENABLE_IBGDA": null,
+            "BKCL_ENABLE_XDR": null,
+            "BKCL_INFERENCE": null,
+            "BKCL_USE_RDMA": null,
+            "XMLIR_ENABLE_NEW_PG": null
+          },
+          "xmlir_package": "1.0.0.1+20260605"
+        },
+        {
+          "backend_type": "<class 'torch.distributed.ProcessGroupXCCL'>",
+          "flagcx_imported": false,
+          "libraries": [
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"
+            }
+          ],
+          "plugin_imported": false,
+          "rank": 2,
+          "route": "vendor_kccl_pg",
+          "selected_env": {
+            "BKCL_ENABLE_IBGDA": null,
+            "BKCL_ENABLE_XDR": null,
+            "BKCL_INFERENCE": null,
+            "BKCL_USE_RDMA": null,
+            "XMLIR_ENABLE_NEW_PG": null
+          },
+          "xmlir_package": "1.0.0.1+20260605"
+        }
+      ],
+      "completed_replays_each": 1,
+      "requested_replays_first_case": 12,
+      "second_case_reached": false,
+      "exit": 137,
+      "log_sha256": "2365475f5e505df3b213f80f33a10c6826a7e38dbb438527ea86b1a7b2a98e99",
+      "selected_cards_post_mib": 0
+    }
+  ]
+}

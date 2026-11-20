@@ -1,0 +1,376 @@
+[New LWP 167]
+[New LWP 169]
+[New LWP 170]
+[New LWP 172]
+[New LWP 174]
+[New LWP 180]
+[New LWP 182]
+[New LWP 183]
+[New LWP 186]
+[New LWP 187]
+[New LWP 190]
+[New LWP 191]
+[New LWP 194]
+[New LWP 195]
+[New LWP 198]
+[New LWP 199]
+[New LWP 202]
+[New LWP 204]
+[New LWP 206]
+[New LWP 213]
+[New LWP 214]
+[New LWP 215]
+[New LWP 216]
+[New LWP 217]
+[New LWP 218]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+0x00007f2a55a51001 in pthread_mutex_lock () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 26 (Thread 0x7f285f74c640 (LWP 218) "python"):
+#0  0x00007f2a55a4a0d7 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a55a4ca01 in pthread_cond_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007f2a540e8747 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#3  0x00007f291fe7d24e in baidu::xpu::bkcl::ThreadPool::ThreadPool(unsigned long)::{lambda()#1}::operator()() const () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a541183ec in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#6  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 25 (Thread 0x7f285ff4d640 (LWP 217) "python"):
+#0  0x00007f2a55a4a0d7 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a55a4ca01 in pthread_cond_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007f2a540e8747 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#3  0x00007f291fe7d24e in baidu::xpu::bkcl::ThreadPool::ThreadPool(unsigned long)::{lambda()#1}::operator()() const () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a541183ec in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#6  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 24 (Thread 0x7f2857f4d640 (LWP 216) "python"):
+#0  0x00007f2a55a4a0d7 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a55a4ca01 in pthread_cond_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007f2a540e8747 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#3  0x00007f291fe7d24e in baidu::xpu::bkcl::ThreadPool::ThreadPool(unsigned long)::{lambda()#1}::operator()() const () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a541183ec in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#6  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 23 (Thread 0x7f286074e640 (LWP 215) "python"):
+#0  0x00007f2a55a4a0d7 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a55a4ca01 in pthread_cond_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007f2a540e8747 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#3  0x00007f291fe7d24e in baidu::xpu::bkcl::ThreadPool::ThreadPool(unsigned long)::{lambda()#1}::operator()() const () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a541183ec in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#6  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 22 (Thread 0x7f2860f4f640 (LWP 214) "python"):
+#0  0x00007f2a55a4a0d7 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a55a4ca01 in pthread_cond_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007f291fe7c838 in baidu::xpu::bkcl::util::BlockingQueue<std::vector<baidu::xpu::bkcl::ProxyArgs, std::allocator<baidu::xpu::bkcl::ProxyArgs> > >::pop(std::vector<baidu::xpu::bkcl::ProxyArgs, std::allocator<baidu::xpu::bkcl::ProxyArgs> >*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fe6ae2b in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 21 (Thread 0x7f28737ff640 (LWP 213) "python"):
+#0  0x00007f2a55a4a0d7 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a55a4ca01 in pthread_cond_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007f291fe7c768 in baidu::xpu::bkcl::util::BlockingQueue<baidu::xpu::bkcl::QueueItem*>::pop(baidu::xpu::bkcl::QueueItem**) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fe6ac0b in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 20 (Thread 0x7f2861f5f640 (LWP 206) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 19 (Thread 0x7f2862f6f640 (LWP 204) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 18 (Thread 0x7f2863f7f640 (LWP 202) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 17 (Thread 0x7f2864f8f640 (LWP 199) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 16 (Thread 0x7f2865f9f640 (LWP 198) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 15 (Thread 0x7f2866faf640 (LWP 195) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 14 (Thread 0x7f2867fbf640 (LWP 194) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 13 (Thread 0x7f2868fcf640 (LWP 191) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 12 (Thread 0x7f2869fdf640 (LWP 190) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 11 (Thread 0x7f286afef640 (LWP 187) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 10 (Thread 0x7f286bfff640 (LWP 186) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 9 (Thread 0x7f28713df640 (LWP 183) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 8 (Thread 0x7f28723ef640 (LWP 182) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 7 (Thread 0x7f2872ffe640 (LWP 180) "python"):
+#0  0x00007f2a55acd96c in read () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f288c0bf4c4 in ibv_get_async_event () from /rdma-lib/libibverbs.so
+#2  0x00007f291fed1453 in wrap_ibv_get_async_event(ibv_context*, ibv_async_event*) () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#3  0x00007f291fea2891 in ?? () from /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 6 (Thread 0x7f28860fd640 (LWP 174) "python"):
+#0  0x00007f2a55a4a0d7 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a55a4ca01 in pthread_cond_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007f2a540e8747 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#3  0x00007f2a34509659 in c10d::ProcessGroupGloo::runLoop(int) () from /flagos/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so
+#4  0x00007f2a54118253 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#6  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 5 (Thread 0x7f28868fe640 (LWP 172) "python"):
+#0  0x00007f2a55a4a0d7 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a55a4ca01 in pthread_cond_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007f2a540e8747 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#3  0x00007f2a34509659 in c10d::ProcessGroupGloo::runLoop(int) () from /flagos/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so
+#4  0x00007f2a54118253 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#6  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 4 (Thread 0x7f28870ff640 (LWP 170) "python"):
+#0  0x00007f2a55adeebe in epoll_wait () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a36a4da4d in gloo::transport::tcp::Loop::run() () from /flagos/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so
+#2  0x00007f2a54118253 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#3  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#4  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 3 (Thread 0x7f288f9ff640 (LWP 169) "cuda-EvtHandlr"):
+#0  0x00007f2a55ad1d1f in poll () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a53b35162 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#2  0x00007f2a53a76cc1 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#3  0x00007f2a53b37498 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 2 (Thread 0x7f289842d640 (LWP 167) "cuda-EvtHandlr"):
+#0  0x00007f2a55ad1d1f in poll () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a53b35162 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#2  0x00007f2a53a76cc1 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#3  0x00007f2a53b37498 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#4  0x00007f2a55a4da83 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+#5  0x00007f2a55adf8e0 in ?? () from /lib/x86_64-linux-gnu/libc.so.6
+
+Thread 1 (Thread 0x7f2a559b6740 (LWP 150) "python"):
+#0  0x00007f2a55a51001 in pthread_mutex_lock () from /lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007f2a53aaa1a2 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#2  0x00007f2a53aaa4f5 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#3  0x00007f2a53a742da in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#4  0x00007f2a53a74a77 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#5  0x00007f2a53a75417 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#6  0x00007f2a53a44463 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#7  0x00007f2a53a44855 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#8  0x00007f2a53a2aeca in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#9  0x00007f2a53af05d6 in ?? () from /usr/local/xcudart/lib/libcuda.so.1
+#10 0x00007f2a53617ba2 in cudaDeviceSynchronize () from /usr/local/xpu/so/libcudart.so.12
+#11 0x00007f29d7eaf147 in at::cuda::CUDAGraph::replay() () from /flagos/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so
+#12 0x00007f2a43bc8122 in torch::detail::wrap_pybind_function_impl_<void (at::cuda::CUDAGraph::*)(), 0ul, true>(void (at::cuda::CUDAGraph::*&&)(), std::integer_sequence<unsigned long, 0ul>, std::integral_constant<bool, true>)::{lambda(at::cuda::CUDAGraph&)#1}::operator()(at::cuda::CUDAGraph&) const () from /flagos/lib/python3.10/site-packages/torch/lib/libtorch_python.so
+#13 0x00007f2a43bc9364 in pybind11::cpp_function::initialize<torch::detail::wrap_pybind_function_impl_<void (at::cuda::CUDAGraph::*)(), 0ul, true>(void (at::cuda::CUDAGraph::*&&)(), std::integer_sequence<unsigned long, 0ul>, std::integral_constant<bool, true>)::{lambda(at::cuda::CUDAGraph&)#1}, void, at::cuda::CUDAGraph&, pybind11::name, pybind11::is_method, pybind11::sibling>(void (at::cuda::CUDAGraph::*&&)(), void (*)(at::cuda::CUDAGraph&), pybind11::name const&, pybind11::is_method const&, pybind11::sibling const&)::{lambda(pybind11::detail::function_call&)#1}::_FUN(pybind11::detail::function_call&) () from /flagos/lib/python3.10/site-packages/torch/lib/libtorch_python.so
+#14 0x00007f2a43250223 in pybind11::cpp_function::dispatcher(_object*, _object*, _object*) () from /flagos/lib/python3.10/site-packages/torch/lib/libtorch_python.so
+#15 0x000055a82f4c8b65 in cfunction_call ()
+#16 0x000055a82f390b76 in _PyObject_MakeTpCall ()
+#17 0x000055a82f4a7fe1 in method_vectorcall ()
+#18 0x000055a82f50544e in _PyEval_EvalFrameDefault ()
+#19 0x000055a82f4a5933 in _PyFunction_Vectorcall ()
+#20 0x000055a82f5049ce in _PyEval_EvalFrameDefault ()
+#21 0x000055a82f4a5933 in _PyFunction_Vectorcall ()
+#22 0x000055a82f53402c in call_function ()
+#23 0x000055a82f5103c7 in _PyEval_EvalFrameDefault ()
+#24 0x000055a82f4a5933 in _PyFunction_Vectorcall ()
+#25 0x000055a82f53402c in call_function ()
+#26 0x000055a82f5103c7 in _PyEval_EvalFrameDefault ()
+#27 0x000055a82f620b22 in _PyEval_Vector ()
+#28 0x000055a82f657492 in run_mod ()
+#29 0x000055a82f3ec39c in pyrun_file ()
+#30 0x000055a82f3ebea3 in _PyRun_SimpleFileObject ()
+#31 0x000055a82f3eb896 in _PyRun_AnyFileObject ()
+#32 0x000055a82f3f5e18 in pymain_run_file_obj ()
+#33 0x000055a82f3f5925 in pymain_run_file ()
+#34 0x000055a82f663ef2 in Py_RunMain ()
+From                To                  Syms Read   Shared Object Library
+0x00007f2a55cdb040  0x00007f2a55cdb105  Yes         /lib/x86_64-linux-gnu/libpthread.so.0
+0x00007f2a55cd6040  0x00007f2a55cd6105  Yes (*)     /lib/x86_64-linux-gnu/libdl.so.2
+0x00007f2a55cd1040  0x00007f2a55cd1105  Yes (*)     /lib/x86_64-linux-gnu/libutil.so.1
+0x00007f2a55bf73a0  0x00007f2a55c728c8  Yes (*)     /lib/x86_64-linux-gnu/libm.so.6
+0x00007f2a55be3080  0x00007f2a55be3275  Yes (*)     /lib/x86_64-linux-gnu/librt.so.1
+0x00007f2a559e1700  0x00007f2a55b739fd  Yes (*)     /lib/x86_64-linux-gnu/libc.so.6
+0x00007f2a55ce7090  0x00007f2a55d10315  Yes (*)     /lib64/ld-linux-x86-64.so.2
+0x00007f2a55753040  0x00007f2a557530f5  Yes (*)     /root/.local/share/uv/python/cpython-3.10.20-linux-x86_64-gnu/bin/../lib/libpython3.so
+0x00007f2a543b8000  0x00007f2a54d48120  Yes (*)     /root/.local/share/uv/python/cpython-3.10.20-linux-x86_64-gnu/bin/../lib/../lib/libpython3.10.so.1.0
+0x00007f2a5574e380  0x00007f2a5574e8a7  Yes         /flagos/lib/python3.10/site-packages/torch_plugin/initialize_runtime.so
+0x00007f2a540de420  0x00007f2a541e6fc2  Yes (*)     /lib/x86_64-linux-gnu/libstdc++.so.6
+0x00007f2a5401f660  0x00007f2a54035805  Yes (*)     /lib/x86_64-linux-gnu/libgcc_s.so.1
+0x00007f2a53a274a0  0x00007f2a53b5b22c  Yes (*)     /usr/local/xcudart/lib/libcuda.so.1
+0x00007f2a5360aff0  0x00007f2a5363126c  Yes (*)     /usr/local/xpu/so/libcudart.so.12
+0x00007f2a53205ad0  0x00007f2a5322bbac  Yes (*)     /usr/local/xpu/so/libxpurt.so.2
+0x00007f2a54007940  0x00007f2a54011875  Yes (*)     /usr/local/xcudart/lib/libcupti.so.12
+0x00007f2a5161cab0  0x00007f2a5172373c  Yes (*)     /usr/local/xcudart/lib/libxpuml.so.1
+0x00007f2a55747040  0x00007f2a557470f9  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libtorch_global_deps.so
+0x00007f2a512092a0  0x00007f2a5122d3a2  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libgomp.so.1
+0x00007f2a4adbf180  0x00007f2a4f61e5e1  Yes (*)     /flagos/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12
+0x00007f2a4a000b20  0x00007f2a4a000fc5  Yes (*)     /flagos/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc-builtins.so.12.9
+0x00007f2a446ac0c0  0x00007f2a48b83cf1  Yes (*)     /flagos/lib/python3.10/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
+0x00007f2a55741050  0x00007f2a55741115  Yes         /flagos/lib/python3.10/site-packages/torch/_C.cpython-310-x86_64-linux-gnu.so
+0x00007f2a43042980  0x00007f2a43d2cd30  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libtorch_python.so
+0x00007f2a555f9c50  0x00007f2a55620a2e  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libtorch.so
+0x00007f2a557383d0  0x00007f2a5573aadd  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libshm.so
+0x00007f2a2f4d7100  0x00007f2a3fa08930  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so
+0x00007f29d7b43df0  0x00007f29dabc4482  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so
+0x00007f2a534662f0  0x00007f2a534b7953  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libc10_cuda.so
+0x00007f2a5150a440  0x00007f2a515a9e08  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libc10.so
+0x00007f29d6e04230  0x00007f29d6e1448e  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/cudnn/lib/libcudnn.so.9
+0x00007f29bdc7f8f0  0x00007f29c0c44b92  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/cusparselt/lib/libcusparseLt.so.0
+0x00007f29bb9bbf30  0x00007f29bbbb96da  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/cufile/lib/libcufile.so.0
+0x00007f29bb0af660  0x00007f29bb150452  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/libtorch_nvshmem.so
+0x00007f299de6c480  0x00007f299e921f02  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/cusparse/lib/libcusparse.so.12
+0x00007f298be27630  0x00007f298c2f7c2a  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/cufft/lib/libcufft.so.11
+0x00007f2973243ba0  0x00007f29733ae112  Yes         /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/nccl/lib/libnccl.so.2
+0x00007f2968a0a970  0x00007f2968b2bdb2  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/curand/lib/libcurand.so.10
+0x00007f2962231360  0x00007f29627aa212  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/cublas/lib/libcublas.so.12
+0x00007f293085a9c0  0x00007f2938418ed2  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/cublas/lib/libcublasLt.so.12
+0x00007f2927233890  0x00007f292749b352  Yes (*)     /flagos/lib/python3.10/site-packages/torch/lib/../../nvidia/nvshmem/lib/libnvshmem_host.so.3
+0x00007f2926b5fa70  0x00007f292703a663  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/core/_multiarray_umath.cpython-310-x86_64-linux-gnu.so
+0x00007f2924bcb000  0x00007f292684bc5c  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/core/../../numpy.libs/libopenblas64_p-r0-0cf96a72.3.23.dev.so
+0x00007f292461b870  0x00007f2924846837  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/core/../../numpy.libs/libgfortran-040039e1.so.5.0.0
+0x00007f29242023e0  0x00007f2924225d2b  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/core/../../numpy.libs/libquadmath-96973f99.so.0.0.0
+0x00007f2a53fe5280  0x00007f2a53ff5c14  Yes (*)     /lib/x86_64-linux-gnu/libz.so.1
+0x00007f2a514bfe70  0x00007f2a514d5299  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/core/_multiarray_tests.cpython-310-x86_64-linux-gnu.so
+0x00007f2a5148dc20  0x00007f2a514acda2  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/linalg/_umath_linalg.cpython-310-x86_64-linux-gnu.so
+0x00007f2a53858170  0x00007f2a5386aadf  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/fft/_pocketfft_internal.cpython-310-x86_64-linux-gnu.so
+0x00007f29621528f0  0x00007f29621aafd4  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/mtrand.cpython-310-x86_64-linux-gnu.so
+0x00007f2a514568f0  0x00007f2a514782cf  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/bit_generator.cpython-310-x86_64-linux-gnu.so
+0x00007f2a4a8fa830  0x00007f2a4a92b2ab  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/_common.cpython-310-x86_64-linux-gnu.so
+0x00007f29d71be840  0x00007f29d7202fdf  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/_bounded_integers.cpython-310-x86_64-linux-gnu.so
+0x00007f29d70915e0  0x00007f29d70a16d2  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/_mt19937.cpython-310-x86_64-linux-gnu.so
+0x00007f29d7079610  0x00007f29d708702c  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/_philox.cpython-310-x86_64-linux-gnu.so
+0x00007f29d705d600  0x00007f29d706e5eb  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/_pcg64.cpython-310-x86_64-linux-gnu.so
+0x00007f2a53447590  0x00007f2a5344f1ba  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/_sfc64.cpython-310-x86_64-linux-gnu.so
+0x00007f2924527c90  0x00007f29245a6f67  Yes (*)     /flagos/lib/python3.10/site-packages/numpy/random/_generator.cpython-310-x86_64-linux-gnu.so
+0x00007f2a538a9040  0x00007f2a538ed74f  Yes         /flagos/lib/python3.10/site-packages/flagcx/_C.cpython-310-x86_64-linux-gnu.so
+0x00007f29219f7750  0x00007f2921b830c5  Yes         /flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so
+0x00007f291fe3ea10  0x00007f291ffac1b5  Yes (*)     /usr/local/xccl_Linux_x86_64/so/libbkcl.so
+0x00007f292445d700  0x00007f29244969d0  Yes         /flagos/lib/python3.10/site-packages/regex/_regex.cpython-310-x86_64-linux-gnu.so
+0x00007f29bb042990  0x00007f29bb087bc7  Yes         /flagos/lib/python3.10/site-packages/yaml/_yaml.cpython-310-x86_64-linux-gnu.so
+0x00007f2968873090  0x00007f29688d852f  Yes         /flagos/lib/python3.10/site-packages/hyperparameter/librbackend.abi3.so
+0x00007f29d7036b60  0x00007f29d704fabb  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/op_deregister_C.so
+0x00007f291fbb1620  0x00007f291fbc3b8c  Yes         /flagos/lib/python3.10/site-packages/wcwidth/_wcwidth_c.abi3.so
+0x00007f291d629680  0x00007f291f4f4532  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/_XMLIRC.cpython-310-x86_64-linux-gnu.so
+0x00007f291d2801c0  0x00007f291d4b6bb2  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libxpytorch.so
+0x00007f291d0f3000  0x00007f291d1ec967  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libXMLIRRuntime.so
+0x00007f29731a75c0  0x00007f29731ed476  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libeager_fallback.so
+0x00007f290fc52190  0x00007f29149fc054  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libxdnn_pytorch.so
+0x00007f28eb4c9600  0x00007f28ef39cf05  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libxpu_blas.so
+0x00007f28e15f7270  0x00007f28e3da4aa5  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libxpu_dnn.so
+0x00007f28d743c800  0x00007f28daee518c  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libxpu_flash_attention.so
+0x00007f28d7089c10  0x00007f28d7141b10  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libomp.so
+0x00007f29620f3a80  0x00007f2962135752  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libxlog_adapter.so
+0x00007f28d6fce3f0  0x00007f28d6fdfb91  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libxpujitc.so
+0x00007f28d6a153f0  0x00007f28d6eb891a  Yes (*)     /flagos/lib/python3.10/site-packages/torch_xmlir/libxmlir_custom_ops.so
+0x00007f299dc1c6a0  0x00007f299dc42ad9  Yes (*)     /flagos/lib/python3.10/site-packages/hydrax/Hydra.cpython-310-x86_64-linux-gnu.so
+0x00007f298bcc7f60  0x00007f298bcf0204  Yes (*)     /flagos/lib/python3.10/site-packages/hydrax/libHydraXBF16.so
+0x00007f28d62e99b0  0x00007f28d63da9ad  Yes (*)     /flagos/lib/python3.10/site-packages/hydrax/libHydraOps.so
+0x00007f2a5388e500  0x00007f2a5388ffe0  Yes (*)     /flagos/lib/python3.10/site-packages/hydrax/libHydraCore.so
+0x00007f28adf365b0  0x00007f28b76d30c2  Yes (*)     /flagos/lib/python3.10/site-packages/hydrax/../torch_xmlir/libxpuapi.so
+0x00007f2a53885430  0x00007f2a53887501  Yes         /flagos/lib/python3.10/site-packages/psutil/_psutil_linux.abi3.so
+0x00007f2a5387e280  0x00007f2a5387f751  Yes         /flagos/lib/python3.10/site-packages/psutil/_psutil_posix.abi3.so
+0x00007f28a4cb0880  0x00007f28aa9fb6b4  Yes         /opt/flagtree/triton/_C/libtriton.so
+0x00007f289fe1bbd0  0x00007f289ff21b7c  Yes (*)     /usr/local/xcudart/lib/libxpunvidia-ml.so.1
+0x00007f2a53fdf080  0x00007f2a53fdf92c  Yes         /flagos/lib/python3.10/site-packages/markupsafe/_speedups.cpython-310-x86_64-linux-gnu.so
+0x00007f292fcc0c60  0x00007f292fceb65f  Yes (*)     /flagos/lib/python3.10/site-packages/zmq/backend/cython/_zmq.cpython-310-x86_64-linux-gnu.so
+0x00007f289d230e50  0x00007f289d2b9e44  Yes (*)     /flagos/lib/python3.10/site-packages/zmq/backend/cython/../../../pyzmq.libs/libzmq-82f916e6.so.5.2.5
+0x00007f289d0dfea0  0x00007f289d1f5383  Yes (*)     /flagos/lib/python3.10/site-packages/zmq/backend/cython/../../../pyzmq.libs/libsodium-1c6bac97.so.26.4.0
+0x00007f296208d9c0  0x00007f29620b568c  Yes         /flagos/lib/python3.10/site-packages/sqlalchemy/cyextension/collections.cpython-310-x86_64-linux-gnu.so
+0x00007f29bb0257a0  0x00007f29bb033810  Yes         /flagos/lib/python3.10/site-packages/sqlalchemy/cyextension/immutabledict.cpython-310-x86_64-linux-gnu.so
+0x00007f2a4a8e4740  0x00007f2a4a8efbcf  Yes         /flagos/lib/python3.10/site-packages/sqlalchemy/cyextension/processors.cpython-310-x86_64-linux-gnu.so
+0x00007f29bb0107a0  0x00007f29bb01aed5  Yes         /flagos/lib/python3.10/site-packages/sqlalchemy/cyextension/resultproxy.cpython-310-x86_64-linux-gnu.so
+0x00007f297317f780  0x00007f297318d519  Yes         /flagos/lib/python3.10/site-packages/sqlalchemy/cyextension/util.cpython-310-x86_64-linux-gnu.so
+0x00007f292fca0ac0  0x00007f292fcb00cd  Yes         /flagos/lib/python3.10/site-packages/greenlet/_greenlet.cpython-310-x86_64-linux-gnu.so
+0x00007f289842f220  0x00007f289842faa4  Yes (*)     /root/.triton/cache/IXY4FTWR3ASV4K5XXQWED7SGVUHDZO3IC53UP6TNVU6MPOEADX7A/xpu_utils.so
+0x00007f288c0b20c0  0x00007f288c0c6d40  Yes (*)     /rdma-lib/libibverbs.so
+0x00007f288c044450  0x00007f288c0814b1  Yes (*)     /rdma-lib/libnl-route-3.so.200
+0x00007f288c00d890  0x00007f288c01b7e1  Yes (*)     /rdma-lib/libnl-3.so.200
+0x00007f28842d5f90  0x00007f28842e9c12  Yes (*)     /rdma-lib/librdmacm.so.1
+0x00007f2884253240  0x00007f28842bcddc  Yes (*)     /rdma-lib/libmlx5.so.1
+(*): Shared library is missing debugging information.
+[Inferior 1 (process 150) detached]

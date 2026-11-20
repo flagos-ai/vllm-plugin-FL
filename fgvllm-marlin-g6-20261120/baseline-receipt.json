@@ -1,0 +1,226 @@
+{
+  "runtime": {
+    "event": "runtime",
+    "torch": "2.13.0+cu130",
+    "vllm": "0.32.0",
+    "triton": "3.6.0",
+    "kernel": "/probe/source/src/flaggems_vllm/ops/fused_marlin_moe.py",
+    "source_sha256": "beab14356ede698e7087131e20a7efa7affd70b5bd3fa4d5e8c2bd98adcbdb7c",
+    "shapes": [
+      [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ]
+    ],
+    "dtype": "bfloat16",
+    "tolerance": 0.04,
+    "warmup_ms": 10,
+    "rep_ms": 50,
+    "gate": 0.9,
+    "variant": "baseline"
+  },
+  "metric": "median of 3 interleaved native/gems 10ms warmup/50ms samples, original repo timer",
+  "data": [
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      "median_speedup": 1.1091211233696643
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 0.8078685500503847
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 0.3292296950101079
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 0.7587512647305269
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 1.0704547516455556
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 1.4665289874714587
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 1.6096102769501877
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      "median_speedup": 0.7707979826931066
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 0.5651397814910025
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 0.8370901767095559
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 0.9440243688899362
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 1.2964562951553882
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 1.5741388766579376
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_speedup": 1.4506089459559512
+    }
+  ],
+  "passed": 8,
+  "total": 14
+}

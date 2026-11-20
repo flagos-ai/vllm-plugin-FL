@@ -1,0 +1,113 @@
+{
+  "control": "vendorbkcl",
+  "native_pg": false,
+  "passed": false,
+  "roles": [
+    {
+      "role": 0,
+      "observations": [
+        {
+          "flagcx_package": "0.14.1+xre5.37.1",
+          "is_homo": {
+            "available": true,
+            "result": 0,
+            "value": 1
+          },
+          "libraries": [
+            {
+              "path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+              "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"
+            },
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"
+            }
+          ],
+          "plugin_imported": true,
+          "rank": 0,
+          "route": "direct"
+        },
+        {
+          "flagcx_package": "0.14.1+xre5.37.1",
+          "is_homo": {
+            "available": true,
+            "result": 0,
+            "value": 1
+          },
+          "libraries": [
+            {
+              "path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+              "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"
+            },
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"
+            }
+          ],
+          "plugin_imported": true,
+          "rank": 1,
+          "route": "direct"
+        }
+      ],
+      "completed_replays_each": 1,
+      "requested_replays_first_case": 12,
+      "second_case_reached": false,
+      "exit": 137,
+      "log_sha256": "57e0a5bf3f4939d9a2502788dd4bf56c796b9df670ae606cf20b7d2f84ff9aff",
+      "selected_cards_post_mib": 0
+    },
+    {
+      "role": 1,
+      "observations": [
+        {
+          "flagcx_package": "0.14.1+xre5.37.1",
+          "is_homo": {
+            "available": true,
+            "result": 0,
+            "value": 1
+          },
+          "libraries": [
+            {
+              "path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+              "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"
+            },
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"
+            }
+          ],
+          "plugin_imported": true,
+          "rank": 2,
+          "route": "direct"
+        },
+        {
+          "flagcx_package": "0.14.1+xre5.37.1",
+          "is_homo": {
+            "available": true,
+            "result": 0,
+            "value": 1
+          },
+          "libraries": [
+            {
+              "path": "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so",
+              "sha256": "8618fc37bd45f13f5726b7c5bea04c096828191e27fa95d8f9956c9a23cf3934"
+            },
+            {
+              "path": "/usr/local/xccl_Linux_x86_64/so/libbkcl.so",
+              "sha256": "069cc58b79a391a87d7a8dbd2fe73915b291f5e9670f93b3f1854ff069f9c2f2"
+            }
+          ],
+          "plugin_imported": true,
+          "rank": 3,
+          "route": "direct"
+        }
+      ],
+      "completed_replays_each": 1,
+      "requested_replays_first_case": 12,
+      "second_case_reached": false,
+      "exit": 137,
+      "log_sha256": "203cf3f453d96c96ecf0eb53d23b5dca5adcdd5c04fb657f99f2d2adbe93163b",
+      "selected_cards_post_mib": 0
+    }
+  ]
+}

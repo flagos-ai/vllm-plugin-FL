@@ -1,0 +1,89 @@
+{
+  "control": "ibgda",
+  "retained_graph_diagnostic": true,
+  "passed": false,
+  "roles": [
+    {
+      "role": 0,
+      "observations": [
+        {
+          "driver_api_version": 10020,
+          "node_count": 1,
+          "node_types": [
+            0
+          ],
+          "rank": 0,
+          "segment": 0,
+          "selected_env": {
+            "BKCL_ENABLE_IBGDA": "1",
+            "BKCL_ENABLE_XDR": null,
+            "BKCL_INFERENCE": null,
+            "BKCL_USE_RDMA": null
+          }
+        },
+        {
+          "driver_api_version": 10020,
+          "node_count": 1,
+          "node_types": [
+            0
+          ],
+          "rank": 1,
+          "segment": 0,
+          "selected_env": {
+            "BKCL_ENABLE_IBGDA": "1",
+            "BKCL_ENABLE_XDR": null,
+            "BKCL_INFERENCE": null,
+            "BKCL_USE_RDMA": null
+          }
+        }
+      ],
+      "kernel": "kl3_all_reduce_proxy<bfloat16>",
+      "completed_replays_each": 1,
+      "requested_replays_first_case": 12,
+      "second_case_reached": false,
+      "exit": 137,
+      "log_sha256": "c8f7532cdc8d5ab14e9cb9b792c8fb61f45c64101f949df45028889b978b0d7d"
+    },
+    {
+      "role": 1,
+      "observations": [
+        {
+          "driver_api_version": 10020,
+          "node_count": 1,
+          "node_types": [
+            0
+          ],
+          "rank": 2,
+          "segment": 0,
+          "selected_env": {
+            "BKCL_ENABLE_IBGDA": "1",
+            "BKCL_ENABLE_XDR": null,
+            "BKCL_INFERENCE": null,
+            "BKCL_USE_RDMA": null
+          }
+        },
+        {
+          "driver_api_version": 10020,
+          "node_count": 1,
+          "node_types": [
+            0
+          ],
+          "rank": 3,
+          "segment": 0,
+          "selected_env": {
+            "BKCL_ENABLE_IBGDA": "1",
+            "BKCL_ENABLE_XDR": null,
+            "BKCL_INFERENCE": null,
+            "BKCL_USE_RDMA": null
+          }
+        }
+      ],
+      "kernel": "kl3_all_reduce_proxy<bfloat16>",
+      "completed_replays_each": 1,
+      "requested_replays_first_case": 12,
+      "second_case_reached": false,
+      "exit": 137,
+      "log_sha256": "abf6e34c68b02aff1bde80aed9f4864deffaa403498fec3ede291c57bb6bd53d"
+    }
+  ]
+}

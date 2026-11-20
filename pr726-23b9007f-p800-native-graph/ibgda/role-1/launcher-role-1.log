@@ -1,0 +1,26 @@
+plugin-23b9007f.tar.gz: OK
+probe-graph-nodes.py: OK
+graph_observations.py: OK
+probe_observations.py: OK
+/data/pr726-e8-crosshost/native-ibgda-20261120/run-ibgda-probe.sh: line 83: 2497347 Killed                  timeout --signal=TERM --kill-after=15s 355s docker run --pull=never --rm --name "$name" --label "codex.flagcx729=$label" --network host --ipc host --device /dev/xpuctrl --device /dev/xpu4 --device /dev/xpu5 --device /dev/xdrdrv --device /dev/infiniband --ulimit memlock=-1 -v /etc/libibverbs.d:/etc/libibverbs.d:ro -v /usr/lib/x86_64-linux-gnu/libibverbs:/usr/lib/x86_64-linux-gnu/libibverbs:ro -v "$state/rdma-lib:/rdma-lib:ro" -v "$root:/probe:ro" -e CUDA_VISIBLE_DEVICES=0,1 -e "NODE_RANK=$role" -e "VLLM_HOST_IP=$address" -e "PROBE_ROUTE=$route" -e "REPLAY_STREAM=$mode" -e "MASTER_PORT=$port" --entrypoint /bin/bash "$image" -ec '
+        source /etc/bash_env.sh
+        unset BASH_ENV FLAGCX_PATH VLLM_USE_V2_MODEL_RUNNER VLLM_FL_FLAGOS_WHITELIST
+        unset VLLM_FL_FLAGOS_BLACKLIST VLLM_FL_FLAGOS_BLACKLIST_APPEND
+        export PATH=/flagos/bin:$PATH
+        export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"
+        export LD_LIBRARY_PATH=/rdma-lib:${LD_LIBRARY_PATH:-}
+        export VLLM_PLUGINS=fl GEMS_VENDOR=kunlunxin USE_FLAGGEMS=1
+        export GLOO_SOCKET_IFNAME=eth0 FLAGCX_SOCKET_IFNAME=eth0 BKCL_SOCKET_IFNAME=eth0
+        export BKCL_ENABLE_IBGDA=1
+        export FLAGCX_DEBUG=INFO BKCL_RDMA_NICS=bond0,bond1,bond2,bond3,bond4,bond5,bond6,bond7
+        export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1200 VLLM_COMPUTE_NANS_IN_LOGITS=1
+        if [[ "$PROBE_ROUTE" == direct ]]; then
+            mkdir -p /tmp/plugin
+            tar -xzf /probe/plugin-23b9007f.tar.gz -C /tmp/plugin
+            SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.dev0 python -m pip install --no-index --no-deps --no-build-isolation /tmp/plugin
+        fi
+        python -c "import torch; assert torch.cuda.device_count() == 2; assert [torch.cuda.get_device_properties(i).pci_bus_id for i in range(2)] == [132, 182]"
+        python -m torch.distributed.run --nnodes=2 --nproc-per-node=2 \
+            --node-rank "$NODE_RANK" --master-addr <MASTER_ADDR> --master-port "$MASTER_PORT" \
+            "/probe/probe-graph-nodes.py" --replay-stream "$REPLAY_STREAM"
+    ' > "$output.log" 2>&1
