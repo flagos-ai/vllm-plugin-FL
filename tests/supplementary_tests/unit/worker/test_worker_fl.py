@@ -264,6 +264,17 @@ class WorkerVllmTree:
                 FLASH_ATTN=object(), ROCM_AITER_FA=object(), TORCH_SDPA=object()
             ),
         )
+        # The iluvatar module-level patch calls find_spec on this name; the
+        # stub needs a __spec__ whose origin is a real readable file, or
+        # find_spec raises (missing parent chain / None __spec__). Pointing
+        # the origin at this test file is safe: the patch reads it, finds no
+        # chained-or to rewrite, and skips — exactly the graceful branch.
+        from importlib.util import spec_from_file_location
+
+        _helpers = self._put("vllm.v1.attention.ops.triton_attention_helpers")
+        _helpers.__spec__ = spec_from_file_location(
+            "vllm.v1.attention.ops.triton_attention_helpers", __file__
+        )
         self._put(
             "vllm.model_executor.layers.fused_moe",
             FusedMoEFactory=type("FusedMoEFactory", (), {}),

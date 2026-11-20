@@ -96,7 +96,11 @@ def fake_target_info(monkeypatch):
     The patch module imports ``triton.language.target_info`` inside
     ``apply_flagtree_target_info``, so pre-seeding ``sys.modules`` (and the
     parent package attribute) controls what it sees; teardown restores whatever
-    was there before.
+    was there before.  On hosts without real Triton the parent packages are
+    faked too — a statement like ``import triton.language.target_info`` still
+    imports every missing parent from disk, so seeding only the leaf would
+    fail on the missing ``triton`` package and the patch would report
+    Triton unavailable.
     """
     fake = FakeTargetInfo()
 
@@ -110,7 +114,13 @@ def fake_target_info(monkeypatch):
         saved_attr = getattr(real_parent, "target_info", None)
         monkeypatch.setitem(sys.modules, "triton.language.target_info", fake)
         real_parent.target_info = fake
-    else:  # pragma: no cover - triton always present in CI
+    else:  # pragma: no cover - CPU-only Windows hosts without triton
+        triton_pkg = ModuleType("triton")
+        triton_pkg.__path__ = []
+        language_pkg = ModuleType("triton.language")
+        language_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "triton", triton_pkg)
+        monkeypatch.setitem(sys.modules, "triton.language", language_pkg)
         monkeypatch.setitem(sys.modules, "triton.language.target_info", fake)
         saved_module = None
         saved_attr = None

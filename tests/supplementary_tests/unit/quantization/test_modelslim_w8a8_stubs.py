@@ -236,8 +236,16 @@ try:
 
     _REAL_VLLM = True
 except ImportError:  # pragma: no cover - exercised only without vllm
-    _ModelSlimVllmStubs()
+    _stubs = _ModelSlimVllmStubs()
     import vllm_fl.quantization.modelslim_w8a8 as module  # noqa: F811
+
+    # The module under test holds every vllm name it needs as attributes of
+    # its own namespace, so it stays fully functional after the stub tree is
+    # removed. Restoring is what makes the file order-independent: leaving
+    # the stubs installed keeps a fake "vllm" in sys.modules, so any later
+    # file's ``import vllm`` probe succeeds and files gated on HAS_VLLM
+    # import against stale partial stubs instead of skipping.
+    _stubs.restore()
 
     _REAL_VLLM = False
 

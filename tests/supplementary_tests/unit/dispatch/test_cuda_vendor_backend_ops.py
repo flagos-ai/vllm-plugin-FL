@@ -282,7 +282,16 @@ def _install_vllm_stubs(monkeypatch, vendor_name="nvidia"):
 
     fused_moe.invoke_fused_moe_triton_kernel = fake_invoke
 
-    leaf("vllm.triton_utils", triton=__import__("triton"))
+    # impl/fused_moe.py binds ``triton`` from this module at import time;
+    # the real package is GPU-only and absent on CPU-only Windows hosts. The
+    # bound surface actually used on this path is just ``triton.cdiv`` (the
+    # align-block-size math), so the fallback module provides it directly.
+    try:
+        _triton_ref = __import__("triton")
+    except ImportError:  # pragma: no cover - CPU-only Windows hosts
+        _triton_ref = ModuleType("triton")
+        _triton_ref.cdiv = lambda x, y: -(-x // y)
+    leaf("vllm.triton_utils", triton=_triton_ref)
     leaf(
         "vllm.utils.math_utils",
         round_up=lambda value, multiple: (value + multiple - 1) // multiple * multiple,

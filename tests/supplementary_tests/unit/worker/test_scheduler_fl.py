@@ -152,6 +152,9 @@ def scheduler_module(fl_sys_modules):
 class TestFallbackBranches:
     """Every guard clause must delegate to the base manager."""
 
+    # _MTPStructuredOutputManager.__init__ imports xgrammar unconditionally,
+    # so even the pure-delegation branches below need the package present.
+    @xgrammar_required
     def test_num_speculative_tokens_not_one_delegates(self, scheduler_module):
         """MTP != 1 skips the plugin batching path entirely."""
         base = _BaseManager(num_speculative_tokens=2)
@@ -160,6 +163,7 @@ class TestFallbackBranches:
         assert result == "BASE_RESULT"
         assert base.base_calls == [(("r1", "r2"), {})]
 
+    @xgrammar_required
     def test_single_request_delegates(self, scheduler_module):
         """A single structured request has no batching opportunity."""
         base = _BaseManager(num_speculative_tokens=1)
@@ -308,6 +312,7 @@ class TestNormalPath:
 class TestDelegation:
     """Attribute access proxies through to the wrapped base manager."""
 
+    @xgrammar_required
     def test_getattr_forwards_unknown_names(self, scheduler_module):
         """Unknown attributes resolve against the base manager."""
         base = _BaseManager(num_speculative_tokens=1)
