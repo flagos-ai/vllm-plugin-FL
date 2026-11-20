@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "platform": "nvidia",
+  "device": "a100",
+  "description": "Effective coverage scope for vllm-plugin-FL 0.5.0-dev on NVIDIA A100. Measurement scope is pyproject.toml [tool.coverage.run] (source=vllm_fl, unchanged); this file only drives REPORT-time filtering so baseline and combined numbers share one denominator.",
+  "measurement": {
+    "source": ["vllm_fl"],
+    "config": "pyproject.toml [tool.coverage.*]",
+    "note": "measurement scope never changes; only reporting is filtered"
+  },
+  "reporting_exclude": [
+    "vllm_fl/dispatch/backends/vendor/ascend/",
+    "vllm_fl/dispatch/backends/vendor/amd/",
+    "vllm_fl/dispatch/backends/vendor/gcu/",
+    "vllm_fl/dispatch/backends/vendor/iluvatar/",
+    "vllm_fl/dispatch/backends/vendor/kunlunxin/",
+    "vllm_fl/dispatch/backends/vendor/metax/",
+    "vllm_fl/dispatch/backends/vendor/musa/",
+    "vllm_fl/dispatch/backends/vendor/sunrise/",
+    "vllm_fl/dispatch/backends/vendor/template/",
+    "vllm_fl/dispatch/backends/vendor/thead/",
+    "vllm_fl/dispatch/backends/vendor/txda/"
+  ],
+  "vendor_includes": [
+    "vllm_fl/dispatch/backends/vendor/cuda/"
+  ],
+  "areas": {
+    "attention": "vllm_fl/attention/",
+    "compilation": "vllm_fl/compilation/",
+    "dispatch.core": "vllm_fl/dispatch/",
+    "dispatch.backends.flaggems": "vllm_fl/dispatch/backends/flaggems/",
+    "dispatch.backends.reference": "vllm_fl/dispatch/backends/reference/",
+    "dispatch.backends.vendor.cuda": "vllm_fl/dispatch/backends/vendor/cuda/",
+    "distributed": "vllm_fl/distributed/",
+    "kv_cache": "vllm_fl/kv_cache/",
+    "models": "vllm_fl/models/",
+    "ops": "vllm_fl/ops/",
+    "patches": "vllm_fl/patches/",
+    "quantization": "vllm_fl/quantization/",
+    "worker": "vllm_fl/worker/",
+    "toplevel": "vllm_fl/"
+  }
+}
