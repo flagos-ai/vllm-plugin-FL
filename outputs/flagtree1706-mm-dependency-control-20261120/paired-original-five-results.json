@@ -1,0 +1,886 @@
+{
+  "status": "LOCAL_DEPENDENCY_BLOCK_BEFORE_MM_NUMERICS",
+  "raw_archive_sha256": "569c1c524537f316d74518bb49e2971ab5896c6d6348c4bda4eee8bee98f5cf1",
+  "variants": {
+    "fc0": {
+      "compiler_source": "fc0ec83b8478231436bf293219ca9d90fe52e33b",
+      "core_sha256": "8a3d05127b3b29d66effdf54692b57610e20b5b397ac60e3d0bbbcf1fc767433",
+      "source": {
+        "source_commit": "a7620cc191a0b42e040194622c5758b22a7a25dc",
+        "blobs": 4780,
+        "original_source_exact_except_explicit_CI_conftest_overlay": true,
+        "conftest_sha256": "c10ce2bcdf74f09b21d82709f5f51328e1e541e29d30566a5d4b61a5b040985e"
+      },
+      "torch": "2.13.0+cu130",
+      "GPU_name": "NVIDIA H20-3e",
+      "cases": {
+        "tests/test_mm.py::test_mm[False-dtype2-1-1-32]": {
+          "result": {
+            "params": {
+              "b_column_major": false,
+              "dtype": "torch.bfloat16",
+              "M": 1,
+              "N": 1,
+              "K": 32
+            },
+            "result": "failed",
+            "opname": [
+              "mm"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [
+                1,
+                32
+              ],
+              "stride": [
+                32,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "e3f1e9704d4e6fdf7c9154879d52c904d03e456f20f6aa907cf76c7f712e12c9"
+            },
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "56386830a01dd63721efcf3bc034b484bfc31a35d79828814eed757d12a39a75"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "413a317253b3cbe3c335732f9af4e12c3a27e36a84e1277e0edc27221b6a1e56"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "f2b108eb8906dd883e39c3064163f7198334bb3343d5cacb6e6420ac4fb6f761"
+              }
+            ]
+          },
+          "launches": []
+        },
+        "tests/test_mm.py::test_mm_broadcast_stride_zero[dtype2]": {
+          "result": {
+            "params": {
+              "dtype": "torch.bfloat16"
+            },
+            "result": "failed",
+            "opname": [
+              "mm"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [],
+              "stride": [],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "0e78c53b37287378c3b829f4988dd6ea5fb813e7d8016091129feb61759b8e1e"
+            },
+            {
+              "shape": [
+                256,
+                256
+              ],
+              "stride": [
+                256,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 131072,
+              "sha256": "d0dd09718fd351dcffd7dd47ae28526206028603e43fc3180ef137b7cb760662"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "413a317253b3cbe3c335732f9af4e12c3a27e36a84e1277e0edc27221b6a1e56"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "fb92106b84bd735e2b02d88d09fc1f450aea06af484789d49aa8500362103e3d"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-1-launch-0.ttir",
+                  "bytes": 7530,
+                  "sha256": "b7c4e4253ddc1633b4ad6fb02979236df1ce57d86d79e68b0105d83a38b96797"
+                },
+                "ttgir": {
+                  "path": "case-1-launch-0.ttgir",
+                  "bytes": 8468,
+                  "sha256": "8e6dd844db34385eb6167e181a0fc1f7ec00d61a61c3b1060d919299733b6fa1"
+                },
+                "llir": {
+                  "path": "case-1-launch-0.llir",
+                  "bytes": 5785,
+                  "sha256": "60fa7f6811d139f3d18a1eda78e5e22d3dfa14011cda9e245e99c8e9f8ba6f03"
+                },
+                "ptx": {
+                  "path": "case-1-launch-0.ptx",
+                  "bytes": 11749,
+                  "sha256": "ba59764deec25d4ffef210b70cefb179708d81483ccc02916a97526a42fbb9c5"
+                },
+                "cubin": {
+                  "path": "case-1-launch-0.cubin",
+                  "bytes": 8216,
+                  "sha256": "425f879986b300827c1044f5751e5ede9d4ef3d14fc04dfd4d6ddb44fbd7d472"
+                }
+              },
+              "name": "_copy_kernel_kernel_rank_2",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-fc0/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "de7da65e14963faded801c70dc514354a5fbf680e276ebb1f04684b0c838082a",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "_copy_kernel_kernel_rank_2",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 0,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {}
+            }
+          ]
+        },
+        "tests/test_mm.py::test_mm_out_vllm_tma_column_major_weight": {
+          "result": {
+            "params": {},
+            "result": "failed",
+            "opname": [
+              "mm"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [
+                4096,
+                4096
+              ],
+              "stride": [
+                4096,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 33554432,
+              "sha256": "9dd09348375ff03dbb345ddbd476c3c920daae91b1b38214ed385e7b7c877383"
+            },
+            {
+              "shape": [
+                3328,
+                4096
+              ],
+              "stride": [
+                4096,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 27262976,
+              "sha256": "c7edebab4e8da7b63074454e575040ecf8aaacfb7d3dd0c135dd77778f3de6f8"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "9361df19a7dba8ecbaf3672d56a618df1e16228e53c82b716272ba93f2b48b9a"
+              }
+            ]
+          },
+          "launches": []
+        },
+        "tests/test_mm.py::test_mm_self_transpose[dtype2-1-32]": {
+          "result": {
+            "params": {
+              "dtype": "torch.bfloat16",
+              "M": 1,
+              "K": 32
+            },
+            "result": "failed",
+            "opname": [
+              "mm"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "0ca209ced48518b7f9386b4b40ffdb9e972209cdb41265ff8ce13b4c44a7f2f6"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "e44501a9d134006508a07061e66cd37974284b2d8f90e7da55dfe1bcf60ff6c3"
+              }
+            ]
+          },
+          "launches": []
+        },
+        "tests/test_mm.py::test_mm_out_self_transpose[dtype2-1-32]": {
+          "result": {
+            "params": {
+              "dtype": "torch.bfloat16",
+              "M": 1,
+              "K": 32
+            },
+            "result": "failed",
+            "opname": [
+              "mm_out"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "0ca209ced48518b7f9386b4b40ffdb9e972209cdb41265ff8ce13b4c44a7f2f6"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "f7548c023e431138b11357593f5cceb9dd35eb0b0a2041f0b1560212eeb6f13e"
+              }
+            ]
+          },
+          "launches": []
+        }
+      }
+    },
+    "6ed3": {
+      "compiler_source": "6ed3ec1307eb37c6f4f00f92c6018b15e1b4f1ee",
+      "core_sha256": "9026d97c42075b0c0125bfbedf6e375a1fa16bc65fa37de26eaae03add51db78",
+      "source": {
+        "source_commit": "a7620cc191a0b42e040194622c5758b22a7a25dc",
+        "blobs": 4780,
+        "original_source_exact_except_explicit_CI_conftest_overlay": true,
+        "conftest_sha256": "c10ce2bcdf74f09b21d82709f5f51328e1e541e29d30566a5d4b61a5b040985e"
+      },
+      "torch": "2.13.0+cu130",
+      "GPU_name": "NVIDIA H20-3e",
+      "cases": {
+        "tests/test_mm.py::test_mm[False-dtype2-1-1-32]": {
+          "result": {
+            "params": {
+              "b_column_major": false,
+              "dtype": "torch.bfloat16",
+              "M": 1,
+              "N": 1,
+              "K": 32
+            },
+            "result": "failed",
+            "opname": [
+              "mm"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [
+                1,
+                32
+              ],
+              "stride": [
+                32,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "e3f1e9704d4e6fdf7c9154879d52c904d03e456f20f6aa907cf76c7f712e12c9"
+            },
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "56386830a01dd63721efcf3bc034b484bfc31a35d79828814eed757d12a39a75"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "413a317253b3cbe3c335732f9af4e12c3a27e36a84e1277e0edc27221b6a1e56"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "f2b108eb8906dd883e39c3064163f7198334bb3343d5cacb6e6420ac4fb6f761"
+              }
+            ]
+          },
+          "launches": []
+        },
+        "tests/test_mm.py::test_mm_broadcast_stride_zero[dtype2]": {
+          "result": {
+            "params": {
+              "dtype": "torch.bfloat16"
+            },
+            "result": "failed",
+            "opname": [
+              "mm"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [],
+              "stride": [],
+              "dtype": "torch.bfloat16",
+              "bytes": 2,
+              "sha256": "0e78c53b37287378c3b829f4988dd6ea5fb813e7d8016091129feb61759b8e1e"
+            },
+            {
+              "shape": [
+                256,
+                256
+              ],
+              "stride": [
+                256,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 131072,
+              "sha256": "d0dd09718fd351dcffd7dd47ae28526206028603e43fc3180ef137b7cb760662"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "413a317253b3cbe3c335732f9af4e12c3a27e36a84e1277e0edc27221b6a1e56"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "fb92106b84bd735e2b02d88d09fc1f450aea06af484789d49aa8500362103e3d"
+              }
+            ]
+          },
+          "launches": [
+            {
+              "actual_original_LibEntry_returned": true,
+              "files": {
+                "ttir": {
+                  "path": "case-1-launch-0.ttir",
+                  "bytes": 7545,
+                  "sha256": "c2dd4f9de349379fd90f7587a4d4afc413d4eceb554469219613ef7b854d74a5"
+                },
+                "ttgir": {
+                  "path": "case-1-launch-0.ttgir",
+                  "bytes": 8483,
+                  "sha256": "2bb340561d5c282bca06541d9de37617f9e30248ed42103bb0f90bb7ae2a69a5"
+                },
+                "llir": {
+                  "path": "case-1-launch-0.llir",
+                  "bytes": 5787,
+                  "sha256": "6fa3825cf00744993ab7d97d5edd8c1ea9305470427e0effda728807cab419db"
+                },
+                "ptx": {
+                  "path": "case-1-launch-0.ptx",
+                  "bytes": 11759,
+                  "sha256": "b6edcc8f25cb673ceb5269b668264d6693e02c8440b6d07afdf95b5884054f0c"
+                },
+                "cubin": {
+                  "path": "case-1-launch-0.cubin",
+                  "bytes": 8216,
+                  "sha256": "f2849d5c12b73981ad6e7be6e35957153444abf75cf6c9c3f94fddab9aaf52f6"
+                }
+              },
+              "name": "_copy_kernel_kernel_rank_2",
+              "metadata": {
+                "allowed_dot_input_precisions": [
+                  "tf32",
+                  "tf32x3",
+                  "ieee",
+                  "bf16x3",
+                  "bf16x6"
+                ],
+                "arch": "sm90",
+                "backend_name": "cuda",
+                "cluster_dims": [
+                  1,
+                  1,
+                  1
+                ],
+                "debug": false,
+                "default_dot_input_precision": "tf32",
+                "deprecated_fp8_dot_operand_dtypes": [
+                  "fp8e4b15"
+                ],
+                "enable_fp_fusion": true,
+                "enable_reflect_ftz": true,
+                "extern_libs": [
+                  [
+                    "libdevice",
+                    "/compiler-6ed3/triton/backends/nvidia/lib/libdevice.10.bc"
+                  ],
+                  [
+                    "libflagcx",
+                    "/flagcx-dependency/flagcx/lib/libflagcx_device.bc"
+                  ]
+                ],
+                "global_scratch_align": 1,
+                "global_scratch_size": 0,
+                "hash": "aa1bb51d4c90db7a1a98e226e9c63dba8811f28186718bc0acfeaaee77ae3b56",
+                "instrumentation_mode": "",
+                "ir_override": null,
+                "kernel_init_hooks": [],
+                "launch_cooperative_grid": false,
+                "launch_pdl": false,
+                "max_num_imprecise_acc_default": 1073741824,
+                "maxnreg": null,
+                "name": "_copy_kernel_kernel_rank_2",
+                "num_ctas": 1,
+                "num_stages": 3,
+                "num_warps": 4,
+                "pipeline_hoist_copy": true,
+                "pipeline_index_prefetch": true,
+                "pipeline_merge_loads": "all",
+                "pipeline_wgmma_carry": true,
+                "pipeline_wgmma_carry_applied": false,
+                "profile_scratch_align": 1,
+                "profile_scratch_size": 0,
+                "ptx_options": null,
+                "ptx_version": null,
+                "ptxas_spill_load_bytes": 0,
+                "ptxas_spill_store_bytes": 0,
+                "ptxas_stack_frame_bytes": 0,
+                "sanitize_overflow": true,
+                "shared": 0,
+                "supported_fp8_dtypes": [
+                  "fp8e4b15",
+                  "fp8e4nv",
+                  "fp8e5"
+                ],
+                "target": "GPUTarget(backend='cuda', arch=90, warp_size=32)",
+                "tensordesc_meta": [],
+                "tle_node_buffer_bindings": "",
+                "tmem_size": 0,
+                "triton_version": "3.6.0",
+                "warp_size": 32
+              },
+              "constexprs": {}
+            }
+          ]
+        },
+        "tests/test_mm.py::test_mm_out_vllm_tma_column_major_weight": {
+          "result": {
+            "params": {},
+            "result": "failed",
+            "opname": [
+              "mm"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [
+                4096,
+                4096
+              ],
+              "stride": [
+                4096,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 33554432,
+              "sha256": "9dd09348375ff03dbb345ddbd476c3c920daae91b1b38214ed385e7b7c877383"
+            },
+            {
+              "shape": [
+                3328,
+                4096
+              ],
+              "stride": [
+                4096,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 27262976,
+              "sha256": "c7edebab4e8da7b63074454e575040ecf8aaacfb7d3dd0c135dd77778f3de6f8"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "9361df19a7dba8ecbaf3672d56a618df1e16228e53c82b716272ba93f2b48b9a"
+              }
+            ]
+          },
+          "launches": []
+        },
+        "tests/test_mm.py::test_mm_self_transpose[dtype2-1-32]": {
+          "result": {
+            "params": {
+              "dtype": "torch.bfloat16",
+              "M": 1,
+              "K": 32
+            },
+            "result": "failed",
+            "opname": [
+              "mm"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "0ca209ced48518b7f9386b4b40ffdb9e972209cdb41265ff8ce13b4c44a7f2f6"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "e44501a9d134006508a07061e66cd37974284b2d8f90e7da55dfe1bcf60ff6c3"
+              }
+            ]
+          },
+          "launches": []
+        },
+        "tests/test_mm.py::test_mm_out_self_transpose[dtype2-1-32]": {
+          "result": {
+            "params": {
+              "dtype": "torch.bfloat16",
+              "M": 1,
+              "K": 32
+            },
+            "result": "failed",
+            "opname": [
+              "mm_out"
+            ],
+            "reason": "triton.flagtune.runtime.errors.ModelSourceError: FlagTuneDependencyError: FlagTune model loading requires optional dependency 'xgboost' (failed to import 'xgboost'); install FlagTree with the 'flagtune' extra"
+          },
+          "input_fingerprints": [
+            {
+              "shape": [
+                32,
+                1
+              ],
+              "stride": [
+                1,
+                1
+              ],
+              "dtype": "torch.bfloat16",
+              "bytes": 64,
+              "sha256": "0ca209ced48518b7f9386b4b40ffdb9e972209cdb41265ff8ce13b4c44a7f2f6"
+            }
+          ],
+          "rng_before": {
+            "cpu": {
+              "shape": [
+                5056
+              ],
+              "stride": [
+                1
+              ],
+              "dtype": "torch.uint8",
+              "bytes": 5056,
+              "sha256": "1ccf17250133dec5e96478acd63e13d728d0dbbabb30389415a302c6f872f81f"
+            },
+            "cuda": [
+              {
+                "shape": [
+                  16
+                ],
+                "stride": [
+                  1
+                ],
+                "dtype": "torch.uint8",
+                "bytes": 16,
+                "sha256": "f7548c023e431138b11357593f5cceb9dd35eb0b0a2041f0b1560212eeb6f13e"
+              }
+            ]
+          },
+          "launches": []
+        }
+      }
+    }
+  },
+  "same_inputs_and_initial_rng": true,
+  "original_aggregate_status": {
+    "status": "INCOMPLETE_OR_HARNESS_INVALID",
+    "error": "AssertionError('Actual model artifact/cache identity differs; no pure compiler control claim')",
+    "CI_fixed_claimed": false,
+    "full_600_Gate_claimed": false,
+    "performance_Gate_claimed": false
+  },
+  "manifest_payload_sha256": "f5cb4ea820a5cc4d647d569465846d246049da60a51e65a4e09eb06f5ac2dbf0",
+  "manifest_meta_raw": [
+    {
+      "fetched_at": 1795178970.915333,
+      "source": "remote",
+      "source_url": "https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/flagtune-xgb-manifest-v1.0.0.tar.gz"
+    },
+    {
+      "fetched_at": 1795178992.0461962,
+      "source": "remote",
+      "source_url": "https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/flagtune-xgb-manifest-v1.0.0.tar.gz"
+    }
+  ],
+  "exact_owned_container_absent": true,
+  "CI_same_cause_proven": false,
+  "full_600_or_performance_Gate_passed": false
+}

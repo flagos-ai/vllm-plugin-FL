@@ -1,0 +1,108 @@
+{
+  "status": "OFFICIAL_FLAGTUNE_EXTRAS_ISOLATED_CPU_PASS",
+  "GPU_device_nodes": [],
+  "Torch_imported": false,
+  "imports": {
+    "numpy": {
+      "path": "/task/prefix-official/numpy/__init__.py",
+      "version": "1.26.4"
+    },
+    "scipy": {
+      "path": "/task/prefix-official/scipy/__init__.py",
+      "version": "1.17.1"
+    },
+    "sklearn": {
+      "path": "/task/prefix-official/sklearn/__init__.py",
+      "version": "1.9.1"
+    },
+    "xgboost": {
+      "path": "/task/prefix-official/xgboost/__init__.py",
+      "version": "3.3.0"
+    },
+    "yaml": {
+      "path": "/task/prefix-official/yaml/__init__.py",
+      "version": "6.0.3"
+    }
+  },
+  "wheels": {
+    "cloudpickle": {
+      "version": "3.1.3",
+      "filename": "cloudpickle-3.1.3-py3-none-any.whl",
+      "sha256": "1654f4f18e416447210a63c5c25a135d65a292156aa5fa519dfa4baf7726dddb",
+      "bytes": 22399
+    },
+    "joblib": {
+      "version": "1.6.0",
+      "filename": "joblib-1.6.0-py3-none-any.whl",
+      "sha256": "3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba",
+      "bytes": 306115
+    },
+    "narwhals": {
+      "version": "2.29.0",
+      "filename": "narwhals-2.29.0-py3-none-any.whl",
+      "sha256": "1c69b3dc30240f6e848c5a673cafc86affa44184ecce721e25b7194663ad10dc",
+      "bytes": 501718
+    },
+    "numpy": {
+      "version": "1.26.4",
+      "filename": "numpy-1.26.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "675d61ffbfa78604709862923189bad94014bef562cc35cf61d3a07bba02a7ed",
+      "bytes": 17950613
+    },
+    "nvidia-nccl-cu12": {
+      "version": "2.32.6",
+      "filename": "nvidia_nccl_cu12-2.32.6-py3-none-manylinux_2_27_x86_64.whl",
+      "sha256": "2a6e6d5ddfc08970eca872be3dfa2650b24fa10a2043974465a9cae9c64ed6d8",
+      "bytes": 336541086
+    },
+    "PyYAML": {
+      "version": "6.0.3",
+      "filename": "pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc",
+      "bytes": 807870
+    },
+    "scikit-learn": {
+      "version": "1.9.1",
+      "filename": "scikit_learn-1.9.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "e5d7b18a5b9dca241a74695f3275fa4c895a9dadc72b3d8df5fa9d1083c9b83e",
+      "bytes": 9166043
+    },
+    "scipy": {
+      "version": "1.17.1",
+      "filename": "scipy-1.17.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "02ae3b274fde71c5e92ac4d54bc06c42d80e399fec704383dcd99b301df37458",
+      "bytes": 35235890
+    },
+    "threadpoolctl": {
+      "version": "3.8.0",
+      "filename": "threadpoolctl-3.8.0-py3-none-any.whl",
+      "sha256": "f1b49c82704d50f13ffae019c727b0fa4f6791a58f48f06a09c45face1be66da",
+      "bytes": 32091
+    },
+    "xgboost": {
+      "version": "3.3.0",
+      "filename": "xgboost-3.3.0-py3-none-manylinux_2_28_x86_64.whl",
+      "sha256": "f59edaf28eccd1c519788607c72ed907ee6cedfa933d706620bc1612d24b354e",
+      "bytes": 98716607
+    }
+  },
+  "official_four_direct_requirements_unchanged": [
+    "numpy>=1.26.4,<2.0",
+    "PyYAML>=6.0",
+    "scikit-learn>=1.4,<2.0",
+    "xgboost==3.3.0"
+  ],
+  "production_image_or_compiler_or_venv_modified": false,
+  "GPU_Gate_run": false,
+  "installed_RECORD_hashed_entries_verified": 3733,
+  "normal_pip_target_entrypoint_relocations": [
+    {
+      "record": "numpy-1.26.4.dist-info",
+      "original_RECORD_relative_path": "../../bin/f2py",
+      "actual_target_path": "/task/prefix-official/bin/f2py",
+      "source_RECORD_modified": false
+    }
+  ],
+  "full_receipt_sha256": "c31458926289041b3070c3a5c910ccd1da3ea55116e011b1531bb62f45a95da5",
+  "image_wide_dependency_consistency_claimed": false
+}
