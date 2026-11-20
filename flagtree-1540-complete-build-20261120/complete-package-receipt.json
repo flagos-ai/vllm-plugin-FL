@@ -1,0 +1,36 @@
+{
+  "status": "PACKAGING_COMPLETE_GPU_GATE_PENDING",
+  "original_wheel_preserved": "/task/wheels/flagtree-0.7.0+git6ed3ec13-cp312-cp312-linux_x86_64.whl",
+  "original_wheel_sha256": "302f4b5babdf0ce902eb1e4e6de27be5eb9ab30734d07d82c6a3df575a2d64cf",
+  "original_wheel_bytes": 349697223,
+  "complete_wheel": "/task/wheels-complete/flagtree-0.7.0+git6ed3ec13-1-cp312-cp312-linux_x86_64.whl",
+  "complete_wheel_sha256": "fe97e2d3931a583e27e9d907866c5a055d26989568ab73d6467d11d21db8049c",
+  "complete_wheel_bytes": 407551897,
+  "complete_prefix": "/task/compiler-complete",
+  "source_merge": "6ed3ec1307eb37c6f4f00f92c6018b15e1b4f1ee",
+  "source_tree": "11ad7f04bdae38cfc3e195f717c850ae91fc90d7",
+  "libtriton_sha256": "9026d97c42075b0c0125bfbedf6e375a1fa16bc65fa37de26eaae03add51db78",
+  "unchanged_original_py_and_so_files": 337,
+  "wheel_build_tag": 1,
+  "baseline_asset_file_count": 173,
+  "baseline_asset_bytes": 213086900,
+  "asset_hashes_verified": true,
+  "wheel_RECORD_hashes_verified": true,
+  "tool_versions": {
+    "ptxas": "ptxas: NVIDIA (R) Ptx optimizing assembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:21:21_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+    "ptxas-blackwell": "ptxas-blackwell: NVIDIA (R) Ptx optimizing assembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Tue_May_27_02:18:05_PDT_2025\nCuda compilation tools, release 12.9, V12.9.86\nBuild cuda_12.9.r12.9/compiler.36037853_0",
+    "cuobjdump": "cuobjdump: NVIDIA (R) fat binary listing tool\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Jan__3_19:19:51_PST_2025\nCuda compilation tools, release 12.8, V12.8.55\nBuild cuda_12.8.r12.8/compiler.35351055_0",
+    "nvdisasm": "nvdisasm: NVIDIA (R) CUDA disassembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Jan__3_19:13:46_PST_2025\nCuda compilation tools, release 12.8, V12.8.55\nBuild cuda_12.8.r12.8/compiler.35351055_0"
+  },
+  "repo_toolchain_pins": {
+    "ptxas-blackwell": "12.9.86",
+    "ptxas": "12.8.93",
+    "cuobjdump": "12.8.55",
+    "nvdisasm": "12.8.55",
+    "cudacrt": "12.8.61",
+    "cudart": "12.8.57",
+    "cupti": "12.8.90"
+  },
+  "root_cause": "Build supplied external TRITON_* CUDA paths; setup.py:download_and_copy returns before copying assets into the wheel when that variable exists. Missing bin/include/lib/cupti account for part of the initial349MB vs CI395MB difference; LLVM toolchain difference alone was not sufficient explanation.",
+  "gpu_gate_run_by_this_packaging_task": false
+}

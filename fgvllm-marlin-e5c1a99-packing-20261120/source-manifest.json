@@ -1,0 +1,9 @@
+{
+  "base": "11622d72e3a13a4ccd6752444cf80feba5df94dc",
+  "diff_sha256": "6b3aec4dcfdccac65326816ddb89b58cb27c67dd1ef937ca9dc975294c4d864e",
+  "modified_file_sha256": {
+    "src/flaggems_vllm/ops/fused_marlin_moe.py": "8332eb9ec26c1a3b8c06d23d409e50b101b8719ba8c7ad8d266037e9a3f3f43d",
+    "tests/test_fused_marlin_moe.py": "a6ac3a4559d3bcd1bffa0757ac42cefba3c9e2ff44de2bf48bbcc39b85ca53f5"
+  },
+  "source_tar_sha256": "983da3c37727f8d6169511d571fcfb35d70cf5337ba5584fcfb2371948b94b02"
+}

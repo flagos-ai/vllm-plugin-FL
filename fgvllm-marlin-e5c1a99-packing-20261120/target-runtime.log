@@ -1,0 +1,15 @@
+[Note] No specialized fused operators were found for the nvidia, generic fused operators will be used by default.
+{
+  "torch": "2.13.0+cu130",
+  "vllm": "0.32.0",
+  "triton": "3.6.0",
+  "triton_path": "/compiler/triton/__init__.py",
+  "tle": true,
+  "source": "/candidate/src/flaggems_vllm/ops/fused_marlin_moe.py",
+  "source_sha256": "8332eb9ec26c1a3b8c06d23d409e50b101b8719ba8c7ad8d266037e9a3f3f43d",
+  "gpu": "NVIDIA H20-3e",
+  "capability": [
+    9,
+    0
+  ]
+}

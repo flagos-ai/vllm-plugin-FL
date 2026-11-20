@@ -1,0 +1,12 @@
+{
+  "build-manifest.json": "1f3a30595357ccb462068483dcd4552ea9ee649e263df789c7f8d0692706d8a0",
+  "compiler-abi-receipt.json": "28a6cb9be0df94960170e0d1d491764f0117418a67a7a969c6d0347e89c23f99",
+  "compiler-handoff.md": "e226e9429a62023b48a082c7036c9329e6d7bfc26b62d4dcfe7a0b8c198b98a6",
+  "compiler1540-all11-stage3-receipt.json": "c4d151729e60735386286140ff008b2df8752c135a9fee89aa38ec31e1c084e4",
+  "complete-package-receipt.json": "7072482cdfaa4e1c18f96290acd4ac304e488a447d1427a56bf15030ee568b25",
+  "complete1540-functional-driver.log": "3a6426181bc9b81cd9ee3b6f8d72e873ab1c943db62442dafb3ba18620a2b32b",
+  "complete1540-functional.log": "6465921e0773942b631c55a1d0509a33e339f413e40263fb1b08fe6fee09c3fb",
+  "complete1540-functional.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "cuda-asset-records.json": "74daa1101bfef0b28bbca05105dc450aa3ffd2829d57ac1f59aaae37fb8c931f",
+  "README.md": "1660a3d1f184ca48609223bb021484eaafde1e28dbc7262c92a9f3d5ae34e60f"
+}

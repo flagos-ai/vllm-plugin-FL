@@ -1,0 +1,137 @@
+{
+  "purpose": "Isolated exact merged-source compiler rebuild for FlagTree PR1540; not a GPU Gate result",
+  "source": {
+    "repository": "https://github.com/flagos-ai/FlagTree",
+    "pr": 1540,
+    "head": "c0e8d152cde3194ce4a4c09fe3596abf7e36535b",
+    "base": "0fc46ad4657a77cec5311b4fdb72c025429eaa34",
+    "merge": "6ed3ec1307eb37c6f4f00f92c6018b15e1b4f1ee",
+    "tree": "11ad7f04bdae38cfc3e195f717c850ae91fc90d7",
+    "method": "GitHub source archive uploaded to owned remote directory; tracked tree exactly reconstructed; original signed merge commit object restored byte-for-byte and verified by Git object SHA. Parent history is a declared shallow boundary.",
+    "github_api_signature_verification": {
+      "verified": true,
+      "reason": "valid",
+      "verified_at": "2026-11-18T09:55:28Z"
+    },
+    "local_gpg_signature_verification_run": false,
+    "source_patches": [],
+    "archive_sha256": "466bfd9136838836c21e964f4e00717c9e6f7cd10b2e75171b24ab7dfa745ad4",
+    "archive_bytes": 25240265,
+    "flagcx_source_dependency": "c93438decaba8d935e7aa6ae8377e56fd3910b32",
+    "flagcx_source_archive_sha256": "22b59b5e9927002c3380d884001c519d75ca20c457654b82d6d3621b841fb13b"
+  },
+  "build": {
+    "remote_root": "/data/codex/flagtree-1540-20261120",
+    "isolation": "Owned task directory, runc CPU-only container, original compiler and deps read-only; no original venv or host-driver modifications",
+    "image_config_id": "sha256:bd8a5d7a8774800c92d714c0c226b32c1863f929150f36efd610aebcd12a335d",
+    "image_repo_digest": "vllm/vllm-openai@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34",
+    "python": "3.12.3",
+    "gcc": "13.3.0",
+    "llvm_version": "22.0.0git",
+    "llvm_source_pin": "f6ded0be897e2878612dd903f7e8bb85448269e5",
+    "llvm_official_url": "https://oaitriton.blob.core.windows.net/public/llvm-builds/llvm-f6ded0be-ubuntu-x64.tar.gz",
+    "llvm_archive_sha256": "7c1a2eb0a80c216f7e44e436e2293cd94bdaded31c1710013b8a4753995227f3",
+    "llvm_archive_bytes": 1234838471,
+    "llvm_etag": "0x8DDFCE8129A1070",
+    "googletest_version": "1.17.0",
+    "googletest_archive_sha256": "90d6ecfe2b69639593ed80fc13aaa0ebc7f751b1dbb554fe9a9f3d3aea685321",
+    "cmake_completed_targets": 560,
+    "cmake_total_targets": 560,
+    "start_utc": "2026-11-20T01:49:07Z",
+    "end_utc": "2026-11-20T01:53:07Z",
+    "cpu_build_complete": true,
+    "rebuilt_from_exact_source_not_ci_original_bytes": true,
+    "ci_toolchain_difference": "Original CI used /usr/local/lib/python3.12/dist-packages/mlir/llvm_artifact. This rebuild uses repository-declared f6ded0be official LLVM dev package; therefore original CI wheel size/hash differ.",
+    "dependency_binary_inputs": "Bundled libflagcx.so/libflagcx_device.bc and NVIDIA assembler/disassembler tools reused read-only from baseline compiler; input hashes recorded in logs/readonly-baseline-inputs.sha256.",
+    "cmake_build_type": "TritonRelBuildWithAsserts",
+    "codegen_backends": [
+      "nvidia",
+      "amd"
+    ],
+    "unit_test_targets_built": true,
+    "final_tracked_diff_empty": true,
+    "raw_first_build_container_status": "Nonzero after successful wheel/install because the first CPU-only ABI invocation omitted the original external CUDA13 FlagCX and driver-library mounts. No compiler rebuild/source change was needed; final explicit mounts passed."
+  },
+  "artifact": {
+    "compiler_prefix": "/data/codex/flagtree-1540-20261120/compiler-complete",
+    "libtriton_sha256": "9026d97c42075b0c0125bfbedf6e375a1fa16bc65fa37de26eaae03add51db78",
+    "ci_original_wheel_sha256": "afb849ff9af4251b56dbee3486967946e30ac4589d4c01721a899bfdd6866da0",
+    "ci_original_wheel_bytes": 395691698,
+    "initial_wheel": "/data/codex/flagtree-1540-20261120/wheels/flagtree-0.7.0+git6ed3ec13-cp312-cp312-linux_x86_64.whl",
+    "initial_wheel_sha256": "302f4b5babdf0ce902eb1e4e6de27be5eb9ab30734d07d82c6a3df575a2d64cf",
+    "initial_wheel_bytes": 349697223,
+    "wheel": "/data/codex/flagtree-1540-20261120/wheels-complete/flagtree-0.7.0+git6ed3ec13-1-cp312-cp312-linux_x86_64.whl",
+    "wheel_sha256": "fe97e2d3931a583e27e9d907866c5a055d26989568ab73d6467d11d21db8049c",
+    "wheel_bytes": 407551897,
+    "wheel_build_tag": 1
+  },
+  "verification": {
+    "cpu_import_abi": "PASS_COMPLETE_PREFIX",
+    "abi_receipt": "compiler-abi-receipt.json",
+    "flagtree": "0.7.0+git6ed3ec13",
+    "triton": "3.6.0",
+    "tle": true,
+    "torch": "2.13.0+cu130",
+    "vllm": "0.32.0",
+    "torch_cxx11_abi": true,
+    "actual_runtime_external_flagcx_sha256": "c768f5fa077c6d932eb23542131bc3a5ae436b0beebb96bac9581aed58279b48",
+    "flagcx_runtime_requirement": "Use original external CUDA13 FlagCX package before bundled legacy CUDA12 fallback; import torch first. No collective extension ABI qualification is claimed.",
+    "cpu_abi_environment": "runc with no GPU devices; host libcuda/NVML libraries bind-mounted read-only solely to load TLE dependencies",
+    "source_mlir_regressions": {
+      "status": "PASS",
+      "discovered": 141,
+      "selected": 10,
+      "passed": 10,
+      "excluded_by_filter": 131,
+      "unsupported": 0,
+      "failed": 0,
+      "skipped": 0,
+      "runtime_seconds": 0.12,
+      "runner": "lit23.1.6, normal LIT_USE_INTERNAL_SHELL=1, j2; unchanged source config"
+    },
+    "gpu_numerical_gate_run": false,
+    "gpu_performance_gate_run": false,
+    "no_claim": "Compiler build/CPU ABI pass does not establish MHC or Marlin G5/G6 pass",
+    "final_owned_build_containers_running": false,
+    "default_tools_without_external_asset_overrides": "PASS",
+    "packaging_install_retry": "First installation exceeded the explicitly bounded1GB container tmpfs; host volume had11TB free. Reused the same build1wheel with task-owned disk TMPDIR; no recompile or repack, no existing prefix overwritten."
+  },
+  "initial_artifact_correction": {
+    "status": "INCOMPLETE_CUDA_RUNTIME_ASSETS",
+    "cpu_abi_pass_did_not_establish_gpu_compilation_readiness": true,
+    "missing": [
+      "triton/backends/nvidia/bin",
+      "triton/backends/nvidia/include",
+      "triton/backends/nvidia/lib/cupti"
+    ],
+    "cause": "Explicit external TRITON_* asset env values made setup.py download_and_copy return before copying into wheel package_data.",
+    "initial_size_difference_explanation_corrected": "Missing CUDA assets contributed to349MB vs originalCI395MB; LLVM dependency differences alone were not a valid complete explanation.",
+    "initial_wheel_and_prefix_preserved": true,
+    "old_evidence_zip_sha256": "ecb40cd6eccc6a71d27775d361dd839831ea7f7208cc34afe0f0f369463cbba1"
+  },
+  "cuda_assets": {
+    "source_prefix": "/data/codex/flaggems-vllm-h20-marlin-0d86ec1/source/.venv/lib/python3.12/site-packages/triton/backends/nvidia",
+    "file_count": 173,
+    "bytes": 213086900,
+    "all_copied_hashes_verified": true,
+    "inventory": "cuda-asset-records.json",
+    "tool_versions": {
+      "ptxas": "ptxas: NVIDIA (R) Ptx optimizing assembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:21:21_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+      "ptxas-blackwell": "ptxas-blackwell: NVIDIA (R) Ptx optimizing assembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Tue_May_27_02:18:05_PDT_2025\nCuda compilation tools, release 12.9, V12.9.86\nBuild cuda_12.9.r12.9/compiler.36037853_0",
+      "cuobjdump": "cuobjdump: NVIDIA (R) fat binary listing tool\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Jan__3_19:19:51_PST_2025\nCuda compilation tools, release 12.8, V12.8.55\nBuild cuda_12.8.r12.8/compiler.35351055_0",
+      "nvdisasm": "nvdisasm: NVIDIA (R) CUDA disassembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Jan__3_19:13:46_PST_2025\nCuda compilation tools, release 12.8, V12.8.55\nBuild cuda_12.8.r12.8/compiler.35351055_0"
+    },
+    "repo_toolchain_pins": {
+      "ptxas-blackwell": "12.9.86",
+      "ptxas": "12.8.93",
+      "cuobjdump": "12.8.55",
+      "nvdisasm": "12.8.55",
+      "cudacrt": "12.8.61",
+      "cudart": "12.8.57",
+      "cupti": "12.8.90"
+    },
+    "original_python_and_core_so_unchanged": 337,
+    "complete_wheel_RECORD_verified": true,
+    "no_source_rebuild": true
+  }
+}

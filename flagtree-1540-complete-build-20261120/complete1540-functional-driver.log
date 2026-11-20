@@ -1,0 +1,10 @@
+[Note] No specialized fused operators were found for the nvidia, generic fused operators will be used by default.
+{"torch": "2.13.0+cu130", "triton": "3.6.0", "vllm": "0.32.0", "compiler": "/compiler1540/triton/__init__.py", "core_sha256": "9026d97c42075b0c0125bfbedf6e375a1fa16bc65fa37de26eaae03add51db78", "source": "/probe/candidate-small-hopper/src/flaggems_vllm/ops/fused_marlin_moe.py"}
+    from cutlass.base_dsl.arch import Arch
+
+../../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: 14 warnings
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+279 passed, 176 skipped, 31 warnings in 628.85s (0:10:28)

@@ -1,0 +1,1213 @@
+[
+  {
+    "path": "triton/backends/nvidia/bin/cuobjdump",
+    "bytes": 569008,
+    "sha256": "ad1d0f0699f46603416eb58e7b9fdf9a293e95f9312c9df7fd6fda56a6c30d41",
+    "source": "/baseline/triton/backends/nvidia/bin/cuobjdump",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/bin/nvdisasm",
+    "bytes": 5894744,
+    "sha256": "1080bc909a3020761ff4c78a9b7bd9b4937bdb9c0978709cbe52381de612a1f2",
+    "source": "/baseline/triton/backends/nvidia/bin/nvdisasm",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/bin/ptxas",
+    "bytes": 31912192,
+    "sha256": "c960a4f238b17d5c5d3c01ad2bbc1ebd2c5aecc459cb4d223bff10b45f9b8fca",
+    "source": "/baseline/triton/backends/nvidia/bin/ptxas",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/bin/ptxas-blackwell",
+    "bytes": 34931056,
+    "sha256": "983b0e9283855979f42cebfd80d43f9b6e786eb84f03f7570bf941c4d3a3c461",
+    "source": "/baseline/triton/backends/nvidia/bin/ptxas-blackwell",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/Openacc/cupti_openacc.h",
+    "bytes": 3513,
+    "sha256": "67438ce5efe16ddddcc5d5f29f74821ea04141ac0b83840e467966e7b0abdbe3",
+    "source": "/baseline/triton/backends/nvidia/include/Openacc/cupti_openacc.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/Openmp/cupti_openmp.h",
+    "bytes": 3491,
+    "sha256": "13558d99e6ffec76944a605e82d50d7b8215d62ee95de371833225c8a9f5ceb3",
+    "source": "/baseline/triton/backends/nvidia/include/Openmp/cupti_openmp.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/Openmp/omp-tools.h",
+    "bytes": 37403,
+    "sha256": "026b82ff13c2ed53eedc1f96e0f997b8236e7c56b0858f0f8cd5de3da40500e8",
+    "source": "/baseline/triton/backends/nvidia/include/Openmp/omp-tools.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/builtin_types.h",
+    "bytes": 3150,
+    "sha256": "2714fd55fdaadac9f14c138bf400b33666334d60023b654e554bb529d16deff8",
+    "source": "/baseline/triton/backends/nvidia/include/builtin_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/channel_descriptor.h",
+    "bytes": 21846,
+    "sha256": "a192033b591d7b13dbf6396d531d40b17005927bd158002bd78e7af76e4faa28",
+    "source": "/baseline/triton/backends/nvidia/include/channel_descriptor.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/common_functions.h",
+    "bytes": 3410,
+    "sha256": "db62d365155c3d9cc41fa30975aee734c0af3202234937b438a47bb04423ea47",
+    "source": "/baseline/triton/backends/nvidia/include/common_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/async.h",
+    "bytes": 19122,
+    "sha256": "c6c1070993f79ee118de5da9f12536775db6e97897ba652f0cffc6ca1f0f7556",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/async.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/coalesced_reduce.h",
+    "bytes": 4257,
+    "sha256": "a41420158ee2eb857ced73404e0d5410840754d60e22d42d1e34b9078ca7f297",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/coalesced_reduce.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/coalesced_scan.h",
+    "bytes": 7314,
+    "sha256": "0df66fe5de56d1726ffad655860ac87632e3b3a682c7fbb4a32d650c8a63a354",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/coalesced_scan.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/driver_abi.h",
+    "bytes": 3964,
+    "sha256": "bfe6546f852018a264e8d4765825870f7c7fe36cbeb68808d6eac59fbd068be8",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/driver_abi.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/functional.h",
+    "bytes": 8905,
+    "sha256": "d8157c8bc062773d24831b989090806f0171388651cb31e01be73fad52a14737",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/functional.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/helpers.h",
+    "bytes": 26476,
+    "sha256": "2bd8efc675dce7ee85ba6d4a1b811028926b559e018473920096d9478b832f47",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/helpers.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/info.h",
+    "bytes": 12465,
+    "sha256": "14eae9dcbb6de0f71b2b67c0339517f63b2c159b63fcba954a1ccb15c2a249a6",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/info.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/invoke.h",
+    "bytes": 8616,
+    "sha256": "3acab72beb59b971d508c409ef4f0f8cfa3e0703218e18c0a4ee1bd1360b1498",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/invoke.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/memory.h",
+    "bytes": 5606,
+    "sha256": "8444b749f817201b23d8c16b0bf33908e5e53a2ad206eba13cc0099d6a08f76c",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/memory.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/partitioning.h",
+    "bytes": 7153,
+    "sha256": "010cfe4e17aa5f7a27a97d91988522a73614541dbbdf384b947270fe45fd0f65",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/partitioning.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/reduce.h",
+    "bytes": 23296,
+    "sha256": "323a8c0f04f44f2599938256705dd61f0f31b7032aca2cc0e02df3cbb7fc79ed",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/reduce.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/scan.h",
+    "bytes": 17166,
+    "sha256": "f93b706f601f10463fb6c9aa2634767688e43e9a11c77f3b4a8ab182f7dd06d4",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/scan.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/details/sync.h",
+    "bytes": 10795,
+    "sha256": "11de0af50acf662e3775d4aa670bf55fc346fc24ec5d4a304909dda14bfcd8b5",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/details/sync.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/memcpy_async.h",
+    "bytes": 2960,
+    "sha256": "7ab3881ee39b75fc5184159fad7137c2c645e01d8652eab0cd0aec3f028fa5b8",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/memcpy_async.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/reduce.h",
+    "bytes": 2949,
+    "sha256": "0748600e4a8cfbab9ea934e06f76f7e00d111f8bc6cfc9817f97b68d3d5d275a",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/reduce.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups/scan.h",
+    "bytes": 2940,
+    "sha256": "d8453a4f97163707ed9b607b162715df53e88e823ad72a397c75c6458906938d",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups/scan.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cooperative_groups.h",
+    "bytes": 60684,
+    "sha256": "cb6705c5ae9efac684140f5a5b6d99b93c22d30b9dede107abb5cddefdf42d3d",
+    "source": "/baseline/triton/backends/nvidia/include/cooperative_groups.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/common_functions.h",
+    "bytes": 13559,
+    "sha256": "f94e387f8c941a6c033f077b43fdc2cf989fd39c4718f4a5033cf9cccca52d24",
+    "source": "/baseline/triton/backends/nvidia/include/crt/common_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/cudacc_ext.h",
+    "bytes": 3224,
+    "sha256": "296ea7d0898e64a4b456a5660475935ed1c8f35ea187cf187848148366987555",
+    "source": "/baseline/triton/backends/nvidia/include/crt/cudacc_ext.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/device_double_functions.h",
+    "bytes": 39938,
+    "sha256": "035bc1de0d2ac273447dca53d5df518860dac6a3d75e062bf95c5eda8307cb16",
+    "source": "/baseline/triton/backends/nvidia/include/crt/device_double_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/device_double_functions.hpp",
+    "bytes": 8568,
+    "sha256": "61821ba9885be5099ff1ce187dc0bf8f2b60e054707173e3bf74c54f085bdb81",
+    "source": "/baseline/triton/backends/nvidia/include/crt/device_double_functions.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/device_fp128_functions.h",
+    "bytes": 51047,
+    "sha256": "de208aadd98fa753488eb946478edd0993a057d5fa32675f9a3ba0ac5e8312db",
+    "source": "/baseline/triton/backends/nvidia/include/crt/device_fp128_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/device_functions.h",
+    "bytes": 137919,
+    "sha256": "4f820db9104894b99ddc9100f07e81e571d500d195ea3f20c325138f987f175f",
+    "source": "/baseline/triton/backends/nvidia/include/crt/device_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/device_functions.hpp",
+    "bytes": 37991,
+    "sha256": "3951e2a818dd6b2fda5059c3289c53788d150d923c640e8921d50a780291e290",
+    "source": "/baseline/triton/backends/nvidia/include/crt/device_functions.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/func_macro.h",
+    "bytes": 1755,
+    "sha256": "10ea4395a33dd7b6e1f5cc0188504f17af3d0c2301c398456abc4bc45b7e8bbe",
+    "source": "/baseline/triton/backends/nvidia/include/crt/func_macro.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/host_config.h",
+    "bytes": 12169,
+    "sha256": "d5e922df0e71b98d3480891d61b9927d93b64a823c8226566124d120bdae16cd",
+    "source": "/baseline/triton/backends/nvidia/include/crt/host_config.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/host_defines.h",
+    "bytes": 10102,
+    "sha256": "7c353fd1c41db48bc474cd33645298d0e6e83003443201cb6e589f3da94f18b9",
+    "source": "/baseline/triton/backends/nvidia/include/crt/host_defines.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/host_runtime.h",
+    "bytes": 10284,
+    "sha256": "94ea66931159564129f1d70c0061194484ec87ed7da3d8f2dfd91d48d2dcdcd8",
+    "source": "/baseline/triton/backends/nvidia/include/crt/host_runtime.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/math_functions.h",
+    "bytes": 238284,
+    "sha256": "2f2189d1752d862e96122f985484c89e16bd03a485a01e1f114514f738a2ed4f",
+    "source": "/baseline/triton/backends/nvidia/include/crt/math_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/math_functions.hpp",
+    "bytes": 100207,
+    "sha256": "bbe0866ddd11d8565674a1bee9b766192a2bf4a4ffc279884a3eb794f40a0123",
+    "source": "/baseline/triton/backends/nvidia/include/crt/math_functions.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/mma.h",
+    "bytes": 62695,
+    "sha256": "068a1600b0d6013bd9ba925a2fbf8615045060ea2d35efc5cb5d48e4d1a1d850",
+    "source": "/baseline/triton/backends/nvidia/include/crt/mma.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/mma.hpp",
+    "bytes": 66599,
+    "sha256": "b29a342d7ef5b540a2a712b9d7b06cb23d2773e6477fca0c5b3bc7a18601ffa2",
+    "source": "/baseline/triton/backends/nvidia/include/crt/mma.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/nvfunctional",
+    "bytes": 16900,
+    "sha256": "143334cea58ee9b97d8e924acfd53c08c6e3b7a8932a1d7cb506a5c40bd1b1a8",
+    "source": "/baseline/triton/backends/nvidia/include/crt/nvfunctional",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/sm_100_rt.h",
+    "bytes": 8987,
+    "sha256": "ddc062094d7539c8c6629afce5e742375ab89b6cfdd45686841b6e3b48ace13a",
+    "source": "/baseline/triton/backends/nvidia/include/crt/sm_100_rt.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/sm_100_rt.hpp",
+    "bytes": 6855,
+    "sha256": "bdb23608d098d3c74323bcd7c29e8135c7992a5d1c7971b596f7aae30f9535aa",
+    "source": "/baseline/triton/backends/nvidia/include/crt/sm_100_rt.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/sm_70_rt.h",
+    "bytes": 6837,
+    "sha256": "29ff37d31ca603ece617b2ecba71472d23728614f952224ca1c8281c141e367b",
+    "source": "/baseline/triton/backends/nvidia/include/crt/sm_70_rt.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/sm_70_rt.hpp",
+    "bytes": 7837,
+    "sha256": "ddafeb53e63431207886d043158e0f090fe35e25854deed64f567284cb8224e0",
+    "source": "/baseline/triton/backends/nvidia/include/crt/sm_70_rt.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/sm_80_rt.h",
+    "bytes": 7743,
+    "sha256": "31d2475824732ccfff9c30dfd60a3ad6b0ec97dc9d396de88ba49905f8d4c9cf",
+    "source": "/baseline/triton/backends/nvidia/include/crt/sm_80_rt.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/sm_80_rt.hpp",
+    "bytes": 6705,
+    "sha256": "a3eac9bbe8e97a109ec8004682ffbc758441ee82530b0b8d76f482ab455445d1",
+    "source": "/baseline/triton/backends/nvidia/include/crt/sm_80_rt.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/sm_90_rt.h",
+    "bytes": 11445,
+    "sha256": "6a7e3b9b45c505a277a545fd325138fa792d3f58dbdde2545e14379ed66dcdcf",
+    "source": "/baseline/triton/backends/nvidia/include/crt/sm_90_rt.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/sm_90_rt.hpp",
+    "bytes": 9228,
+    "sha256": "62ea95ca0195eab82d5adc7527d70fa4423705729004823e133ea86453f7c2b1",
+    "source": "/baseline/triton/backends/nvidia/include/crt/sm_90_rt.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/crt/storage_class.h",
+    "bytes": 4791,
+    "sha256": "77370e675ea92da37c7a3a87697c388876c127a7d75b17da53eb23d908d8cf38",
+    "source": "/baseline/triton/backends/nvidia/include/crt/storage_class.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuComplex.h",
+    "bytes": 12186,
+    "sha256": "5a9720a5a88f854fe8f6c4cf31c353119bb25c321cf31deccf8754592ced2f68",
+    "source": "/baseline/triton/backends/nvidia/include/cuComplex.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda.h",
+    "bytes": 1156988,
+    "sha256": "4568cc9e7a321e47707cd6403980f21ac2e2e55170500d0e0a3f54feb03a9acb",
+    "source": "/baseline/triton/backends/nvidia/include/cuda.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudaEGL.h",
+    "bytes": 39955,
+    "sha256": "8abb9953dc52180709dbd3845f82bf528d68e0d18ff61820bf67e239939f0d0a",
+    "source": "/baseline/triton/backends/nvidia/include/cudaEGL.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudaEGLTypedefs.h",
+    "bytes": 5645,
+    "sha256": "c45fc500dd4a6abf68c8727770253b8f3b53a715fc5b29698ae6326291861de9",
+    "source": "/baseline/triton/backends/nvidia/include/cudaEGLTypedefs.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudaGL.h",
+    "bytes": 22501,
+    "sha256": "80c4f51cf19afac8ae8e2d2002c298af85f8e4b736f472a0942fedb4d486c943",
+    "source": "/baseline/triton/backends/nvidia/include/cudaGL.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudaGLTypedefs.h",
+    "bytes": 6576,
+    "sha256": "742969408f8bb97805f6b3d206c8fb3a4220f20fdf5c38d3d212d94bc4c6a4e8",
+    "source": "/baseline/triton/backends/nvidia/include/cudaGLTypedefs.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudaProfilerTypedefs.h",
+    "bytes": 3297,
+    "sha256": "1766962c82affc084d6f134e69955c46cc4887492eb1c9d5f143165b19010256",
+    "source": "/baseline/triton/backends/nvidia/include/cudaProfilerTypedefs.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudaTypedefs.h",
+    "bytes": 115169,
+    "sha256": "48a7c0bd33a3d7dcf1b222c62a1a315cf8a8a4aaa87b98638f9897911dbfbfa1",
+    "source": "/baseline/triton/backends/nvidia/include/cudaTypedefs.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudaVDPAU.h",
+    "bytes": 12694,
+    "sha256": "369ecd7365a36b3fbe864a5b856e9ff5a6a9afe35b70f0c0824a2dd2c25eadca",
+    "source": "/baseline/triton/backends/nvidia/include/cudaVDPAU.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudaVDPAUTypedefs.h",
+    "bytes": 4144,
+    "sha256": "c33f27c8e51dc0cf661fd24edd0656f80f5dcb1b7e22e7d25fb9e08125e908db",
+    "source": "/baseline/triton/backends/nvidia/include/cudaVDPAUTypedefs.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_awbarrier.h",
+    "bytes": 9340,
+    "sha256": "dd91fe6655ce0e14a2c1263daea4a78bf110c22db940c1cfe939becce7710701",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_awbarrier.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_awbarrier_helpers.h",
+    "bytes": 12489,
+    "sha256": "382b240adb396c22a5fd12817bd33be3329222c56978f9f8e12fda269d6d1571",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_awbarrier_helpers.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_awbarrier_primitives.h",
+    "bytes": 4699,
+    "sha256": "9f9fff1358d8603865807f9fdeef0c423b73e7b519eefe55b2184cc9ed5e89c3",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_awbarrier_primitives.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_bf16.h",
+    "bytes": 204512,
+    "sha256": "4d5a2ad88adb17983aef0505ed6ed2a0603497c79c103bba82c928301ea12310",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_bf16.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_bf16.hpp",
+    "bytes": 136544,
+    "sha256": "3ae9165e837a6e04650bea7c0856e150dd06d2e0096ffce8b359823da82c7272",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_bf16.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_device_runtime_api.h",
+    "bytes": 46986,
+    "sha256": "e7897ae906f07ab5f4c0f2a8242db2eea09d18ff27bf5fc681d98c57c034c789",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_device_runtime_api.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_egl_interop.h",
+    "bytes": 37509,
+    "sha256": "6b058104462f50533b01444da7698d0fc1fbff990640b46cc11bde5d8072fb7b",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_egl_interop.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_fp16.h",
+    "bytes": 206851,
+    "sha256": "8eb1600a8e2e33d40572bffe7001a27f6046a74949d80353fe02cf88b2563dda",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_fp16.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_fp16.hpp",
+    "bytes": 120927,
+    "sha256": "a352130e6b8debb37c61419472f4e957721da52fbac30966eb933f1fef0b60ab",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_fp16.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_fp4.h",
+    "bytes": 13823,
+    "sha256": "a531107f9acb7e2694fd43178279ec4b5dcd1f91fd16d1e075e88db96fcd9076",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_fp4.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_fp4.hpp",
+    "bytes": 35423,
+    "sha256": "618694bbe611818763f7162ee190e1fee3d57dfc640e512bd020ff6e1945f011",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_fp4.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_fp6.h",
+    "bytes": 13963,
+    "sha256": "eb187413848d9a3989643dc7e7f1e865ed3c6d0d25a1413ccb771b3b5f7e01de",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_fp6.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_fp6.hpp",
+    "bytes": 56455,
+    "sha256": "a9af37f1bb9978b3f7db1055a9ba3bd6e1525b9467056c7daa9e43f9247fc5cd",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_fp6.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_fp8.h",
+    "bytes": 18072,
+    "sha256": "4124cc45bf65ec8f669ef4f5ffc29736a2cee3cc166961201bdedb0e3121d627",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_fp8.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_fp8.hpp",
+    "bytes": 97230,
+    "sha256": "e8000164f7cf94afa3990c8c75b4c41343d94e550b8ee2ceaec43467f72e6c1c",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_fp8.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_gl_interop.h",
+    "bytes": 19150,
+    "sha256": "55012cc0578e045e8937a434a5d964bdce564fb6c3d459d37ca7b0bc036e9427",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_gl_interop.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_occupancy.h",
+    "bytes": 71302,
+    "sha256": "d076afacc2165c6c48ba36aaef6897df5fbbdd9a6bc7458161d8a59f764d3f6c",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_occupancy.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_pipeline.h",
+    "bytes": 8130,
+    "sha256": "d1e9d71b8f7037825a8e5422dda85ba767a2fee7d363f3339e273bcdf5a62873",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_pipeline.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_pipeline_helpers.h",
+    "bytes": 13852,
+    "sha256": "6e8d4bedeeaf0ae33e2b7225f0ad73e302548dae43c9740a768fe149650c13e1",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_pipeline_helpers.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_pipeline_primitives.h",
+    "bytes": 8675,
+    "sha256": "167249b6e57aac7afa2e02f9e970f08a57126c5afa5b51e3ea67f500968c236d",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_pipeline_primitives.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_runtime.h",
+    "bytes": 98570,
+    "sha256": "1aaa84ed2ac4086acdf908390e4f742d28ecfb1bca94766944b9691fb2d47a13",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_runtime.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_runtime_api.h",
+    "bytes": 655943,
+    "sha256": "116852112153fef5797986694c112ee04be036d13dae19873f9d375e72061c8b",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_runtime_api.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_stdint.h",
+    "bytes": 4093,
+    "sha256": "5db14e93d0ad2632aa93b3e960da9b495b03c40b1533c6af038ad6a4f8b40634",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_stdint.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_surface_types.h",
+    "bytes": 3688,
+    "sha256": "330e4ba386fc43e7fd9a880ebc04c6c8786ef5ddadd8ae973b1baab59ad28770",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_surface_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_texture_types.h",
+    "bytes": 3688,
+    "sha256": "2136d7f893673fb466f894a0355749f69aba93c155a2bf116e7aee0ec2aaeac9",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_texture_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cuda_vdpau_interop.h",
+    "bytes": 7727,
+    "sha256": "6d741a9d67362055d900a58d1a5db1033f672ef1664295b21abb03bdf792f450",
+    "source": "/baseline/triton/backends/nvidia/include/cuda_vdpau_interop.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cudart_platform.h",
+    "bytes": 2717,
+    "sha256": "60deac2a10746fdc39b465f52182fbba52553eb580897f40e38a8bbf812d5b94",
+    "source": "/baseline/triton/backends/nvidia/include/cudart_platform.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti.h",
+    "bytes": 4697,
+    "sha256": "2645720064c8318cf09bad9d7d5a9ab379cc7082e180ffd6773e9f878fcd103d",
+    "source": "/baseline/triton/backends/nvidia/include/cupti.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_activity.h",
+    "bytes": 229848,
+    "sha256": "809286946d8989f5b7e8bc7eba325c28196752b34ea13c5aaf9d64dbc1ab52d5",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_activity.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_activity_deprecated.h",
+    "bytes": 137602,
+    "sha256": "074a78cdb965daf527d63d089931ba4086e9a7a1e2c3ccbe5f4db56667fb7e51",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_activity_deprecated.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_callbacks.h",
+    "bytes": 29689,
+    "sha256": "699f9213460c15f4fd47e521e4c1dba0f834ca91cc8de492009c37cdd3fb382b",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_callbacks.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_checkpoint.h",
+    "bytes": 5264,
+    "sha256": "ad3cfc2685b1a844815f26565216491a6e31798731e0e24eb49ecb775dd3fdbd",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_checkpoint.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_common.h",
+    "bytes": 3514,
+    "sha256": "f399bbe1bc54817a77b4468f4297b379ace6a6c34cc38d4fb2335262641d4f6d",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_common.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_driver_cbid.h",
+    "bytes": 77280,
+    "sha256": "9a404d3d890b7dc1318506450e8d2260795a1c95860f6bce31db73695fa51149",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_driver_cbid.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_events.h",
+    "bytes": 51923,
+    "sha256": "f35c1cbc5bef1e3f1198409b6c4a7915f823248403a02ffcd4586fab39c5ba96",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_events.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_metrics.h",
+    "bytes": 32175,
+    "sha256": "ce67d9c6ae55914269e938fba171243fda32711370d7307d54d8684256e188de",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_metrics.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_nvtx_cbid.h",
+    "bytes": 5912,
+    "sha256": "fdaccfb51d60e2a8afbd7eea6ef1d1520d111c2585ee210e2721cc37da997bd1",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_nvtx_cbid.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_pcsampling.h",
+    "bytes": 32144,
+    "sha256": "c9c2474f7e8398f21a5731ec077c718d792117211f30224e9772db0ac1c58320",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_pcsampling.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_pcsampling_util.h",
+    "bytes": 12430,
+    "sha256": "971f0268d5e8c097b966f734e8b13ebbf66bcbf8ce0ecd6633a8fd4395885fd1",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_pcsampling_util.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_pmsampling.h",
+    "bytes": 20440,
+    "sha256": "53de6128ec0891949b18d54fd7541298c6b007ca9d26c96363fb54258e2f79d7",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_pmsampling.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_profiler_host.h",
+    "bytes": 22155,
+    "sha256": "32491f5e528146b44be0d7da3c58ae1380f8cff8299b18815964c18b1cb23139",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_profiler_host.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_profiler_target.h",
+    "bytes": 32294,
+    "sha256": "31d2eeb4879fc1d31323bc2c71ed0b3b736e0a6dc5460151dc6c4092a69d32ce",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_profiler_target.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_range_profiler.h",
+    "bytes": 18779,
+    "sha256": "b9ee5b500fb7c42c00b501b20dee4ed5de6b02645b55b72b5ca7c84dde313352",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_range_profiler.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_result.h",
+    "bytes": 13114,
+    "sha256": "c50a81b1946889c05259d935959004fd67998fcf0c2c7e82953a39f28b21c7ef",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_result.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_runtime_cbid.h",
+    "bytes": 48372,
+    "sha256": "059267cecbdfd918d194728484f8c293409d8cb23dfcbfa70a54f07b8bfd3547",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_runtime_cbid.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_sass_metrics.h",
+    "bytes": 19674,
+    "sha256": "dd15bdb2726e15074e86b127df00c93abbb4e6ad15ff3b2c5aba83eedbd524ac",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_sass_metrics.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_target.h",
+    "bytes": 1263,
+    "sha256": "c78573d54a5bea6f62c6656998668a425743598408dce67ea1c1171b334ad041",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_target.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/cupti_version.h",
+    "bytes": 4506,
+    "sha256": "2855e68c1e28fa2646bcef256bd49ff54ae0e2ae2cae61229a7c5b3c2c9dd8df",
+    "source": "/baseline/triton/backends/nvidia/include/cupti_version.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/device_atomic_functions.h",
+    "bytes": 9500,
+    "sha256": "391da33527d22b3685ae2ef8ce1e15b73e4cd33f540c1537aca782d6b61a550b",
+    "source": "/baseline/triton/backends/nvidia/include/device_atomic_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/device_atomic_functions.hpp",
+    "bytes": 10486,
+    "sha256": "d1eecc3a234d5279e5a17a41febf564f960ec2ce5cc60cd0400cd1098be06850",
+    "source": "/baseline/triton/backends/nvidia/include/device_atomic_functions.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/device_double_functions.h",
+    "bytes": 3452,
+    "sha256": "294c487796757f1f1259f2d14f13c3ed107eccdef3b25cdbe27ec96892df2f72",
+    "source": "/baseline/triton/backends/nvidia/include/device_double_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/device_functions.h",
+    "bytes": 3410,
+    "sha256": "6d64ab853604f4d425b2cef131230456eb2fb68f63d9f8140d75951f65bf70e0",
+    "source": "/baseline/triton/backends/nvidia/include/device_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/device_launch_parameters.h",
+    "bytes": 3846,
+    "sha256": "1f5fc20bebef01a4b6eb2b385ec4c590c813c544dc8808dd8ecc238b3922b2f4",
+    "source": "/baseline/triton/backends/nvidia/include/device_launch_parameters.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/device_types.h",
+    "bytes": 3588,
+    "sha256": "d8b171a190493e80395741f511b29311a5c38b718324fb7338f7511c36ae7084",
+    "source": "/baseline/triton/backends/nvidia/include/device_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/driver_functions.h",
+    "bytes": 4625,
+    "sha256": "70ddc88d1033d8c8f63e3df94b2c4922464d0c3bac9c9a9aab305d333a5029b0",
+    "source": "/baseline/triton/backends/nvidia/include/driver_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/driver_types.h",
+    "bytes": 200083,
+    "sha256": "98c35b888c20e44de4ed293af396024af9ca6267d0ddbc56bf76e4120cceb4d5",
+    "source": "/baseline/triton/backends/nvidia/include/driver_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/fatbinary_section.h",
+    "bytes": 1809,
+    "sha256": "367b947f2df9f32189c787a7ab4a419deb63bf5ed459afa73a58184e8522b6bc",
+    "source": "/baseline/triton/backends/nvidia/include/fatbinary_section.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/generated_cudaGL_meta.h",
+    "bytes": 3115,
+    "sha256": "75f77642e6917448db4ad38abda40b8b531dfeaae945087c3dfc99ce727c6d66",
+    "source": "/baseline/triton/backends/nvidia/include/generated_cudaGL_meta.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/generated_cudaVDPAU_meta.h",
+    "bytes": 1453,
+    "sha256": "7c079db28431694de12000290160ce2ac6bd92072e430e2d7727fc9252e6fb79",
+    "source": "/baseline/triton/backends/nvidia/include/generated_cudaVDPAU_meta.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/generated_cuda_gl_interop_meta.h",
+    "bytes": 2250,
+    "sha256": "2d73aabd009e8f4b028004f52d428a619e3ae84171378848c1ff682215ce2c5d",
+    "source": "/baseline/triton/backends/nvidia/include/generated_cuda_gl_interop_meta.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/generated_cuda_meta.h",
+    "bytes": 98664,
+    "sha256": "0c37607d6f38195b6c19bafb75a3497219a66434bfc5fbc31ef1429b72353847",
+    "source": "/baseline/triton/backends/nvidia/include/generated_cuda_meta.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/generated_cuda_runtime_api_meta.h",
+    "bytes": 72208,
+    "sha256": "0aece2683c0ed8c877de96822c62aa8bbdcf41f60d9b3a77f3062b8402be7e78",
+    "source": "/baseline/triton/backends/nvidia/include/generated_cuda_runtime_api_meta.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/generated_cuda_vdpau_interop_meta.h",
+    "bytes": 1367,
+    "sha256": "f0e2ea58ddba6846294d6517b5b1c9bc0e4662156fdf26d854e4d6ef22b7ef3f",
+    "source": "/baseline/triton/backends/nvidia/include/generated_cuda_vdpau_interop_meta.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/generated_cudart_removed_meta.h",
+    "bytes": 5172,
+    "sha256": "5f72395979a1b6c24d365818edca09e6f838b75d46e45451e97a3b31ba0879c9",
+    "source": "/baseline/triton/backends/nvidia/include/generated_cudart_removed_meta.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/generated_nvtx_meta.h",
+    "bytes": 7513,
+    "sha256": "6076ff443f20dece26f0f267ed9d309f1bd41daae5ec13805f9003afe04bdc72",
+    "source": "/baseline/triton/backends/nvidia/include/generated_nvtx_meta.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/host_config.h",
+    "bytes": 3380,
+    "sha256": "06c707fc66b30196dba2d75d5732f946669f6d0f908d1c7c7fe2353b4d48056f",
+    "source": "/baseline/triton/backends/nvidia/include/host_config.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/host_defines.h",
+    "bytes": 3386,
+    "sha256": "6c1430405e42d4dd5cdaaa4b579ea0d5cfb07aef58b20cfe8087f62a7deecff0",
+    "source": "/baseline/triton/backends/nvidia/include/host_defines.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/library_types.h",
+    "bytes": 5156,
+    "sha256": "8be185730f76c2f722c6cd9b4233a3e08feadba1d863f558e03a43bc75900a36",
+    "source": "/baseline/triton/backends/nvidia/include/library_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/math_constants.h",
+    "bytes": 7608,
+    "sha256": "715ea103241ef17edfecc06d68a8e3209ab707270e503a7a239722cc95f91cbc",
+    "source": "/baseline/triton/backends/nvidia/include/math_constants.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/math_functions.h",
+    "bytes": 3398,
+    "sha256": "e57702ea3f9f24ab6dbe1c1ce2164da0b1cdc3cd3c6b665820eb59eebcbbc9dd",
+    "source": "/baseline/triton/backends/nvidia/include/math_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/mma.h",
+    "bytes": 2932,
+    "sha256": "218fd57a7c6e1277301aaf76321ad651bf97b308747a40172f2f516f18716b66",
+    "source": "/baseline/triton/backends/nvidia/include/mma.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/nvPTXCompiler.h",
+    "bytes": 14471,
+    "sha256": "945d6cb0a96b8ec3560aca7451d85b07a1b23a01420ced6ad19043cceb30963d",
+    "source": "/baseline/triton/backends/nvidia/include/nvPTXCompiler.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/nvfunctional",
+    "bytes": 2975,
+    "sha256": "2241680a2fd0e0e84ff6712e048fb98d6c05951fcf7c6d398491fb95232c7d67",
+    "source": "/baseline/triton/backends/nvidia/include/nvfunctional",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/nvperf_common.h",
+    "bytes": 17255,
+    "sha256": "ca479327923a734cfc2aa310875de194968c6878aaa95501eb4a065ce0aeec18",
+    "source": "/baseline/triton/backends/nvidia/include/nvperf_common.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/nvperf_cuda_host.h",
+    "bytes": 7562,
+    "sha256": "802d095a851d4f200e26cf32e2ea0922189ef57ab8c85e07ce8ba62ec60d5735",
+    "source": "/baseline/triton/backends/nvidia/include/nvperf_cuda_host.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/nvperf_host.h",
+    "bytes": 49197,
+    "sha256": "c02078991f1a2075a2a93d53b31ced420581461ff28aae400459bcb1bdff8f08",
+    "source": "/baseline/triton/backends/nvidia/include/nvperf_host.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/nvperf_target.h",
+    "bytes": 23607,
+    "sha256": "8d1a90b6e34b4eb0b33c37727803644eb3c48a34824e32f2d80d6a8cabb449d3",
+    "source": "/baseline/triton/backends/nvidia/include/nvperf_target.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_20_atomic_functions.h",
+    "bytes": 4478,
+    "sha256": "c78c9c20d56afff97d0784903c3f88e3c8d06cac717419a0a7c55fd863b441f8",
+    "source": "/baseline/triton/backends/nvidia/include/sm_20_atomic_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_20_atomic_functions.hpp",
+    "bytes": 4107,
+    "sha256": "d65e4d2ccf038436ea619fc4e752e8a8495025739b91bc28e7b777afee2e11b1",
+    "source": "/baseline/triton/backends/nvidia/include/sm_20_atomic_functions.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_20_intrinsics.h",
+    "bytes": 57702,
+    "sha256": "6b1783afbcba9d3d55e8bceb4963526875305e088d8cf6d79f54fa521ee194d3",
+    "source": "/baseline/triton/backends/nvidia/include/sm_20_intrinsics.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_20_intrinsics.hpp",
+    "bytes": 8392,
+    "sha256": "9894de8d1870d69acd88ffdac7538f6e4625844a81a8ee27548dc34435c8ce9a",
+    "source": "/baseline/triton/backends/nvidia/include/sm_20_intrinsics.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_30_intrinsics.h",
+    "bytes": 16978,
+    "sha256": "6fa5bc571a7dbc3f4e08923a959b86c9961711d437122f0f4c09681cd93009c4",
+    "source": "/baseline/triton/backends/nvidia/include/sm_30_intrinsics.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_30_intrinsics.hpp",
+    "bytes": 24567,
+    "sha256": "c97d1e6dddbae6d27e04386f96e3f606169d3ee597a5164f23679e40516de72b",
+    "source": "/baseline/triton/backends/nvidia/include/sm_30_intrinsics.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_32_atomic_functions.h",
+    "bytes": 5703,
+    "sha256": "1c69d98101c0084d8001beb369b194511739dc8b1565e95cd81489aafb3d3a06",
+    "source": "/baseline/triton/backends/nvidia/include/sm_32_atomic_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_32_atomic_functions.hpp",
+    "bytes": 6592,
+    "sha256": "0904d3bce118a7eb3986a0202ef0289f5d6f2d80eb0e9f1c4c775e97e5d1cc14",
+    "source": "/baseline/triton/backends/nvidia/include/sm_32_atomic_functions.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_32_intrinsics.h",
+    "bytes": 33539,
+    "sha256": "5dd92881db23cb5be1f2edde1aed22e714e61f10460238fafef54647eb2974e1",
+    "source": "/baseline/triton/backends/nvidia/include/sm_32_intrinsics.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_32_intrinsics.hpp",
+    "bytes": 70616,
+    "sha256": "1a5f1a48b0cb722b785b7a4a412d7d1ac0c6f1161cc03eb91f0601fc27997bc3",
+    "source": "/baseline/triton/backends/nvidia/include/sm_32_intrinsics.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_35_atomic_functions.h",
+    "bytes": 2909,
+    "sha256": "6b75e812c29108439fd10ff963ffeb31f982e2949cbf85645208158152559f8e",
+    "source": "/baseline/triton/backends/nvidia/include/sm_35_atomic_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_35_intrinsics.h",
+    "bytes": 2664,
+    "sha256": "d264b9f8b0a0bd9893bcbefe306ff863023ecd61af33eb38c7246e324ba7302f",
+    "source": "/baseline/triton/backends/nvidia/include/sm_35_intrinsics.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_60_atomic_functions.h",
+    "bytes": 13178,
+    "sha256": "fda9df35a26cbd0a43128ad879428891b8b3624c2b8a705c1bf6428840ad2ea2",
+    "source": "/baseline/triton/backends/nvidia/include/sm_60_atomic_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_60_atomic_functions.hpp",
+    "bytes": 22903,
+    "sha256": "72020a75d0e7d81dd0cd897378120b00fd48472b3be10082c6c1f442a6951a5b",
+    "source": "/baseline/triton/backends/nvidia/include/sm_60_atomic_functions.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_61_intrinsics.h",
+    "bytes": 10902,
+    "sha256": "87f3012f55140f1417fea39d752226ceac858dcae1866ffadc6f7ba460f2ade5",
+    "source": "/baseline/triton/backends/nvidia/include/sm_61_intrinsics.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/sm_61_intrinsics.hpp",
+    "bytes": 6787,
+    "sha256": "37e9d0bdc06c3cc4f6526cb9cd1ebd73d2b5ab7eba5be26a7bb369a0b4ea4e68",
+    "source": "/baseline/triton/backends/nvidia/include/sm_61_intrinsics.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/surface_functions.h",
+    "bytes": 6782,
+    "sha256": "6f53bcd9202f120596c40f6e6535907068a6cd95287a6d906c0113df08777d97",
+    "source": "/baseline/triton/backends/nvidia/include/surface_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/surface_indirect_functions.h",
+    "bytes": 10877,
+    "sha256": "bf2f50b85555f9ecd93fec76453f512e9daa21481d9e000238299a9527d514f0",
+    "source": "/baseline/triton/backends/nvidia/include/surface_indirect_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/surface_types.h",
+    "bytes": 4530,
+    "sha256": "5e41570f59c76de48c81a8d1f94244f6e43b4c1cb32678dd9d42f8fb21a2b9f9",
+    "source": "/baseline/triton/backends/nvidia/include/surface_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/texture_fetch_functions.h",
+    "bytes": 12468,
+    "sha256": "28b0a65317f9698e7f51a957f2d48507a7b84eb8c0f21c943f12ce90c165b40a",
+    "source": "/baseline/triton/backends/nvidia/include/texture_fetch_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/texture_indirect_functions.h",
+    "bytes": 21163,
+    "sha256": "947ff2dcd8be86ae11674fcf3056c1334b61e7e3a64e7dd3b6ab699071e103cc",
+    "source": "/baseline/triton/backends/nvidia/include/texture_indirect_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/texture_types.h",
+    "bytes": 6360,
+    "sha256": "ef79ed57283cafc7f32b2e55224eb2baf0b8e460de59ea5a2c8a8893e337462f",
+    "source": "/baseline/triton/backends/nvidia/include/texture_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/vector_functions.h",
+    "bytes": 8003,
+    "sha256": "5b2a4690bf880db18e95acbb83f1b4a771ceece2c6444d03a3ffc9b621685b16",
+    "source": "/baseline/triton/backends/nvidia/include/vector_functions.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/vector_functions.hpp",
+    "bytes": 10060,
+    "sha256": "69f5e13527772c54d9a3de843ed7ac4cb7efc5de274e62d5ce0923f7aeeb4d18",
+    "source": "/baseline/triton/backends/nvidia/include/vector_functions.hpp",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/include/vector_types.h",
+    "bytes": 13396,
+    "sha256": "e82278caddca0fbcd055f9b5361ae0a8d618103108656c1a8af945c75da784d8",
+    "source": "/baseline/triton/backends/nvidia/include/vector_types.h",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libcheckpoint.so",
+    "bytes": 1644872,
+    "sha256": "06ba82bd09237b934cf16da2172ed5943c582caa35c79b52cfcfeb0ff71f7250",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libcheckpoint.so",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libcupti.so",
+    "bytes": 7595792,
+    "sha256": "fccdc5fcc7c32f8cf4b3ed9b17f7f187a185a6fa0a5bcc06e3434cbd1687c808",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libcupti.so",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libcupti.so.12",
+    "bytes": 7595792,
+    "sha256": "fccdc5fcc7c32f8cf4b3ed9b17f7f187a185a6fa0a5bcc06e3434cbd1687c808",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libcupti.so.12",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libcupti.so.2025.1.1",
+    "bytes": 7595792,
+    "sha256": "fccdc5fcc7c32f8cf4b3ed9b17f7f187a185a6fa0a5bcc06e3434cbd1687c808",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libcupti.so.2025.1.1",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libcupti_static.a",
+    "bytes": 43563448,
+    "sha256": "ab6d9db248f9d87527e34c2c27afb983d0050ff698b4e4aa225349adb46a3a4a",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libcupti_static.a",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libnvperf_host.so",
+    "bytes": 25825936,
+    "sha256": "609f54063c253daff6efba79fe49252fdd2324308ab0ffb991cc125d3e9a1eab",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libnvperf_host.so",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libnvperf_host_static.a",
+    "bytes": 33480030,
+    "sha256": "b132e85f9606f3525706848a9b77cba3444074fdc7a884a682dc7c2f8ed717ee",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libnvperf_host_static.a",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libnvperf_target.so",
+    "bytes": 5275312,
+    "sha256": "2f10e1109fc341a57434c28e4006b45a89247801e20f5ace135c302c173e0770",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libnvperf_target.so",
+    "source_symlink": null
+  },
+  {
+    "path": "triton/backends/nvidia/lib/cupti/libpcsamplingutil.so",
+    "bytes": 970064,
+    "sha256": "e6fa2783077974fb2765bfa9cbaebf980736df74eebf994c59c7596988aec83b",
+    "source": "/baseline/triton/backends/nvidia/lib/cupti/libpcsamplingutil.so",
+    "source_symlink": null
+  }
+]
