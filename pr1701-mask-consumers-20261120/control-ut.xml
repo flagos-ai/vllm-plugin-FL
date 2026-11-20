@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="8" skipped="0" tests="8" time="2.728" timestamp="2026-11-20T08:31:16.396392+00:00" hostname="bm-dhrj-bj-zone8-d-p800-96g-1-4"><testcase classname="test_scalar_atomic_mask" name="test_scalar_compound_mask_old_values_and_unrelated_store[0-0]" time="1.441"><failure message="AssertionError: Tensor-likes are not equal!&#10;&#10;Mismatched elements: 17 / 17 (100.0%)&#10;Greatest absolute difference: 123 at index (7,)&#10;Greatest relative difference: 13.666666984558105 at index (7,)">lower = 0, upper = 0
+
+    @pytest.mark.parametrize(
+        "lower,upper",
+        [(0, 0), (0, 1024), (72, 175), (135, 185), (40, 41), (1024, 1024)],
+    )
+    def test_scalar_compound_mask_old_values_and_unrelated_store(lower, upper):
+        block, bins, initial, sentinel = 1024, 17, 9, -777
+        position = torch.arange(block, dtype=torch.int32)
+        ids = (position * 13 + 7) % bins
+        bounds = torch.tensor([lower, upper], dtype=torch.int32)
+        counts = torch.full((bins, ), initial, dtype=torch.int32, device="cuda")
+        old = torch.full((block, ), sentinel, dtype=torch.int32, device="cuda")
+        unrelated = torch.full((block, ), -1, dtype=torch.int32, device="cuda")
+        _scalar_atomic_mask_contract[(1, )](
+            ids.to("cuda"),
+            bounds.to("cuda"),
+            counts,
+            old,
+            unrelated,
+            BLOCK=block,
+            SENTINEL=sentinel,
+        )
+        torch.cuda.synchronize()
+        active = (position &lt; upper) &amp; (position &gt;= lower)
+        expected = torch.bincount(ids[active].long(), minlength=bins).to(torch.int32)
+&gt;       torch.testing.assert_close(counts.cpu(), expected + initial, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 17 / 17 (100.0%)
+E       Greatest absolute difference: 123 at index (7,)
+E       Greatest relative difference: 13.666666984558105 at index (7,)
+
+/probe/test_scalar_atomic_mask.py:59: AssertionError</failure></testcase><testcase classname="test_scalar_atomic_mask" name="test_scalar_compound_mask_old_values_and_unrelated_store[0-1024]" time="0.014"><failure message="AssertionError: Tensor-likes are not equal!&#10;&#10;Mismatched elements: 17 / 17 (100.0%)&#10;Greatest absolute difference: 61 at index (3,)&#10;Greatest relative difference: 0.8714285492897034 at index (3,)">lower = 0, upper = 1024
+
+    @pytest.mark.parametrize(
+        "lower,upper",
+        [(0, 0), (0, 1024), (72, 175), (135, 185), (40, 41), (1024, 1024)],
+    )
+    def test_scalar_compound_mask_old_values_and_unrelated_store(lower, upper):
+        block, bins, initial, sentinel = 1024, 17, 9, -777
+        position = torch.arange(block, dtype=torch.int32)
+        ids = (position * 13 + 7) % bins
+        bounds = torch.tensor([lower, upper], dtype=torch.int32)
+        counts = torch.full((bins, ), initial, dtype=torch.int32, device="cuda")
+        old = torch.full((block, ), sentinel, dtype=torch.int32, device="cuda")
+        unrelated = torch.full((block, ), -1, dtype=torch.int32, device="cuda")
+        _scalar_atomic_mask_contract[(1, )](
+            ids.to("cuda"),
+            bounds.to("cuda"),
+            counts,
+            old,
+            unrelated,
+            BLOCK=block,
+            SENTINEL=sentinel,
+        )
+        torch.cuda.synchronize()
+        active = (position &lt; upper) &amp; (position &gt;= lower)
+        expected = torch.bincount(ids[active].long(), minlength=bins).to(torch.int32)
+&gt;       torch.testing.assert_close(counts.cpu(), expected + initial, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 17 / 17 (100.0%)
+E       Greatest absolute difference: 61 at index (3,)
+E       Greatest relative difference: 0.8714285492897034 at index (3,)
+
+/probe/test_scalar_atomic_mask.py:59: AssertionError</failure></testcase><testcase classname="test_scalar_atomic_mask" name="test_scalar_compound_mask_old_values_and_unrelated_store[72-175]" time="0.013"><failure message="AssertionError: Tensor-likes are not equal!&#10;&#10;Mismatched elements: 17 / 17 (100.0%)&#10;Greatest absolute difference: 116 at index (3,)&#10;Greatest relative difference: 7.733333110809326 at index (3,)">lower = 72, upper = 175
+
+    @pytest.mark.parametrize(
+        "lower,upper",
+        [(0, 0), (0, 1024), (72, 175), (135, 185), (40, 41), (1024, 1024)],
+    )
+    def test_scalar_compound_mask_old_values_and_unrelated_store(lower, upper):
+        block, bins, initial, sentinel = 1024, 17, 9, -777
+        position = torch.arange(block, dtype=torch.int32)
+        ids = (position * 13 + 7) % bins
+        bounds = torch.tensor([lower, upper], dtype=torch.int32)
+        counts = torch.full((bins, ), initial, dtype=torch.int32, device="cuda")
+        old = torch.full((block, ), sentinel, dtype=torch.int32, device="cuda")
+        unrelated = torch.full((block, ), -1, dtype=torch.int32, device="cuda")
+        _scalar_atomic_mask_contract[(1, )](
+            ids.to("cuda"),
+            bounds.to("cuda"),
+            counts,
+            old,
+            unrelated,
+            BLOCK=block,
+            SENTINEL=sentinel,
+        )
+        torch.cuda.synchronize()
+        active = (position &lt; upper) &amp; (position &gt;= lower)
+        expected = torch.bincount(ids[active].long(), minlength=bins).to(torch.int32)
+&gt;       torch.testing.assert_close(counts.cpu(), expected + initial, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 17 / 17 (100.0%)
+E       Greatest absolute difference: 116 at index (3,)
+E       Greatest relative difference: 7.733333110809326 at index (3,)
+
+/probe/test_scalar_atomic_mask.py:59: AssertionError</failure></testcase><testcase classname="test_scalar_atomic_mask" name="test_scalar_compound_mask_old_values_and_unrelated_store[135-185]" time="0.013"><failure message="AssertionError: Tensor-likes are not equal!&#10;&#10;Mismatched elements: 17 / 17 (100.0%)&#10;Greatest absolute difference: 119 at index (3,)&#10;Greatest relative difference: 10.727272987365723 at index (15,)">lower = 135, upper = 185
+
+    @pytest.mark.parametrize(
+        "lower,upper",
+        [(0, 0), (0, 1024), (72, 175), (135, 185), (40, 41), (1024, 1024)],
+    )
+    def test_scalar_compound_mask_old_values_and_unrelated_store(lower, upper):
+        block, bins, initial, sentinel = 1024, 17, 9, -777
+        position = torch.arange(block, dtype=torch.int32)
+        ids = (position * 13 + 7) % bins
+        bounds = torch.tensor([lower, upper], dtype=torch.int32)
+        counts = torch.full((bins, ), initial, dtype=torch.int32, device="cuda")
+        old = torch.full((block, ), sentinel, dtype=torch.int32, device="cuda")
+        unrelated = torch.full((block, ), -1, dtype=torch.int32, device="cuda")
+        _scalar_atomic_mask_contract[(1, )](
+            ids.to("cuda"),
+            bounds.to("cuda"),
+            counts,
+            old,
+            unrelated,
+            BLOCK=block,
+            SENTINEL=sentinel,
+        )
+        torch.cuda.synchronize()
+        active = (position &lt; upper) &amp; (position &gt;= lower)
+        expected = torch.bincount(ids[active].long(), minlength=bins).to(torch.int32)
+&gt;       torch.testing.assert_close(counts.cpu(), expected + initial, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 17 / 17 (100.0%)
+E       Greatest absolute difference: 119 at index (3,)
+E       Greatest relative difference: 10.727272987365723 at index (15,)
+
+/probe/test_scalar_atomic_mask.py:59: AssertionError</failure></testcase><testcase classname="test_scalar_atomic_mask" name="test_scalar_compound_mask_old_values_and_unrelated_store[40-41]" time="0.013"><failure message="AssertionError: Tensor-likes are not equal!&#10;&#10;Mismatched elements: 17 / 17 (100.0%)&#10;Greatest absolute difference: 122 at index (3,)&#10;Greatest relative difference: 13.55555534362793 at index (3,)">lower = 40, upper = 41
+
+    @pytest.mark.parametrize(
+        "lower,upper",
+        [(0, 0), (0, 1024), (72, 175), (135, 185), (40, 41), (1024, 1024)],
+    )
+    def test_scalar_compound_mask_old_values_and_unrelated_store(lower, upper):
+        block, bins, initial, sentinel = 1024, 17, 9, -777
+        position = torch.arange(block, dtype=torch.int32)
+        ids = (position * 13 + 7) % bins
+        bounds = torch.tensor([lower, upper], dtype=torch.int32)
+        counts = torch.full((bins, ), initial, dtype=torch.int32, device="cuda")
+        old = torch.full((block, ), sentinel, dtype=torch.int32, device="cuda")
+        unrelated = torch.full((block, ), -1, dtype=torch.int32, device="cuda")
+        _scalar_atomic_mask_contract[(1, )](
+            ids.to("cuda"),
+            bounds.to("cuda"),
+            counts,
+            old,
+            unrelated,
+            BLOCK=block,
+            SENTINEL=sentinel,
+        )
+        torch.cuda.synchronize()
+        active = (position &lt; upper) &amp; (position &gt;= lower)
+        expected = torch.bincount(ids[active].long(), minlength=bins).to(torch.int32)
+&gt;       torch.testing.assert_close(counts.cpu(), expected + initial, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 17 / 17 (100.0%)
+E       Greatest absolute difference: 122 at index (3,)
+E       Greatest relative difference: 13.55555534362793 at index (3,)
+
+/probe/test_scalar_atomic_mask.py:59: AssertionError</failure></testcase><testcase classname="test_scalar_atomic_mask" name="test_scalar_compound_mask_old_values_and_unrelated_store[1024-1024]" time="0.013"><failure message="AssertionError: Tensor-likes are not equal!&#10;&#10;Mismatched elements: 17 / 17 (100.0%)&#10;Greatest absolute difference: 122 at index (3,)&#10;Greatest relative difference: 13.55555534362793 at index (3,)">lower = 1024, upper = 1024
+
+    @pytest.mark.parametrize(
+        "lower,upper",
+        [(0, 0), (0, 1024), (72, 175), (135, 185), (40, 41), (1024, 1024)],
+    )
+    def test_scalar_compound_mask_old_values_and_unrelated_store(lower, upper):
+        block, bins, initial, sentinel = 1024, 17, 9, -777
+        position = torch.arange(block, dtype=torch.int32)
+        ids = (position * 13 + 7) % bins
+        bounds = torch.tensor([lower, upper], dtype=torch.int32)
+        counts = torch.full((bins, ), initial, dtype=torch.int32, device="cuda")
+        old = torch.full((block, ), sentinel, dtype=torch.int32, device="cuda")
+        unrelated = torch.full((block, ), -1, dtype=torch.int32, device="cuda")
+        _scalar_atomic_mask_contract[(1, )](
+            ids.to("cuda"),
+            bounds.to("cuda"),
+            counts,
+            old,
+            unrelated,
+            BLOCK=block,
+            SENTINEL=sentinel,
+        )
+        torch.cuda.synchronize()
+        active = (position &lt; upper) &amp; (position &gt;= lower)
+        expected = torch.bincount(ids[active].long(), minlength=bins).to(torch.int32)
+&gt;       torch.testing.assert_close(counts.cpu(), expected + initial, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 17 / 17 (100.0%)
+E       Greatest absolute difference: 122 at index (3,)
+E       Greatest relative difference: 13.55555534362793 at index (3,)
+
+/probe/test_scalar_atomic_mask.py:59: AssertionError</failure></testcase><testcase classname="test_scalar_atomic_mask" name="test_defined_load_other_is_preserved" time="0.561"><failure message="AssertionError: Tensor-likes are not equal!&#10;&#10;Mismatched elements: 920 / 1024 (89.8%)&#10;Greatest absolute difference: 1127537098 at index (108,)&#10;Greatest relative difference: 49023356.0 at index (108,)">def test_defined_load_other_is_preserved():
+        block, length = 1024, 103
+        values = torch.arange(block, dtype=torch.int32)
+        copied = torch.empty((block, ), dtype=torch.int32, device="cuda")
+        counts = torch.full((block, ), 9, dtype=torch.int32, device="cuda")
+        _defined_other_and_atomic[(1, )](
+            values.to("cuda"),
+            torch.tensor([length], dtype=torch.int32, device="cuda"),
+            copied,
+            counts,
+            BLOCK=block,
+        )
+        torch.cuda.synchronize()
+        active = values &lt; length
+        expected_copy = torch.where(active, values, torch.full_like(values, 23))
+&gt;       torch.testing.assert_close(copied.cpu(), expected_copy, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 920 / 1024 (89.8%)
+E       Greatest absolute difference: 1127537098 at index (108,)
+E       Greatest relative difference: 49023356.0 at index (108,)
+
+/probe/test_scalar_atomic_mask.py:96: AssertionError</failure></testcase><testcase classname="test_scalar_atomic_mask" name="test_non_atomic_vector_copy_is_unchanged" time="0.560"><failure message="AssertionError: Tensor-likes are not equal!&#10;&#10;Mismatched elements: 16 / 1024 (1.6%)&#10;Greatest absolute difference: 100 at index (1021,)&#10;Greatest relative difference: inf at index (1008,)">def test_non_atomic_vector_copy_is_unchanged():
+        block, length = 1024, 1001
+        values = torch.arange(block, dtype=torch.int32)
+        output = torch.empty((block, ), dtype=torch.int32, device="cuda")
+        _non_atomic_masked_copy[(1, )](
+            values.to("cuda"),
+            torch.tensor([length], dtype=torch.int32, device="cuda"),
+            output,
+            BLOCK=block,
+        )
+        torch.cuda.synchronize()
+        expected = torch.where(values &lt; length, values, torch.zeros_like(values))
+&gt;       torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 16 / 1024 (1.6%)
+E       Greatest absolute difference: 100 at index (1021,)
+E       Greatest relative difference: inf at index (1008,)
+
+/probe/test_scalar_atomic_mask.py:120: AssertionError</failure></testcase></testsuite></testsuites>

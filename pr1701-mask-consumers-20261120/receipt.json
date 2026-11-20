@@ -1,0 +1,50 @@
+{
+  "status": "Two existing compiler numerical failures; not fixed by the scalar-i1 transfer candidate",
+  "executed_source_base": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9",
+  "executed_source_commit": "49ce384960a4f716a82445ff49b42549f4d15b23",
+  "only_source_delta_from_base": "CMake option wiring, FlagTree PR1706; conceal OFF for normal IR diagnostics",
+  "compiler_core_sha256": "f0595fad9acba49694e3de3d545d210ce5e4134aefa06c6583214b842a78caba",
+  "flagtree": "0.7.0+xpu.git49ce3849",
+  "triton": "3.6.0",
+  "torch": "2.9.0+cu129",
+  "python": "3.10.20",
+  "hardware": "Kunlunxin P800 XPU3",
+  "test_sha256": "016efcb979590f0134dcc4f4808a615266f6170fc089b8961a22ac725611a38e",
+  "pytest": "8.3.5 (isolated test-only prefix)",
+  "actual_run": "Full unchanged eight-case file: 8 failed, 0 skipped; numerical AssertionErrors, not compile errors or device faults",
+  "focus": {
+    "defined_other": {
+      "block": 1024,
+      "length": 103,
+      "input_dtype": "INT32",
+      "other": 23,
+      "mismatches": "920/1024",
+      "max_abs_error": 1127537098,
+      "max_error_index": 108,
+      "oracle": "Every position must be written; values below length, defined other elsewhere"
+    },
+    "non_atomic_vector": {
+      "block": 1024,
+      "length": 1001,
+      "input_dtype": "INT32",
+      "other": 0,
+      "mismatches": "16/1024",
+      "max_abs_error": 100,
+      "max_error_index": 1021,
+      "oracle": "Every position must be written; values below length, zero elsewhere"
+    }
+  },
+  "integer_tolerance": {
+    "rtol": 0,
+    "atol": 0
+  },
+  "main_source_check": {
+    "commit": "bb8a53cc427fb426b65e38bfdd00d0f4217af686",
+    "Mask_cpp_sha256": "c10e95ececa542bfd10f349594a0f46623428089b142079eb99ac572b8a0725d",
+    "byte_identical_to_executed_base": true,
+    "main_binary_execution": false
+  },
+  "SDK_pin_disclosure": "Same verified actual SDK payload as source-control experiments, with source content-pin mismatch explicitly retained; FlagTree issue1703. No production runtime/compiler was replaced.",
+  "related_bincount_issue": 1701,
+  "not_a_gate_pass": true
+}

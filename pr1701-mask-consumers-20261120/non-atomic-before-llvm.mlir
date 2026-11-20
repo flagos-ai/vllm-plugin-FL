@@ -1,0 +1,82 @@
+// -----// IR Dump Before ConvertTritonXPUToLLVM (convert-triton-xpu-to-llvm) ('builtin.module' operation) //----- //
+#cluster = #triton_xpu.cluster<{sizePerCore = [16], coresPerGroup = [64], groupsPerCluster = [1], order = [0]}>
+#cluster1 = #triton_xpu.cluster<{sizePerCore = [2], coresPerGroup = [64], groupsPerCluster = [1], order = [0]}>
+#loc = loc("/probe/test_scalar_atomic_mask.py":101:0)
+#loc1 = loc(unknown)
+#loc3 = loc("/probe/test_scalar_atomic_mask.py":104:21)
+#loc9 = loc("input_ptr"(#loc))
+#loc10 = loc("length_ptr"(#loc))
+#loc11 = loc("output_ptr"(#loc))
+#loc13 = loc("values"(#loc3))
+module attributes {triton_xpu.target = "xpu:3", "ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.shared = 0 : i32, "ttg.threads-per-warp" = 64 : i32} {
+  tt.func public @_non_atomic_masked_copy(%input_ptr: !tt.ptr<i32> {tt.divisibility = 16 : i32} loc("input_ptr"(#loc)), %length_ptr: !tt.ptr<i32> {tt.divisibility = 16 : i32} loc("length_ptr"(#loc)), %output_ptr: !tt.ptr<i32> {tt.divisibility = 16 : i32} loc("output_ptr"(#loc)), %arg3: i32 loc("/probe/test_scalar_atomic_mask.py":101:0), %arg4: i32 loc("/probe/test_scalar_atomic_mask.py":101:0), %arg5: i32 loc("/probe/test_scalar_atomic_mask.py":101:0)) attributes {noinline = false} {
+    %0 = triton_xpu.get_cluster_id : i32 loc(#loc1)
+    %1 = triton_xpu.get_num_cluster : i32 loc(#loc1)
+    %2 = arith.muli %arg3, %arg4 : i32 loc(#loc1)
+    %3 = arith.muli %2, %arg5 : i32 loc(#loc1)
+    %length = arith.constant 1 : i32 loc(#loc12)
+    %4 = arith.subi %1, %length : i32 loc(#loc1)
+    %5 = arith.addi %3, %4 : i32 loc(#loc1)
+    %6 = arith.index_cast %0 : i32 to index loc(#loc1)
+    %7 = arith.index_cast %3 : i32 to index loc(#loc1)
+    %8 = arith.index_cast %1 : i32 to index loc(#loc1)
+    %cst = arith.constant dense<0> : tensor<1024xi32, #cluster> loc(#loc1)
+    %c0_i32 = arith.constant 0 : i32 loc(#loc1)
+    %9 = triton_xpu.make_range %c0_i32  {end = 1024 : i32, realSize = 1024 : i32, start = 0 : i32} : i32  -> tensor<1024xi32, #cluster> loc(#loc1)
+    cf.br ^bb1(%6 : index) loc(#loc1)
+  ^bb1(%10: index loc(unknown)):  // 2 preds: ^bb0, ^bb7
+    %11 = arith.cmpi slt, %10, %7 : index loc(#loc1)
+    cf.cond_br %11, ^bb2, ^bb8 loc(#loc1)
+  ^bb2:  // pred: ^bb1
+    %12 = arith.index_cast %10 : index to i32 loc(#loc1)
+    %13 = arith.divsi %12, %arg5 : i32 loc(#loc1)
+    %values = "triton_xpu.alloca"() <{size = 1024 : si64}> : () -> tensor<1024x!tt.ptr<i32, 0>, #cluster> loc(#loc13)
+    %length_0 = "triton_xpu.alloca"() <{size = 1 : si64}> : () -> !tt.ptr<i32, 0> loc(#loc12)
+    %length_1 = "triton_xpu.gm2lm"(%length_ptr, %length_0) <{SVOpt = false, atomicSim = false, cache = false, fixedStride = -2147483648 : si32, handwrittenOffsetState = false, lrie = -1 : si32, offsetState = 1 : si32, operandSegmentSizes = array<i32: 1, 0, 0, 1>, rowLen = -1 : si64, rowStride = -1 : si64, syncMode = 2 : i32, tensorColSize = -1 : si32}> : (!tt.ptr<i32>, !tt.ptr<i32, 0>) -> !tt.ptr<i32, 0> loc(#loc12)
+    llvm_xpu.mfence %length loc(#loc12)
+    %length_2 = "triton_xpu.load"(%length_1) <{SVOpt = false, bf16Tofp32Unordered = false, isDiscrete = false, operandSegmentSizes = array<i32: 1, 0, 0, 0>, stride = -2147483648 : si32, syncMode = 1 : i32, tensorColSize = -1 : si32}> : (!tt.ptr<i32, 0>) -> i32 loc(#loc12)
+    %values_3 = tt.splat %length_2 : i32 -> tensor<1024xi32, #cluster> loc(#loc14)
+    %values_4 = arith.subi %values_3, %9 : tensor<1024xi32, #cluster> loc(#loc14)
+    %values_5 = arith.cmpi slt, %9, %values_3 : tensor<1024xi32, #cluster> loc(#loc14)
+    %14 = "triton_xpu.extract"(%values_5) <{index = 0 : i32}> : (tensor<1024xi1, #cluster>) -> i1 loc(#loc1)
+    cf.cond_br %14, ^bb3, ^bb7 loc(#loc1)
+  ^bb3:  // pred: ^bb2
+    %values_6 = tt.splat %input_ptr : !tt.ptr<i32> -> tensor<1024x!tt.ptr<i32>, #cluster> loc(#loc15)
+    %values_7 = tt.addptr %values_6, %9 : tensor<1024x!tt.ptr<i32>, #cluster>, tensor<1024xi32, #cluster> loc(#loc15)
+    %values_8 = "triton_xpu.extract_slice"(%cst) : (tensor<1024xi32, #cluster>) -> tensor<128xi32, #cluster1> loc(#loc13)
+    %values_9 = arith.constant 0 : index loc(#loc13)
+    %values_10 = arith.constant 8 : index loc(#loc13)
+    %values_11 = arith.constant 1 : index loc(#loc13)
+    cf.br ^bb4(%values_9 : index) loc(#loc13)
+  ^bb4(%values_12: index loc("values"(#loc3))):  // 2 preds: ^bb3, ^bb5
+    %values_13 = arith.cmpi slt, %values_12, %values_10 : index loc(#loc13)
+    cf.cond_br %values_13, ^bb5, ^bb6 loc(#loc13)
+  ^bb5:  // pred: ^bb4
+    %values_14 = arith.index_cast %values_12 : index to i32 loc(#loc13)
+    "triton_xpu.store"(%values, %values_8, %values_14) <{bf16Tofp32Unordered = false, dtype = 0 : i32, operandSegmentSizes = array<i32: 1, 1, 0, 1>, syncMode = 1 : i32, tensorColSize = -1 : si32}> : (tensor<1024x!tt.ptr<i32, 0>, #cluster>, tensor<128xi32, #cluster1>, i32) -> () loc(#loc13)
+    %values_15 = arith.addi %values_12, %values_11 : index loc(#loc13)
+    cf.br ^bb4(%values_15 : index) loc(#loc13)
+  ^bb6:  // pred: ^bb4
+    %values_16 = "triton_xpu.gm2lm"(%values_7, %values_4, %cst, %values) <{SVOpt = false, atomicSim = false, cache = false, fixedStride = 1 : si32, handwrittenOffsetState = true, lrie = 1 : si32, offsetState = 1 : si32, operandSegmentSizes = array<i32: 1, 1, 1, 1>, rowLen = -1 : si64, rowStride = -1 : si64, syncMode = 1 : i32, tensorColSize = -1 : si32}> : (tensor<1024x!tt.ptr<i32>, #cluster>, tensor<1024xi32, #cluster>, tensor<1024xi32, #cluster>, tensor<1024x!tt.ptr<i32, 0>, #cluster>) -> tensor<1024x!tt.ptr<i32, 0>, #cluster> loc(#loc13)
+    %15 = tt.splat %output_ptr : !tt.ptr<i32> -> tensor<1024x!tt.ptr<i32>, #cluster> loc(#loc6)
+    %16 = tt.addptr %15, %9 : tensor<1024x!tt.ptr<i32>, #cluster>, tensor<1024xi32, #cluster> loc(#loc6)
+    "triton_xpu.lm2gm"(%16, %values_16) <{atomicSim = false, handwrittenOffsetState = true, offsetState = 1 : si32, operandSegmentSizes = array<i32: 1, 0, 0, 1>, rowLen = -1 : si64, rowStride = -1 : si64, syncMode = 1 : i32, tensorColSize = -1 : si32}> : (tensor<1024x!tt.ptr<i32>, #cluster>, tensor<1024x!tt.ptr<i32, 0>, #cluster>) -> () loc(#loc7)
+    cf.br ^bb7 loc(#loc1)
+  ^bb7:  // 2 preds: ^bb2, ^bb6
+    %17 = arith.addi %10, %8 : index loc(#loc1)
+    cf.br ^bb1(%17 : index) loc(#loc1)
+  ^bb8:  // pred: ^bb1
+    tt.return loc(#loc8)
+  } loc(#loc)
+} loc(#loc)
+#loc2 = loc("/probe/test_scalar_atomic_mask.py":103:21)
+#loc4 = loc("/probe/test_scalar_atomic_mask.py":104:59)
+#loc5 = loc("/probe/test_scalar_atomic_mask.py":104:33)
+#loc6 = loc("/probe/test_scalar_atomic_mask.py":105:26)
+#loc7 = loc("/probe/test_scalar_atomic_mask.py":105:36)
+#loc8 = loc("/probe/test_scalar_atomic_mask.py":105:4)
+#loc12 = loc("length"(#loc2))
+#loc14 = loc("values"(#loc4))
+#loc15 = loc("values"(#loc5))
+
+
