@@ -1,0 +1,5 @@
+The verified official `0.7.1+xpu3.6` package was tested separately on both original native grammar and penalties cases, using independent processes and fresh caches. The original FP32 shapes, block 8192, native source/reproduction hashes and provider-imported=false checks were preserved.
+
+Both cases exit 1 during `ConvertTritonToTritonXPU`, with the GlobalEncoding calculation TODO at actual `Dialect.cpp:864`. Both failed reproducers retain the boolean 256-by-32 to 8192-element reshape. Neither reaches native execution completion or its numerical oracle; no native G6 is claimed. The outer `OutOfResources(0,0)` message is a wrapper around this compiler failure.
+
+Loaded libtriton SHA256 is `863733059925dea5e2b86e9cf8c4f3a192c26e88b623321d5a3b93bbd20c1050`; the unchanged original reproduction is `b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb`. This independently confirms that [#1700](https://github.com/flagos-ai/FlagTree/issues/1700) remains reproducible with the newer official package. Only the private compiler build-root prefix is redacted from the two complete logs; receipt.json and redaction-hashes.json record provenance.

@@ -1,0 +1,14 @@
+[
+  {
+    "file": "grammar.log",
+    "original_sha256": "0387e5833e01bb193db8c4d25fef0309ed56357d23436256df9008ad11725d1c",
+    "public_sha256": "4f7fbc3660ec623383558bd86d264c13bb62ec160221b7aad717511ad8204624",
+    "redaction": "Only private compiler build-root prefix replaced with <flagtree-build>; IR, diagnostics and native source identity preserved."
+  },
+  {
+    "file": "penalties.log",
+    "original_sha256": "cda80706ba8cd2e6045f8903f9b1891f716c31382437fd1e153bdbfc1e5a8bad",
+    "public_sha256": "f54b8bc476b1793a7e7168dff0c1fac947c55d65b527f0536574591f9bc7d1a0",
+    "redaction": "Only private compiler build-root prefix replaced with <flagtree-build>; IR, diagnostics and native source identity preserved."
+  }
+]

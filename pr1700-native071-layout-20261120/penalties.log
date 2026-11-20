@@ -1,0 +1,215 @@
+XCCL /usr/local/xccl_Linux_x86_64/so/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+================================================================================
+WARNING: Libraries loaded from different directories!
+This may cause version mismatch issues.
+--------------------------------------------------------------------------------
+Directory: /usr/local/xcudart/lib
+  - libcuda.so.1
+  - libcuda.so.1
+  - libcupti.so.12
+  - libxpuml.so.1
+Directory: /usr/local/xpu/so
+  - libcudart.so.12
+  - libxpurt.so.2
+================================================================================
+{"preflight": {"op": "penalties", "phase": "cold", "timing_run": false, "production_pin_changed": false, "provider_imported": false, "original_block_size": 8192, "candidate_release_source": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9", "official_wheel_sha256": "f99134002d85e4e27b11f860619a01e3385e701d93c541c1fd1515d136424b80", "repro_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb", "native_source": "/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py", "native_source_sha256": "a5e99c71e6ac50ef025b8a7b0b903a1d2679738d8319af9c98bb200389388b29", "torch": "2.9.0+cu129", "triton": "3.6.0", "flagtree": "0.7.1+xpu3.6", "core_path": "/compiler071/triton/_C/libtriton.so", "core_sha256": "863733059925dea5e2b86e9cf8c4f3a192c26e88b623321d5a3b93bbd20c1050", "compiler_path": "/compiler071/triton/backends/xpu/compiler.py", "compiler_py_sha256": "8971d25e7145279bc330d3bd3e4080a020b15d2208d2886bbbb13ee95b23f6e2", "cache_directory": "/results/cache-layout071", "compiler_knobs": {"TRITON_LLVM19_READIN": "0"}}}
+{"op": "penalties", "native_module": "vllm.v1.worker.gpu.sample.penalties", "native_source": "/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py", "native_source_sha256": "a5e99c71e6ac50ef025b8a7b0b903a1d2679738d8319af9c98bb200389388b29", "torch": "2.9.0+cu129", "triton": "3.6.0", "provider_imported": false, "timing_run": false}
+TODO[dyq]: Add triton::xpu::GlobalEncodingAttr Calculation Logic
+UNREACHABLE executed at <flagtree-build>/third_party/xpu/lib/Dialect/TritonXPU/IR/Dialect.cpp:864!
+module {
+  tt.func public @_penalties_kernel(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %arg1: i32, %arg2: !tt.ptr<i32> {tt.divisibility = 16 : i32}, %arg3: !tt.ptr<i32> {tt.divisibility = 16 : i32}, %arg4: !tt.ptr<i32> {tt.divisibility = 16 : i32}, %arg5: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %arg6: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %arg7: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %arg8: !tt.ptr<i32> {tt.divisibility = 16 : i32}, %arg9: i32, %arg10: !tt.ptr<i32> {tt.divisibility = 16 : i32}, %arg11: i32, %arg12: i32) attributes {noinline = false} {
+    %c31_i32 = arith.constant 31 : i32
+    %cst = arith.constant dense<0.000000e+00> : tensor<8192xf32>
+    %c0_i32 = arith.constant 0 : i32
+    %cst_0 = arith.constant dense<1.000000e+00> : tensor<8192xf32>
+    %cst_1 = arith.constant dense<0> : tensor<256x32xi32>
+    %cst_2 = arith.constant dense<1> : tensor<256x32xi32>
+    %cst_3 = arith.constant dense<0> : tensor<256xi32>
+    %c32_i32 = arith.constant 32 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %cst_4 = arith.constant dense<0> : tensor<8192xi32>
+    %c8192_i32 = arith.constant 8192 : i32
+    %true = arith.constant true
+    %cst_5 = arith.constant 0.000000e+00 : f32
+    %cst_6 = arith.constant 1.000000e+00 : f32
+    %0 = tt.get_program_id x : i32
+    %1 = arith.extsi %0 : i32 to i64
+    %2 = tt.addptr %arg2, %1 : !tt.ptr<i32>, i64
+    %3 = tt.load %2 : !tt.ptr<i32>
+    %4 = tt.addptr %arg5, %3 : !tt.ptr<f32>, i32
+    %5 = tt.load %4 : !tt.ptr<f32>
+    %6 = tt.addptr %arg6, %3 : !tt.ptr<f32>, i32
+    %7 = tt.load %6 : !tt.ptr<f32>
+    %8 = tt.addptr %arg7, %3 : !tt.ptr<f32>, i32
+    %9 = tt.load %8 : !tt.ptr<f32>
+    %10 = arith.cmpf une, %5, %cst_6 : f32
+    %11 = arith.cmpf une, %7, %cst_5 : f32
+    %12 = arith.cmpf une, %9, %cst_5 : f32
+    %13 = arith.ori %11, %12 : i1
+    %14 = arith.ori %10, %13 : i1
+    %15 = arith.xori %14, %true : i1
+    cf.cond_br %15, ^bb1, ^bb2
+  ^bb1:  // pred: ^bb0
+    tt.return
+  ^bb2:  // pred: ^bb0
+    %16 = tt.get_program_id y : i32
+    %17 = arith.muli %16, %c8192_i32 : i32
+    %18 = tt.make_range {end = 8192 : i32, start = 0 : i32} : tensor<8192xi32>
+    %19 = tt.splat %17 : i32 -> tensor<8192xi32>
+    %20 = arith.addi %19, %18 : tensor<8192xi32>
+    %21 = tt.splat %arg12 : i32 -> tensor<8192xi32>
+    %22 = arith.cmpi slt, %20, %21 : tensor<8192xi32>
+    %23 = arith.extsi %arg1 : i32 to i64
+    %24 = arith.muli %1, %23 : i64
+    %25 = tt.addptr %arg0, %24 : !tt.ptr<f32>, i64
+    %26 = tt.splat %25 : !tt.ptr<f32> -> tensor<8192x!tt.ptr<f32>>
+    %27 = tt.addptr %26, %20 : tensor<8192x!tt.ptr<f32>>, tensor<8192xi32>
+    %28 = tt.load %27, %22 : tensor<8192x!tt.ptr<f32>>
+    %29 = arith.muli %3, %arg11 : i32
+    %30 = tt.addptr %arg10, %29 : !tt.ptr<i32>, i32
+    %31 = tt.splat %30 : !tt.ptr<i32> -> tensor<8192x!tt.ptr<i32>>
+    %32 = tt.addptr %31, %20 : tensor<8192x!tt.ptr<i32>>, tensor<8192xi32>
+    %33 = tt.load %32, %22, %cst_4 : tensor<8192x!tt.ptr<i32>>
+    %34 = tt.addptr %arg4, %1 : !tt.ptr<i32>, i64
+    %35 = tt.load %34 : !tt.ptr<i32>
+    %36 = arith.extsi %35 : i32 to i64
+    %37 = arith.subi %1, %36 : i64
+    %38 = tt.addptr %arg3, %37 : !tt.ptr<i32>, i64
+    %39 = scf.for %arg13 = %c0_i32 to %35 step %c1_i32 iter_args(%arg14 = %33) -> (tensor<8192xi32>)  : i32 {
+      %50 = tt.addptr %38, %arg13 : !tt.ptr<i32>, i32
+      %51 = tt.addptr %50, %c1_i32 : !tt.ptr<i32>, i32
+      %52 = tt.load %51 : !tt.ptr<i32>
+      %53 = tt.splat %52 : i32 -> tensor<8192xi32>
+      %54 = arith.cmpi eq, %20, %53 : tensor<8192xi32>
+      %55 = arith.extui %54 : tensor<8192xi1> to tensor<8192xi32>
+      %56 = arith.addi %arg14, %55 : tensor<8192xi32>
+      scf.yield %56 : tensor<8192xi32>
+    }
+    %40 = arith.cmpi sgt, %39, %cst_4 : tensor<8192xi32>
+    %41 = scf.if %10 -> (tensor<8192xf32>) {
+      %50 = arith.divsi %17, %c32_i32 : i32
+      %51 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+      %52 = tt.splat %50 : i32 -> tensor<256xi32>
+      %53 = arith.addi %52, %51 : tensor<256xi32>
+      %54 = arith.addi %arg12, %c31_i32 : i32
+      %55 = arith.divsi %54, %c32_i32 : i32
+      %56 = tt.splat %55 : i32 -> tensor<256xi32>
+      %57 = arith.cmpi slt, %53, %56 : tensor<256xi32>
+      %58 = arith.muli %3, %arg9 : i32
+      %59 = tt.addptr %arg8, %58 : !tt.ptr<i32>, i32
+      %60 = tt.splat %59 : !tt.ptr<i32> -> tensor<256x!tt.ptr<i32>>
+      %61 = tt.addptr %60, %53 : tensor<256x!tt.ptr<i32>>, tensor<256xi32>
+      %62 = tt.load %61, %57, %cst_3 : tensor<256x!tt.ptr<i32>>
+      %63 = tt.expand_dims %62 {axis = 1 : i32} : tensor<256xi32> -> tensor<256x1xi32>
+      %64 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32>
+      %65 = tt.expand_dims %64 {axis = 0 : i32} : tensor<32xi32> -> tensor<1x32xi32>
+      %66 = tt.broadcast %63 : tensor<256x1xi32> -> tensor<256x32xi32>
+      %67 = tt.broadcast %65 : tensor<1x32xi32> -> tensor<256x32xi32>
+      %68 = arith.shrsi %66, %67 : tensor<256x32xi32>
+      %69 = arith.andi %68, %cst_2 : tensor<256x32xi32>
+      %70 = arith.cmpi ne, %69, %cst_1 : tensor<256x32xi32>
+      %71 = tt.reshape %70 : tensor<256x32xi1> -> tensor<8192xi1>
+      %72 = arith.ori %71, %40 : tensor<8192xi1>
+      %73 = tt.splat %5 : f32 -> tensor<8192xf32>
+      %74 = arith.select %72, %73, %cst_0 : tensor<8192xi1>, tensor<8192xf32>
+      %75 = arith.cmpf ogt, %28, %cst : tensor<8192xf32>
+      %76 = arith.divf %cst_0, %74 : tensor<8192xf32>
+      %77 = arith.select %75, %76, %74 : tensor<8192xi1>, tensor<8192xf32>
+      %78 = arith.mulf %28, %77 : tensor<8192xf32>
+      scf.yield %78 : tensor<8192xf32>
+    } else {
+      scf.yield %28 : tensor<8192xf32>
+    }
+    %42 = arith.sitofp %39 : tensor<8192xi32> to tensor<8192xf32>
+    %43 = tt.splat %7 : f32 -> tensor<8192xf32>
+    %44 = arith.mulf %43, %42 : tensor<8192xf32>
+    %45 = arith.subf %41, %44 : tensor<8192xf32>
+    %46 = arith.uitofp %40 : tensor<8192xi1> to tensor<8192xf32>
+    %47 = tt.splat %9 : f32 -> tensor<8192xf32>
+    %48 = arith.mulf %47, %46 : tensor<8192xf32>
+    %49 = arith.subf %45, %48 : tensor<8192xf32>
+    tt.store %27, %49, %22 : tensor<8192x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+{-#
+  external_resources: {
+    mlir_reproducer: {
+      pipeline: "builtin.module(triton-loop-aware-cse, tritonxpu-legalize-extern-ew, convert-triton-to-triton-xpu{buffer_size=128 core_num=64 is-tle=false xpu_arch=3}, tritonxpu-print, tritonxpu-create-gm2lm{atomic-sim=true core0-act-only=false is-use-mask-zero=false xpu-arch=3}, tritonxpu-memory-cache{core-num=64 lm-buflen=128}, canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true}, tritonxpu-dtype-convert{xpu-arch=3}, tritonxpu-vectorizability-analysis{pre-tiling=true reduce-vec=true tle-smem-vec=true tle-vec=true}, tritonxpu-tile-decide{reduce-vec=true}, tritonxpu-core-tiling{core-num=64 dump-flag=false groups-per-cluster=1 lm-buflen=128 triton-auto-core-tiling=false}, cse, tritonxpu-scalar-analysis{aggressive=false}, tritonxpu-offset-analysis{dump-flag=false is-use-mask-zero=false lm-buflen=128}, tritonxpu-scalar-analysis{aggressive=true}, canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true}, tritonxpu-legalize{core-num=64 groups-per-cluster=1 is-use-mask-zero=false lm-buflen=128}, canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true}, tritonxpu-mask{core0-act-only=false is-use-mask-zero=false}, canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true}, cse, loop-invariant-code-motion, symbol-dce, canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true}, tritonxpu-normalize{compare-fusion=false dump-flag=false}, tritonxpu-vectorizability-analysis{pre-tiling=false reduce-vec=true tle-smem-vec=true tle-vec=true}, tritonxpu-vectorize{compare-fusion=false dump-flag=false per-op-decision=true tle-smem-vec=true tle-vec=true}, canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true}, tritonxpu-alloca{core-num=64 lm-buflen=128}, tritonxpu-async-load-schedule{dump-flag=false}, tritonxpu-tile-analysis{vrf-budget=24}, tritonxpu-unroll-control{budget-tiling=true core-num=64 is-use-mask-zero=false lm-buflen=128 open-decision-entry=false pin-unroll-num=0 unroll-num=2 vrf-budget=24}, tritonxpu-store-control, tritonxpu-other-sim{core-num=64 lm-buflen=128}, tritonxpu-memory-inplace{core-num=64 lm-buflen=128}, tritonxpu-cf-to-scf, tritonxpu-loop-grid, cse, loop-invariant-code-motion, symbol-dce)",
+      disable_threading: true,
+      verify_each: true
+    }
+  }
+#-}
+/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py:105:0: error: Failures have been detected while processing an MLIR pass pipeline
+/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py:105:0: note: Pipeline failed while executing [`ConvertTritonToTritonXPU` on 'builtin.module' operation]: reproducer generated at `std::errs, please share the reproducer above with Triton project.`
+Traceback (most recent call last):
+  File "/compiler071/triton/backends/xpu/compiler.py", line 572, in make_ttxir
+    pm.run(mod, 'make_ttxir')
+RuntimeError: PassManager::run failed: loc("/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py":105:0): Failures have been detected while processing an MLIR pass pipeline
+  note: Pipeline failed while executing [`ConvertTritonToTritonXPU` on 'builtin.module' operation]: reproducer generated at `std::errs, please share the reproducer above with Triton project.`
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/probe/native-layout071-verify.py", line 109, in <module>
+    values = runpy.run_path(str(repro), run_name="__main__")
+  File "/root/.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/runpy.py", line 289, in run_path
+    return _run_module_code(code, init_globals, run_name,
+  File "/root/.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/runpy.py", line 96, in _run_module_code
+    _run_code(code, mod_globals, init_globals,
+  File "/root/.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/probe/native-baseline-repro.py", line 47, in <module>
+    fn(logits, mapping, zeros, zeros, repetition, frequency, presence, packed, counts)
+  File "/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py", line 198, in apply_penalties
+    _penalties_kernel[(num_tokens, num_blocks)](
+  File "/compiler071/triton/runtime/jit.py", line 837, in launch
+    return fallback(*args, **kwargs)
+  File "/compiler071/triton/runtime/jit.py", line 807, in <lambda>
+    fallback = lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)  # noqa: E731
+  File "/compiler071/triton/runtime/jit.py", line 752, in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+  File "/compiler071/triton/runtime/jit.py", line 979, in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+  File "/compiler071/triton/compiler/compiler.py", line 428, in compile
+    cur_module = run_stage(ext, compile_ir, cur_module)
+  File "/compiler071/triton/compiler/compiler.py", line 349, in run_stage
+    next_module = compile_ir(module, metadata)
+  File "/compiler071/triton/backends/xpu/compiler.py", line 891, in <lambda>
+    stages["ttxir"] = lambda src, metadata: self.make_ttxir(src, metadata, options)
+  File "/compiler071/triton/backends/xpu/compiler.py", line 575, in make_ttxir
+    raise OutOfResources(0, 0, f"uni_sram {e}")
+triton.runtime.errors.OutOfResources: out of resource: uni_sram PassManager::run failed: loc("/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py":105:0): Failures have been detected while processing an MLIR pass pipeline
+  note: Pipeline failed while executing [`ConvertTritonToTritonXPU` on 'builtin.module' operation]: reproducer generated at `std::errs, please share the reproducer above with Triton project.`, Required: 0, Hardware limit: 0. Reducing block sizes or `num_stages` may help.
+{
+  "op": "penalties",
+  "phase": "cold",
+  "timing_run": false,
+  "production_pin_changed": false,
+  "provider_imported": false,
+  "original_block_size": 8192,
+  "candidate_release_source": "e6a8799cc14819def1bdb8fe68b018fd774fe4c9",
+  "official_wheel_sha256": "f99134002d85e4e27b11f860619a01e3385e701d93c541c1fd1515d136424b80",
+  "repro_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb",
+  "native_source": "/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py",
+  "native_source_sha256": "a5e99c71e6ac50ef025b8a7b0b903a1d2679738d8319af9c98bb200389388b29",
+  "torch": "2.9.0+cu129",
+  "triton": "3.6.0",
+  "flagtree": "0.7.1+xpu3.6",
+  "core_path": "/compiler071/triton/_C/libtriton.so",
+  "core_sha256": "863733059925dea5e2b86e9cf8c4f3a192c26e88b623321d5a3b93bbd20c1050",
+  "compiler_path": "/compiler071/triton/backends/xpu/compiler.py",
+  "compiler_py_sha256": "8971d25e7145279bc330d3bd3e4080a020b15d2208d2886bbbb13ee95b23f6e2",
+  "cache_directory": "/results/cache-layout071",
+  "compiler_knobs": {
+    "TRITON_LLVM19_READIN": "0"
+  },
+  "result": "fail",
+  "error": {
+    "type": "OutOfResources",
+    "message": "out of resource: uni_sram PassManager::run failed: loc(\"/flagos/lib/python3.10/site-packages/vllm/v1/worker/gpu/sample/penalties.py\":105:0): Failures have been detected while processing an MLIR pass pipeline\n  note: Pipeline failed while executing [`ConvertTritonToTritonXPU` on 'builtin.module' operation]: reproducer generated at `std::errs, please share the reproducer above with Triton project.`, Required: 0, Hardware limit: 0. Reducing block sizes or `num_stages` may help."
+  }
+}

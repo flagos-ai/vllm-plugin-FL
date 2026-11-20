@@ -1,0 +1,52 @@
+{
+  "scope": "Official071 original-native cold diagnostic only; no production change or gate pass",
+  "torch": "2.9.0+cu129",
+  "triton": "3.6.0",
+  "flagtree": "0.7.1+xpu3.6",
+  "official_wheel_sha256": "f99134002d85e4e27b11f860619a01e3385e701d93c541c1fd1515d136424b80",
+  "core_sha256": "863733059925dea5e2b86e9cf8c4f3a192c26e88b623321d5a3b93bbd20c1050",
+  "compiler_py_sha256": "8971d25e7145279bc330d3bd3e4080a020b15d2208d2886bbbb13ee95b23f6e2",
+  "original_repro_sha256": "b254d41ebee6e64b8cbcf4d4e7d4591d59123049eed77766a582ea6bd2673ecb",
+  "verification_helper_sha256": "4d2840e3f3baba6fbbf2ae4c8340f547b43331d081dbb366b096a8b3b7f82242",
+  "cases": [
+    {
+      "op": "grammar",
+      "logits_shape": [
+        1,
+        167
+      ],
+      "dtype": "FP32",
+      "block_size": 8192,
+      "original_native_source_sha256": "9e212ac51c603e9b95bbc8dceec4510d96b764e49eafa7c10a581ac1e6535297",
+      "independent_process_and_fresh_cache": true,
+      "provider_imported": false,
+      "exit_code": 1,
+      "failed_pass": "ConvertTritonToTritonXPU",
+      "inner_diagnostic": "GlobalEncodingAttr calculation TODO; UNREACHABLE Dialect.cpp:864",
+      "observed_reshape": "tensor<256x32xi1> -> tensor<8192xi1>",
+      "native_execution_completed": false,
+      "oracle": "not reached",
+      "native_G6": "not run"
+    },
+    {
+      "op": "penalties",
+      "logits_shape": [
+        1,
+        1031
+      ],
+      "dtype": "FP32",
+      "block_size": 8192,
+      "original_native_source_sha256": "a5e99c71e6ac50ef025b8a7b0b903a1d2679738d8319af9c98bb200389388b29",
+      "independent_process_and_fresh_cache": true,
+      "provider_imported": false,
+      "exit_code": 1,
+      "failed_pass": "ConvertTritonToTritonXPU",
+      "inner_diagnostic": "GlobalEncodingAttr calculation TODO; UNREACHABLE Dialect.cpp:864",
+      "observed_reshape": "tensor<256x32xi1> -> tensor<8192xi1>",
+      "native_execution_completed": false,
+      "oracle": "not reached",
+      "native_G6": "not run"
+    }
+  ],
+  "resource_error_interpretation": "Outer OutOfResources(0,0,uni_sram) wraps the compilation error; not evidence of physical SRAM exhaustion."
+}
