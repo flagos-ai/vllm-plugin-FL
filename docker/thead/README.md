@@ -41,13 +41,12 @@ The current PR and nightly benchmark matrices are disabled. For manual CLI
 validation, use the throughput, latency and serve cases defined in
 `tests/benchmarks/configs/smoke.yaml`.
 
-The published image in `.github/configs/thead.yml` changes after this
-candidate is accepted and the published digest is verified.
+T-Head CI uses `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-thead-ci-dev`.
+`.github/configs/thead.yml` pins the verified digest.
 
-## Existing CI image
+## Legacy CI image
 
-Builds `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci`, the image
-consumed by `.github/configs/thead.yml`.
+The legacy recipe builds `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci`.
 
 The image carries the fixed PPU stack only. The plugin and `flaggems_vllm` are
 installed at test time by `.github/scripts/thead/setup.sh`, which requires an
@@ -96,15 +95,9 @@ reaches CI:
 - `flag-gems == 5.5.0.dev0+g317b76320`
 - `vllm_fl` is **not** importable (the plugin must not be baked in)
 
-## Publish
+## Publish the legacy image
 
 ```bash
 docker tag <built-image> harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci
 docker push harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci
-```
-
-Then pin the resulting digest in `.github/configs/thead.yml`:
-
-```yaml
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-thead-ci@sha256:<digest>
 ```
