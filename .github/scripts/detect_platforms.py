@@ -53,7 +53,6 @@ THEAD_IMAGE_SUPPORT_FILES = {
     ".github/scripts/detect_platforms.py",
     ".github/workflows/ci.yml",
     ".typos.toml",
-    "tests/platforms/thead.yaml",
 }
 
 

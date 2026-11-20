@@ -31,6 +31,8 @@ export VLLM_PLUGINS=fl GEMS_VENDOR=thead USE_FLAGGEMS=1
 unset FL_BACKEND PYTHONHOME
 if [[ -f "$RUNTIME_PROVENANCE/plugin-source.ref" ]]; then
   export PYTHONPATH=/opt/flagtree
+  # Raw Qwen prompts can take more than 128 tokens to reach the answer.
+  export FL_CONCURRENT_MAX_TOKENS="${FL_CONCURRENT_MAX_TOKENS:-256}"
 else
   unset PYTHONPATH
 fi
@@ -119,7 +121,8 @@ else
 fi
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   if [[ -f "$RUNTIME_PROVENANCE/plugin-source.ref" ]]; then
-    printf 'PYTHONPATH=%s\n' "$PYTHONPATH" >> "$GITHUB_ENV"
+    printf 'PYTHONPATH=%s\nFL_CONCURRENT_MAX_TOKENS=%s\n' \
+      "$PYTHONPATH" "$FL_CONCURRENT_MAX_TOKENS" >> "$GITHUB_ENV"
   fi
   for name in THEAD_CI_WORK_DIR THEAD_CI_PYTHON VIRTUAL_ENV PATH HOME XDG_CACHE_HOME \
     FLAGGEMS_CACHE_DIR TRITON_CACHE_DIR HF_HOME TMPDIR PIP_CONFIG_FILE \

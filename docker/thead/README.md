@@ -31,7 +31,7 @@ python /opt/thead-ci/runtime_stack.py check
 python tests/run.py --platform thead --device zw810e --scope unit
 python tests/run.py --platform thead --device zw810e --scope functional
 python tests/run.py --platform thead --device zw810e --scope e2e --stage pr
-python tests/run.py --platform thead --device zw810e --scope e2e --stage nightly --task concurrent
+FL_CONCURRENT_MAX_TOKENS=256 python tests/run.py --platform thead --device zw810e --scope e2e --stage nightly --task concurrent
 ```
 
 Map the four assigned `/dev/alixpu_ppuN` nodes plus `/dev/alixpu` and
