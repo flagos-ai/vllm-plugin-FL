@@ -1,0 +1,87 @@
+[
+  {
+    "kernel": "_w8a16_int8_route_gemv",
+    "compiled_variants": [
+      {
+        "constants": {
+          "num_warps": "8",
+          "num_stages": "1",
+          "num_ctas": "1",
+          "BLOCK_N": "8",
+          "BLOCK_K": "128",
+          "UNROLL": "2"
+        },
+        "n_regs": 40,
+        "n_spills": 0,
+        "shared_bytes": 16,
+        "actual_num_warps": 8,
+        "actual_num_stages": 1,
+        "selected_launch_stages": "1",
+        "actual_num_ctas": 1
+      },
+      {
+        "constants": {
+          "num_warps": "8",
+          "num_stages": "1",
+          "num_ctas": "1",
+          "BLOCK_N": "8",
+          "BLOCK_K": "128",
+          "UNROLL": "2"
+        },
+        "n_regs": 32,
+        "n_spills": 0,
+        "shared_bytes": 16,
+        "actual_num_warps": 8,
+        "actual_num_stages": 1,
+        "selected_launch_stages": "1",
+        "actual_num_ctas": 1
+      }
+    ],
+    "tuner_configs": [
+      "BLOCK_N: 8, BLOCK_K: 128, UNROLL: 2, num_warps: 8, num_ctas: 1, num_stages: 1, maxnreg: None"
+    ]
+  },
+  {
+    "kernel": "_fused_moe_kernel_w8a16_down_fp8",
+    "compiled_variants": [],
+    "tuner_configs": [
+      "BLOCK_SIZE_N: 64, BLOCK_SIZE_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 128, BLOCK_SIZE_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 64, BLOCK_SIZE_K: 128, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 128, BLOCK_SIZE_K: 128, num_warps: 8, num_ctas: 1, num_stages: 1, maxnreg: None"
+    ]
+  },
+  {
+    "kernel": "_fused_moe_kernel_w8a16_gateup_fp8",
+    "compiled_variants": [],
+    "tuner_configs": [
+      "BLOCK_SIZE_N: 32, BLOCK_SIZE_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 64, BLOCK_SIZE_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 64, BLOCK_SIZE_K: 128, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 128, BLOCK_SIZE_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 128, BLOCK_SIZE_K: 128, num_warps: 8, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 64, BLOCK_SIZE_K: 128, num_warps: 4, num_ctas: 1, num_stages: 3, maxnreg: None",
+      "BLOCK_SIZE_N: 128, BLOCK_SIZE_K: 128, num_warps: 8, num_ctas: 1, num_stages: 3, maxnreg: None"
+    ]
+  },
+  {
+    "kernel": "_fused_moe_kernel_w8a16_gateup_silu_fp8",
+    "compiled_variants": [],
+    "tuner_configs": [
+      "BLOCK_SIZE_N: 32, BLOCK_SIZE_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 64, BLOCK_SIZE_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 64, BLOCK_SIZE_K: 128, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 128, BLOCK_SIZE_K: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 128, BLOCK_SIZE_K: 128, num_warps: 8, num_ctas: 1, num_stages: 1, maxnreg: None"
+    ]
+  },
+  {
+    "kernel": "_fused_moe_kernel_w8a16_unified_moe_fp8",
+    "compiled_variants": [],
+    "tuner_configs": [
+      "BLOCK_SIZE_N: 64, BLOCK_I_TILE: 32, BLOCK_K_H: 64, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 64, BLOCK_I_TILE: 32, BLOCK_K_H: 128, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None",
+      "BLOCK_SIZE_N: 128, BLOCK_I_TILE: 32, BLOCK_K_H: 128, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None"
+    ]
+  }
+]

@@ -1,0 +1,126 @@
+{
+  "head": "e5c1a998ff233a0e5ab09f861fcb150ce4c11f7a",
+  "tree": "8c0f7997e9221a6f8972c2fb019786d4edf06b75",
+  "source_archive_sha256": "cdc4f4e6802be870b34a30a515dba67f2d2c7d5c8b548e9d3c59f05a0200e41d",
+  "source_blob_manifest_sha256": "46c499585eeeb65d98c98da1fb0b4d0e1ecb9763ddd8f282b5631ee8ff5cc699",
+  "source_blob_count": 1491,
+  "canonical_ops_sha256": "77739b56a594b408732bed9605bd802a48dd49c7957b4510290c3ddd7486231e",
+  "historical_crlf_ops_sha256": "8332eb9ec26c1a3b8c06d23d409e50b101b8719ba8c7ad8d266037e9a3f3f43d",
+  "ops_lf_normalized_equal": true,
+  "ops_python_ast_equal": true,
+  "canonical_hopper_yaml_sha256": "d045934b7cfa768fb62a3e723ba069812d93f54e5540fb9e5c6b87c639b760f6",
+  "core_sha256": "385c1089a702a71df0ce847bdac0e71234d411396ac1bbdfe5d74bbd6528f43f",
+  "torch": "2.13.0+cu130",
+  "vllm": "0.32.0",
+  "flagtree": "0.7.0",
+  "probe_sha256": {
+    "probe.py": "b3820f03c9c543468cd25dd7eaccd1af20fc2ffdc0c75d9ef631c0312719d21c",
+    "probe-replay-filtered.py": "7d3b88bbf636ae2e74785773f37ba10649e6379feae9900f4730967b732d1d36",
+    "probe_input_identity.py": "11fad524f01eea0952c28e4e34aa51c522c2f4eb1f8e735f855f2d60e2248a29"
+  },
+  "historical_reference_identity_sha256": "bf7d6a2717e38b833f733d8ff3efd5cbc136a1b35ae9be2cbb2cd6dfded83d68",
+  "variants": {
+    "baseline": {
+      "only": "all",
+      "expected_selected_cases": 14,
+      "target": "baseline",
+      "yaml_sha256": "d045934b7cfa768fb62a3e723ba069812d93f54e5540fb9e5c6b87c639b760f6",
+      "yaml_file": "candidates/baseline/tune_configs.yaml"
+    },
+    "bn8w8": {
+      "only": "int8-1",
+      "expected_selected_cases": 2,
+      "target": "int8",
+      "config": {
+        "BLOCK_N": 8,
+        "BLOCK_K": 128,
+        "UNROLL": 2,
+        "num_warps": 8,
+        "num_stages": 1
+      },
+      "yaml_sha256": "329fca3c22f96503a598a6b1a8a13cd2b90320c974c68ec0377ce84242f52a0c",
+      "yaml_file": "candidates/bn8w8/tune_configs.yaml"
+    },
+    "bn4w4": {
+      "only": "int8-1",
+      "expected_selected_cases": 2,
+      "target": "int8",
+      "config": {
+        "BLOCK_N": 4,
+        "BLOCK_K": 128,
+        "UNROLL": 2,
+        "num_warps": 4,
+        "num_stages": 1
+      },
+      "yaml_sha256": "ff54d8c9014968278c3703ba08d3aa28a662b9ede12e3e4cc91e477df309d3d3",
+      "yaml_file": "candidates/bn4w4/tune_configs.yaml"
+    },
+    "fp8-down-w8": {
+      "only": "fp8-4",
+      "expected_selected_cases": 1,
+      "target": "fp8",
+      "config": {
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_K": 128,
+        "num_warps": 8,
+        "num_stages": 1
+      },
+      "yaml_sha256": "c6a45da6ab845bf4caf5e569caee26f9d7dabca0825b41af2717b6e7de0403d3",
+      "yaml_file": "candidates/fp8-down-w8/tune_configs.yaml"
+    }
+  },
+  "phase_order": "baseline accuracy14 -> baseline formal14 -> candidate accuracy-only then formal only after its numeric pass",
+  "no_gpu_or_remote_execution_yet": true,
+  "harness_sha256": {
+    "harness_common.py": "a196c4e9e0c84a73d401bae283fb7344d5e94caf5aefd57a066c64642015b9d0",
+    "prepare-source.py": "a80508cbe86dc0b32e4afe48243680f7728d22999cbff172047c6fee93735242",
+    "check-prerequisite.py": "6aad35b9cb22116df68989d39ef85471fb856707cd20b83a112063f54204e522",
+    "preflight.py": "e29231bbbea58c12d7cf06bf89653d2ed91f47c39a19cff4d49cea08c26d8128",
+    "probe-with-resources.py": "91e897831d3cf96fa042de911ffe9cae67e0e03b061645d1e3dbc8340f55fa35",
+    "launch.sh": "b9faf5ec28783895e1216a5d3e9509a6313d2f4ad81047dc93173373922740b8",
+    "inside.sh": "8366adf004b7bc1908ba944c500b72c31d50b13950b43eaa7ff5a37210cc9d7a",
+    "run-all.sh": "63726a3755f01e078d3e0aa9345dd112217412e66b02c44d1bd55e7a12c6d1ab"
+  },
+  "aggregation": "median of three original paired speedup rounds per case; >=0.9",
+  "baseline_observer": "Original unfiltered probe.py bytes; lazy import observer only records each original _gen yield, no filtering or RNG changes; input identity hashes outside timed calls",
+  "validation_rules_read": [
+    "AGENTS.md",
+    "workflow.md",
+    ".pre-commit-config.yaml",
+    ".github/workflows/rule-check.yaml",
+    ".github/workflows/backend-test.yaml"
+  ],
+  "referenced_docs_missing": [
+    "optimization.md",
+    "deep_opt.md"
+  ],
+  "git_lf_python_equivalence": {
+    "src/flaggems_vllm/ops/fused_marlin_moe.py": {
+      "historical_worktree_sha256": "8332eb9ec26c1a3b8c06d23d409e50b101b8719ba8c7ad8d266037e9a3f3f43d",
+      "canonical_git_sha256": "77739b56a594b408732bed9605bd802a48dd49c7957b4510290c3ddd7486231e",
+      "lf_normalized_equal": true,
+      "python_ast_equal": true
+    },
+    "tests/test_fused_marlin_moe.py": {
+      "historical_worktree_sha256": "a6ac3a4559d3bcd1bffa0757ac42cefba3c9e2ff44de2bf48bbcc39b85ca53f5",
+      "canonical_git_sha256": "b5cb217debe868a257f7ba168d1479350a74105aedb1862c6f4a33b944286578",
+      "lf_normalized_equal": true,
+      "python_ast_equal": true
+    },
+    "benchmark/test_fused_marlin_moe_w8a16_int8.py": {
+      "historical_worktree_sha256": "85b2d227efdfcdfb332badf843d60ef8b63ff9323ffacb672dc0e1da2f3661ee",
+      "canonical_git_sha256": "c65ba0b30ee2e916084f799e5dc782f5c3ebb64f9ebb65f38cef9f3848cfa37b",
+      "lf_normalized_equal": true,
+      "python_ast_equal": true
+    },
+    "benchmark/test_fused_marlin_moe_w8a16_fp8.py": {
+      "historical_worktree_sha256": "681359bfe1de7bf7f7f441042a50fe92db68a1cfe0f324a2a7a377f95e479859",
+      "canonical_git_sha256": "01b8427aee2b654c911a27a8b91e07fa1053deda1975e60a827a2925f958a983",
+      "lf_normalized_equal": true,
+      "python_ast_equal": true
+    }
+  },
+  "host_python_compatibility": "stdlib validated-path extraction, regular members first then internal symlinks; no filter keyword; host Linux CPU preflight required before GPU",
+  "outer_runtime_minutes": 25,
+  "cache_policy": "new task cache per variant; accuracy then formal reuse same own-variant cache only"
+}

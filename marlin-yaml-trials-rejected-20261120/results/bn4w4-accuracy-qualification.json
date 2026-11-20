@@ -1,0 +1,42 @@
+{
+  "variant": "bn4w4",
+  "phase": "accuracy",
+  "source_fingerprint": {
+    "head": "e5c1a998ff233a0e5ab09f861fcb150ce4c11f7a",
+    "tree": "8c0f7997e9221a6f8972c2fb019786d4edf06b75",
+    "ops_sha256": "77739b56a594b408732bed9605bd802a48dd49c7957b4510290c3ddd7486231e",
+    "yaml_sha256": "ff54d8c9014968278c3703ba08d3aa28a662b9ede12e3e4cc91e477df309d3d3",
+    "core_sha256": "385c1089a702a71df0ce847bdac0e71234d411396ac1bbdfe5d74bbd6528f43f",
+    "probes": {
+      "probe.py": "b3820f03c9c543468cd25dd7eaccd1af20fc2ffdc0c75d9ef631c0312719d21c",
+      "probe-replay-filtered.py": "7d3b88bbf636ae2e74785773f37ba10649e6379feae9900f4730967b732d1d36",
+      "probe_input_identity.py": "11fad524f01eea0952c28e4e34aa51c522c2f4eb1f8e735f855f2d60e2248a29"
+    },
+    "harness": {
+      "harness_common.py": "a196c4e9e0c84a73d401bae283fb7344d5e94caf5aefd57a066c64642015b9d0",
+      "prepare-source.py": "a80508cbe86dc0b32e4afe48243680f7728d22999cbff172047c6fee93735242",
+      "check-prerequisite.py": "6aad35b9cb22116df68989d39ef85471fb856707cd20b83a112063f54204e522",
+      "preflight.py": "e29231bbbea58c12d7cf06bf89653d2ed91f47c39a19cff4d49cea08c26d8128",
+      "probe-with-resources.py": "91e897831d3cf96fa042de911ffe9cae67e0e03b061645d1e3dbc8340f55fa35",
+      "launch.sh": "b9faf5ec28783895e1216a5d3e9509a6313d2f4ad81047dc93173373922740b8",
+      "inside.sh": "8366adf004b7bc1908ba944c500b72c31d50b13950b43eaa7ff5a37210cc9d7a",
+      "run-all.sh": "63726a3755f01e078d3e0aa9345dd112217412e66b02c44d1bd55e7a12c6d1ab"
+    }
+  },
+  "completed": true,
+  "numeric_pass": true,
+  "failure": null,
+  "selected_case_count": 2,
+  "generated_input_count": 14,
+  "identities_match_historical_reference": true,
+  "timing_case_count": 0,
+  "timing_ratios": [],
+  "performance_gate": 0.9,
+  "performance_aggregation": "median of three original paired speedups per case",
+  "performance_gate_pass": false,
+  "target_kernel_observed": true,
+  "baseline_boundary_valid": false,
+  "full_candidate_acceptance": false,
+  "method": "Original14 generator order, BF16, maxdiff<.04,10/50ms,3pairs; no profiler; counters/IR collected after timing",
+  "scope": "diagnostic subset only; useful candidates still require full unfiltered14"
+}

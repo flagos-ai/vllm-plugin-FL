@@ -1,0 +1,50 @@
+[
+  {
+    "file": "baseline-accuracy-receipt.tar.gz",
+    "sha256": "67fe3d6129f47d02a71247a55eaea431dd68e5697b4968e8be36055931fe16d7",
+    "bytes": 94834,
+    "status": 0
+  },
+  {
+    "file": "baseline-formal-receipt.tar.gz",
+    "sha256": "1039044284ec4cd1902406471e330f0a7281647e268b2fb7f60c7be4f4591bd9",
+    "bytes": 102648,
+    "status": 0
+  },
+  {
+    "file": "bn8w8-accuracy-receipt.tar.gz",
+    "sha256": "2ad41e5f8a0f56c7954c7c40bf831f8558488c5f217ea90a10ee824ed63aa520",
+    "bytes": 40568,
+    "status": 0
+  },
+  {
+    "file": "bn8w8-formal-receipt.tar.gz",
+    "sha256": "8c2b16b0de2911c8974752e2e6f1c9edf4daea73bba93dc991d7a94abae7a7b1",
+    "bytes": 42395,
+    "status": 2
+  },
+  {
+    "file": "bn4w4-accuracy-receipt.tar.gz",
+    "sha256": "a3c971f8528c1289aab32942e4f772fcf451f3fc263b2080dd29719f75bac3c9",
+    "bytes": 41086,
+    "status": 0
+  },
+  {
+    "file": "bn4w4-formal-receipt.tar.gz",
+    "sha256": "d3eb5fa5c42da3de414ebd6aaa2d4de7cb4640de5d169e56359ae0d30a58585e",
+    "bytes": 42895,
+    "status": 2
+  },
+  {
+    "file": "fp8-down-w8-accuracy-receipt.tar.gz",
+    "sha256": "160d1526d58f3dc81eee701a9b7d73f14c79c5239081e44415b5d2a6c0eddc4a",
+    "bytes": 36035,
+    "status": 0
+  },
+  {
+    "file": "fp8-down-w8-formal-receipt.tar.gz",
+    "sha256": "ad5780d09cc355ad62596ca4fdaae02a81830a34a5eae360f725590896b059f3",
+    "bytes": 37088,
+    "status": 2
+  }
+]

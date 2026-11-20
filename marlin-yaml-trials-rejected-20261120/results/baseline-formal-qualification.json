@@ -1,0 +1,435 @@
+{
+  "variant": "baseline",
+  "phase": "formal",
+  "source_fingerprint": {
+    "head": "e5c1a998ff233a0e5ab09f861fcb150ce4c11f7a",
+    "tree": "8c0f7997e9221a6f8972c2fb019786d4edf06b75",
+    "ops_sha256": "77739b56a594b408732bed9605bd802a48dd49c7957b4510290c3ddd7486231e",
+    "yaml_sha256": "d045934b7cfa768fb62a3e723ba069812d93f54e5540fb9e5c6b87c639b760f6",
+    "core_sha256": "385c1089a702a71df0ce847bdac0e71234d411396ac1bbdfe5d74bbd6528f43f",
+    "probes": {
+      "probe.py": "b3820f03c9c543468cd25dd7eaccd1af20fc2ffdc0c75d9ef631c0312719d21c",
+      "probe-replay-filtered.py": "7d3b88bbf636ae2e74785773f37ba10649e6379feae9900f4730967b732d1d36",
+      "probe_input_identity.py": "11fad524f01eea0952c28e4e34aa51c522c2f4eb1f8e735f855f2d60e2248a29"
+    },
+    "harness": {
+      "harness_common.py": "a196c4e9e0c84a73d401bae283fb7344d5e94caf5aefd57a066c64642015b9d0",
+      "prepare-source.py": "a80508cbe86dc0b32e4afe48243680f7728d22999cbff172047c6fee93735242",
+      "check-prerequisite.py": "6aad35b9cb22116df68989d39ef85471fb856707cd20b83a112063f54204e522",
+      "preflight.py": "e29231bbbea58c12d7cf06bf89653d2ed91f47c39a19cff4d49cea08c26d8128",
+      "probe-with-resources.py": "91e897831d3cf96fa042de911ffe9cae67e0e03b061645d1e3dbc8340f55fa35",
+      "launch.sh": "b9faf5ec28783895e1216a5d3e9509a6313d2f4ad81047dc93173373922740b8",
+      "inside.sh": "8366adf004b7bc1908ba944c500b72c31d50b13950b43eaa7ff5a37210cc9d7a",
+      "run-all.sh": "63726a3755f01e078d3e0aa9345dd112217412e66b02c44d1bd55e7a12c6d1ab"
+    }
+  },
+  "completed": true,
+  "numeric_pass": true,
+  "failure": null,
+  "selected_case_count": 14,
+  "generated_input_count": 14,
+  "identities_match_historical_reference": true,
+  "timing_case_count": 14,
+  "timing_ratios": [
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      "median_three_pair_speedup": 1.089557440617919,
+      "rounds": [
+        {
+          "native": 0.1024319976568222,
+          "gems": 0.09292799979448318,
+          "speedup": 1.1022727044954996
+        },
+        {
+          "gems": 0.09254399687051773,
+          "native": 0.100832000374794,
+          "speedup": 1.089557440617919
+        },
+        {
+          "native": 0.10124800354242325,
+          "gems": 0.0934240035712719,
+          "speedup": 1.0837472134790556
+        }
+      ]
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 0.8105678085847084,
+      "rounds": [
+        {
+          "native": 0.1640319973230362,
+          "gems": 0.20284800231456757,
+          "speedup": 0.8086448742475795
+        },
+        {
+          "gems": 0.20310400426387787,
+          "native": 0.16463999450206757,
+          "speedup": 0.8106191460812516
+        },
+        {
+          "native": 0.16444799304008484,
+          "gems": 0.20287999510765076,
+          "speedup": 0.8105678085847084
+        }
+      ]
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 0.3298291170618021,
+      "rounds": [
+        {
+          "native": 0.28563201427459717,
+          "gems": 0.8659999966621399,
+          "speedup": 0.3298291170618021
+        },
+        {
+          "gems": 0.8661920130252838,
+          "native": 0.28566399216651917,
+          "speedup": 0.32979291874188726
+        },
+        {
+          "native": 0.2894880026578903,
+          "gems": 0.8707839846611023,
+          "speedup": 0.3324452536532987
+        }
+      ]
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 0.7426374165550512,
+      "rounds": [
+        {
+          "native": 0.5621439814567566,
+          "gems": 0.7715519964694977,
+          "speedup": 0.72858859030764
+        },
+        {
+          "gems": 0.7486079931259155,
+          "native": 0.6008960008621216,
+          "speedup": 0.8026844575262919
+        },
+        {
+          "native": 0.5809919834136963,
+          "gems": 0.7823359966278076,
+          "speedup": 0.7426374165550512
+        }
+      ]
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 1.0689839616239103,
+      "rounds": [
+        {
+          "native": 1.2768959999084473,
+          "gems": 1.1941919922828674,
+          "speedup": 1.0692552019775978
+        },
+        {
+          "gems": 1.1954879760742188,
+          "native": 1.2765600085258484,
+          "speedup": 1.0678150128434218
+        },
+        {
+          "native": 1.2763839960098267,
+          "gems": 1.1940160393714905,
+          "speedup": 1.0689839616239103
+        }
+      ]
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 1.461181381207707,
+      "rounds": [
+        {
+          "native": 3.243328094482422,
+          "gems": 2.2207999229431152,
+          "speedup": 1.460432369875176
+        },
+        {
+          "gems": 2.215456008911133,
+          "native": 3.24288010597229,
+          "speedup": 1.4637528765764671
+        },
+        {
+          "native": 3.2431681156158447,
+          "gems": 2.2195520401000977,
+          "speedup": 1.461181381207707
+        }
+      ]
+    },
+    {
+      "precision": "int8",
+      "shape": [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 1.6092051151488524,
+      "rounds": [
+        {
+          "native": 10.821376323699951,
+          "gems": 6.724671840667725,
+          "speedup": 1.6092051151488524
+        },
+        {
+          "gems": 6.708352088928223,
+          "native": 10.843647956848145,
+          "speedup": 1.6164398965798183
+        },
+        {
+          "native": 10.811744213104248,
+          "gems": 6.738687992095947,
+          "speedup": 1.604428670059474
+        }
+      ]
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        4,
+        512,
+        512,
+        2
+      ],
+      "median_three_pair_speedup": 1.0874505325064086,
+      "rounds": [
+        {
+          "native": 0.10156799852848053,
+          "gems": 0.09372799843549728,
+          "speedup": 1.0836462980523227
+        },
+        {
+          "gems": 0.09294399991631508,
+          "native": 0.10107200220227242,
+          "speedup": 1.0874505325064086
+        },
+        {
+          "native": 0.10099200159311295,
+          "gems": 0.09222400188446045,
+          "speedup": 1.0950728609634308
+        }
+      ]
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 0.5681602603463911,
+      "rounds": [
+        {
+          "native": 0.15356799960136414,
+          "gems": 0.2698560059070587,
+          "speedup": 0.569073862503748
+        },
+        {
+          "gems": 0.27110399305820465,
+          "native": 0.15347200632095337,
+          "speedup": 0.5661001322396741
+        },
+        {
+          "native": 0.1533759981393814,
+          "gems": 0.2699519991874695,
+          "speedup": 0.5681602603463911
+        }
+      ]
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        4,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 0.8191791894618281,
+      "rounds": [
+        {
+          "native": 0.3758719861507416,
+          "gems": 0.4790880084037781,
+          "speedup": 0.784557282915657
+        },
+        {
+          "gems": 0.4859039932489395,
+          "native": 0.3999200016260147,
+          "speedup": 0.8230432496592526
+        },
+        {
+          "native": 0.39185599982738495,
+          "gems": 0.47835199534893036,
+          "speedup": 0.8191791894618281
+        }
+      ]
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        16,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 0.9608638553679822,
+      "rounds": [
+        {
+          "native": 0.5252159833908081,
+          "gems": 0.5616959929466248,
+          "speedup": 0.9350538191229661
+        },
+        {
+          "gems": 0.5663359761238098,
+          "native": 0.5453760027885437,
+          "speedup": 0.9629902139031974
+        },
+        {
+          "native": 0.5338559746742249,
+          "gems": 0.5556000173091888,
+          "speedup": 0.9608638553679822
+        }
+      ]
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        64,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 1.290314468905978,
+      "rounds": [
+        {
+          "native": 1.238752007484436,
+          "gems": 0.9590719938278198,
+          "speedup": 1.2916152441699038
+        },
+        {
+          "gems": 0.9614080190658569,
+          "native": 1.2389919757843018,
+          "speedup": 1.2887264836714767
+        },
+        {
+          "native": 1.2392799854278564,
+          "gems": 0.9604480266571045,
+          "speedup": 1.290314468905978
+        }
+      ]
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        256,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 1.5684695888300277,
+      "rounds": [
+        {
+          "native": 3.4929440021514893,
+          "gems": 2.226975917816162,
+          "speedup": 1.5684695888300277
+        },
+        {
+          "gems": 2.2273919582366943,
+          "native": 3.4927040338516235,
+          "speedup": 1.5680688892387886
+        },
+        {
+          "native": 3.4928640127182007,
+          "gems": 2.2255361080169678,
+          "speedup": 1.5694483680296103
+        }
+      ]
+    },
+    {
+      "precision": "fp8",
+      "shape": [
+        1024,
+        8,
+        4096,
+        14336,
+        2
+      ],
+      "median_three_pair_speedup": 1.4432487965350613,
+      "rounds": [
+        {
+          "native": 10.412559986114502,
+          "gems": 7.218064069747925,
+          "speedup": 1.4425696260795504
+        },
+        {
+          "gems": 7.193887948989868,
+          "native": 10.443567752838135,
+          "speedup": 1.4517278871857562
+        },
+        {
+          "native": 10.425151824951172,
+          "gems": 7.223392009735107,
+          "speedup": 1.4432487965350613
+        }
+      ]
+    }
+  ],
+  "performance_gate": 0.9,
+  "performance_aggregation": "median of three original paired speedups per case",
+  "performance_gate_pass": false,
+  "target_kernel_observed": true,
+  "baseline_boundary_valid": true,
+  "full_candidate_acceptance": false,
+  "method": "Original14 generator order, BF16, maxdiff<.04,10/50ms,3pairs; no profiler; counters/IR collected after timing",
+  "scope": "full canonical baseline14"
+}
