@@ -41,6 +41,17 @@ def prepare_metax_v2_runtime(vllm_config) -> bool:
 
     from vllm_fl.compilation.graph import _weak_ref_metax_tensor
 
+    if (
+        getattr(getattr(vllm_config, "parallel_config", None), "nnodes_within_dp", 1)
+        > 1
+    ):
+        from vllm_fl.dispatch.backends.vendor.metax.patches.remote_queue_shutdown import (
+            install_remote_queue_shutdown,
+        )
+
+        if install_remote_queue_shutdown():
+            logger.info_once("MetaX V2 multinode remote queue cancellation enabled.")
+
     if not _has_native_mapped_cpu_view():
         buffer_utils.is_uva_available = _no_uva
         logger.info_once(
