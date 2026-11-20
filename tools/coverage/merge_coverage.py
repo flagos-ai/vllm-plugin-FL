@@ -76,8 +76,12 @@ def merge(baseline: dict, supp: dict, scope: dict, commit_sha: str) -> dict:
 
     for key, base_info in base_files.items():
         rel = _norm_key(key)
-        if any(rel.startswith(prefix.replace("vllm_fl/", "", 1).replace("vllm_fl/", "vllm_fl/"))
-               for prefix in reporting_exclude):
+        if any(
+            rel.startswith(
+                prefix.replace("vllm_fl/", "", 1).replace("vllm_fl/", "vllm_fl/")
+            )
+            for prefix in reporting_exclude
+        ):
             continue
         # scope prefixes are like "vllm_fl/dispatch/backends/vendor/ascend/"
         if any(rel.startswith(prefix) for prefix in reporting_exclude):
@@ -130,9 +134,9 @@ def main() -> int:
     supp = _load(args.supplementary)
     scope = _load(args.scope)
 
-    if baseline.get("meta", {}).get("format_version") != supp.get(
-        "meta", {}
-    ).get("format_version"):
+    if baseline.get("meta", {}).get("format_version") != supp.get("meta", {}).get(
+        "format_version"
+    ):
         print("[merge] error: coverage.py format versions differ", file=sys.stderr)
         return 2
 
