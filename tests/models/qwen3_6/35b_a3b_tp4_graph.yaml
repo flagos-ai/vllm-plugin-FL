@@ -51,3 +51,11 @@ serve:
         - "blue rectangle"
   sampling:
     temperature: 0.0
+
+verification:
+  source: "tools/adaptation-gate-cases"
+  serving_scenarios: ["text_single", "image_single"]
+  concurrent_scenarios:
+    - "text_concurrent_8"
+    - "image_concurrent_8"
+    - "mixed_concurrent_8"

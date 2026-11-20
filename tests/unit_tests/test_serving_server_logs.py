@@ -12,7 +12,7 @@ import pytest
 import requests
 
 from tests.e2e_tests.serving.server_helper import VllmServer
-from tests.utils.model_config import ModelConfig
+from tests.utils.model_config import ModelConfig, VerificationConfig
 
 
 @pytest.fixture
@@ -162,6 +162,7 @@ def smoke_module(tmp_path, monkeypatch):
         serve=SimpleNamespace(
             endpoints=["chat"], request_model=lambda _: "Example-27B"
         ),
+        verification=VerificationConfig(),
     )
     monkeypatch.setenv("FL_TEST_MODEL", "example")
     monkeypatch.setenv("FL_TEST_CASE", "case")

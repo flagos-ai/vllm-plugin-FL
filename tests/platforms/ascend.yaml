@@ -97,6 +97,10 @@ env_defaults:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
       nightly:
         inference:
           qwen3_6:
@@ -106,6 +110,14 @@ env_defaults:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+    timeouts:
+      e2e:
+        serving: 180
+        concurrent: 180
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

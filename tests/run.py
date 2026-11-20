@@ -15,7 +15,7 @@ Usage::
     # Run only functional tests (ops, compilation, distributed)
     python tests/run.py --platform cuda --device a100 --scope functional
 
-    # Run only E2E tests (inference, serving — require model files)
+    # Run only E2E tests (inference, serving, concurrent — require model files)
     python tests/run.py --platform cuda --device a100 --scope e2e
 
     # Run only unit tests
@@ -57,6 +57,8 @@ from tests.utils.device_utils import get_device_count, get_visible_device_env_va
 from tests.utils.model_config import ModelConfig
 from tests.utils.platform_config import PlatformConfig
 from tests.utils.report import TestReport, TestResult
+
+_MODEL_E2E_TASKS = ("inference", "serving", "concurrent")
 
 # ---------------------------------------------------------------------------
 # Test case descriptor
@@ -266,6 +268,10 @@ class TestRunner:
 
         results: list[TestResult] = []
         results_lock = threading.Lock()
+        # A one-case job has no competing subprocess output, so stream it
+        # live. Multi-case jobs keep per-case buffered/prefixed output to
+        # prevent concurrent subprocesses from interleaving their logs.
+        capture_case_output = len(cases) > 1
 
         def _ts() -> str:
             return time.strftime("%H:%M:%S")
@@ -273,9 +279,15 @@ class TestRunner:
         def _run_one(tc: TestCase) -> None:
             slots = scheduler.acquire(tc.num_devices)
             visible = ",".join(str(s) for s in slots)
+            output_mode = (
+                "stdout buffered until done"
+                if capture_case_output
+                else "stdout streaming live"
+            )
             print(
                 f"[run] [{_ts()}] START  {tc.name}  "
-                f"{visible_env_var}={visible}  (devices={tc.num_devices}, stdout buffered until done)",
+                f"{visible_env_var}={visible}  "
+                f"(devices={tc.num_devices}, {output_mode})",
                 flush=True,
             )
             status = "FAIL"
@@ -292,7 +304,9 @@ class TestRunner:
                     f"{port_base}-{port_base + 19}"
                 )
                 result = self._run_single(
-                    tc, extra_env_override=device_env, _quiet=True
+                    tc,
+                    extra_env_override=device_env,
+                    _quiet=capture_case_output,
                 )
                 status = "PASS" if result.passed else "FAIL"
                 # Flush captured subprocess output with per-case prefix so
@@ -330,7 +344,7 @@ class TestRunner:
         Scopes:
         - ``unit``: unit tests
         - ``functional``: component-level GPU tests (ops, compilation, distributed)
-        - ``e2e``: end-to-end model tests (inference, serving)
+        - ``e2e``: end-to-end model tests (inference, serving, concurrent)
         - ``benchmark``: benchmark tests selected by platform YAML
         - ``all``: all of the above
         """
@@ -434,8 +448,7 @@ class TestRunner:
     ) -> list[TestCase]:
         """Build test cases from platform YAML config for e2e tests.
 
-        For inference/serving/concurrent tasks, routes to the unified smoke
-        tests (``test_inference_smoke.py`` etc.) and injects
+        For inference/serving/concurrent tasks, routes to the unified test and injects
         ``FL_TEST_MODEL``/``FL_TEST_CASE`` env vars so the smoke test can
         load the correct model YAML config.
 
@@ -606,7 +619,7 @@ class TestRunner:
         ]
 
     def _discover_e2e_tests(self) -> list[TestCase]:
-        """End-to-end model tests (inference, serving)."""
+        """End-to-end model tests (inference, serving, concurrent)."""
         return self._discover_from_yaml("tests/e2e_tests")
 
     def _discover_benchmark_tests(self) -> list[TestCase]:
@@ -749,7 +762,7 @@ class TestRunner:
         # Wait for sufficient device memory before e2e tests.
         # When running in parallel the memory check runs under the already-acquired
         # device slots, so we only look at the assigned cards.
-        if tc.task in ("inference", "serving") and tc.model and tc.case:
+        if tc.task in _MODEL_E2E_TASKS and tc.model and tc.case:
             gpu_util = ModelConfig.load(
                 tc.model,
                 tc.case,
@@ -882,7 +895,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["all", "unit", "functional", "e2e", "benchmark"],
         default="all",
         help="Which test scope to run: unit, functional (ops/compilation/"
-        "distributed), e2e (inference/serving), benchmark, or all (default: all)",
+        "distributed), e2e (inference/serving/concurrent), benchmark, or all "
+        "(default: all)",
     )
     parser.add_argument(
         "--stage",
@@ -894,7 +908,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--task",
         default=None,
-        help="Functional test task filter (e.g., inference, serve)",
+        help="E2E/functional task filter (e.g., inference, serving, concurrent)",
     )
     parser.add_argument(
         "--model",

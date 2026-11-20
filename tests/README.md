@@ -224,6 +224,14 @@ serve:                                     # Optional: serving test config
   endpoints: [completion]
   completion_prompt: "please introduce yourself"
   max_tokens: 20
+
+verification:                              # Optional: shared external case pack
+  source: "tools/adaptation-gate-cases"
+  serving_scenarios: ["text_single", "image_single"]
+  concurrent_scenarios:
+    - "text_concurrent_8"
+    - "image_concurrent_8"
+    - "mixed_concurrent_8"
 ```
 
 ### Multimodal model example
@@ -270,8 +278,13 @@ generate:
 | `serve.max_tokens` | int | No | Max tokens for serving requests (default: 50) |
 | `serve.api_key` | str | No | API key for authenticated endpoints |
 | `serve.extra_engine` | dict | No | Engine param overrides for serving only |
+| `verification.source` | str | No | Repository-relative case pack; currently `tools/adaptation-gate-cases` |
+| `verification.serving_scenarios` | list | No | Case-pack scenarios executed by the standard serving job |
+| `verification.concurrent_scenarios` | list | No | Case-pack scenarios executed by the standard concurrent job in HTTP mode |
 
-Platform `device_overrides.<device>.<case>` can override any `llm`, `generate`, or `serve` field for that device. A `null` value removes the inherited key from the base model YAML.
+Platform `device_overrides.<device>.<case>` can override any `llm`, `generate`,
+`serve`, `concurrent`, or `verification` field for that device. A `null` value
+removes the inherited key from the base model YAML.
 
 ## Platform Config Format
 

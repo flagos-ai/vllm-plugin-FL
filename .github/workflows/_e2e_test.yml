@@ -14,7 +14,7 @@
 
 # Reusable E2E test workflow — slow, end-to-end model validation.
 #
-# Runs inference or serving tests that require real model files on disk
+# Runs model-backed E2E tasks that require real model files on disk
 # and substantial GPU memory. Each invocation tests all model/case combos
 # for a single (task, device) group, avoiding repeated container startup.
 # Called by _platform_test.yml for each entry in the E2E test matrix.
@@ -34,7 +34,7 @@ on:
         type: string
         default: ""
       task:
-        description: "Test task category (e.g., inference, serving)"
+        description: "Test task category (e.g., inference, serving, concurrent)"
         required: true
         type: string
       device:
@@ -157,3 +157,4 @@ jobs:
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
+            test-results/gate/

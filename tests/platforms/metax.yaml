@@ -64,6 +64,12 @@ c550:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
       nightly:
         inference:
           qwen3_6:
@@ -80,6 +86,8 @@ c550:
         concurrent:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
     timeouts:
       e2e:
