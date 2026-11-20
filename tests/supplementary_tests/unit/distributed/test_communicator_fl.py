@@ -91,11 +91,15 @@ def comm_env(monkeypatch):
         return module
 
     def chain(name, **attrs):
+        # Parents go through monkeypatch.setitem so every stub is removed on
+        # teardown — a leaked non-package 'vllm' stub breaks later tests that
+        # import on-disk fake vllm trees.
+        setitem = monkeypatch.setitem
         parts = name.split(".")
         for i in range(1, len(parts)):
             parent = ".".join(parts[:i])
             if parent not in sys.modules:
-                sys.modules[parent] = ModuleType(parent)
+                setitem(sys.modules, parent, ModuleType(parent))
         return leaf(name, **attrs)
 
     # Import the real vllm_fl.distributed packages BEFORE stubbing so the

@@ -68,8 +68,21 @@ class _FakeVllmTree:
             (ops / "broken.py").write_text("raise ImportError('broken child')\n")
 
     def install(self):
-        """Put the fake tree first on sys.path."""
+        """Put the fake tree first on sys.path.
+
+        Any ``vllm*`` entries already in ``sys.modules`` (leaked stubs from
+        earlier tests that fake the vllm boundary) are dropped first: their
+        ``find_spec`` resolution would otherwise shadow the on-disk tree and
+        make ``_module_exists`` report the whole package as absent.
+        """
         self._saved_path = list(sys.path)
+        self._saved_modules = {
+            name: sys.modules.get(name)
+            for name in list(sys.modules)
+            if name == "vllm" or name.startswith("vllm.")
+        }
+        for name in self._saved_modules:
+            del sys.modules[name]
         sys.path.insert(0, str(self.root))
 
     def restore(self):
@@ -81,6 +94,9 @@ class _FakeVllmTree:
             if name == "vllm" or name.startswith("vllm.")
         ]:
             del sys.modules[name]
+        for name, module in self._saved_modules.items():
+            if module is not None:
+                sys.modules[name] = module
 
 
 @pytest.fixture
