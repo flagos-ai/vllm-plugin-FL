@@ -72,6 +72,7 @@ def test_metax_plan_resolves_registered_c550_provider(
     from vllm_fl.dispatch.backends.flaggems.impl import mla_ops
 
     calls = []
+    cache_calls = []
     failure = RuntimeError("sparse launch failed")
 
     def sparse(q, cache, indices, scale, *, attn_sink, topk_length):
@@ -86,6 +87,7 @@ def test_metax_plan_resolves_registered_c550_provider(
     operators = {
         "flash_mla_sparse_fwd": sparse,
         "per_token_group_quant_fp8": quantize,
+        "concat_and_cache_mla": lambda *args: cache_calls.append(args),
     }
 
     def lookup(name):
@@ -110,6 +112,18 @@ def test_metax_plan_resolves_registered_c550_provider(
         torch.float8_e4m3fn,
         False,
     )
+    kv_c = torch.ones((1, 512), dtype=torch.bfloat16)
+    k_pe = torch.ones((1, 64), dtype=torch.bfloat16)
+    cache = torch.empty((1, 64, 576), dtype=torch.bfloat16)
+    slots = torch.tensor([0])
+    scale = torch.tensor(1.0)
+    update_cache = plan.operations["concat_and_cache_mla"]
+    for dtype in ("auto", "bfloat16"):
+        update_cache(kv_c, k_pe, cache, slots, kv_cache_dtype=dtype, scale=scale)
+    with pytest.raises(ValueError, match="BF16 MLA cache requires"):
+        update_cache(kv_c, k_pe, cache.float(), slots, "bfloat16", scale)
+    assert cache_calls == [(kv_c, k_pe, cache, slots, "auto", scale)] * 2
+
     impl = plan.sparse_backend.get_impl_cls()
     with pytest.raises(RuntimeError) as error:
         impl._sparse_attention(

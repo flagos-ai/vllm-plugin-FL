@@ -35,6 +35,20 @@ def _flaggems_query_quantizer(implementation):
     return quantize
 
 
+def _metax_concat_and_cache_mla(implementation):
+    @wraps(implementation)
+    def cache(kv_c, k_pe, kv_cache, slot_mapping, kv_cache_dtype, scale):
+        if kv_cache_dtype == "bfloat16":
+            if kv_cache.dtype != torch.bfloat16 or kv_c.dtype != torch.bfloat16:
+                raise ValueError("BF16 MLA cache requires BF16 input and cache")
+            # The public FlagGems-vllm API uses "auto" for matching
+            # input and cache dtypes without quantization.
+            kv_cache_dtype = "auto"
+        return implementation(kv_c, k_pe, kv_cache, slot_mapping, kv_cache_dtype, scale)
+
+    return cache
+
+
 def get_operator(name):
     from vllm.platforms import current_platform
 
@@ -67,7 +81,10 @@ def get_operator(name):
         graph_fn = get_flaggems_vllm_operator("fp8_fp4_paged_mqa_logits_graph")
         if callable(graph_fn):
             return graph_fn
-    return get_flaggems_vllm_operator(name)
+    implementation = get_flaggems_vllm_operator(name)
+    if is_metax and name == "concat_and_cache_mla" and callable(implementation):
+        return _metax_concat_and_cache_mla(implementation)
+    return implementation
 
 
 def is_available(name):
