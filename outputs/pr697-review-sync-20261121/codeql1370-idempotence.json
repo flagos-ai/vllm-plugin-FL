@@ -1,0 +1,94 @@
+{
+  "head": "171348d950867cc2779e77bbe78283cdbd211979",
+  "source": "vllm_fl/dispatch/backends/vendor/sunrise/patch.py",
+  "actual_bytes_sha256": "9ebb09a984bd6c83f18b17b517aadfe0de33696e2e178e8fbc210525ff33b7ab",
+  "source_unchanged": true,
+  "uses": {
+    "initial_store": 12,
+    "global_declaration": 19,
+    "guard_load": 20,
+    "completion_store": 29
+  },
+  "cases": [
+    {
+      "case": "production_ptpu_twice",
+      "device": "ptpu",
+      "calls": 2,
+      "patch_call_counts": {
+        "patch_accelerator_memory_stats": 1,
+        "patch_accelerator_memory_api": 1,
+        "patch_graph_capture_runtime": 1,
+        "patch_flagcx_stream_adapter": 1,
+        "patch_distributed_runtime": 1,
+        "patch_op_cls": 1
+      },
+      "ordered_calls": [
+        "patch_accelerator_memory_stats",
+        "patch_accelerator_memory_api",
+        "patch_graph_capture_runtime",
+        "patch_flagcx_stream_adapter",
+        "patch_distributed_runtime",
+        "patch_op_cls"
+      ],
+      "state_after": true,
+      "counterfactual_ast_only": false,
+      "pass": true
+    },
+    {
+      "case": "production_other_platform",
+      "device": "cuda",
+      "calls": 2,
+      "patch_call_counts": {
+        "patch_accelerator_memory_stats": 0,
+        "patch_accelerator_memory_api": 0,
+        "patch_graph_capture_runtime": 0,
+        "patch_flagcx_stream_adapter": 0,
+        "patch_distributed_runtime": 0,
+        "patch_op_cls": 0
+      },
+      "ordered_calls": [],
+      "state_after": false,
+      "counterfactual_ast_only": false,
+      "pass": true
+    },
+    {
+      "case": "counterfactual_delete_only_final_store",
+      "device": "ptpu",
+      "calls": 2,
+      "patch_call_counts": {
+        "patch_accelerator_memory_stats": 2,
+        "patch_accelerator_memory_api": 2,
+        "patch_graph_capture_runtime": 2,
+        "patch_flagcx_stream_adapter": 2,
+        "patch_distributed_runtime": 2,
+        "patch_op_cls": 2
+      },
+      "ordered_calls": [
+        "patch_accelerator_memory_stats",
+        "patch_accelerator_memory_api",
+        "patch_graph_capture_runtime",
+        "patch_flagcx_stream_adapter",
+        "patch_distributed_runtime",
+        "patch_op_cls",
+        "patch_accelerator_memory_stats",
+        "patch_accelerator_memory_api",
+        "patch_graph_capture_runtime",
+        "patch_flagcx_stream_adapter",
+        "patch_distributed_runtime",
+        "patch_op_cls"
+      ],
+      "state_after": false,
+      "counterfactual_ast_only": true,
+      "pass": true
+    }
+  ],
+  "meaning": "The completion store is consumed by the guard on a later production call; deleting only that store makes the second call reapply every patch. The counterfactual exists only in this task process AST, never in repository source.",
+  "original_receipt_sha256": "30338975cb9d3793e4ae3a05db1db31f460a8f028981cb947ebeb90abed3c0f2",
+  "scanned_source_matches_current_commit": true,
+  "scanned_source_git_blob": "6f449fe8f02575d0a1f12629aa62d107aca9ad23",
+  "existing_runtime_tests": {
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0
+  }
+}

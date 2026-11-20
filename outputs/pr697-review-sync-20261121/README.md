@@ -8,3 +8,5 @@ The submitted merge `171348d9` incorporates target `0.5.0-dev` `77f141a9` into t
 - No hardware Gate was run on this new commit. See `previous-pr-description.md` for the original historical test revisions, successes, failed attempts, infrastructure limits and links. Those results are not promoted to new-HEAD acceptance.
 
 This fork directory is evidence storage and is not added to the platform PR's source tree.
+
+CodeQL alert1370 reports the final idempotency-guard assignment as unused. The scanned source exactly matches the submitted source. Its line20 guard reads the line29 value on subsequent calls: the production control executes each of six patches once across two calls; an in-memory control removing only the assignment executes every patch twice. The repository source is unchanged. Ten existing runtime tests pass. See `codeql1370-idempotence.json` for the source identity and controls.
