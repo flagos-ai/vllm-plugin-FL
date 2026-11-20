@@ -76,12 +76,12 @@ def test_reference_registration_keeps_implemented_fallbacks():
         "apply_rotary_emb",
         "attention_backend",
         "invoke_fused_moe_triton_kernel",
+        "grouped_topk",
     }
     missing = {
         "moe_align_block_size",
         "moe_sum",
         "topk_softmax",
-        "grouped_topk",
     }
     for op_name in implemented:
         assert registry.get_implementation(op_name, "reference.torch") is not None
