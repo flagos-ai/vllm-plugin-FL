@@ -270,6 +270,20 @@ def test_inference(combo: dict) -> None:
         "generates random-weight output."
     )
 
+    check_mamba_align = (
+        _PLATFORM == "kunlunxin"
+        and _DEVICE == "p800"
+        and _MODEL == "qwen3_6"
+        and _CASE in {"27b_tp4_eager", "27b_tp4_graph"}
+    )
+    if check_mamba_align:
+        from tests.e2e_tests.inference.test_kunlunxin_mamba_align import (
+            MAMBA_CACHE_WORKER_EXTENSION,
+            assert_mamba_align_prefix_reuse,
+        )
+
+        llm_kwargs["worker_extension_cls"] = MAMBA_CACHE_WORKER_EXTENSION
+
     # For multimodal: inject limit_mm_per_prompt
     max_assets = _get_max_asset_count()
     if gen.modality != "text" and max_assets > 0:
@@ -300,6 +314,8 @@ def test_inference(combo: dict) -> None:
             _run_text_test(llm, sampling_params)
         else:
             _run_multimodal_test(llm, sampling_params)
+        if check_mamba_align:
+            assert_mamba_align_prefix_reuse(llm)
     finally:
         if llm is not None:
             # Explicitly shut down the engine core so that the executor calls

@@ -20,6 +20,8 @@ from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
 from vllm.utils.torch_utils import current_stream
 
+from vllm_fl.utils import _env_vendor_name
+
 logger = init_logger(__name__)
 _TXDA_ABORT_TIMEOUT_SECONDS = 5.0
 
@@ -70,6 +72,33 @@ def _load_amd_flagcx_api(api_path: Path):
     return api
 
 
+def _is_kunlunxin() -> bool:
+    vendor = _env_vendor_name()
+    if vendor:
+        return vendor == "kunlunxin"
+    try:
+        from vllm.platforms import current_platform
+    except ImportError:
+        return False
+    return getattr(current_platform, "vendor_name", None) == "kunlunxin"
+
+
+def _load_kunlunxin_flagcx_api(flagcx_path):
+    if flagcx_path:
+        if os.path.isdir(flagcx_path):
+            sys.path.append(flagcx_path)
+        try:
+            from plugin.interservice import flagcx_wrapper
+        except ImportError:
+            pass
+        else:
+            return flagcx_wrapper
+
+    from flagcx import api
+
+    return api
+
+
 _flagcx_path = os.getenv("FLAGCX_PATH")
 _flagcx_root = Path(_flagcx_path) if _flagcx_path else None
 _flagcx_wheel_library = None
@@ -79,11 +108,17 @@ if _flagcx_path and torch.version.hip:
 
     _flagcx_amd_source = getattr(current_platform, "vendor_name", None) == "amd"
 
+_flagcx_kunlunxin = not _flagcx_amd_source and _is_kunlunxin()
+_flagcx_packaged_library = False
 _flagcx_import_error = None
 try:
-    if _flagcx_amd_source:
-        _api_path = Path(_flagcx_path) / "src" / "flagcx" / "api.py"
-        _api = _load_amd_flagcx_api(_api_path)
+    if _flagcx_amd_source or _flagcx_kunlunxin:
+        if _flagcx_amd_source:
+            _api_path = Path(_flagcx_path) / "src" / "flagcx" / "api.py"
+            _api = _load_amd_flagcx_api(_api_path)
+        else:
+            _api = _load_kunlunxin_flagcx_api(_flagcx_path)
+            _flagcx_packaged_library = _api.__name__ == "flagcx.api"
         FLAGCXLibrary = _api.FLAGCXLibrary
         buffer_type = _api.buffer_type
         flagcxComm_t = _api.flagcxComm_t
@@ -117,7 +152,11 @@ try:
         )
     _flagcx_available = True
 except (ImportError, OSError, AttributeError) as exc:
-    if not _flagcx_amd_source and not isinstance(exc, ImportError):
+    if (
+        not _flagcx_amd_source
+        and not _flagcx_kunlunxin
+        and not isinstance(exc, ImportError)
+    ):
         raise
     _flagcx_available = False
     _flagcx_import_error = exc
@@ -203,7 +242,7 @@ class PyFlagcxCommunicator:
                 raise ImportError(
                     "FlagCX Python bindings are unavailable"
                 ) from _flagcx_import_error
-            if library_path is None:
+            if library_path is None and not _flagcx_packaged_library:
                 library_path = _flagcx_wheel_library
                 if library_path is None:
                     flagcx_path = os.getenv("FLAGCX_PATH")
@@ -290,6 +329,7 @@ class PyFlagcxCommunicator:
                 stream = self._current_stream()
                 # A small all_reduce warms up the selected submission path.
                 data = torch.zeros(1, device=device)
+                # Keep the new output allocation alive through synchronization.
                 warmup_output = self.all_reduce(data)
                 stream.synchronize()
                 del data, warmup_output

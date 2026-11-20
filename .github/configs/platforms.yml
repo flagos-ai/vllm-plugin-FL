@@ -130,12 +130,18 @@ platforms:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/
   kunlunxin:
-    enabled: false
+    enabled: true
     trigger_paths:
+      - .github/configs/kunlunxin.yml
+      - .github/scripts/kunlunxin/
+      - docker/kunlunxin/
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
       - tests/platforms/kunlunxin.yaml
     exempt_from_global:
+      - .github/configs/kunlunxin.yml
+      - .github/scripts/kunlunxin/
+      - docker/kunlunxin/
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
   thead:
