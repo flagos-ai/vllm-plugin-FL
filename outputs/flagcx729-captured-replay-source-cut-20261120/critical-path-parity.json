@@ -1,0 +1,210 @@
+{
+  "tested_source": "6fe36310fb5c9bd2396f531d7bf78c08fc792340",
+  "current_main": "f2d13b59081bdb429d0435d307455f97c6cbc144",
+  "paths": [
+    {
+      "path": "flagcx/flagcx.cc",
+      "exact_local_exists": true,
+      "exact_blob": "72c84a50e50df53adaf2b67aeb15bf629d9d82fb",
+      "exact_sha256": "e191928ecc968819306c46c4e0add7fba2b7b74487211df104d42ec0a7758d56",
+      "current_blob": "bcc1ae3a07c329fdcf91afc16f78561724b5dff0",
+      "byte_identical": false,
+      "current_sha256": "31647aec9c3031038ea0bfe0a432c2792cab0c100a08d6011e703889310f0884"
+    },
+    {
+      "path": "flagcx/runner/homo_runner.cc",
+      "exact_local_exists": true,
+      "exact_blob": "6b33606bac919ea263c7e48939713299fbadf7a3",
+      "exact_sha256": "3ea396037dd073a4bbaa51df484a714ea233141176c786960e5651d02025c4c2",
+      "current_blob": "6b33606bac919ea263c7e48939713299fbadf7a3",
+      "byte_identical": true
+    },
+    {
+      "path": "flagcx/adaptor/ccl/xccl_adaptor.cc",
+      "exact_local_exists": true,
+      "exact_blob": "d5b9c9c0902f0a07a1de5effc800df2410c259d6",
+      "exact_sha256": "426ca6fac8c749dd43c3c5c0622494ae64f25b73242d8d868822b759c4868769",
+      "current_blob": "d5b9c9c0902f0a07a1de5effc800df2410c259d6",
+      "byte_identical": true
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "exact_local_exists": true,
+      "exact_blob": "1afc78ba801ddb9299a6b80b7c7ccc3f85c5acc3",
+      "exact_sha256": "40b4ebe370f5d8904345a2066671c8a52d537465edabd20f8503d06feccea8c6",
+      "current_blob": "b80725e169b78b676ad2c41bfadb3d3effa59ccd",
+      "byte_identical": false,
+      "current_sha256": "c2a9516459e0ac44094e51bd6776c8ec03e726e967242c69bcc57bc670d4fe8a"
+    },
+    {
+      "path": "plugin/torch/flagcx/src/backend_flagcx.cpp",
+      "exact_local_exists": true,
+      "exact_blob": "4f4e34d218b7d5b8b7b04a6ced8de2abf94eb153",
+      "exact_sha256": "47fbc520792fa994b042d085660c79de07dbc93e0d6d471bcf0f8abf4b271654",
+      "current_blob": "68315f133286cc9e7dc4e04c9d266ff886f390b6",
+      "byte_identical": false,
+      "current_sha256": "898fe139002bfb21fb68dee3b6d5525264475ea619b7084204edff97d13f6ef3"
+    },
+    {
+      "path": "plugin/torch/flagcx/include/event_flagcx.hpp",
+      "exact_local_exists": true,
+      "exact_blob": "2262c3d6eba2287785b757c0b66489300ca960a2",
+      "exact_sha256": "820590695f0f7cb8e565d37b93d0ecdac2466b99af14d2c6a995b98b69901188",
+      "current_blob": "b0644bc92dabbaa63ca6eb119e345bd5267ff961",
+      "byte_identical": false,
+      "current_sha256": "4907aa556a4465d1145b3518a64ba520b2a8f7fa8927bbe26da02418b0524106"
+    },
+    {
+      "path": "plugin/torch/flagcx/include/stream_guard_flagcx.hpp",
+      "exact_local_exists": true,
+      "exact_blob": "95f1a9a2601cff96bb0e5629d7154a1236652b1b",
+      "exact_sha256": "f4556de6bd96aea96765d70b49cf710d6fd2406c34e5b19735e773b9b1852322",
+      "current_blob": "0f866c98580bfdece226945d6d8241c736484c3e",
+      "byte_identical": false,
+      "current_sha256": "cfbae0bb766b897f8ad170606da5701a09ba2f96adc196336438028143c3e457"
+    },
+    {
+      "path": "plugin/torch/flagcx/src/comm_flagcx.cpp",
+      "exact_local_exists": false,
+      "current_exists": false
+    }
+  ],
+  "critical_functions": [
+    {
+      "path": "flagcx/flagcx.cc",
+      "function": "flagcxAllReduce",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 2736,
+      "current_line": 4579,
+      "exact_sha256": "c6b8ec94379733cbe74e5ff8681e4be9b5d4bf6cff8d254af8a271f706066ae7",
+      "current_sha256": "c6b8ec94379733cbe74e5ff8681e4be9b5d4bf6cff8d254af8a271f706066ae7"
+    },
+    {
+      "path": "flagcx/flagcx.cc",
+      "function": "useHomoComm",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 143,
+      "current_line": 168,
+      "exact_sha256": "7cd7aac7df7a351d75897f09932f17df775de9bd90d50b834d17a72e67602866",
+      "current_sha256": "7cd7aac7df7a351d75897f09932f17df775de9bd90d50b834d17a72e67602866"
+    },
+    {
+      "path": "flagcx/flagcx.cc",
+      "function": "useHeteroComm",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 155,
+      "current_line": 180,
+      "exact_sha256": "4cd2ad2d9d3992b700c8b802efdfaa3fb832c99a16e18f49d48f766260b16fb3",
+      "current_sha256": "4cd2ad2d9d3992b700c8b802efdfaa3fb832c99a16e18f49d48f766260b16fb3"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorStreamCreate",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 163,
+      "current_line": 163,
+      "exact_sha256": "a55131bed58c7193974dbe94014521d4f1eb6a89730592e20bd05b9bc46d6f68",
+      "current_sha256": "a55131bed58c7193974dbe94014521d4f1eb6a89730592e20bd05b9bc46d6f68"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorStreamDestroy",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 171,
+      "current_line": 171,
+      "exact_sha256": "aa2d07db3426dc2b248531d09ed4cef1957d8a35f0fa32123e7990803b214989",
+      "current_sha256": "aa2d07db3426dc2b248531d09ed4cef1957d8a35f0fa32123e7990803b214989"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorStreamCopy",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 180,
+      "current_line": 180,
+      "exact_sha256": "af3de1f44158f0eb0b7c978b1323d1ec67d8f94d0ce4b6b4d21754e8eb9c4aa4",
+      "current_sha256": "af3de1f44158f0eb0b7c978b1323d1ec67d8f94d0ce4b6b4d21754e8eb9c4aa4"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorStreamFree",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 188,
+      "current_line": 188,
+      "exact_sha256": "ef80e3e806421f5b06e53d877fb85b56c3be55b27b5ce5ded87904333ac81af6",
+      "current_sha256": "ef80e3e806421f5b06e53d877fb85b56c3be55b27b5ce5ded87904333ac81af6"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorStreamSynchronize",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 196,
+      "current_line": 196,
+      "exact_sha256": "fe39a801b8e329a6093a40097ab030b3649446e7806f29ddded399b12a6809f2",
+      "current_sha256": "fe39a801b8e329a6093a40097ab030b3649446e7806f29ddded399b12a6809f2"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorStreamQuery",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 203,
+      "current_line": 203,
+      "exact_sha256": "b74eab4dd5d7aab6d428e4a591712a77c3a84c94cb19d40a61c937aab8edf26f",
+      "current_sha256": "b74eab4dd5d7aab6d428e4a591712a77c3a84c94cb19d40a61c937aab8edf26f"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorStreamWaitEvent",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 218,
+      "current_line": 218,
+      "exact_sha256": "80890b2c40ae5d05635beaebb505912275b5a801452f392b3f7fdfebea0e5d70",
+      "current_sha256": "80890b2c40ae5d05635beaebb505912275b5a801452f392b3f7fdfebea0e5d70"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorEventCreate",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 227,
+      "current_line": 227,
+      "exact_sha256": "e1c71c3f7d9bd7808f7d7861b8cd5c7c72a548721be32b76ebfad6af1c1d299d",
+      "current_sha256": "e1c71c3f7d9bd7808f7d7861b8cd5c7c72a548721be32b76ebfad6af1c1d299d"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorEventDestroy",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 238,
+      "current_line": 238,
+      "exact_sha256": "29afc81ca782dcdebbc8bfda98ce7b872c3056804924ff71c4736bff888dee15",
+      "current_sha256": "29afc81ca782dcdebbc8bfda98ce7b872c3056804924ff71c4736bff888dee15"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorEventRecord",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 247,
+      "current_line": 247,
+      "exact_sha256": "94860b672bb3f89ac5c46ef435d9a93cdb68d417e9f02ac810e24a454a09bc90",
+      "current_sha256": "94860b672bb3f89ac5c46ef435d9a93cdb68d417e9f02ac810e24a454a09bc90"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorEventSynchronize",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 260,
+      "current_line": 260,
+      "exact_sha256": "6f73e5779c70cb48b79bc0ff62ea2461da73b9ad76f4bd911e902f68aa06e63b",
+      "current_sha256": "6f73e5779c70cb48b79bc0ff62ea2461da73b9ad76f4bd911e902f68aa06e63b"
+    },
+    {
+      "path": "flagcx/adaptor/device/kunlunxin_adaptor.cc",
+      "function": "kunlunAdaptorEventQuery",
+      "byte_equal_utf8_lf": true,
+      "exact_line": 267,
+      "current_line": 267,
+      "exact_sha256": "3c22d1bf96d33737597edd0878d9084b138f5e7481d0d83bd21a4c16d3c40f35",
+      "current_sha256": "3c22d1bf96d33737597edd0878d9084b138f5e7481d0d83bd21a4c16d3c40f35"
+    }
+  ],
+  "hardware_new_test_performed": false
+}
