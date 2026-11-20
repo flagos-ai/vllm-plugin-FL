@@ -118,6 +118,14 @@ def register_builtins(registry) -> None:
             vendor="kunlunxin",
             priority=BackendPriority.VENDOR,
         ),
+        OpImpl(
+            op_name="fused_experts",
+            impl_id="vendor.kunlunxin",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.fused_experts, is_avail),
+            vendor="kunlunxin",
+            priority=BackendPriority.VENDOR,
+        ),
         # Fused MoE: topk_softmax
         OpImpl(
             op_name="topk_softmax",
