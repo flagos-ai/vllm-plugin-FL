@@ -69,6 +69,8 @@ env_defaults:
   USE_FLAGGEMS: "1"
   TORCH_DEVICE_BACKEND_AUTOLOAD: "1"
   FLAGCX_PATH: "/sgl-workspace/FlagCX"
+  # The raw Qwen prompt can use the first 64 tokens to show its arithmetic.
+  FL_CONCURRENT_MAX_TOKENS: "128"
 
 zw810e:
   name: "zw810e"

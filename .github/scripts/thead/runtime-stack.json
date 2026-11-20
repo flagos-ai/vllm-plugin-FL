@@ -5,8 +5,7 @@
     "torchaudio": "2.10.0+v0.1.0.ppu2.1.1",
     "numpy": "1.26.4",
     "flagtree": "0.7.0+ppu3.6",
-    "triton": "3.5.0+v0.2.0.ppu2.1.1",
-    "flag-gems": "5.4.0"
+    "triton": "3.5.0+v0.2.0.ppu2.1.1"
   },
   "vllm": {
     "version": "0.32.0+flagos",
@@ -23,5 +22,9 @@
   "flagcx": {
     "version": "0.14.1+ppu2.1.0",
     "sha256": "76a7e19f36ac699f42a841f7a78a2700ab29ab684f2eb6fb7557087667972f5b"
+  },
+  "flag-gems": {
+    "version": "5.5.0.dev20261117",
+    "sha256": "06915796a2fdc24d4559ded6076bba3e04a14db6385a4a59b7de00817286b5ea"
   }
 }

@@ -5,6 +5,7 @@ import copy
 import pytest
 from runtime_stack import (
     ATTENTION,
+    PROVIDER_WHEELS,
     STACK,
     audit_plan,
     validate_devices,
@@ -26,10 +27,7 @@ def imports():
             for name, version in STACK["protected"].items()
             if name not in ("flagtree", "triton")
         },
-        **{
-            name: copy.copy(STACK[name])
-            for name in ("vllm", "flaggems-vllm", "flash-attn-3", "flagcx")
-        },
+        **{name: copy.copy(STACK[name]) for name in PROVIDER_WHEELS},
     }
 
 
@@ -51,7 +49,7 @@ def test_valid_stack(imports):
         ("vllm", {"version": "0.32.0+empty"}, "Wrong vllm wheel version"),
         ("vllm", {"sha256": None}, "Wrong vllm wheel sha256"),
         ("torch", {"version": "2.10.0"}, "Wrong torch version"),
-        ("flag-gems", {"version": "5.5.0"}, "Wrong flag-gems version"),
+        ("flag-gems", {"version": "5.4.0"}, "Wrong flag-gems wheel version"),
         ("triton", {"path": "/opt/triton/triton/__init__.py"}, "Runtime FlagTree"),
         ("flagtree_version", None, "Runtime FlagTree"),
         ("flash-attn-3", {"sha256": None}, "Wrong flash-attn-3 wheel sha256"),
@@ -102,3 +100,12 @@ def test_pip_plan_requires_hash():
         audit_plan({"install": [entry]})
     entry["download_info"]["archive_info"]["hashes"] = {"sha256": "a" * 64}
     audit_plan({"install": [entry]})
+
+
+def test_pip_plan_requires_the_reviewed_flaggems_wheel():
+    entry = {
+        "metadata": {"name": "flag_gems", "version": "5.4.0"},
+        "download_info": {"archive_info": {"hashes": {"sha256": "a" * 64}}},
+    }
+    with pytest.raises(RuntimeError, match="wrong flag-gems wheel"):
+        audit_plan({"install": [entry]})

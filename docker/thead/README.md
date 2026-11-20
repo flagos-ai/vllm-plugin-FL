@@ -20,8 +20,10 @@ package versions under `/opt/thead-ci` in the built image.
 FlagTree 0.7.0+ppu3.6 provides the default Triton from `/opt/flagtree`
 through `PYTHONPATH`. The vendor Triton remains in `/opt/triton`. The T-Head
 FlagCX wheel supplies the graph-capable TP collective at `FLAGCX_PATH`.
-Run the
-stack checker with the normal interpreter from a clean container on four
+The pinned plain FlagGems wheel supplies the version verified by the
+multimodal A/B probe. Its wheel is installed from the lock without extras.
+
+Run the stack checker with the normal interpreter from a clean container on four
 reserved ZW810E cards:
 
 ```bash

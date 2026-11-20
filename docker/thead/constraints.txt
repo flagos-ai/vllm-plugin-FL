@@ -5,5 +5,7 @@ torchvision==0.25.0+v0.1.0.ppu2.1.1
 numpy==1.26.4
 flagtree==0.7.0+ppu3.6
 triton==3.5.0+v0.2.0.ppu2.1.1
-flag-gems==5.4.0
 PyYAML==6.0.1
+
+# Candidate FlagGems wheel, selected by the multimodal device A/B.
+flag-gems==5.5.0.dev20261117

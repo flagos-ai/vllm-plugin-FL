@@ -17,6 +17,7 @@ STACK = json.loads(Path(__file__).with_name("runtime-stack.json").read_text())
 ATTENTION = (
     "vllm_fl.dispatch.backends.vendor.thead.impl.attention.TheadFlashAttentionBackend"
 )
+PROVIDER_WHEELS = ("vllm", "flash-attn-3", "flaggems-vllm", "flagcx", "flag-gems")
 
 
 def require(condition, message):
@@ -33,10 +34,14 @@ def audit_plan(report):
     for entry in report["install"]:
         project = entry["metadata"]["name"].lower().replace("_", "-")
         require(project not in STACK["protected"], f"pip would modify {project}")
-        require(
-            wheel_digest(entry["download_info"]),
-            f"pip did not verify a wheel hash for {project}",
-        )
+        digest = wheel_digest(entry["download_info"])
+        require(digest, f"pip did not verify a wheel hash for {project}")
+        if project in PROVIDER_WHEELS:
+            require(
+                entry["metadata"]["version"] == STACK[project]["version"]
+                and digest == STACK[project]["sha256"],
+                f"pip selected the wrong {project} wheel",
+            )
 
 
 def protected_snapshot():
@@ -87,12 +92,12 @@ def module_fact(project, module, relative=None):
 
 def validate_imports(facts):
     require(facts["python"] == (3, 12), "T-Head CI requires Python 3.12")
-    for name in ("vllm", "flash-attn-3", "flaggems-vllm", "flagcx"):
+    for name in PROVIDER_WHEELS:
         for key in ("version", "sha256"):
             require(
                 facts[name].get(key) == STACK[name][key], f"Wrong {name} wheel {key}"
             )
-    for name in ("torch", "torchvision", "torchaudio", "numpy", "flag-gems"):
+    for name in ("torch", "torchvision", "torchaudio", "numpy"):
         require(
             facts[name]["version"] == STACK["protected"][name],
             f"Wrong {name} version",
