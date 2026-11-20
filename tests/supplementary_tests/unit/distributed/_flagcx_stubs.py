@@ -95,13 +95,21 @@ def _leaf(name, **attrs):
     return module
 
 
-def _chain(name, **attrs):
-    """Install a leaf module and any missing parent packages in sys.modules."""
+def _chain(name, setitem, **attrs):
+    """Install a leaf module and any missing parent packages in sys.modules.
+
+    Every entry — parents included — goes through ``setitem`` (the test's
+    ``monkeypatch.setitem``), so all stubs are removed again on teardown:
+    a bare ``sys.modules[parent] = ...`` would leak a non-package stub (e.g.
+    ``vllm`` without ``__path__``) into later tests that build on-disk fake
+    ``vllm`` trees, where ``find_spec`` then rejects every ``vllm.*`` import
+    with "'vllm' is not a package".
+    """
     parts = name.split(".")
     for i in range(1, len(parts)):
         parent = ".".join(parts[:i])
         if parent not in sys.modules:
-            sys.modules[parent] = ModuleType(parent)
+            setitem(sys.modules, parent, ModuleType(parent))
     return _leaf(name, **attrs)
 
 
@@ -163,6 +171,7 @@ class FlagcxStubEnv:
         )
         utils_mod = _chain(
             "vllm.distributed.kv_transfer.kv_connector.utils",
+            setitem,
             TransferTopology=_StubTransferTopology,
             get_current_attn_backends=lambda cfg: [],
         )
@@ -176,6 +185,7 @@ class FlagcxStubEnv:
             "vllm.distributed.kv_transfer.kv_connector.v1.base",
             _chain(
                 "vllm.distributed.kv_transfer.kv_connector.v1.base",
+                setitem,
                 KVConnectorBase_V1=KVConnectorBase_V1,
                 KVConnectorMetadata=object,
                 KVConnectorRole=SimpleNamespace(SCHEDULER="scheduler", WORKER="worker"),
@@ -187,6 +197,7 @@ class FlagcxStubEnv:
             "vllm.distributed.kv_transfer.kv_connector.v1.metrics",
             _chain(
                 "vllm.distributed.kv_transfer.kv_connector.v1.metrics",
+                setitem,
                 KVConnectorPromMetrics=_StubPromMetricsBase,
                 KVConnectorStats=KVConnectorStats,
                 PromMetric=object,
@@ -198,6 +209,7 @@ class FlagcxStubEnv:
             "vllm.distributed.parallel_state",
             _chain(
                 "vllm.distributed.parallel_state",
+                setitem,
                 get_pp_group=lambda: None,
                 get_tensor_model_parallel_rank=lambda: 0,
                 get_tensor_model_parallel_world_size=lambda: 1,
