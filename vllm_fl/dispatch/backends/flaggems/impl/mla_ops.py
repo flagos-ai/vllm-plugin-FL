@@ -35,8 +35,40 @@ def _flaggems_query_quantizer(implementation):
     return quantize
 
 
+def _metax_concat_and_cache_mla(implementation):
+    @wraps(implementation)
+    def cache(kv_c, k_pe, kv_cache, slot_mapping, kv_cache_dtype, scale):
+        if kv_cache_dtype == "bfloat16":
+            if kv_cache.dtype != torch.bfloat16 or kv_c.dtype != torch.bfloat16:
+                raise ValueError("BF16 MLA cache requires BF16 input and cache")
+            # The public FlagGems-vllm API uses "auto" for matching
+            # input and cache dtypes without quantization.
+            kv_cache_dtype = "auto"
+        return implementation(kv_c, k_pe, kv_cache, slot_mapping, kv_cache_dtype, scale)
+
+    return cache
+
+
 def get_operator(name):
+    from vllm.platforms import current_platform
+
+    is_metax = getattr(current_platform, "vendor_name", None) == "metax"
     if name == "per_token_group_quant_fp8":
+        if is_metax:
+            fn = get_flaggems_vllm_operator(name)
+            if not callable(fn):
+                return None
+
+            @wraps(fn)
+            def quantize(x, group_size, *, use_ue8m0):
+                return fn(
+                    x,
+                    group_size,
+                    dtype=torch.float8_e4m3fn,
+                    scale_ue8m0=use_ue8m0,
+                )
+
+            return quantize
         import flag_gems
 
         fn = getattr(flag_gems, name, None)
@@ -45,18 +77,28 @@ def get_operator(name):
         from vllm_fl.attention.mla_prefill import FlagGemsMLAPrefillBackend
 
         return lambda config: FlagGemsMLAPrefillBackend
-    if name == "fp8_fp4_paged_mqa_logits":
+    if name == "fp8_fp4_paged_mqa_logits" and not is_metax:
         graph_fn = get_flaggems_vllm_operator("fp8_fp4_paged_mqa_logits_graph")
         if callable(graph_fn):
             return graph_fn
-    return get_flaggems_vllm_operator(name)
+    implementation = get_flaggems_vllm_operator(name)
+    if is_metax and name == "concat_and_cache_mla" and callable(implementation):
+        return _metax_concat_and_cache_mla(implementation)
+    return implementation
 
 
 def is_available(name):
     from vllm.platforms import current_platform
 
-    if not current_platform.is_cuda() or not use_flaggems_op(name):
+    if not use_flaggems_op(name):
         return False
+    if not current_platform.is_cuda():
+        if getattr(current_platform, "vendor_name", None) != "metax":
+            return False
+        sparse = get_flaggems_vllm_operator("flash_mla_sparse_fwd")
+        supports_c550 = getattr(sparse, "supports_metax_c550", None)
+        if not (callable(supports_c550) and supports_c550()):
+            return False
     if name == "mla_prefill_backend":
         return is_available("flash_attn_varlen_func")
     return callable(get_operator(name))

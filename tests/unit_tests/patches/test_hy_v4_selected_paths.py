@@ -11,7 +11,7 @@ from vllm_fl.models.hy4 import model as hy_v4, runtime
 
 
 @pytest.mark.parametrize(
-    "vendor", ["ascend", "metax", "musa", "hygon", "thead", "kunlunxin", "enflame"]
+    "vendor", ["ascend", "musa", "hygon", "thead", "kunlunxin", "enflame"]
 )
 def test_non_cuda_preflight_rejects_before_operator_resolution(monkeypatch, vendor):
     from vllm import platforms
@@ -26,8 +26,111 @@ def test_non_cuda_preflight_rejects_before_operator_resolution(monkeypatch, vend
         "_resolve_registered_operator",
         lambda *a, **k: pytest.fail("unsupported platform reached operator resolution"),
     )
-    with pytest.raises(ValueError, match="requires an NVIDIA CUDA runtime"):
+    with pytest.raises(ValueError, match="requires an NVIDIA CUDA or MetaX C550"):
         runtime.validate_hy4_runtime(_prefill_config())
+
+
+@pytest.fixture
+def metax_runtime(monkeypatch):
+    from vllm import platforms
+
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(vendor_name="metax", is_cuda=lambda: False),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "native_hy4_available",
+        lambda *_: pytest.fail("C550 reached NVIDIA sparse capability checks"),
+    )
+    config = _prefill_config()
+    config.attention_config.backend = None
+    config.model_config.enforce_eager = True
+    return config
+
+
+@pytest.mark.parametrize(
+    ("cache_dtype", "enforce_eager", "message"),
+    [("auto", False, "requires enforce_eager"), ("fp8", True, "requires BF16 KV")],
+)
+def test_metax_rejects_unsupported_runtime(
+    metax_runtime, cache_dtype, enforce_eager, message
+):
+    metax_runtime.cache_config.cache_dtype = cache_dtype
+    metax_runtime.model_config.enforce_eager = enforce_eager
+    with pytest.raises(ValueError, match=message):
+        runtime.validate_hy4_runtime(metax_runtime)
+
+
+@pytest.mark.parametrize("capability", [None, False, True])
+def test_metax_plan_resolves_registered_c550_provider(
+    monkeypatch, metax_runtime, capability
+):
+    import torch
+
+    from vllm_fl.dispatch.backends.flaggems.impl import mla_ops
+
+    calls = []
+    cache_calls = []
+    failure = RuntimeError("sparse launch failed")
+
+    def sparse(q, cache, indices, scale, *, attn_sink, topk_length):
+        calls.append((q, cache, indices, scale, attn_sink, topk_length))
+        raise failure
+
+    def quantize(x, group_size, *, dtype, scale_ue8m0):
+        return x, group_size, dtype, scale_ue8m0
+
+    if capability is not None:
+        sparse.supports_metax_c550 = lambda: capability
+    operators = {
+        "flash_mla_sparse_fwd": sparse,
+        "per_token_group_quant_fp8": quantize,
+        "concat_and_cache_mla": lambda *args: cache_calls.append(args),
+    }
+
+    def lookup(name):
+        if name == "fp8_fp4_paged_mqa_logits_graph":
+            pytest.fail("C550 eager path queried the graph provider")
+        return operators.get(name, lambda *args, **kwargs: None)
+
+    monkeypatch.setattr(mla_ops, "get_flaggems_vllm_operator", lookup)
+    if not capability:
+        with pytest.raises(RuntimeError, match="no permitted implementation"):
+            runtime.validate_hy4_runtime(metax_runtime)
+        assert not calls
+        return
+
+    plan = runtime.validate_hy4_runtime(metax_runtime)
+    assert plan.provider == "flaggems"
+    assert plan.sparse_backend.supports_sink()
+    assert plan.prefill_backend.get_name() == "FLAGGEMS_MLA_PREFILL"
+    assert plan.query_quantizer("query", 128, use_ue8m0=False) == (
+        "query",
+        128,
+        torch.float8_e4m3fn,
+        False,
+    )
+    kv_c = torch.ones((1, 512), dtype=torch.bfloat16)
+    k_pe = torch.ones((1, 64), dtype=torch.bfloat16)
+    cache = torch.empty((1, 64, 576), dtype=torch.bfloat16)
+    slots = torch.tensor([0])
+    scale = torch.tensor(1.0)
+    update_cache = plan.operations["concat_and_cache_mla"]
+    for dtype in ("auto", "bfloat16"):
+        update_cache(kv_c, k_pe, cache, slots, kv_cache_dtype=dtype, scale=scale)
+    with pytest.raises(ValueError, match="BF16 MLA cache requires"):
+        update_cache(kv_c, k_pe, cache.float(), slots, "bfloat16", scale)
+    assert cache_calls == [(kv_c, k_pe, cache, slots, "auto", scale)] * 2
+
+    impl = plan.sparse_backend.get_impl_cls()
+    with pytest.raises(RuntimeError) as error:
+        impl._sparse_attention(
+            "q", "kv", "indices", 0.25, attn_sink="sink", topk_length="len"
+        )
+    assert error.value is failure
+    assert calls == [("q", "kv", "indices", 0.25, "sink", "len")]
 
 
 @pytest.mark.parametrize(

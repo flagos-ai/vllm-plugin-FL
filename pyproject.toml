@@ -47,6 +47,9 @@ glm5 = [
     "flaggems_vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@80a8e9716abed1bac3fc0ba5fd4e9f650ae3f989",
     "tilelang==0.1.9",
 ]
+hy4-metax = [
+    "flaggems_vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@9b5dc11715616700bab2c9be5e7ffded31b2b394",
+]
 test = [
     "pytest",
     "pytest-cov",
