@@ -35,3 +35,13 @@ run 44570711676 at c40baf66 passed 11024 tests, 2379 skips, zero failures.
 A new exact integrated run is required after current repairs. FlagTree #1691
 tracks the illegal-instruction candidate controls. Compiler #1540 remains
 under investigation and is not claimed as a fix.
+
+## Filtered-diagnostic input clarification, 2026-11-20
+
+The original probe's --only filter skips _gen for earlier shapes. Its benchmark
+class caches the weight bank by E/H/I, so selected-only T4/T16 diagnostics can
+create a different bank/routing from the complete14 sequence, despite identical
+shape seeds. Treat the selected-only trial/profile ratios here as strategy
+diagnostics, not exact frozen-input Gate comparisons. Full14 baseline/production
+and complete-compiler runs are unfiltered and remain valid. T1 first-bank controls
+are unaffected. Future focused T>1 runs replay the original generator prefix.

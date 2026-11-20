@@ -1,0 +1,16 @@
+{
+  "purpose": "Isolated diagnostic only; original generic W8A16 tuning with complete1540 compiler, production Hopper table unchanged",
+  "removed_hopper_keys": [
+    "fused_marlin_moe_w8a16_int8_gateup_silu",
+    "fused_marlin_moe_w8a16_int8_unified",
+    "fused_marlin_moe_w8a16_fp8_gateup_silu",
+    "fused_marlin_moe_w8a16_fp8_down",
+    "fused_marlin_moe_w8a16_fp8_unified"
+  ],
+  "compiler_merge": "6ed3ec1307eb37c6f4f00f92c6018b15e1b4f1ee",
+  "files": {
+    "src/flaggems_vllm/runtime/backend/_nvidia/hopper/tune_configs.yaml": "3986f2bafd45950305794137a539896ad8561da1cd3773a984a92b6d571a744c",
+    "src/flaggems_vllm/ops/fused_marlin_moe.py": "8332eb9ec26c1a3b8c06d23d409e50b101b8719ba8c7ad8d266037e9a3f3f43d",
+    "tests/test_fused_marlin_moe.py": "a6ac3a4559d3bcd1bffa0757ac42cefba3c9e2ff44de2bf48bbcc39b85ca53f5"
+  }
+}
