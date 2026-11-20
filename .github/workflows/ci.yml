@@ -123,7 +123,7 @@ jobs:
         id: changed
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git diff --name-only \
+            git diff --no-renames --name-only \
               ${{ github.event.pull_request.base.sha }}...${{ github.sha }} \
               > /tmp/changed_files.txt
             echo "file=/tmp/changed_files.txt" >> "$GITHUB_OUTPUT"

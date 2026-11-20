@@ -11,6 +11,7 @@ Priority:
      excluding ``template`` and ``platforms`` (the registry file itself).
 
 Diff-based routing logic (when --changed-files is given):
+  - T-Head CI image changes run T-Head and the NVIDIA regression baseline.
   - If any changed file matches ``global_trigger_paths`` → return all enabled
     platforms (full run). Paths carved out by a platform's
     ``exempt_from_global`` never count as global triggers — they route only
@@ -46,6 +47,14 @@ REGISTRY_FILE = CONFIGS_DIR / "platforms.yml"
 
 # Names to exclude when falling back to auto-scan
 AUTO_SCAN_EXCLUDE = {"template", "platforms"}
+THEAD_IMAGE_DIRS = ("docker/thead/", ".github/scripts/thead/")
+THEAD_IMAGE_SUPPORT_FILES = {
+    ".github/configs/thead.yml",
+    ".github/scripts/detect_platforms.py",
+    ".github/workflows/ci.yml",
+    ".typos.toml",
+    "tests/platforms/thead.yaml",
+}
 
 
 def _validate_and_collect_exemptions(
@@ -128,6 +137,14 @@ def from_registry(changed_files: list[str] | None = None) -> list[str] | None:
     # No diff filtering → return all enabled platforms (nightly/weekly mode)
     if changed_files is None:
         return list(enabled.keys())
+
+    # Require an image change and check every path before narrowing the matrix.
+    if any(path.startswith("docker/thead/") for path in changed_files) and all(
+        path.startswith(THEAD_IMAGE_DIRS) or path in THEAD_IMAGE_SUPPORT_FILES
+        for path in changed_files
+    ):
+        print("[detect] T-Head CI image → T-Head and NVIDIA baseline", file=sys.stderr)
+        return [name for name in enabled if name in {"thead", "nvidia"}]
 
     # Diff-based routing. Two keys, two independent questions:
     #   - exempt_from_global: vendor carve-out; a changed file under one of
