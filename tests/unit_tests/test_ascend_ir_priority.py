@@ -55,7 +55,7 @@ def test_npu_ir_defaults_select_native_for_every_operator(monkeypatch, backend, 
         namespace,
     )
     result = namespace["get_default_ir_op_priority"](
-        SimpleNamespace(device_type="npu"),
+        SimpleNamespace(device_type="npu", vendor_name="ascend"),
         SimpleNamespace(compilation_config=SimpleNamespace(backend=backend, mode=mode)),
     )
     assert set(result) == {"rms_norm", "fused_add_rms_norm", "gelu_and_mul_sparse"}
