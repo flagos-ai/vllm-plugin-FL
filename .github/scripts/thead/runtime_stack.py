@@ -2,10 +2,12 @@
 """Validate the vendored wheel provider and the immutable PPU runtime stack."""
 
 import argparse
+import ctypes
 import hashlib
 import importlib
 import importlib.metadata as metadata
 import json
+import os
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -85,7 +87,7 @@ def module_fact(project, module, relative=None):
 
 def validate_imports(facts):
     require(facts["python"] == (3, 12), "T-Head CI requires Python 3.12")
-    for name in ("vllm", "flash-attn-3", "flaggems-vllm"):
+    for name in ("vllm", "flash-attn-3", "flaggems-vllm", "flagcx"):
         for key in ("version", "sha256"):
             require(
                 facts[name].get(key) == STACK[name][key], f"Wrong {name} wheel {key}"
@@ -111,6 +113,9 @@ def validate_devices(facts):
         facts["vendor"] == "thead", f"Expected T-Head; detected {facts['vendor']!r}"
     )
     require(
+        facts["distributed_backend"] == "flagcx", "TP graph capture requires FlagCX"
+    )
+    require(
         facts["attention"] == ATTENTION,
         f"Wrong attention backend: {facts['attention']}",
     )
@@ -118,6 +123,28 @@ def validate_devices(facts):
         facts["devices"] == ["PPU-ZW810E"] * 4,
         f"Expected four ZW810E devices, found {facts['devices']}",
     )
+
+
+def flagcx_fact():
+    dist = metadata.distribution("flagcx")
+    path = Path(dist.locate_file("flagcx")).resolve()
+    configured = os.environ.get("FLAGCX_PATH")
+    require(
+        configured
+        and Path(configured).resolve() == path
+        and (path / "api.py").is_file(),
+        "FLAGCX_PATH must point to the installed T-Head wheel",
+    )
+    library = path / "lib" / "libflagcx.so"
+    ctypes.CDLL(str(library))
+    with library.open("rb") as stream:
+        library_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    return {
+        "version": dist.version,
+        "path": str(library),
+        "sha256": wheel_digest(json.loads(dist.read_text("direct_url.json") or "{}")),
+        "library_sha256": library_digest,
+    }
 
 
 def check_stack(with_devices):
@@ -133,6 +160,7 @@ def check_stack(with_devices):
         "vllm": module_fact("vllm", vllm),
         "vllm_module_version": vllm.__version__,
         "flagtree_version": metadata.version("flagtree"),
+        "flagcx": flagcx_fact(),
         "triton": {
             "path": str(Path(triton.__file__).resolve()),
             "version": triton.__version__,
@@ -166,6 +194,7 @@ def check_stack(with_devices):
             facts["vendor"] == "thead", f"Expected T-Head; detected {facts['vendor']!r}"
         )
         facts["platform"] = type(current_platform).__qualname__
+        facts["distributed_backend"] = current_platform.dist_backend
         facts["worker"] = importlib.import_module(
             "vllm_fl.worker.worker"
         ).WorkerFL.__qualname__

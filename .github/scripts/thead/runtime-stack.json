@@ -19,5 +19,9 @@
   "flaggems-vllm": {
     "version": "0.3.0.dev20261117",
     "sha256": "edeff1754a554d226cb07287e59895523faaf5a64e97f7cad246a139279837a2"
+  },
+  "flagcx": {
+    "version": "0.14.1+ppu2.1.0",
+    "sha256": "76a7e19f36ac699f42a841f7a78a2700ab29ab684f2eb6fb7557087667972f5b"
   }
 }

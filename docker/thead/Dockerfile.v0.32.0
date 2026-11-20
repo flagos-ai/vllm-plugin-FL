@@ -3,6 +3,7 @@ FROM harbor.baai.ac.cn/flagos-runtime/flagos-runtime-thead-ppu2.1.0:2.3.0@sha256
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 ENV PYTHONPATH=/opt/flagtree \
+    FLAGCX_PATH=/flagos/lib/python3.12/site-packages/flagcx \
     PIP_CONFIG_FILE=/dev/null \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
