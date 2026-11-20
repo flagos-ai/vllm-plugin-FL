@@ -85,7 +85,17 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
         compilation.mode = CompilationMode.NONE
         compilation.cudagraph_mode = CUDAGraphMode.NONE
         return
-    if compilation.cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY:
+    whisper_piecewise = (
+        model_config is not None
+        and model_config.is_encoder_decoder
+        and model_config.hf_config.model_type == "whisper"
+    )
+    if whisper_piecewise:
+        # vLLM selects FULL_DECODE_ONLY for encoder-decoder models before
+        # invoking the platform hook. Keep cross-attention outside ACL graphs.
+        compilation.cudagraph_mode = CUDAGraphMode.PIECEWISE
+        compilation.splitting_ops = list(compilation._attention_ops)
+    elif compilation.cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY:
         raise NotImplementedError(
             "FL basic Ascend graph support requires NONE or FULL_DECODE_ONLY"
         )
@@ -116,7 +126,8 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     compilation.backend = "eager"
     compilation.use_inductor = False
     compilation.use_inductor_graph_partition = False
-    compilation.splitting_ops = []
+    if not whisper_piecewise:
+        compilation.splitting_ops = []
     compilation.cudagraph_num_of_warmups = 1
     compilation.pass_config.fuse_norm_quant = False
     compilation.pass_config.fuse_act_quant = False

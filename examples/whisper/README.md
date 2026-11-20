@@ -1,7 +1,7 @@
 # Whisper large-v3 on Ascend
 
 This example uses vLLM 0.24 with the FL plugin, torch-npu, and FlagGems. It runs
-FP16 transcription in eager mode on one Ascend 910C device.
+FP16 transcription on one Ascend 910C device.
 
 Start the server with the official FlagGems GELU operator explicitly enabled:
 
@@ -24,4 +24,7 @@ curl --fail-with-body http://127.0.0.1:8000/v1/audio/transcriptions \
 ```
 
 Use a local checkpoint by replacing the model identifier in both commands.
-The Ascend cross-attention path in this example requires eager execution.
+For PIECEWISE graph mode, remove `--enforce-eager` and add
+`--compilation-config '{"cudagraph_mode":"PIECEWISE"}'`. The decoder's attention
+operators execute outside the captured segments, so cross-attention continues
+to consume the current request's encoder cache metadata.
