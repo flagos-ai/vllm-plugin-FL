@@ -1,0 +1,35 @@
+{
+  "verified": true,
+  "raw_rows": 8,
+  "summary_rows": 2,
+  "skip_first": 1,
+  "rows": [
+    {
+      "case": "4K / 1024 / C64",
+      "total_tok_s": 15819.11,
+      "mean_ttft_ms": 580.78,
+      "baseline_total_tok_s": 5089.645,
+      "baseline_ttft_ms": 3199.435,
+      "total_change_pct": 210.80969301395282,
+      "ttft_change_pct": -81.84741993508229,
+      "passes": true
+    },
+    {
+      "case": "16K / 1024 / C64",
+      "total_tok_s": 11162.07,
+      "mean_ttft_ms": 19400.58,
+      "baseline_total_tok_s": 7029.675,
+      "baseline_ttft_ms": 27197.135,
+      "total_change_pct": 58.78500784175655,
+      "ttft_change_pct": -28.666824648993348,
+      "passes": true
+    }
+  ],
+  "sha256": {
+    "raw_runs_20261120_030755.csv": "066418593b7a79fd44fa604d53ee9eca83a5f902114c11f836bba52fe0fb79b7",
+    "summary_20261120_030755.csv": "1e1969dbe5ef01b5361caea05b4530996780649dee53740779562dfff7350135"
+  },
+  "controller_sha256": "bc797a92c76cccd20102c8a1671fcc35326a77041218c68c9f3d268670964415",
+  "container_id": "d889168f2ed02a6161e857167ec3eb58919f9b1e06c3f3ffd21f456808265fa0",
+  "clean_start_verified": true
+}

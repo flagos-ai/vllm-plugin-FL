@@ -1,0 +1,102 @@
+{
+  "source": "source_route_r1224",
+  "script_sha256": "0813eba574e9d1eb50c297c515baa426da1bcb61ce8c78a398b482f246005565",
+  "source_archive_sha256": "56830d29409a71426092d28d3b133458158bd42f670c1a9ecf719e6f0dd34eb0",
+  "raw_sha256": "012d599f0144366e721f769b0cfa1daf4f9f949ad8033e92d6665db7becef877",
+  "summary_sha256": "f04df8c6b54ac7513b27f323a0c7e125bfbfd18d0a2ce8dff1c00aeb23dc0fe6",
+  "results": [
+    {
+      "case": [
+        4096,
+        1024,
+        64,
+        256
+      ],
+      "raw_successes": 4,
+      "summary": {
+        "Benchmark Duration (s)": 234.74,
+        "Total Input Tokens": 1048576.0,
+        "Total Output Tokens": 262144.0,
+        "Req/s": 1.09,
+        "Output tok/s": 1117.26,
+        "Peak Output tok/s": 1872.33,
+        "Total tok/s": 5586.31,
+        "Mean TTFT (ms)": 3603.45,
+        "Median TTFT (ms)": 1149.66,
+        "P99 TTFT (ms)": 20685.3,
+        "Mean TPOT (ms)": 53.5,
+        "Median TPOT (ms)": 54.42,
+        "P99 TPOT (ms)": 61.41,
+        "Mean ITL (ms)": 53.5,
+        "Median ITL (ms)": 36.13,
+        "P99 ITL (ms)": 230.53
+      },
+      "total_vs_official_pct": 175.4577147055488,
+      "ttft_vs_official_pct": -68.8647283931523,
+      "throughput_gate": true,
+      "ttft_gate": true
+    },
+    {
+      "case": [
+        16384,
+        1024,
+        64,
+        128
+      ],
+      "raw_successes": 4,
+      "summary": {
+        "Benchmark Duration (s)": 512.61,
+        "Total Input Tokens": 2097152.0,
+        "Total Output Tokens": 131072.0,
+        "Req/s": 0.25,
+        "Output tok/s": 255.69,
+        "Peak Output tok/s": 682.0,
+        "Total tok/s": 4346.83,
+        "Mean TTFT (ms)": 118441.97,
+        "Median TTFT (ms)": 131821.31,
+        "P99 TTFT (ms)": 231127.64,
+        "Mean TPOT (ms)": 103.5,
+        "Median TPOT (ms)": 111.71,
+        "P99 TPOT (ms)": 130.73,
+        "Mean ITL (ms)": 103.5,
+        "Median ITL (ms)": 46.66,
+        "P99 ITL (ms)": 489.76
+      },
+      "total_vs_official_pct": 374.9855214992078,
+      "ttft_vs_official_pct": -80.23536215034348,
+      "throughput_gate": true,
+      "ttft_gate": true
+    }
+  ],
+  "local_performance_gate": true,
+  "official_baselines": [
+    {
+      "case": [
+        4096,
+        1024,
+        64,
+        256
+      ],
+      "duration_s": 646.31,
+      "output_tok_s": 405.6,
+      "total_tok_s": 2028.01,
+      "mean_TTFT_ms": 11573.53,
+      "throughput_floor_99pct": 2007.7299,
+      "mean_TTFT_ceiling_101pct": 11689.2653
+    },
+    {
+      "case": [
+        16384,
+        1024,
+        64,
+        128
+      ],
+      "duration_s": 2434.82,
+      "output_tok_s": 53.83,
+      "total_tok_s": 915.15,
+      "mean_TTFT_ms": 599262.03,
+      "throughput_floor_99pct": 905.9985,
+      "mean_TTFT_ceiling_101pct": 605254.6503
+    }
+  ]
+}
