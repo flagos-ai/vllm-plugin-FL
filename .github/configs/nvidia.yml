@@ -49,6 +49,10 @@ container_options: >-
   --env VLLM_USE_V2_MODEL_RUNNER=1
   --ulimit nofile=65535:65535
 
+# Run the dedicated unit job on the H20 runner (the functional job also runs
+# the unit pass; this makes the unit result a first-class PR check).
+unit_devices: [h20]
+
 # Per-device configuration
 # Each device inherits all platform-level defaults above and can override
 # any field. Only fields that differ from the defaults need to be specified.

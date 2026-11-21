@@ -18,17 +18,21 @@
 # Jobs need a self-hosted runner matching the label below.
 
 platform: iluvatar
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-iluvatar-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-Iluvatar-ci@sha256:b43fbf5bda5e123d58f25150d0b717abbe81c026ea05a6cdde989dfac23587e0
 runner_labels:
   - iluvatar-cicd-vllm-plugin
+# Run the dedicated unit job on the BI-V150 runner (the functional job also
+# runs the unit pass; this makes the unit result a first-class PR check).
+unit_devices: [bi_v150]
 
+# The CoreX 5.0.1 runtime image carries its own driver userspace
+# (libcuda.so.1, libixml.so, ixsmi) and requires a 5.0.1 host driver. Never
+# inject the CoreX 4.5.0 libraries that the previous stack needed: they are
+# ABI-incompatible with this runtime and make torch fail with ITR ioctl errors.
 container_volumes:
   - /data:/data
   - /dev:/dev
   - /lib/modules:/lib/modules
-  - /usr/local/corex-4.5.0/lib64/libcuda.so.1:/usr/local/corex/lib64/libcuda.so.1
-  - /usr/local/corex-4.5.0/lib64/libixml.so:/usr/local/corex/lib64/libixml.so
-  - /usr/local/corex-4.5.0/bin/ixsmi:/usr/local/corex/bin/ixsmi
   - /mnt/share/user_homes/models:/data/models/Qwen:ro
 
 container_options: >-

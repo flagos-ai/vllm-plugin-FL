@@ -72,6 +72,18 @@ THEAD_FLAGGEMS_VERSION="${THEAD_FLAGGEMS_VERSION:-5.5.0.dev0+g317b76320}"
 THEAD_WHEELS_DIR="${THEAD_WHEELS_DIR:-}"
 FLAGGEMS_VERSION="${FLAGGEMS_VERSION:-62d70b9e858ec407572153ee8cdf65cc24a637d5}"
 VLLM_PLUGIN_FL_VERSION="${VLLM_PLUGIN_FL_VERSION:-ffa2ee3eb3831f3873dd0966d12fc8e0b4e6e3d4}"
+ILUVATAR_BASE_IMAGE="${ILUVATAR_BASE_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-iluvatar-corex5.0.1:2.3.0@sha256:fb0280be3f2b1c7feba3b1b933dce9e6ae85690c0b7edb615d7577c1c632777c}"
+ILUVATAR_VLLM_VERSION="${ILUVATAR_VLLM_VERSION:-0.32.0}"
+ILUVATAR_PYTHON_VERSION="${ILUVATAR_PYTHON_VERSION:-3.12}"
+ILUVATAR_DRIVER_VERSION="${ILUVATAR_DRIVER_VERSION:-5.0.1}"
+ILUVATAR_VLLM_WHEEL_URL="${ILUVATAR_VLLM_WHEEL_URL:-https://resource.flagos.net/repository/flagos-pypi-iluvatar/packages/vllm/0.32.0+flagos/vllm-0.32.0+flagos-py3-none-any.whl}"
+ILUVATAR_VLLM_WHEEL_SHA256="${ILUVATAR_VLLM_WHEEL_SHA256:-8863d2a86ae2928f3a5575e2eef829ef91654cc16469aad26cb63a7f009f6b2a}"
+ILUVATAR_FLAGGEMS_VERSION="${ILUVATAR_FLAGGEMS_VERSION:-5.5.0.dev20261118}"
+ILUVATAR_FLAGGEMS_WHEEL_URL="${ILUVATAR_FLAGGEMS_WHEEL_URL:-https://resource.flagos.net/repository/flagos-pypi-daily/packages/flag-gems/5.5.0.dev20261118/flag_gems-5.5.0.dev20261118-py3-none-any.whl}"
+ILUVATAR_FLAGGEMS_WHEEL_SHA256="${ILUVATAR_FLAGGEMS_WHEEL_SHA256:-cae4b8409763c88e3e6e7ead44cc900f20de391a1000fb7ad6efe8c215b86316}"
+ILUVATAR_FLAGGEMS_VLLM_VERSION="${ILUVATAR_FLAGGEMS_VLLM_VERSION:-0.3.0.dev20261119}"
+ILUVATAR_FLAGGEMS_VLLM_WHEEL_URL="${ILUVATAR_FLAGGEMS_VLLM_WHEEL_URL:-https://resource.flagos.net/repository/flagos-pypi-daily/packages/flaggems-vllm/0.3.0.dev20261119/flaggems_vllm-0.3.0.dev20261119-py3-none-any.whl}"
+ILUVATAR_FLAGGEMS_VLLM_WHEEL_SHA256="${ILUVATAR_FLAGGEMS_VLLM_WHEEL_SHA256:-b9947e9da1c8ca02eec68f8a0a0fa72595507a79b24f3c2f77cd00af344d42d6}"
 
 # ---- Build options ----
 PLATFORM="${PLATFORM:-cuda}"
@@ -104,7 +116,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin, amd (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin, iluvatar, amd (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image repository (default: ${IMAGE_NAME}; Ascend: harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend)
     --image-tag TAG        Image tag (default: auto-generated)
@@ -190,6 +202,10 @@ EXAMPLES:
 
     # Build Hygon CI image
     ./build.sh --platform hygon --target ci
+
+    # Build the Iluvatar CoreX 5.0.1 CI image on FlagOS Runtime 2.3.0
+    # (the plugin is built from PLUGIN_SOURCE_SHA, default: HEAD)
+    ./build.sh --platform iluvatar --target ci
     # Build T-Head PPU CI image from pre-downloaded wheels
     THEAD_WHEELS_DIR=/path/to/wheels ./build.sh --platform thead --target ci
 
@@ -432,6 +448,50 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-ci"
     fi
+elif [[ "${PLATFORM}" == "iluvatar" ]]; then
+    PYTHON_VERSION="${ILUVATAR_PYTHON_VERSION}"
+    VLLM_VERSION="${ILUVATAR_VLLM_VERSION}"
+    # The plugin and the stack checker are COPY inputs, so the build context is
+    # the repository root and only the committed revision is built.
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    PLUGIN_SOURCE_SHA="${PLUGIN_SOURCE_SHA:-$(git -C "${BUILD_CONTEXT}" rev-parse HEAD)}"
+    [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || err "PLUGIN_SOURCE_SHA must be a full Git revision."
+    resolved_source_sha="$(git -C "${BUILD_CONTEXT}" rev-parse --verify "${PLUGIN_SOURCE_SHA}^{commit}")" \
+        || err "PLUGIN_SOURCE_SHA must identify an existing Git commit."
+    [[ "${resolved_source_sha}" == "${PLUGIN_SOURCE_SHA}" ]] || err "PLUGIN_SOURCE_SHA must identify a commit, not a tag object."
+    DOCKERFILE="docker/iluvatar/Dockerfile"
+    for build_arg in "${EXTRA_BUILD_ARGS[@]+"${EXTRA_BUILD_ARGS[@]}"}"; do
+        case "${build_arg}" in
+            PLUGIN_SOURCE_SHA|PLUGIN_SOURCE_SHA=*)
+                err "Set PLUGIN_SOURCE_SHA in the environment; do not override it with --build-arg." ;;
+        esac
+    done
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
+    PLUGIN_VERSION="0.5.0.dev0+g${PLUGIN_SOURCE_SHA:0:7}"
+    ILUVATAR_BUILD_DATE="$(git -C "${BUILD_CONTEXT}" show -s --format=%cI "${PLUGIN_SOURCE_SHA}")"
+    BUILD_ARGS+=(
+        --build-arg "ILUVATAR_BASE_IMAGE=${ILUVATAR_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${ILUVATAR_VLLM_VERSION}"
+        --build-arg "VLLM_WHEEL_URL=${ILUVATAR_VLLM_WHEEL_URL}"
+        --build-arg "VLLM_WHEEL_SHA256=${ILUVATAR_VLLM_WHEEL_SHA256}"
+        --build-arg "FLAGGEMS_VERSION=${ILUVATAR_FLAGGEMS_VERSION}"
+        --build-arg "FLAGGEMS_WHEEL_URL=${ILUVATAR_FLAGGEMS_WHEEL_URL}"
+        --build-arg "FLAGGEMS_WHEEL_SHA256=${ILUVATAR_FLAGGEMS_WHEEL_SHA256}"
+        --build-arg "FLAGGEMS_VLLM_VERSION=${ILUVATAR_FLAGGEMS_VLLM_VERSION}"
+        --build-arg "FLAGGEMS_VLLM_WHEEL_URL=${ILUVATAR_FLAGGEMS_VLLM_WHEEL_URL}"
+        --build-arg "FLAGGEMS_VLLM_WHEEL_SHA256=${ILUVATAR_FLAGGEMS_VLLM_WHEEL_SHA256}"
+        --build-arg "PLUGIN_SOURCE_SHA=${PLUGIN_SOURCE_SHA}"
+        --build-arg "PLUGIN_VERSION=${PLUGIN_VERSION}"
+        --build-arg "BUILD_DATE=${ILUVATAR_BUILD_DATE}"
+        --build-arg "IMAGE_VERSION=${PLUGIN_VERSION}"
+    )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="v${ILUVATAR_VLLM_VERSION}-Iluvatar-${TARGET}"
+    fi
 elif [[ "${PLATFORM}" == "amd" ]]; then
     PYTHON_VERSION="${AMD_PYTHON_VERSION}"
     VLLM_VERSION="${AMD_VLLM_VERSION}"
@@ -452,7 +512,7 @@ elif [[ "${PLATFORM}" == "amd" ]]; then
         IMAGE_TAG="amd-vllm${VLLM_VERSION}-rocm-gfx1100-py${AMD_PYTHON_VERSION}-${TARGET}"
     fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', 'kunlunxin', or 'amd'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', 'kunlunxin', 'iluvatar', or 'amd'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -490,8 +550,14 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     msg "  Driver:         ${KUNLUNXIN_DRIVER_VERSION}"
     msg "  Kunlunxin base: ${KUNLUNXIN_BASE_IMAGE}"
     msg "  Kunlunxin PyTorch: ${KUNLUNXIN_TORCH_VERSION}"
+elif [[ "${PLATFORM}" == "iluvatar" ]]; then
+    msg "  CoreX:          5.0.1 (host driver ${ILUVATAR_DRIVER_VERSION})"
+    msg "  Runtime base:   ${ILUVATAR_BASE_IMAGE}"
+    msg "  FlagGems:       ${ILUVATAR_FLAGGEMS_VERSION}"
+    msg "  FlagGems-vllm:  ${ILUVATAR_FLAGGEMS_VLLM_VERSION}"
+    msg "  Plugin source:  ${PLUGIN_SOURCE_SHA}"
 fi
-if [[ "${PLATFORM}" != "ascend" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
+if [[ "${PLATFORM}" != "ascend" && "${PLATFORM}" != "iluvatar" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"
     msg "  Python:         ${PYTHON_VERSION}"
 fi
@@ -510,7 +576,7 @@ docker_build() {
         "$1"
 }
 
-if [[ "${PLATFORM}" == "hygon" ]]; then
+if [[ "${PLATFORM}" == "hygon" || "${PLATFORM}" == "iluvatar" ]]; then
     git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | docker_build -
 else
     docker_build "${BUILD_CONTEXT}"

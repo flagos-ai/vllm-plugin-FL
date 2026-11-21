@@ -80,10 +80,20 @@ platforms:
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
       - tests/platforms/nvidia.yaml
+      # Shared image entry point and platform registry: image work touches
+      # docker/build.sh and platforms.yml for every vendor, so those changes
+      # are routed to the vendor platforms that build from them instead of
+      # fanning out to every enabled backend.
+      - .github/configs/nvidia.yml
+      - .github/configs/platforms.yml
+      - docker/build.sh
     exempt_from_global:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
+      - .github/configs/nvidia.yml
+      - .github/configs/platforms.yml
+      - docker/build.sh
   # Enablement follows the 0.5.0-dev line's own compatibility matrix.
   # NVIDIA and Ascend have completed their vLLM 0.32 runtime and CI
   # adaptations; other backends remain disabled until theirs are ready.
@@ -160,6 +170,17 @@ platforms:
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/
       - tests/platforms/iluvatar.yaml
+      # Image-owned inputs: the CI config, the image recipe and the benchmark
+      # smoke config are Iluvatar-only, so they route here instead of fanning
+      # out to every enabled platform.
+      - .github/configs/iluvatar.yml
+      - .github/configs/platforms.yml
+      - docker/build.sh
+      - docker/iluvatar/
     exempt_from_global:
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/
+      - .github/configs/iluvatar.yml
+      - .github/configs/platforms.yml
+      - docker/build.sh
+      - docker/iluvatar/
