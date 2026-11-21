@@ -1,0 +1,530 @@
+{
+  "pr_head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+  "tested_merge": "22f0573d2d6b77ce1ab5a2aa277bff980d9b8307",
+  "run": 44678172822,
+  "attempt": 2,
+  "totals": {
+    "metax": {
+      "requests": 104,
+      "checks": 1040
+    },
+    "kunlunxin": {
+      "requests": 104,
+      "checks": 1040
+    }
+  },
+  "rows": [
+    {
+      "platform": "kunlunxin",
+      "case": "27b_tp4_eager",
+      "job_id": 136432179021,
+      "artifact_id": 14677840327,
+      "requests_passed": 26,
+      "checks_passed": 260,
+      "job_started": "2026-11-20T22:23:41Z",
+      "job_completed": "2026-11-20T22:49:00Z",
+      "raw_job_log_sha256": "5d72431179cdee3111142eee59a23d1ef7e63f41e6ba8b902869e85489426018",
+      "artifact_zip_sha256": "88fef3b3bee59b3a8935ce2cb4a86fa29224b77b78bb066bbebe9441334939aa",
+      "scenarios": {
+        "image_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T22:45:54.979713+00:00",
+          "finished_at": "2026-11-20T22:47:52.930985+00:00",
+          "sha256": "badae1b8539d40a0c3e76dd01d8fabd38144b406e2a9d40d6301f8d0e6474a08"
+        },
+        "image_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T22:44:33.919804+00:00",
+          "finished_at": "2026-11-20T22:45:54.977404+00:00",
+          "sha256": "2cfe3703e33089f4c286c2dbcdff2bd5fe03d3985fb23fd5ebf07ab426a40de3"
+        },
+        "mixed_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T22:47:52.933789+00:00",
+          "finished_at": "2026-11-20T22:48:44.411215+00:00",
+          "sha256": "df165c0ff8117cdaea70d7e8e600b6635fdeb38876d00f69cf53bff666bced2d"
+        },
+        "text_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T22:43:45.414459+00:00",
+          "finished_at": "2026-11-20T22:44:33.917005+00:00",
+          "sha256": "fb3dc7b78ea4b65889c524bb021c76f5b2cf670562af8d61cf053a65e7d009e3"
+        },
+        "text_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T22:41:03.715855+00:00",
+          "finished_at": "2026-11-20T22:43:45.412156+00:00",
+          "sha256": "c5aa6f6509f7db863a72be7daa7805829b8b619db6453de2d93b7daaf4602ce7"
+        }
+      },
+      "job_url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822/job/136432179021",
+      "original_server_argv": [
+        "2026-11-20T22:43:45.4135467Z [Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 4 --host 127.0.0.1 --port 60563 --served-model-name qwen3 --pipeline-parallel-size 1 --max-model-len 16384 --gpu-memory-utilization 0.7 --enforce-eager --max-num-seqs 256 --block-size 128 --reasoning-parser qwen3 --allowed-local-media-path /__w/vllm-plugin-FL/vllm-plugin-FL/tools/adaptation-gate-cases/images"
+      ],
+      "logical_device_mapping": [
+        "2026-11-20T22:25:35.5927994Z [run] E2E parallel: CUDA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3",
+        "2026-11-20T22:43:45.4132942Z [Setup] Starting vLLM (Qwen3.6-27B, TP=4, CUDA_VISIBLE_DEVICES=0,1,2,3)"
+      ],
+      "pytest_5_passed": true,
+      "successful_worker_stdout_uploaded": false,
+      "physical_PCI_mapping_available": false
+    },
+    {
+      "platform": "kunlunxin",
+      "case": "27b_tp4_graph",
+      "job_id": 136432180764,
+      "artifact_id": 14678314527,
+      "requests_passed": 26,
+      "checks_passed": 260,
+      "job_started": "2026-11-20T23:14:30Z",
+      "job_completed": "2026-11-20T23:37:00Z",
+      "raw_job_log_sha256": "a09aa6f5cbe301df3f8924f6ae125308d58aec61fad7d25bab7ac1971ae91ffa",
+      "artifact_zip_sha256": "e995df4563e21c97bade3d263342b2a9905e1a0b7963ce64be5f33866c442130",
+      "scenarios": {
+        "image_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T23:34:13.481678+00:00",
+          "finished_at": "2026-11-20T23:36:03.009521+00:00",
+          "sha256": "a8e92358efb8cf050751ce8dbd4433c9d58da7bf30c6b4b5bc2f123b40119cf4"
+        },
+        "image_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T23:32:53.047749+00:00",
+          "finished_at": "2026-11-20T23:34:13.479755+00:00",
+          "sha256": "083efdf5b8f93b6d627cfdae950c76bde96a16397d29dad2e20feedee4b1754b"
+        },
+        "mixed_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T23:36:03.012134+00:00",
+          "finished_at": "2026-11-20T23:36:43.854313+00:00",
+          "sha256": "854fbe98b377cf67365348fcc053578d8864921f9b36cced3f03653ee3232ed5"
+        },
+        "text_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T23:32:14.742417+00:00",
+          "finished_at": "2026-11-20T23:32:53.045219+00:00",
+          "sha256": "41b9e7d391135247d699ce58da54be7438b53c7a7f2697de8c8b813ee7786ea5"
+        },
+        "text_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T23:31:48.329189+00:00",
+          "finished_at": "2026-11-20T23:32:14.740469+00:00",
+          "sha256": "5cc9236bed98aa1016155e72de4a45738abbf95d055bde14c42287dfae43ba19"
+        }
+      },
+      "job_url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822/job/136432180764",
+      "original_server_argv": [
+        "2026-11-20T23:32:14.7418083Z [Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 4 --host 127.0.0.1 --port 48221 --served-model-name qwen3 --pipeline-parallel-size 1 --max-model-len 16384 --gpu-memory-utilization 0.7 --max-num-seqs 256 --block-size 128 --reasoning-parser qwen3 --allowed-local-media-path /__w/vllm-plugin-FL/vllm-plugin-FL/tools/adaptation-gate-cases/images"
+      ],
+      "logical_device_mapping": [
+        "2026-11-20T23:16:10.1925442Z [run] E2E parallel: CUDA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3",
+        "2026-11-20T23:32:14.7416398Z [Setup] Starting vLLM (Qwen3.6-27B, TP=4, CUDA_VISIBLE_DEVICES=0,1,2,3)"
+      ],
+      "pytest_5_passed": true,
+      "successful_worker_stdout_uploaded": false,
+      "physical_PCI_mapping_available": false
+    },
+    {
+      "platform": "kunlunxin",
+      "case": "35b_a3b_tp4_eager",
+      "job_id": 136432180758,
+      "artifact_id": 14683555555,
+      "requests_passed": 26,
+      "checks_passed": 260,
+      "job_started": "2026-11-21T00:27:15Z",
+      "job_completed": "2026-11-21T00:51:13Z",
+      "raw_job_log_sha256": "e15db63281e1e2183ffbad6d528716213114d81962acdbeb73766a9eeefa2893",
+      "artifact_zip_sha256": "82124a4fec13656e16dc44893f35dc9e6609124554843c27a9a9f5ab53e1b3e8",
+      "scenarios": {
+        "image_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-21T00:48:39.766810+00:00",
+          "finished_at": "2026-11-21T00:50:18.112870+00:00",
+          "sha256": "85ab5852c84cfd8485d65d5583f3d071351ed5663ba266ef224321faf17b015b"
+        },
+        "image_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-21T00:47:26.026222+00:00",
+          "finished_at": "2026-11-21T00:48:39.764904+00:00",
+          "sha256": "abdd2baafd3c5bc3faca4b216faaa289a906eaa53084833cbd5e4b6cbdba6712"
+        },
+        "mixed_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-21T00:50:18.115351+00:00",
+          "finished_at": "2026-11-21T00:50:56.556946+00:00",
+          "sha256": "836364caf941e4f0c385f5f75d3f833c9212ba2bf8299afabeecf39fad539b5d"
+        },
+        "text_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-21T00:46:38.961085+00:00",
+          "finished_at": "2026-11-21T00:47:26.023857+00:00",
+          "sha256": "efb560ff3bee1853d9f04f75ff14e4ef07ff5cec6679e7bdf8ab248e12b1ccdb"
+        },
+        "text_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-21T00:44:13.177125+00:00",
+          "finished_at": "2026-11-21T00:46:38.959189+00:00",
+          "sha256": "fbb3c3d54080ca2faeb7074381ad4e5536c29e0c1413e42b3b4e6845d797ab41"
+        }
+      },
+      "job_url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822/job/136432180758",
+      "original_server_argv": [
+        "2026-11-21T00:46:38.9604474Z [Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-35B-A3B --tensor-parallel-size 4 --host 127.0.0.1 --port 44629 --served-model-name qwen3 --pipeline-parallel-size 1 --max-model-len 16384 --gpu-memory-utilization 0.7 --enforce-eager --max-num-seqs 256 --block-size 128 --reasoning-parser qwen3 --allowed-local-media-path /__w/vllm-plugin-FL/vllm-plugin-FL/tools/adaptation-gate-cases/images"
+      ],
+      "logical_device_mapping": [
+        "2026-11-21T00:28:55.1475890Z [run] E2E parallel: CUDA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3",
+        "2026-11-21T00:46:38.9603149Z [Setup] Starting vLLM (Qwen3.6-35B-A3B, TP=4, CUDA_VISIBLE_DEVICES=0,1,2,3)"
+      ],
+      "pytest_5_passed": true,
+      "successful_worker_stdout_uploaded": false,
+      "physical_PCI_mapping_available": false
+    },
+    {
+      "platform": "kunlunxin",
+      "case": "35b_a3b_tp4_graph",
+      "job_id": 136432180874,
+      "artifact_id": 14684452171,
+      "requests_passed": 26,
+      "checks_passed": 260,
+      "job_started": "2026-11-21T00:57:59Z",
+      "job_completed": "2026-11-21T01:19:43Z",
+      "raw_job_log_sha256": "db1c14c4343cf8cda3711bdc1f42479ebf88300e1d94b50e8482ad509f54e96e",
+      "artifact_zip_sha256": "935d8a5ff6b3a4f58e94808f20db7ee1d3bb2ab4a87c94a9b3f0840bb912db78",
+      "scenarios": {
+        "image_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-21T01:17:26.956723+00:00",
+          "finished_at": "2026-11-21T01:18:56.095488+00:00",
+          "sha256": "0a796645169948cc131ab124060ab75efab3276738f93cdf721b16cfc3fa0d79"
+        },
+        "image_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-21T01:16:15.387016+00:00",
+          "finished_at": "2026-11-21T01:17:26.954868+00:00",
+          "sha256": "77d76bf6e4b06197a73d0c7fa2f6407f15fff3f9fbfd277786b713fe432cdcbd"
+        },
+        "mixed_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-21T01:18:56.097900+00:00",
+          "finished_at": "2026-11-21T01:19:26.910023+00:00",
+          "sha256": "abd76a4036d141bedbd14b42d7eff38c106256023ebf6d0e787e41c14e04093f"
+        },
+        "text_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-21T01:15:37.747787+00:00",
+          "finished_at": "2026-11-21T01:16:15.384702+00:00",
+          "sha256": "c0a84107c0eb37ae2c0a6d19fa74c950085250d767e50b19463cab4c162be0b3"
+        },
+        "text_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-21T01:15:08.691265+00:00",
+          "finished_at": "2026-11-21T01:15:37.745963+00:00",
+          "sha256": "dffc3e0f8679139874a137d6534f06f119a133ea50edaf1068b03e0c87d8156f"
+        }
+      },
+      "job_url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822/job/136432180874",
+      "original_server_argv": [
+        "2026-11-21T01:15:37.7472034Z [Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-35B-A3B --tensor-parallel-size 4 --host 127.0.0.1 --port 60339 --served-model-name qwen3 --pipeline-parallel-size 1 --max-model-len 16384 --gpu-memory-utilization 0.7 --max-num-seqs 256 --block-size 128 --reasoning-parser qwen3 --allowed-local-media-path /__w/vllm-plugin-FL/vllm-plugin-FL/tools/adaptation-gate-cases/images"
+      ],
+      "logical_device_mapping": [
+        "2026-11-21T00:59:10.5882080Z [run] E2E parallel: CUDA_VISIBLE_DEVICES=0,1,2,3 pins this runner to 4 devices; slots 0-3 map to devices 0,1,2,3",
+        "2026-11-21T01:15:37.7470734Z [Setup] Starting vLLM (Qwen3.6-35B-A3B, TP=4, CUDA_VISIBLE_DEVICES=0,1,2,3)"
+      ],
+      "pytest_5_passed": true,
+      "successful_worker_stdout_uploaded": false,
+      "physical_PCI_mapping_available": false
+    },
+    {
+      "platform": "metax",
+      "case": "27b_tp4_eager",
+      "job_id": 136433843889,
+      "artifact_id": 14652471540,
+      "requests_passed": 26,
+      "checks_passed": 260,
+      "job_started": "2026-11-20T16:56:28Z",
+      "job_completed": "2026-11-20T17:09:58Z",
+      "raw_job_log_sha256": "08f851a85d2a568ca817d6a0331486970d088ecc1ff1075deea2d50cea8270fe",
+      "artifact_zip_sha256": "d79025977e4b6b34cb8281e45a43f1aceffe0e7b12cac3c46500da50f816be1e",
+      "scenarios": {
+        "image_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T17:08:36.999683+00:00",
+          "finished_at": "2026-11-20T17:09:05.916408+00:00",
+          "sha256": "cbe218ff9db6c5993addcf7318a760f0adfeb0a6621511e36fd13ee2ab29dcae"
+        },
+        "image_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T17:08:13.951956+00:00",
+          "finished_at": "2026-11-20T17:08:36.997875+00:00",
+          "sha256": "f7c4ab24c94f62b3d1f243c3e7e155b954f5a591b030620ddb2d6991a65be09d"
+        },
+        "mixed_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T17:09:05.918725+00:00",
+          "finished_at": "2026-11-20T17:09:16.413049+00:00",
+          "sha256": "45dcdeb1647adafeddcfe9d9f61d601a7adb13c0f7057dc5555f40760adfa434"
+        },
+        "text_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T17:07:46.516046+00:00",
+          "finished_at": "2026-11-20T17:08:13.949764+00:00",
+          "sha256": "897c16392413fa08040ba8c01f7d73685e918678bba0d02795f4a9c695f6c195"
+        },
+        "text_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T17:05:44.713690+00:00",
+          "finished_at": "2026-11-20T17:07:46.514058+00:00",
+          "sha256": "1fa3708d547e84fa78e469cf988914222ab278a20de9bfa43eb4f34ad499cf7b"
+        }
+      },
+      "job_url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822/job/136433843889",
+      "original_server_argv": [
+        "2026-11-20T17:07:46.5162804Z [Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 4 --host 127.0.0.1 --port 50033 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --enforce-eager --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /__w/vllm-plugin-FL/vllm-plugin-FL/tools/adaptation-gate-cases/images"
+      ],
+      "logical_device_mapping": [
+        "2026-11-20T17:07:46.5160011Z [Setup] Starting vLLM (Qwen3.6-27B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)"
+      ],
+      "pytest_5_passed": true,
+      "successful_worker_stdout_uploaded": false,
+      "physical_PCI_mapping_available": false
+    },
+    {
+      "platform": "metax",
+      "case": "27b_tp4_graph",
+      "job_id": 136433845273,
+      "artifact_id": 14654098281,
+      "requests_passed": 26,
+      "checks_passed": 260,
+      "job_started": "2026-11-20T17:34:41Z",
+      "job_completed": "2026-11-20T17:49:38Z",
+      "raw_job_log_sha256": "1077b58514e5e661717b4690ebde2bcc68187f2d74800dc957be6edb78adadd3",
+      "artifact_zip_sha256": "9e1665098611be96fd9eb67ace077c413a085c3d4bdc8b35c7619c8418448a5a",
+      "scenarios": {
+        "image_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T17:48:23.944293+00:00",
+          "finished_at": "2026-11-20T17:48:49.654128+00:00",
+          "sha256": "5d8e5bb3021ee84c2f71534db29c6768f8129b0959a0b648d9905a42776d34ff"
+        },
+        "image_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T17:47:58.356399+00:00",
+          "finished_at": "2026-11-20T17:48:23.941803+00:00",
+          "sha256": "db3add99e8fc211fc8aa63c358374aa4122c49b6897d80196156216210d3cc9c"
+        },
+        "mixed_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T17:48:49.657031+00:00",
+          "finished_at": "2026-11-20T17:48:55.968849+00:00",
+          "sha256": "0fe31531191ba6e2733d5538148c9c65e9f13006461e19d36d6c36edfe3f4c12"
+        },
+        "text_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T17:47:48.436528+00:00",
+          "finished_at": "2026-11-20T17:47:58.354218+00:00",
+          "sha256": "cfb0a2087f864afe96f04f7ea4f1312b64242aa21d68479934b670de27c3b59a"
+        },
+        "text_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T17:47:31.951989+00:00",
+          "finished_at": "2026-11-20T17:47:48.434566+00:00",
+          "sha256": "6896145085702394b5633c54e0a028a6a0140b0ff0370caad261b2975c5a87fc"
+        }
+      },
+      "job_url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822/job/136433845273",
+      "original_server_argv": [
+        "2026-11-20T17:47:48.4366220Z [Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 4 --host 127.0.0.1 --port 47073 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /__w/vllm-plugin-FL/vllm-plugin-FL/tools/adaptation-gate-cases/images"
+      ],
+      "logical_device_mapping": [
+        "2026-11-20T17:47:48.4363833Z [Setup] Starting vLLM (Qwen3.6-27B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)"
+      ],
+      "pytest_5_passed": true,
+      "successful_worker_stdout_uploaded": false,
+      "physical_PCI_mapping_available": false
+    },
+    {
+      "platform": "metax",
+      "case": "35b_a3b_tp4_eager",
+      "job_id": 136433845653,
+      "artifact_id": 14655833322,
+      "requests_passed": 26,
+      "checks_passed": 260,
+      "job_started": "2026-11-20T18:03:25Z",
+      "job_completed": "2026-11-20T18:16:35Z",
+      "raw_job_log_sha256": "284bf340e644e3e37ee646e7db3b836a4fbd6ff1df7418142e610e594b899286",
+      "artifact_zip_sha256": "f35fb3c5fc63947b03d81ac1850df192ba8fd3a25869d830d06b493de9b72c1d",
+      "scenarios": {
+        "image_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T18:15:12.057312+00:00",
+          "finished_at": "2026-11-20T18:15:38.547467+00:00",
+          "sha256": "203959c4b502e026a7eed3fdb37b5f02e9224853d61ac8c8924ff4af7d0d3b6a"
+        },
+        "image_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T18:14:52.636539+00:00",
+          "finished_at": "2026-11-20T18:15:12.055372+00:00",
+          "sha256": "0ec9c33637b65532c4728fcacfffb173d0429118976a76e0a3bd6c1249894021"
+        },
+        "mixed_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T18:15:38.549834+00:00",
+          "finished_at": "2026-11-20T18:15:48.035102+00:00",
+          "sha256": "6093ad5bc9e0d2f0451298d863deb910a46310895ed5d29b8431c1cf14f4e38c"
+        },
+        "text_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T18:14:23.763360+00:00",
+          "finished_at": "2026-11-20T18:14:52.634275+00:00",
+          "sha256": "c72d3a42a0eeada97a3f5a059805f7e4ce1709481a136826893407bff042eba7"
+        },
+        "text_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T18:12:23.207733+00:00",
+          "finished_at": "2026-11-20T18:14:23.761331+00:00",
+          "sha256": "9663f0bcf14c025d17832364ba7e5f7d56c96e2a7f7f281feb834c38eda97fc5"
+        }
+      },
+      "job_url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822/job/136433845653",
+      "original_server_argv": [
+        "2026-11-20T18:14:23.7634384Z [Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-35B-A3B --tensor-parallel-size 4 --host 127.0.0.1 --port 37723 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --enforce-eager --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /__w/vllm-plugin-FL/vllm-plugin-FL/tools/adaptation-gate-cases/images"
+      ],
+      "logical_device_mapping": [
+        "2026-11-20T18:14:23.7632281Z [Setup] Starting vLLM (Qwen3.6-35B-A3B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)"
+      ],
+      "pytest_5_passed": true,
+      "successful_worker_stdout_uploaded": false,
+      "physical_PCI_mapping_available": false
+    },
+    {
+      "platform": "metax",
+      "case": "35b_a3b_tp4_graph",
+      "job_id": 136433845394,
+      "artifact_id": 14654628317,
+      "requests_passed": 26,
+      "checks_passed": 260,
+      "job_started": "2026-11-20T17:50:06Z",
+      "job_completed": "2026-11-20T18:02:56Z",
+      "raw_job_log_sha256": "1d5e4b89e1596d0a7bd202ff9b9afbe4580e118564a309c83071e0ed1626b7fe",
+      "artifact_zip_sha256": "17dbbf7808970c0ae0e81cf957561f55b2af15f93caa307a35e50faf84195f73",
+      "scenarios": {
+        "image_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T18:01:36.061624+00:00",
+          "finished_at": "2026-11-20T18:02:02.786086+00:00",
+          "sha256": "0340ce2d6bfdcdcec47e93f1e4d7648f16e0c9d5ebd4c494fe37fdc45ca9642f"
+        },
+        "image_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T18:01:22.228007+00:00",
+          "finished_at": "2026-11-20T18:01:36.059479+00:00",
+          "sha256": "5136559194b156f0d95189b7cad48a324a6d0a852ea1451b78aca8d99bdf8c15"
+        },
+        "mixed_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T18:02:02.788887+00:00",
+          "finished_at": "2026-11-20T18:02:08.139321+00:00",
+          "sha256": "2ecfa0c8fab25476e77d49cdb146a15f213833fad55eea74be26c60a5d17e0a4"
+        },
+        "text_concurrent_8": {
+          "requests": 8,
+          "checks": 80,
+          "started_at": "2026-11-20T18:01:05.432980+00:00",
+          "finished_at": "2026-11-20T18:01:22.225392+00:00",
+          "sha256": "d133414e251439d7d338850a18742cd32c6b30d10c6af63ae3fb32c548036690"
+        },
+        "text_single": {
+          "requests": 1,
+          "checks": 10,
+          "started_at": "2026-11-20T18:00:54.743161+00:00",
+          "finished_at": "2026-11-20T18:01:05.430945+00:00",
+          "sha256": "0bbe730362ba3d956b05ea370f01ab60251588e6fdf77b7f928f096565f8921b"
+        }
+      },
+      "job_url": "https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/44678172822/job/136433845394",
+      "original_server_argv": [
+        "2026-11-20T18:01:05.4331136Z [Setup] Command: vllm serve /data/models/Qwen/Qwen3.6-35B-A3B --tensor-parallel-size 4 --host 127.0.0.1 --port 59561 --served-model-name qwen --pipeline-parallel-size 1 --max-model-len 8192 --gpu-memory-utilization 0.9 --trust-remote-code --disable-custom-all-reduce --allowed-local-media-path /__w/vllm-plugin-FL/vllm-plugin-FL/tools/adaptation-gate-cases/images"
+      ],
+      "logical_device_mapping": [
+        "2026-11-20T18:01:05.4328823Z [Setup] Starting vLLM (Qwen3.6-35B-A3B, TP=4, MACA_VISIBLE_DEVICES=0,1,2,3)"
+      ],
+      "pytest_5_passed": true,
+      "successful_worker_stdout_uploaded": false,
+      "physical_PCI_mapping_available": false
+    }
+  ],
+  "independent_P800_confirmation": {
+    "schema": "pr693-independent-P800-confirmation-v1",
+    "run": 44678172822,
+    "attempt": 2,
+    "PR_head": "982739fd5d68ff19955c7ff975756960abe1cce7",
+    "tested_merge_revision": "22f0573d2d6b77ce1ab5a2aa277bff980d9b8307",
+    "four_log_sha_receipts_verified": true,
+    "all_four_original_gate_groups": {
+      "scenarios": 20,
+      "actual_requests": 104,
+      "actual_checks": 1040,
+      "all_output_checks_true": true,
+      "input_output_request_ids_match": true
+    },
+    "all_four_CVD": "0,1,2,3",
+    "runner_release_lines_present": true,
+    "inference": {
+      "bytes": 70613909,
+      "sha256": "c24bece4f89f9274d9e484ed79c93604d60dd0165b08ff8d85d587839fc626d0",
+      "four_profile_pass_summaries_observed": true,
+      "NoC_kl3_KL_XID_invalid_ordinal_marker_count": 0
+    },
+    "limits": [
+      "Successful Gate server/worker stdout was not uploaded, so physical PCI/rank1 identity or natural per-worker shutdown is not established by those artifacts.",
+      "This run did not reproduce the historical NoC failure; it does not prove universal resolution.",
+      "Upper-bank4..7 and dual-hostissue729 failures remain separate evidence; lower-bank thinA was not run."
+    ],
+    "cross_reviewed_summary": "attempt2-gate-evidence-audit.json",
+    "no_new_runtime_remote_or_GPU": true
+  },
+  "whole_workflow_result": "Not green: four Iluvatar jobs failed before checkout because Docker could not allocate a non-overlapping IPv4 network. Only the failed jobs and aggregate were retried in attempt3.",
+  "limits": [
+    "Successful Gate server/worker stdout was not uploaded, so physical PCI/rank1 identity or natural per-worker shutdown is not established by those artifacts.",
+    "This run did not reproduce the historical NoC failure; it does not prove universal resolution.",
+    "Upper-bank4..7 and dual-hostissue729 failures remain separate evidence; lower-bank thinA was not run."
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "submitted_commit": "59695b9a87a9e413ec2e8ec95b0aa06025bb4030",
+  "parent": "171348d950867cc2779e77bbe78283cdbd211979",
+  "tree": "95b8ae7be8fa7119c038a9242504c7ebbb2bf0f1",
+  "changed_paths": [
+    "tests/unit_tests/dispatch/test_sunrise_graph_capture.py",
+    "tests/unit_tests/distributed/test_sunrise_flagcx_wheel.py"
+  ],
+  "production_source_changes": false,
+  "assertion_or_gate_changes": false,
+  "original_failures_reproduced": 5,
+  "original_official_failures": 6,
+  "unknown_sixth_failure": true,
+  "post_commit_existing_CPU_tests": {
+    "vendor": "kunlunxin",
+    "passed": 179,
+    "failed": 0,
+    "skipped": 0,
+    "original_log_sha256": "ad6b02f5a2b44d54d0557da3fcdccc7fe870600a8c5e4d4a408355c683efbbc7"
+  },
+  "focused_vendor_comparisons": [
+    {
+      "vendor": "kunlunxin",
+      "passed": 39,
+      "skipped": 0,
+      "exit": 0,
+      "sha256": "6f97cc017bca3d792a6b6cabeefcd5beb654dd2c185634fb99cad34bda99ada7"
+    },
+    {
+      "vendor": "sunrise",
+      "passed": 39,
+      "skipped": 0,
+      "exit": 0,
+      "sha256": "b421a4a9abf87ea8c70127f8376982c7defed87a551acceda91de68ef1c3b5f8"
+    },
+    {
+      "vendor": "ascend",
+      "passed": 39,
+      "skipped": 0,
+      "exit": 0,
+      "sha256": "1068d2c5407a8cb9938888bc5202f6cffac064639f7c35d9ce58e2bde07b8a8a"
+    }
+  ],
+  "full_CI_run": 44850265504,
+  "full_CI_result": "Running; full hardware acceptance is pending."
+}
