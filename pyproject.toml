@@ -99,6 +99,7 @@ include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
 "vllm_fl.dispatch.config" = ["*.yaml"]
+"vllm_fl.third_party.attn_res_pr737" = ["LICENSE", "THIRD_PARTY_NOTICES", "PROVENANCE.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

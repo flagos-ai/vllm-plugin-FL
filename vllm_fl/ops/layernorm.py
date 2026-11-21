@@ -31,6 +31,13 @@ class RMSNormFL(RMSNorm):
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        from vllm_fl.patches.allreduce_rms_provider import (
+            allreduce_rms_provider_requested,
+        )
+
+        if allreduce_rms_provider_requested() and torch.compiler.is_compiling():
+            # Preserve native IR for vLLM's distributed fusion patterns.
+            return RMSNorm.forward_cuda(self, x, residual)
         if self._use_amd_graph_ops and torch.compiler.is_compiling():
             from vllm_fl.dispatch.backends.vendor.amd.graph_ops import (
                 rms_norm_custom_op,

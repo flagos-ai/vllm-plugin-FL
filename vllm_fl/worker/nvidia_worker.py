@@ -75,10 +75,57 @@ class NvidiaWorkerFL(NativeGPUWorker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._fl_io_dump_initialized = False
+
+        from vllm_fl.envs import USE_FLAGGEMS
+        from vllm_fl.patches.kimi_complex_ops import patch_kimi_complex_ops
+        from vllm_fl.patches.kimi_mean_grid import patch_kimi_mean_grid
+
+        patch_kimi_complex_ops(self.model_config, enabled=USE_FLAGGEMS)
+        patch_kimi_mean_grid(self.model_config, enabled=USE_FLAGGEMS)
         _initialize_fl_runtime(self.rank)
+
+        if USE_FLAGGEMS:
+            from vllm_fl.ops.fused_moe.padding import install_no_tle_moe_alignment
+
+            if install_no_tle_moe_alignment():
+                logger.info("FL_MOE_NO_TLE_ALIGNMENT_INSTALLED")
+
+        from vllm_fl.patches.allreduce_rms_provider import (
+            apply_allreduce_rms_provider_patch,
+        )
+
+        apply_allreduce_rms_provider_patch()
 
     def init_device(self):
         super().init_device()
+
+        from vllm_fl.envs import USE_FLAGGEMS
+        from vllm_fl.patches.qwen_gdn_state_index import patch_qwen_gdn_state_indices
+
+        if USE_FLAGGEMS:
+            patch_qwen_gdn_state_indices(self.model_config)
+
+        from vllm_fl.patches.allreduce_rms_provider import (
+            initialize_allreduce_rms_provider,
+        )
+
+        initialize_allreduce_rms_provider(self.vllm_config)
+
+        from vllm_fl.patches.attn_res_provider import patch_attn_res_provider
+
+        patch_attn_res_provider(self.model_config, self.device)
+
+        from vllm_fl.patches.deepencoder_triton_constants import (
+            patch_deepencoder_triton_constants,
+        )
+
+        if patch_deepencoder_triton_constants(self.model_config):
+            logger.info("Applied the Triton 3.6 DeepEncoder LOG2E constexpr fix")
+
+        from vllm_fl.patches.minimax_topk_bounds import patch_minimax_topk_bounds
+
+        if patch_minimax_topk_bounds(self.model_config):
+            logger.info("Applied the FlagTree short-score MiniMax top-k tile guard")
 
         from vllm_fl.patches.qsa_cache_hint import patch_qsa_cache_hint
 

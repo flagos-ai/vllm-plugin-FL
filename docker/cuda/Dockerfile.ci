@@ -67,7 +67,7 @@ RUN python -m pip download --no-deps --only-binary=:all: \
 FROM ${CUDA_CI_WHEELS_IMAGE} AS ci-wheels
 
 FROM ${CUDA_CI_RUNTIME_IMAGE} AS ci
-COPY .github/scripts/cuda/stack.py /opt/fl-ci/stack.py
+COPY .github/scripts/nvidia/stack.py /opt/fl-ci/stack.py
 COPY docker/cuda/record-provenance.py /opt/fl-ci/record-provenance.py
 COPY --from=ci-wheels /opt/fl-wheels /opt/fl-wheels
 # CI dependencies are resolved before installing FlagTree, which deliberately
