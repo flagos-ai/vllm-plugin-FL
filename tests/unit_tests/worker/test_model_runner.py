@@ -479,3 +479,45 @@ def test_runner_has_no_removed_mamba_api_references():
         "mamba_prev_last_scheduled_idx",
     ):
         assert removed not in source
+
+
+# =============================================================================
+# Layer 2: JIT warmup registry lifecycle
+# =============================================================================
+
+
+class TestJitWarmupRegistryCapture:
+    """Registry must be active while ``__init__`` runs, not just constructed."""
+
+    def test_init_is_wrapped_by_capture(self):
+        import pytest
+
+        pytest.importorskip("vllm.model_executor.warmup.jit_warmup")
+        from vllm_fl.worker.model_runner import ModelRunnerFL
+
+        assert hasattr(ModelRunnerFL.__init__, "__wrapped__"), (
+            "ModelRunnerFL.__init__ must be wrapped by JitWarmupRegistry.capture; "
+            "a bare registry instance never activates the registration ContextVar "
+            "and every register_warmup() call is silently dropped."
+        )
+
+    def test_registry_is_active_while_init_body_runs(self, monkeypatch):
+        import pytest
+
+        module = pytest.importorskip("vllm.model_executor.warmup.jit_warmup")
+        from vllm_fl.worker import model_runner as mr
+
+        seen = {}
+
+        def probe(self, vllm_config, device):
+            seen["active"] = module.JitWarmupRegistry._active.get()
+            seen["attached"] = getattr(self, "jit_warmup_registry", None)
+
+        monkeypatch.setattr(
+            mr.ModelRunnerFL, "__init__", module.JitWarmupRegistry.capture(probe)
+        )
+        instance = object.__new__(mr.ModelRunnerFL)
+        mr.ModelRunnerFL.__init__(instance, "cfg", None)
+
+        assert seen["active"] is not None
+        assert seen["attached"] is seen["active"]
