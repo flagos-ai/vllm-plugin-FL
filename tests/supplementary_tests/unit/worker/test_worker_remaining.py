@@ -66,6 +66,28 @@ def _make_worker(worker, **cfg_overrides):
 
 
 # ---------------------------------------------------------------------------
+# _prepare_comm_buffer ImportError fallback (lines 62-65)
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareCommBufferFallback:
+    """The vLLM >= 0.28 shim when parallel_state lacks the symbol."""
+
+    def test_missing_symbol_becomes_noop(self, worker_env, monkeypatch):
+        """A parallel_state without the symbol leaves a None-returning shim
+        (the except-import fallback body at lines 62-65)."""
+        worker, tree = worker_env()
+        # Remove the symbol from the installed stub leaf, then reload the
+        # module so the try/except at import time takes the fallback branch.
+        installed = sys.modules["vllm.distributed.parallel_state"]
+        monkeypatch.delattr(installed, "prepare_communication_buffer_for_model")
+        import importlib
+
+        reloaded = importlib.reload(worker)
+        assert reloaded._prepare_comm_buffer(object(), args=1) is None
+
+
+# ---------------------------------------------------------------------------
 # sleep: the ROCm retry loop (line 335)
 # ---------------------------------------------------------------------------
 
