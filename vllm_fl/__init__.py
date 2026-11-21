@@ -408,6 +408,29 @@ def register_model():
         # frontend and spawned workers, for both upstream model runners.
         patch_minicpmo_audio_budget()
 
+    # MetaX: Hy4-Flash registration is vendor-agnostic; register on metax too.
+    if vendor_name in ("nvidia", "metax"):
+        from vllm_fl.models.hy_v4_flash.registration import register_hy4_flash
+
+        register_hy4_flash()
+
+    if vendor_name == "metax":
+        # Bind FlagGems-vllm Triton FlashMLA in place of the empty wheel's
+        # missing CUDA extensions. Deferred to here: importing the attention
+        # backend modules during platform-plugin registration is too early and
+        # creates a circular import with vllm.config.
+        from vllm_fl.dispatch.backends.vendor.metax.shims._fl_metax_gems_flashmla import (
+            patch as _patch_gems_flashmla,
+        )
+
+        _patch_gems_flashmla()
+
+        from vllm_fl.dispatch.backends.vendor.metax.shims._fl_metax_deepgemm_ops import (
+            patch as _patch_gems_deepgemm,
+        )
+
+        _patch_gems_deepgemm()
+
     if vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
         # configuration resolution in worker processes.
