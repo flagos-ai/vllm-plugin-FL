@@ -56,6 +56,64 @@ def _vllm_c_available() -> bool:
         return False
 
 
+def _configure_sunrise_compilation_defaults(vllm_config: "VllmConfig") -> None:
+    """Choose native PTPU decode graphs before vLLM finalizes capture sizes."""
+    from vllm.config import CompilationMode, CUDAGraphMode
+    from vllm.envs import VLLM_USE_BREAKABLE_CUDAGRAPH
+
+    model = vllm_config.model_config
+    compilation = vllm_config.compilation_config
+    if model is None:
+        return
+    if model.enforce_eager:
+        compilation.mode = CompilationMode.NONE
+        compilation.cudagraph_mode = CUDAGraphMode.NONE
+        return
+
+    if compilation.mode not in (None, CompilationMode.NONE):
+        raise NotImplementedError(
+            "Sunrise/PTPU supports compilation mode NONE with native Runner V2 "
+            "graphs; Dynamo/VLLM_COMPILE/Inductor model compilation is unsupported. "
+            "Set compilation_config.mode=0."
+        )
+    if compilation.mode is None and compilation.backend not in ("", "eager"):
+        raise NotImplementedError(
+            "Sunrise/PTPU model compilation backend is unsupported. Use "
+            "compilation_config.mode=0 for native PTPU execution."
+        )
+    compilation.mode = CompilationMode.NONE
+    if not compilation.backend:
+        compilation.backend = "eager"
+    if compilation.cudagraph_mode is None:
+        compilation.cudagraph_mode = (
+            CUDAGraphMode.NONE
+            if vllm_config.optimization_level == 0
+            else CUDAGraphMode.FULL_DECODE_ONLY
+        )
+    if compilation.cudagraph_mode not in (
+        CUDAGraphMode.NONE,
+        CUDAGraphMode.FULL_DECODE_ONLY,
+    ):
+        raise NotImplementedError(
+            "Sunrise/PTPU graphs support NONE or FULL_DECODE_ONLY; mixed FULL, "
+            "PIECEWISE and FULL_AND_PIECEWISE are unsupported."
+        )
+    if compilation.cudagraph_mode == CUDAGraphMode.NONE:
+        return
+    if VLLM_USE_BREAKABLE_CUDAGRAPH:
+        raise NotImplementedError(
+            "Sunrise/PTPU FULL_DECODE_ONLY requires VLLM_USE_BREAKABLE_CUDAGRAPH=0."
+        )
+    if vllm_config.parallel_config.use_ubatching:
+        raise NotImplementedError("Sunrise/PTPU graphs do not support ubatching")
+    if getattr(compilation, "cudagraph_mm_encoder", False):
+        raise NotImplementedError("Sunrise/PTPU encoder graphs are unsupported")
+    if compilation.use_inductor_graph_partition:
+        raise NotImplementedError(
+            "Sunrise/PTPU graphs do not support Inductor partitioning"
+        )
+
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -130,9 +188,9 @@ class PlatformFL(Platform):
     # ``ValueError: Expected a cuda device, but got: cpu`` from Inductor's
     # ``preserve_rng_state``. Dynamo tracing itself is fine, so use the eager
     # backend there: the traced graph is kept and only Inductor codegen is
-    # dropped.
+    # dropped. The torch-ptpu stack also lacks a PTPU Inductor code generator.
     simple_compile_backend: str = (
-        "eager" if device_type == "npu" or vendor_name == "amd" else "inductor"
+        "eager" if device_type in ("npu", "ptpu") or vendor_name == "amd" else "inductor"
     )
     device_control_env_var: str = (
         "ASCEND_RT_VISIBLE_DEVICES"
@@ -304,7 +362,13 @@ class PlatformFL(Platform):
 
     @classmethod
     def import_ir_kernels(cls) -> None:
-        """Import IR kernel modules. OOT platforms override to import their own."""
+        """Import executable IR providers for the active device."""
+        if cls.device_type == "ptpu":
+            # The empty wheel has no CUDA vllm_c providers. Native IR ops use
+            # real PyTorch operations and retain enabled FlagGems dispatch.
+            import vllm.ir.ops  # noqa: F401
+
+            return
         import vllm.kernels  # noqa: F401
 
     @classmethod
@@ -312,8 +376,11 @@ class PlatformFL(Platform):
         """Install vendor defaults before vLLM resolves compilation and graphs.
 
         MetaX keeps explicit eager, optimization-level and graph settings.
-        Kunlunxin uses native decode graphs without torch.compile.
+        Sunrise and Kunlunxin use native decode graphs without torch.compile.
         """
+        if cls.device_type == "ptpu":
+            _configure_sunrise_compilation_defaults(vllm_config)
+            return
         if cls.device_type == "cuda" and cls.vendor_name == "kunlunxin":
             from vllm.config.compilation import CompilationMode
 
@@ -370,6 +437,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.device_type == "ptpu" and vllm_config.is_mm_encoder_only:
+            raise NotImplementedError(
+                "Sunrise does not support encoder-only execution on PTPU."
+            )
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(
@@ -496,11 +567,12 @@ class PlatformFL(Platform):
                 # Revalidate after changing MLA/KV-head semantics so DCP and TP
                 # constraints are checked against the dense architecture.
                 model_config.verify_with_parallel_config(parallel_config)
-        parallel_config.worker_cls = (
-            "vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker.IluvatarWorkerFL"
-            if cls.vendor_name == "iluvatar"
-            else "vllm_fl.worker.worker.WorkerFL"
-        )
+        if cls.device_type == "ptpu":
+            parallel_config.worker_cls = "vllm_fl.worker.sunrise_worker.SunriseWorker"
+        elif cls.vendor_name == "iluvatar":
+            parallel_config.worker_cls = "vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker.IluvatarWorkerFL"
+        else:
+            parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         scheduler_config = vllm_config.scheduler_config
         if (
@@ -925,6 +997,7 @@ class PlatformFL(Platform):
             "enflame",
             "kunlunxin",
             "amd",
+            "sunrise",
         ]
 
     @classmethod
@@ -1147,8 +1220,8 @@ class PlatformFL(Platform):
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
-        if cls.vendor_name == "kunlunxin":
-            # The P800 empty wheel has no vllm_c IR providers.
+        if cls.device_type == "ptpu" or cls.vendor_name == "kunlunxin":
+            # The PTPU and P800 empty wheels have no vllm_c IR providers.
             return IrOpPriorityConfig.with_default(["native"])
 
         cc = vllm_config.compilation_config

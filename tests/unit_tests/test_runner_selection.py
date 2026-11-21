@@ -402,6 +402,29 @@ def test_enflame_rejects_only_hybrid_speculative_align_cache(
     assert config.cache_config.mamba_cache_mode == mamba_cache_mode
 
 
+def test_sunrise_selects_ptpu_worker_for_native_v2(monkeypatch):
+    from vllm.config import CUDAGraphMode
+    from vllm.config.compilation import CompilationMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "ptpu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "sunrise")
+    config = _make_ascend_vllm_config(
+        compilation_mode=CompilationMode.NONE,
+        cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY,
+    )
+    config.use_v2_model_runner = True
+    config.is_mm_encoder_only = False
+
+    PlatformFL.check_and_update_config(config)
+
+    assert config.use_v2_model_runner is True
+    assert config.parallel_config.worker_cls == (
+        "vllm_fl.worker.sunrise_worker.SunriseWorker"
+    )
+
+
 @pytest.mark.parametrize("use_v2", [False, True])
 def test_ascend_preserves_full_decode_graphs(monkeypatch, use_v2):
     from vllm.config import CUDAGraphMode
@@ -683,3 +706,31 @@ def test_ascend_allows_layer_only_vllm_config(monkeypatch):
     assert config.model_config is None
     assert config.compilation_config.mode is CompilationMode.NONE
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.NONE
+
+
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+def test_sunrise_preserves_upstream_v2_runner_selection(monkeypatch, requested):
+    import os
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    plugin = import_module("vllm_fl")
+    plugin_utils = import_module("vllm_fl.utils")
+
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    for name in (
+        "_arm_cpu_platform",
+        "_init_vendor_device",
+        "_patch_custom_ops",
+        "_patch_flash_attn_import",
+        "_get_op_config",
+    ):
+        monkeypatch.setattr(plugin, name, lambda: None)
+    monkeypatch.setattr(
+        plugin_utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="sunrise")
+    )
+    assert plugin.register() == "vllm_fl.platform.PlatformFL"
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested

@@ -14,20 +14,34 @@ _patches_applied = False
 
 def apply_sunrise_patches():
     """Apply Sunrise/PTPU patches that must run before model construction."""
-    global _patches_applied
-    if _patches_applied:
-        return
-    _patches_applied = True
+    from vllm.platforms import current_platform
 
+    global _patches_applied
+    if current_platform.device_type != "ptpu" or _patches_applied:
+        return
+
+    patch_accelerator_memory_stats()
+    patch_accelerator_memory_api()
+    patch_graph_capture_runtime()
     patch_flagcx_stream_adapter()
     patch_distributed_runtime()
     patch_op_cls()
-    patch_accelerator_empty_cache()
-    patch_accelerator_memory_stats()
+    _patches_applied = True
+
+
+def patch_graph_capture_runtime():
+    from .impl.graph_capture import patch_graph_capture_runtime as patch_runtime
+
+    patch_runtime()
 
 
 def patch_flagcx_stream_adapter():
-    """Patch FlagCX wrapper to accept PTPU streams."""
+    """Pass PTPU stream pointers through the wrapper's own ABI adapter.
+
+    Legacy checkouts expose handler.devHandle; FlagCX 0.14 wheels expose
+    devHandle directly. Delegate to their native streamCopy implementation
+    rather than reproducing either ctypes layout here.
+    """
     try:
         from vllm.platforms import current_platform
 
@@ -38,52 +52,53 @@ def patch_flagcx_stream_adapter():
         if flagcx_path and os.path.isdir(flagcx_path) and flagcx_path not in sys.path:
             sys.path.append(flagcx_path)
 
-        flagcx_wrapper = importlib.import_module("plugin.interservice.flagcx_wrapper")
-        FLAGCXLibrary = flagcx_wrapper.FLAGCXLibrary
-        flagcxStream_t = flagcx_wrapper.flagcxStream_t
-
-        if getattr(FLAGCXLibrary, "_sunrise_stream_patch_applied", False):
+        try:
+            flagcx_wrapper = importlib.import_module(
+                "plugin.interservice.flagcx_wrapper"
+            )
+        except (ImportError, ModuleNotFoundError):
+            flagcx_wrapper = importlib.import_module("flagcx.api")
+        library_cls = flagcx_wrapper.FLAGCXLibrary
+        if getattr(library_cls, "_sunrise_stream_patch_applied", False):
             return
+        native_copy = library_cls.adaptor_stream_copy
 
-        def _to_void_p(raw_stream_ptr):
-            if isinstance(raw_stream_ptr, ctypes.c_void_p):
-                return raw_stream_ptr
-            if raw_stream_ptr is None:
-                raise ValueError("Stream pointer is None.")
-            return ctypes.c_void_p(int(raw_stream_ptr))
-
-        def _extract_raw_stream_ptr(old_stream):
-            if isinstance(old_stream, (int, ctypes.c_void_p)):
-                return old_stream
-
+        def _extract_raw_stream_ptr(stream):
+            if isinstance(stream, ctypes.c_void_p):
+                if stream.value is None:
+                    raise ValueError("Stream pointer is None.")
+                return stream.value
+            if isinstance(stream, int):
+                return stream
             for attr in ("ptpu_stream", "cuda_stream"):
-                stream_ptr = getattr(old_stream, attr, None)
-                if stream_ptr is not None:
-                    return stream_ptr
-
-            stream_fn = getattr(old_stream, "stream", None)
+                raw = getattr(stream, attr, None)
+                if raw is not None:
+                    return _extract_raw_stream_ptr(raw)
+            stream_fn = getattr(stream, "stream", None)
             if callable(stream_fn):
-                stream_ptr = stream_fn()
-                if stream_ptr is not None:
-                    return stream_ptr
-
+                raw = stream_fn()
+                if raw is not None:
+                    return _extract_raw_stream_ptr(raw)
             raise AttributeError(
-                "Unsupported stream object: expected a raw pointer or one of "
-                "`ptpu_stream`, `cuda_stream`, or callable `stream()`."
+                "Unsupported PTPU stream: expected a raw pointer, ptpu_stream, "
+                "cuda_stream, or callable stream()."
             )
 
-        def _adaptor_stream_copy(self, old_stream):
-            new_stream = flagcxStream_t()
-            raw_stream_ptr = _extract_raw_stream_ptr(old_stream)
-            self.FLAGCX_CHECK(
-                self.handler.contents.devHandle.contents.streamCopy(
-                    ctypes.byref(new_stream), _to_void_p(raw_stream_ptr)
-                )
-            )
-            return new_stream
+        class _StreamView:
+            def __init__(self, stream):
+                self._original = stream
+                self.cuda_stream = _extract_raw_stream_ptr(stream)
+                self.ptpu_stream = self.cuda_stream
 
-        FLAGCXLibrary.adaptor_stream_copy = _adaptor_stream_copy
-        FLAGCXLibrary._sunrise_stream_patch_applied = True
+            def __getattr__(self, name):
+                return getattr(self._original, name)
+
+        def _adaptor_stream_copy(self, stream):
+            return native_copy(self, _StreamView(stream))
+
+        library_cls._sunrise_original_stream_copy = native_copy
+        library_cls.adaptor_stream_copy = _adaptor_stream_copy
+        library_cls._sunrise_stream_patch_applied = True
         logger.info("Patched FlagCX stream adapter for Sunrise/PTPU")
     except Exception as e:
         logger.warning("Failed to patch FlagCX stream adapter for Sunrise: %s", e)
@@ -171,32 +186,57 @@ def patch_op_cls():
         logger.warning("Failed to patch VocabParallelEmbedding for Sunrise: %s", e)
 
 
-def patch_accelerator_empty_cache():
-    """Redirect torch.accelerator.empty_cache() to torch.ptpu.empty_cache().
+def patch_accelerator_memory_api():
+    """Route vLLM 0.32 memory profiling through the PTPU runtime.
 
-    torch.accelerator.empty_cache() requires a DeviceAllocator interface that
-    PTPU does not implement. torch.ptpu.empty_cache() works correctly instead.
+    The generic accelerator allocator interface is unavailable in torch_ptpu.
+    vLLM 0.32 uses it for both its initial snapshot and KV-cache profiling.
     """
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "ptpu":
+        return
+
     try:
         import torch.accelerator as _accel
 
-        if getattr(_accel, "_sunrise_empty_cache_patched", False):
+        if getattr(_accel, "_sunrise_memory_api_patched", False):
             return
-        _accel.empty_cache = torch.ptpu.empty_cache
-        _accel._sunrise_empty_cache_patched = True
-        logger.info("Patched torch.accelerator.empty_cache for Sunrise/PTPU")
+        api_names = {
+            "empty_cache": "empty_cache",
+            "memory_stats": "memory_stats",
+            "memory_allocated": "memory_allocated",
+            "memory_reserved": "memory_reserved",
+            "max_memory_allocated": "max_memory_allocated",
+            "reset_peak_memory_stats": "reset_peak_memory_stats",
+            "get_memory_info": "mem_get_info",
+        }
+        memory_api = {
+            name: getattr(torch.ptpu, ptpu_name)
+            for name, ptpu_name in api_names.items()
+        }
+        for name, fn in memory_api.items():
+            setattr(_accel, name, fn)
+        _accel._sunrise_memory_api_patched = True
+        logger.info("Patched torch.accelerator memory APIs for Sunrise/PTPU")
     except Exception as e:
-        logger.warning("Failed to patch torch.accelerator.empty_cache: %s", e)
+        logger.warning("Failed to patch torch.accelerator memory APIs: %s", e)
 
 
 def patch_accelerator_memory_stats():
-    """Provide torch.ptpu.memory_stats() for FL worker memory profiling.
+    """Provide the memory counter keys used by vLLM 0.32 snapshots.
 
     torch.ptpu exposes max_memory_allocated/memory_reserved but not the
     torch.cuda-style memory_stats() dict that the FL worker's KV-cache sizing
-    reads ("allocated_bytes.all.peak"). Synthesize the keys the worker uses
-    from the ptpu peak APIs. Guarded: never overrides a real implementation.
+    reads. Include the current allocation so v0.32 does not count it again
+    as transient peak headroom. These counters retain the runtime's own
+    tracking limitations; never override a native stats implementation.
     """
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "ptpu":
+        return
+
     try:
         if getattr(torch.ptpu, "_sunrise_memory_stats_patched", False):
             return
@@ -204,9 +244,14 @@ def patch_accelerator_memory_stats():
             return
 
         def _memory_stats(device=None):
+            allocated = torch.ptpu.memory_allocated(device)
+            peak = max(allocated, torch.ptpu.max_memory_allocated(device))
+            reserved = torch.ptpu.memory_reserved(device)
             return {
-                "allocated_bytes.all.peak": torch.ptpu.max_memory_allocated(device),
-                "reserved_bytes.all.peak": torch.ptpu.memory_reserved(device),
+                "allocated_bytes.all.peak": peak,
+                "allocated_bytes.all.current": allocated,
+                "reserved_bytes.all.peak": reserved,
+                "reserved_bytes.all.current": reserved,
             }
 
         torch.ptpu.memory_stats = _memory_stats

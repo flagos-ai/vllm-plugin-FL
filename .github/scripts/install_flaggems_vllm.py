@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 
 RELEASE = "v0.2.0"
 COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
+SUNRISE_COMMIT = "3b0f3880b2a781699462eacb7dd3e00cc24f2d43"
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
 SOURCE_ARCHIVE = f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"
 SOURCE_ARCHIVE_SHA256 = (
@@ -93,11 +94,17 @@ def main(*, commit=COMMIT, source_archive=None, archive_sha256=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-archive", action="store_true")
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument("--sunrise", action="store_true")
+    source_group.add_argument("--source-archive", action="store_true")
+    parser.add_argument("--print-commit", action="store_true")
     args = parser.parse_args()
-    if args.source_archive:
+    commit = SUNRISE_COMMIT if args.sunrise else COMMIT
+    if args.print_commit:
+        print(commit)
+    elif args.source_archive:
         if SOURCE_ARCHIVE is None:
             parser.error("--source-archive is unavailable for the selected provider")
         main(source_archive=SOURCE_ARCHIVE, archive_sha256=SOURCE_ARCHIVE_SHA256)
     else:
-        main()
+        main(commit=commit)
