@@ -4,7 +4,11 @@
 FlagGems fused moe operator implementations.
 """
 
+from functools import lru_cache
+from inspect import Parameter, signature
+
 import torch
+
 from vllm.logger import init_logger
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
@@ -138,6 +142,27 @@ def invoke_fused_moe_triton_kernel_flaggems(
     )
 
 
+@lru_cache(maxsize=4)
+def _provider_supports_padding(provider) -> bool:
+    try:
+        parameter = signature(provider).parameters.get("is_padding")
+    except (TypeError, ValueError):
+        return False
+    return parameter is not None and parameter.kind in (
+        Parameter.POSITIONAL_OR_KEYWORD,
+        Parameter.KEYWORD_ONLY,
+    )
+
+
+def grouped_topk_supports_padding() -> bool:
+    """Whether the installed public FlagGems provider has the #1291 ABI."""
+    try:
+        from flaggems_vllm import grouped_topk
+    except ImportError:
+        return False
+    return _provider_supports_padding(grouped_topk)
+
+
 def grouped_topk_flaggems(
     scores,
     n_group,
@@ -147,10 +172,11 @@ def grouped_topk_flaggems(
     routed_scaling_factor,
     bias,
     scoring_func=0,
+    is_padding=None,
 ):
     from flaggems_vllm import grouped_topk
 
-    return grouped_topk(
+    args = (
         scores,
         n_group,
         topk_group,
@@ -160,6 +186,12 @@ def grouped_topk_flaggems(
         bias,
         scoring_func,
     )
+    if is_padding is None:
+        # Preserve the public ABI8 call on the branch-wide legacy CI pin.
+        return grouped_topk(*args)
+    if not _provider_supports_padding(grouped_topk):
+        raise NotImplementedError("masked grouped_topk requires FlagGems-vllm #1291")
+    return grouped_topk(*args, is_padding=is_padding)
 
 
 def moe_sum_flaggems(inp, out):
