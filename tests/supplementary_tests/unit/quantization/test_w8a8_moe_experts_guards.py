@@ -73,9 +73,7 @@ def _install_stub_vllm_graph() -> dict:
     mk.ExpertTokensMetadata = object
     act = _make_module("vllm.model_executor.layers.fused_moe.activation")
     act.MoEActivation = _StubMoEActivation
-    triton_moe = _make_module(
-        "vllm.model_executor.layers.fused_moe.experts.triton_moe"
-    )
+    triton_moe = _make_module("vllm.model_executor.layers.fused_moe.experts.triton_moe")
 
     class _TritonExperts:
         """Upstream TritonExperts stand-in (never instantiated here)."""
@@ -131,8 +129,9 @@ def _has_vllm() -> bool:
 
 
 if _has_vllm():  # pragma: no cover - real-vllm hosts
-    import vllm_fl.quantization.w8a8.moe_experts as moe_experts
     from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+
+    import vllm_fl.quantization.w8a8.moe_experts as moe_experts
 else:
     _stubs_previous = _install_stub_vllm_graph()
     import vllm_fl.quantization.w8a8.moe_experts as moe_experts  # noqa: E402
@@ -163,9 +162,7 @@ def _quant_config(**overrides):
 
 def _experts_instance(quant_config=None, *, lora_context=None):
     return types.SimpleNamespace(
-        quant_config=(
-            _quant_config() if quant_config is None else quant_config
-        ),
+        quant_config=(_quant_config() if quant_config is None else quant_config),
         activation_config=types.SimpleNamespace(clamp_limit=None),
         _lora_context=lora_context,
     )
@@ -306,9 +303,7 @@ class TestValidateW8A8ContractBranches:
             ),
             pytest.param(
                 lambda a: (
-                    a.__setitem__(
-                        "topk_ids", torch.zeros((3, 1), dtype=torch.int64)
-                    ),
+                    a.__setitem__("topk_ids", torch.zeros((3, 1), dtype=torch.int64)),
                     a.__setitem__(
                         "topk_weights", torch.ones((3, 1), dtype=torch.float32)
                     ),
@@ -335,9 +330,7 @@ class TestValidateW8A8ContractBranches:
                 id="float-w1",
             ),
             pytest.param(
-                lambda a: a.__setitem__(
-                    "w2", torch.ones((2, 4, 4), dtype=torch.int16)
-                ),
+                lambda a: a.__setitem__("w2", torch.ones((2, 4, 4), dtype=torch.int16)),
                 id="int16-w2",
             ),
         ],
@@ -367,9 +360,7 @@ class TestValidateW8A8ContractBranches:
     @pytest.mark.parametrize(
         ("scale_name", "bad_scale"),
         [
-            pytest.param(
-                "w1_scale", None, id="w1-scale-missing"
-            ),
+            pytest.param("w1_scale", None, id="w1-scale-missing"),
             pytest.param("w2_scale", None, id="w2-scale-missing"),
             pytest.param(
                 "w1_scale",
@@ -452,9 +443,7 @@ class TestVllmFunctionalApplyGuards:
         _forbid_implementations(monkeypatch)
         instance = _experts_instance(_quant_config(use_int8_w8a8=False))
         with pytest.raises(ValueError, match="INT8 W8A8 quant config"):
-            moe_experts.VllmFunctionalW8A8Experts.apply(
-                instance, **_apply_arguments()
-            )
+            moe_experts.VllmFunctionalW8A8Experts.apply(instance, **_apply_arguments())
 
     @pytest.mark.parametrize(
         "config_override",
@@ -468,25 +457,19 @@ class TestVllmFunctionalApplyGuards:
         _forbid_implementations(monkeypatch)
         instance = _experts_instance(_quant_config(**config_override))
         with pytest.raises(ValueError, match="per-token/channel-wise"):
-            moe_experts.VllmFunctionalW8A8Experts.apply(
-                instance, **_apply_arguments()
-            )
+            moe_experts.VllmFunctionalW8A8Experts.apply(instance, **_apply_arguments())
 
     def test_lora_context_rejected(self, monkeypatch):
         """A LoRA context raises NotImplementedError."""
         _forbid_implementations(monkeypatch)
         instance = _experts_instance(lora_context=object())
         with pytest.raises(NotImplementedError, match="does not support LoRA"):
-            moe_experts.VllmFunctionalW8A8Experts.apply(
-                instance, **_apply_arguments()
-            )
+            moe_experts.VllmFunctionalW8A8Experts.apply(instance, **_apply_arguments())
 
     def test_prequantized_input_rejected(self, monkeypatch):
         """An a1q/a2 scale pair raises the pre-quantized-input guard."""
         _forbid_implementations(monkeypatch)
-        arguments = _apply_arguments(
-            a1q_scale=torch.ones((2, 1), dtype=torch.float32)
-        )
+        arguments = _apply_arguments(a1q_scale=torch.ones((2, 1), dtype=torch.float32))
         with pytest.raises(ValueError, match="quantized before"):
             moe_experts.VllmFunctionalW8A8Experts.apply(
                 _experts_instance(), **arguments
@@ -596,18 +579,14 @@ class TestAscendGroupedExpertsGuards:
             ),
         ],
     )
-    def test_supported_dtypes_select_scale_dtype(
-        self, monkeypatch, dtype, fragment
-    ):
+    def test_supported_dtypes_select_scale_dtype(self, monkeypatch, dtype, fragment):
         """bf16/fp16 inputs pass the dtype guard (never reach a kernel)."""
         self._fail_torch_npu(monkeypatch)
         arguments = self._arguments()
         arguments["hidden_states"] = torch.ones((0, 4), dtype=dtype)
         arguments["topk_ids"] = torch.zeros((0, 1), dtype=torch.int64)
         arguments["topk_weights"] = torch.ones((0, 1), dtype=torch.float32)
-        result = moe_experts._ascend_w8a8_grouped_experts(
-            **arguments, clamp_limit=None
-        )
+        result = moe_experts._ascend_w8a8_grouped_experts(**arguments, clamp_limit=None)
         # Zero-token short-circuit: empty (0, w2.shape[1]) output.
         assert result.shape == (0, 4)
         assert result.dtype == dtype
@@ -618,9 +597,7 @@ class TestAscendGroupedExpertsGuards:
         arguments = self._arguments()
         arguments["hidden_states"] = torch.ones((2, 4), dtype=torch.float32)
         with pytest.raises(TypeError, match="bfloat16 or float16"):
-            moe_experts._ascend_w8a8_grouped_experts(
-                **arguments, clamp_limit=None
-            )
+            moe_experts._ascend_w8a8_grouped_experts(**arguments, clamp_limit=None)
 
     def test_zero_tokens_short_circuits(self, monkeypatch):
         """An empty routing tensor returns an empty output before kernels."""
@@ -628,9 +605,7 @@ class TestAscendGroupedExpertsGuards:
         arguments = self._arguments()
         arguments["topk_ids"] = torch.zeros((0, 1), dtype=torch.int64)
         arguments["topk_weights"] = torch.ones((0, 1), dtype=torch.float32)
-        result = moe_experts._ascend_w8a8_grouped_experts(
-            **arguments, clamp_limit=None
-        )
+        result = moe_experts._ascend_w8a8_grouped_experts(**arguments, clamp_limit=None)
         assert result.shape == (0, 4)
 
     def test_all_nonlocal_routes_return_zeros(self, monkeypatch):
@@ -638,9 +613,7 @@ class TestAscendGroupedExpertsGuards:
         self._fail_torch_npu(monkeypatch)
         arguments = self._arguments()
         arguments["expert_map"] = torch.tensor([-1, -1], dtype=torch.int64)
-        result = moe_experts._ascend_w8a8_grouped_experts(
-            **arguments, clamp_limit=None
-        )
+        result = moe_experts._ascend_w8a8_grouped_experts(**arguments, clamp_limit=None)
         assert torch.equal(result, torch.zeros((2, 4), dtype=torch.bfloat16))
 
 
@@ -708,16 +681,14 @@ def _independent_row0(row, w1_e, w2_e, w1_scale_e, w2_scale_e, route_weight):
         return (torch.round(value / safe).clamp(-127, 127) * safe).to(value.dtype)
 
     inputs = qdq(row.unsqueeze(0))
-    gate_up_weight = (
-        w1_e.to(inputs.dtype)
-        * w1_scale_e.squeeze(-1).to(inputs.dtype).unsqueeze(-1)
-    )
+    gate_up_weight = w1_e.to(inputs.dtype) * w1_scale_e.squeeze(-1).to(
+        inputs.dtype
+    ).unsqueeze(-1)
     gate_up = inputs @ gate_up_weight.transpose(0, 1)
     gate, up = gate_up.chunk(2, dim=-1)
     activated = qdq(torch.nn.functional.silu(gate) * up)
-    down_weight = (
-        w2_e.to(activated.dtype)
-        * w2_scale_e.squeeze(-1).to(activated.dtype).unsqueeze(-1)
-    )
+    down_weight = w2_e.to(activated.dtype) * w2_scale_e.squeeze(-1).to(
+        activated.dtype
+    ).unsqueeze(-1)
     out = activated @ down_weight.transpose(0, 1)
     return (out.float() * route_weight).squeeze(0).to(torch.bfloat16)
