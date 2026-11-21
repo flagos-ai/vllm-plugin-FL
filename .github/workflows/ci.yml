@@ -12,325 +12,265 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Pull request CI workflow
-#
-# Stage design (PR labels narrow the hardware stages; default is full):
-#   lint + build  — always run, no hardware required
-#   no label      — full: functional + e2e + benchmark on routed platforms
-#   ci-functional — functional only
-#   ci-e2e        — functional + e2e smoke
-#   ci-full       — full (explicit form of the default)
-#
-# Platform routing: diff-based — only platforms whose trigger_paths match the
-# PR diff are tested. Changes to shared code (see global_trigger_paths in
-# .github/configs/platforms.yml — vllm_fl/ python, tests/, benchmarks/,
-# .github/scripts, etc.) trigger all enabled platforms.
-#
-# ci-gate is the single Required Status Check configured in branch protection.
-# It aggregates lint, build, discover, and all platform test results; a
-# discovery failure fails the gate even though the platform jobs it would
-# have spawned show as skipped. Skipped platform tests (no matching runner,
-# no label) count as passing.
-name: CI
+
+# Temporary manual diagnostics on this isolated branch; never a PR Gate.
+name: Iluvatar runner read-only probe
 
 on:
-  pull_request:
-    branches: [main, 0.5.0-dev]
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "examples/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: iluvatar-readonly-runner-probe-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # ============================================================
-  # Job 1: Lint (ruff check, ruff format, typos)
-  # ============================================================
-  lint:
-    if: |
-      github.event_name != 'pull_request' ||
-      (
-        github.repository == 'flagos-ai/vllm-plugin-FL' &&
-        !github.event.pull_request.draft &&
-        !contains(github.event.pull_request.title, 'WIP') &&
-        !contains(github.event.pull_request.title, 'wip')
-      )
-    uses: ./.github/workflows/_lint.yml
-
-  # ============================================================
-  # Job 2: Build & install check
-  # ============================================================
-  build:
-    needs: lint
-    uses: ./.github/workflows/_build_wheel.yml
-
-  # ============================================================
-  # Job 3: Discover which platforms to test (diff-based routing)
-  # ============================================================
-  discover:
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      platforms: ${{ steps.detect.outputs.platforms }}
-      # Stage selection from PR labels. Default (no tier label) and
-      # workflow_dispatch run the full stack; tier labels narrow it:
-      # ci-functional = functional only, ci-e2e adds e2e smoke, ci-full
-      # keeps the full stack (explicit).
-      run_e2e: ${{ github.event_name == 'workflow_dispatch' || !(contains(github.event.pull_request.labels.*.name, 'ci-functional') || contains(github.event.pull_request.labels.*.name, 'ci-e2e') || contains(github.event.pull_request.labels.*.name, 'ci-full')) || contains(github.event.pull_request.labels.*.name, 'ci-e2e') || contains(github.event.pull_request.labels.*.name, 'ci-full') }}
-      run_benchmark: ${{ github.event_name == 'workflow_dispatch' || !(contains(github.event.pull_request.labels.*.name, 'ci-functional') || contains(github.event.pull_request.labels.*.name, 'ci-e2e') || contains(github.event.pull_request.labels.*.name, 'ci-full')) || contains(github.event.pull_request.labels.*.name, 'ci-full') }}
-    steps:
-      - name: Checkout (attempt 1)
-        id: checkout1
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          sparse-checkout: |
-            .github/configs
-            .github/scripts
-        continue-on-error: true
-      - name: Checkout (attempt 2)
-        id: checkout2
-        if: steps.checkout1.outcome == 'failure'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          sparse-checkout: |
-            .github/configs
-            .github/scripts
-        continue-on-error: true
-      - name: Checkout (attempt 3)
-        if: steps.checkout2.outcome == 'failure'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          sparse-checkout: |
-            .github/configs
-            .github/scripts
-      - name: Install PyYAML
-        run: pip install pyyaml
-      - name: Check NVIDIA native CUDA stack validation
-        run: python -I -B .github/scripts/nvidia/test_stack.py
-      - name: Get changed files
-        id: changed
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git diff --name-only \
-              ${{ github.event.pull_request.base.sha }}...${{ github.sha }} \
-              > /tmp/changed_files.txt
-            echo "file=/tmp/changed_files.txt" >> "$GITHUB_OUTPUT"
-            echo "Changed files:"
-            cat /tmp/changed_files.txt
-          else
-            echo "file=" >> "$GITHUB_OUTPUT"
-            echo "workflow_dispatch — no diff filtering"
-          fi
-      - id: detect
-        run: |
-          if [ -n "${{ steps.changed.outputs.file }}" ]; then
-            python3 .github/scripts/detect_platforms.py \
-              --changed-files "${{ steps.changed.outputs.file }}"
-          else
-            python3 .github/scripts/detect_platforms.py
-          fi
-
-  # ============================================================
-  # Job 4a–4h: Platform tests (PR stage)
-  # Require ci-functional, ci-e2e, or ci-full label to run on PRs.
-  # workflow_dispatch bypasses the label check so manual runs always
-  # execute all enabled platforms.
-  # Skipped jobs (no label or no matching runner) do not fail ci-gate.
-  # ============================================================
-  test-nvidia:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'nvidia')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: nvidia
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  test-ascend:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'ascend')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: ascend
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  test-hygon:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'hygon')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: hygon
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  test-metax:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'metax')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: metax
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  test-musa:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: musa
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  test-enflame:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'enflame')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: enflame
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  test-kunlunxin:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: kunlunxin
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  test-thead:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: thead
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  test-iluvatar:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: iluvatar
-      ci_stage: pr
-      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
-      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
-    secrets: inherit
-
-  # ============================================================
-  # ci-gate — single Required Status Check for branch protection.
-  #
-  # Rules:
-  #   lint, build, discover : must be 'success'
-  #   platform test jobs    : 'success' or 'skipped' → pass
-  #                           'failure' or 'cancelled' → fail
-  # ============================================================
-  ci-gate:
-    name: ci-gate
-    needs:
-      - lint
-      - build
-      - discover
-      - test-nvidia
-      - test-ascend
-      - test-hygon
-      - test-metax
-      - test-musa
-      - test-enflame
-      - test-kunlunxin
-      - test-thead
-      - test-iluvatar
-    if: always()
-    runs-on: ubuntu-latest
+  inspect-runner:
+    if: github.ref == 'refs/heads/codex/iluvatar-ci-runner-probe-20261121'
+    runs-on: [iluvatar-cicd-vllm-plugin]
     timeout-minutes: 5
     steps:
-      - name: Check gate
+      - name: Read selected runner and Docker metadata
+        shell: bash
         env:
-          LINT_RESULT:       ${{ needs.lint.result }}
-          BUILD_RESULT:      ${{ needs.build.result }}
-          DISCOVER_RESULT:   ${{ needs.discover.result }}
-          NVIDIA_RESULT:      ${{ needs.test-nvidia.result }}
-          ASCEND_RESULT:     ${{ needs.test-ascend.result }}
-          HYGON_RESULT:      ${{ needs.test-hygon.result }}
-          METAX_RESULT:      ${{ needs.test-metax.result }}
-          MUSA_RESULT:       ${{ needs.test-musa.result }}
-          ENFLAME_RESULT:    ${{ needs.test-enflame.result }}
-          KUNLUNXIN_RESULT:  ${{ needs.test-kunlunxin.result }}
-          THEAD_RESULT:      ${{ needs.test-thead.result }}
-          ILUVATAR_RESULT:   ${{ needs.test-iluvatar.result }}
+          RUNNER_NAME: ${{ runner.name }}
+          PROBE_OUTPUT: ${{ runner.temp }}/iluvatar-runner-probe-${{ github.run_id }}.json
         run: |
-          set -euo pipefail
+          python3 - <<'PY'
+          """Read selected runner/daemon metadata; never change daemon or device state."""
 
-          fail=0
+          import json
+          import os
+          import re
+          import shutil
+          import socket
+          import subprocess
+          import time
+          from datetime import datetime, timezone
+          from pathlib import Path
 
-          check_required() {
-            local name="$1" result="$2"
-            if [ "$result" != "success" ]; then
-              echo "::error::$name must succeed but got: $result"
-              fail=1
-            fi
+          INFO = (
+              '{"name":{{json .Name}},"server_version":{{json .ServerVersion}},'
+              '"default_address_pools":{{json .DefaultAddressPools}}}'
+          )
+          PS = (
+              '{"id":{{json .ID}},"name":{{json .Names}},'
+              '"state":{{json .State}},"networks":{{json .Networks}}}'
+          )
+          NETWORK_LIST = '{"id":{{json .ID}},"name":{{json .Name}}}'
+          NETWORK = (
+              '{"id":{{json .Id}},"name":{{json .Name}},"created":{{json .Created}},'
+              '"driver":{{json .Driver}},"endpoint_count":{{len .Containers}},'
+              '"subnets":[""{{range .IPAM.Config}},{{json .Subnet}}{{end}}],'
+              '"label_keys":[""{{range $k,$v := .Labels}}'
+              "{{if eq (len $k) 6}},{{json $k}}{{end}}{{end}}]}"
+          )
+          END = time.monotonic() + 120
+
+
+          def scrub(value):
+              if isinstance(value, bytes):
+                  value = value.decode(errors="replace")
+              value = re.sub(r"(https?://)[^/\s@]+@", r"\1<redacted>@", value or "")
+              value = re.sub(
+                  r"(?i)\b(authorization\s*[:=]\s*)(?:Basic|Bearer)\s+\S+",
+                  r"\1<redacted>",
+                  value,
+              )
+              return re.sub(
+                  r"(?i)\b(password|passwd|access_token|token)\s*[:=]\s*[^\s,;\"']+",
+                  r"\1=<redacted>",
+                  value,
+              )
+
+
+          def clean(value):
+              if isinstance(value, dict):
+                  return {k: clean(v) for k, v in value.items()}
+              if isinstance(value, list):
+                  return [clean(v) for v in value]
+              return scrub(value) if isinstance(value, str) else value
+
+
+          def run(args):
+              remaining = END - time.monotonic()
+              if remaining <= 0:
+                  return {"status": "probe_budget_exhausted", "stdout": "", "stderr": ""}
+              started = time.monotonic()
+              try:
+                  result = subprocess.run(
+                      args, capture_output=True, text=True, timeout=min(10, remaining)
+                  )
+                  return {
+                      "status": "ok" if result.returncode == 0 else "command_failed",
+                      "returncode": result.returncode,
+                      "elapsed_seconds": round(time.monotonic() - started, 3),
+                      "stdout": result.stdout,
+                      "stderr": scrub(result.stderr)[:3000],
+                  }
+              except subprocess.TimeoutExpired as exc:
+                  return {
+                      "status": "timeout",
+                      "elapsed_seconds": round(time.monotonic() - started, 3),
+                      "stdout": scrub(exc.stdout),
+                      "stderr": scrub(exc.stderr)[:3000],
+                  }
+              except OSError as exc:
+                  return {"status": "unavailable", "stdout": "", "stderr": scrub(str(exc))[:1000]}
+
+
+          def metadata(result):
+              return {key: value for key, value in result.items() if key != "stdout"}
+
+
+          def rows(result):
+              return [json.loads(line) for line in result["stdout"].splitlines() if line.strip()]
+
+
+          report = {
+              "observed_at_utc": datetime.now(timezone.utc).isoformat(),
+              "diagnostic_only": True,
+              "gate_result_claimed": False,
+              "hostname": socket.gethostname(),
+              "uid": os.getuid(),
+              "allowlisted_environment": {
+                  name: os.environ.get(name) for name in ("RUNNER_NAME", "NODE_NAME")
+              },
+              "probe_budget_seconds": 120,
+              "subprocess_timeout_max_seconds": 10,
           }
+          try:
+              result = run(["docker", "info", "--format", INFO])
+              report["docker_info"] = metadata(result)
+              if result["status"] == "ok":
+                  data = json.loads(result["stdout"])
+                  pools = data.get("default_address_pools")
+                  report["docker_info"]["data"] = {
+                      "name": data.get("name"),
+                      "server_version": data.get("server_version"),
+                      "default_address_pools": (
+                          [{k: pool.get(k) for k in ("Base", "Size")} for pool in pools]
+                          if isinstance(pools, list)
+                          else None
+                      ),
+                  }
 
-          check_optional() {
-            local name="$1" result="$2"
-            case "$result" in
-              success|skipped) ;;
-              *)
-                echo "::error::$name failed with: $result"
-                fail=1
-                ;;
-            esac
-          }
+              result = run(["docker", "ps", "--all", "--no-trunc", "--format", PS])
+              report["containers"] = metadata(result)
+              report["containers"]["items"] = (
+                  [
+                      {key: row.get(key) for key in ("id", "name", "state", "networks")}
+                      for row in rows(result)
+                  ]
+                  if result["status"] == "ok"
+                  else []
+              )
 
-          check_required "lint"    "$LINT_RESULT"
-          check_required "build"   "$BUILD_RESULT"
-          # Discover must succeed: its failure skips every platform job,
-          # and skipped platform jobs must not paper over a dead router.
-          check_required "discover" "$DISCOVER_RESULT"
+              result = run(
+                  [
+                      "docker",
+                      "network",
+                      "ls",
+                      "--no-trunc",
+                      "--filter",
+                      "name=github_network_",
+                      "--format",
+                      NETWORK_LIST,
+                  ]
+              )
+              report["github_networks"] = metadata(result)
+              listed = rows(result) if result["status"] == "ok" else []
+              listing_succeeded = result["status"] == "ok"
+              report["github_networks"]["listed_count"] = len(listed)
+              inspected = []
+              for item in listed:
+                  network_id = item.get("id", "")
+                  if not re.fullmatch(r"[a-f0-9]{64}", network_id) or not str(
+                      item.get("name", "")
+                  ).startswith("github_network_"):
+                      continue
+                  result = run(["docker", "network", "inspect", "--format", NETWORK, network_id])
+                  entry = {"listed_id": network_id, **metadata(result)}
+                  if result["status"] == "ok":
+                      data = json.loads(result["stdout"])
+                      if data.get("id") != network_id or not str(data.get("name", "")).startswith(
+                          "github_network_"
+                      ):
+                          raise ValueError("Network identity changed during the read-only sample")
+                      entry["data"] = {
+                          key: data.get(key)
+                          for key in ("id", "name", "created", "driver", "endpoint_count")
+                      }
+                      entry["data"]["subnets"] = [
+                          v for v in data.get("subnets", []) if isinstance(v, str) and v
+                      ]
+                      entry["data"]["runner_label_keys_6hex"] = [
+                          v
+                          for v in data.get("label_keys", [])
+                          if isinstance(v, str) and re.fullmatch(r"[0-9a-fA-F]{6}", v)
+                      ]
+                  inspected.append(entry)
+                  if result["status"] == "probe_budget_exhausted":
+                      break
+              report["github_networks"]["items"] = inspected
+              report["github_networks"]["inspection_complete"] = (
+                  listing_succeeded
+                  and len(inspected) == len(listed)
+                  and all(item["status"] == "ok" for item in inspected)
+              )
 
-          check_optional "test-nvidia"    "$NVIDIA_RESULT"
-          check_optional "test-ascend"    "$ASCEND_RESULT"
-          check_optional "test-hygon"     "$HYGON_RESULT"
-          check_optional "test-metax"     "$METAX_RESULT"
-          check_optional "test-musa"      "$MUSA_RESULT"
-          check_optional "test-enflame"   "$ENFLAME_RESULT"
-          check_optional "test-kunlunxin" "$KUNLUNXIN_RESULT"
-          check_optional "test-thead"     "$THEAD_RESULT"
-          check_optional "test-iluvatar"  "$ILUVATAR_RESULT"
+              smi = shutil.which("ixsmi")
+              if smi is None and os.access("/usr/local/corex-4.5.0/bin/ixsmi", os.X_OK):
+                  smi = "/usr/local/corex-4.5.0/bin/ixsmi"
+              if smi:
+                  result = run([smi])
+                  report["ixsmi_read_only"] = {
+                      **metadata(result),
+                      "stdout_excerpt": scrub(result["stdout"])[:20000],
+                      "stdout_truncated": len(result["stdout"]) > 20000,
+                  }
+              else:
+                  report["ixsmi_read_only"] = {"status": "not_available"}
+          except Exception as exc:
+              report["probe_exception"] = {
+                  "type": type(exc).__name__,
+                  "message": scrub(str(exc))[:1000],
+              }
+          finally:
+              report = clean(report)
+              output = Path(os.environ["PROBE_OUTPUT"])
+              output.parent.mkdir(parents=True, exist_ok=True)
+              output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+              print(
+                  json.dumps(
+                      {
+                          "diagnostic_only": True,
+                          "hostname": report["hostname"],
+                          "uid": report["uid"],
+                          "runner": report["allowlisted_environment"],
+                          "docker_info": report.get("docker_info"),
+                          "container_count": len(report.get("containers", {}).get("items", [])),
+                          "github_network_count": report.get("github_networks", {}).get(
+                              "listed_count"
+                          ),
+                          "network_inspection_complete": report.get("github_networks", {}).get(
+                              "inspection_complete"
+                          ),
+                          "ixsmi_status": report.get("ixsmi_read_only", {}).get("status"),
+                          "exception_type": report.get("probe_exception", {}).get("type"),
+                      },
+                      indent=2,
+                  )
+              )
+          PY
 
-          if [ $fail -ne 0 ]; then
-            echo "ci-gate: FAILED"
-            exit 1
-          fi
-          echo "ci-gate: PASSED"
+      - name: Retain read-only diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iluvatar-runner-probe-${{ github.run_id }}
+          path: ${{ runner.temp }}/iluvatar-runner-probe-${{ github.run_id }}.json
+          if-no-files-found: warn
+          retention-days: 7
