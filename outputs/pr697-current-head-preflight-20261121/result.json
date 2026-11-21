@@ -1,0 +1,258 @@
+{
+  "scope": "Current-head packaging and two-device communication preflight only; not model Gate acceptance",
+  "head": "8f5ad9358d14f77475d2119ef29fab3ff899fe5b",
+  "tree": "ab626fc0eefe76fb6c9344f2129b13332c932482",
+  "image_digest": "sha256:e0c5ee48b79317fda2dd8d97d1d89f2ddb487db6375a7d13cd58a57f635547e5",
+  "source_total_paths": 816,
+  "source_regular_files": 815,
+  "source_symlinks": 1,
+  "source_before_after_verified": true,
+  "wheel": {
+    "name": "vllm_plugin_fl-0.0.0+g8f5ad935-py3-none-any.whl",
+    "sha256": "1067bb843a865fc080bbe7ac9c5eb9ef242a9d2ebe1959297c24641468679d28",
+    "bytes": 779263,
+    "canonical_python_files_matched": 324,
+    "generated_version_only_exception": "vllm_fl/_version.py"
+  },
+  "stack": {
+    "packages": {
+      "vllm": "0.32.0+empty",
+      "torch": "2.11.0+cpu",
+      "torch-ptpu": "0.2.3+torch2.11",
+      "flag-gems": "5.4.0",
+      "flagtree": "0.7.0+sunrise3.6",
+      "flagcx": "0.14.0+tangrt1.2.0"
+    },
+    "provider_version": "0.1.0",
+    "provider_direct_url": {
+      "url": "https://github.com/flagos-ai/FlagGems-vllm.git",
+      "vcs_info": {
+        "commit_id": "3b0f3880b2a781699462eacb7dd3e00cc24f2d43",
+        "requested_revision": "3b0f3880b2a781699462eacb7dd3e00cc24f2d43",
+        "vcs": "git"
+      }
+    },
+    "plugin_version": "0.0.0+g8f5ad935",
+    "python": "3.10.20 (main, Jul 18 2026, 17:02:35) [Clang 22.1.3 ]",
+    "passed": true,
+    "identity_only_no_backend_import": true
+  },
+  "cpu_stage": {
+    "started": "2026-11-21T02:05:57Z",
+    "finished": "2026-11-21T02:06:00Z",
+    "raw_archive_sha256": "03de12f6308384959bfa3bb10d71019223a4e629f5b1ebf39ce2483bccfc3e20",
+    "gpu_imports_or_execution": false,
+    "container_contract": {
+      "kind": "cpu",
+      "actual_runtime": "runc",
+      "image_id": "sha256:93f9c7d99fccd74a36cdaf020c24a67d86e1df9e2a5d4351403240737b7db3c1",
+      "label": "pr697-current-8f5ad935-cpu-v2-20261121",
+      "passed": true
+    },
+    "own_container_removed_and_absence_verified": true
+  },
+  "communication_preflight": {
+    "started": "2026-11-21T02:24:45Z",
+    "finished": "2026-11-21T02:25:39Z",
+    "physical_slots": [
+      3,
+      7
+    ],
+    "world_size": 2,
+    "checks": [
+      {
+        "rank": 0,
+        "dtype": "torch.float32",
+        "operation": "copy",
+        "exact_values": true,
+        "elements": 32
+      },
+      {
+        "rank": 0,
+        "dtype": "torch.float32",
+        "operation": "flagcx_ar",
+        "exact_values": true,
+        "elements": 32
+      },
+      {
+        "rank": 0,
+        "dtype": "torch.float32",
+        "operation": "flagcx_ag",
+        "exact_values": true,
+        "elements": 64
+      },
+      {
+        "rank": 0,
+        "dtype": "torch.bfloat16",
+        "operation": "copy",
+        "exact_values": true,
+        "elements": 32
+      },
+      {
+        "rank": 0,
+        "dtype": "torch.bfloat16",
+        "operation": "flagcx_ar",
+        "exact_values": true,
+        "elements": 32
+      },
+      {
+        "rank": 0,
+        "dtype": "torch.bfloat16",
+        "operation": "flagcx_ag",
+        "exact_values": true,
+        "elements": 64
+      },
+      {
+        "rank": 1,
+        "dtype": "torch.float32",
+        "operation": "copy",
+        "exact_values": true,
+        "elements": 32
+      },
+      {
+        "rank": 1,
+        "dtype": "torch.float32",
+        "operation": "flagcx_ar",
+        "exact_values": true,
+        "elements": 32
+      },
+      {
+        "rank": 1,
+        "dtype": "torch.float32",
+        "operation": "flagcx_ag",
+        "exact_values": true,
+        "elements": 64
+      },
+      {
+        "rank": 1,
+        "dtype": "torch.bfloat16",
+        "operation": "copy",
+        "exact_values": true,
+        "elements": 32
+      },
+      {
+        "rank": 1,
+        "dtype": "torch.bfloat16",
+        "operation": "flagcx_ar",
+        "exact_values": true,
+        "elements": 32
+      },
+      {
+        "rank": 1,
+        "dtype": "torch.bfloat16",
+        "operation": "flagcx_ag",
+        "exact_values": true,
+        "elements": 64
+      }
+    ],
+    "exact_check_count": 12,
+    "normal_runtime_origins": {
+      "origins": {
+        "torch_ptpu": "/flagos/lib/python3.10/site-packages/torch_ptpu/__init__.py",
+        "torch": "/flagos/lib/python3.10/site-packages/torch/__init__.py",
+        "flag_gems": "/flagos/lib/python3.10/site-packages/flag_gems/__init__.py",
+        "flaggems_vllm": "/flagos/lib/python3.10/site-packages/flaggems_vllm/__init__.py",
+        "triton": "/opt/flagtree/triton/__init__.py",
+        "flagcx": "/flagos/lib/python3.10/site-packages/flagcx/__init__.py",
+        "vllm": "/flagos/lib/python3.10/site-packages/vllm/__init__.py",
+        "vllm_fl": "/source/vllm_fl/__init__.py"
+      },
+      "triton_init_sha256": "df3092178f70be89b50d22905cedae5bac414cc38677053616fc56802c91af30",
+      "provider_api": {
+        "source": "/flagos/lib/python3.10/site-packages/flaggems_vllm/ops/reshape_and_cache_flash_strided.py",
+        "sha256": "4827d6638f9e7ae376b9cc2471b8a9dd561c7455a393991404cfe4db61fc1d5b"
+      },
+      "mapped_DSO_sha256": {
+        "/opt/flagtree/triton/_C/libtriton.so": "83d63a4434eba363b424f11f0a07bfdd08b8b4fb2ad4aad0ca4b53890075beee",
+        "/flagos/lib/python3.10/site-packages/flagcx/lib/libflagcx.so": "7eba3f5e530c5166f7e25b7e949b4b1ad2fdb43ff08fe6606bcc2e014cbdceff",
+        "/flagos/lib/python3.10/site-packages/flagcx/_C.cpython-310-x86_64-linux-gnu.so": "544bf8bd4a2eecb5cef86f417b7f848d20b9f9861992e32cb9582ad216b2b7c0",
+        "/usr/local/tangrt-0.25/targets/linux-x86_64/lib/libtangrt_shared.so": "66b2914e03d69be18373f02f0f33cda131462777c2f43cf37d086e2e5595596a",
+        "/flagos/lib/python3.10/site-packages/torch_ptpu/lib/libptpu_kernel.so": "7a995f7c1c6c7267ea6a6274bdc49ff4c6a9a2c1ae95201242aba5dc78fd14e9",
+        "/usr/local/pccl/lib/linux-x86_64/libpccl.so": "10fff10dc7fe160a770e717979dd07336a33c46033d3efe99274b600cddc5c45",
+        "/usr/local/tangrt-0.25/targets/linux-x86_64/lib/libtablas.so": "a1340a884f04af3626c84663379ee152fd56334c22e532127ce43338689dd0a1",
+        "/flagos/lib/python3.10/site-packages/torch_ptpu/lib/libptpu_kernel_binary_misc.so": "173e39026ba71efe3384313734a39753c4636ed44a91e9e7c00a178366fd2fdb",
+        "/flagos/lib/python3.10/site-packages/torch_ptpu/lib/libptpu_kernel_binary_cmp.so": "cbd9ccab102a90a8acc13f980600cf3b946b5ce1f27d32e80aced88bf5cce6c3",
+        "/flagos/lib/python3.10/site-packages/torch_ptpu/lib/libptpu_kernel_binary_arith.so": "a2b8bfc8d1145b60e65cadf906d3cda183671937d3d4b9dc8f970f6217a8397e",
+        "/flagos/lib/python3.10/site-packages/torch_ptpu/lib/libsgl_kernel_ptpu.so": "496e129bf1af1ea4a3550d49beb86fa86ceeb8c9298a587a00c70873227239aa",
+        "/usr/local/tangrt-0.25/targets/linux-x86_64/lib/stub/libtang.so.0": "65572792ca4db26ddf909a9fb0f45e57eddaec2b46b87567e8c3b934acc68bb7",
+        "/flagos/lib/python3.10/site-packages/torch_ptpu/_C.cpython-310-x86_64-linux-gnu.so": "909fff8521635050c99c088c0736e9bdb07f399e7e4fc61edbf0e695c356ff75",
+        "/usr/local/tangrt-0.25/targets/linux-x86_64/lib/tapti/libtapti_shared.so": "fcb0fed6dc0f7524a0ef38c5c4ff4bb87af4120497aa8ca36f7b1a809fb4d8fd"
+      },
+      "plugin_version": "0.0.0+g8f5ad935",
+      "installed_python_files_matched": 324,
+      "normal_production_import": true,
+      "actual_model_dispatch_not_claimed_by_import": true
+    },
+    "observed_FlagGems_op_entries": [
+      "GEMS ONES"
+    ],
+    "compiled_metadata": [
+      {
+        "file": "cache/preflight/triton/6DAOGZHBODWRFEX5XSTTKVQIKZEYBZK4PKDFA7FJBFMJXU2F6JNQ/ones_kernel.json",
+        "sha256": "eb1523d9a01b3e7f5eb84a187e1f7949f85ed156935b166db11505d6f20974cf",
+        "name": "ones_kernel",
+        "target": {
+          "backend": "ptpu",
+          "arch": "S2",
+          "warp_size": 32
+        }
+      },
+      {
+        "file": "cache/preflight/triton/IFUVMXJBFRGPGQVGRIMIKPJWISHAY32SHUI66WVET7XJQJTDMWPA/empty_kernel.json",
+        "sha256": "91a0d7d9c17ccc4bb02824c035b7581c2b0a07356fca4e411b13e7b7a5d24a97",
+        "name": "empty_kernel",
+        "target": {
+          "backend": "ptpu",
+          "arch": "S2",
+          "warp_size": 32
+        }
+      },
+      {
+        "file": "cache/preflight/triton/KEZDQHWMW5USDDR7EDLRXXEDUBC7YSA4XSTZORQKW4VI5WDZLWAA/add_func_kernel_rank_1.json",
+        "sha256": "d1788a654977d96e86b7c1fea84a62cadb4cf1b5ae5e23172487bb270f9839e0",
+        "name": "add_func_kernel_rank_1",
+        "target": {
+          "backend": "ptpu",
+          "arch": "S2",
+          "warp_size": 32
+        }
+      }
+    ],
+    "original_scripts_completed": true,
+    "raw_archive_sha256": "6f3ef0463fd34ed85f3335450642f7cf4b9e057d61268c76ca5d22102ffbd268",
+    "natural_container_exit": true,
+    "own_container_removed_and_absence_verified": true,
+    "before": {
+      "physical_slots": [
+        3,
+        7
+      ],
+      "idle": true,
+      "handles": 0,
+      "ecc_clear": true,
+      "passed": true
+    },
+    "after": {
+      "physical_slots": [
+        3,
+        7
+      ],
+      "idle": true,
+      "handles": 0,
+      "ecc_clear": true,
+      "passed": true
+    },
+    "four_cooperative_locks_released": true
+  },
+  "setup_failures_preserved": [
+    "The first CPU wrapper rejected Docker's canonical CAP_MKNOD spelling before starting its created container. The validator now accepts the optional CAP_ prefix while retaining the same isolation checks.",
+    "The first executed communication wrapper imported provider provenance before normal platform registration. It failed at import, before numerical checks. The corrected wrapper follows the unchanged verify_runtime.py import order; no production, provider, dependency or Gate script was modified."
+  ],
+  "model_gate_pass_claimed": false,
+  "multi_node_pass_claimed": false,
+  "permanent_hardware_failure_resolution_claimed": false,
+  "local_receipt_sha256": {
+    "cpu-stage-cfdba815-v2-receipt.json": "9023c1f433c65b80459c228ddfee498d5e14823fb3aaab950ea44940cdd7c4f7",
+    "gpu-preflight-v3-pass-receipt.json": "31a69c86caa2dcc5608103f305aa21cdab4251b457278be2800fd007dee2f5a6"
+  }
+}
