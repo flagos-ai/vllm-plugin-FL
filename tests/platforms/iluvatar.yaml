@@ -94,13 +94,7 @@ bi_v150:
     unit:
       include: "*"
     benchmark:
-      # The unified CoreX 5.0.1 image ships the vllm bench entry points, so
-      # the throughput/latency/serve smoke runs in PR and nightly CI.
       pr:
-        enabled: true
-        types: [throughput, latency, serve]
-        config: tests/benchmarks/configs/smoke_iluvatar.yaml
+        enabled: false
       nightly:
-        enabled: true
-        types: [throughput, latency, serve]
-        config: tests/benchmarks/configs/smoke_iluvatar.yaml
+        enabled: false

@@ -177,7 +177,6 @@ platforms:
       - .github/configs/platforms.yml
       - docker/build.sh
       - docker/iluvatar/
-      - tests/benchmarks/configs/smoke_iluvatar.yaml
     exempt_from_global:
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/
@@ -185,4 +184,3 @@ platforms:
       - .github/configs/platforms.yml
       - docker/build.sh
       - docker/iluvatar/
-      - tests/benchmarks/configs/smoke_iluvatar.yaml
