@@ -230,6 +230,7 @@ def test_graph_patch_is_idempotent_and_does_not_activate_on_other_platforms(
 def test_real_flagcx_all_reduce_uses_the_live_capture_stream(
     graph_runtime, monkeypatch
 ):
+    monkeypatch.setenv("GEMS_VENDOR", "sunrise")
     state = graph_runtime
     state.install(
         "vllm.distributed.utils",

@@ -27,6 +27,8 @@ def install_module(monkeypatch, name, **attrs):
 @pytest.mark.parametrize("api", ["legacy", "wheel"])
 @pytest.mark.parametrize("explicit_library", [None, "/custom/libflagcx.so"])
 def test_communicator_loads_matched_api_and_library(monkeypatch, api, explicit_library):
+    monkeypatch.setenv("GEMS_VENDOR", "sunrise")
+
     class Group:
         rank = 0
         world_size = 2
@@ -113,6 +115,7 @@ def test_communicator_loads_matched_api_and_library(monkeypatch, api, explicit_l
 
 
 def test_wheel_fallback_is_not_enabled_on_other_platforms(monkeypatch):
+    monkeypatch.setenv("GEMS_VENDOR", "nvidia")
     install_module(monkeypatch, "vllm.distributed.utils", StatelessProcessGroup=object)
     install_module(monkeypatch, "vllm.logger", init_logger=logging.getLogger)
     install_module(monkeypatch, "vllm.utils.torch_utils", current_stream=Mock())
