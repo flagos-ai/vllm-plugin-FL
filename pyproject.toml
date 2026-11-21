@@ -96,6 +96,7 @@ include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
 "vllm_fl.dispatch.config" = ["*.yaml"]
+"vllm_fl.dispatch.backends.vendor.iluvatar.impl.attention" = ["native/*.cu", "native/*.cpp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

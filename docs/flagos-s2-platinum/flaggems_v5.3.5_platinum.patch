@@ -1,0 +1,3842 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index f0f7220a5a2..8a6da9a0561 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -277,6 +277,7 @@ flaggems-flagtune-compare = "flag_gems.flagtune.cli.compare:main"
+ [tool.setuptools_scm]
+ write_to = "src/flag_gems/_version.py"
+ version_scheme = "no-guess-dev"
++fallback_version = "5.3.5"
+ 
+ [tool.uv]
+ 
+diff --git a/setup.py b/setup.py
+index 9e1c14dcd76..59dc4353b35 100644
+--- a/setup.py
++++ b/setup.py
+@@ -17,7 +17,7 @@
+ patches the backend to ``setuptools.build_meta`` — that build honors this shim.
+ """
+ 
+-from setuptools import find_packages, setup
++from setuptools import find_namespace_packages, find_packages, setup
+ 
+ setup(
+     package_dir={
+@@ -31,7 +31,7 @@
+     # means it is found at src/flaggems_setup.py.
+     py_modules=["flaggems_setup"],
+     packages=(
+-        find_packages("src")
++        find_namespace_packages("src", include=["flag_gems", "flag_gems.*"])
+         + ["flaggems_tests", *(f"flaggems_tests.{p}" for p in find_packages("tests"))]
+         + [
+             "flaggems_benchmark",
+diff --git a/src/flag_gems/fused/__init__.py b/src/flag_gems/fused/__init__.py
+index 764aea78174..0da8d7c605d 100644
+--- a/src/flag_gems/fused/__init__.py
++++ b/src/flag_gems/fused/__init__.py
+@@ -51,6 +51,7 @@
+ from flag_gems.fused.fp8_fp4_mqa_logits import fp8_fp4_mqa_logits
+ from flag_gems.fused.fp8_fp4_paged_mqa_logits import fp8_fp4_paged_mqa_logits
+ from flag_gems.fused.fused_add_rms_norm import fused_add_rms_norm
++from flag_gems.fused.fused_swiglu_proj import fused_swiglu_proj
+ from flag_gems.fused.fused_deepseek_v4_qnorm_rope_kv_rope_insert import (
+     fused_deepseek_v4_qnorm_rope_kv_rope_insert,
+ )
+@@ -109,8 +110,13 @@
+ from flag_gems.fused.swiglu import dswiglu, swiglu
+ from flag_gems.fused.top_k_per_row_decode import top_k_per_row_decode
+ from flag_gems.fused.top_k_per_row_prefill import top_k_per_row_prefill
++from flag_gems.fused.top_p_sampling import top_p_sampling_from_logits
+ from flag_gems.fused.topk_softmax import topk_softmax
+ from flag_gems.fused.topk_softplus_sqrt import topk_softplus_sqrt
++from flag_gems.fused.topk_topp_sampler import (
++    apply_top_k_top_p,
++    topk_topp_random_sample,
++)
+ from flag_gems.fused.unpack_seq import unpack_seq_triton
+ from flag_gems.fused.weight_norm import weight_norm
+ 
+@@ -119,6 +125,7 @@
+     "act_quant_triton",
+     "apply_repetition_penalties",
+     "apply_rotary_pos_emb",
++    "apply_top_k_top_p",
+     "beam_search_score",
+     "beam_search_score_",
+     "bf16_paged_mqa_logits",
+@@ -145,6 +152,7 @@
+     "fp8_fp4_mqa_logits",
+     "fp8_fp4_paged_mqa_logits",
+     "fused_add_rms_norm",
++    "fused_swiglu_proj",
+     "fused_deepseek_v4_qnorm_rope_kv_rope_insert",
+     "fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert",
+     "fused_experts_impl",
+@@ -190,8 +198,10 @@
+     "swiglu",
+     "top_k_per_row_decode",
+     "top_k_per_row_prefill",
++    "top_p_sampling_from_logits",
+     "topk_softmax",
+     "topk_softplus_sqrt",
++    "topk_topp_random_sample",
+     "triton_sparse_mla_fwd_interface",
+     "unpack_seq_triton",
+     "weight_norm",
+diff --git a/src/flag_gems/fused/fused_add_rms_norm.py b/src/flag_gems/fused/fused_add_rms_norm.py
+index c9529629454..5719691e5f9 100644
+--- a/src/flag_gems/fused/fused_add_rms_norm.py
++++ b/src/flag_gems/fused/fused_add_rms_norm.py
+@@ -15,6 +15,7 @@
+ import logging
+ import math
+ 
++import torch
+ import triton
+ import triton.language as tl
+ 
+@@ -25,57 +26,57 @@
+ logger = logging.getLogger(__name__)
+ 
+ 
+-@libentry()
+ @triton.jit(do_not_specialize=["eps"])
+-def fused_add_rms_norm_kernel(
+-    input_ptr,  # pointer to the input
+-    residual_ptr,  # pointer to the residual
+-    w_ptr,  # pointer to the weights
+-    in_stride_r,  # how much to increase the pointer when moving by 1 row
+-    in_stride_c,  # how much to increase the pointer when moving by 1 col
+-    r_stride_r,  # how much to increase the pointer when moving by 1 row
+-    r_stride_c,  # how much to increase the pointer when moving by 1 col
+-    N,  # number of columns in in_ptr
+-    eps,  # epsilon to avoid division by zero
++def _fused_add_rms_norm_fast_kernel(
++    out_x_ptr,
++    out_r_ptr,
++    input_ptr,
++    residual_ptr,
++    w_ptr,
++    N: tl.constexpr,
++    eps,
+     BLOCK_SIZE: tl.constexpr,
++    EVEN_N: tl.constexpr,
+ ):
+-    if tl.constexpr(input_ptr.dtype.element_ty == tl.float16) or tl.constexpr(
+-        input_ptr.dtype.element_ty == tl.bfloat16
+-    ):
+-        cdtype = tl.float32
+-    else:
+-        cdtype = input_ptr.dtype.element_ty
+-
+-    pid = ext.program_id(0)
+-    input_ptr += pid * in_stride_r
+-    residual_ptr += pid * r_stride_r
+-
+-    mask = tl.arange(0, BLOCK_SIZE) < N
++    row = tl.program_id(0).to(tl.int64)
++    offset = row * N
++    out_x_ptr += offset
++    out_r_ptr += offset
++    input_ptr += offset
++    residual_ptr += offset
+     cols = tl.arange(0, BLOCK_SIZE)
+-    x = tl.load(input_ptr + cols * in_stride_c, mask, other=0.0).to(cdtype)
+-    r = tl.load(residual_ptr + cols * r_stride_c, mask, other=0.0).to(cdtype)
+-
+-    x += r
+-    # write back to residual
+-    tl.store(residual_ptr + cols * r_stride_c, x, mask=mask)
+ 
+-    var = tl.sum(x * x / N, axis=0)
+-    rrms = 1 / tl.sqrt(var + eps)
+-
+-    w = tl.load(w_ptr + tl.arange(0, BLOCK_SIZE), mask=mask, other=0.0)
+-    y = (x * rrms * w).to(cdtype)
+-    # write back to input
+-    tl.store(input_ptr + cols * in_stride_c, y, mask=mask)
++    if EVEN_N:
++        x = tl.load(input_ptr + cols).to(tl.float32)
++        r = tl.load(residual_ptr + cols).to(tl.float32)
++        x = x + r
++        tl.store(out_r_ptr + cols, x.to(out_r_ptr.dtype.element_ty))
++        var = tl.sum(x * x, axis=0) * (1.0 / N)
++        rrms = 1.0 / tl.sqrt(var + eps)
++        w = tl.load(w_ptr + cols)
++        y = (x * rrms).to(input_ptr.dtype.element_ty) * w
++        tl.store(out_x_ptr + cols, y)
++    else:
++        mask = cols < N
++        x = tl.load(input_ptr + cols, mask=mask, other=0.0).to(tl.float32)
++        r = tl.load(residual_ptr + cols, mask=mask, other=0.0).to(tl.float32)
++        x = x + r
++        tl.store(out_r_ptr + cols, x.to(out_r_ptr.dtype.element_ty), mask=mask)
++        var = tl.sum(x * x, axis=0) * (1.0 / N)
++        rrms = 1.0 / tl.sqrt(var + eps)
++        w = tl.load(w_ptr + cols, mask=mask, other=0.0)
++        y = (x * rrms).to(input_ptr.dtype.element_ty) * w
++        tl.store(out_x_ptr + cols, y, mask=mask)
+ 
+ 
+ @libentry()
+ @triton.jit(do_not_specialize=["eps"])
+ def fused_add_rms_norm_loop_kernel(
+-    input_ptr,  # pointer to the input
+-    residual_ptr,  # pointer to the residual
+-    w_ptr,  # pointer to the weights
+-    N,  # number of columns in in_ptr
+-    eps,  # epsilon to avoid division by zero
++    input_ptr,
++    residual_ptr,
++    w_ptr,
++    N,
++    eps,
+     BLOCK_SIZE: tl.constexpr,
+ ):
+     if tl.constexpr(input_ptr.dtype.element_ty == tl.float16) or tl.constexpr(
+@@ -88,7 +89,6 @@ def fused_add_rms_norm_loop_kernel(
+     pid = ext.program_id(0)
+     row_start = pid * N
+ 
+-    # Pass 1: add residual and compute variance
+     var_acc = tl.zeros((BLOCK_SIZE,), dtype=tl.float32)
+     num_steps = tl.cdiv(N, BLOCK_SIZE)
+ 
+@@ -99,52 +99,90 @@ def fused_add_rms_norm_loop_kernel(
+         x = tl.load(input_ptr + row_start + cols, mask=mask, other=0.0).to(cdtype)
+         r = tl.load(residual_ptr + row_start + cols, mask=mask, other=0.0).to(cdtype)
+         x = x + r
+-        # write back to residual
+         tl.store(residual_ptr + row_start + cols, x, mask=mask)
+         var_acc += x * x
+ 
+     var = tl.sum(var_acc) / N
+     rrms = 1 / tl.sqrt(var + eps)
+ 
+-    # Pass 2: normalize and write back to input
+     for step in range(0, num_steps):
+         start_n = step * BLOCK_SIZE
+         cols = start_n + tl.arange(0, BLOCK_SIZE)
+         mask = cols < N
+-        # Re-read from residual (which now has x+r)
+         x = tl.load(residual_ptr + row_start + cols, mask=mask, other=0.0).to(cdtype)
+         w = tl.load(w_ptr + cols, mask=mask, other=0.0)
+         y = (x * rrms * w).to(cdtype)
+         tl.store(input_ptr + row_start + cols, y, mask=mask)
+ 
+ 
++@torch.library.custom_op("flag_gems::_fused_add_rms_norm_op", mutates_args=())
++def _fused_add_rms_norm_op(
++    x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float
++) -> tuple[torch.Tensor, torch.Tensor]:
++    N = weight.numel()
++    M = x.numel() // N
++    out_x = torch.empty_like(x)
++    out_r = torch.empty_like(residual)
++    if M == 0:
++        return out_x, out_r
++    BLOCK_SIZE = triton.next_power_of_2(N)
++    num_warps = 4 if BLOCK_SIZE <= 2048 else 8
++    with torch_device_fn.device(x.device):
++        _fused_add_rms_norm_fast_kernel[(M,)](
++            out_x,
++            out_r,
++            x,
++            residual,
++            weight,
++            N,
++            eps,
++            BLOCK_SIZE=BLOCK_SIZE,
++            EVEN_N=(N == BLOCK_SIZE),
++            num_warps=num_warps,
++        )
++    return out_x, out_r
++
++
++@_fused_add_rms_norm_op.register_fake
++def _(
++    x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float
++) -> tuple[torch.Tensor, torch.Tensor]:
++    return torch.empty_like(x), torch.empty_like(residual)
++
++
+ def fused_add_rms_norm(x, residual, normalized_shape, weight, eps=1e-5):
+-    """
+-    This function performs fused residual addition and RMS normalization **in-place**.
+-    Both `x` and `residual` tensors will be modified. Use with caution if these tensors
+-    are reused elsewhere or require gradients.
+-    """
+-    logger.debug(
+-        "GEMS FUSED_ADD_RMS_NORM FORWARD, [input shape]: %s, [residual shape]: %s, [weight shape]: %s",
+-        x.size(),
+-        residual.size(),
+-        weight.size(),
+-    )
+-    dim = x.ndim - len(normalized_shape)
+-    M = math.prod(x.shape[:dim])
+-    N = math.prod(normalized_shape)
+-
+-    x = x.contiguous()
+-    residual = residual.contiguous()
+-    weight = weight.contiguous()
++    N = normalized_shape[0] if len(normalized_shape) == 1 else math.prod(normalized_shape)
++    if not x.is_contiguous():
++        x = x.contiguous()
++    if not residual.is_contiguous():
++        residual = residual.contiguous()
++    if not weight.is_contiguous():
++        weight = weight.contiguous()
++
++    if N <= 4096:
++        if torch.compiler.is_compiling() and not torch.is_grad_enabled():
++            return _fused_add_rms_norm_op(x, residual, weight, float(eps))
++        M = x.numel() // N
++        if M == 0:
++            return x, residual
++        BLOCK_SIZE = triton.next_power_of_2(N)
++        num_warps = 4 if BLOCK_SIZE <= 2048 else 8
++        with torch_device_fn.device(x.device):
++            _fused_add_rms_norm_fast_kernel[(M,)](
++                x,
++                residual,
++                x,
++                residual,
++                weight,
++                N,
++                eps,
++                BLOCK_SIZE=BLOCK_SIZE,
++                EVEN_N=(N == BLOCK_SIZE),
++                num_warps=num_warps,
++            )
++        return x, residual
+ 
+     with torch_device_fn.device(x.device):
+-        if N <= 4096:
+-            BLOCK_SIZE = triton.next_power_of_2(N)
+-            fused_add_rms_norm_kernel[M,](
+-                x, residual, weight, N, 1, N, 1, N, eps, BLOCK_SIZE
+-            )
+-        else:
+-            BLOCK_SIZE = 1024
+-            fused_add_rms_norm_loop_kernel[M,](x, residual, weight, N, eps, BLOCK_SIZE)
++        BLOCK_SIZE = 1024
++        fused_add_rms_norm_loop_kernel[M,](x, residual, weight, N, eps, BLOCK_SIZE)
+     return x, residual
+diff --git a/src/flag_gems/fused/fused_swiglu_proj.py b/src/flag_gems/fused/fused_swiglu_proj.py
+new file mode 100644
+index 00000000000..ad698de9012
+--- /dev/null
++++ b/src/flag_gems/fused/fused_swiglu_proj.py
+@@ -0,0 +1,298 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++"""Fused Dual-Accumulator SwiGLU Linear Projection:
++
++    out = silu(x @ W_gate^T) * (x @ W_up^T),   where W = [W_gate; W_up] of shape [2*I, K].
++
++Each CTA loads X[rm, rk] ONCE into SRAM, accumulates both gate and up tiles in FP32
++registers, evaluates silu(gate) * up in exact FP32, and writes [M, I] directly to HBM,
++eliminating materialization of the [M, 2*I] intermediate tensor and the separate
++SiluAndMul kernel launch.
++"""
++
++import logging
++
++import torch
++import triton
++import triton.language as tl
++
++from flag_gems import runtime
++from flag_gems.runtime import torch_device_fn
++
++logger = logging.getLogger(__name__)
++
++
++@triton.jit(do_not_specialize=["M"])
++def _metax_fused_swiglu_kernel(
++    A,
++    W_GU,
++    C,
++    M,
++    I: tl.constexpr,
++    K: tl.constexpr,
++    stride_am,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    GROUP_M: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
++    EVEN_K: tl.constexpr,
++    pipeline: tl.constexpr,
++    scenario: tl.constexpr,
++):
++    pid = tl.program_id(0)
++    grid_m = tl.cdiv(M, BLOCK_M)
++    grid_n = tl.cdiv(I, BLOCK_N)
++    width = GROUP_M * grid_n
++    group_id = pid // width
++    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
++    pid_m = group_id * GROUP_M + (pid % group_size)
++    pid_n = (pid % width) // group_size
++
++    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    if EVEN_M:
++        ram = tl.max_contiguous(tl.multiple_of(rm, BLOCK_M), BLOCK_M)
++    else:
++        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
++    if EVEN_N:
++        rbn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_N), BLOCK_N)
++    else:
++        rbn = tl.max_contiguous(tl.multiple_of(rn % I, BLOCK_N), BLOCK_N)
++    rk = tl.arange(0, BLOCK_K)
++
++    a_ptrs = A + (ram[:, None] * stride_am + rk[None, :])
++    wg_ptrs = W_GU + (rk[:, None] + rbn[None, :] * K)
++    wu_ptrs = W_GU + (I * K) + (rk[:, None] + rbn[None, :] * K)
++
++    acc_g = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    acc_u = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    for k in range(0, tl.cdiv(K, BLOCK_K)):
++        if EVEN_K:
++            a = tl.load(a_ptrs)
++            wg = tl.load(wg_ptrs)
++            wu = tl.load(wu_ptrs)
++        else:
++            k_rem = K - k * BLOCK_K
++            a = tl.load(a_ptrs, mask=rk[None, :] < k_rem, other=0.0)
++            wg = tl.load(wg_ptrs, mask=rk[:, None] < k_rem, other=0.0)
++            wu = tl.load(wu_ptrs, mask=rk[:, None] < k_rem, other=0.0)
++        acc_g = tl.dot(a, wg, acc_g, out_dtype=tl.float32, allow_tf32=False)
++        acc_u = tl.dot(a, wu, acc_u, out_dtype=tl.float32, allow_tf32=False)
++        a_ptrs += BLOCK_K
++        wg_ptrs += BLOCK_K
++        wu_ptrs += BLOCK_K
++
++    act = (acc_g / (1.0 + tl.exp(-acc_g))) * acc_u
++    out = act.to(C.dtype.element_ty)
++    c_ptrs = C + (rm[:, None] * I + rn[None, :])
++    if EVEN_M and EVEN_N:
++        tl.store(c_ptrs, out)
++    else:
++        tl.store(c_ptrs, out, mask=(rm < M)[:, None] & (rn < I)[None, :])
++
++
++@triton.jit(do_not_specialize=["M"])
++def _generic_fused_swiglu_kernel(
++    A,
++    W_GU,
++    C,
++    M,
++    I: tl.constexpr,
++    K: tl.constexpr,
++    stride_am,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    GROUP_M: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
++    EVEN_K: tl.constexpr,
++    UPGRADE_OFFS: tl.constexpr,
++):
++    pid = tl.program_id(0)
++    grid_m = tl.cdiv(M, BLOCK_M)
++    grid_n = tl.cdiv(I, BLOCK_N)
++    width = GROUP_M * grid_n
++    group_id = pid // width
++    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
++    pid_m = group_id * GROUP_M + (pid % group_size)
++    pid_n = (pid % width) // group_size
++
++    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    if EVEN_M:
++        ram = tl.max_contiguous(tl.multiple_of(rm, BLOCK_M), BLOCK_M)
++    else:
++        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
++    if EVEN_N:
++        rbn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_N), BLOCK_N)
++    else:
++        rbn = tl.max_contiguous(tl.multiple_of(rn % I, BLOCK_N), BLOCK_N)
++    rk = tl.arange(0, BLOCK_K)
++
++    if UPGRADE_OFFS:
++        a_ptrs = A + (ram[:, None].to(tl.int64) * stride_am + rk[None, :])
++        wg_ptrs = W_GU + (rk[:, None] + rbn[None, :].to(tl.int64) * K)
++        wu_ptrs = W_GU + (I * K) + (rk[:, None] + rbn[None, :].to(tl.int64) * K)
++    else:
++        a_ptrs = A + (ram[:, None] * stride_am + rk[None, :])
++        wg_ptrs = W_GU + (rk[:, None] + rbn[None, :] * K)
++        wu_ptrs = W_GU + (I * K) + (rk[:, None] + rbn[None, :] * K)
++
++    acc_g = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    acc_u = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    for k in range(0, tl.cdiv(K, BLOCK_K)):
++        if EVEN_K:
++            a = tl.load(a_ptrs)
++            wg = tl.load(wg_ptrs)
++            wu = tl.load(wu_ptrs)
++        else:
++            k_rem = K - k * BLOCK_K
++            a = tl.load(a_ptrs, mask=rk[None, :] < k_rem, other=0.0)
++            wg = tl.load(wg_ptrs, mask=rk[:, None] < k_rem, other=0.0)
++            wu = tl.load(wu_ptrs, mask=rk[:, None] < k_rem, other=0.0)
++        acc_g = tl.dot(a, wg, acc_g, out_dtype=tl.float32, allow_tf32=False)
++        acc_u = tl.dot(a, wu, acc_u, out_dtype=tl.float32, allow_tf32=False)
++        a_ptrs += BLOCK_K
++        wg_ptrs += BLOCK_K
++        wu_ptrs += BLOCK_K
++
++    act = (acc_g / (1.0 + tl.exp(-acc_g))) * acc_u
++    out = act.to(C.dtype.element_ty)
++    if UPGRADE_OFFS:
++        c_ptrs = C + (rm[:, None].to(tl.int64) * I + rn[None, :])
++    else:
++        c_ptrs = C + (rm[:, None] * I + rn[None, :])
++    if EVEN_M and EVEN_N:
++        tl.store(c_ptrs, out)
++    else:
++        tl.store(c_ptrs, out, mask=(rm < M)[:, None] & (rn < I)[None, :])
++
++
++def fused_swiglu_proj(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
++    """Compute silu(x @ W_gate^T) * (x @ W_up^T) with microarchitecture-aware kernel selection."""
++    batch_dims = x.shape[:-1]
++    K = x.shape[-1]
++    M = x.numel() // K if K > 0 else 0
++    two_I = weight.shape[0]
++    I = two_I // 2
++
++    if M == 0 or I == 0:
++        return torch.empty((*batch_dims, I), device=x.device, dtype=x.dtype)
++
++    if x.stride(-1) != 1 or (x.ndim > 2 and not x.is_contiguous()):
++        x_2d = x.contiguous().view(M, K)
++    else:
++        x_2d = x.view(M, K)
++    if not weight.is_contiguous():
++        weight = weight.contiguous()
++
++    vendor = getattr(runtime.device, "vendor_name", "")
++
++    if vendor == "metax":
++        # On MetaX C500 (64 KiB smem): dual-accumulator fused cpasync wins by 1.73x for M <= 128;
++        # for M > 128, 4-stage cpasync 128x128x64 avoids register spill across dual 128x128 tiles.
++        if M <= 128:
++            out_2d = torch.empty((M, I), device=x.device, dtype=x.dtype)
++            bm = 16 if M <= 16 else (32 if M <= 32 else 64)
++            bn, bk = 64, 64
++            grid = (triton.cdiv(M, bm) * triton.cdiv(I, bn),)
++
++            def _run_mx():
++                _metax_fused_swiglu_kernel[grid](
++                    x_2d,
++                    weight,
++                    out_2d,
++                    M,
++                    I,
++                    K,
++                    x_2d.stride(0),
++                    BLOCK_M=bm,
++                    BLOCK_N=bn,
++                    BLOCK_K=bk,
++                    GROUP_M=8,
++                    EVEN_M=(M % bm == 0),
++                    EVEN_N=(I % bn == 0),
++                    EVEN_K=(K % bk == 0),
++                    pipeline="cpasync",
++                    scenario="unroll",
++                    num_stages=4,
++                    num_warps=4,
++                )
++
++            if torch.cuda.current_device() != x_2d.device.index:
++                with torch_device_fn.device(x_2d.device):
++                    _run_mx()
++            else:
++                _run_mx()
++            return out_2d.view(*batch_dims, I)
++        else:
++            from flag_gems.modules.activation import gems_silu_and_mul_merged
++            from flag_gems.runtime.backend._metax.ops.linear import linear_nt_dispatch
++
++            gu = linear_nt_dispatch(x_2d, weight)
++            return gems_silu_and_mul_merged(gu).view(*batch_dims, I)
++
++    out_2d = torch.empty((M, I), device=x.device, dtype=x.dtype)
++    if vendor == "iluvatar":
++        # On Iluvatar BI-V150 (128 KiB smem, 16 SMs): fused dual-accumulator wins across ALL M (2.61x decode, 1.45x prefill)!
++        if M <= 16:
++            bm, bn, bk, gm, ns, nw = 16, 128, 32, 4, 2, 4
++        elif M <= 32:
++            bm, bn, bk, gm, ns, nw = 32, 128, 32, 4, 2, 4
++        elif M <= 64:
++            bm, bn, bk, gm, ns, nw = 64, 128, 32, 4, 2, 4
++        elif M <= 128:
++            bm, bn, bk, gm, ns, nw = 128, 128, 32, 4, 2, 8
++        else:
++            bm, bn, bk, gm, ns, nw = 256, 128, 32, 4, 2, 8
++    else:
++        bm = 64 if M <= 64 else 128
++        bn, bk, gm, ns, nw = 64, 32, 8, 2, 4
++
++    upgrade = max(M * x_2d.stride(0), two_I * K, M * I) >= (1 << 31)
++    grid = (triton.cdiv(M, bm) * triton.cdiv(I, bn),)
++
++    def _run_gen():
++        _generic_fused_swiglu_kernel[grid](
++            x_2d,
++            weight,
++            out_2d,
++            M,
++            I,
++            K,
++            x_2d.stride(0),
++            BLOCK_M=bm,
++            BLOCK_N=bn,
++            BLOCK_K=bk,
++            GROUP_M=gm,
++            EVEN_M=(M % bm == 0),
++            EVEN_N=(I % bn == 0),
++            EVEN_K=(K % bk == 0),
++            UPGRADE_OFFS=upgrade,
++            num_stages=ns,
++            num_warps=nw,
++        )
++
++    if torch.cuda.current_device() != x_2d.device.index:
++        with torch_device_fn.device(x_2d.device):
++            _run_gen()
++    else:
++        _run_gen()
++    return out_2d.view(*batch_dims, I)
++
++
++__all__ = ["fused_swiglu_proj"]
+diff --git a/src/flag_gems/fused/rotary_embedding.py b/src/flag_gems/fused/rotary_embedding.py
+index 1e5c3e2794f..a5dabbe750c 100644
+--- a/src/flag_gems/fused/rotary_embedding.py
++++ b/src/flag_gems/fused/rotary_embedding.py
+@@ -192,6 +192,132 @@ def apply_rotary_pos_emb_inplace_kernel(
+         tl.store(k_ptr + ordered_cols, y, mask=mask)  # In-place update
+ 
+ 
++@triton.jit(do_not_specialize=["n_tokens", "q_stride_s", "k_stride_s", "oq_stride_s", "ok_stride_s"])
++def _rotary_neox_inplace_fast_kernel(
++    oq_ptr,
++    ok_ptr,
++    q_ptr,
++    k_ptr,
++    cos_ptr,
++    sin_ptr,
++    pos_ptr,
++    n_tokens,
++    q_stride_s,
++    q_stride_h: tl.constexpr,
++    k_stride_s,
++    k_stride_h: tl.constexpr,
++    oq_stride_s,
++    oq_stride_h: tl.constexpr,
++    ok_stride_s,
++    ok_stride_h: tl.constexpr,
++    p_stride_s: tl.constexpr,
++    cos_stride_s: tl.constexpr,
++    sin_stride_s: tl.constexpr,
++    NUM_Q_HEADS: tl.constexpr,
++    NUM_K_HEADS: tl.constexpr,
++    HALF_DIM: tl.constexpr,
++    PADDED_HALF_DIM: tl.constexpr,
++    HEADS_PER_CTA: tl.constexpr,
++):
++    t_id = tl.program_id(0).to(tl.int64)
++    h_grp = tl.program_id(1)
++
++    pos_id = tl.load(pos_ptr + t_id * p_stride_s).to(tl.int64)
++    d_offs = tl.arange(0, PADDED_HALF_DIM)
++    EVEN_D: tl.constexpr = HALF_DIM == PADDED_HALF_DIM
++
++    if EVEN_D:
++        cos = tl.load(cos_ptr + pos_id * cos_stride_s + d_offs).to(tl.float32)[None, :]
++        sin = tl.load(sin_ptr + pos_id * sin_stride_s + d_offs).to(tl.float32)[None, :]
++    else:
++        d_mask = d_offs < HALF_DIM
++        cos = tl.load(cos_ptr + pos_id * cos_stride_s + d_offs, mask=d_mask, other=0.0).to(tl.float32)[None, :]
++        sin = tl.load(sin_ptr + pos_id * sin_stride_s + d_offs, mask=d_mask, other=0.0).to(tl.float32)[None, :]
++
++    h_offs = h_grp * HEADS_PER_CTA + tl.arange(0, HEADS_PER_CTA)
++    q_mask_h = h_offs < NUM_Q_HEADS
++    if h_grp * HEADS_PER_CTA < NUM_Q_HEADS:
++        q_base = q_ptr + t_id * q_stride_s + h_offs[:, None] * q_stride_h
++        oq_base = oq_ptr + t_id * oq_stride_s + h_offs[:, None] * oq_stride_h
++        if EVEN_D:
++            q1 = tl.load(q_base + d_offs[None, :], mask=q_mask_h[:, None], other=0.0).to(tl.float32)
++            q2 = tl.load(q_base + HALF_DIM + d_offs[None, :], mask=q_mask_h[:, None], other=0.0).to(tl.float32)
++            tl.store(oq_base + d_offs[None, :], (q1 * cos - q2 * sin).to(oq_ptr.dtype.element_ty), mask=q_mask_h[:, None])
++            tl.store(oq_base + HALF_DIM + d_offs[None, :], (q2 * cos + q1 * sin).to(oq_ptr.dtype.element_ty), mask=q_mask_h[:, None])
++        else:
++            qm = q_mask_h[:, None] & (d_offs[None, :] < HALF_DIM)
++            q1 = tl.load(q_base + d_offs[None, :], mask=qm, other=0.0).to(tl.float32)
++            q2 = tl.load(q_base + HALF_DIM + d_offs[None, :], mask=qm, other=0.0).to(tl.float32)
++            tl.store(oq_base + d_offs[None, :], (q1 * cos - q2 * sin).to(oq_ptr.dtype.element_ty), mask=qm)
++            tl.store(oq_base + HALF_DIM + d_offs[None, :], (q2 * cos + q1 * sin).to(oq_ptr.dtype.element_ty), mask=qm)
++
++    k_idx = h_offs - NUM_Q_HEADS
++    k_mask_h = (k_idx >= 0) & (k_idx < NUM_K_HEADS)
++    if (h_grp + 1) * HEADS_PER_CTA > NUM_Q_HEADS:
++        safe_k_idx = tl.where(k_mask_h, k_idx, 0)
++        k_base = k_ptr + t_id * k_stride_s + safe_k_idx[:, None] * k_stride_h
++        ok_base = ok_ptr + t_id * ok_stride_s + safe_k_idx[:, None] * ok_stride_h
++        if EVEN_D:
++            k1 = tl.load(k_base + d_offs[None, :], mask=k_mask_h[:, None], other=0.0).to(tl.float32)
++            k2 = tl.load(k_base + HALF_DIM + d_offs[None, :], mask=k_mask_h[:, None], other=0.0).to(tl.float32)
++            tl.store(ok_base + d_offs[None, :], (k1 * cos - k2 * sin).to(ok_ptr.dtype.element_ty), mask=k_mask_h[:, None])
++            tl.store(ok_base + HALF_DIM + d_offs[None, :], (k2 * cos + k1 * sin).to(ok_ptr.dtype.element_ty), mask=k_mask_h[:, None])
++        else:
++            km = k_mask_h[:, None] & (d_offs[None, :] < HALF_DIM)
++            k1 = tl.load(k_base + d_offs[None, :], mask=km, other=0.0).to(tl.float32)
++            k2 = tl.load(k_base + HALF_DIM + d_offs[None, :], mask=km, other=0.0).to(tl.float32)
++            tl.store(ok_base + d_offs[None, :], (k1 * cos - k2 * sin).to(ok_ptr.dtype.element_ty), mask=km)
++            tl.store(ok_base + HALF_DIM + d_offs[None, :], (k2 * cos + k1 * sin).to(ok_ptr.dtype.element_ty), mask=km)
++
++
++@torch.library.custom_op("flag_gems::_rotary_neox_fast_op", mutates_args=())
++def _rotary_neox_fast_op(
++    q: torch.Tensor,
++    k: torch.Tensor,
++    cos: torch.Tensor,
++    sin: torch.Tensor,
++    position_ids: torch.Tensor,
++) -> tuple[torch.Tensor, torch.Tensor]:
++    n_tokens, q_heads, head_dim = q.shape
++    k_heads = k.shape[1]
++    oq = torch.empty((n_tokens, q_heads, head_dim), device=q.device, dtype=q.dtype)
++    ok = torch.empty((n_tokens, k_heads, head_dim), device=k.device, dtype=k.dtype)
++    if n_tokens == 0:
++        return oq, ok
++    half_dim = head_dim // 2
++    padded_half_dim = max(triton.next_power_of_2(half_dim), 16)
++    heads_per_cta = 4
++    num_warps = 2 if padded_half_dim * heads_per_cta <= 256 else 4
++    grid = (n_tokens, triton.cdiv(q_heads + k_heads, heads_per_cta))
++    with torch_device_fn.device(q.device):
++        _rotary_neox_inplace_fast_kernel[grid](
++            oq, ok, q, k, cos, sin, position_ids, n_tokens,
++            q.stride(0), q.stride(1), k.stride(0), k.stride(1),
++            oq.stride(0), oq.stride(1), ok.stride(0), ok.stride(1),
++            position_ids.stride(0), cos.stride(0), sin.stride(0),
++            NUM_Q_HEADS=q_heads, NUM_K_HEADS=k_heads,
++            HALF_DIM=half_dim, PADDED_HALF_DIM=padded_half_dim,
++            HEADS_PER_CTA=heads_per_cta, num_warps=num_warps,
++        )
++    return oq, ok
++
++
++@_rotary_neox_fast_op.register_fake
++def _(
++    q: torch.Tensor,
++    k: torch.Tensor,
++    cos: torch.Tensor,
++    sin: torch.Tensor,
++    position_ids: torch.Tensor,
++) -> tuple[torch.Tensor, torch.Tensor]:
++    n_tokens, q_heads, head_dim = q.shape
++    k_heads = k.shape[1]
++    return (
++        q.new_empty((n_tokens, q_heads, head_dim)),
++        k.new_empty((n_tokens, k_heads, head_dim)),
++    )
++
++
+ def apply_rotary_pos_emb(
+     q,
+     k,
+@@ -216,7 +342,8 @@ def apply_rotary_pos_emb(
+         q_embed: (*, q_heads, head_dim)
+         k_embed: (*, k_heads, head_dim)
+     """
+-    logger.debug("GEMS ROTARY_POS_EMBEDDING")
++    if not torch.compiler.is_compiling():
++        logger.debug("GEMS ROTARY_POS_EMBEDDING")
+     assert (
+         k.shape[-1] == q.shape[-1]
+     ), f"q and k must have the same last dimension, got {q.shape} and {k.shape}"
+@@ -245,11 +372,14 @@ def apply_rotary_pos_emb(
+             position_ids.shape == q.shape[:-2]
+         ), f"position_ids must have the same length as q, got {position_ids.shape} and {q.shape[:-2]}"
+ 
+-        position_ids = position_ids.view(-1)
++        if position_ids.ndim != 1:
++            position_ids = position_ids.reshape(-1)
+         seq_len = None
+ 
+-    q = q.view(-1, q.shape[-2], q.shape[-1])
+-    k = k.view(-1, k.shape[-2], k.shape[-1])
++    if q.ndim != 3:
++        q = q.reshape(-1, q.shape[-2], q.shape[-1])
++    if k.ndim != 3:
++        k = k.reshape(-1, k.shape[-2], k.shape[-1])
+ 
+     n_tokens, q_heads, head_dim = q.shape
+ 
+@@ -257,6 +387,38 @@ def apply_rotary_pos_emb(
+     padded_head_dim = max(triton.next_power_of_2(head_dim), 16)
+ 
+     if inplace:
++        k_heads = k.shape[-2]
++        if (
++            not rotary_interleaved
++            and position_ids is not None
++            and q.stride(-1) == 1
++            and k.stride(-1) == 1
++            and head_dim % 2 == 0
++        ):
++            if not torch.compiler.is_compiling() and n_tokens == 0:
++                return q.view(q_shape), k.view(k_shape)
++            if torch.compiler.is_compiling() and not torch.is_grad_enabled():
++                oq, ok = _rotary_neox_fast_op(q, k, cos, sin, position_ids)
++                return oq.view(q_shape), ok.view(k_shape)
++            half_dim = head_dim // 2
++            padded_half_dim = max(triton.next_power_of_2(half_dim), 16)
++            total_heads = q_heads + k_heads
++            heads_per_cta = 4
++            num_warps = 2 if padded_half_dim * heads_per_cta <= 256 else 4
++            grid = (n_tokens, triton.cdiv(total_heads, heads_per_cta))
++            p_stride = position_ids.stride(0)
++            with torch_device_fn.device(q.device):
++                _rotary_neox_inplace_fast_kernel[grid](
++                    q, k, q, k, cos, sin, position_ids, n_tokens,
++                    q.stride(0), q.stride(1), k.stride(0), k.stride(1),
++                    q.stride(0), q.stride(1), k.stride(0), k.stride(1),
++                    p_stride, cos.stride(0), sin.stride(0),
++                    NUM_Q_HEADS=q_heads, NUM_K_HEADS=k_heads,
++                    HALF_DIM=half_dim, PADDED_HALF_DIM=padded_half_dim,
++                    HEADS_PER_CTA=heads_per_cta, num_warps=num_warps,
++                )
++            return q.view(q_shape), k.view(k_shape)
++
+         grid = (n_tokens,)
+         with torch_device_fn.device(q.device):
+             apply_rotary_pos_emb_inplace_kernel[grid](
+diff --git a/src/flag_gems/fused/silu_and_mul.py b/src/flag_gems/fused/silu_and_mul.py
+index c5b182dfab9..64647ad28ab 100644
+--- a/src/flag_gems/fused/silu_and_mul.py
++++ b/src/flag_gems/fused/silu_and_mul.py
+@@ -18,6 +18,7 @@
+ import triton
+ import triton.language as tl
+ 
++from flag_gems.runtime import torch_device_fn
+ from flag_gems.utils import pointwise_dynamic
+ 
+ logger = logging.getLogger(__name__)
+@@ -45,6 +46,137 @@ def silu_and_mul_grad_kernel(x, y, dgrad):
+     return dx, dy
+ 
+ 
++@triton.jit(do_not_specialize=["M", "D", "stride_xm", "stride_om"])
++def _silu_and_mul_merged_kernel(
++    X_ptr,
++    O_ptr,
++    M,
++    D,
++    stride_xm,
++    stride_om,
++    BLOCK_N: tl.constexpr,
++    EVEN_N: tl.constexpr,
++):
++    row = tl.program_id(0).to(tl.int64)
++    col_blk = tl.program_id(1)
++    cols = col_blk * BLOCK_N + tl.arange(0, BLOCK_N)
++    x_row_ptr = X_ptr + row * stride_xm
++    o_row_ptr = O_ptr + row * stride_om
++
++    if EVEN_N:
++        gate = tl.load(x_row_ptr + cols).to(tl.float32)
++        up = tl.load(x_row_ptr + D + cols).to(tl.float32)
++        out = tl.fdiv(gate, 1.0 + tl.exp(-gate)) * up
++        tl.store(o_row_ptr + cols, out.to(O_ptr.dtype.element_ty))
++    else:
++        mask = cols < D
++        gate = tl.load(x_row_ptr + cols, mask=mask, other=0.0).to(tl.float32)
++        up = tl.load(x_row_ptr + D + cols, mask=mask, other=0.0).to(tl.float32)
++        out = tl.fdiv(gate, 1.0 + tl.exp(-gate)) * up
++        tl.store(o_row_ptr + cols, out.to(O_ptr.dtype.element_ty), mask=mask)
++
++
++@triton.jit(do_not_specialize=["M", "D", "stride_am", "stride_bm", "stride_om"])
++def _silu_and_mul_2d_kernel(
++    A_ptr,
++    B_ptr,
++    O_ptr,
++    M,
++    D,
++    stride_am,
++    stride_bm,
++    stride_om,
++    BLOCK_N: tl.constexpr,
++    EVEN_N: tl.constexpr,
++):
++    row = tl.program_id(0).to(tl.int64)
++    col_blk = tl.program_id(1)
++    cols = col_blk * BLOCK_N + tl.arange(0, BLOCK_N)
++    a_ptrs = A_ptr + row * stride_am + cols
++    b_ptrs = B_ptr + row * stride_bm + cols
++    o_ptrs = O_ptr + row * stride_om + cols
++
++    if EVEN_N:
++        a = tl.load(a_ptrs).to(tl.float32)
++        b = tl.load(b_ptrs).to(tl.float32)
++        out = tl.fdiv(a, 1.0 + tl.exp(-a)) * b
++        tl.store(o_ptrs, out.to(O_ptr.dtype.element_ty))
++    else:
++        mask = cols < D
++        a = tl.load(a_ptrs, mask=mask, other=0.0).to(tl.float32)
++        b = tl.load(b_ptrs, mask=mask, other=0.0).to(tl.float32)
++        out = tl.fdiv(a, 1.0 + tl.exp(-a)) * b
++        tl.store(o_ptrs, out.to(O_ptr.dtype.element_ty), mask=mask)
++
++
++@torch.library.custom_op("flag_gems::_silu_and_mul_merged_op", mutates_args=())
++def _silu_and_mul_merged_op(x_2d: torch.Tensor) -> torch.Tensor:
++    M, two_d = x_2d.shape
++    d = two_d // 2
++    out = torch.empty((M, d), device=x_2d.device, dtype=x_2d.dtype)
++    if M == 0 or d == 0:
++        return out
++    block_n = 1024 if d >= 1024 else max(64, triton.next_power_of_2(d))
++    num_warps = 4 if block_n <= 1024 else 8
++    grid = (M, triton.cdiv(d, block_n))
++    with torch_device_fn.device(x_2d.device):
++        _silu_and_mul_merged_kernel[grid](
++            x_2d,
++            out,
++            M,
++            d,
++            x_2d.stride(0),
++            d,
++            BLOCK_N=block_n,
++            EVEN_N=(d % block_n == 0),
++            num_warps=num_warps,
++        )
++    return out
++
++
++@_silu_and_mul_merged_op.register_fake
++def _(x_2d: torch.Tensor) -> torch.Tensor:
++    M, two_d = x_2d.shape
++    return x_2d.new_empty((M, two_d // 2))
++
++
++def silu_and_mul_merged(x: torch.Tensor) -> torch.Tensor:
++    """Fast fused SiLU-and-Mul directly on [..., 2*D] tensor without slice views."""
++    orig_shape = x.shape
++    two_d = orig_shape[-1]
++    d = two_d // 2
++    out_shape = orig_shape[:-1] + (d,)
++    M = x.numel() // two_d
++    if not torch.compiler.is_compiling() and (M == 0 or d == 0):
++        return torch.empty(out_shape, device=x.device, dtype=x.dtype)
++
++    if x.stride(-1) == 1 and (x.ndim == 2 or x.is_contiguous()):
++        x_2d = x if x.ndim == 2 else x.view(M, two_d)
++        if torch.compiler.is_compiling() and not torch.is_grad_enabled():
++            out = _silu_and_mul_merged_op(x_2d)
++            return out if len(out_shape) == 2 else out.view(out_shape)
++        out = torch.empty((M, d), device=x.device, dtype=x.dtype)
++        block_n = 1024 if d >= 1024 else max(64, triton.next_power_of_2(d))
++        num_warps = 4 if block_n <= 1024 else 8
++        grid = (M, triton.cdiv(d, block_n))
++        with torch_device_fn.device(x.device):
++            _silu_and_mul_merged_kernel[grid](
++                x_2d,
++                out,
++                M,
++                d,
++                x_2d.stride(0),
++                d,
++                BLOCK_N=block_n,
++                EVEN_N=(d % block_n == 0),
++                num_warps=num_warps,
++            )
++        return out if len(out_shape) == 2 else out.view(out_shape)
++
++    x1, x2 = x[..., :d], x[..., d:]
++    return silu_and_mul(x1, x2)
++
++
+ class SiluAndMul(torch.autograd.Function):
+     @staticmethod
+     def forward(ctx, A, B):
+@@ -60,7 +192,58 @@ def backward(ctx, grad_output):
+ 
+ 
+ def silu_and_mul(A, B):
+-    return SiluAndMul.apply(A, B)
++    if torch.is_grad_enabled() and (A.requires_grad or B.requires_grad):
++        return SiluAndMul.apply(A, B)
++
++    if (
++        A.shape == B.shape
++        and A.dtype == B.dtype
++        and A.ndim >= 1
++        and A.stride(-1) == 1
++        and B.stride(-1) == 1
++    ):
++        d = A.shape[-1]
++        M = A.numel() // d if d > 0 else 0
++        if M > 0 and d > 0 and (A.ndim <= 2 or (A.stride(-2) == B.stride(-2))):
++            stride_am = A.stride(-2) if A.ndim >= 2 else d
++            stride_bm = B.stride(-2) if B.ndim >= 2 else d
++            if A.ndim <= 2:
++                out = torch.empty_like(A, memory_format=torch.contiguous_format)
++                block_n = 1024 if d >= 1024 else max(64, triton.next_power_of_2(d))
++                num_warps = 4 if block_n <= 1024 else 8
++                grid = (M, triton.cdiv(d, block_n))
++                if torch.cuda.current_device() != A.device.index:
++                    with torch_device_fn.device(A.device):
++                        _silu_and_mul_2d_kernel[grid](
++                            A,
++                            B,
++                            out,
++                            M,
++                            d,
++                            stride_am,
++                            stride_bm,
++                            d,
++                            BLOCK_N=block_n,
++                            EVEN_N=(d % block_n == 0),
++                            num_warps=num_warps,
++                        )
++                else:
++                    _silu_and_mul_2d_kernel[grid](
++                        A,
++                        B,
++                        out,
++                        M,
++                        d,
++                        stride_am,
++                        stride_bm,
++                        d,
++                        BLOCK_N=block_n,
++                        EVEN_N=(d % block_n == 0),
++                        num_warps=num_warps,
++                    )
++                return out
++
++    return silu_and_mul_kernel(A, B)
+ 
+ 
+ def silu_and_mul_out(A, B, out):
+diff --git a/src/flag_gems/fused/top_p_sampling.py b/src/flag_gems/fused/top_p_sampling.py
+new file mode 100644
+index 00000000000..e17ab79ad04
+--- /dev/null
++++ b/src/flag_gems/fused/top_p_sampling.py
+@@ -0,0 +1,240 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++"""Sort-free, exact top-p (nucleus) sampling fused into one Triton kernel.
++
++Algorithm ("candidate-first nucleus sampling")
++----------------------------------------------
++Let w_i = exp(l_i - m), z = sum_i w_i.  The nucleus is
++    K = { i : mass(l > l_i) < p * z }          (*)
++i.e. a token is kept iff the probability mass of tokens with a strictly
++larger logit is still below p (the top token is always kept; ties at the
++boundary follow stable ascending sort order).  Sampling from softmax(l)
++renormalised on K is equivalent to the Gumbel-max race restricted to K:
++    i* = argmax_{i in K} (l_i + g_i),   g_i = -log(-log(1 - u_i)), u_i ~ U[0,1).
++
++One program handles one row and executes:
++  pass 1  row max m  +  global top-4 of the race scores l_i + g_i over the
++          whole vocabulary (running insertion sort in registers).
++  pass 2  z = sum_i w_i and, for each of the 4 candidates c, A_c =
++          mass(l > l_c) + w_c * #{j : l_j == l_c, j > c}.  Candidate c is in K
++          iff A_c < p * z (or p >= 1.0).  The first kept candidate in race
++          order is i*.  The probability that none of the 4 best scores lies in
++          K is at most (1 - p)^4 (~6.25e-6 for p = 0.95).
++  fallback (only when no candidate is kept): exact boundary bisection with
++          minimum-element-above-pivot tracking, followed by restricted argmax
++          using the identical Philox counter stream as pass 1.
++"""
++
++import logging
++
++import torch
++import triton
++import triton.language as tl
++
++from flag_gems.runtime import torch_device_fn
++from flag_gems.utils import libentry
++from flag_gems.utils.random_utils import philox_backend_seed_offset, uniform
++
++logger = logging.getLogger(__name__)
++
++
++@triton.jit
++def _gumbel(philox_seed, philox_offset, counter):
++    u0, u1, u2, u3 = uniform(philox_seed, philox_offset, counter)
++    e = tl.maximum(-tl.log(1.0 - u0), 1e-30)
++    return -tl.log(e)
++
++
++@libentry()
++@triton.jit(do_not_specialize=["philox_seed", "philox_offset"])
++def _top_p_sampling_kernel(
++    logits_ptr,
++    stride_row,
++    p_ptr,
++    out_ptr,
++    philox_seed,
++    philox_offset,
++    V: tl.constexpr,
++    BLOCK: tl.constexpr,
++    NUM_TILES: tl.constexpr,
++    N_ITERS: tl.constexpr,
++):
++    row = tl.program_id(0)
++    base = logits_ptr + row.to(tl.int64) * stride_row
++    offs0 = tl.arange(0, BLOCK)
++    neg_inf = float("-inf")
++    pos_inf = float("inf")
++    cbase = row * V
++
++    # ---- pass 1: row max + global top-4 of the Gumbel race ----------------
++    m = neg_inf
++    c0 = neg_inf
++    c1 = neg_inf
++    c2 = neg_inf
++    c3 = neg_inf
++    i0 = 0
++    i1 = 0
++    i2 = 0
++    i3 = 0
++    for t in range(0, NUM_TILES):
++        offs = t * BLOCK + offs0
++        valid = offs < V
++        x = tl.load(base + offs, mask=valid, other=neg_inf)
++        m = tl.maximum(m, tl.max(x, 0))
++        g = _gumbel(philox_seed, philox_offset, cbase + offs)
++        s = tl.where(valid & (x > neg_inf), x + g, neg_inf)
++        for r in range(0, 4):
++            v = tl.max(s, 0)
++            j = tl.argmax(s, 0)
++            idx = t * BLOCK + j
++            s = tl.where(offs0 == j, neg_inf, s)
++            gt0 = v > c0
++            gt1 = v > c1
++            gt2 = v > c2
++            gt3 = v > c3
++            c3 = tl.where(gt3, tl.where(gt2, c2, v), c3)
++            i3 = tl.where(gt3, tl.where(gt2, i2, idx), i3)
++            c2 = tl.where(gt2, tl.where(gt1, c1, v), c2)
++            i2 = tl.where(gt2, tl.where(gt1, i1, idx), i2)
++            c1 = tl.where(gt1, tl.where(gt0, c0, v), c1)
++            i1 = tl.where(gt1, tl.where(gt0, i0, idx), i1)
++            c0 = tl.where(gt0, v, c0)
++            i0 = tl.where(gt0, idx, i0)
++
++    if m == neg_inf:
++        tl.store(out_ptr + row, tl.zeros((), dtype=tl.int64))
++        return
++
++    p = tl.load(p_ptr + row)
++    if p >= 1.0:
++        tl.store(out_ptr + row, i0.to(tl.int64))
++        return
++
++    l0 = tl.load(base + i0)
++    l1 = tl.load(base + i1)
++    l2 = tl.load(base + i2)
++    l3 = tl.load(base + i3)
++
++    # ---- pass 2: partition function + mass ahead of each candidate --------
++    z = 0.0
++    a0 = 0.0
++    a1 = 0.0
++    a2 = 0.0
++    a3 = 0.0
++    lo = pos_inf
++    for t in range(0, NUM_TILES):
++        offs = t * BLOCK + offs0
++        x = tl.load(base + offs, mask=offs < V, other=neg_inf)
++        finite = x > neg_inf
++        e = tl.where(finite, tl.exp(x - m), 0.0)
++        z += tl.sum(e, 0)
++        a0 += tl.sum(tl.where((x > l0) | ((x == l0) & (offs > i0)), e, 0.0), 0)
++        a1 += tl.sum(tl.where((x > l1) | ((x == l1) & (offs > i1)), e, 0.0), 0)
++        a2 += tl.sum(tl.where((x > l2) | ((x == l2) & (offs > i2)), e, 0.0), 0)
++        a3 += tl.sum(tl.where((x > l3) | ((x == l3) & (offs > i3)), e, 0.0), 0)
++        lo = tl.minimum(lo, tl.min(tl.where(finite, x, pos_inf), 0))
++
++    target = p * z
++    k0 = a0 < target
++    k1 = a1 < target
++    k2 = a2 < target
++    k3 = a3 < target
++    chosen = tl.where(k0, i0, tl.where(k1, i1, tl.where(k2, i2, tl.where(k3, i3, -1))))
++    need_fallback = chosen < 0
++
++    # ---- fallback: exact boundary by bisection, then restricted argmax ----
++    n_iters = tl.where(need_fallback, N_ITERS, 0)
++    lo_b = lo - 1.0
++    hi_b = m
++    thr = m
++    found = 0
++    for it in range(0, n_iters):
++        piv = 0.5 * (lo_b + hi_b)
++        S = 0.0
++        ml = pos_inf
++        cnt = 0.0
++        for t in range(0, NUM_TILES):
++            offs = t * BLOCK + offs0
++            x = tl.load(base + offs, mask=offs < V, other=neg_inf)
++            above = x > piv
++            S += tl.sum(tl.where(above, tl.exp(x - m), 0.0), 0)
++            tmin = tl.min(tl.where(above, x, pos_inf), 0)
++            tcnt = tl.sum(tl.where(above & (x == tmin), 1.0, 0.0), 0)
++            cnt = tl.where(tmin < ml, tcnt, tl.where(tmin == ml, cnt + tcnt, cnt))
++            ml = tl.minimum(ml, tmin)
++        mass_above_ml = S - tl.exp(ml - m) * cnt
++        ok = (found == 0) & (S >= target) & (mass_above_ml < target)
++        thr = tl.where(ok, ml, thr)
++        found = tl.where(ok, 1, found)
++        go_down = (found == 0) & (S < target)
++        go_up = (found == 0) & (S >= target)
++        hi_b = tl.where(go_down, piv, hi_b)
++        lo_b = tl.where(go_up, piv, lo_b)
++    thr = tl.where(found == 1, thr, lo_b)
++
++    n_tiles_fb = tl.where(need_fallback, NUM_TILES, 0)
++    best = neg_inf
++    best_idx = 0
++    for t in range(0, n_tiles_fb):
++        offs = t * BLOCK + offs0
++        x = tl.load(base + offs, mask=offs < V, other=neg_inf)
++        kept = (offs < V) & (x >= thr) & (x > lo_b)
++        g = _gumbel(philox_seed, philox_offset, cbase + offs)
++        s = tl.where(kept, x + g, neg_inf)
++        tmax = tl.max(s, 0)
++        tidx = t * BLOCK + tl.argmax(s, 0)
++        best_idx = tl.where(tmax > best, tidx, best_idx)
++        best = tl.maximum(best, tmax)
++    chosen = tl.where(need_fallback, best_idx, chosen)
++    tl.store(out_ptr + row, chosen.to(tl.int64))
++
++
++def top_p_sampling_from_logits(
++    logits: torch.Tensor,
++    top_p: torch.Tensor,
++    *,
++    generator=None,
++    n_iters: int = 30,
++) -> torch.Tensor:
++    """Sample one token id per row from the exact top-p nucleus of ``logits``."""
++    logger.debug("GEMS TOP_P_SAMPLING_FROM_LOGITS")
++    assert logits.dim() == 2
++    if logits.dtype != torch.float32:
++        logits = logits.float()
++    if logits.stride(1) != 1:
++        logits = logits.contiguous()
++    B, V = logits.shape
++    out = torch.empty((B,), dtype=torch.int64, device=logits.device)
++    if B == 0:
++        return out
++    if top_p.dtype != torch.float32 or not top_p.is_contiguous():
++        top_p = top_p.to(dtype=torch.float32).contiguous()
++    BLOCK = 4096 if V >= 4096 else triton.next_power_of_2(V)
++    NUM_TILES = triton.cdiv(V, BLOCK)
++    philox_seed, philox_offset = philox_backend_seed_offset(B * V, generator=generator)
++    with torch_device_fn.device(logits.device):
++        _top_p_sampling_kernel[(B,)](
++            logits,
++            logits.stride(0),
++            top_p,
++            out,
++            philox_seed,
++            philox_offset,
++            V=V,
++            BLOCK=BLOCK,
++            NUM_TILES=NUM_TILES,
++            N_ITERS=n_iters,
++            num_warps=8,
++        )
++    return out
+diff --git a/src/flag_gems/fused/topk_topp_sampler.py b/src/flag_gems/fused/topk_topp_sampler.py
+new file mode 100644
+index 00000000000..b8c2a52d847
+--- /dev/null
++++ b/src/flag_gems/fused/topk_topp_sampler.py
+@@ -0,0 +1,592 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++import logging
++from typing import Optional
++
++import torch
++import triton
++import triton.language as tl
++
++from flag_gems.runtime import torch_device_fn
++from flag_gems.utils.random_utils import (
++    philox_backend_seed_offset,
++    uint_to_uniform_float,
++)
++
++logger = logging.getLogger(__name__)
++
++
++@triton.jit
++def _next_up_f32(x):
++    """Smallest normal IEEE-754 float32 strictly greater than finite x (FTZ-safe)."""
++    x = (x + 0.0).to(tl.float32)
++    bits = x.to(tl.int32, bitcast=True)
++    next_bits = tl.where(x >= 0.0, bits + 1, bits - 1)
++    cand = next_bits.to(tl.float32, bitcast=True)
++    fallback = tl.where(
++        x == 0.0,
++        tl.full((), 1.17549435e-38, tl.float32),
++        x + tl.abs(x) * 1.1920929e-7 + 1.17549435e-38,
++    )
++    return tl.where(cand > x, cand, fallback).to(tl.float32)
++
++
++@triton.jit
++def _argmax_combine(v1, i1, v2, i2):
++    gt = (v1 > v2) | ((v1 == v2) & (i1 < i2))
++    return tl.where(gt, v1, v2), tl.where(gt, i1, i2)
++
++
++@triton.jit
++def _row_stats_pass(row_ptr, vocab_size, floor_val, BLOCK_V: tl.constexpr):
++    """Single register-accumulated pass computing (max_val, min_valid, sum_exp, count_valid)."""
++    neg_inf = tl.full((), -float("inf"), tl.float32)
++    pos_inf = tl.full((), float("inf"), tl.float32)
++
++    m_vec = tl.full((BLOCK_V,), -float("inf"), tl.float32)
++    s_vec = tl.zeros((BLOCK_V,), dtype=tl.float32)
++    min_vec = tl.full((BLOCK_V,), float("inf"), tl.float32)
++    cnt_vec = tl.zeros((BLOCK_V,), dtype=tl.int32)
++
++    for start in range(0, vocab_size, BLOCK_V):
++        cols = start + tl.arange(0, BLOCK_V)
++        mask = cols < vocab_size
++        z = tl.load(row_ptr + cols, mask=mask, other=neg_inf).to(tl.float32)
++        valid = mask & (z > neg_inf) & (z >= floor_val)
++        zv = tl.where(valid, z, neg_inf)
++
++        new_m = tl.maximum(m_vec, zv)
++        scale_old = tl.where(new_m > neg_inf, tl.exp(m_vec - new_m), 0.0)
++        add_new = tl.where(valid, tl.exp(zv - new_m), 0.0)
++        s_vec = s_vec * scale_old + add_new
++        m_vec = new_m
++
++        min_vec = tl.minimum(min_vec, tl.where(valid, z, pos_inf))
++        cnt_vec += valid.to(tl.int32)
++
++    max_val = tl.max(m_vec, axis=0)
++    min_valid = tl.min(min_vec, axis=0)
++    count_valid = tl.sum(cnt_vec, axis=0)
++    sum_exp = tl.sum(
++        tl.where(m_vec > neg_inf, s_vec * tl.exp(m_vec - max_val), 0.0), axis=0
++    )
++    return max_val, min_valid, sum_exp, count_valid
++
++
++@triton.jit
++def _find_topk_cutoff(
++    row_ptr, vocab_size, k_val, min_finite, max_val, BLOCK_V: tl.constexpr
++):
++    """Exact multi-pivot IEEE-754 search with hoisted cross-warp reductions."""
++    neg_inf = tl.full((), -float("inf"), tl.float32)
++    pos_inf = tl.full((), float("inf"), tl.float32)
++
++    cnt_max_vec = tl.zeros((BLOCK_V,), dtype=tl.int32)
++    for start in range(0, vocab_size, BLOCK_V):
++        cols = start + tl.arange(0, BLOCK_V)
++        mask = cols < vocab_size
++        z = tl.load(row_ptr + cols, mask=mask, other=neg_inf).to(tl.float32)
++        cnt_max_vec += (mask & (z >= max_val)).to(tl.int32)
++    cnt_max = tl.sum(cnt_max_vec, axis=0)
++
++    low = min_finite.to(tl.float32)
++    high = max_val.to(tl.float32)
++    v_res = max_val.to(tl.float32)
++    done = tl.where(cnt_max >= k_val, 1, 0).to(tl.int32)
++    it = tl.full((), 0, tl.int32)
++    piv_idx = (tl.arange(0, 8) + 1).to(tl.float32)
++
++    while (it < 8) & (done == 0):
++        step = (high - low) * (1.0 / 9.0)
++        pivs = low + piv_idx * step
++        cnt_acc = tl.zeros((BLOCK_V, 8), dtype=tl.int32)
++        b_min_vec = tl.full((BLOCK_V,), float("inf"), tl.float32)
++        b_max_vec = tl.full((BLOCK_V,), -float("inf"), tl.float32)
++
++        for start in range(0, vocab_size, BLOCK_V):
++            cols = start + tl.arange(0, BLOCK_V)
++            mask = cols < vocab_size
++            z = tl.load(row_ptr + cols, mask=mask, other=neg_inf).to(tl.float32)
++            in_band = mask & (z >= low) & (z < high)
++            b_min_vec = tl.minimum(b_min_vec, tl.where(in_band, z, pos_inf))
++            b_max_vec = tl.maximum(b_max_vec, tl.where(in_band, z, neg_inf))
++            ge = mask[:, None] & (z[:, None] >= pivs[None, :])
++            cnt_acc += ge.to(tl.int32)
++
++        b_min = tl.min(b_min_vec, axis=0)
++        b_max = tl.max(b_max_vec, axis=0)
++        cnt_ge = tl.sum(cnt_acc, axis=0)
++
++        single_val = b_min >= b_max
++        ok = cnt_ge >= k_val
++        cand_low = tl.max(tl.where(ok, pivs, low), axis=0)
++        cand_high = tl.min(tl.where(ok, high, pivs), axis=0)
++        cand_low = tl.maximum(cand_low, b_min)
++        hi_cap = _next_up_f32(tl.minimum(b_max, high))
++        cand_high = tl.minimum(cand_high, hi_cap)
++
++        converged = single_val | (cand_high <= cand_low)
++        v_res = tl.where(
++            single_val, tl.where(b_min <= b_max, b_min, low), cand_low
++        ).to(tl.float32)
++        low = cand_low.to(tl.float32)
++        high = cand_high.to(tl.float32)
++        done = tl.where(converged, 1, 0).to(tl.int32)
++        it += 1
++
++    return tl.where(done != 0, v_res, low).to(tl.float32)
++
++
++@triton.jit
++def _find_topp_cutoff(
++    row_ptr,
++    vocab_size,
++    p_eff,
++    floor_val,
++    min_valid,
++    max_val,
++    sum_exp,
++    BLOCK_V: tl.constexpr,
++):
++    """Exact multi-pivot IEEE-754 search for Top-P with hoisted register reductions."""
++    neg_inf = tl.full((), -float("inf"), tl.float32)
++    pos_inf = tl.full((), float("inf"), tl.float32)
++    target_mass = (p_eff * sum_exp).to(tl.float32)
++
++    cnt_max_vec = tl.zeros((BLOCK_V,), dtype=tl.int32)
++    for start in range(0, vocab_size, BLOCK_V):
++        cols = start + tl.arange(0, BLOCK_V)
++        mask = cols < vocab_size
++        z = tl.load(row_ptr + cols, mask=mask, other=neg_inf).to(tl.float32)
++        cnt_max_vec += (mask & (z >= max_val)).to(tl.int32)
++    mass_at_max = tl.sum(cnt_max_vec, axis=0).to(tl.float32)
++
++    rem_mass = tl.maximum((1.0 - p_eff) * sum_exp, 1e-7 * sum_exp)
++    analytic_low = max_val + tl.log(rem_mass / vocab_size.to(tl.float32)) - 0.05
++    low = tl.maximum(min_valid, analytic_low).to(tl.float32)
++    low = tl.where(low < max_val, low, min_valid).to(tl.float32)
++    high = max_val.to(tl.float32)
++    v_res = max_val.to(tl.float32)
++    done = tl.where((mass_at_max >= target_mass) | (p_eff <= 0.0), 1, 0).to(tl.int32)
++    it = tl.full((), 0, tl.int32)
++    piv_idx = (tl.arange(0, 8) + 1).to(tl.float32)
++
++    while (it < 8) & (done == 0):
++        step = (high - low) * (1.0 / 9.0)
++        pivs = low + piv_idx * step
++        piv0 = tl.min(pivs, axis=0)
++        mass_acc = tl.zeros((BLOCK_V, 8), dtype=tl.float32)
++        b_min_vec = tl.full((BLOCK_V,), float("inf"), tl.float32)
++        b_max_vec = tl.full((BLOCK_V,), -float("inf"), tl.float32)
++
++        for start in range(0, vocab_size, BLOCK_V):
++            cols = start + tl.arange(0, BLOCK_V)
++            mask = cols < vocab_size
++            z = tl.load(row_ptr + cols, mask=mask, other=neg_inf).to(tl.float32)
++            valid = mask & (z >= floor_val) & (z > neg_inf)
++            in_band = valid & (z >= low) & (z < high)
++            b_min_vec = tl.minimum(b_min_vec, tl.where(in_band, z, pos_inf))
++            b_max_vec = tl.maximum(b_max_vec, tl.where(in_band, z, neg_inf))
++            ez = tl.where(valid & (z >= piv0), tl.exp(z - max_val), 0.0)
++            mass_acc += tl.where(z[:, None] >= pivs[None, :], ez[:, None], 0.0)
++
++        b_min = tl.min(b_min_vec, axis=0)
++        b_max = tl.max(b_max_vec, axis=0)
++        mass_ge = tl.sum(mass_acc, axis=0)
++
++        single_val = b_min >= b_max
++        ok = mass_ge >= target_mass
++        cand_low = tl.max(tl.where(ok, pivs, low), axis=0)
++        cand_high = tl.min(tl.where(ok, high, pivs), axis=0)
++        cand_low = tl.maximum(cand_low, b_min)
++        hi_cap = _next_up_f32(tl.minimum(b_max, high))
++        cand_high = tl.minimum(cand_high, hi_cap)
++
++        converged = single_val | (cand_high <= cand_low)
++        v_res = tl.where(
++            single_val, tl.where(b_min <= b_max, b_min, low), cand_low
++        ).to(tl.float32)
++        low = cand_low.to(tl.float32)
++        high = cand_high.to(tl.float32)
++        done = tl.where(converged, 1, 0).to(tl.int32)
++        it += 1
++
++    v_p = tl.where(done != 0, v_res, low).to(tl.float32)
++
++    # Exact tie count at z == v_p with hoisted register reductions
++    mass_gt_vec = tl.zeros((BLOCK_V,), dtype=tl.float32)
++    mass_lt_vec = tl.zeros((BLOCK_V,), dtype=tl.float32)
++    cnt_gt_vec = tl.zeros((BLOCK_V,), dtype=tl.int32)
++    cnt_eq_vec = tl.zeros((BLOCK_V,), dtype=tl.int32)
++    for start in range(0, vocab_size, BLOCK_V):
++        cols = start + tl.arange(0, BLOCK_V)
++        mask = cols < vocab_size
++        z = tl.load(row_ptr + cols, mask=mask, other=neg_inf).to(tl.float32)
++        valid = mask & (z >= floor_val) & (z > neg_inf)
++        is_gt = valid & (z > v_p)
++        is_eq = valid & (z == v_p)
++        is_lt = valid & (z < v_p)
++        ez = tl.where(valid & (z != v_p), tl.exp(z - max_val), 0.0)
++        mass_gt_vec += tl.where(is_gt, ez, 0.0)
++        mass_lt_vec += tl.where(is_lt, ez, 0.0)
++        cnt_gt_vec += is_gt.to(tl.int32)
++        cnt_eq_vec += is_eq.to(tl.int32)
++
++    mass_gt = tl.sum(mass_gt_vec, axis=0)
++    mass_lt = tl.sum(mass_lt_vec, axis=0)
++    cnt_gt = tl.sum(cnt_gt_vec, axis=0)
++    cnt_eq = tl.sum(cnt_eq_vec, axis=0)
++
++    exp_vp = tl.exp(v_p - max_val)
++    total_mass = mass_lt + cnt_eq.to(tl.float32) * exp_vp + mass_gt
++    thresh_drop = (1.0 - p_eff) * total_mass
++    can_drop = (cnt_eq > 1) & (exp_vp > 0.0) & (thresh_drop >= mass_lt)
++    raw_drop = tl.where(
++        can_drop,
++        tl.math.floor(
++            (thresh_drop - mass_lt)
++            / tl.maximum(exp_vp, tl.full((), 1.17549435e-38, tl.float32))
++        ).to(tl.int32),
++        0,
++    )
++    m_drop = tl.minimum(cnt_eq, tl.maximum(raw_drop, 0))
++    m_keep = cnt_eq - m_drop
++    m_keep = tl.where((cnt_gt == 0) & (m_keep <= 0), 1, m_keep)
++    return v_p, m_keep, cnt_eq
++
++
++@triton.jit(
++    do_not_specialize=[
++        "batch_size",
++        "vocab_size",
++        "logits_stride",
++        "philox_seed",
++        "philox_offset",
++    ]
++)
++def _topk_topp_sample_kernel(
++    LOGITS_PTR,
++    K_PTR,
++    P_PTR,
++    OUT_PTR,
++    batch_size,
++    vocab_size,
++    logits_stride,
++    philox_seed,
++    philox_offset,
++    HAS_K: tl.constexpr,
++    HAS_P: tl.constexpr,
++    BLOCK_V: tl.constexpr,
++):
++    row_id = tl.program_id(0)
++    if row_id >= batch_size:
++        return
++
++    row_ptr = LOGITS_PTR + row_id.to(tl.int64) * logits_stride.to(tl.int64)
++    neg_inf = tl.full((), -float("inf"), tl.float32)
++
++    if HAS_K:
++        k_raw = tl.load(K_PTR + row_id).to(tl.int32)
++        active_k = (k_raw > 0) & (k_raw < vocab_size)
++        k_val = tl.where(active_k, k_raw, vocab_size)
++    else:
++        active_k = tl.full((), 0, tl.int1)
++        k_val = vocab_size
++
++    if HAS_P:
++        p_raw = tl.load(P_PTR + row_id).to(tl.float32)
++        active_p = p_raw < 1.0
++        p_eff = tl.maximum(p_raw, 0.0)
++    else:
++        active_p = tl.full((), 0, tl.int1)
++        p_eff = tl.full((), 1.0, tl.float32)
++
++    v_cut = neg_inf
++    m_keep = vocab_size
++    cnt_eq = tl.full((), 0, tl.int32)
++
++    if active_k:
++        max_val, min_valid, sum_exp, cnt_valid = _row_stats_pass(
++            row_ptr, vocab_size, neg_inf, BLOCK_V
++        )
++        if cnt_valid == 0:
++            tl.store(OUT_PTR + row_id, tl.full((), 0, tl.int64))
++            return
++        if cnt_valid > k_val:
++            v_k = _find_topk_cutoff(
++                row_ptr, vocab_size, k_val, min_valid, max_val, BLOCK_V
++            )
++        else:
++            v_k = neg_inf
++        if active_p:
++            max_k, min_k, sum_exp_k, _ = _row_stats_pass(
++                row_ptr, vocab_size, v_k, BLOCK_V
++            )
++            v_cut, m_keep, cnt_eq = _find_topp_cutoff(
++                row_ptr, vocab_size, p_eff, v_k, min_k, max_k, sum_exp_k, BLOCK_V
++            )
++        else:
++            v_cut = v_k
++    elif active_p:
++        max_val, min_valid, sum_exp, cnt_valid = _row_stats_pass(
++            row_ptr, vocab_size, neg_inf, BLOCK_V
++        )
++        if cnt_valid == 0:
++            tl.store(OUT_PTR + row_id, tl.full((), 0, tl.int64))
++            return
++        v_cut, m_keep, cnt_eq = _find_topp_cutoff(
++            row_ptr, vocab_size, p_eff, neg_inf, min_valid, max_val, sum_exp, BLOCK_V
++        )
++
++    # Final single fused Gumbel-Max sampling pass (log-space: argmax(z - log(-log(u))))
++    seed64 = philox_seed.to(tl.int64)
++    row_rng_base = philox_offset.to(tl.int64) + row_id.to(tl.int64) * vocab_size.to(
++        tl.int64
++    )
++    c0_base = (row_rng_base & 0xFFFFFFFF).to(tl.uint32)
++    c1_base = ((row_rng_base >> 32) & 0xFFFFFFFF).to(tl.uint32)
++
++    best_scores = tl.full((BLOCK_V,), -float("inf"), tl.float32)
++    best_indices = tl.zeros((BLOCK_V,), dtype=tl.int32)
++    ties_seen = tl.full((), 0, tl.int32)
++    partial_ties = m_keep < cnt_eq
++
++    for start in range(0, vocab_size, BLOCK_V):
++        cols = start + tl.arange(0, BLOCK_V)
++        mask = cols < vocab_size
++        z = tl.load(row_ptr + cols, mask=mask, other=neg_inf).to(tl.float32)
++        finite = mask & (z > neg_inf)
++
++        if partial_ties:
++            is_gt = finite & (z > v_cut)
++            is_eq = finite & (z == v_cut)
++            eq_f32 = is_eq.to(tl.float32)
++            eq_rank = ties_seen + tl.cumsum(eq_f32, axis=0).to(tl.int32)
++            ties_seen += tl.sum(eq_f32, axis=0).to(tl.int32)
++            keep = is_gt | (is_eq & (eq_rank <= m_keep))
++        else:
++            keep = finite & (z >= v_cut)
++
++        u_cols = cols.to(tl.uint32)
++        c0 = c0_base + u_cols
++        c1 = c1_base + (c0 < c0_base).to(tl.uint32)
++        zeros_u32 = u_cols * 0
++        r0, _, _, _ = tl.philox(seed64, c0, c1, zeros_u32, zeros_u32)
++        u = uint_to_uniform_float(r0).to(tl.float32)
++        u_min = tl.full((), 1.17549435e-38, tl.float32)
++        u_max = tl.full((), 0.99999994, tl.float32)
++        u_safe = tl.minimum(tl.maximum(u, u_min), u_max)
++        gumbel = (-tl.log(-tl.log(u_safe))).to(tl.float32)
++        score = tl.where(keep, z + gumbel, neg_inf).to(tl.float32)
++
++        better = score > best_scores
++        best_scores = tl.where(better, score, best_scores)
++        best_indices = tl.where(better, cols, best_indices)
++
++    _, sampled_idx = tl.reduce((best_scores, best_indices), 0, _argmax_combine)
++    tl.store(OUT_PTR + row_id, sampled_idx.to(tl.int64))
++
++
++@triton.jit(do_not_specialize=["batch_size", "vocab_size", "logits_stride"])
++def _topk_topp_mask_kernel(
++    LOGITS_PTR,
++    K_PTR,
++    P_PTR,
++    batch_size,
++    vocab_size,
++    logits_stride,
++    HAS_K: tl.constexpr,
++    HAS_P: tl.constexpr,
++    BLOCK_V: tl.constexpr,
++):
++    row_id = tl.program_id(0)
++    if row_id >= batch_size:
++        return
++
++    row_ptr = LOGITS_PTR + row_id.to(tl.int64) * logits_stride.to(tl.int64)
++    neg_inf = tl.full((), -float("inf"), tl.float32)
++
++    if HAS_K:
++        k_raw = tl.load(K_PTR + row_id).to(tl.int32)
++        active_k = (k_raw > 0) & (k_raw < vocab_size)
++        k_val = tl.where(active_k, k_raw, vocab_size)
++    else:
++        active_k = tl.full((), 0, tl.int1)
++        k_val = vocab_size
++
++    if HAS_P:
++        p_raw = tl.load(P_PTR + row_id).to(tl.float32)
++        active_p = p_raw < 1.0
++        p_eff = tl.maximum(p_raw, 0.0)
++    else:
++        active_p = tl.full((), 0, tl.int1)
++        p_eff = tl.full((), 1.0, tl.float32)
++
++    if (not active_k) & (not active_p):
++        return
++
++    v_cut = neg_inf
++    m_keep = vocab_size
++    cnt_eq = tl.full((), 0, tl.int32)
++
++    if active_k:
++        max_val, min_valid, sum_exp, cnt_valid = _row_stats_pass(
++            row_ptr, vocab_size, neg_inf, BLOCK_V
++        )
++        if cnt_valid == 0:
++            return
++        if cnt_valid > k_val:
++            v_k = _find_topk_cutoff(
++                row_ptr, vocab_size, k_val, min_valid, max_val, BLOCK_V
++            )
++        else:
++            v_k = neg_inf
++        if active_p:
++            max_k, min_k, sum_exp_k, _ = _row_stats_pass(
++                row_ptr, vocab_size, v_k, BLOCK_V
++            )
++            v_cut, m_keep, cnt_eq = _find_topp_cutoff(
++                row_ptr, vocab_size, p_eff, v_k, min_k, max_k, sum_exp_k, BLOCK_V
++            )
++        else:
++            v_cut = v_k
++    else:
++        max_val, min_valid, sum_exp, cnt_valid = _row_stats_pass(
++            row_ptr, vocab_size, neg_inf, BLOCK_V
++        )
++        if cnt_valid == 0:
++            return
++        v_cut, m_keep, cnt_eq = _find_topp_cutoff(
++            row_ptr, vocab_size, p_eff, neg_inf, min_valid, max_val, sum_exp, BLOCK_V
++        )
++
++    ties_seen = tl.full((), 0, tl.int32)
++    partial_ties = m_keep < cnt_eq
++
++    for start in range(0, vocab_size, BLOCK_V):
++        cols = start + tl.arange(0, BLOCK_V)
++        mask = cols < vocab_size
++        z = tl.load(row_ptr + cols, mask=mask, other=neg_inf).to(tl.float32)
++        if partial_ties:
++            is_gt = mask & (z > v_cut)
++            is_eq = mask & (z == v_cut)
++            eq_f32 = is_eq.to(tl.float32)
++            eq_rank = ties_seen + tl.cumsum(eq_f32, axis=0).to(tl.int32)
++            ties_seen += tl.sum(eq_f32, axis=0).to(tl.int32)
++            keep = is_gt | (is_eq & (eq_rank <= m_keep))
++        else:
++            keep = mask & (z >= v_cut)
++        out_z = tl.where(keep, z, neg_inf).to(LOGITS_PTR.dtype.element_ty)
++        tl.store(row_ptr + cols, out_z, mask=mask)
++
++
++def topk_topp_random_sample(
++    logits: torch.Tensor,
++    k: Optional[torch.Tensor] = None,
++    p: Optional[torch.Tensor] = None,
++    generator: Optional[torch.Generator] = None,
++) -> torch.Tensor:
++    """Fused exact Top-K + Top-P + Gumbel-Max token sampling without HBM logit writeback."""
++    logger.debug("GEMS TOPK_TOPP_RANDOM_SAMPLE")
++    assert logits.ndim == 2, f"Expected 2D logits, got shape {logits.shape}"
++    batch_size, vocab_size = logits.shape
++    out = torch.empty((batch_size,), dtype=torch.int64, device=logits.device)
++    if batch_size == 0 or vocab_size == 0:
++        return out
++
++    if logits.stride(1) != 1:
++        logits = logits.contiguous()
++    has_k = k is not None
++    has_p = p is not None
++    if has_k and not k.is_contiguous():
++        k = k.contiguous()
++    if has_p and not p.is_contiguous():
++        p = p.contiguous()
++
++    k_ptr = k if has_k else logits
++    p_ptr = p if has_p else logits
++
++    block_v = 1024 if vocab_size >= 1024 else max(64, triton.next_power_of_2(vocab_size))
++    num_warps = 8 if block_v >= 1024 else 4
++
++    with torch_device_fn.device(logits.device):
++        philox_seed, philox_offset = philox_backend_seed_offset(
++            batch_size * vocab_size, generator=generator
++        )
++        _topk_topp_sample_kernel[(batch_size,)](
++            logits,
++            k_ptr,
++            p_ptr,
++            out,
++            batch_size,
++            vocab_size,
++            logits.stride(0),
++            philox_seed,
++            philox_offset,
++            HAS_K=has_k,
++            HAS_P=has_p,
++            BLOCK_V=block_v,
++            num_warps=num_warps,
++        )
++    return out
++
++
++def apply_top_k_top_p(
++    logits: torch.Tensor,
++    k: Optional[torch.Tensor] = None,
++    p: Optional[torch.Tensor] = None,
++) -> torch.Tensor:
++    """Exact in-place Top-K and Top-P logit masking using multi-pivot threshold search."""
++    logger.debug("GEMS APPLY_TOP_K_TOP_P")
++    if k is None and p is None:
++        return logits
++    assert logits.ndim == 2, f"Expected 2D logits, got shape {logits.shape}"
++    batch_size, vocab_size = logits.shape
++    if batch_size == 0 or vocab_size == 0:
++        return logits
++
++    need_copy_back = logits.stride(1) != 1
++    work = logits.contiguous() if need_copy_back else logits
++
++    has_k = k is not None
++    has_p = p is not None
++    if has_k and not k.is_contiguous():
++        k = k.contiguous()
++    if has_p and not p.is_contiguous():
++        p = p.contiguous()
++
++    k_ptr = k if has_k else work
++    p_ptr = p if has_p else work
++
++    block_v = 1024 if vocab_size >= 1024 else max(64, triton.next_power_of_2(vocab_size))
++    num_warps = 8 if block_v >= 1024 else 4
++
++    with torch_device_fn.device(work.device):
++        _topk_topp_mask_kernel[(batch_size,)](
++            work,
++            k_ptr,
++            p_ptr,
++            batch_size,
++            vocab_size,
++            work.stride(0),
++            HAS_K=has_k,
++            HAS_P=has_p,
++            BLOCK_V=block_v,
++            num_warps=num_warps,
++        )
++
++    if need_copy_back:
++        logits.copy_(work)
++    return logits
+diff --git a/src/flag_gems/modules/activation.py b/src/flag_gems/modules/activation.py
+index 9a48788c335..a35a8e4c6f4 100644
+--- a/src/flag_gems/modules/activation.py
++++ b/src/flag_gems/modules/activation.py
+@@ -18,13 +18,15 @@
+ import torch.nn as nn
+ 
+ import flag_gems
++from flag_gems.fused.silu_and_mul import silu_and_mul_merged
+ 
+ logger = logging.getLogger(__name__)
+ 
+-has_c_extension = False  # Disable C extension for now, as we have not implemented c++ wrapper for silu_and_mul yet.
++has_c_extension = False
+ 
+ __all__ = [
+     "gems_silu_and_mul",
++    "gems_silu_and_mul_merged",
+     "GemsSiluAndMul",
+ ]
+ 
+@@ -33,11 +35,13 @@ def gems_silu_and_mul(
+     x: torch.Tensor,
+     y: torch.Tensor,
+ ) -> torch.Tensor:
+-    logger.debug("GEMS CUSTOM SILU_AND_MUL FORWARD")
+-    # TODO: Implement C++ wrapper for silu_and_mul
+     return flag_gems.silu_and_mul(x, y)
+ 
+ 
++def gems_silu_and_mul_merged(x: torch.Tensor) -> torch.Tensor:
++    return silu_and_mul_merged(x)
++
++
+ class GemsSiluAndMul(nn.Module):
+     """
+     Fused Silu and Mul activation function.
+diff --git a/src/flag_gems/modules/normalization.py b/src/flag_gems/modules/normalization.py
+index 1bb63392f34..66a9b217608 100644
+--- a/src/flag_gems/modules/normalization.py
++++ b/src/flag_gems/modules/normalization.py
+@@ -47,24 +47,14 @@
+ def gems_rms_forward(
+     x: torch.Tensor, residual: Optional[torch.Tensor], weight: torch.Tensor, eps: float
+ ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+-    add_residual = residual is not None
+-    if add_residual:
++    if residual is not None:
+         if use_c_extension:
+-            logger.debug("GEMS CUSTOM FUSED_ADD_RMS_NORM(C EXTENSION)")
+             torch.ops.flag_gems.fused_add_rms_norm(x, residual, weight, eps)
+             return x, residual
+-        else:
+-            logger.debug("GEMS CUSTOM FUSED_ADD_RMS_NORM")
+-            return flag_gems.fused_add_rms_norm(
+-                x, residual, list(weight.size()), weight, eps
+-            )
+-    else:
+-        if use_c_extension:
+-            logger.debug("GEMS CUSTOM RMS_NORM(C EXTENSION)")
+-            return torch.ops.flag_gems.rms_norm(x, weight, eps)
+-        else:
+-            logger.debug("GEMS CUSTOM RMS_NORM")
+-            return flag_gems.rms_norm(x, list(weight.size()), weight, eps)
++        return flag_gems.fused_add_rms_norm(x, residual, weight.shape, weight, eps)
++    if use_c_extension:
++        return torch.ops.flag_gems.rms_norm(x, weight, eps)
++    return flag_gems.rms_norm(x, weight.shape, weight, eps)
+ 
+ 
+ class GemsRMSNorm(nn.Module):
+diff --git a/src/flag_gems/modules/rotary_embedding.py b/src/flag_gems/modules/rotary_embedding.py
+index a4e9f33044b..78561ffaeb6 100644
+--- a/src/flag_gems/modules/rotary_embedding.py
++++ b/src/flag_gems/modules/rotary_embedding.py
+@@ -43,7 +43,8 @@ def gems_rope_forward(
+     inplace: bool = False,
+ ) -> Union[torch.Tensor, torch.Tensor]:
+     if use_c_extension:
+-        logger.debug("GEMS CUSTOM ROPE FORWARD(C EXTENSION)")
++        if not torch.compiler.is_compiling():
++            logger.debug("GEMS CUSTOM ROPE FORWARD(C EXTENSION)")
+         if inplace:
+             torch.ops.flag_gems.rotary_embedding_inplace(
+                 query, key, cos, sin, position_ids, rotary_interleaved
+@@ -54,7 +55,8 @@ def gems_rope_forward(
+                 query, key, cos, sin, position_ids, rotary_interleaved
+             )
+     else:
+-        logger.debug("GEMS CUSTOM ROPE FORWARD")
++        if not torch.compiler.is_compiling():
++            logger.debug("GEMS CUSTOM ROPE FORWARD")
+         # Fallback to pure python implementation
+         return flag_gems.apply_rotary_pos_emb(
+             query, key, cos, sin, position_ids, rotary_interleaved, inplace
+diff --git a/src/flag_gems/ops/addmm.py b/src/flag_gems/ops/addmm.py
+index 446a8aee2c6..d4dcc4c6960 100644
+--- a/src/flag_gems/ops/addmm.py
++++ b/src/flag_gems/ops/addmm.py
+@@ -43,7 +43,7 @@ def _accumulate_dot(
+ @libtuner(
+     configs=runtime.get_tuned_config("addmm"),
+     key=["M", "N", "K", "stride_am", "stride_bk"],
+-    strategy=["align32", "align32", "align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32", "align32", "align32"],
+     warmup=5,
+     rep=10,
+     flagtune_op_name="addmm",
+diff --git a/src/flag_gems/ops/index.py b/src/flag_gems/ops/index.py
+index 807bd38b4c4..7b5a72cd8a8 100644
+--- a/src/flag_gems/ops/index.py
++++ b/src/flag_gems/ops/index.py
+@@ -18,8 +18,11 @@
+ from typing import Any, Callable, List, Mapping, Tuple
+ 
+ import torch
++import triton
++import triton.language as tl
+ 
+ from flag_gems import runtime
++from flag_gems.runtime import torch_device_fn
+ from flag_gems.utils.code_cache import code_cache_dir
+ from flag_gems.utils.code_utils import IndentedBuffer, write_atomic
+ 
+@@ -410,28 +413,26 @@ def arg_key(self, *args, **kwargs):
+ 
+ 
+ def generate_index_linearized_kernel(
+-    inp_shape,
+-    start_dim,
+     indices_len,
+     configs,
+     kernel_name: str,
+     code: IndentedBuffer,
+ ):
+-    """Generate a kernel for contiguous input with adjacent tensor indices."""
++    """Generate a kernel for contiguous input with adjacent tensor indices.
+ 
+-    indexed_dims = [int(dim) for dim in inp_shape[start_dim : start_dim + indices_len]]
+-    indexed_volume = _volume(indexed_dims)
+-    indexed_strides = [
+-        _volume(indexed_dims[pos + 1 :]) for pos in range(len(indexed_dims))
+-    ]
+-    suffix_size = _volume(inp_shape[start_dim + indices_len :])
++    The indexed extents (``dim{i}``), their strides inside the indexed block
++    (``istride{i}``), the indexed volume (``IVOL``) and the suffix size (``N``)
++    are runtime arguments, so one generated kernel serves every input shape
++    with the same number of index tensors: no code generation, compilation or
++    cache-table creation per shape.
++    """
+ 
+     code.writeline("@libentry()")
+     code.writeline("@libtuner(")
+     with code.indent():
+         _write_index_configs(code, configs)
+         code.writeline('key=["M"],')
+-        code.writeline('strategy=["align32"],')
++        code.writeline('strategy=["align32_capped"],')
+         code.writeline("warmup=5,")
+         code.writeline("rep=10,")
+     code.writeline(")")
+@@ -440,10 +441,10 @@ def generate_index_linearized_kernel(
+     with code.indent():
+         args = ["input_ptr,"]
+         args += [f"indices{i}_ptr," for i in range(indices_len)]
++        args += ["out_ptr,", "M,", "N,", "IVOL,"]
++        args += [f"dim{i}," for i in range(indices_len)]
++        args += [f"istride{i}," for i in range(indices_len)]
+         args += [
+-            "out_ptr,",
+-            "M,",
+-            "N,",
+             "BLOCK_SIZE0: tl.constexpr,",
+             "BLOCK_SIZE1: tl.constexpr,",
+         ]
+@@ -465,36 +466,32 @@ def generate_index_linearized_kernel(
+         code.writeline("index_mask = index_offsets < M")
+         code.newline()
+ 
+-        for i, dim in enumerate(indexed_dims):
++        for i in range(indices_len):
+             code.writeline(
+                 f"raw{i} = tl.load(indices{i}_ptr + index_offsets, mask=index_mask, other=0)"
+             )
+-            code.writeline(f"idx{i} = tl.where(raw{i} < 0, raw{i} + {dim}, raw{i})")
++            code.writeline(f"idx{i} = tl.where(raw{i} < 0, raw{i} + dim{i}, raw{i})")
+         code.newline()
+ 
+-        linear_terms = [f"idx{i} * {indexed_strides[i]}" for i in range(indices_len)]
+-        valid_terms = [
+-            f"(idx{i} >= 0) & (idx{i} < {indexed_dims[i]})" for i in range(indices_len)
+-        ]
++        linear_terms = [f"idx{i} * istride{i}" for i in range(indices_len)]
++        valid_terms = [f"(idx{i} >= 0) & (idx{i} < dim{i})" for i in range(indices_len)]
+         code.writeline(f"linear_index = {' + '.join(linear_terms)}")
+         code.writeline(f"valid_index = {' & '.join(valid_terms)}")
+         code.newline()
+ 
+         code.writeline("src_offsets = (")
+         with code.indent():
+-            code.writeline(
+-                f"(pid_p * {indexed_volume} + linear_index[:, None]) * {suffix_size}"
+-            )
++            code.writeline("(pid_p * IVOL + linear_index[:, None]) * N")
+             code.writeline("+ suffix_offsets[None, :]")
+         code.writeline(")")
+         code.writeline("out_offsets = (")
+         with code.indent():
+-            code.writeline(f"(pid_p * M + index_offsets[:, None]) * {suffix_size}")
++            code.writeline("(pid_p * M + index_offsets[:, None]) * N")
+             code.writeline("+ suffix_offsets[None, :]")
+         code.writeline(")")
+         code.writeline(
+             "mask = index_mask[:, None] & valid_index[:, None] & "
+-            f"(suffix_offsets[None, :] < {suffix_size})"
++            "(suffix_offsets[None, :] < N)"
+         )
+         code.newline()
+ 
+@@ -507,21 +504,24 @@ def generate_index_linearized_kernel(
+ 
+ 
+ def generate_index_linearized_wrapper(
+-    inp_shape,
+-    start_dim,
+     indices_len,
+     wrapper_name: str,
+     kernel_name: str,
+     code: IndentedBuffer,
+ ):
+-    prefix_size = _volume(inp_shape[:start_dim])
+-    suffix_size = _volume(inp_shape[start_dim + indices_len :])
+-
+     code.writeline(f"def {wrapper_name}(input, start_dim, indices, out):")
+     with code.indent():
++        code.writeline("shape = input.shape")
+         code.writeline("M = indices[0].numel()")
+-        code.writeline(f"P = {prefix_size}")
+-        code.writeline(f"N = {suffix_size}")
++        code.writeline("P = volume(shape[:start_dim])")
++        code.writeline(f"N = volume(shape[start_dim + {indices_len}:])")
++        code.writeline(
++            f"dims = [int(shape[start_dim + i]) for i in range({indices_len})]"
++        )
++        code.writeline(
++            f"strides = [volume(dims[i + 1:]) for i in range({indices_len})]"
++        )
++        code.writeline("IVOL = volume(dims)")
+         code.newline()
+         # Match the kernel axes: prefix, flattened index elements, suffix.
+         code.writeline("grid = lambda meta: (")
+@@ -535,7 +535,9 @@ def generate_index_linearized_wrapper(
+         with code.indent():
+             args = ["input,"]
+             args += [f"indices[{i}]," for i in range(indices_len)]
+-            args += ["out,", "M,", "N,"]
++            args += ["out,", "M,", "N,", "IVOL,"]
++            args += [f"dims[{i}]," for i in range(indices_len)]
++            args += [f"strides[{i}]," for i in range(indices_len)]
+             code.writelines(args)
+         code.writeline(")")
+         code.writeline("return input")
+@@ -558,22 +560,8 @@ def generate_linearized_code(
+         raise ValueError("At least one non-None index tensor is required")
+     configs = _index_candidate_configs(inp, start_dim, indices_len, tensor_indices)
+     code = generate_imports(code)
+-    generate_index_linearized_kernel(
+-        tuple(inp.shape),
+-        start_dim,
+-        indices_len,
+-        configs,
+-        kernel_name,
+-        code,
+-    )
+-    generate_index_linearized_wrapper(
+-        tuple(inp.shape),
+-        start_dim,
+-        indices_len,
+-        wrapper_name,
+-        kernel_name,
+-        code,
+-    )
++    generate_index_linearized_kernel(indices_len, configs, kernel_name, code)
++    generate_index_linearized_wrapper(indices_len, wrapper_name, kernel_name, code)
+     return code
+ 
+ 
+@@ -618,16 +606,15 @@ def __call__(self, *args, **kwargs):
+ 
+     def arg_key(self, *args, **kwargs):
+         inp, start_dim, tensor_indices = args[0], int(args[1]), args[2]
+-        inp_shape = "_".join(str(int(dim)) for dim in inp.shape)
+         indices_len = len(tensor_indices)
+-        index_len = int(tensor_indices[0].numel()) if tensor_indices else 0
+-        suffix_size = _volume(inp.shape[start_dim + indices_len :])
+-        index_bucket, suffix_bucket = _shape_bucket(index_len, suffix_size)
++        configs = _index_candidate_configs(inp, start_dim, indices_len, tensor_indices)
++        cfg_sig = "_".join(
++            f"{c.kwargs['BLOCK_SIZE0']}x{c.kwargs['BLOCK_SIZE1']}w{c.num_warps}s{c.num_stages}"
++            for c in configs
++        ) or "default"
+         return (
+-            f"inp_shape_{inp_shape}_start_dim_{start_dim}_"
+-            f"indices_len_{indices_len}_"
+-            f"dtype_{str(inp.dtype).replace('.', '_')}_"
+-            f"m_{index_bucket}_n_{suffix_bucket}"
++            f"start_dim_{start_dim}_indices_len_{indices_len}_"
++            f"dtype_{str(inp.dtype).replace('.', '_')}_{cfg_sig}"
+         )
+ 
+ 
+@@ -687,8 +674,63 @@ def _run_linearized_adjacent_index(inp, indices):
+     return out.contiguous()
+ 
+ 
++@triton.jit(do_not_specialize=["num_src_rows", "src_stride_0", "idx_stride_0"])
++def _fast_2d_row_gather_kernel(
++    SRC_PTR,
++    IDX_PTR,
++    OUT_PTR,
++    num_src_rows,
++    src_stride_0,
++    idx_stride_0,
++    COLS: tl.constexpr,
++    BLOCK_C: tl.constexpr,
++):
++    row = tl.program_id(0).to(tl.int64)
++    idx = tl.load(IDX_PTR + row * idx_stride_0).to(tl.int64)
++    idx = tl.where(idx < 0, idx + num_src_rows, idx)
++    src_row = SRC_PTR + idx * src_stride_0
++    out_row = OUT_PTR + row * COLS
++    for c0 in range(0, COLS, BLOCK_C):
++        cols = c0 + tl.arange(0, BLOCK_C)
++        mask = cols < COLS
++        val = tl.load(src_row + cols, mask=mask)
++        tl.store(out_row + cols, val, mask=mask)
++
++
+ def index(inp, indices):
+     logger.debug("GEMS INDEX")
++    if (
++        inp.ndim == 2
++        and (len(indices) == 1 or (len(indices) == 2 and indices[1] is None))
++        and isinstance(indices[0], torch.Tensor)
++        and indices[0].ndim == 1
++        and indices[0].dtype in (torch.int32, torch.int64)
++        and inp.stride(1) == 1
++    ):
++        idx = indices[0]
++        if idx.device != inp.device:
++            idx = idx.to(inp.device)
++        m_out = idx.shape[0]
++        cols = inp.shape[1]
++        out = torch.empty((m_out, cols), dtype=inp.dtype, device=inp.device)
++        if m_out == 0 or cols == 0 or inp.shape[0] == 0:
++            return out
++        block_c = min(2048, max(64, triton.next_power_of_2(cols)))
++        num_warps = 4 if block_c <= 1024 else 8
++        with torch_device_fn.device(inp.device):
++            _fast_2d_row_gather_kernel[(m_out,)](
++                inp,
++                idx,
++                out,
++                inp.shape[0],
++                inp.stride(0),
++                idx.stride(0),
++                COLS=cols,
++                BLOCK_C=block_c,
++                num_warps=num_warps,
++                num_stages=1,
++            )
++        return out
+     original_indices = list(indices)  # Save original indices for later checks
+     indices = list(indices)
+ 
+diff --git a/src/flag_gems/ops/linear.py b/src/flag_gems/ops/linear.py
+index ca6793726ae..371bd1c5fe9 100644
+--- a/src/flag_gems/ops/linear.py
++++ b/src/flag_gems/ops/linear.py
+@@ -30,7 +30,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("linear"),
+     key=["M", "N", "K"],
+-    strategy=["align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32"],
+     warmup=5,
+     rep=10,
+ )
+diff --git a/src/flag_gems/ops/mm.py b/src/flag_gems/ops/mm.py
+index d4a46c68112..44f90bad8e3 100644
+--- a/src/flag_gems/ops/mm.py
++++ b/src/flag_gems/ops/mm.py
+@@ -61,7 +61,7 @@ def prev_multiple_of(a, b):
+     configs=runtime.get_tuned_config("mm"),
+     # Add 'stride_am' and 'stride_bk' to trigger autotune for tensors with the same shape but different strides.
+     key=["M", "N", "K", "stride_am", "stride_bk"],
+-    strategy=["align32", "align32", "align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32", "align32", "align32"],
+     warmup=5,
+     rep=10,
+ )
+@@ -446,7 +446,7 @@ def general_mm(a, b, c, M, N, K):
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_self_transpose"),
+     key=["M", "K", "stride_am", "stride_ak"],
+-    strategy=["align32", "align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32", "align32"],
+     warmup=2,
+     rep=4,
+ )
+diff --git a/src/flag_gems/ops/mul.py b/src/flag_gems/ops/mul.py
+index 1b1457e67d8..f943422a3d6 100644
+--- a/src/flag_gems/ops/mul.py
++++ b/src/flag_gems/ops/mul.py
+@@ -40,15 +40,13 @@
+ 
+ def mul_get_configs():
+     return [
+-        triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=3),
++        triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=1),
+     ]
+ 
+ 
+ def mul_broadcast_get_configs():
+     return [
+-        triton.Config({"BLOCK_SIZE": 256}, num_warps=4, num_stages=3),
+-        triton.Config({"BLOCK_SIZE": 512}, num_warps=4, num_stages=3),
+-        triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=3),
++        triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=1),
+     ]
+ 
+ 
+diff --git a/src/flag_gems/ops/rms_norm.py b/src/flag_gems/ops/rms_norm.py
+index 0acf10a2319..69a42cb64a0 100644
+--- a/src/flag_gems/ops/rms_norm.py
++++ b/src/flag_gems/ops/rms_norm.py
+@@ -402,5 +402,84 @@ def backward(ctx, dy):
+         return dx, None, dw, None
+ 
+ 
++@triton.jit(do_not_specialize=["eps"])
++def _rms_norm_infer_kernel(
++    out_ptr,
++    in_ptr,
++    w_ptr,
++    N: tl.constexpr,
++    eps,
++    BLOCK_SIZE: tl.constexpr,
++    EVEN_N: tl.constexpr,
++):
++    row = tl.program_id(0).to(tl.int64)
++    out_ptr += row * N
++    in_ptr += row * N
++    cols = tl.arange(0, BLOCK_SIZE)
++
++    if EVEN_N:
++        x = tl.load(in_ptr + cols).to(tl.float32)
++        var = tl.sum(x * x, axis=0) * (1.0 / N)
++        rrms = 1.0 / tl.sqrt(var + eps)
++        w = tl.load(w_ptr + cols)
++        x_normed = (x * rrms).to(in_ptr.dtype.element_ty)
++        tl.store(out_ptr + cols, x_normed * w)
++    else:
++        mask = cols < N
++        x = tl.load(in_ptr + cols, mask=mask, other=0.0).to(tl.float32)
++        var = tl.sum(x * x, axis=0) * (1.0 / N)
++        rrms = 1.0 / tl.sqrt(var + eps)
++        w = tl.load(w_ptr + cols, mask=mask, other=0.0)
++        x_normed = (x * rrms).to(in_ptr.dtype.element_ty)
++        tl.store(out_ptr + cols, x_normed * w, mask=mask)
++
++
++@torch.library.custom_op("flag_gems::_rms_norm_infer_op", mutates_args=())
++def _rms_norm_infer_op(x: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
++    N = weight.numel()
++    M = x.numel() // N
++    y = torch.empty_like(x)
++    if M == 0:
++        return y
++    BLOCK_SIZE = triton.next_power_of_2(N)
++    num_warps = 4 if BLOCK_SIZE <= 2048 else 8
++    with torch_device_fn.device(x.device):
++        _rms_norm_infer_kernel[(M,)](
++            y, x, weight, N, eps, BLOCK_SIZE=BLOCK_SIZE, EVEN_N=(N == BLOCK_SIZE), num_warps=num_warps
++        )
++    return y
++
++
++@_rms_norm_infer_op.register_fake
++def _(x: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
++    return torch.empty_like(x)
++
++
++def rms_norm_infer(x, normalized_shape, weight, eps=1e-5):
++    N = normalized_shape[0] if len(normalized_shape) == 1 else math.prod(normalized_shape)
++    if not x.is_contiguous():
++        x = x.contiguous()
++    if not weight.is_contiguous():
++        weight = weight.contiguous()
++    if N <= 4096:
++        if torch.compiler.is_compiling() and not torch.is_grad_enabled():
++            return _rms_norm_infer_op(x, weight, float(eps))
++        M = x.numel() // N
++        if M == 0:
++            return torch.empty_like(x)
++        y = torch.empty_like(x)
++        BLOCK_SIZE = triton.next_power_of_2(N)
++        num_warps = 4 if BLOCK_SIZE <= 2048 else 8
++        with torch_device_fn.device(x.device):
++            _rms_norm_infer_kernel[(M,)](
++                y, x, weight, N, eps, BLOCK_SIZE=BLOCK_SIZE, EVEN_N=(N == BLOCK_SIZE), num_warps=num_warps
++            )
++        return y
++    y, _ = rms_norm_forward(x, normalized_shape, weight, eps=eps)
++    return y
++
++
+ def rms_norm(x, normalized_shape, weight, eps=1e-5):
++    if not (torch.is_grad_enabled() and (x.requires_grad or weight.requires_grad)):
++        return rms_norm_infer(x, normalized_shape, weight, eps)
+     return RmsNorm.apply(x, normalized_shape, weight, eps)
+diff --git a/src/flag_gems/runtime/backend/_ascend/ops/addmm.py b/src/flag_gems/runtime/backend/_ascend/ops/addmm.py
+index 238ed872161..f93cd7cd370 100644
+--- a/src/flag_gems/runtime/backend/_ascend/ops/addmm.py
++++ b/src/flag_gems/runtime/backend/_ascend/ops/addmm.py
+@@ -30,6 +30,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+ )
+ @triton.heuristics(_hcu.HEURISTICS_CONFIGS["mm"])
+ @triton.jit(do_not_specialize=["alpha", "beta"])
+diff --git a/src/flag_gems/runtime/backend/_ascend/ops/mm.py b/src/flag_gems/runtime/backend/_ascend/ops/mm.py
+index 3e4e62bcf26..b1b8945321d 100644
+--- a/src/flag_gems/runtime/backend/_ascend/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_ascend/ops/mm.py
+@@ -30,6 +30,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+ )
+ @triton.heuristics(_hcu.HEURISTICS_CONFIGS["mm"])
+ @triton.jit
+diff --git a/src/flag_gems/runtime/backend/_cambricon/ops/addmm.py b/src/flag_gems/runtime/backend/_cambricon/ops/addmm.py
+index 28c059d10b9..3e1298824e1 100644
+--- a/src/flag_gems/runtime/backend/_cambricon/ops/addmm.py
++++ b/src/flag_gems/runtime/backend/_cambricon/ops/addmm.py
+@@ -28,7 +28,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("addmm"),
+     key=["M", "N", "K"],
+-    strategy=["align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32"],
+     warmup=5,
+     rep=10,
+     flagtune_op_name="addmm",
+diff --git a/src/flag_gems/runtime/backend/_cambricon/ops/mm.py b/src/flag_gems/runtime/backend/_cambricon/ops/mm.py
+index 8eba4c47122..38e220178a3 100644
+--- a/src/flag_gems/runtime/backend/_cambricon/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_cambricon/ops/mm.py
+@@ -28,8 +28,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K", "stride_am", "stride_bk", "stride_ak", "stride_bn"],
+-    strategy=[
+-        "align32",
++    strategy=["align32_capped",
+         "align32",
+         "align32",
+         "align32",
+diff --git a/src/flag_gems/runtime/backend/_iluvatar/ops/addmm.py b/src/flag_gems/runtime/backend/_iluvatar/ops/addmm.py
+index 75980895300..e2ad2d54d64 100644
+--- a/src/flag_gems/runtime/backend/_iluvatar/ops/addmm.py
++++ b/src/flag_gems/runtime/backend/_iluvatar/ops/addmm.py
+@@ -34,6 +34,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+     prune_configs_by={
+         "early_config_prune": early_config_prune,
+         "perf_model": estimate_matmul_time,
+diff --git a/src/flag_gems/runtime/backend/_iluvatar/ops/linear.py b/src/flag_gems/runtime/backend/_iluvatar/ops/linear.py
+index 992810472bc..58b390894eb 100644
+--- a/src/flag_gems/runtime/backend/_iluvatar/ops/linear.py
++++ b/src/flag_gems/runtime/backend/_iluvatar/ops/linear.py
+@@ -18,48 +18,34 @@
+ import triton
+ import triton.language as tl
+ 
+-from flag_gems import runtime
+ from flag_gems.runtime import torch_device_fn
+-from flag_gems.utils import libentry, libtuner
+ 
+ logger = logging.getLogger(__name__)
+ 
+ 
+-@libentry()
+-@libtuner(
+-    configs=runtime.get_tuned_config("linear"),
+-    key=["M", "N", "K"],
+-    strategy=["align32", "align32", "align32"],
+-    warmup=5,
+-    rep=10,
+-)
+-@triton.heuristics(runtime.get_heuristic_config("linear"))
+-@triton.jit
+-def linear_kernel(
+-    input_ptr,
+-    weight_ptr,
+-    bias_ptr,
+-    output_ptr,
++@triton.jit(do_not_specialize=["M"])
++def _iluvatar_linear_nt_kernel(
++    A,
++    W,
++    BIAS_PTR,
++    C,
+     M,
+-    N,
+-    K,
+-    stride_im,
+-    stride_ik,
+-    stride_wn,
+-    stride_wk,
+-    stride_om,
+-    stride_on,
+-    stride_bn,
+-    BIAS: tl.constexpr,
++    N: tl.constexpr,
++    K: tl.constexpr,
++    stride_am,
++    stride_wn: tl.constexpr,
++    stride_cm: tl.constexpr,
++    HAS_BIAS: tl.constexpr,
+     BLOCK_M: tl.constexpr,
+     BLOCK_N: tl.constexpr,
+     BLOCK_K: tl.constexpr,
+     GROUP_M: tl.constexpr,
+-    SPLIT_K: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
+     EVEN_K: tl.constexpr,
++    UPGRADE_OFFS: tl.constexpr,
+ ):
+     pid = tl.program_id(0)
+-    pid_z = tl.program_id(1)
+     grid_m = tl.cdiv(M, BLOCK_M)
+     grid_n = tl.cdiv(N, BLOCK_N)
+     width = GROUP_M * grid_n
+@@ -70,53 +56,259 @@ def linear_kernel(
+ 
+     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+-    rk = pid_z * BLOCK_K + tl.arange(0, BLOCK_K)
++    if EVEN_M:
++        ram = tl.max_contiguous(tl.multiple_of(rm, BLOCK_M), BLOCK_M)
++    else:
++        ram = rm % M
++    if EVEN_N:
++        rbn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_N), BLOCK_N)
++    else:
++        rbn = rn % N
++
++    rk = tl.arange(0, BLOCK_K)
++    if UPGRADE_OFFS:
++        a_ptrs = A + (ram[:, None].to(tl.int64) * stride_am + rk[None, :])
++        w_ptrs = W + (rk[:, None] + rbn[None, :].to(tl.int64) * stride_wn)
++    else:
++        a_ptrs = A + (ram[:, None] * stride_am + rk[None, :])
++        w_ptrs = W + (rk[:, None] + rbn[None, :] * stride_wn)
+ 
+-    A = input_ptr + (ram[:, None] * stride_im + rk[None, :] * stride_ik)
+-    W = weight_ptr + (rk[:, None] * stride_wk + rbn[None, :] * stride_wn)
+     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    for k in range(0, tl.cdiv(K, BLOCK_K)):
++        if EVEN_K:
++            a = tl.load(a_ptrs)
++            w = tl.load(w_ptrs)
++        else:
++            k_rem = K - k * BLOCK_K
++            a = tl.load(a_ptrs, mask=rk[None, :] < k_rem, other=0.0)
++            w = tl.load(w_ptrs, mask=rk[:, None] < k_rem, other=0.0)
++        acc = tl.dot(a, w, acc, out_dtype=tl.float32, allow_tf32=False)
++        a_ptrs += BLOCK_K
++        w_ptrs += BLOCK_K
++
++    if HAS_BIAS:
++        bias = tl.load(BIAS_PTR + rn, mask=rn < N, other=0.0).to(tl.float32)
++        acc += bias[None, :]
+ 
+-    if EVEN_K:
+-        for _ in range(0, tl.cdiv(K, BLOCK_K * SPLIT_K)):
+-            a = tl.load(A)
+-            b = tl.load(W)
+-            acc += tl.dot(a, b, allow_tf32=False)
+-            A += BLOCK_K * SPLIT_K * stride_ik
+-            W += BLOCK_K * SPLIT_K * stride_wk
++    if UPGRADE_OFFS:
++        c_ptrs = C + (rm[:, None].to(tl.int64) * stride_cm + rn[None, :])
+     else:
+-        loop_num = tl.cdiv(K, BLOCK_K * SPLIT_K) - 1
+-        for _ in range(0, loop_num):
+-            a = tl.load(A)
+-            b = tl.load(W)
+-            acc += tl.dot(a, b, allow_tf32=False)
+-            A += BLOCK_K * SPLIT_K * stride_ik
+-            W += BLOCK_K * SPLIT_K * stride_wk
+-
+-        _0 = tl.zeros((1, 1), dtype=output_ptr.dtype.element_ty)
+-        k_remaining = K - loop_num * (BLOCK_K * SPLIT_K)
+-        a = tl.load(A, mask=rk[None, :] < k_remaining, other=_0)
+-        b = tl.load(W, mask=rk[:, None] < k_remaining, other=_0)
+-        acc += tl.dot(a, b, allow_tf32=False)
+-
+-    if BIAS:
+-        bias = tl.load(bias_ptr + rn, mask=rn < N, other=0.0)
+-        acc = acc + bias[None, :]
++        c_ptrs = C + (rm[:, None] * stride_cm + rn[None, :])
++
++    out = acc.to(C.dtype.element_ty)
++    if EVEN_M and EVEN_N:
++        tl.store(c_ptrs, out)
++    else:
++        tl.store(c_ptrs, out, mask=(rm < M)[:, None] & (rn < N)[None, :])
++
++
++@triton.jit(do_not_specialize=["M"])
++def _iluvatar_linear_nt_splitk_partial(
++    A,
++    W,
++    P,
++    M,
++    N: tl.constexpr,
++    K: tl.constexpr,
++    stride_am,
++    stride_wn: tl.constexpr,
++    SPLIT_K: tl.constexpr,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
++    EVEN_K: tl.constexpr,
++):
++    pid = tl.program_id(0)
++    pid_k = tl.program_id(1)
++    grid_n = tl.cdiv(N, BLOCK_N)
++    pid_m = pid // grid_n
++    pid_n = pid % grid_n
+ 
+     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+-    C = output_ptr + (rm[:, None] * stride_om + rn[None, :] * stride_on)
+-    mask = (rm < M)[:, None] & (rn < N)[None, :]
+-    if SPLIT_K == 1:
+-        tl.store(C, acc.to(output_ptr.dtype.element_ty), mask=mask)
++    if EVEN_M:
++        ram = tl.max_contiguous(tl.multiple_of(rm, BLOCK_M), BLOCK_M)
++    else:
++        ram = rm % M
++    if EVEN_N:
++        rbn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_N), BLOCK_N)
+     else:
+-        tl.atomic_add(C, acc.to(output_ptr.dtype.element_ty), mask=mask)
++        rbn = rn % N
+ 
++    total_k_iters = tl.cdiv(K, BLOCK_K)
++    k_per_split = tl.cdiv(total_k_iters, SPLIT_K)
++    k_start = pid_k * k_per_split
++    k_end = min(k_start + k_per_split, total_k_iters)
+ 
+-def linear(input, weight, bias=None):
+-    logger.debug("GEMS_ILUVATAR LINEAR")
++    rk = tl.arange(0, BLOCK_K)
++    k_off = k_start * BLOCK_K + rk
++    a_ptrs = A + (ram[:, None] * stride_am + k_off[None, :])
++    w_ptrs = W + (k_off[:, None] + rbn[None, :] * stride_wn)
++    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++
++    for k in range(k_start, k_end):
++        if EVEN_K:
++            a = tl.load(a_ptrs)
++            w = tl.load(w_ptrs)
++        else:
++            k_rem = K - k * BLOCK_K
++            a = tl.load(a_ptrs, mask=rk[None, :] < k_rem, other=0.0)
++            w = tl.load(w_ptrs, mask=rk[:, None] < k_rem, other=0.0)
++        acc = tl.dot(a, w, acc, out_dtype=tl.float32, allow_tf32=False)
++        a_ptrs += BLOCK_K
++        w_ptrs += BLOCK_K
+ 
++    p_ptrs = P + (pid_k * M * N + rm[:, None] * N + rn[None, :])
++    if EVEN_M and EVEN_N:
++        tl.store(p_ptrs, acc)
++    else:
++        tl.store(p_ptrs, acc, mask=(rm < M)[:, None] & (rn < N)[None, :])
++
++
++@triton.jit(do_not_specialize=["total_elems"])
++def _iluvatar_splitk_reduce_kernel(
++    P,
++    C,
++    BIAS_PTR,
++    total_elems,
++    N: tl.constexpr,
++    SPLIT_K: tl.constexpr,
++    HAS_BIAS: tl.constexpr,
++    BLOCK: tl.constexpr,
++):
++    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
++    mask = offs < total_elems
++    acc = tl.zeros((BLOCK,), dtype=tl.float32)
++    for s in range(0, SPLIT_K):
++        acc += tl.load(P + s * total_elems + offs, mask=mask, other=0.0)
++    if HAS_BIAS:
++        col = offs % N
++        acc += tl.load(BIAS_PTR + col, mask=mask, other=0.0).to(tl.float32)
++    tl.store(C + offs, acc.to(C.dtype.element_ty), mask=mask)
++
++
++def _select_iluvatar_linear_config(M: int, N: int, K: int):
++    """Hardware-tuned tile & Split-K selection for Iluvatar BI-V150 (16 SMs, warp_size=64)."""
++    if M <= 16:
++        if K >= 2048 and N <= 4096:
++            return 16, 64, 64, 4, 2, 4
++        return 16, 64, 64, 4, 2, 1
++    if M <= 32:
++        if K >= 4096 and N <= 4096:
++            return 32, 64, 64, 4, 2, 4
++        return 32, 64, 64, 4, 2, 1
++    if M <= 64:
++        if N >= 32768:
++            return 64, 128, 32, 4, 2, 1
++        if N >= 8192:
++            return 64, 256, 32, 8, 2, 1
++        if K >= 4096 and N <= 4096:
++            return 64, 64, 64, 4, 2, 2
++        return 64, 128, 64, 8, 2, 1
++    if M <= 128:
++        return 64, 128, 64, 8, 2, 1
++    if M <= 512:
++        return 128, 128, 64, 8, 2, 1
++    if M >= 1024 and (N >= 4096 or K >= 4096 or N == 2048):
++        return 256, 256, 32, 8, 2, 1
++    return 128, 128, 32, 8, 2, 1
++
++
++def linear_nt_dispatch(a_2d: torch.Tensor, weight: torch.Tensor, bias=None, out: torch.Tensor = None):
++    M, K = a_2d.shape
++    N = weight.shape[0]
++    if out is None:
++        out = torch.empty((M, N), device=a_2d.device, dtype=a_2d.dtype)
++    if M == 0 or N == 0:
++        return out
++    if K == 0:
++        if bias is not None:
++            out.copy_(bias.unsqueeze(0).expand(M, N))
++        else:
++            out.zero_()
++        return out
++
++    bm, bn, bk, nw, ns, sk = _select_iluvatar_linear_config(M, N, K)
++    has_bias = bias is not None
++    bias_ptr = bias if has_bias else weight
++    even_m = (M % bm == 0)
++    even_n = (N % bn == 0)
++    even_k = (K % bk == 0)
++    upgrade_offs = max(M * K, N * K, M * N) >= (1 << 30)
++
++    def _run():
++        if sk == 1 or upgrade_offs:
++            grid = (triton.cdiv(M, bm) * triton.cdiv(N, bn),)
++            _iluvatar_linear_nt_kernel[grid](
++                a_2d,
++                weight,
++                bias_ptr,
++                out,
++                M,
++                N,
++                K,
++                a_2d.stride(0),
++                weight.stride(0),
++                out.stride(0),
++                HAS_BIAS=has_bias,
++                BLOCK_M=bm,
++                BLOCK_N=bn,
++                BLOCK_K=bk,
++                GROUP_M=8,
++                EVEN_M=even_m,
++                EVEN_N=even_n,
++                EVEN_K=even_k,
++                UPGRADE_OFFS=upgrade_offs,
++                num_warps=nw,
++                num_stages=ns,
++            )
++        else:
++            partials = torch.empty((sk, M, N), device=a_2d.device, dtype=torch.float32)
++            grid_p = (triton.cdiv(M, bm) * triton.cdiv(N, bn), sk)
++            grid_r = (triton.cdiv(M * N, 512),)
++            _iluvatar_linear_nt_splitk_partial[grid_p](
++                a_2d,
++                weight,
++                partials,
++                M,
++                N,
++                K,
++                a_2d.stride(0),
++                weight.stride(0),
++                SPLIT_K=sk,
++                BLOCK_M=bm,
++                BLOCK_N=bn,
++                BLOCK_K=bk,
++                EVEN_M=even_m,
++                EVEN_N=even_n,
++                EVEN_K=even_k,
++                num_warps=nw,
++                num_stages=ns,
++            )
++            _iluvatar_splitk_reduce_kernel[grid_r](
++                partials,
++                out,
++                bias_ptr,
++                M * N,
++                N,
++                SPLIT_K=sk,
++                HAS_BIAS=has_bias,
++                BLOCK=512,
++                num_warps=4,
++            )
++
++    if torch.cuda.current_device() != a_2d.device.index:
++        with torch_device_fn.device(a_2d.device):
++            _run()
++    else:
++        _run()
++    return out
++
++
++def linear(input: torch.Tensor, weight: torch.Tensor, bias=None) -> torch.Tensor:
++    logger.debug("GEMS_ILUVATAR LINEAR")
+     input_dim = input.dim()
+     if input_dim == 1:
+         input = input.unsqueeze(0)
+@@ -125,44 +317,27 @@ def linear(input, weight, bias=None):
+         single_1d = False
+ 
+     batch_dims = input.shape[:-1]
+-    batch_size = 1
+-    for dim in batch_dims:
+-        batch_size *= dim
+-    M = batch_size
+     K = input.shape[-1]
++    M = input.numel() // K if K > 0 else 0
+     N = weight.shape[0]
+ 
+-    input_flat = input.view(M, K)
+-    weight = weight.contiguous()
+-    output = torch.empty((M, N), device=input.device, dtype=input.dtype)
+-
+-    grid = lambda META: (
+-        triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+-        META.get("SPLIT_K", 1),
+-    )
+-
+-    with torch_device_fn.device(input.device):
+-        linear_kernel[grid](
+-            input_flat,
+-            weight,
+-            bias if bias is not None else weight,
+-            output,
+-            M,
+-            N,
+-            K,
+-            input_flat.stride(0),
+-            input_flat.stride(1),
+-            weight.stride(0),
+-            weight.stride(1),
+-            output.stride(0),
+-            output.stride(1),
+-            bias.stride(0) if bias is not None else 0,
+-            BIAS=bias is not None,
+-            GROUP_M=8,
+-            SPLIT_K=1,
+-        )
+-
+-    output = output.view(*batch_dims, N)
++    if input.stride(-1) != 1 or (input.ndim > 2 and not input.is_contiguous()):
++        input_flat = input.contiguous().view(M, K)
++    else:
++        input_flat = input.view(M, K)
++
++    if not weight.is_contiguous():
++        weight = weight.contiguous()
++    if bias is not None and not bias.is_contiguous():
++        bias = bias.contiguous()
++
++    if input_flat.dtype != weight.dtype or input_flat.dtype not in (torch.float16, torch.bfloat16):
++        from flag_gems.ops.linear import linear as generic_linear
++        out = generic_linear(input_flat, weight, bias)
++    else:
++        out = linear_nt_dispatch(input_flat, weight, bias)
++
++    out = out.view(*batch_dims, N)
+     if single_1d:
+-        output = output.squeeze(0)
+-    return output
++        out = out.squeeze(0)
++    return out
+diff --git a/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py b/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
+index 5fefae2d956..d7563173d6b 100644
+--- a/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
+@@ -47,10 +47,36 @@ def _to_tl_type(ty):
+     return getattr(tl, str(ty).split(".")[-1])
+ 
+ 
++def _reset_splitk_output(args, reset_only=False):
++    if reset_only:
++        return
++    out = args.get("C", None)
++    if out is not None:
++        out.zero_()
++
++
++def _with_splitk_prehook(configs):
++    out = []
++    for cfg in configs:
++        if int(cfg.kwargs.get("BLOCK_M", 16)) < 16 or int(cfg.kwargs.get("BLOCK_N", 16)) < 16:
++            continue
++        if int(cfg.kwargs.get("SPLIT_K", 1)) > 1 and cfg.pre_hook is None:
++            cfg = triton.Config(
++                dict(cfg.kwargs),
++                num_warps=cfg.num_warps,
++                num_stages=cfg.num_stages,
++                num_ctas=cfg.num_ctas,
++                pre_hook=_reset_splitk_output,
++            )
++        out.append(cfg)
++    return out
++
++
+ @libentry()
+ @libtuner(
+-    configs=runtime.get_tuned_config("mm"),
++    configs=_with_splitk_prehook(runtime.get_tuned_config("mm")),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+     prune_configs_by={
+         "early_config_prune": early_config_prune,
+         "perf_model": estimate_matmul_time,
+@@ -205,6 +231,19 @@ def mm_kernel(
+ 
+ def _launch_mm(a, b, c, M, N, K):
+     """Launch Triton matmul _kernel; c must be pre-allocated."""
++    if (
++        a.dtype == b.dtype
++        and a.dtype in (torch.float16, torch.bfloat16)
++        and a.stride(1) == 1
++        and b.stride(0) == 1
++        and b.stride(1) == K
++        and c.stride(0) == N
++        and c.stride(1) == 1
++    ):
++        from .linear import linear_nt_dispatch
++
++        return linear_nt_dispatch(a, b.t(), None, out=c)
++
+     ab_dtype = get_higher_dtype(a.dtype, b.dtype)
+     acc_dtype_tl = tl.float32
+     ab_dtype_tl = _to_tl_type(ab_dtype)
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/__init__.py b/src/flag_gems/runtime/backend/_metax/ops/__init__.py
+index f3f3f4dd56f..397a38c442e 100644
+--- a/src/flag_gems/runtime/backend/_metax/ops/__init__.py
++++ b/src/flag_gems/runtime/backend/_metax/ops/__init__.py
+@@ -28,6 +28,7 @@
+ from .layernorm import layer_norm, layer_norm_backward
+ from .lgamma_ import lgamma, lgamma_
+ from .linalg_svdvals import linalg_svdvals
++from .linear import linear
+ from .log_sigmoid_forward import log_sigmoid_forward
+ from .log_softmax import log_softmax, log_softmax_backward
+ from .logical_or import logical_or, logical_or_
+@@ -113,6 +114,7 @@
+     "lgamma",
+     "lgamma_",
+     "linalg_svdvals",
++    "linear",
+     "log_sigmoid_forward",
+     "log_softmax",
+     "log_softmax_backward",
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/addmm.py b/src/flag_gems/runtime/backend/_metax/ops/addmm.py
+index f4b461f7199..bc4b8423ac8 100644
+--- a/src/flag_gems/runtime/backend/_metax/ops/addmm.py
++++ b/src/flag_gems/runtime/backend/_metax/ops/addmm.py
+@@ -37,6 +37,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("addmm"),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+ )
+ @triton.heuristics(
+     {
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/linear.py b/src/flag_gems/runtime/backend/_metax/ops/linear.py
+new file mode 100644
+index 00000000000..901ff419207
+--- /dev/null
++++ b/src/flag_gems/runtime/backend/_metax/ops/linear.py
+@@ -0,0 +1,368 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++import logging
++
++import torch
++import triton
++import triton.language as tl
++
++from flag_gems.runtime import torch_device_fn
++
++logger = logging.getLogger(__name__)
++
++
++@triton.jit(do_not_specialize=["M"])
++def _metax_linear_nt_kernel(
++    A,
++    W,
++    BIAS_PTR,
++    C,
++    M,
++    N: tl.constexpr,
++    K: tl.constexpr,
++    stride_am,
++    stride_wn: tl.constexpr,
++    stride_cm: tl.constexpr,
++    HAS_BIAS: tl.constexpr,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    GROUP_M: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
++    EVEN_K: tl.constexpr,
++    UPGRADE_A: tl.constexpr,
++    UPGRADE_W: tl.constexpr,
++    UPGRADE_C: tl.constexpr,
++    pipeline: tl.constexpr,
++    scenario: tl.constexpr,
++):
++    pid = tl.program_id(0)
++    grid_m = tl.cdiv(M, BLOCK_M)
++    grid_n = tl.cdiv(N, BLOCK_N)
++    width = GROUP_M * grid_n
++    group_id = pid // width
++    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
++    pid_m = group_id * GROUP_M + (pid % group_size)
++    pid_n = (pid % width) // group_size
++
++    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    if EVEN_M:
++        ram = tl.max_contiguous(tl.multiple_of(rm, BLOCK_M), BLOCK_M)
++    else:
++        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
++    if EVEN_N:
++        rbn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_N), BLOCK_N)
++    else:
++        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
++
++    rk = tl.arange(0, BLOCK_K)
++    if UPGRADE_A:
++        a_ptrs = A + (ram[:, None].to(tl.int64) * stride_am + rk[None, :])
++    else:
++        a_ptrs = A + (ram[:, None] * stride_am + rk[None, :])
++    if UPGRADE_W:
++        w_ptrs = W + (rk[:, None] + rbn[None, :].to(tl.int64) * stride_wn)
++    else:
++        w_ptrs = W + (rk[:, None] + rbn[None, :] * stride_wn)
++
++    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    for k in range(0, tl.cdiv(K, BLOCK_K)):
++        if EVEN_K:
++            a = tl.load(a_ptrs)
++            w = tl.load(w_ptrs)
++        else:
++            k_rem = K - k * BLOCK_K
++            a = tl.load(a_ptrs, mask=rk[None, :] < k_rem, other=0.0)
++            w = tl.load(w_ptrs, mask=rk[:, None] < k_rem, other=0.0)
++        acc = tl.dot(a, w, acc, out_dtype=tl.float32, allow_tf32=False)
++        a_ptrs += BLOCK_K
++        w_ptrs += BLOCK_K
++
++    if HAS_BIAS:
++        bias = tl.load(BIAS_PTR + rn, mask=rn < N, other=0.0).to(tl.float32)
++        acc += bias[None, :]
++
++    if UPGRADE_C:
++        c_ptrs = C + (rm[:, None].to(tl.int64) * stride_cm + rn[None, :])
++    else:
++        c_ptrs = C + (rm[:, None] * stride_cm + rn[None, :])
++
++    out = acc.to(C.dtype.element_ty)
++    if EVEN_M and EVEN_N:
++        tl.store(c_ptrs, out)
++    else:
++        tl.store(c_ptrs, out, mask=(rm < M)[:, None] & (rn < N)[None, :])
++
++
++@triton.jit(do_not_specialize=["M"])
++def _metax_linear_nt_splitk_partial(
++    A,
++    W,
++    P,
++    M,
++    N: tl.constexpr,
++    K: tl.constexpr,
++    stride_am,
++    stride_wn: tl.constexpr,
++    SPLIT_K: tl.constexpr,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
++    EVEN_K: tl.constexpr,
++    pipeline: tl.constexpr,
++):
++    pid = tl.program_id(0)
++    pid_k = tl.program_id(1)
++    grid_n = tl.cdiv(N, BLOCK_N)
++    pid_m = pid // grid_n
++    pid_n = pid % grid_n
++
++    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    if EVEN_M:
++        ram = tl.max_contiguous(tl.multiple_of(rm, BLOCK_M), BLOCK_M)
++    else:
++        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
++    if EVEN_N:
++        rbn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_N), BLOCK_N)
++    else:
++        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
++
++    total_k_iters = tl.cdiv(K, BLOCK_K)
++    k_per_split = tl.cdiv(total_k_iters, SPLIT_K)
++    k_start = pid_k * k_per_split
++    k_end = min(k_start + k_per_split, total_k_iters)
++
++    rk = tl.arange(0, BLOCK_K)
++    k_off = k_start * BLOCK_K + rk
++    a_ptrs = A + (ram[:, None] * stride_am + k_off[None, :])
++    w_ptrs = W + (k_off[:, None] + rbn[None, :] * stride_wn)
++    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++
++    for k in range(k_start, k_end):
++        if EVEN_K:
++            a = tl.load(a_ptrs)
++            w = tl.load(w_ptrs)
++        else:
++            k_rem = K - k * BLOCK_K
++            a = tl.load(a_ptrs, mask=rk[None, :] < k_rem, other=0.0)
++            w = tl.load(w_ptrs, mask=rk[:, None] < k_rem, other=0.0)
++        acc = tl.dot(a, w, acc, out_dtype=tl.float32, allow_tf32=False)
++        a_ptrs += BLOCK_K
++        w_ptrs += BLOCK_K
++
++    p_ptrs = P + (pid_k * M * N + rm[:, None] * N + rn[None, :])
++    if EVEN_M and EVEN_N:
++        tl.store(p_ptrs, acc)
++    else:
++        tl.store(p_ptrs, acc, mask=(rm < M)[:, None] & (rn < N)[None, :])
++
++
++@triton.jit(do_not_specialize=["total_elems"])
++def _metax_splitk_reduce_kernel(
++    P,
++    C,
++    BIAS_PTR,
++    total_elems,
++    N: tl.constexpr,
++    SPLIT_K: tl.constexpr,
++    HAS_BIAS: tl.constexpr,
++    BLOCK: tl.constexpr,
++):
++    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
++    mask = offs < total_elems
++    acc = tl.zeros((BLOCK,), dtype=tl.float32)
++    for s in range(0, SPLIT_K):
++        acc += tl.load(P + s * total_elems + offs, mask=mask, other=0.0)
++    if HAS_BIAS:
++        col = offs % N
++        acc += tl.load(BIAS_PTR + col, mask=mask, other=0.0).to(tl.float32)
++    tl.store(C + offs, acc.to(C.dtype.element_ty), mask=mask)
++
++
++def _select_metax_linear_config(M: int, N: int, K: int):
++    """Hardware-tuned cpasync & two-step Split-K selection for MetaX C500 (104 SMs, 64 KiB smem)."""
++    if M <= 16:
++        if N >= 32768:
++            return 16, 128, 64, "cpasync", "", 4, 4, 1
++        if N >= 8192:
++            return 16, 64, 64, "cpasync", "", 4, 4, 1
++        if K >= 4096:
++            return 16, 64, 64, "basic", "", 2, 4, 4
++        return 16, 64, 64, "basic", "", 2, 4, 2
++    if M <= 32:
++        if N >= 32768:
++            return 32, 128, 64, "cpasync", "", 4, 4, 1
++        if N >= 8192:
++            return 32, 64, 64, "cpasync", "", 4, 4, 1
++        if K >= 4096:
++            return 32, 64, 64, "basic", "", 2, 4, 4
++        return 32, 64, 64, "cpasync", "", 4, 4, 1
++    if M <= 64:
++        if N >= 8192:
++            return 64, 128, 64, "cpasync", "", 4, 4, 1
++        if K >= 4096 and N <= 4096:
++            return 64, 64, 64, "basic", "", 2, 4, 4
++        return 64, 64, 64, "cpasync", "", 4, 4, 1
++    if M <= 256:
++        if K >= 4096 and N <= 4096 and M <= 128:
++            return 64, 64, 64, "cpasync", "unroll", 4, 4, 1
++        return 128, 64, 64, "cpasync", "unroll", 4, 4, 1
++    if M >= 8192 and K >= 4096:
++        return 256, 256, 32, "basic", "fullstage", 2, 8, 1
++    return 128, 128, 64, "cpasync", "unroll", 4, 4, 1
++
++
++def linear_nt_dispatch(a_2d: torch.Tensor, weight: torch.Tensor, bias=None, out: torch.Tensor = None):
++    M, K = a_2d.shape
++    N = weight.shape[0]
++    if out is None:
++        out = torch.empty((M, N), device=a_2d.device, dtype=a_2d.dtype)
++    if M == 0 or N == 0:
++        return out
++    if K == 0:
++        if bias is not None:
++            out.copy_(bias.unsqueeze(0).expand(M, N))
++        else:
++            out.zero_()
++        return out
++
++    bm, bn, bk, pipe, scen, ns, nw, sk = _select_metax_linear_config(M, N, K)
++    if M > 256 and (M % bm) != 0 and out.stride(0) == N and out.stride(1) == 1:
++        m_main = (M // bm) * bm
++        linear_nt_dispatch(a_2d[:m_main], weight, bias, out[:m_main])
++        linear_nt_dispatch(a_2d[m_main:], weight, bias, out[m_main:])
++        return out
++    has_bias = bias is not None
++    bias_ptr = bias if has_bias else weight
++    even_m = (M % bm == 0)
++    even_n = (N % bn == 0)
++    even_k = (K % bk == 0)
++    upgrade_a = (M * a_2d.stride(0)) >= (1 << 31)
++    upgrade_w = (N * weight.stride(0)) >= (1 << 31)
++    upgrade_c = (M * out.stride(0)) >= (1 << 31)
++
++    def _run():
++        if sk == 1 or upgrade_a or upgrade_w or upgrade_c:
++            grid = (triton.cdiv(M, bm) * triton.cdiv(N, bn),)
++            _metax_linear_nt_kernel[grid](
++                a_2d,
++                weight,
++                bias_ptr,
++                out,
++                M,
++                N,
++                K,
++                a_2d.stride(0),
++                weight.stride(0),
++                out.stride(0),
++                HAS_BIAS=has_bias,
++                BLOCK_M=bm,
++                BLOCK_N=bn,
++                BLOCK_K=bk,
++                GROUP_M=8,
++                EVEN_M=even_m,
++                EVEN_N=even_n,
++                EVEN_K=even_k,
++                UPGRADE_A=upgrade_a,
++                UPGRADE_W=upgrade_w,
++                UPGRADE_C=upgrade_c,
++                pipeline=pipe,
++                scenario=scen,
++                num_stages=ns,
++                num_warps=nw,
++            )
++        else:
++            partials = torch.empty((sk, M, N), device=a_2d.device, dtype=torch.float32)
++            grid_p = (triton.cdiv(M, bm) * triton.cdiv(N, bn), sk)
++            grid_r = (triton.cdiv(M * N, 512),)
++            _metax_linear_nt_splitk_partial[grid_p](
++                a_2d,
++                weight,
++                partials,
++                M,
++                N,
++                K,
++                a_2d.stride(0),
++                weight.stride(0),
++                SPLIT_K=sk,
++                BLOCK_M=bm,
++                BLOCK_N=bn,
++                BLOCK_K=bk,
++                EVEN_M=even_m,
++                EVEN_N=even_n,
++                EVEN_K=even_k,
++                pipeline=pipe,
++                num_stages=ns,
++                num_warps=nw,
++            )
++            _metax_splitk_reduce_kernel[grid_r](
++                partials,
++                out,
++                bias_ptr,
++                M * N,
++                N,
++                SPLIT_K=sk,
++                HAS_BIAS=has_bias,
++                BLOCK=512,
++                num_warps=4,
++            )
++
++    if torch.cuda.current_device() != a_2d.device.index:
++        with torch_device_fn.device(a_2d.device):
++            _run()
++    else:
++        _run()
++    return out
++
++
++def linear(input: torch.Tensor, weight: torch.Tensor, bias=None) -> torch.Tensor:
++    logger.debug("GEMS_METAX LINEAR")
++    input_dim = input.dim()
++    if input_dim == 1:
++        input = input.unsqueeze(0)
++        single_1d = True
++    else:
++        single_1d = False
++
++    batch_dims = input.shape[:-1]
++    K = input.shape[-1]
++    M = input.numel() // K if K > 0 else 0
++    N = weight.shape[0]
++
++    if input.stride(-1) != 1 or (input.ndim > 2 and not input.is_contiguous()):
++        input_flat = input.contiguous().view(M, K)
++    else:
++        input_flat = input.view(M, K)
++
++    if not weight.is_contiguous():
++        weight = weight.contiguous()
++    if bias is not None and not bias.is_contiguous():
++        bias = bias.contiguous()
++
++    if input_flat.dtype != weight.dtype or input_flat.dtype not in (torch.float16, torch.bfloat16):
++        from flag_gems.ops.linear import linear as generic_linear
++        out = generic_linear(input_flat, weight, bias)
++    else:
++        out = linear_nt_dispatch(input_flat, weight, bias)
++
++    out = out.view(*batch_dims, N)
++    if single_1d:
++        out = out.squeeze(0)
++    return out
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/mm.py b/src/flag_gems/runtime/backend/_metax/ops/mm.py
+index cd19518e5c8..7a71fbb406e 100644
+--- a/src/flag_gems/runtime/backend/_metax/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_metax/ops/mm.py
+@@ -52,12 +52,6 @@ def _prune_mm_dense_configs(configs, named_args, transposed_b=False, **kwargs):
+             if block_m > 128 or block_n > 128 or pipeline != "cpasync":
+                 continue
+ 
+-        if (
+-            pipeline == "cpasync"
+-            and block_k >= 64
+-            and (block_m == 128 or block_n == 128)
+-        ):
+-            continue
+ 
+         if transposed_b and K % block_k != 0 and block_m == 256 and block_n == 256:
+             continue
+@@ -94,10 +88,13 @@ def _prune_mm_dense_configs(configs, named_args, transposed_b=False, **kwargs):
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K", "stride_am", "stride_bk"],
++    strategy=["align32_capped", "align32", "align32", "align32", "align32"],
+     prune_configs_by={"early_config_prune": _prune_mm_dense_configs},
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="mm",
+     flagtune_yaml_path=EXPAND_CONFIG_FILENAME,
++    warmup=5,
++    rep=10,
+ )
+ @triton.heuristics(runtime.get_heuristic_config("mm"))
+ @triton.heuristics(
+@@ -249,10 +246,13 @@ def mm_kernel(
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_nn"),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+     prune_configs_by={"early_config_prune": _prune_mm_dense_configs},
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="mm_nn",
+     flagtune_yaml_path=EXPAND_CONFIG_FILENAME,
++    warmup=5,
++    rep=10,
+ )
+ @triton.heuristics(runtime.get_heuristic_config("mm"))
+ @triton.heuristics(
+@@ -330,10 +330,13 @@ def mm_kernel_nn(
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_nt"),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+     prune_configs_by={"early_config_prune": _prune_mm_dense_configs_nt},
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="mm_nt",
+     flagtune_yaml_path=EXPAND_CONFIG_FILENAME,
++    warmup=5,
++    rep=10,
+ )
+ @triton.heuristics(runtime.get_heuristic_config("mm"))
+ @triton.heuristics(
+@@ -421,6 +424,7 @@ def _prune_gemv_configs(configs, named_args, **kwargs):
+ @libtuner(
+     configs=[triton.Config({"BLOCK_M": 32, "BLOCK_K": 256})],
+     key=["M", "K", "stride_am", "stride_bk"],
++    strategy=["align32_capped", "align32", "align32", "align32"],
+     prune_configs_by={"early_config_prune": _prune_gemv_configs},
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="gemv",
+@@ -480,6 +484,7 @@ def gemv_mm(a, b, c, M, K):
+ @libtuner(
+     configs=runtime.get_tuned_config("gemv_k_parallel"),
+     key=["M", "K", "stride_am", "stride_bk"],
++    strategy=["align32_capped", "align32", "align32", "align32"],
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="gemv_k_parallel",
+     flagtune_yaml_path=EXPAND_CONFIG_FILENAME,
+@@ -660,10 +665,13 @@ def _prune_mm_splitk_two_step_configs(configs, named_args, **kwargs):
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_splitk"),
+     key=["M", "N", "K", "stride_am", "stride_bk"],
++    strategy=["align32_capped", "align32", "align32", "align32", "align32"],
+     pre_hook=_reset_splitk_output,
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="mm_splitk",
+     flagtune_yaml_path=EXPAND_CONFIG_FILENAME,
++    warmup=5,
++    rep=10,
+ )
+ @triton.jit
+ def mm_kernel_splitk(
+@@ -746,10 +754,13 @@ def splitk_mm(a, b, c, M, N, K):
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_splitk_two_step"),
+     key=["M", "N", "K", "stride_am", "stride_bk"],
++    strategy=["align32_capped", "align32", "align32", "align32", "align32"],
+     prune_configs_by={"early_config_prune": _prune_mm_splitk_two_step_configs},
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="mm_splitk_two_step",
+     flagtune_yaml_path=EXPAND_CONFIG_FILENAME,
++    warmup=5,
++    rep=10,
+ )
+ @triton.jit
+ def mm_kernel_splitk_partial(
+@@ -1082,7 +1093,7 @@ def _splitk_mm_two_step_scenario(M, N, K):
+     if K < 2048:
+         return False
+ 
+-    if N != 256:
++    if N % 16 != 0:
+         return False
+ 
+     split_k, output_tiles = _two_step_split_k(M, N, K)
+@@ -1177,6 +1188,18 @@ def mm(a, b):
+     # allocates output
+     c_dtype = get_higher_dtype(a.dtype, b.dtype)
+     c = torch.empty((M, N), device=device, dtype=c_dtype)
++    if (
++        a.dtype == b.dtype
++        and a.dtype in (torch.float16, torch.bfloat16)
++        and a.stride(1) == 1
++        and b.stride(0) == 1
++        and b.stride(1) == K
++        and c.stride(0) == N
++        and c.stride(1) == 1
++    ):
++        from .linear import linear_nt_dispatch
++
++        return linear_nt_dispatch(a, b.t(), None, out=c)
+     if N == 1:
+         if _gemv_k_parallel_scenario(M, K):
+             return gemv_mm_k_parallel(a, b, c, M, K)
+@@ -1207,6 +1230,18 @@ def mm_out(a, b, *, out):
+     _, N = b.shape
+     # allocates output
+     c = out
++    if (
++        a.dtype == b.dtype
++        and a.dtype in (torch.float16, torch.bfloat16)
++        and a.stride(1) == 1
++        and b.stride(0) == 1
++        and b.stride(1) == K
++        and c.stride(0) == N
++        and c.stride(1) == 1
++    ):
++        from .linear import linear_nt_dispatch
++
++        return linear_nt_dispatch(a, b.t(), None, out=c)
+     if N == 1:
+         if _gemv_k_parallel_scenario(M, K):
+             return gemv_mm_k_parallel(a, b, c, M, K)
+diff --git a/src/flag_gems/runtime/backend/_metax/tune_configs.yaml b/src/flag_gems/runtime/backend/_metax/tune_configs.yaml
+index 90f583a6747..99d5d1fd47a 100644
+--- a/src/flag_gems/runtime/backend/_metax/tune_configs.yaml
++++ b/src/flag_gems/runtime/backend/_metax/tune_configs.yaml
+@@ -38,6 +38,14 @@ attention:
+   - 1
+ 
+ bmm:
++- META:
++    BLOCK_M: 128
++    BLOCK_N: 128
++    BLOCK_K: 64
++    pipeline: "cpasync"
++    scenario: "unroll"
++  num_stages: 4
++  num_warps: 4
+ - META:
+     TILE_M: 32
+     TILE_N: 32
+@@ -313,6 +321,38 @@ mm_nn:
+   num_stages: 4
+   num_warps: 4
+ mm_nt:
++- META:
++    BLOCK_M: 128
++    BLOCK_N: 128
++    BLOCK_K: 64
++    pipeline: "cpasync"
++    scenario: "unroll"
++  num_stages: 4
++  num_warps: 4
++- META:
++    BLOCK_M: 128
++    BLOCK_N: 64
++    BLOCK_K: 64
++    pipeline: "cpasync"
++    scenario: "unroll"
++  num_stages: 4
++  num_warps: 4
++- META:
++    BLOCK_M: 64
++    BLOCK_N: 128
++    BLOCK_K: 64
++    pipeline: "cpasync"
++    scenario: ""
++  num_stages: 4
++  num_warps: 4
++- META:
++    BLOCK_M: 64
++    BLOCK_N: 64
++    BLOCK_K: 64
++    pipeline: "cpasync"
++    scenario: ""
++  num_stages: 4
++  num_warps: 4
+ - META:
+     BLOCK_M: 16
+     BLOCK_N: 32
+diff --git a/src/flag_gems/runtime/backend/_mthreads/ops/addmm.py b/src/flag_gems/runtime/backend/_mthreads/ops/addmm.py
+index f67cc784dfa..8ea9c14076b 100644
+--- a/src/flag_gems/runtime/backend/_mthreads/ops/addmm.py
++++ b/src/flag_gems/runtime/backend/_mthreads/ops/addmm.py
+@@ -86,6 +86,7 @@ def _prepare_bias(bias, out):
+         ),
+     ],
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+     warmup=5,
+     rep=5,
+ )
+diff --git a/src/flag_gems/runtime/backend/_mthreads/ops/mm.py b/src/flag_gems/runtime/backend/_mthreads/ops/mm.py
+index aed623eef8f..1f74b549d08 100644
+--- a/src/flag_gems/runtime/backend/_mthreads/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_mthreads/ops/mm.py
+@@ -67,7 +67,7 @@ def prev_multiple_of(a, b):
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K", "stride_am", "stride_bk"],
+-    strategy=["align32", "align32", "align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32", "align32", "align32"],
+     warmup=5,
+     rep=5,
+     flagtune_op_name="mm",
+@@ -164,7 +164,7 @@ def mm_kernel(
+         triton.Config({"BLOCK_M": 128, "BLOCK_K": 64}),
+     ],
+     key=["M", "K", "stride_am", "stride_bk"],
+-    strategy=["align32", "align32", "align32", "default"],
++    strategy=["align32_capped", "align32", "align32", "default"],
+     warmup=5,
+     rep=5,
+     flagtune_op_name="mm",
+@@ -349,7 +349,7 @@ def sqmma_descriptor_pre_hook(nargs):
+         )
+     ],
+     key=["M", "N", "K", "dtype"],
+-    strategy=["align32", "align32", "align32", "default"],
++    strategy=["align32_capped", "align32", "align32", "default"],
+     warmup=5,
+     rep=5,
+     flagtune_op_name="mm",
+diff --git a/src/flag_gems/runtime/backend/_spacemit/ops/addmm.py b/src/flag_gems/runtime/backend/_spacemit/ops/addmm.py
+index 845f06e7ae9..da8ccc438d7 100755
+--- a/src/flag_gems/runtime/backend/_spacemit/ops/addmm.py
++++ b/src/flag_gems/runtime/backend/_spacemit/ops/addmm.py
+@@ -29,6 +29,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("addmm_spacemit"),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+ )
+ @triton.jit
+ def addmm_kernel(
+diff --git a/src/flag_gems/runtime/backend/_spacemit/ops/mm.py b/src/flag_gems/runtime/backend/_spacemit/ops/mm.py
+index 848635413e1..a1bd6c98ace 100755
+--- a/src/flag_gems/runtime/backend/_spacemit/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_spacemit/ops/mm.py
+@@ -29,6 +29,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_spacemit"),
+     key=["M", "N", "K"],
++    strategy=["align32_capped", "align32", "align32"],
+ )
+ @triton.jit
+ def mm_kernel(
+diff --git a/src/flag_gems/runtime/backend/_sunrise/ops/addmm.py b/src/flag_gems/runtime/backend/_sunrise/ops/addmm.py
+index 5b4d9d16ff6..c65252533f4 100644
+--- a/src/flag_gems/runtime/backend/_sunrise/ops/addmm.py
++++ b/src/flag_gems/runtime/backend/_sunrise/ops/addmm.py
+@@ -30,7 +30,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("addmm"),
+     key=["M", "N", "K"],
+-    strategy=["align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32"],
+     warmup=5,
+     rep=10,
+ )
+diff --git a/src/flag_gems/runtime/backend/_sunrise/ops/mm.py b/src/flag_gems/runtime/backend/_sunrise/ops/mm.py
+index bd04c1b96de..992628d31c5 100644
+--- a/src/flag_gems/runtime/backend/_sunrise/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_sunrise/ops/mm.py
+@@ -47,7 +47,7 @@ def prev_multiple_of(a, b):
+     configs=runtime.get_tuned_config("mm"),
+     # Add 'stride_am' and 'stride_bk' to trigger autotune for tensors with the same shape but different strides.
+     key=["M", "N", "K", "stride_am", "stride_bk"],
+-    strategy=["align32", "align32", "align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32", "align32", "align32"],
+     warmup=5,
+     rep=10,
+ )
+@@ -475,7 +475,7 @@ def general_mm(a, b, c, M, N, K):
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_self_transpose"),
+     key=["M", "K", "stride_am", "stride_ak"],
+-    strategy=["align32", "align32", "align32", "align32"],
++    strategy=["align32_capped", "align32", "align32", "align32"],
+     warmup=2,
+     rep=4,
+ )
+diff --git a/src/flag_gems/runtime/backend/_tsingmicro/ops/mm.py b/src/flag_gems/runtime/backend/_tsingmicro/ops/mm.py
+index 84558bcbed6..ca5dcb1e9b6 100644
+--- a/src/flag_gems/runtime/backend/_tsingmicro/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_tsingmicro/ops/mm.py
+@@ -29,8 +29,7 @@
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K", "stride_am", "stride_bk", "stride_ak", "stride_bn"],
+-    strategy=[
+-        "align32",
++    strategy=["align32_capped",
+         "align32",
+         "align32",
+         "align32",
+diff --git a/src/flag_gems/utils/libentry.py b/src/flag_gems/utils/libentry.py
+index 24876afff22..d4f4068773d 100755
+--- a/src/flag_gems/utils/libentry.py
++++ b/src/flag_gems/utils/libentry.py
+@@ -520,6 +520,13 @@ def __init__(
+             f"{BENCHMARK_CACHE_SCHEMA_VERSION}"
+         )
+         self.cache: ConfigCache = libcache[self.config_table_name]
++        try:
++            import inspect as _inspect
++
++            _src_fn = self.base_fn.fn if hasattr(self.base_fn, "fn") else self.base_fn
++            self._uses_dot = "tl.dot" in _inspect.getsource(_src_fn)
++        except Exception:
++            self._uses_dot = True
+ 
+     def _make_config_table_name(self) -> str:
+         """Namespace best configs by selection mode and timing protocol."""
+@@ -950,6 +957,30 @@ def benchmark_with_requested_quantiles(kernel_call, quantiles):
+         finally:
+             self.nargs = original_nargs
+ 
++    def _config_known(self, config):
++        """True when `config` (from the persistent cache) is one of the current candidates."""
++        if config is None:
++            return False
++        kw = config.all_kwargs()
++        for c in self.configs:
++            if c.all_kwargs() == kw:
++                return True
++        return len(self.configs) == 0
++
++    def _bench(self, *args, config, **meta):
++        """Benchmark one candidate.  The flagtree AABS pass shrinks block sizes to the actual
++        problem size; for kernels built on tl.dot that yields sub-MMA tiles (BLOCK_M < 16)
++        which are miscompiled on some backends, so AABS is disabled for those kernels."""
++        knobs = getattr(triton, "knobs", None)
++        auto = getattr(getattr(knobs, "autotuning", None), "adjust_block_size", None)
++        if not getattr(self, "_uses_dot", False) or not auto:
++            return super()._bench(*args, config=config, **meta)
++        knobs.autotuning.adjust_block_size = False
++        try:
++            return super()._bench(*args, config=config, **meta)
++        finally:
++            knobs.autotuning.adjust_block_size = True
++
+     def run(self, *args, **kwargs):
+         """Select and launch a config under the current scoped run mode.
+ 
+@@ -983,7 +1014,13 @@ def run(self, *args, **kwargs):
+             _args = {k: v for k, v in all_args.items() if k in self.arg_names}
+             config_key = self.get_key(_args)
+             benchmark_key = self.get_benchmark_key(_args)
+-            if bypass_config_cache or config_key not in self.cache:
++            _mem = self.__dict__.get("_mem_cache")
++            if _mem is None:
++                _mem = self._mem_cache = {}
++            _hit = None if bypass_config_cache else _mem.get(config_key)
++            if _hit is not None:
++                config = _hit
++            elif bypass_config_cache or not self._config_known(self.cache.get(config_key)):
+                 cache: BenchmarkCache = libcache[
+                     self.benchmark_table_name, benchmark_key
+                 ]
+@@ -1054,13 +1091,16 @@ def bench(config: triton.Config) -> List[float]:
+                 self.configs_timings = timings
+             else:
+                 config = self.cache[config_key]
+-            if config.pre_hook is None:
+-                cached_kwargs = config.all_kwargs()
+-                for original_config in self.configs:
+-                    if original_config.all_kwargs() == cached_kwargs:
+-                        # Use the original config which has the pre_hook
+-                        config = original_config
+-                        break
++            if _hit is None:
++                if config.pre_hook is None:
++                    cached_kwargs = config.all_kwargs()
++                    for original_config in self.configs:
++                        if original_config.all_kwargs() == cached_kwargs:
++                            # Use the original config which has the pre_hook
++                            config = original_config
++                            break
++                if not bypass_config_cache:
++                    _mem[config_key] = config
+         else:
+             config = self.configs[0]
+         self.best_config = config
+@@ -1374,6 +1414,20 @@ def align32_strategy(key: Union[int, float]) -> int:
+     return math.ceil(key / 32) * 32
+ 
+ 
++
++@LibTuner.register_strategy("align32_capped")
++def align32_capped_strategy(key: Union[int, float]) -> int:
++    """align32 below 256, next power of two above.
++
++    Large-M GEMM tile configs selected by the tuner are invariant in M (one config per
++    256..2048 range on the targets), while every distinct key costs a full benchmark
++    sweep on the serving path; bucketing keeps the number of sweeps bounded.
++    """
++    if key < 256:
++        return align32_strategy(key)
++    return 1 << (int(key) - 1).bit_length()
++
++
+ @LibTuner.register_policy("default")
+ def default_policy(
+     self,
+diff --git a/src/flag_gems/utils/models/sql.py b/src/flag_gems/utils/models/sql.py
+index c06adbe661a..3df6b109a4d 100644
+--- a/src/flag_gems/utils/models/sql.py
++++ b/src/flag_gems/utils/models/sql.py
+@@ -29,6 +29,7 @@
+ )
+ 
+ import sqlalchemy
++import sqlalchemy.exc
+ import sqlalchemy.ext.automap
+ import sqlalchemy.orm
+ import triton
+@@ -145,7 +146,14 @@ def build_sql_model_by_db(
+         AutoBase: sqlalchemy.ext.automap.AutomapBase = (
+             sqlalchemy.ext.automap.automap_base()
+         )
+-        AutoBase.prepare(engine)
++        # Reflect only the requested table.  Reflecting the whole database costs
++        # O(number of tuned kernels) (hundreds of tables -> about a second) and
++        # was paid on the hot path for every kernel seen for the first time in a
++        # process.
++        try:
++            AutoBase.prepare(engine, reflection_options={"only": [name]})
++        except sqlalchemy.exc.InvalidRequestError:
++            return None  # table does not exist (yet)
+         ModelCls: Optional[Type[Base]] = AutoBase.classes.get(name)
+         return ModelCls
+ 
+@@ -333,6 +341,11 @@ def put_config(
+             with RollbackSession(self.engine) as session:
+                 existing: Optional[Base] = session.get(ConfigCls, key_dict)
+                 if existing is not None:
++                    # overwrite: the caller re-tuned this key (stale or invalid config)
++                    for k, v in config.items():
++                        if hasattr(existing, k):
++                            setattr(existing, k, v)
++                    session.commit()
+                     return
+                 session.add(ConfigCls(**key_dict, **config))
+                 session.commit()
