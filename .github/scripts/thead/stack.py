@@ -1,147 +1,305 @@
 # Copyright 2026 FlagOS Contributors
-"""Pinned PPU stack provenance and normal import checks."""
+"""Validate the vendored wheel provider and the immutable PPU runtime stack."""
 
 import argparse
+import ctypes
 import hashlib
 import importlib
 import importlib.metadata as metadata
+import importlib.util
 import json
+import os
 import sys
-import sysconfig
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import unquote, urlsplit
+
+from packaging.utils import parse_wheel_filename
+
+ATTENTION = (
+    "vllm_fl.dispatch.backends.vendor.thead.impl.attention.TheadFlashAttentionBackend"
+)
+PROVIDER_WHEELS = ("vllm", "flash-attn-3", "flaggems-vllm", "flagcx", "flag-gems")
+PROTECTED_PACKAGES = (
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "numpy",
+    "flagtree",
+    "triton",
+)
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def load_stack(lock_dir):
+    versions = dict(
+        line.split("==", 1)
+        for line in (lock_dir / "constraints.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line and not line.startswith("#")
+    )
+    stack = {"protected": {name: versions[name] for name in PROTECTED_PACKAGES}}
+    lock = (lock_dir / "requirements-ci.txt").read_text(encoding="utf-8")
+    for line in lock.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        name, _, url, hash_option = line.split()
+        if name in PROVIDER_WHEELS:
+            filename = Path(unquote(urlsplit(url).path)).name
+            project, version, _, _ = parse_wheel_filename(filename)
+            digest = hash_option.removeprefix("--hash=sha256:")
+            require(
+                project == name and len(digest) == 64, f"Invalid wheel pin for {name}"
+            )
+            require(name not in stack, f"Duplicate wheel pin for {name}")
+            stack[name] = {"version": str(version), "sha256": digest}
+    missing = set(PROVIDER_WHEELS) - stack.keys()
+    require(not missing, f"Missing wheel pins: {', '.join(sorted(missing))}")
+    return stack
+
 
 HERE = Path(__file__).resolve().parent
-STACK = json.loads((HERE / "stack.json").read_text())
+LOCK_DIR = (
+    HERE
+    if (HERE / "requirements-ci.txt").is_file()
+    else HERE.parents[2] / "docker/thead"
+)
+STACK = load_stack(LOCK_DIR)
 
 
-def file_fact(path):
-    raw = Path(path).read_bytes()
-    return {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+def wheel_digest(data):
+    return data.get("archive_info", {}).get("hashes", {}).get("sha256")
 
 
-def vendor_snapshot():
-    # This finite protection is not a whole SDK or vendor payload audit.
+def audit_plan(report):
+    """Reject any pip action on a Runtime-owned Python distribution."""
+    for entry in report["install"]:
+        project = entry["metadata"]["name"].lower().replace("_", "-")
+        require(project not in STACK["protected"], f"pip would modify {project}")
+        digest = wheel_digest(entry["download_info"])
+        require(digest, f"pip did not verify a wheel hash for {project}")
+        if project in PROVIDER_WHEELS:
+            require(
+                entry["metadata"]["version"] == STACK[project]["version"]
+                and digest == STACK[project]["sha256"],
+                f"pip selected the wrong {project} wheel",
+            )
+
+
+def protected_snapshot():
+    facts = {}
+    for project, expected in STACK["protected"].items():
+        if project == "triton":
+            # Vendor fallback is deliberately absent from the default sys.path.
+            (dist,) = metadata.distributions(name=project, path=["/opt/triton"])
+        else:
+            dist = metadata.distribution(project)
+        require(
+            dist.version == expected,
+            f"{project} must be {expected}, found {dist.version}",
+        )
+        files = tuple(file for file in dist.files or () if file.hash)
+        require(files, f"{project} has no hashed entries in RECORD")
+        payload = hashlib.sha256()
+        for file in sorted(files):
+            if file.name == "RECORD":
+                continue
+            path = dist.locate_file(file)
+            with path.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256")
+            payload.update(f"{file}:{digest.hexdigest()}\n".encode())
+        facts[project] = {
+            "version": dist.version,
+            "path": str(dist.locate_file("")),
+            "payload_sha256": payload.hexdigest(),
+        }
+    return facts
+
+
+def module_fact(project, name, origin, relative=None):
+    dist = metadata.distribution(project)
+    require(origin, f"Cannot locate {name}")
+    path = Path(origin).resolve()
+    if relative is None:
+        relative = name.replace(".", "/") + "/__init__.py"
+    expected = Path(dist.locate_file(relative)).resolve()
+    require(path == expected, f"{name} comes from {path}, expected {expected}")
+    return {
+        "version": dist.version,
+        "path": str(path),
+        "sha256": wheel_digest(json.loads(dist.read_text("direct_url.json") or "{}")),
+    }
+
+
+def validate_imports(facts):
+    require(facts["python"] == (3, 12), "T-Head CI requires Python 3.12")
+    for name in PROVIDER_WHEELS:
+        for key in ("version", "sha256"):
+            require(
+                facts[name].get(key) == STACK[name][key], f"Wrong {name} wheel {key}"
+            )
+    for name in ("torch", "torchvision", "torchaudio", "numpy"):
+        require(
+            facts[name]["version"] == STACK["protected"][name],
+            f"Wrong {name} version",
+        )
+    require(facts["vllm_module_version"] == "0.32.0", "Wrong vLLM module version")
+    require(
+        facts["flagtree_version"] == STACK["protected"]["flagtree"]
+        and facts["triton"]
+        == {"version": "3.6.0", "path": "/opt/flagtree/triton/__init__.py"},
+        "Active Triton must be supplied by the Runtime FlagTree",
+    )
+    require(facts["flash_op_registered"], "FlashAttention 3 forward op is missing")
+    require(facts["plugin_registered"], "FL platform plugin entry point is missing")
+
+
+def validate_devices(facts):
+    require(
+        facts["vendor"] == "thead", f"Expected T-Head; detected {facts['vendor']!r}"
+    )
+    require(
+        facts["distributed_backend"] == "flagcx", "TP graph capture requires FlagCX"
+    )
+    require(
+        facts["attention"] == ATTENTION,
+        f"Wrong attention backend: {facts['attention']}",
+    )
+    require(
+        facts["devices"] == ["PPU-ZW810E"] * 4,
+        f"Expected four ZW810E devices, found {facts['devices']}",
+    )
+
+
+def flagcx_fact():
+    dist = metadata.distribution("flagcx")
+    path = Path(dist.locate_file("flagcx")).resolve()
+    configured = os.environ.get("FLAGCX_PATH")
+    require(
+        configured
+        and Path(configured).resolve() == path
+        and (path / "api.py").is_file(),
+        "FLAGCX_PATH must point to the installed T-Head wheel",
+    )
+    library = path / "lib" / "libflagcx.so"
+    ctypes.CDLL(str(library))
+    with library.open("rb") as stream:
+        library_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    return {
+        "version": dist.version,
+        "path": str(library),
+        "sha256": wheel_digest(json.loads(dist.read_text("direct_url.json") or "{}")),
+        "library_sha256": library_digest,
+    }
+
+
+def check_stack(with_devices):
     import torch
 
-    if torch.__version__.split("+")[0] != "2.10.0":
-        raise RuntimeError("This PPU stack requires the vendor Torch 2.10.0")
-    return {
-        "torch_version": torch.__version__,
-        "torch_init": {"path": torch.__file__, **file_fact(torch.__file__)},
-        "torch_C": {"path": torch._C.__file__, **file_fact(torch._C.__file__)},
-    }
-
-
-def validate_vllm_provider(
-    module_version, distribution_version, module_origin, distribution_module_origin
-):
-    # Upstream writes the SCM version before adding +empty to wheel metadata.
-    actual = {
-        "vllm_module_version": module_version,
-        "vllm_distribution_version": distribution_version,
-        "vllm_origin": str(module_origin),
-        "vllm_distribution_origin": str(distribution_module_origin),
-    }
-    same_origin = (
-        module_origin is not None
-        and distribution_module_origin is not None
-        and Path(module_origin).resolve() == Path(distribution_module_origin).resolve()
-    )
-    if (
-        module_version != "0.32.0"
-        or distribution_version != "0.32.0+empty"
-        or not same_origin
-    ):
-        raise RuntimeError(
-            "CI requires vLLM module 0.32.0 from distribution 0.32.0+empty "
-            "at the same origin; actual: " + repr(actual)
-        )
-    return actual
-
-
-def check_stack():
-    # Preserve the ordinary import order used for the verified vendor stack.
-    torch = importlib.import_module("torch")
+    flash = importlib.import_module("flash_attn_3._C")
     vllm = importlib.import_module("vllm")
-    triton_utils = importlib.import_module("vllm.triton_utils")
-    vllm_fl = importlib.import_module("vllm_fl")
-    WorkerFL = importlib.import_module("vllm_fl.worker.worker").WorkerFL
-    current_platform = importlib.import_module("vllm.platforms").current_platform
-    flag_gems = importlib.import_module("flag_gems")
     triton = importlib.import_module("triton")
-
-    if metadata.version("flagtree") != STACK["flagtree"]["version"]:
-        raise RuntimeError("CI image must provide the reviewed PPU FlagTree wheel")
-    expected_triton = metadata.distribution("flagtree").locate_file(
-        "triton/__init__.py"
-    )
-    if Path(triton.__file__).resolve() != Path(expected_triton).resolve():
-        raise RuntimeError("Active Triton must be supplied by the reviewed FlagTree")
-    gems_distribution = metadata.distribution("flag-gems")
-    if gems_distribution.version != STACK["flaggems"]["version"]:
-        raise RuntimeError(
-            "FlagGems wheel version does not match the pinned upstream commit: "
-            + gems_distribution.version
-        )
-    expected_gems = gems_distribution.locate_file("flag_gems/__init__.py")
-    if Path(flag_gems.__file__).resolve() != Path(expected_gems).resolve():
-        raise RuntimeError("Active FlagGems must come from the installed wheel")
-    if triton.__version__ != "3.6.0":
-        raise RuntimeError("Active Triton module must come from PPU FlagTree 3.6")
-    vllm_distribution = metadata.distribution("vllm")
-    vllm_provider = validate_vllm_provider(
-        vllm.__version__,
-        vllm_distribution.version,
-        vllm.__file__,
-        vllm_distribution.locate_file("vllm/__init__.py"),
-    )
-    if getattr(current_platform, "vendor_name", None) != "thead":
-        raise RuntimeError("Normal FL registration did not activate the THead platform")
-    if not torch.cuda.is_available() or torch.cuda.device_count() != 4:
-        raise RuntimeError("Exactly four reserved PPU devices must be visible")
-    if (
-        Path(vllm_fl.__file__).resolve().parent.parent
-        != Path(sysconfig.get_path("purelib")).resolve()
-    ):
-        raise RuntimeError("Plugin must be an ordinary wheel in this CI venv")
-    return {
-        "vendor": vendor_snapshot(),
+    ep = metadata.entry_points(group="vllm.platform_plugins", name="fl")
+    facts = {
+        "python": sys.version_info[:2],
+        "executable": sys.executable,
+        "device_dependent_imports_checked": with_devices,
+        "vllm": module_fact("vllm", vllm.__name__, vllm.__file__),
+        "vllm_module_version": vllm.__version__,
         "flagtree_version": metadata.version("flagtree"),
-        "triton_version": triton.__version__,
-        "triton_origin": triton.__file__,
-        "flaggems_version": gems_distribution.version,
-        "flaggems_origin": flag_gems.__file__,
-        "flaggems_commit": STACK["flaggems"]["commit"],
-        "vllm_triton_utils_origin": triton_utils.__file__,
-        "vllm_version": vllm.__version__,
-        **vllm_provider,
-        "plugin_origin": vllm_fl.__file__,
-        "worker_class": WorkerFL.__qualname__,
-        "platform": type(current_platform).__qualname__,
-        "device_count": torch.cuda.device_count(),
-        "normal_import_only": True,
-        "python_prefix": sys.prefix,
-        "plugin_install": "ordinary wheel in isolated CI venv",
-        "upstream_declared_torch_2_13_requirement_satisfied": False,
+        "flagcx": flagcx_fact(),
+        "triton": {
+            "path": str(Path(triton.__file__).resolve()),
+            "version": triton.__version__,
+        },
+        "flash-attn-3": module_fact(
+            "flash-attn-3",
+            flash.__name__,
+            flash.__file__,
+            "flash_attn_3/" + Path(flash.__file__).name,
+        ),
+        "flash_op_registered": hasattr(torch.ops.flash_attn_3, "fwd"),
+        "plugin_registered": [entry.value for entry in ep] == ["vllm_fl:register"],
     }
+    for name in ("torch", "torchvision", "torchaudio", "numpy"):
+        module = importlib.import_module(name)
+        facts[name] = module_fact(name, name, module.__file__)
+
+    # Device-specific FlagGems operators can create a Triton driver during
+    # import. BuildKit has no PPU, so check the origins here and import them
+    # normally in the real-device check.
+    for project, name in (
+        ("flag-gems", "flag_gems"),
+        ("flaggems-vllm", "flaggems_vllm"),
+        ("vllm-plugin-fl", "vllm_fl"),
+    ):
+        if with_devices:
+            origin = importlib.import_module(name).__file__
+        else:
+            spec = importlib.util.find_spec(name)
+            origin = spec.origin if spec is not None else None
+        facts[project] = module_fact(project, name, origin)
+    facts["regex"] = importlib.import_module("regex").__file__
+    validate_imports(facts)
+
+    if with_devices:
+        from vllm.platforms import current_platform
+
+        facts["vendor"] = getattr(current_platform, "vendor_name", None)
+        require(
+            facts["vendor"] == "thead", f"Expected T-Head; detected {facts['vendor']!r}"
+        )
+        facts["platform"] = type(current_platform).__qualname__
+        facts["distributed_backend"] = current_platform.dist_backend
+        facts["worker"] = importlib.import_module(
+            "vllm_fl.worker.worker"
+        ).WorkerFL.__qualname__
+        facts["attention"] = current_platform.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=False, use_sparse=False)
+        )
+        module, name = facts["attention"].rsplit(".", 1)
+        getattr(importlib.import_module(module), name)
+        facts["devices"] = [
+            torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())
+        ]
+        validate_devices(facts)
+        for i in range(len(facts["devices"])):
+            tensor = torch.ones((32,), device=f"cuda:{i}")
+            torch.cuda.synchronize(i)
+            require(
+                tensor.cpu().eq(1).all().item(), f"Tensor allocation failed on PPU {i}"
+            )
+        facts["device_properties"] = [
+            str(torch.cuda.get_device_properties(i))
+            for i in range(len(facts["devices"]))
+        ]
+    return facts
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["snapshot", "check"])
-    parser.add_argument("--compare", type=Path)
+    parser.add_argument(
+        "action", choices=("snapshot", "audit-plan", "imports", "check")
+    )
+    parser.add_argument("report", nargs="?", type=Path)
     args = parser.parse_args()
-    # Keep ordinary import logs in stderr so stdout remains one JSON document.
+    if args.action == "audit-plan":
+        if args.report is None:
+            parser.error("audit-plan requires a pip report")
+        audit_plan(json.loads(args.report.read_text()))
+        return
+
     with redirect_stdout(sys.stderr):
-        facts = vendor_snapshot() if args.action == "snapshot" else check_stack()
-    if args.compare is not None:
-        expected = json.loads(args.compare.read_text())
-        actual = facts if args.action == "snapshot" else facts["vendor"]
-        if actual != expected:
-            raise RuntimeError(
-                "Vendor Torch version, origins or protected bytes changed"
-            )
+        if args.action == "snapshot":
+            facts = protected_snapshot()
+        else:
+            facts = check_stack(with_devices=args.action == "check")
     print(json.dumps(facts, indent=2))
 
 

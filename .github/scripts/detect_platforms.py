@@ -11,6 +11,7 @@ Priority:
      excluding ``template`` and ``platforms`` (the registry file itself).
 
 Diff-based routing logic (when --changed-files is given):
+  - T-Head CI image changes run T-Head and the NVIDIA regression baseline.
   - If any changed file matches ``global_trigger_paths`` → return all enabled
     platforms (full run). Paths carved out by a platform's
     ``exempt_from_global`` never count as global triggers — they route only
@@ -36,6 +37,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -46,6 +49,50 @@ REGISTRY_FILE = CONFIGS_DIR / "platforms.yml"
 
 # Names to exclude when falling back to auto-scan
 AUTO_SCAN_EXCLUDE = {"template", "platforms"}
+THEAD_IMAGE_DIRS = ("docker/thead/", ".github/scripts/thead/")
+THEAD_IMAGE_SUPPORT_FILES = {
+    ".github/configs/thead.yml",
+    ".github/scripts/detect_platforms.py",
+    ".github/workflows/ci.yml",
+    ".typos.toml",
+}
+BUILD_SCRIPT = "docker/build.sh"
+
+
+def _shared_build_script(source: str) -> str | None:
+    # Strip only the T-Head branch and its platform-specific defaults and help.
+    shared, count = re.subn(
+        r'^elif \[\[ "\$\{PLATFORM\}" == "thead" \]\]; then\n'
+        r'.*?(?=^elif \[\[ "\$\{PLATFORM\}" == )',
+        "",
+        source,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    if count != 1:
+        return None
+    return re.sub(
+        r"^(?:THEAD_[A-Z_]+=|    THEAD_WHEELS_DIR +)[^\n]*\n",
+        "",
+        shared,
+        flags=re.MULTILINE,
+    )
+
+
+def _thead_only_build_change(base_ref: str, head_ref: str) -> bool:
+    try:
+        base = subprocess.check_output(
+            ["git", "merge-base", base_ref, head_ref], encoding="utf-8"
+        ).strip()
+        source = [
+            subprocess.check_output(
+                ["git", "show", f"{ref}:{BUILD_SCRIPT}"], encoding="utf-8"
+            )
+            for ref in (base, head_ref)
+        ]
+    except subprocess.CalledProcessError:
+        return False
+    before, after = map(_shared_build_script, source)
+    return before is not None and before == after
 
 
 def _validate_and_collect_exemptions(
@@ -91,7 +138,12 @@ def _validate_and_collect_exemptions(
     return exempt_paths
 
 
-def from_registry(changed_files: list[str] | None = None) -> list[str] | None:
+def from_registry(
+    changed_files: list[str] | None = None,
+    *,
+    base_ref: str | None = None,
+    head_ref: str = "HEAD",
+) -> list[str] | None:
     """Read platforms.yml and return enabled platform names, filtered by
     diff-based routing when changed_files is provided. Returns None if the
     file does not exist."""
@@ -128,6 +180,25 @@ def from_registry(changed_files: list[str] | None = None) -> list[str] | None:
     # No diff filtering → return all enabled platforms (nightly/weekly mode)
     if changed_files is None:
         return list(enabled.keys())
+
+    # Require an image change and check every path before narrowing the matrix.
+    support_files = THEAD_IMAGE_SUPPORT_FILES
+    thead_build_only = bool(
+        base_ref
+        and BUILD_SCRIPT in changed_files
+        and _thead_only_build_change(base_ref, head_ref)
+    )
+    if thead_build_only:
+        support_files = support_files | {BUILD_SCRIPT}
+    if (
+        thead_build_only
+        or any(path.startswith("docker/thead/") for path in changed_files)
+    ) and all(
+        path.startswith(THEAD_IMAGE_DIRS) or path in support_files
+        for path in changed_files
+    ):
+        print("[detect] T-Head CI image → T-Head and NVIDIA baseline", file=sys.stderr)
+        return [name for name in enabled if name in {"thead", "nvidia"}]
 
     # Diff-based routing. Two keys, two independent questions:
     #   - exempt_from_global: vendor carve-out; a changed file under one of
@@ -212,6 +283,14 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="Newline-delimited file of changed paths for diff-based routing",
     )
+    parser.add_argument(
+        "--base-ref", help="PR base for classifying shared build changes"
+    )
+    parser.add_argument(
+        "--head-ref",
+        default="HEAD",
+        help="PR head for classifying shared build changes",
+    )
     args = parser.parse_args(argv)
 
     changed: list[str] | None = None
@@ -226,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("[detect] No changed files → full run", file=sys.stderr)
 
-    platforms = from_registry(changed)
+    platforms = from_registry(changed, base_ref=args.base_ref, head_ref=args.head_ref)
 
     if platforms is not None:
         source = "platforms.yml"

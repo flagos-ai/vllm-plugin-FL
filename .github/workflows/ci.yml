@@ -79,6 +79,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     outputs:
       platforms: ${{ steps.detect.outputs.platforms }}
       # Stage selection from PR labels. Default (no tier label) and
@@ -123,8 +126,9 @@ jobs:
         id: changed
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git diff --name-only \
-              ${{ github.event.pull_request.base.sha }}...${{ github.sha }} \
+            # Route the PR's own diff; the merge checkout can include newer base changes.
+            git diff --no-renames --name-only \
+              "$PR_BASE_SHA...$PR_HEAD_SHA" \
               > /tmp/changed_files.txt
             echo "file=/tmp/changed_files.txt" >> "$GITHUB_OUTPUT"
             echo "Changed files:"
@@ -137,7 +141,9 @@ jobs:
         run: |
           if [ -n "${{ steps.changed.outputs.file }}" ]; then
             python3 .github/scripts/detect_platforms.py \
-              --changed-files "${{ steps.changed.outputs.file }}"
+              --changed-files "${{ steps.changed.outputs.file }}" \
+              --base-ref "$PR_BASE_SHA" \
+              --head-ref "$PR_HEAD_SHA"
           else
             python3 .github/scripts/detect_platforms.py
           fi
