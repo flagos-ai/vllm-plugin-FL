@@ -12,99 +12,80 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG CUDA_VERSION=13.0.2
-ARG UBUNTU_VERSION=24.04
+ARG BUILD_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-nvidia-cuda13.0.3:2.3.0
+ARG FLAGOS_DAILY_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-daily/simple
+# ARG FLAGOS_NVIDIA_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-nvidia/simple
 
 # ---------- base stage ----------
-FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
-
-ARG PYTHON_VERSION=3.12
-ARG UV_VERSION=0.12.6
-ARG VLLM_VERSION=0.24.0
+FROM ${BUILD_BASE_IMAGE} AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-c"]
 
-# System dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        ccache \
-        git \
-        curl \
-        ca-certificates \
-        vim \
-        wget \
-        python3-pip \
-        libibverbs-dev \
-        gcc-11 \
-        g++-11 \
-        librdmacm-dev \
+ARG CUDA_VERSION=13.0.3
+ARG VLLM_VERSION=0.32.0
+ARG FLAGGEMS_VLLM_VERSION=0.3.0.dev20261119
+ARG FLAGOS_DAILY_INDEX_URL
+
+# System dependencies and CUDA development tools for JIT compilation
+RUN CUDA_VERSION_DASH=$(echo $CUDA_VERSION | cut -d. -f1,2 | tr '.' '-') && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends apt-utils && \
+    apt-get install -y --no-install-recommends --allow-change-held-packages \
+        cuda-nvcc-${CUDA_VERSION_DASH} \
+        cuda-cudart-${CUDA_VERSION_DASH} \
+        cuda-nvrtc-${CUDA_VERSION_DASH} \
+        cuda-nvrtc-dev-${CUDA_VERSION_DASH} \
+        cuda-cuobjdump-${CUDA_VERSION_DASH} \
+        libcurand-dev-${CUDA_VERSION_DASH} \
+        libcublas-dev-${CUDA_VERSION_DASH} \
+        libcusolver-dev-${CUDA_VERSION_DASH} \
+        libcusparse-dev-${CUDA_VERSION_DASH} \
+        # Required by fastsafetensors
         libnuma-dev \
-        software-properties-common \
-    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 --slave /usr/bin/g++ g++ /usr/bin/g++-11 \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python${PYTHON_VERSION} \
-        python${PYTHON_VERSION}-dev \
-        python${PYTHON_VERSION}-venv \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 \
+        # numactl CLI for NUMA binding at runtime
+        numactl \
+        # Required by DeepGEMM (deep_jit uses elfutils/libdwfl.h)
+        libdw-dev \
+        # Required by av/torchcodec/PyNvVideoCodec for video multimodal models
+        ffmpeg \
+        # Required by opencv-python (non-headless fallback) and X11-dependent libs
+        libsm6 \
+        libxext6 \
+        libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh
-ENV PATH="/root/.local/bin:${PATH}"
+# Ensures nvcc/ptxas (installed above, needed at runtime for FlashInfer/
+# DeepGEMM/EP kernel JIT compilation) are reachable on PATH. Harmless no-op
+# if already set by FINAL_BASE_IMAGE.
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH="${CUDA_HOME}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
 
-# Verify GCC version
-RUN gcc --version
+# Install FlagGems-vLLM and vLLM
+RUN PYTHONPATH=/opt/triton \
+    pip install --no-cache-dir \
+        "flaggems-vllm==${FLAGGEMS_VLLM_VERSION}" --extra-index-url "${FLAGOS_DAILY_INDEX_URL}" \
+        "vllm==${VLLM_VERSION}"
 
-# Install pip via uv
-RUN uv pip install --system --break-system-packages pip setuptools setuptools-scm wheel
+# Install DeepGEMM
+RUN PYTHONPATH=/opt/triton \
+    TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
+    bash -c 'git clone --recursive https://github.com/deepseek-ai/DeepGEMM /workspace/DeepGEMM && \
+    cd /workspace/DeepGEMM && \
+    ./install.sh'
 
-ENV PATH="/usr/local/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+WORKDIR /workspace
 
-ENV VLLM_ENABLE_CUDA_COMPATIBILITY=0
 
 # ---------- dev stage ----------
 FROM base AS dev
 
-ARG INDEX_URL
-ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.24.0
-
-# Install vLLM
-RUN uv pip install --system --break-system-packages \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        "vllm==${VLLM_VERSION}"
-
-# Install dev tools
-RUN uv pip install --system --break-system-packages \
-        pytest \
-        pytest-cov \
-        pytest-json-report \
-        ruff \
-        pre-commit \
-        ninja \
-        cmake
-
-# ---------- ci stage ----------
-FROM base AS ci
-
-ARG INDEX_URL
-ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.24.0
-
-# Install vLLM
-RUN uv pip install --system --break-system-packages \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        "vllm[audio]==${VLLM_VERSION}"
-
 # Install dev/test tools
-RUN uv pip install --system --break-system-packages \
+RUN PYTHONPATH=/opt/triton \
+    pip install --no-cache-dir \
         pytest \
+        pytest-xdist>=3.0.0 \
         pytest-cov \
         pytest-timeout \
         pytest-json-report \
@@ -116,39 +97,13 @@ RUN uv pip install --system --break-system-packages \
         pre-commit \
         ninja \
         cmake
-ARG FLAGGEMS_VERSION=v5.3.5
 
-# Install FlagGems
-RUN uv pip install --system --break-system-packages scikit-build-core==0.11 pybind11 \
-    && git clone --branch ${FLAGGEMS_VERSION} --depth 1 https://github.com/flagos-ai/FlagGems /workspace/FlagGems \
-    && touch /workspace/FlagGems/src/flag_gems/fused/DSA/__init__.py \
-    && uv pip install --system --break-system-packages --no-build-isolation /workspace/FlagGems
 
-# Install DeepGEMM
-RUN git clone https://github.com/deepseek-ai/DeepGEMM.git /workspace/DeepGEMM \
-    && cd /workspace/DeepGEMM \
-    && git checkout 891d57b \
-    && git submodule update --init --recursive \
-    && TORCH_DEVICE_BACKEND_AUTOLOAD=0 uv pip install --system --break-system-packages --no-build-isolation .
+# ---------- test stage ----------
+FROM base AS test
 
-ENV VLLM_PLUGINS=fl
+# Install vLLM-Plugin-FL wheel package for SVT
 
-WORKDIR /workspace
-
-# ---------- release stage ----------
-FROM base AS release
-
-ARG INDEX_URL
-ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.24.0
-
-# Install vLLM
-RUN uv pip install --system --break-system-packages \
-        ${INDEX_URL:+--index-url ${INDEX_URL}} \
-        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
-        "vllm==${VLLM_VERSION}"
-
-WORKDIR /workspace
-
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+# Minimal test environment - inherits vLLM and FlagGems from base
+LABEL maintainer="FlagOS Contributors" \
+      description="FlagOS vLLM-Plugin-FL environment with FlagGems"

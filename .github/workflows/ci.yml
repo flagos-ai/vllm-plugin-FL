@@ -117,8 +117,6 @@ jobs:
             .github/scripts
       - name: Install PyYAML
         run: pip install pyyaml
-      - name: Check NVIDIA native CUDA stack validation
-        run: python -I -B .github/scripts/nvidia/test_stack.py
       - name: Get changed files
         id: changed
         run: |

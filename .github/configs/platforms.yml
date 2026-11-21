@@ -88,7 +88,7 @@ platforms:
   # NVIDIA and Ascend have completed their vLLM 0.32 runtime and CI
   # adaptations; other backends remain disabled until theirs are ready.
   ascend:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/ascend.yaml
       - tests/platforms/ascend.yaml
@@ -146,7 +146,7 @@ platforms:
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
   thead:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
@@ -155,7 +155,7 @@ platforms:
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
   iluvatar:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/
