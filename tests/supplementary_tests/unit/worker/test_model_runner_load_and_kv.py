@@ -31,7 +31,6 @@ import contextlib
 from importlib import import_module
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
 try:  # pragma: no cover - dual-environment guard
@@ -223,9 +222,9 @@ def _make_vllm_config(**overrides):
             num_gpu_blocks=None,
             # allocate_kv_cache resolves physical strides through the real
             # KVCacheLayout enum (NHD == LBNHC logical axis order).
-            get_resolved_kv_cache_layout=lambda: import_module(
-                "vllm.v1.kv_cache_layout"
-            ).KVCacheLayout.LBNHC,
+            get_resolved_kv_cache_layout=lambda: (
+                import_module("vllm.v1.kv_cache_layout").KVCacheLayout.LBNHC
+            ),
         ),
         mamba_config=None,
         offload_config=config_mod.OffloadConfig(),
@@ -294,8 +293,7 @@ def _build_runner(module, vllm_config):
     ModelRunnerFL = module.ModelRunnerFL
     spec_config = getattr(vllm_config, "speculative_config", None)
     suffix_patched = (
-        spec_config is not None
-        and getattr(spec_config, "method", None) == "suffix"
+        spec_config is not None and getattr(spec_config, "method", None) == "suffix"
     )
     if suffix_patched:
         # Manual patch with try/finally restore: never monkeypatch.setitem on
@@ -340,8 +338,9 @@ class _RecordingLoader:
         self._has_all_weights = has_all_weights
 
     def load_model(self, *, vllm_config, model_config):
-        self.load_calls.append(SimpleNamespace(vllm_config=vllm_config,
-                                               model_config=model_config))
+        self.load_calls.append(
+            SimpleNamespace(vllm_config=vllm_config, model_config=model_config)
+        )
         if self._load_model_impl is not None:
             return self._load_model_impl(vllm_config, model_config)
         return self.model
@@ -403,8 +402,7 @@ class _FakeAttentionLayer:
             base = _attention_layer_base()
 
             class _Layer(base):
-                def __init__(self, backend, num_heads=8, num_kv_heads=2,
-                             head_size=8):
+                def __init__(self, backend, num_heads=8, num_kv_heads=2, head_size=8):
                     self.backend = backend
                     self.num_heads = num_heads
                     self.num_kv_heads = num_kv_heads
@@ -425,8 +423,9 @@ class _FakeAttentionLayer:
         # Construct through the resolved subclass (its __init__ runs; the
         # returned instance is not a _FakeAttentionLayer, so Python will not
         # call _FakeAttentionLayer.__init__ on it).
-        return cls._layer_cls(backend, num_heads=num_heads,
-                              num_kv_heads=num_kv_heads, head_size=head_size)
+        return cls._layer_cls(
+            backend, num_heads=num_heads, num_kv_heads=num_kv_heads, head_size=head_size
+        )
 
 
 class _FakeAttentionBackend:
@@ -472,8 +471,7 @@ class _FakeBuilderCls:
 
         return AttentionCGSupport.ALWAYS
 
-    def __init__(self, kv_cache_spec, layer_names, vllm_config, device,
-                 **kwargs):
+    def __init__(self, kv_cache_spec, layer_names, vllm_config, device, **kwargs):
         self.kv_cache_spec = kv_cache_spec
         self.layer_names = list(layer_names)
         self.vllm_config = vllm_config
@@ -497,18 +495,27 @@ class TestLoadModel:
         comm_buffers = []
         io_hooks = []
         post_inits = []
-        monkeypatch.setattr(patched_module, "get_model_loader",
-                            lambda load_config: loader)
-        monkeypatch.setattr(patched_module, "warmup_cached_ops",
-                            lambda: warmups.append(1))
-        monkeypatch.setattr(patched_module, "_prepare_comm_buffer",
-                            lambda model: comm_buffers.append(model))
-        monkeypatch.setattr(patched_module, "register_io_module_hooks",
-                            lambda model: io_hooks.append(model))
-        monkeypatch.setattr(patched_module, "get_offloader",
-                            lambda: SimpleNamespace(
-                                post_init=lambda: post_inits.append(1)
-                            ))
+        monkeypatch.setattr(
+            patched_module, "get_model_loader", lambda load_config: loader
+        )
+        monkeypatch.setattr(
+            patched_module, "warmup_cached_ops", lambda: warmups.append(1)
+        )
+        monkeypatch.setattr(
+            patched_module,
+            "_prepare_comm_buffer",
+            lambda model: comm_buffers.append(model),
+        )
+        monkeypatch.setattr(
+            patched_module,
+            "register_io_module_hooks",
+            lambda model: io_hooks.append(model),
+        )
+        monkeypatch.setattr(
+            patched_module,
+            "get_offloader",
+            lambda: SimpleNamespace(post_init=lambda: post_inits.append(1)),
+        )
         if drafter is not None:
             runner_hint = drafter
 
@@ -611,15 +618,11 @@ class TestLoadModel:
         # The model was never installed on the runner.
         assert not hasattr(runner, "model") or runner.model is None
 
-    def test_load_model_multimodal_pruning_enabled(
-        self, patched_module, monkeypatch
-    ):
+    def test_load_model_multimodal_pruning_enabled(self, patched_module, monkeypatch):
         """A model supporting multimodal pruning with an enabled multimodal
         config flips is_multimodal_pruning_enabled on."""
         model = _TinyModel()
-        mm_config = SimpleNamespace(
-            is_multimodal_pruning_enabled=lambda: True
-        )
+        mm_config = SimpleNamespace(is_multimodal_pruning_enabled=lambda: True)
         loader = _RecordingLoader(model)
         runner = _build_runner(
             patched_module,
@@ -641,9 +644,7 @@ class TestLoadModel:
     ):
         """Pruning support without an enabled multimodal config stays off."""
         model = _TinyModel()
-        mm_config = SimpleNamespace(
-            is_multimodal_pruning_enabled=lambda: False
-        )
+        mm_config = SimpleNamespace(is_multimodal_pruning_enabled=lambda: False)
         loader = _RecordingLoader(model)
         runner = _build_runner(
             patched_module,
@@ -683,7 +684,8 @@ class TestReloadWeights:
         model = runner.get_model()
         resets = []
         monkeypatch.setattr(
-            patched_module.ModelRunnerFL, "reset_lora_state",
+            patched_module.ModelRunnerFL,
+            "reset_lora_state",
             lambda self: resets.append(1),
         )
         # Independent oracle: reload values chosen so each parameter's new
@@ -715,15 +717,18 @@ class TestReloadWeights:
         init_calls = []
         fin_calls = []
         monkeypatch.setattr(
-            patched_module, "initialize_layerwise_reload",
+            patched_module,
+            "initialize_layerwise_reload",
             lambda m: init_calls.append(m),
         )
         monkeypatch.setattr(
-            patched_module, "finalize_layerwise_reload",
+            patched_module,
+            "finalize_layerwise_reload",
             lambda m, mc: fin_calls.append((m, mc)),
         )
-        iterator = [("embed_tokens.weight",
-                     torch.zeros_like(model.embed_tokens.weight))]
+        iterator = [
+            ("embed_tokens.weight", torch.zeros_like(model.embed_tokens.weight))
+        ]
 
         patched_module.ModelRunnerFL.reload_weights(
             runner, weights_iterator=iterator, is_checkpoint_format=True
@@ -741,8 +746,9 @@ class TestReloadWeights:
         raises NotImplementedError."""
         runner = self._runner_with_model(patched_module)
         loader = _RecordingLoader(None, has_all_weights=False)
-        monkeypatch.setattr(patched_module, "get_model_loader",
-                            lambda load_config: loader)
+        monkeypatch.setattr(
+            patched_module, "get_model_loader", lambda load_config: loader
+        )
 
         with pytest.raises(NotImplementedError, match="format"):
             patched_module.ModelRunnerFL.reload_weights(runner)
@@ -755,8 +761,9 @@ class TestReloadWeights:
         runner = self._runner_with_model(patched_module)
         model = runner.get_model()
         loader = _RecordingLoader(None, has_all_weights=True)
-        monkeypatch.setattr(patched_module, "get_model_loader",
-                            lambda load_config: loader)
+        monkeypatch.setattr(
+            patched_module, "get_model_loader", lambda load_config: loader
+        )
 
         def all_weights(model_config, model_):
             loader.all_weights_calls.append((model_config, model_))
@@ -783,8 +790,9 @@ class TestReloadWeights:
         runner = self._runner_with_model(patched_module)
         loader = _RecordingLoader(None, has_all_weights=True)
         loader.get_all_weights = lambda model_config, model: []
-        monkeypatch.setattr(patched_module, "get_model_loader",
-                            lambda load_config: loader)
+        monkeypatch.setattr(
+            patched_module, "get_model_loader", lambda load_config: loader
+        )
 
         with caplog.at_level("WARNING"):
             patched_module.ModelRunnerFL.reload_weights(
@@ -807,8 +815,9 @@ class TestReloadWeights:
             patched_module, "finalize_layerwise_reload", lambda m, mc: None
         )
         # load only the embedding; lm_head stays unloaded.
-        iterator = [("embed_tokens.weight",
-                     torch.zeros_like(model.embed_tokens.weight))]
+        iterator = [
+            ("embed_tokens.weight", torch.zeros_like(model.embed_tokens.weight))
+        ]
 
         with caplog.at_level("WARNING"):
             patched_module.ModelRunnerFL.reload_weights(
@@ -838,8 +847,9 @@ class TestReloadWeights:
         monkeypatch.setattr(
             patched_module, "finalize_layerwise_reload", lambda m, mc: None
         )
-        iterator = [("embed_tokens.weight",
-                     torch.zeros_like(model.embed_tokens.weight))]
+        iterator = [
+            ("embed_tokens.weight", torch.zeros_like(model.embed_tokens.weight))
+        ]
 
         # reload_weights only consults model.named_parameters(); a warning
         # surfaces listing names as not loaded. The lora branch's observable
@@ -896,8 +906,7 @@ class TestInitializeAttnBackend:
             kv_cache_tensors=[],
             kv_cache_groups=[
                 kv_interface.KVCacheGroupSpec(
-                    layer_names=["model.layers.0", "model.layers.1",
-                                 "model.layers.2"],
+                    layer_names=["model.layers.0", "model.layers.1", "model.layers.2"],
                     kv_cache_spec=spec,
                 )
             ],
@@ -912,7 +921,8 @@ class TestInitializeAttnBackend:
         assert len(groups) == 2
         by_backend = {g.backend.full_cls_name(): g for g in groups}
         assert set(by_backend["BackendA"].layer_names) == {
-            "model.layers.0", "model.layers.1"
+            "model.layers.0",
+            "model.layers.1",
         }
         assert by_backend["BackendB"].layer_names == ["model.layers.2"]
         # The spec is carried onto each group.
@@ -1011,8 +1021,7 @@ class TestMayReinitializeInputBatch:
     def _kv_cache_config(self, block_size):
         kv_interface = import_module("vllm.v1.kv_cache_interface")
         spec = kv_interface.FullAttentionSpec(
-            block_size=block_size, num_kv_heads=2, head_size=8,
-            dtype=torch.float32
+            block_size=block_size, num_kv_heads=2, head_size=8, dtype=torch.float32
         )
         return kv_interface.KVCacheConfig(
             num_blocks=8,
@@ -1031,9 +1040,7 @@ class TestMayReinitializeInputBatch:
         original = runner.input_batch
         config = self._kv_cache_config(16)
         # kernel_block_sizes equal to the placeholder block size.
-        patched_module.ModelRunnerFL.may_reinitialize_input_batch(
-            runner, config, [16]
-        )
+        patched_module.ModelRunnerFL.may_reinitialize_input_batch(runner, config, [16])
         assert runner.input_batch is original
         assert runner._init_block_sizes == [16]
 
@@ -1043,9 +1050,7 @@ class TestMayReinitializeInputBatch:
         runner = _build_runner(patched_module, _make_vllm_config())
         original = runner.input_batch
         config = self._kv_cache_config(32)
-        patched_module.ModelRunnerFL.may_reinitialize_input_batch(
-            runner, config, [32]
-        )
+        patched_module.ModelRunnerFL.may_reinitialize_input_batch(runner, config, [32])
         assert runner.input_batch is not original
         assert runner._init_block_sizes == [32]
         assert runner._init_kernel_block_sizes == [32]
@@ -1110,15 +1115,12 @@ class TestMayReinitializeInputBatch:
         # Only the full-attention group's geometry counts; combined with the
         # placeholder's [16] it stays equal, but the group count differs
         # through kernel_block_sizes.
-        patched_module.ModelRunnerFL.may_reinitialize_input_batch(
-            runner, config, [16]
-        )
+        patched_module.ModelRunnerFL.may_reinitialize_input_batch(runner, config, [16])
         # block_sizes = [16] (encoder group skipped) and kernel sizes [16]
         # both match the placeholder single group -> no rebuild.
         assert runner.input_batch is original
         assert runner._init_slot_mapping_modes == [
-            import_module("vllm.v1.worker.block_table").SlotMappingMode
-            .TOKEN_TO_KV_SLOT
+            import_module("vllm.v1.worker.block_table").SlotMappingMode.TOKEN_TO_KV_SLOT
         ]
 
 
@@ -1130,8 +1132,7 @@ class TestMayReinitializeInputBatch:
 class TestCleanupProfilingKvCache:
     """_cleanup_profiling_kv_cache releases profiling state."""
 
-    def test_cleanup_clears_caches_groups_and_config(self, patched_module,
-                                                     monkeypatch):
+    def test_cleanup_clears_caches_groups_and_config(self, patched_module, monkeypatch):
         """After cleanup the kv caches, attention groups and kv_cache_config
         are gone and the forward-context layers' caches are reset."""
         config = _make_vllm_config()
@@ -1146,10 +1147,12 @@ class TestCleanupProfilingKvCache:
         runner.attn_groups = [[SimpleNamespace()]]
         runner.cache_config.num_gpu_blocks = 128
         # torch.accelerator.synchronize / empty_cache are device ops.
-        monkeypatch.setattr(torch.accelerator, "synchronize", lambda: None,
-                            raising=False)
-        monkeypatch.setattr(torch.accelerator, "empty_cache", lambda: None,
-                            raising=False)
+        monkeypatch.setattr(
+            torch.accelerator, "synchronize", lambda: None, raising=False
+        )
+        monkeypatch.setattr(
+            torch.accelerator, "empty_cache", lambda: None, raising=False
+        )
 
         patched_module.ModelRunnerFL._cleanup_profiling_kv_cache(runner)
 
@@ -1158,19 +1161,21 @@ class TestCleanupProfilingKvCache:
         assert runner.attn_groups == []
         assert runner.cache_config.num_gpu_blocks is None
         # The forward-context layer's cache was detached.
-        assert not isinstance(layer.kv_cache, torch.Tensor) or layer.kv_cache \
-            .numel() == 0
+        assert (
+            not isinstance(layer.kv_cache, torch.Tensor) or layer.kv_cache.numel() == 0
+        )
 
-    def test_cleanup_without_kv_state_is_a_noop(self, patched_module,
-                                                monkeypatch):
+    def test_cleanup_without_kv_state_is_a_noop(self, patched_module, monkeypatch):
         """A runner without kv caches / attn groups cleans up without
         errors."""
         config = _make_vllm_config()
         runner = _build_runner(patched_module, config)
-        monkeypatch.setattr(torch.accelerator, "synchronize", lambda: None,
-                            raising=False)
-        monkeypatch.setattr(torch.accelerator, "empty_cache", lambda: None,
-                            raising=False)
+        monkeypatch.setattr(
+            torch.accelerator, "synchronize", lambda: None, raising=False
+        )
+        monkeypatch.setattr(
+            torch.accelerator, "empty_cache", lambda: None, raising=False
+        )
         patched_module.ModelRunnerFL._cleanup_profiling_kv_cache(runner)
         assert not hasattr(runner, "kv_cache_config")
 
@@ -1189,9 +1194,7 @@ class _RecordingSampler:
 
     def __call__(self, logits, sampling_metadata, **kwargs):
         self.calls.append(
-            SimpleNamespace(
-                logits=logits.clone(), sampling_metadata=sampling_metadata
-            )
+            SimpleNamespace(logits=logits.clone(), sampling_metadata=sampling_metadata)
         )
         from vllm.v1.outputs import SamplerOutput
 
@@ -1272,15 +1275,14 @@ class TestDummySamplerRun:
         runner.model = _TinyModel()
         runner.sampler = _RecordingSampler()
 
-        out = patched_module.ModelRunnerFL._dummy_sampler_run(
-            runner, torch.randn(2, 8)
-        )
+        out = patched_module.ModelRunnerFL._dummy_sampler_run(runner, torch.randn(2, 8))
 
         assert isinstance(out, torch.Tensor) and out.numel() == 0
         assert runner.sampler.calls == []
 
-    def test_spec_config_runs_rejection_sampler_warmups(self, patched_module,
-                                                        monkeypatch):
+    def test_spec_config_runs_rejection_sampler_warmups(
+        self, patched_module, monkeypatch
+    ):
         """With a speculative config the warm-up also drives the rejection
         sampler twice (mixed + all-greedy) with dummy spec metadata."""
         spec = SimpleNamespace(
@@ -1304,8 +1306,9 @@ class TestDummySamplerRun:
         class RecordingRejectionSampler:
             def __call__(self, metadata, draft_probs, logits, md):
                 rejection_calls.append(
-                    SimpleNamespace(metadata=metadata, draft_probs=draft_probs,
-                                    logits=logits, md=md)
+                    SimpleNamespace(
+                        metadata=metadata, draft_probs=draft_probs, logits=logits, md=md
+                    )
                 )
                 from vllm.v1.outputs import SamplerOutput
 
@@ -1318,12 +1321,11 @@ class TestDummySamplerRun:
 
         # The spec branch ends with torch.accelerator.synchronize, a device
         # op unavailable on CPU builds.
-        monkeypatch.setattr(torch.accelerator, "synchronize", lambda: None,
-                            raising=False)
+        monkeypatch.setattr(
+            torch.accelerator, "synchronize", lambda: None, raising=False
+        )
         with self._platform_fl_stub(vendor_name=None):
-            patched_module.ModelRunnerFL._dummy_sampler_run(
-                runner, torch.randn(3, 8)
-            )
+            patched_module.ModelRunnerFL._dummy_sampler_run(runner, torch.randn(3, 8))
 
         # Mixed-sampling + all-greedy warm-ups.
         assert len(rejection_calls) == 2
@@ -1343,9 +1345,7 @@ class TestDummySamplerRun:
         runner = self._runner(patched_module)
 
         with self._platform_fl_stub(vendor_name="kunlunxin"):
-            patched_module.ModelRunnerFL._dummy_sampler_run(
-                runner, torch.randn(2, 8)
-            )
+            patched_module.ModelRunnerFL._dummy_sampler_run(runner, torch.randn(2, 8))
 
         assert len(runner.sampler.calls) == 1
         assert runner.sampler.calls[0].sampling_metadata.all_greedy
@@ -1375,14 +1375,15 @@ class _FakePooler:
 
     def __call__(self, hidden_states, pooling_metadata):
         self.calls.append(
-            SimpleNamespace(hidden_states=hidden_states.clone(),
-                            pooling_metadata=pooling_metadata)
+            SimpleNamespace(
+                hidden_states=hidden_states.clone(), pooling_metadata=pooling_metadata
+            )
         )
         prompt_lens = pooling_metadata.prompt_lens
         rows = []
         offset = 0
         for length in prompt_lens.tolist():
-            rows.append(hidden_states[offset:offset + length].mean(dim=0))
+            rows.append(hidden_states[offset : offset + length].mean(dim=0))
             offset += length
         return rows
 
@@ -1465,7 +1466,7 @@ class TestDummyPoolerRunTask:
         assert md.prompt_token_ids.shape == (3, 1)
         # Oracle: each row is the mean of its single hidden token.
         for i in range(3):
-            assert torch.allclose(out[i], hidden[i:i + 1].mean(dim=0))
+            assert torch.allclose(out[i], hidden[i : i + 1].mean(dim=0))
 
     def test_mm_encoder_only_skips_pooler(self, patched_module):
         """An encoder-only multimodal model returns an empty tensor without
@@ -1480,9 +1481,7 @@ class TestDummyPoolerRunTask:
         pooler = _FakePooler()
         runner.model = _PoolingTinyModel(pooler)
 
-        out = patched_module.ModelRunnerFL._dummy_pooler_run(
-            runner, torch.randn(4, 2)
-        )
+        out = patched_module.ModelRunnerFL._dummy_pooler_run(runner, torch.randn(4, 2))
 
         assert isinstance(out, torch.Tensor) and out.numel() == 0
         assert pooler.calls == []
@@ -1501,32 +1500,34 @@ class TestDummyPoolerRun:
         """Every supported task is warmed; the returned output comes from the
         task with the largest output bytes."""
         runner = self._runner(patched_module)
-        pooler = _FakePooler(tasks=("embed", "classify"))
+
+        # A pooler whose 'classify' rows are twice as wide as its 'embed'
+        # rows: the wider output carries more bytes and wins the max-task
+        # selection. (The override must live on a subclass: implicit
+        # __call__ is looked up on the type, not the instance.)
+        class _WideClassifyPooler(_FakePooler):
+            def __call__(self, hidden_states, pooling_metadata):
+                rows = super().__call__(hidden_states, pooling_metadata)
+                if pooling_metadata.pooling_params[0].task == "classify":
+                    rows = [torch.cat([r, r]) for r in rows]
+                return rows
+
+        pooler = _WideClassifyPooler(tasks=("embed", "classify"))
         runner.model = _PoolingTinyModel(pooler)
 
-        # Make 'classify' produce bigger rows than 'embed'.
-        original_call = pooler.__call__
-
-        def call_with_task(hidden_states, pooling_metadata):
-            rows = original_call(hidden_states, pooling_metadata)
-            task_params = pooling_metadata.pooling_params[0]
-            if task_params.task == "classify":
-                rows = [r * 1.0 for r in rows]
-            return rows
-
-        pooler.__call__ = call_with_task
-        hidden = torch.randn(4, 2)
+        hidden = torch.arange(8, dtype=torch.float32).reshape(4, 2)
         out = patched_module.ModelRunnerFL._dummy_pooler_run(runner, hidden)
 
         # embed ran first, classify second (per supported task), then the
         # largest-output task ran once more.
-        tasks_seen = [
-            c.pooling_metadata.pooling_params[0].task for c in pooler.calls
-        ]
-        assert tasks_seen[0] == "embed"
-        assert set(tasks_seen) == {"embed", "classify"}
-        # The final call re-ran one of the tasks with the full hidden batch.
+        tasks_seen = [c.pooling_metadata.pooling_params[0].task for c in pooler.calls]
+        assert tasks_seen == ["embed", "classify", "classify"]
+        # The final call re-ran classify with the full hidden batch.
         assert torch.equal(pooler.calls[-1].hidden_states, hidden)
+        # Oracle: the returned rows are the classify (width-doubled) means.
+        means = [hidden[i : i + 1].mean(dim=0) for i in range(4)]
+        for row, mean in zip(out, means, strict=True):
+            assert torch.equal(row, torch.cat([mean, mean]))
 
     def test_no_supported_tasks_raises(self, patched_module):
         """A pooling model without tasks raises RuntimeError."""
@@ -1535,8 +1536,7 @@ class TestDummyPoolerRun:
         runner.model = _PoolingTinyModel(pooler)
 
         with pytest.raises(RuntimeError, match="pooling tasks"):
-            patched_module.ModelRunnerFL._dummy_pooler_run(runner,
-                                                           torch.randn(2, 2))
+            patched_module.ModelRunnerFL._dummy_pooler_run(runner, torch.randn(2, 2))
 
 
 # ---------------------------------------------------------------------------
@@ -1585,8 +1585,12 @@ class TestKlApply:
     def test_all_sizes_captured_keeps_everything(self, patched_module):
         """When every (mode, size) pair is already captured the sizes stay
         unchanged."""
-        runner = self._runner(patched_module, _kl_budget=100, _kl_stop=True,
-                             _kl_captured={("m0", 8), ("m1", 8)})
+        runner = self._runner(
+            patched_module,
+            _kl_budget=100,
+            _kl_stop=True,
+            _kl_captured={("m0", 8), ("m1", 8)},
+        )
         descs = [
             (self._desc("m0"), [self._desc("m0", 8)]),
             (self._desc("m1"), [self._desc("m1", 8)]),
@@ -1598,11 +1602,17 @@ class TestKlApply:
     def test_partial_capture_trims_sizes(self, patched_module, caplog):
         """Uncaptured sizes trim the capture list down to the captured
         prefix."""
-        runner = self._runner(patched_module, _kl_budget=100, _kl_stop=True,
-                              _kl_captured={("m0", 8), ("m0", 16)})
+        runner = self._runner(
+            patched_module,
+            _kl_budget=100,
+            _kl_stop=True,
+            _kl_captured={("m0", 8), ("m0", 16)},
+        )
         descs = [
-            (self._desc("m0"), [self._desc("m0", 8), self._desc("m0", 16),
-                                 self._desc("m0", 32)]),
+            (
+                self._desc("m0"),
+                [self._desc("m0", 8), self._desc("m0", 16), self._desc("m0", 32)],
+            ),
         ]
         with caplog.at_level("WARNING"):
             patched_module.ModelRunnerFL._kl_apply(runner, descs)
@@ -1614,8 +1624,9 @@ class TestKlApply:
 
     def test_nothing_captured_keeps_smallest_size(self, patched_module):
         """With no captured pairs at all, the smallest size is kept."""
-        runner = self._runner(patched_module, _kl_budget=100, _kl_stop=True,
-                              _kl_captured=set())
+        runner = self._runner(
+            patched_module, _kl_budget=100, _kl_stop=True, _kl_captured=set()
+        )
         descs = [
             (self._desc("m0"), [self._desc("m0", 8), self._desc("m0", 32)]),
         ]
@@ -1653,8 +1664,7 @@ class TestInitializeKvCache:
         config = _make_vllm_config()
         forward_context = {}
         for name, backend, num_heads in layer_specs:
-            forward_context[name] = _FakeAttentionLayer(backend,
-                                                         num_heads=num_heads)
+            forward_context[name] = _FakeAttentionLayer(backend, num_heads=num_heads)
         config.compilation_config.static_forward_context = forward_context
         runner = _build_runner(patched_module, config)
         kv_interface = import_module("vllm.v1.kv_cache_interface")
@@ -1693,8 +1703,7 @@ class TestInitializeKvCache:
             patched_module,
             [("model.layers.0", backend, 8), ("model.layers.1", backend, 8)],
         )
-        monkeypatch.setattr(patched_module, "has_kv_transfer_group",
-                            lambda: False)
+        monkeypatch.setattr(patched_module, "has_kv_transfer_group", lambda: False)
         original_batch = runner.input_batch
 
         patched_module.ModelRunnerFL.initialize_kv_cache(runner, config)
@@ -1740,10 +1749,10 @@ class TestInitializeKvCache:
             def set_host_xfer_buffer_ops(self, ops):
                 pass
 
-        monkeypatch.setattr(patched_module, "has_kv_transfer_group",
-                            lambda: True)
-        monkeypatch.setattr(patched_module, "get_kv_transfer_group",
-                            lambda: FakeTransferGroup())
+        monkeypatch.setattr(patched_module, "has_kv_transfer_group", lambda: True)
+        monkeypatch.setattr(
+            patched_module, "get_kv_transfer_group", lambda: FakeTransferGroup()
+        )
 
         patched_module.ModelRunnerFL.initialize_kv_cache(runner, config)
 
@@ -1771,10 +1780,10 @@ class TestInitializeKvCache:
             def set_host_xfer_buffer_ops(self, ops):
                 pass
 
-        monkeypatch.setattr(patched_module, "has_kv_transfer_group",
-                            lambda: True)
-        monkeypatch.setattr(patched_module, "get_kv_transfer_group",
-                            lambda: FakeTransferGroup())
+        monkeypatch.setattr(patched_module, "has_kv_transfer_group", lambda: True)
+        monkeypatch.setattr(
+            patched_module, "get_kv_transfer_group", lambda: FakeTransferGroup()
+        )
 
         patched_module.ModelRunnerFL.initialize_kv_cache(
             runner, config, is_profiling=True
@@ -1782,16 +1791,14 @@ class TestInitializeKvCache:
 
         assert registered == []
 
-    def test_initialize_kv_cache_copies_the_config(self, patched_module,
-                                                  monkeypatch):
+    def test_initialize_kv_cache_copies_the_config(self, patched_module, monkeypatch):
         """initialize_kv_cache deep-copies the incoming config so later
         mutation of the caller's object cannot leak in."""
         backend = _FakeAttentionBackend(name="BackendA")
         runner, config, _ = self._config_with_layers(
             patched_module, [("model.layers.0", backend, 8)]
         )
-        monkeypatch.setattr(patched_module, "has_kv_transfer_group",
-                            lambda: False)
+        monkeypatch.setattr(patched_module, "has_kv_transfer_group", lambda: False)
 
         patched_module.ModelRunnerFL.initialize_kv_cache(runner, config)
 
