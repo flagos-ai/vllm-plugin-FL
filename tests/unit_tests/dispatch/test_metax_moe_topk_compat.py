@@ -18,6 +18,14 @@ _PATCHES = (
 )
 
 
+class _CudaRoutingTensor(torch.Tensor):
+    """CUDA routing metadata for a mocked provider backed by CPU storage."""
+
+    @property
+    def is_cuda(self):
+        return True
+
+
 def _load(monkeypatch, name, path, *, package=False):
     spec = importlib.util.spec_from_file_location(
         name,
@@ -239,7 +247,9 @@ def test_fl_metax_router_uses_stable_flaggems_bridge_after_upstream_overwrite(
         )
 
     padding = torch.tensor([False, False, True])
-    logits = torch.tensor([[2.0, 1.0, 0.0, -1.0], [-1.0, 0.0, 3.0, 1.0], [1.0] * 4])
+    logits = torch.tensor(
+        [[2.0, 1.0, 0.0, -1.0], [-1.0, 0.0, 3.0, 1.0], [1.0] * 4]
+    ).as_subclass(_CudaRoutingTensor)
     expected_ids = torch.tensor([[0, 1], [2, 3], [-1, -1]], dtype=torch.int64)
     expected_weights = torch.tensor([[0.75, 0.25], [0.6, 0.4], [0.0, 0.0]])
     expected_rows = torch.tensor([[0, 3], [1, 4], [2, 5]], dtype=torch.int32)
@@ -282,13 +292,14 @@ def test_non_metax_padded_router_keeps_upstream_route(monkeypatch):
     assert captured["gating_output"] is logits
 
 
-def test_unpadded_metax_softmax_keeps_flaggems_route(monkeypatch):
+@pytest.mark.parametrize("padding", [None, torch.tensor([False])])
+def test_cpu_metax_softmax_keeps_cached_route(monkeypatch, padding):
     def cached(weights, ids, expanded, logits, renormalize):
         weights.fill_(0.5)
         ids.fill_(1)
         return weights, ids
 
-    route = _fl_router(monkeypatch, object(), "metax", None, None, cached)
+    route = _fl_router(monkeypatch, object(), "metax", padding, None, cached)
     weights, ids, _ = route(torch.zeros(1, 8), torch.zeros(1, 4), 2, True)
     torch.testing.assert_close(weights, torch.full((1, 2), 0.5))
     torch.testing.assert_close(ids, torch.ones((1, 2), dtype=torch.int32))

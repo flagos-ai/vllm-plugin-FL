@@ -104,9 +104,11 @@ def fused_topk(
     if scoring_func != "softmax" or padding_mask is not None:
         from vllm.platforms import current_platform
 
-        if getattr(
-            current_platform, "vendor_name", None
-        ) == "metax" and scoring_func in ("softmax", "sigmoid"):
+        if (
+            getattr(current_platform, "vendor_name", None) == "metax"
+            and gating_output.is_cuda
+            and scoring_func in ("softmax", "sigmoid")
+        ):
             from vllm_fl.dispatch.backends.vendor.metax.patches.moe_topk_compat import (
                 get_topk_operator,
             )
