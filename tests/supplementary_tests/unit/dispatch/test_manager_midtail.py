@@ -35,8 +35,7 @@ import types
 
 import pytest
 
-import vllm_fl.dispatch.discovery as discovery
-import vllm_fl.dispatch.manager as mgr_mod
+from vllm_fl.dispatch import discovery, manager as mgr_mod
 from vllm_fl.dispatch.manager import OpManager
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 

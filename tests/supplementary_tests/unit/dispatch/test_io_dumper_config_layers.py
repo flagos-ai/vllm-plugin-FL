@@ -357,10 +357,13 @@ class TestTorchFuncSummaryOnly:
 
     def test_summary_only_records_seen(self, tmp_path):
         """with_metas=False records the op in _seen_ops and passes through."""
+        mode_cls = getattr(d, "_DumpTorchFuncMode", None)
+        if mode_cls is None:  # HAS_TORCH_FUNC_MODE off (no torch.overrides)
+            pytest.skip("_DumpTorchFuncMode requires TorchFunctionMode support")
         d.enable_io_dump(
             dump_dir=str(tmp_path), with_torch_funcs=True, with_metas=False, ops=None
         )
-        mode = d._DumpTorchFuncMode()
+        mode = mode_cls()
         tensor = torch.arange(4.0)
         out = mode.__torch_function__(torch.sin, [torch.Tensor], (tensor,), {})
         assert torch.equal(out, torch.sin(tensor))

@@ -306,7 +306,7 @@ class _VllmStubTree:
         # see the same stubbed module.
         self._leaf("vllm.triton_utils")
         self._leaf(
-            "vllm.utils.math_utils" if False else "vllm.utils.math_utils",
+            "vllm.utils.math_utils",
             round_up=lambda value, multiple: (
                 (value + multiple - 1) // multiple * multiple
             ),
@@ -813,6 +813,20 @@ _MLA_ARGS = dict(
 )
 
 
+def _evict_cached_mla_module():
+    """Drop any collection-time cached ``...impl.mla`` bound to real vllm.
+
+    On hosts with a real vLLM installed (the A100 container), pytest-xdist
+    imports the functional attention file at collection time, which caches
+    ``...impl.mla`` with the REAL vllm base classes.  Under the stub tree
+    those bases read ``vllm.config`` symbols the stub does not carry
+    (``AttentionImpl.__new__`` imports ``get_current_vllm_config_or_none``),
+    so the cached module is evicted before importing it against the stubs.
+    ``_fl_sys_modules`` restores the original entry on teardown.
+    """
+    sys.modules.pop("vllm_fl.dispatch.backends.flaggems.impl.mla", None)
+
+
 def _make_impl(stubs, **overrides):
     """Construct a concrete MLAFLImpl under the stubbed boundary.
 
@@ -820,6 +834,7 @@ def _make_impl(stubs, **overrides):
     it in.  ``_pad_v`` is set explicitly because ``__init__`` never assigns
     it (see module docstring).
     """
+    _evict_cached_mla_module()
     from vllm_fl.dispatch.backends.flaggems.impl.mla import MLAFLImpl
 
     AttentionType = stubs.classes.AttentionType
@@ -841,6 +856,7 @@ class TestMLAFLBackend:
 
     def test_get_name_and_impl_cls(self, stubs):
         """The backend is named MLAFL and returns the impl class."""
+        _evict_cached_mla_module()
         from vllm_fl.dispatch.backends.flaggems.impl.mla import (
             MLAFLBackend,
             MLAFLImpl,

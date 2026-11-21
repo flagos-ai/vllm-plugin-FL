@@ -91,7 +91,15 @@ class TestAcceleratorViewAmd:
         monkeypatch.setitem(sys.modules, "vllm.platforms", platforms)
 
     def test_amd_delegates_to_vendor_view(self, monkeypatch, caplog):
-        """The AMD vendor resolves to the ROCm zero-copy host mapping."""
+        """The AMD vendor resolves to the ROCm zero-copy host mapping.
+
+        The vendor is pinned through the ``vllm_fl.utils.DeviceInfo`` seam —
+        the same attribute the unavailable-view tests below patch — because
+        with flag_gems installed the real DeviceInfo answers with the host
+        vendor (``nvidia`` on the CUDA CI container) instead of raising, and
+        the call would fall through to the unavailable-view stub. The
+        ``current_platform`` stub keeps steering the fallback probe.
+        """
         calls = []
 
         def fake_amd_view(tensor):
@@ -104,7 +112,13 @@ class TestAcceleratorViewAmd:
         )
         saved = sys.modules.get(amd_mod.__name__)
         sys.modules[amd_mod.__name__] = amd_mod
-        # DeviceInfo import fails (vllm_fl.utils unset here) -> fallback probe.
+        import vllm_fl.utils as utils
+
+        class _AmdDeviceInfo:
+            def __init__(self):
+                self.vendor_name = "amd"
+
+        monkeypatch.setattr(utils, "DeviceInfo", _AmdDeviceInfo)
         self._install_vllm_platforms(
             monkeypatch, types.SimpleNamespace(vendor_name="amd")
         )
@@ -144,8 +158,10 @@ class TestAcceleratorViewAmd:
         finally:
             logger.removeHandler(handler)
         assert records == [
-            "Using the AMD ROCm zero-copy host mapping for "
-            "_C::get_cuda_view_from_cpu_tensor."
+            (
+                "Using the AMD ROCm zero-copy host mapping for "
+                "_C::get_cuda_view_from_cpu_tensor."
+            )
         ]
 
     def test_both_probes_failing_raises_unavailable(self, monkeypatch):

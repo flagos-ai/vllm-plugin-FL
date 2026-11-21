@@ -23,13 +23,12 @@ Covered behavior:
   against the same oracle reading the KV cache written by
   ``do_kv_cache_update`` (vLLM's ``triton_reshape_and_cache_flash``).
 
-Known source defect documented here: ``AttentionFLImpl.__init__`` never
-assigns ``self.dcp_world_size`` (unlike ``AttentionGCUImpl`` and the
-metadata builder, which both set it), so the decoder-path
-``forward()`` would raise ``AttributeError`` at line 571 unless a caller
-sets it externally. The decoder tests set it explicitly and pin the
-missing-attribute fact; a fix should make the pinned test fail loudly so
-it is not forgotten.
+On ``dcp_world_size``: ``AttentionFLImpl.__init__`` never assigns it
+(unlike ``AttentionGCUImpl`` and the metadata builder, which both set
+it), but on vllm 0.32 the base ``AttentionImpl.__new__`` assigns it for
+every subclass, so the decoder-path ``forward()`` will not raise
+``AttributeError``. ``test_impl_dcp_world_size_defaults_to_one`` pins
+the single-process default of 1.
 """
 
 import pytest
@@ -132,9 +131,10 @@ def test_split_kv_cache_views_packed_k_and_v():
     k, v = _split_kv_cache(cache, HEAD_SIZE)
     assert k.shape == (num_blocks, block_size, heads, HEAD_SIZE)
     assert v.shape == (num_blocks, block_size, heads, HEAD_SIZE)
-    # K occupies the first HEAD_SIZE columns of the packed last dim.
+    # K occupies the first HEAD_SIZE columns of the packed last dim;
+    # V starts at column HEAD_SIZE.
     cache[..., 0] = 1.0
-    cache[..., 1] = 2.0
+    cache[..., HEAD_SIZE] = 2.0
     assert torch.all(k[..., 0] == 1.0)
     assert torch.all(v[..., 0] == 2.0)
     # Unequal K/V head sizes are rejected.
@@ -165,14 +165,14 @@ def test_impl_init_attribute_surface():
 
 @pytest.mark.supplementary
 @pytest.mark.gpu
-def test_impl_init_missing_dcp_world_size_is_pinned():
-    """Pin the source defect: __init__ never assigns dcp_world_size.
+def test_impl_dcp_world_size_defaults_to_one():
+    """vllm 0.32's AttentionImpl.__new__ provides dcp_world_size.
 
-    ``forward()`` reads ``self.dcp_world_size`` on the decoder path but
-    ``__init__`` does not set it (the metadata builder and the GCU impl do).
-    If a fix lands, this pin should be updated to assert the attribute exists
-    right after construction — the test will fail until then, keeping the
-    defect visible.
+    ``AttentionImpl.__new__`` assigns ``self.dcp_world_size`` (and
+    ``dcp_rank``) for every subclass, so the attribute exists right after
+    construction even though ``vllm_fl``'s own ``__init__`` never sets it.
+    In a single non-distributed process it defaults to 1, so the
+    decoder-path ``forward()`` will not raise ``AttributeError``.
     """
     impl = AttentionFLImpl(
         num_heads=NUM_HEADS,
@@ -183,7 +183,7 @@ def test_impl_init_missing_dcp_world_size_is_pinned():
         sliding_window=None,
         kv_cache_dtype="auto",
     )
-    assert not hasattr(impl, "dcp_world_size")
+    assert impl.dcp_world_size == 1
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +250,7 @@ def test_encoder_attention_forward_matches_oracle(device, lengths, seqlens):
     expected = _oracle_varlen(
         q.float(), k.float(), v.float(), cu_seqlens.tolist(), SCALE, causal=False
     )
-    torch.testing.assert_close(output.float(), expected, rtol=2e-2, atol=2e-2)
+    torch.testing.assert_close(output.float(), expected.float(), rtol=2e-2, atol=2e-2)
 
 
 # ---------------------------------------------------------------------------
@@ -335,4 +335,4 @@ def test_decoder_forward_with_kv_cache_matches_oracle(device, seq_len, block_siz
         SCALE,
         causal=True,
     )
-    torch.testing.assert_close(output.float(), expected, rtol=2e-2, atol=2e-2)
+    torch.testing.assert_close(output.float(), expected.float(), rtol=2e-2, atol=2e-2)

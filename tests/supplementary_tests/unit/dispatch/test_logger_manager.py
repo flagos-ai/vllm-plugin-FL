@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-import vllm_fl.dispatch.logger_manager as logger_manager
+from vllm_fl.dispatch import logger_manager
 from vllm_fl.dispatch.logger_manager import get_logger, set_log_level
 
 

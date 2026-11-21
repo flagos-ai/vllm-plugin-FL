@@ -669,6 +669,11 @@ class TestRegister:
     def test_other_vendor_patches_ops(self, fresh_module, monkeypatch):
         """Non-NVIDIA vendors install the stub patches before returning."""
         monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+        # register() honours an existing VLLM_USE_V2_MODEL_RUNNER via
+        # os.environ.setdefault, and CI containers preset it to "1"; drop it
+        # so the assertion below verifies register()'s own mutation rather
+        # than the preset surviving in the env copy.
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
         env = self._env_view()
         monkeypatch.setattr(os, "environ", env)
         calls = []

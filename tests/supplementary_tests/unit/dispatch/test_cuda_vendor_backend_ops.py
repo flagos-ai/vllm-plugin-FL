@@ -367,13 +367,6 @@ class TestCudaBackendAvailability:
 
     def test_platform_import_failure_unavailable(self, backend, monkeypatch):
         """A raising platform import is swallowed into False."""
-
-        class _Broken:
-            @property
-            def current_platform(self):
-                raise RuntimeError("platform probe exploded")
-
-        broken = ModuleType("vllm.platforms.broken")
         monkeypatch.setitem(
             sys.modules,
             "vllm",
@@ -386,7 +379,9 @@ class TestCudaBackendAvailability:
         )
 
         # Make ``from vllm.platforms import current_platform`` itself raise
-        # by replacing the module with a property-raising proxy.
+        # by replacing the module with a raising __getattr__ proxy
+        # (an AttributeError would be swallowed as "missing", so
+        # RuntimeError proves the swallowing branch runs).
         class _RaisingModule(ModuleType):
             def __getattr__(self, item):
                 if item == "current_platform":
@@ -398,7 +393,6 @@ class TestCudaBackendAvailability:
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
         monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
         assert backend.is_available() is False
-        del broken
 
 
 # ---------------------------------------------------------------------------

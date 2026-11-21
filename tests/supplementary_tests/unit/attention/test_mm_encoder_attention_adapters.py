@@ -84,9 +84,7 @@ def _install_vllm_stubs(monkeypatch, vendor_name, is_cuda=False):
 
     # --- vllm.v1.attention.ops.vit_attn_wrappers ---
     vit = modules[_VIT_LEAVES[0]]
-    vit.einops = SimpleNamespace(
-        rearrange=lambda x, pattern: _rearrange_bshd_bhsd(x, pattern)
-    )
+    vit.einops = SimpleNamespace(rearrange=_rearrange_bshd_bhsd)
     vit.F = SimpleNamespace(
         pad=F.pad, scaled_dot_product_attention=F.scaled_dot_product_attention
     )

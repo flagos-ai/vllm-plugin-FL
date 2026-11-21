@@ -17,6 +17,7 @@ device type, HIP build, compute capability) plus the validation failures.
 """
 
 import importlib.util
+import inspect
 import math
 import sys
 from pathlib import Path
@@ -119,6 +120,65 @@ def gdn(monkeypatch):
     # subject matter is unavailable, so the tests skip rather than error.
     triton = pytest.importorskip("triton")
     import triton.language as tl
+
+    # FlagTree's build wires a lazy ``tl.ext`` symbol dispatcher whose
+    # ``__getattr__`` raises RuntimeError (not AttributeError) for unknown
+    # names.  The interpreter's ``_patch_builtin`` scans every ``tl`` member
+    # with ``tl.core.is_builtin`` -> ``getattr(fn, "__triton_builtin__")``,
+    # and ``getattr``'s default only swallows AttributeError, so the scan
+    # itself crashes on the dispatcher.  Wrapping ``is_builtin`` to treat
+    # that RuntimeError as "not a builtin" (which the dispatcher indeed is
+    # not) keeps the kernel executable under FlagTree; upstream triton
+    # never raises here, so the wrapper is a no-op pass-through there.
+    real_is_builtin = tl.core.is_builtin
+
+    def _safe_is_builtin(fn):
+        try:
+            return real_is_builtin(fn)
+        except RuntimeError:
+            return False
+
+    monkeypatch.setattr(tl.core, "is_builtin", _safe_is_builtin)
+
+    # FlagTree's language/semantic layer passes trailing load/store options
+    # (e.g. ``flagtree_hints``) that its own InterpreterBuilder methods do
+    # not accept — an internal mismatch in that wheel.  The interpreter
+    # ignores cache/eviction hints anyway, so each builder method is wrapped
+    # to drop positional arguments beyond its declared arity.  On upstream
+    # triton the arities match and the wrappers are pass-throughs.
+    from triton.runtime.interpreter import InterpreterBuilder
+
+    def _truncate_positionals(name):
+        orig = getattr(InterpreterBuilder, name, None)
+        if orig is None:
+            return
+        params = inspect.signature(orig).parameters
+        if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values()):
+            return
+        n_pos = (
+            sum(
+                p.kind
+                in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                )
+                for p in params.values()
+            )
+            - 1  # exclude self
+        )
+
+        def wrapper(self, *args, **kwargs):
+            return orig(self, *args[:n_pos], **kwargs)
+
+        monkeypatch.setattr(InterpreterBuilder, name, wrapper)
+
+    for name in (
+        "create_load",
+        "create_masked_load",
+        "create_store",
+        "create_masked_store",
+    ):
+        _truncate_positionals(name)
 
     if not triton.knobs.runtime.interpret or type(tl.sigmoid).__name__ != (
         "InterpretedFunction"
