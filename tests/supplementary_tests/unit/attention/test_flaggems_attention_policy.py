@@ -667,7 +667,6 @@ def test_impl_init_attribute_surface_and_sliding_window_encoding(attention_mod):
     """__init__ encodes sliding windows, softcap defaults and GQA ratio."""
     AttentionType = attention_mod._stubs.classes.AttentionType
 
-    impl = _make_impl(attention_mod, alibi_slopes_probe=None) if False else None
     impl = attention_mod.AttentionFLImpl(
         num_heads=_NUM_HEADS,
         head_size=_HEAD_SIZE,

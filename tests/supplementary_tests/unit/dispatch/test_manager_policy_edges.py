@@ -52,7 +52,7 @@ import types
 import pytest
 import torch
 
-import vllm_fl.dispatch.manager as mgr_mod
+from vllm_fl.dispatch import manager as mgr_mod
 from vllm_fl.dispatch.manager import OpManager
 from vllm_fl.dispatch.policy import (
     PREFER_DEFAULT,
@@ -1161,8 +1161,18 @@ class TestPolicyFromEnv:
         assert policy.per_op_order_dict == {"my_op": ["reference", "flagos"]}
 
     @pytest.mark.supplementary
-    def test_defaults_without_any_env(self):
-        """With a clean environment the built-in defaults come back."""
+    def test_defaults_without_any_env(self, monkeypatch):
+        """With a clean environment the built-in defaults come back.
+
+        Real-GPU hosts resolve the CUDA platform, so ``_policy_from_env``
+        auto-loads ``nvidia.yaml`` there and the result deviates from the
+        plain defaults. The platform-config seam is pinned to "no config
+        file" — the same ``get_config_path`` attribute the platform-base
+        test above overrides — so the defaults are observed on every host.
+        """
+        import vllm_fl.dispatch.config as dispatch_config
+
+        monkeypatch.setattr(dispatch_config, "get_config_path", lambda: None)
         policy = policy_from_env()
         assert policy == SelectionPolicy()
 
@@ -1172,33 +1182,59 @@ class TestPolicyContextManagers:
 
     @pytest.mark.supplementary
     def test_with_strict_mode_toggles(self):
-        """with_strict_mode keeps the current prefer and adds strict."""
+        """with_strict_mode keeps the current prefer and adds strict.
+
+        The restored value is compared against the pre-context base rather
+        than a hard-coded default: on real-GPU hosts the base policy comes
+        from the auto-loaded platform config (e.g. nvidia.yaml), which may
+        differ from the built-in defaults.
+        """
+        before = get_policy().strict
         with with_strict_mode():
             active = get_policy()
             assert active.strict is True
             assert active.prefer == PREFER_DEFAULT
-        assert get_policy().strict is False
+        assert get_policy().strict is before
 
     @pytest.mark.supplementary
     def test_with_preference_switches(self):
-        """with_preference swaps only the prefer field."""
+        """with_preference swaps only the prefer field.
+
+        The restored prefer is compared against the pre-context base: the
+        base policy may come from the auto-loaded platform config on
+        real-GPU hosts instead of the built-in default.
+        """
+        before = get_policy().prefer
         with with_preference(PREFER_REFERENCE):
             assert get_policy().prefer == "reference"
-        assert get_policy().prefer == PREFER_DEFAULT
+        assert get_policy().prefer == before
 
     @pytest.mark.supplementary
     def test_with_allowed_vendors_replaces_allowlist(self):
-        """with_allowed_vendors replaces the allow set wholesale."""
+        """with_allowed_vendors replaces the allow set wholesale.
+
+        The restored allowlist is compared against the pre-context base:
+        on real-GPU hosts the base policy comes from the auto-loaded
+        platform config (nvidia.yaml pins allow_vendors to {cuda}), so the
+        post-context value is that base, not the built-in None.
+        """
+        before = get_policy().allow_vendors
         with with_allowed_vendors("cuda", "rocm"):
             assert get_policy().allow_vendors == frozenset({"cuda", "rocm"})
-        assert get_policy().allow_vendors is None
+        assert get_policy().allow_vendors == before
 
     @pytest.mark.supplementary
     def test_with_denied_vendors_unions(self):
-        """with_denied_vendors adds to the existing deny set (union)."""
+        """with_denied_vendors adds to the existing deny set (union).
+
+        The restored deny set is compared against the pre-context base,
+        which may be a platform-config policy rather than the built-in
+        empty set on real-GPU hosts.
+        """
+        before = get_policy().deny_vendors
         with with_denied_vendors("npu"), with_denied_vendors("ascend"):
             assert get_policy().deny_vendors == frozenset({"npu", "ascend"})
-        assert get_policy().deny_vendors == frozenset()
+        assert get_policy().deny_vendors == before
 
     @pytest.mark.supplementary
     def test_contexts_nest_and_restore(self):
@@ -1211,5 +1247,5 @@ class TestPolicyContextManagers:
                 assert inner.strict is True
             mid = get_policy()
             assert mid.prefer == "vendor"
-            assert mid.strict is False
+            assert mid.strict is base.strict
         assert get_policy() is base

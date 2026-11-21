@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import vllm_fl.dispatch.config.utils as config_utils
+from vllm_fl.dispatch.config import utils as config_utils
 from vllm_fl.dispatch.config.utils import (
     get_effective_config,
     get_flagos_blacklist,

@@ -37,6 +37,39 @@ _SUPP_DIR = "tests/supplementary_tests/"
 class SupplementaryRunner(TestRunner):
     """Run the supplementary suite with coverage isolated to its own JSON."""
 
+    def _run_single(
+        self,
+        tc: TestCase,
+        extra_env_override: dict[str, str] | None = None,
+        _quiet: bool = False,
+        device_slots: list[int] | None = None,
+        device_ids: list[int] | None = None,
+    ):
+        """Extend the core exit-code handling to the supplementary serial pass.
+
+        The core runner treats pytest exit 5 (no tests collected) as a pass
+        only for ``unit-serial``. The supplementary serial pass selects
+        ``multi_gpu``/``serial``-marked tests and may legitimately collect
+        none (the supplementary suite currently ships no such tests), so
+        the same vacuous-collection exemption is applied here. Real test
+        failures still exit 1 and are reported as failures.
+        """
+        result = super()._run_single(
+            tc,
+            extra_env_override=extra_env_override,
+            _quiet=_quiet,
+            device_slots=device_slots,
+            device_ids=device_ids,
+        )
+        if (
+            not result.passed
+            and tc.name.startswith("supplementary-serial")
+            and "pytest exited with code 5" in (result.message or "")
+        ):
+            result.passed = True
+            result.message = "no serial-marked supplementary tests collected"
+        return result
+
     def discover_tests(self) -> list[TestCase]:
         """Build supplementary TestCase descriptors (parallel + serial)."""
         cpu_workers = min(os.cpu_count() or 1, 16)

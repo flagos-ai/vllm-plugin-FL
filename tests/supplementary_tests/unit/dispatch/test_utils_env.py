@@ -13,11 +13,10 @@ so neither is duplicated here.
 
 import json
 import re
-import sys
 
 import pytest
 
-import vllm_fl.utils as utils
+from vllm_fl import utils
 from vllm_fl.utils import (
     get_device_name,
     get_device_type,
@@ -305,11 +304,6 @@ class TestFlagGemsSelection:
         """A ValueError from the config layer propagates (not swallowed)."""
         import vllm_fl.dispatch.config as config_mod
 
-        def raise_conflict():
-            raise ValueError(
-                "Platform config cannot define both flagos_whitelist and flagos_blacklist."
-            )
-
         monkeypatch.setattr(config_mod, "get_flagos_whitelist", lambda: ["a"])
         monkeypatch.setattr(config_mod, "get_flagos_blacklist", lambda: ["b"])
         with pytest.raises(
@@ -319,14 +313,25 @@ class TestFlagGemsSelection:
 
     @pytest.mark.supplementary
     def test_get_flaggems_all_ops_requires_flag_gems(self, monkeypatch):
-        """Without flag_gems installed, the import error propagates."""
-        saved = sys.modules.pop("flag_gems", None)
-        try:
-            with pytest.raises(ModuleNotFoundError):
-                get_flaggems_all_ops()
-        finally:
-            if saved is not None:
-                sys.modules["flag_gems"] = saved
+        """Without flag_gems importable, the import error propagates.
+
+        The import is intercepted through ``builtins.__import__`` (same
+        idiom as the config-failure test above) so the ModuleNotFoundError
+        is raised identically whether or not flag_gems is actually
+        installed in the test environment.
+        """
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_flag_gems(name, *args, **kwargs):
+            if name == "flag_gems":
+                raise ModuleNotFoundError("No module named 'flag_gems'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_flag_gems)
+        with pytest.raises(ModuleNotFoundError):
+            get_flaggems_all_ops()
 
 
 class TestOotWhitelistBlacklist:

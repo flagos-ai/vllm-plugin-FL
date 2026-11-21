@@ -44,8 +44,6 @@ _GRAPH_SOURCE = _ROOT / "vllm_fl/compilation/graph.py"
 _PARAMS_SOURCE = _ROOT / "vllm_fl/compilation/graph_params.py"
 _RUNTIME_SOURCE = _ROOT / "vllm_fl/compilation/graph_runtime.py"
 
-_MODULE_BASE = "supp_compilation_under_test"
-
 
 class _FakeIntermediateTensors:
     """Stand-in for vLLM's IntermediateTensors carrying a tensors mapping."""
@@ -1089,10 +1087,10 @@ class TestGraphRuntimeController:
         )
         controller = fl_tree.runtime.GraphRuntimeController(vllm_config="cfg")
         controller.attention_impls = ()
-        with (
-            pytest.raises(ValueError, match="body failed"),
-            controller.replay_scope(SimpleNamespace(batch_descriptor=_Descriptor(5))),
-        ):
+        scope = controller.replay_scope(
+            SimpleNamespace(batch_descriptor=_Descriptor(5))
+        )
+        with scope, pytest.raises(ValueError, match="body failed"):
             raise ValueError("body failed")
         assert controller._active is False
 
