@@ -175,6 +175,7 @@ platforms:
       # out to every enabled platform.
       - .github/configs/iluvatar.yml
       - .github/configs/platforms.yml
+      - .github/scripts/iluvatar/
       - docker/build.sh
       - docker/iluvatar/
     exempt_from_global:
@@ -182,5 +183,6 @@ platforms:
       - vllm_fl/dispatch/backends/vendor/iluvatar/
       - .github/configs/iluvatar.yml
       - .github/configs/platforms.yml
+      - .github/scripts/iluvatar/
       - docker/build.sh
       - docker/iluvatar/

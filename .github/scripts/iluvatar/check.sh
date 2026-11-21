@@ -15,7 +15,11 @@ else
   echo "::warning::Neither ixsmi nor nvidia-smi found; probing via torch."
 fi
 
-python - <<'PY'
+# The torch probe occasionally wedges while the CoreX user space talks to an
+# older kernel driver (the process holds a device context and never returns).
+# A hung probe would otherwise burn the job's full timeout, so bound every
+# attempt and retry in a fresh process.
+PROBE_SRC=$(cat <<'PY'
 import shutil
 import subprocess
 
@@ -68,3 +72,26 @@ print(f"Iluvatar devices: {count}")
 print(f"Device 0: {torch.cuda.get_device_name(0)}")
 print(f"Tensor smoke: {tensor.device} {tuple(tensor.shape)}")
 PY
+)
+
+probe_ok=0
+for attempt in 1 2 3; do
+  echo "=== Device probe attempt ${attempt}/3 (timeout 180s) ==="
+  rc=0
+  timeout 180 python -c "${PROBE_SRC}" || rc=$?
+  if [[ "${rc}" -eq 0 ]]; then
+    probe_ok=1
+    break
+  fi
+  if [[ "${rc}" -eq 124 ]]; then
+    echo "::warning::Device probe attempt ${attempt} hung for 180s and was killed; retrying in a fresh process."
+  else
+    echo "::warning::Device probe attempt ${attempt} failed with exit code ${rc}."
+  fi
+  sleep 5
+done
+
+if [[ "${probe_ok}" -ne 1 ]]; then
+  echo "::error::Iluvatar device probe failed after 3 attempts."
+  exit 1
+fi
