@@ -1,0 +1,23 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Runtime 2.3.0 native stack for Kunlunxin XRE 5.37.1.
+# Recorded from `python -m pip freeze --all` inside the clean runtime image and
+# enforced on every pip invocation in docker/kunlunxin/Dockerfile so a regular
+# resolver can never replace the vendor stack. Triton is provided by FlagTree
+# under /opt/flagtree and is intentionally not a distribution pin.
+
+torch==2.9.0+cu129
+torchvision==0.24.0+cu129
+torchaudio==2.9.0+cu129
+flagtree==0.7.0+xpu3.6
+flag_gems==5.4.0
+flagcx==0.14.1+xre5.37.1
+numpy==1.26.4
+xmlir==1.0.0.1+20260605
+xtorch_ops==0.1.2935+50a5d6a4
+torch_plugin==0.1.0
+torch_xray==2.0.4
+flash_attn==2.4.2+7e2dd4d
+xformers==0.0.29+1e7a8ec.d20260114
+regex==2026.4.4
+vllm==0.32.0+flagos

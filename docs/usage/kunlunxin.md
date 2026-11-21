@@ -9,7 +9,7 @@
 | Container XPU runtime (XRE) | `5.37.1` |
 | Python | 3.10 with the FlagOS wheel and matching Kunlunxin runtime packages |
 | vLLM | `0.32.0+flagos` from the Kunlunxin package index |
-| PyTorch | `2.9.0+cu129` from the application image |
+| PyTorch | `2.9.0+cu129` from the official FlagOS Runtime |
 | FlagTree and Triton | FlagTree `0.7.0+xpu3.6`, Triton `3.6.0` |
 | FlagGems | `5.4.0` |
 | FlagGems-vLLM | [`8ae5c22`](https://github.com/flagos-ai/FlagGems-vllm/commit/8ae5c22f5af6d650216f881c329c4dff20c182e1) based on `v0.2.0`, with Kunlunxin Runner V2 sampling penalties and grammar masking |
@@ -17,20 +17,25 @@
 
 The prebuilt runtime includes the versions in the table and the dependencies
 needed to install the plugin from your checkout. The image's Python is in
-`/flagos/bin`. Its base comes from the
-[FlagOS application release](https://flagos-ai.github.io/release-info/application/vllm0.24.0-kunlunxin-xre5.37.1/).
+`/flagos/bin`. Its base is the
+[FlagOS Runtime 2.3.0](https://flagos-ai.github.io/release-info/zh-cn/runtime/kunlunxin-xre5.37.1/)
+manifest
+`harbor.baai.ac.cn/flagos-runtime/flagos-runtime-kunlunxin-xre5.37.1:2.3.0@sha256:cc0deb9c09cd49977e754892e85f4414835d142379949cc2d66261f63b47959d`;
+`docker/kunlunxin/constraints.txt` pins the runtime packages that pip must
+not replace.
 
 ## Pull the runtime image
 
 ```sh
-KUNLUNXIN_IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-kunlunxin-pr726-runtime-7c7329e@sha256:93caedbfc36d665c2e7d9f70a38bbb2501a860c9389be660888b0b6d66bc4402
+KUNLUNXIN_IMAGE=<validated CI image reference>
 docker pull "$KUNLUNXIN_IMAGE"
 ```
 
-The runtime build applies the [Python 3.10 compatibility patch](../../docker/kunlunxin/python310_compat.py)
-to the pinned vLLM wheel. To rebuild the runtime from this checkout, use
-`docker build --target runtime -f docker/kunlunxin/Dockerfile -t kunlunxin-vllm:0.32.0 .`.
-The P800 CI jobs start from the published application base and use the same vLLM installer.
+`docker/kunlunxin/Dockerfile` applies the [Python 3.10 compatibility patch](../../docker/kunlunxin/python310_compat.py)
+to the pinned vLLM wheel, installs the pinned FlagGems-vLLM source archive, and
+builds `vllm_fl._C` from the checkout inside the runtime so CI runs the checkout
+with a native extension built against the same Torch. Rebuild it with
+`bash docker/build.sh --platform kunlunxin --target ci`.
 A source build of [upstream vLLM 0.32.0](https://github.com/vllm-project/vllm/blob/v0.32.0/pyproject.toml)
 in empty mode is also accepted by CI on Python 3.11–3.13.
 
