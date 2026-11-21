@@ -16,8 +16,6 @@ import sys
 import types
 from pathlib import Path
 
-import yaml
-
 from tests.e2e_tests.chat_cases import (
     build_chat_messages,
     chat_cases_for_task,
@@ -228,7 +226,9 @@ def _assert_template_contract():
     # (e.g. one entry per scenario instead of eight explicit requests).
     cases = ModelConfig.load(TEMPLATE_MODEL, TEMPLATE_CASE).serve.chat_cases
     selector_only = [
-        case for case in cases if case.get("scenario") in ("text_single", "image_single")
+        case
+        for case in cases
+        if case.get("scenario") in ("text_single", "image_single")
     ] + [
         dict(case, name="selector-" + case["scenario"])
         for case in [cases[2], cases[10], cases[18]]
