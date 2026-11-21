@@ -119,14 +119,15 @@ def test_sunrise_patches_do_not_change_other_platforms(monkeypatch, device_type)
     monkeypatch.setitem(sys.modules, "vllm.platforms", platform_module)
     monkeypatch.setattr(patch, "_patches_applied", False)
     memory_stats_fn = torch.accelerator.memory_stats
-    memory_info_fn = torch.accelerator.get_memory_info
+    missing = object()
+    memory_info_fn = getattr(torch.accelerator, "get_memory_info", missing)
 
     patch.apply_sunrise_patches()
     patch.patch_accelerator_memory_stats()
     patch.patch_accelerator_memory_api()
 
     assert torch.accelerator.memory_stats is memory_stats_fn
-    assert torch.accelerator.get_memory_info is memory_info_fn
+    assert getattr(torch.accelerator, "get_memory_info", missing) is memory_info_fn
     assert patch._patches_applied is False
 
 
