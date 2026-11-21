@@ -8,6 +8,14 @@ Mount `Eco-Tech/DeepSeek-V4.1-Flash-1017-w4a8` revision `2701ad74996ab465759ea37
 
 Use the vLLM 0.32.0 MetaX release image `harbor.baai.ac.cn/flagrelease-public/metax-plugin-0.32.0@sha256:1e73934aa791993ed5a67e1fc30eae952813ce4c27ef67b6d38abac574b53e1b` with the image’s PyTorch `2.10.0+metax3.9.0.8` and FlagTree `0.7.0+metax.git14f6eb96`. For the C550 configuration below, the hosts used KMD `3.100.1`, GPU BIOS `1.38.5.0` and MACA SDK `3.10.1.11`. The image bundles SDK `3.9.0.31`. On both nodes, pass `-v /opt/maca-3.10.1:/opt/maca:ro -v /opt/maca-3.10.1:/opt/maca-3.10.1:ro` to Docker to use the tested host SDK. The model requires the companion FlagGems and FlagGems-vllm implementations for the packed experts, Engram and sparse attention. The image was built before those changes. The [dependency manifest](../../examples/deepseek_v41/operator_dependencies.json) identifies the validated source trees. For a source deployment, put the three compatible checkouts under `SOURCE_ROOT` with their original repository names. For an installed deployment the launcher uses the packages in the active Python environment.
 
+### Prepare runtime sources
+
+Run the following once in each fresh release container, from the model plugin checkout. The image imports vLLM from `/opt/vllm`. Fast-forward that checkout to the pinned 0.32.0 revision with the DSpark resampling counter fix before starting either node.
+
+```bash
+python3 examples/deepseek_v41/prepare_metax_sources.py vllm /opt/vllm
+```
+
 ## Start the two nodes
 
 Run the [DP8 launcher](../../examples/deepseek_v41/metax_dp8_serve.sh) in each container. Supply the original local checkpoint path, the address of node 0, each node's own address and the inter-node network interface. The example uses local host Engram tables and requires sufficient host RAM and shared memory on both nodes.
