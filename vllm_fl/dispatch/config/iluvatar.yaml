@@ -1,3 +1,4 @@
+# CI-only control for PR #726 on the 0.5.0-dev baseline.
 # vLLM-FL Dispatch Configuration for Iluvatar GPU
 # Auto-loaded when running on Iluvatar hardware
 
