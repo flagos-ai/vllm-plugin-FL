@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Kunlunxin P800 OAM CI uses the published application image.
-# setup.sh installs the same pinned vLLM runtime as the derived Docker image.
+# Kunlunxin P800 OAM CI uses the unified CI image built on FlagOS Runtime 2.3.0
+# by docker/kunlunxin/Dockerfile; the digest below is the published manifest.
 
 platform: kunlunxin
 
-ci_image: harbor.baai.ac.cn/flagos-app/vllm0.24.0-kunlunxin-xre5.37.1:2.3.0-0.3.0@sha256:db1cceff13d438142abfd695500ac0820ebfe6ae13d909017a2ce073ac607b17
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-kunlunxin-ci@sha256:3881b669a49dc70b4911b70c676f4ec976b3dba633311242f7edc1b42919ac2a
 
 runner_labels:
   - kunlunxin-p800
@@ -41,3 +41,7 @@ container_options: >-
   --env CUDA_VISIBLE_DEVICES=0,1,2,3
   --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
   --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
+
+# Run the dedicated unit job on the P800 runner (the functional job also runs
+# the unit pass; this makes the unit result a first-class PR check).
+unit_devices: [p800]

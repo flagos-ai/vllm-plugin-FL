@@ -80,10 +80,18 @@ platforms:
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
       - tests/platforms/nvidia.yaml
+      # Shared image entry point and platform registry: image work touches
+      # docker/build.sh and platforms.yml for every vendor, so those changes
+      # are routed to the owning platform plus the NVIDIA regression baseline
+      # instead of fanning out to every enabled backend.
+      - .github/configs/platforms.yml
+      - docker/build.sh
     exempt_from_global:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
+      - .github/configs/platforms.yml
+      - docker/build.sh
   # Enablement follows the 0.5.0-dev line's own compatibility matrix.
   # NVIDIA and Ascend have completed their vLLM 0.32 runtime and CI
   # adaptations; other backends remain disabled until theirs are ready.
@@ -137,12 +145,16 @@ platforms:
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
       - tests/platforms/kunlunxin.yaml
+      - .github/configs/platforms.yml
+      - docker/build.sh
     exempt_from_global:
       - .github/configs/kunlunxin.yml
       - .github/scripts/kunlunxin/
       - docker/kunlunxin/
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
+      - .github/configs/platforms.yml
+      - docker/build.sh
   thead:
     enabled: true
     trigger_paths:
