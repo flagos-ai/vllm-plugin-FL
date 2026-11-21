@@ -9,18 +9,47 @@ git config --global --add safe.directory "$(pwd)"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${MTHREADS_VISIBLE_DEVICES:?MTHREADS_VISIBLE_DEVICES is not set}"
 
+# The base image puts FlagTree (which supplies Triton) on PYTHONPATH from
+# /etc/bash_env.sh, i.e. only for bash. The functional and e2e jobs run their
+# test steps with the default `sh`, which does not read that file, so every
+# FlagGems-backed test failed to collect with "No module named 'triton'".
+# Publish the value to later steps so they see the same stack.
+if [ -n "${GITHUB_ENV:-}" ]; then
+    _pythonpath="${PYTHONPATH:-}"
+    if [ -z "${_pythonpath}" ]; then
+        _pythonpath="$(bash -c 'echo "${PYTHONPATH:-}"')"
+    fi
+    if [ -n "${_pythonpath}" ]; then
+        echo "PYTHONPATH=${_pythonpath}" >>"${GITHUB_ENV}"
+    fi
+fi
+
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip install "pytest-xdist>=3.0.0"
 
 python .github/scripts/install_flaggems_vllm.py
 
 python - <<'PY'
+from importlib.metadata import version as dist_version
+
 import flag_gems
+import flagtree  # noqa: F401 - provides the Triton build
 import torch
 import torch_musa
+import triton
 import vllm
 import vllm_fl
 from vllm.platforms import current_platform
+
+# The MUSA CI image is pinned to the vLLM 0.32 adaptation stack; fail loudly
+# instead of silently testing a different dependency set.
+assert vllm.__version__.startswith("0.32."), vllm.__version__
+assert flag_gems.__version__.startswith("5.4."), flag_gems.__version__
+# ``flagtree.__version__`` mirrors Triton (3.6.0); the distribution carries the
+# 0.7.x FlagTree build identifier.
+assert dist_version("flagtree").startswith("0.7."), dist_version("flagtree")
+assert triton.__version__.startswith("3.6."), triton.__version__
+assert torch.__version__.startswith("2.9."), torch.__version__
 
 assert torch.musa.is_available(), "MUSA accelerator is unavailable"
 assert torch.musa.device_count() > 0, "No MUSA devices detected"
