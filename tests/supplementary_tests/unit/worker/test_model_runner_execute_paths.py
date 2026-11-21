@@ -398,8 +398,14 @@ class _RecordingModel:
         """Real-torch embedding lookup used by the prompt-embeds path."""
         return self.embed[input_ids.long()]
 
-    def __call__(self, input_ids=None, positions=None, intermediate_tensors=None,
-                inputs_embeds=None, **kwargs):
+    def __call__(
+        self,
+        input_ids=None,
+        positions=None,
+        intermediate_tensors=None,
+        inputs_embeds=None,
+        **kwargs,
+    ):
         self.calls.append(
             SimpleNamespace(
                 input_ids=None if input_ids is None else input_ids.clone(),
@@ -501,9 +507,7 @@ class _RecordingRejectionSampler:
         )
         assert logits is not None
         num_reqs = logits.shape[0]
-        num_draft = (
-            max(metadata.num_draft_tokens) if metadata.num_draft_tokens else 0
-        )
+        num_draft = max(metadata.num_draft_tokens) if metadata.num_draft_tokens else 0
         # Greedy bonus token per request.
         sampled = logits.argmax(dim=-1)
         out = torch.full((num_reqs, num_draft + 1), -1, dtype=torch.int64)
@@ -806,9 +810,7 @@ def _prepare_execution_runner(
 
     model = _RecordingModel()
     runner.model = model
-    runner.sampler = _RecordingSampler(
-        logprobs_mode=config.model_config.logprobs_mode
-    )
+    runner.sampler = _RecordingSampler(logprobs_mode=config.model_config.logprobs_mode)
     runner.rejection_sampler = _RecordingRejectionSampler()
     # _may_reorder_batch (inside _update_states) reads kv_cache_config even
     # on zero-token steps; attach an empty-group default. Tests driving a
@@ -873,12 +875,8 @@ class TestExecuteModelEarlyExits:
         to kv_connector_no_forward and returns its output."""
         runner, sched, _ = _prepare_execution_runner(patched_module)
         monkeypatch.setattr(patched_module, "has_kv_transfer_group", lambda: True)
-        fake_group = SimpleNamespace(
-            handle_preemptions=lambda md: None
-        )
-        monkeypatch.setattr(
-            patched_module, "get_kv_transfer_group", lambda: fake_group
-        )
+        fake_group = SimpleNamespace(handle_preemptions=lambda md: None)
+        monkeypatch.setattr(patched_module, "get_kv_transfer_group", lambda: fake_group)
         sentinel = object()
         monkeypatch.setattr(
             runner,
@@ -1037,7 +1035,7 @@ class TestExecuteModelHappyPath:
             prompts=(("r1", (5, 6, 7)),),
             model_config=_make_model_config(runner_type="pooling"),
         )
-        builders = _wire_attn_groups(patched_module, runner)
+        _wire_attn_groups(patched_module, runner)
 
         # A pooling request: the scheduler sends pooling_params, and the
         # runner's model exposes the pooler boundary _update_states consults.
@@ -1112,7 +1110,7 @@ class TestSampleTokens:
         prompts,
         spec_config=None,
         suffix_proposer_cls=None,
-        **runner_overrides
+        **runner_overrides,
     ):
         """Run execute_model then sample_tokens; return (runner, output).
 
@@ -1344,17 +1342,16 @@ class TestGetSlotMappings:
         state = _make_req_state(patched_module, "r1", (5, 6, 7), (9,))
         batch.add_request(state)
         batch.refresh_metadata()
-        runner = self._runner_with(
-            patched_module, batch, [enc_spec], [["enc.0"]]
-        )
+        runner = self._runner_with(patched_module, batch, [enc_spec], [["enc.0"]])
         gid_map, layer_map = patched_module.ModelRunnerFL._get_slot_mappings(
             runner, num_tokens_padded=4, num_reqs_padded=1, num_tokens_unpadded=3
         )
         assert gid_map[0].tolist() == [0, 0, 0, -1]
         assert layer_map["enc.0"] is gid_map[0]
 
-    def test_ubatch_slices_produce_per_slice_dicts(self, patched_module,
-                                                   cpu_slot_mapping_kernel):
+    def test_ubatch_slices_produce_per_slice_dicts(
+        self, patched_module, cpu_slot_mapping_kernel
+    ):
         """With ubatch slices the per-layer mapping becomes a list of dicts,
         one per ubatch, each slicing the shared slot tensors."""
         batch = _make_input_batch(patched_module)
@@ -1440,9 +1437,7 @@ class TestAllowMicrobatching:
             is True
         )
 
-    def test_prefill_after_prefill_without_shared_blocks_allows(
-        self, patched_module
-    ):
+    def test_prefill_after_prefill_without_shared_blocks_allows(self, patched_module):
         """Two prefills writing disjoint block ranges do not trip the veto."""
         batch = _make_input_batch(patched_module)
         state1 = _make_req_state(patched_module, "r1", tuple(range(8)), (1,))
@@ -1459,9 +1454,7 @@ class TestAllowMicrobatching:
             is True
         )
 
-    def test_reader_of_blocks_written_by_other_request_vetoes(
-        self, patched_module
-    ):
+    def test_reader_of_blocks_written_by_other_request_vetoes(self, patched_module):
         """A reader whose already-computed prefix includes a block another
         request in this batch is only writing now must not be split.
 
@@ -1496,8 +1489,9 @@ class TestPreprocess:
     """_preprocess branches: text-only, prompt-embeds, position padding."""
 
     @staticmethod
-    def _text_runner(patched_module, cpu_slot_mapping_kernel, num_scheduled=3,
-                     **config_overrides):
+    def _text_runner(
+        patched_module, cpu_slot_mapping_kernel, num_scheduled=3, **config_overrides
+    ):
         config = _make_vllm_config(**config_overrides)
         runner = _build_runner(patched_module, config)
         batch = _make_input_batch(patched_module)
@@ -1530,9 +1524,7 @@ class TestPreprocess:
             intermediate_tensors,
             model_kwargs,
             ec_out,
-        ) = patched_module.ModelRunnerFL._preprocess(
-            runner, sched, num_input_tokens=5
-        )
+        ) = patched_module.ModelRunnerFL._preprocess(runner, sched, num_input_tokens=5)
         assert input_ids is not None and inputs_embeds is None
         assert input_ids.tolist()[:3] == [5, 6, 7]
         assert positions.shape == (5,)
@@ -1566,9 +1558,7 @@ class TestPreprocess:
             _it,
             model_kwargs,
             _ec,
-        ) = patched_module.ModelRunnerFL._preprocess(
-            runner, sched, num_input_tokens=3
-        )
+        ) = patched_module.ModelRunnerFL._preprocess(runner, sched, num_input_tokens=3)
         assert input_ids is None
         assert inputs_embeds is not None
         assert inputs_embeds.shape == (3, 4)
@@ -1696,9 +1686,7 @@ class TestPool:
         )
         assert result.pooler_output == [None, None]
 
-    def test_pool_raw_output_none_returns_all_none(
-        self, patched_module, monkeypatch
-    ):
+    def test_pool_raw_output_none_returns_all_none(self, patched_module, monkeypatch):
         """A None pooler output short-circuits to all-None rows."""
         runner, batch, pooler = self._pool_runner(patched_module)
         pooler.__call__ = lambda hidden_states, pooling_metadata: None
@@ -1945,9 +1933,7 @@ class TestBookkeepingSync:
         assert runner.requests["r1"].output_token_ids == []
         assert runner.requests["r2"].output_token_ids == [21]
 
-    def test_spec_decode_tokens_parsed_via_rejection_parse(
-        self, patched_module
-    ):
+    def test_spec_decode_tokens_parsed_via_rejection_parse(self, patched_module):
         """Multi-column sampled ids (spec decode) route through
         RejectionSampler.parse_output: -1 slots are dropped per row."""
         runner = self._runner(
@@ -2009,9 +1995,7 @@ class TestBookkeepingSync:
         assert runner.requests["r2"].output_token_ids == [-1]
         assert runner.requests["r1"].output_token_ids == []
 
-    def test_cpu_generator_state_restored_for_discarded_request(
-        self, patched_module
-    ):
+    def test_cpu_generator_state_restored_for_discarded_request(self, patched_module):
         """A discarded request with a CPU generator has its RNG state rolled
         back via set_state (chunked prefill must not advance the stream)."""
         runner = self._runner(patched_module)
@@ -2175,9 +2159,7 @@ class TestPpReceivePrevSampledTokenIds:
         runner = self._runner(patched_module)
         pp_group.is_last_rank = False
         runner.discard_request_mask.np[0] = True
-        monkeypatch.setattr(
-            torch.distributed, "broadcast", lambda *a, **k: None
-        )
+        monkeypatch.setattr(torch.distributed, "broadcast", lambda *a, **k: None)
         patched_module.ModelRunnerFL._pp_receive_prev_sampled_token_ids_to_input_batch(
             runner
         )
@@ -2245,9 +2227,7 @@ class TestCopyDraftTokenIdsToCpu:
         assert runner.draft_token_ids_cpu[:1, :2].tolist() == [[0, 0]]
         assert runner.draft_token_ids_event.record_count == 1
 
-    def test_async_scheduling_skips_without_structured_output(
-        self, patched_module
-    ):
+    def test_async_scheduling_skips_without_structured_output(self, patched_module):
         """Under async scheduling with no structured output requests and no
         output-token history, the copy is skipped entirely."""
         runner = self._runner(patched_module, async_sched=True)
@@ -2259,9 +2239,7 @@ class TestCopyDraftTokenIdsToCpu:
         assert runner._draft_token_req_ids is None
         assert runner.draft_token_ids_event.record_count == 0
 
-    def test_list_valued_draft_ids_records_req_ids_only(
-        self, patched_module
-    ):
+    def test_list_valued_draft_ids_records_req_ids_only(self, patched_module):
         """A list-valued _draft_token_ids (CPU drafter) snapshots request
         ids but skips the tensor copy machinery."""
         runner = self._runner(patched_module)
@@ -2285,14 +2263,10 @@ class TestGetSpecDecodeDraftProbabilities:
         runner = _build_runner(patched_module, config)
         batch = _make_input_batch(patched_module)
         for req_id in req_ids:
-            batch.add_request(
-                _make_req_state(patched_module, req_id, (5, 6, 7), (9,))
-            )
+            batch.add_request(_make_req_state(patched_module, req_id, (5, 6, 7), (9,)))
         batch.refresh_metadata()
         runner.input_batch = batch
-        runner._draft_probs = torch.arange(
-            2 * 4, dtype=torch.float32
-        ).reshape(2, 4)
+        runner._draft_probs = torch.arange(2 * 4, dtype=torch.float32).reshape(2, 4)
         runner._draft_prob_req_ids = ["ra", "rb"]
         return runner
 
