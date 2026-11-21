@@ -4,9 +4,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
+import time
+import unicodedata
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -37,6 +40,73 @@ QUALITY_CHECKS = frozenset(
 
 _MISSING = object()
 _LOCAL_MEDIA_FLAG = "--allowed-local-media-path"
+
+
+def normalized_text(text: str) -> str:
+    """Normalize model output for semantic checks."""
+    normalized = " ".join(unicodedata.normalize("NFKC", text).lower().split())
+    for word, digit in {
+        "zero": "0",
+        "one": "1",
+        "two": "2",
+        "three": "3",
+        "four": "4",
+        "five": "5",
+        "six": "6",
+        "seven": "7",
+        "eight": "8",
+        "nine": "9",
+    }.items():
+        normalized = re.sub(rf"\b{word}\b", digit, normalized)
+    return normalized
+
+
+def _has_repeated_phrase(text: str) -> bool:
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    for size in range(2, min(13, len(tokens) // 3 + 1)):
+        for start in range(0, len(tokens) - size * 3 + 1):
+            phrase = tokens[start : start + size]
+            if (
+                phrase
+                == tokens[start + size : start + size * 2]
+                == tokens[start + size * 2 : start + size * 3]
+            ):
+                return True
+    return False
+
+
+def quality_checks(
+    text: str, expected: list[str], min_length: int = 1
+) -> dict[str, bool]:
+    """Apply the ten adaptation checks to one configured chat case."""
+    normalized = normalized_text(text)
+    positions: list[int] = []
+    cursor = 0
+    for term in expected:
+        position = normalized.find(str(term).lower(), cursor)
+        positions.append(position)
+        if position >= 0:
+            cursor = position + len(str(term))
+    mojibake_markers = ("\ufffd", chr(0x00C3), chr(0x00C2), "\u00e2\u20ac", "\u00ef\u00bf\u00bd")
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return {
+        "non_empty": bool(normalized),
+        "minimum_length": len(text.strip()) >= min_length,
+        "expected_semantics": all(position >= 0 for position in positions),
+        "expected_order": positions == sorted(positions)
+        and all(position >= 0 for position in positions),
+        "no_bang_triplet": "!!!" not in text,
+        "no_mojibake": not any(marker in text for marker in mojibake_markers),
+        "no_control_characters": not any(
+            ord(char) < 32 and char not in "\n\r\t" for char in text
+        ),
+        "no_long_character_run": re.search(r"([^\s])\1{7,}", text) is None,
+        "no_repeated_word_run": not any(
+            tokens[index] == tokens[index + 1] == tokens[index + 2]
+            for index in range(len(tokens) - 2)
+        ),
+        "no_repeated_phrase": not _has_repeated_phrase(text),
+    }
 
 
 def safe_component(value: str) -> str:
@@ -87,75 +157,6 @@ def resolve_request_timeout(environment: Mapping[str, str]) -> str:
     return value
 
 
-def summarize_gate_progress(
-    results_dir: Path, scenario: str | None = None
-) -> dict[str, int | bool]:
-    """Return non-asserting counts suitable for live CI progress logs."""
-    selected = SCENARIOS
-    if scenario is not None:
-        selected = tuple(item for item in SCENARIOS if item[0] == scenario)
-        if not selected:
-            raise ValueError(f"Unknown adaptation Gate scenario: {scenario}")
-
-    expected_scenarios = len(selected)
-    expected_requests = sum(count for _, count in selected)
-    expected_checks = expected_requests * len(QUALITY_CHECKS)
-    documents = []
-    for name, _ in selected:
-        path = results_dir / f"{name}.json"
-        if path.is_file():
-            documents.append(json.loads(path.read_text(encoding="utf-8")))
-
-    outputs = [
-        output
-        for document in documents
-        for output in document.get("output", [])
-        if isinstance(output, dict)
-    ]
-    checks = [
-        passed for output in outputs for passed in (output.get("checks") or {}).values()
-    ]
-    checks_have_valid_shape = all(
-        isinstance(output.get("checks"), dict)
-        and set(output["checks"]) == QUALITY_CHECKS
-        and all(type(value) is bool for value in output["checks"].values())
-        for output in outputs
-    )
-    passed_requests = sum(output.get("passed") is True for output in outputs)
-    passed_checks = sum(passed is True for passed in checks)
-    return {
-        "expected_scenarios": expected_scenarios,
-        "observed_scenarios": len(documents),
-        "expected_requests": expected_requests,
-        "observed_requests": len(outputs),
-        "passed_requests": passed_requests,
-        "expected_checks": expected_checks,
-        "observed_checks": len(checks),
-        "passed_checks": passed_checks,
-        "passed": (
-            len(documents) == expected_scenarios
-            and len(outputs) == expected_requests
-            and passed_requests == expected_requests
-            and len(checks) == expected_checks
-            and passed_checks == expected_checks
-            and checks_have_valid_shape
-        ),
-    }
-
-
-def format_gate_progress(label: str, summary: Mapping[str, int | bool]) -> str:
-    """Format Gate counts as one grep-friendly CI log line."""
-    status = "PASS" if summary["passed"] else "FAIL"
-    return (
-        f"[Gate] {label}: {status}; "
-        f"scenarios={summary['observed_scenarios']}/{summary['expected_scenarios']}; "
-        f"requests={summary['passed_requests']}/{summary['expected_requests']} passed "
-        f"({summary['observed_requests']} observed); "
-        f"checks={summary['passed_checks']}/{summary['expected_checks']} passed "
-        f"({summary['observed_checks']} observed)"
-    )
-
-
 @contextmanager
 def temporary_environment(updates: Mapping[str, str]) -> Iterator[None]:
     """Apply environment updates and exactly restore the previous state."""
@@ -171,26 +172,10 @@ def temporary_environment(updates: Mapping[str, str]) -> Iterator[None]:
                 os.environ[name] = str(value)
 
 
-def build_server_args(config: Any, image_dir: Path) -> list[str]:
-    """Combine model and serving arguments, then allow the Gate fixtures."""
-    serve = config.serve
-    args = [*config.serve_args(**serve.extra_engine), *serve.extra_args]
-    if any(
-        arg == _LOCAL_MEDIA_FLAG or str(arg).startswith(_LOCAL_MEDIA_FLAG + "=")
-        for arg in args
-    ):
-        raise ValueError(
-            f"{_LOCAL_MEDIA_FLAG} must be supplied only by the adaptation Gate"
-        )
-    return [*args, _LOCAL_MEDIA_FLAG, str(image_dir.resolve())]
-
-
-def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
-    """Validate the original five-scenario, 26-request, 260-check contract.
-
-    The contract matches the validation used by the T-Head Gate runner, while
-    remaining independent of that platform-specific process orchestration.
-    """
+def validate_scenario_documents(
+    directory: Path, scenarios: tuple[tuple[str, int], ...]
+) -> dict[str, int | bool]:
+    """Validate one selected group of adaptation Gate scenario documents."""
     directory = Path(directory)
     documents = [json.loads(path.read_text()) for path in directory.glob("*.json")]
     by_scenario: dict[str, dict[str, Any]] = {}
@@ -200,10 +185,10 @@ def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
             raise AssertionError("Gate results contain a missing or duplicate scenario")
         by_scenario[scenario] = document
 
-    expected_scenarios = dict(SCENARIOS)
-    if len(documents) != len(SCENARIOS) or set(by_scenario) != set(expected_scenarios):
+    expected_scenarios = dict(scenarios)
+    if len(documents) != len(scenarios) or set(by_scenario) != set(expected_scenarios):
         raise AssertionError(
-            "Gate must produce exactly the five original scenarios: "
+            "Gate produced an unexpected scenario set: "
             f"expected={sorted(expected_scenarios)}, actual={sorted(by_scenario)}"
         )
 
@@ -211,7 +196,7 @@ def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
     check_count = 0
     passed_checks = 0
     passed_requests = 0
-    for scenario, expected_count in SCENARIOS:
+    for scenario, expected_count in scenarios:
         document = by_scenario[scenario]
         inputs = document.get("input")
         outputs = document.get("output")
@@ -254,18 +239,289 @@ def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
             raise AssertionError(f"{scenario} summary does not match its responses")
         request_count += expected_count
 
+    expected_request_count = sum(expected_scenarios.values())
+    expected_check_count = expected_request_count * len(QUALITY_CHECKS)
     result = {
         "logical_requests": request_count,
         "checks": check_count,
         "passed_checks": passed_checks,
         "passed_requests": passed_requests,
         "passed": (
-            request_count == 26
-            and check_count == 260
-            and passed_checks == 260
-            and passed_requests == 26
+            request_count == expected_request_count
+            and check_count == expected_check_count
+            and passed_checks == expected_check_count
+            and passed_requests == expected_request_count
         ),
     }
     if not result["passed"]:
         raise AssertionError(f"Adaptation Gate quality contract failed: {result}")
     return result
+
+
+def validate_gate_documents(directory: Path) -> dict[str, int | bool]:
+    """Validate the original five-scenario, 26-request, 260-check contract."""
+    return validate_scenario_documents(directory, SCENARIOS)
+
+
+# ---------------------------------------------------------------------------
+# Gate execution helpers shared by the serving and concurrent runners.
+# These stay free of any concrete request data: runners pass configured
+# entries in, and every response is graded with the ten quality checks.
+# ---------------------------------------------------------------------------
+
+
+def apply_local_media_flag(extra_args: list[str], media_dir: Path | None) -> list[str]:
+    """Append ``--allowed-local-media-path`` once when local images are used.
+
+    Raises when the flag is already present: user configuration must not
+    race with the runner-owned argument.
+    """
+    if any(
+        arg == _LOCAL_MEDIA_FLAG or str(arg).startswith(_LOCAL_MEDIA_FLAG + "=")
+        for arg in extra_args
+    ):
+        raise ValueError(
+            f"{_LOCAL_MEDIA_FLAG} must be supplied only by the gate runner, "
+            "not by model or platform configuration"
+        )
+    if media_dir is None:
+        return list(extra_args)
+    return [*extra_args, _LOCAL_MEDIA_FLAG, str(Path(media_dir).resolve())]
+
+
+def ensure_gate_server_alive(server: Any, phase: str) -> None:
+    """Fail immediately when the shared gate server has exited."""
+    process = getattr(server, "_process", None)
+    if process is None or process.poll() is not None:
+        details = server.preserve_failure_logs(
+            f"vLLM service exited before the {phase} gate scenario"
+        )
+        raise RuntimeError(details)
+
+
+def ensure_clean_gate_directory(directory: Path) -> Path:
+    """Create the per-job document directory and refuse stale results."""
+    directory = Path(directory)
+    if directory.exists() and any(directory.glob("*.json")):
+        raise RuntimeError(f"Refusing to reuse stale gate results: {directory}")
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def evaluate_gate_entry(
+    entry: Mapping[str, Any],
+    text: str,
+    *,
+    error: str | None = None,
+    latency_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Grade one response with exactly the ten quality checks.
+
+    Failed or errored requests still yield ten booleans (all False) so the
+    JSON document stays contract-valid and the failure is visible in the
+    error field and in the counters.
+    """
+    if error:
+        checks: dict[str, bool] = {name: False for name in QUALITY_CHECKS}
+    else:
+        checks = quality_checks(
+            text, list(entry["expected"]), min_length=int(entry["min_length"])
+        )
+    output: dict[str, Any] = {
+        "request": entry["name"],
+        "latency_seconds": (
+            round(latency_seconds, 3) if latency_seconds is not None else None
+        ),
+        "text": text,
+        "checks": checks,
+        "passed": not error and all(checks.values()),
+    }
+    if error:
+        output["error"] = error
+    return output
+
+
+async def execute_gate_entries(
+    client: Any, served_model_name: str, entries: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Run all entries of one scenario through a single asyncio.gather."""
+    api = getattr(getattr(client, "chat", None), "completions", None)
+    if api is None or not hasattr(api, "create"):
+        raise TypeError("client must expose chat.completions.create()")
+
+    async def run_one(entry: dict[str, Any]) -> dict[str, Any]:
+        started = time.monotonic()
+        try:
+            completion = await api.create(
+                model=served_model_name,
+                messages=entry["messages"],
+                max_tokens=int(entry["max_tokens"]),
+                temperature=0.0,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            )
+            text = completion.choices[0].message.content or ""
+            return evaluate_gate_entry(
+                entry,
+                text,
+                latency_seconds=time.monotonic() - started,
+            )
+        except Exception as error:  # noqa: BLE001 - recorded, never raised
+            return evaluate_gate_entry(
+                entry,
+                "",
+                error=f"{type(error).__name__}: {error}",
+                latency_seconds=time.monotonic() - started,
+            )
+
+    return await asyncio.gather(*(run_one(entry) for entry in entries))
+
+
+def write_gate_document(
+    directory: Path,
+    scenario: str,
+    *,
+    model_path: str,
+    served_model_name: str,
+    port: Any,
+    entries: list[dict[str, Any]],
+    outputs: list[dict[str, Any]],
+) -> Path:
+    """Write one scenario document atomically, compatible with the validator."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    passed_count = sum(
+        1
+        for output in outputs
+        if output.get("passed") is True and all(output.get("checks", {}).values())
+    )
+    document = {
+        "schema_version": 1,
+        "case": {
+            "scenario": scenario,
+            "model_path": model_path,
+            "served_model_name": served_model_name,
+            "port": str(port),
+            "concurrency": len(entries),
+        },
+        "input": [
+            {
+                "request": entry["name"],
+                "messages": entry["messages"],
+                "expected": list(entry["expected"]),
+                "min_length": int(entry["min_length"]),
+                "max_tokens": int(entry["max_tokens"]),
+            }
+            for entry in entries
+        ],
+        "output": outputs,
+        "summary": {
+            "request_count": len(entries),
+            "passed_count": passed_count,
+            "failed_count": len(entries) - passed_count,
+            "passed": passed_count == len(entries),
+        },
+    }
+    destination = directory / f"{scenario}.json"
+    temporary = destination.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    temporary.replace(destination)
+    return destination
+
+
+def gate_failure_details(outputs: list[dict[str, Any]], limit: int = 160) -> str:
+    """Render failed requests as compact diagnostic lines."""
+    lines = []
+    for output in outputs:
+        if output.get("passed"):
+            continue
+        error = output.get("error")
+        failed_checks = [
+            name for name, passed in output.get("checks", {}).items() if not passed
+        ]
+        detail = f"failed checks: {', '.join(failed_checks) or 'unknown'}"
+        if error:
+            detail = f"{error}; {detail}"
+        text = " ".join(str(output.get("text", "")).split())
+        if text:
+            detail += f"; output: {text[:limit]!r}"
+        lines.append(f"    - {output.get('request', '<unnamed>')}: {detail}")
+    return "\n".join(lines)
+
+
+def format_gate_scenario_log(
+    phase: str, scenario: str, outputs: list[dict[str, Any]]
+) -> str:
+    """One grep-friendly log line with the real per-scenario counters."""
+    passed_requests = sum(1 for output in outputs if output.get("passed") is True)
+    passed_checks = sum(
+        1 for output in outputs for passed in output.get("checks", {}).values() if passed
+    )
+    total_checks = len(outputs) * len(QUALITY_CHECKS)
+    return (
+        f"[Gate] {phase} scenario={scenario} "
+        f"requests={passed_requests}/{len(outputs)} "
+        f"checks={passed_checks}/{total_checks}"
+    )
+
+
+def format_gate_total_log(phase: str, summary: Mapping[str, Any]) -> str:
+    """Job-total log line computed from validate_scenario_documents output."""
+    status = "PASS" if summary["passed"] else "FAIL"
+    return (
+        f"[Gate] {phase} total: {status}; "
+        f"requests={summary['passed_requests']}/{summary['logical_requests']}; "
+        f"checks={summary['passed_checks']}/{summary['checks']}"
+    )
+
+
+def create_gate_client(*, base_url: str, api_key: str, timeout: str | float) -> Any:
+    """Build the gate HTTP client pair; the proxy bypass is explicit."""
+    import httpx
+    from openai import AsyncOpenAI
+
+    http_client = httpx.AsyncClient(trust_env=False)
+    client = AsyncOpenAI(
+        api_key=api_key or "EMPTY",
+        base_url=base_url,
+        timeout=float(timeout),
+        http_client=http_client,
+    )
+    return client, http_client
+
+
+def run_concurrent_scenario(
+    entries: list[dict[str, Any]],
+    *,
+    served_model_name: str,
+    base_url: str,
+    api_key: str,
+    timeout: str | float,
+    document_dir: Path,
+    scenario: str,
+    model_path: str,
+    port: Any,
+) -> list[dict[str, Any]]:
+    """Execute one scenario: one client, one gather, one JSON document."""
+    async def execute() -> list[dict[str, Any]]:
+        client, http_client = create_gate_client(
+            base_url=base_url, api_key=api_key, timeout=timeout
+        )
+        try:
+            return await execute_gate_entries(client, served_model_name, entries)
+        finally:
+            await client.close()
+            await http_client.close()
+
+    outputs = asyncio.run(execute())
+    write_gate_document(
+        document_dir,
+        scenario,
+        model_path=model_path,
+        served_model_name=served_model_name,
+        port=port,
+        entries=entries,
+        outputs=outputs,
+    )
+    return outputs
