@@ -50,6 +50,9 @@ op_backends:
 flagos_blacklist:
   - masked_fill
   - masked_fill_
+  # FG's AA interpolation assumes contiguous NCHW and misreads strided inputs.
+  # Use native ATen until the provider's layout fix is pinned and validated.
+  - _upsample_bicubic2d_aa
 
 # OOT (Out-of-Tree) operator blacklist
 oot_blacklist:

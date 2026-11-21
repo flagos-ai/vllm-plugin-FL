@@ -161,7 +161,8 @@ class MacaBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False,
+                          use_rswa: bool = False) -> str:
         """
         Get the MACA FlashAttention or dense FlashMLA backend class path.
 
@@ -178,6 +179,15 @@ class MacaBackend(Backend):
 
         # register before selection
         register_attention_backends()
+
+        if use_rswa:
+            if use_mla or use_sparse:
+                raise NotImplementedError("MetaX R-SWA requires dense MHA")
+            from .impl.attention.rswa import vendor_rswa_available
+
+            if vendor_rswa_available():
+                return "vllm_fl.dispatch.backends.vendor.metax.impl.attention.rswa.MetaXRSWABackend"
+            return AttentionBackendEnum.TRITON_ATTN.get_path()
 
         if use_mla:
             if use_sparse:

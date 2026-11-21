@@ -129,6 +129,15 @@ def rotary_embedding_flaggems(
     # out of place and copy back so both layouts keep the caller's values,
     # tensors and strides.
     thead_inplace = inplace and getattr(flag_gems, "vendor_name", None) == "thead"
+    # MetaX's split-half kernel has the same rotation-partner race for
+    # multi-token packed QKV views. Keep the FGV provider and preserve the
+    # caller's in-place contract through its out-of-place API and copyback.
+    metax_inplace = (
+        inplace
+        and not rotary_interleaved
+        and getattr(flag_gems, "vendor_name", None) == "metax"
+    )
+    copyback_inplace = nvidia_inplace or thead_inplace or metax_inplace
     result = gems_rope_forward(
         query,
         key,
@@ -136,9 +145,9 @@ def rotary_embedding_flaggems(
         sin,
         position_ids=position_ids,
         rotary_interleaved=rotary_interleaved,
-        inplace=inplace and not (nvidia_inplace or thead_inplace),
+        inplace=inplace and not copyback_inplace,
     )
-    if nvidia_inplace or thead_inplace:
+    if copyback_inplace:
         q_embed, k_embed = result
         query.copy_(q_embed)
         key.copy_(k_embed)

@@ -347,6 +347,13 @@ def _register_gdn_packed_decode_patch() -> bool:
 def register_model():
     """Register FL runtime extensions after vLLM model discovery."""
 
+    from vllm.model_executor.models import ModelRegistry
+
+    ModelRegistry.register_model(
+        "UnlimitedOCRForCausalLM",
+        "vllm_fl.models.unlimited_ocr:UnlimitedOCRForCausalLM",
+    )
+
     from vllm.platforms import current_platform
 
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
@@ -413,8 +420,6 @@ def register_model():
     if vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
         # configuration resolution in worker processes.
-        from vllm.model_executor.models import ModelRegistry
-
         from vllm_fl.quantization import modelslim_w8a8  # noqa: F401
 
         # Reuse vLLM's DeepSeek-V4 model and loader with an Ascend-only

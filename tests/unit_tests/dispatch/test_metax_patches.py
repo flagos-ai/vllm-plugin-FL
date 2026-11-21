@@ -36,3 +36,38 @@ def test_triton_kernels_disabled_for_metax():
     # vLLM modules bind this predicate when they load, so it has to be
     # replaced before any patch import runs.
     assert iu.has_triton_kernels() is False
+
+
+def test_triton_cache_writer_installation_is_idempotent():
+    import importlib
+
+    from vllm.v1.attention.backends import triton_attn
+
+    from vllm_fl.dispatch.backends.vendor.metax.patches import triton_kv_cache
+
+    expected = triton_kv_cache.triton_reshape_and_cache_flash
+    assert triton_attn.triton_reshape_and_cache_flash is expected
+    importlib.reload(triton_kv_cache)
+    assert triton_attn.triton_reshape_and_cache_flash is expected
+
+
+def test_triton_cache_writer_rejects_signature_change(monkeypatch):
+    import importlib
+
+    from vllm.v1.attention.backends import triton_attn
+
+    from vllm_fl.dispatch.backends.vendor.metax.patches import triton_kv_cache
+
+    def incompatible_writer(key):
+        raise AssertionError("The incompatible writer must not execute")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            triton_attn, "triton_reshape_and_cache_flash", incompatible_writer
+        )
+        with pytest.raises(
+            RuntimeError, match="Unexpected vLLM Triton KV cache writer"
+        ):
+            importlib.reload(triton_kv_cache)
+        assert triton_attn.triton_reshape_and_cache_flash is incompatible_writer
+    importlib.reload(triton_kv_cache)
