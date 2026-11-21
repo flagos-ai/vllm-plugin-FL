@@ -403,6 +403,17 @@ def register_model():
         # NVIDIA's native vLLM 0.32 already preserves packed GDN beta precision.
         _register_gdn_packed_decode_patch()
 
+    if vendor_name == "metax":
+        from vllm_fl.dispatch.backends.vendor.metax.patches.deepseek_v41.indexer import (
+            install_indexer_request_guard,
+        )
+        from vllm_fl.models.deepseek_v41 import register_deepseek_v41_model
+        from vllm_fl.quantization.modelslim import register_modelslim_format
+
+        register_modelslim_format()
+        register_deepseek_v41_model()
+        install_indexer_request_guard()
+
     if vendor_name == "nvidia":
         from vllm_fl.patches.minicpmo_audio import patch_minicpmo_audio_budget
 

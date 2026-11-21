@@ -26,6 +26,10 @@ strict: false
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:metax   : METAX-specific vendor backend
 op_backends:
+  w8a8_scaled_mm:
+    - vendor:metax
+  w4a8_moe_experts:
+    - vendor:metax
   # attention_backend: prioritize vendor (MACA attention)
   attention_backend:
     - vendor:metax
@@ -48,6 +52,23 @@ op_backends:
 
 # FlagOS operator blacklist
 flagos_blacklist:
+  # FG aten.im2col.default: incorrect output on the V4.1 aligner input
+  # [1,1024,39,39], kernel/stride3. The launch grid assumes 64x128 tiles
+  # instead of the selected tuning tile, leaving output positions unwritten.
+  # Use native MetaX Torch im2col; keep the remaining FlagOS ops enabled.
+  # Exit: repaired FG tiles pass the 39x39 aligner and changed-input graph checks.
+  - im2col
+  # FG aten.copy_.default: the 64-bit flat-copy path views a strided INT64
+  # destination as INT32 (DSpark token column stride=5), which is invalid.
+  # Use native MetaX Torch copy_ until FG's bitcast plan handles that layout.
+  # Exit: stride-5 INT64 copies pass changed-input graph and neighbor-canary checks.
+  - copy_
+  # FG aten.clone.default registers a generic Autograd path that also catches
+  # CPU UINT8 RNG-state copies during torch.compile on MetaX (incorrect
+  # dispatch: "Expected a cuda device, but got: cpu"). Use native clone for
+  # this vendor until the FG registration supports that path; other ops stay.
+  # Exit: CPU UINT8 RNG-state cloning succeeds during MetaX compile/graph setup.
+  - clone
   - masked_fill
   - masked_fill_
 

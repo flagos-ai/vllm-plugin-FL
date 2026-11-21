@@ -13,8 +13,9 @@ logger = init_logger(__name__)
 
 def _initialize_fl_runtime(rank: int) -> None:
     """Install FL dispatch hooks before model/operator construction."""
-    from vllm_fl.ops.custom_ops import register_oot_ops
     from vllm.platforms import current_platform
+
+    from vllm_fl.ops.custom_ops import register_oot_ops
 
     if getattr(current_platform, "vendor_name", "") == "metax":
         from vllm_fl.dispatch.backends.vendor.metax.patches import ensure_patches
@@ -23,7 +24,18 @@ def _initialize_fl_runtime(rank: int) -> None:
         # still executing. Its later definitions then replace those wrappers.
         # At this worker boundary the imports above are complete; restore the
         # live bindings before any router/model caches a callable.
-        ensure_patches()
+        errors = ensure_patches()
+        from vllm.config import get_current_vllm_config_or_none
+
+        config = get_current_vllm_config_or_none()
+        if (
+            config is not None
+            and config.model_config.hf_config.model_type == "deepseek_v41"
+            and "deepseek_v41" in errors
+        ):
+            raise RuntimeError(
+                "required V4.1 MetaX patch group could not be installed"
+            ) from errors["deepseek_v41"]
 
     # CustomOp caches its selected forward method in __init__, so the
     # multimodal attention patch must run before model construction.
