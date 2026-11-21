@@ -1,0 +1,16 @@
+# Preserve the supplied FlagOS Runtime 2.3.0 Ascend core and build helpers.
+torch==2.13.0+cpu
+torch-npu==2.13.0
+torchvision==0.28.0+cpu
+torchaudio==2.11.0+cpu
+numpy==1.26.4
+flag-gems==5.4.0
+flagtree==0.7.1a1+ascend3.5
+flagcx==0.14.1+cann9.2.1
+cann-shmem==1.6.0
+pybind11==3.0.3
+setuptools-scm==9.2.2
+ninja==1.13.0
+packaging==26.3
+PyYAML==6.0.1
+SQLAlchemy==2.0.57
