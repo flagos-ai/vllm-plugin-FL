@@ -121,7 +121,7 @@ class MusaBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False, use_rswa: bool = False) -> str:
         """
         Get the attention backend class path for Musa.
 
@@ -132,6 +132,9 @@ class MusaBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        if use_rswa:
+            raise NotImplementedError("R-SWA selection is unsupported by this vendor backend")
+
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
         if use_sparse and not use_mla:
@@ -141,4 +144,3 @@ class MusaBackend(Backend):
             return AttentionBackendEnum.TRITON_MLA.get_path()
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()
-

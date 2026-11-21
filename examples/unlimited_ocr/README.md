@@ -43,8 +43,29 @@ Runner V1 provides the interface used by the upstream N-gram processor.
 `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS=1` is required by the pinned FlagTree 0.7.0
 runtime to compile the upstream SAM relative-position attention's `LOG2E`
 constant. It is a deployment prerequisite for this runtime combination.
-The text attention backend is selected from the request's R-SWA capability
-requirements, and resolves to the upstream Triton backend on C550.
+The text attention backend is selected from its R-SWA capability requirements.
+On C550, an available FGV `paged_prefix_window_attention` API and compatible
+MACA KV-cache ABI enable vendor prefix/window decode for multiple requests.
+Native Triton retains KV layout, prefill, single-request decode and feature
+combinations outside that fast path. The documented image's original FGV pin
+does not provide the optional API, so that installation keeps native Triton.
+For the validated vendor provider, install the public runtime revision below
+inside the same image before starting the server:
+
+```bash
+python -m pip install --no-deps --no-build-isolation --force-reinstall \
+  'git+https://github.com/cshujie131-bot/FlagGems-vllm.git@66c4970920c2834e23765a68bf7a08a16cae5874'
+```
+
+This fixed revision preserves the image's e0055710 operator baseline and adds
+the public prefix/window API. Its numerical implementation and tests match
+the [upstream operator submission](https://github.com/flagos-ai/FlagGems-vllm/pull/1386);
+the runtime pin avoids unrelated provider
+changes. Vendor decode is selected automatically from `use_rswa` when the API
+and native ABI are available; no model-specific backend switch is needed.
+The startup example remains single-request serving. Multiple active decode
+requests are needed to select the vendor path; increasing the configured
+sequence capacity alone does not change B1 dispatch.
 The TP1 example reserves 45% of the device memory and uses the default
 multimodal memory profiling. The MetaX split-half RoPE adapter retains the FGV
 provider and uses out-of-place rotation followed by copyback to preserve its
@@ -81,3 +102,5 @@ the reference multi-page path. The effective size and crop mode form part of
 the encoder-cache identity, so single-page crops and multi-page base views
 have separate entries.
 Assess transcription quality with the page layout and resolution in use.
+Mixed single-page and multi-page concurrency has a baseline transcription
+failure and is not qualified by the standalone page checks above.

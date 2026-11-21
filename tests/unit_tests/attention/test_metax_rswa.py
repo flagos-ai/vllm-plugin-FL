@@ -65,13 +65,31 @@ def rswa_config(tmp_path_factory):
 @pytest.mark.parametrize("reuse_pages", [False, True])
 @torch.inference_mode()
 def test_default_rswa_keeps_prefix_and_masks_evicted_decode(
-    rswa_config, generated, reuse_pages
+    rswa_config, generated, reuse_pages, monkeypatch
 ):
+    import flaggems_vllm
+
     from vllm.config import set_current_vllm_config
     from vllm.forward_context import set_forward_context
     from vllm.model_executor.layers.attention.rswa_attention import RSWAAttention
     from vllm.v1.attention.backend import CommonAttentionMetadata
     from vllm.v1.attention.backends.triton_attn import TritonAttentionBackend
+
+    from vllm_fl.dispatch.backends.vendor.metax.impl.attention.rswa import (
+        MetaXRSWABackend,
+        vendor_rswa_available,
+    )
+
+    available = vendor_rswa_available()
+    calls = []
+    if available:
+        original = flaggems_vllm.paged_prefix_window_attention
+
+        def track(*args, **kwargs):
+            calls.append(True)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(flaggems_vllm, "paged_prefix_window_attention", track)
 
     device, dtype = torch.device("cuda"), torch.bfloat16
     prefixes, window, block_size, heads, dim = (273, 301), 128, 16, 10, 128
@@ -133,7 +151,8 @@ def test_default_rswa_keeps_prefix_and_masks_evicted_decode(
             prefix=name,
             cache_config=rswa_config.cache_config,
         ).to(device)
-        assert layer.get_attn_backend() is TritonAttentionBackend
+        expected_backend = MetaXRSWABackend if available else TritonAttentionBackend
+        assert layer.get_attn_backend() is expected_backend
         layer.kv_cache = cache
         builder = layer.get_attn_backend().get_builder_cls()(
             layer.get_kv_cache_spec(rswa_config), [name], rswa_config, device
@@ -145,6 +164,8 @@ def test_default_rswa_keeps_prefix_and_masks_evicted_decode(
         with set_forward_context({name: attention_metadata}, rswa_config, num_tokens=2):
             result = layer(query, None, None).reshape(2, heads, dim).float().cpu()
         torch.testing.assert_close(result, reference, atol=2e-5, rtol=1e-2)
+        if available:
+            assert len(calls) == 1
         for row, prefix in enumerate(prefixes):
             assert torch.all(result[row].flatten()[:prefix] > 0)
             assert (

@@ -153,7 +153,7 @@ class CudaBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False, use_rswa: bool = False) -> str:
         """
         Get the attention backend class path for CUDA.
 
@@ -169,6 +169,9 @@ class CudaBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        if use_rswa:
+            raise NotImplementedError("R-SWA selection is unsupported by this vendor backend")
+
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
         if use_mla:

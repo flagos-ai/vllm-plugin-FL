@@ -56,7 +56,10 @@ def test_metax_attention_dispatch_respects_rswa(
     from vllm_fl.platform import PlatformFL
 
     vendor_path = "configured.vendor.AttentionBackend"
-    vendor_backend = SimpleNamespace(supports_rswa=lambda: vendor_supports_rswa)
+    vendor_backend = SimpleNamespace(
+        supports_rswa=lambda: vendor_supports_rswa,
+        validate_configuration=lambda **kwargs: [],
+    )
     resolve_backend = import_utils.resolve_obj_by_qualname
 
     def resolve(path):
@@ -64,8 +67,13 @@ def test_metax_attention_dispatch_respects_rswa(
             return vendor_backend
         return resolve_backend(path)
 
-    def select_configured_backend(op_name, *, use_mla, use_sparse):
+    def select_configured_backend(op_name, *, use_mla, use_sparse, **extras):
         assert (op_name, use_mla, use_sparse) == ("attention_backend", False, False)
+        assert extras == (
+            {"use_rswa": True}
+            if use_rswa and requested in (None, "TRITON_ATTN")
+            else {}
+        )
         return vendor_path
 
     monkeypatch.setattr(PlatformFL, "vendor_name", "metax")

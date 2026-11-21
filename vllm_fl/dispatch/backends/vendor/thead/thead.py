@@ -62,7 +62,7 @@ class TheadBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
-    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False, use_rswa: bool = False) -> str:
         """
         Get the attention backend class path for PPU.
 
@@ -75,6 +75,9 @@ class TheadBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        if use_rswa:
+            raise NotImplementedError("R-SWA selection is unsupported by this vendor backend")
+
         if use_mla or use_sparse:
             # Fall back to standard FLASH_ATTN for MLA/sparse
             from vllm.v1.attention.backends.registry import AttentionBackendEnum

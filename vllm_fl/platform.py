@@ -761,13 +761,19 @@ class PlatformFL(Platform):
         if cls.vendor_name == "amd" and use_sparse:
             raise NotImplementedError("Sparse MLA is unsupported by the AMD backend")
 
-        backend_path = call_op(
-            "attention_backend", use_mla=use_mla, use_sparse=use_sparse
-        )
+        backend_kwargs = dict(use_mla=use_mla, use_sparse=use_sparse)
+        if (cls.vendor_name == "metax"
+            and getattr(attn_selector_config, "use_rswa", False)
+            and selected_backend in (None, AttentionBackendEnum.TRITON_ATTN)):
+            # Native R-SWA layers can request the logical Triton backend.
+            # The MetaX provider retains its KV and metadata contracts.
+            backend_kwargs["use_rswa"] = True
+        backend_path = call_op("attention_backend", **backend_kwargs)
         if cls.vendor_name == "metax" and getattr(attn_selector_config, "use_rswa", False):
             from vllm.utils.import_utils import resolve_obj_by_qualname
 
-            if not resolve_obj_by_qualname(backend_path).supports_rswa():
+            backend_cls = resolve_obj_by_qualname(backend_path)
+            if not backend_cls.supports_rswa():
                 rswa_backend = selected_backend or AttentionBackendEnum.TRITON_ATTN
                 invalid_reasons = rswa_backend.get_class().validate_configuration(
                     device_capability=cls.get_device_capability(),
@@ -779,6 +785,16 @@ class PlatformFL(Platform):
                         f"R-SWA requirements: {', '.join(invalid_reasons)}"
                     )
                 backend_path = rswa_backend.get_path()
+            else:
+                invalid_reasons = backend_cls.validate_configuration(
+                    device_capability=cls.get_device_capability(),
+                    **attn_selector_config._asdict(),
+                )
+                if invalid_reasons:
+                    raise ValueError(
+                        "MetaX attention backend cannot satisfy R-SWA requirements: "
+                        + ", ".join(invalid_reasons)
+                    )
 
         logger.info_once(
             "Using attention backend via dispatch (use_mla=%s, use_sparse=%s): %s",
