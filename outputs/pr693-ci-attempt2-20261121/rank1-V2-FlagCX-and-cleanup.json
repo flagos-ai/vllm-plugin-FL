@@ -1,0 +1,204 @@
+{
+  "raw_source_sha256": "c24bece4f89f9274d9e484ed79c93604d60dd0165b08ff8d85d587839fc626d0",
+  "V2_module": "vllm.v1.worker.gpu.model_runner.GPUModelRunner",
+  "V2_file_selected_by_plugin": "vllm_fl/worker/worker.py584-585 at982739fd",
+  "profiles": {
+    "27b_tp4_eager": {
+      "V2_file_log_count": 9,
+      "rank1_V2_model_load": [
+        {
+          "line": 6242,
+          "text": "2026-11-20T21:10:39.9203811Z [inference/qwen3_6/27b_tp4_eager] (Worker_TP1 pid=1691) INFO 11-20 20:54:11 [v1/worker/gpu/model_runner.py:424] Model loading took 12.91 GiB memory and 18.666676 seconds"
+        }
+      ],
+      "flagcx_backend": [
+        {
+          "line": 974,
+          "text": "2026-11-20T21:10:39.6341870Z [inference/qwen3_6/27b_tp4_eager] (Worker pid=1690) DEBUG 11-20 20:53:51 [distributed/parallel_state.py:1829] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_c224517155e34ef7b0a9444cd726f185 backend=flagcx"
+        },
+        {
+          "line": 975,
+          "text": "2026-11-20T21:10:39.6343003Z [inference/qwen3_6/27b_tp4_eager] (Worker pid=1690) INFO 11-20 20:53:51 [distributed/parallel_state.py:1913] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_c224517155e34ef7b0a9444cd726f185 backend=flagcx"
+        },
+        {
+          "line": 976,
+          "text": "2026-11-20T21:10:39.6344130Z [inference/qwen3_6/27b_tp4_eager] (Worker pid=1693) DEBUG 11-20 20:53:51 [distributed/parallel_state.py:1829] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_c224517155e34ef7b0a9444cd726f185 backend=flagcx"
+        },
+        {
+          "line": 977,
+          "text": "2026-11-20T21:10:39.6345287Z [inference/qwen3_6/27b_tp4_eager] (Worker pid=1693) INFO 11-20 20:53:51 [distributed/parallel_state.py:1913] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_c224517155e34ef7b0a9444cd726f185 backend=flagcx"
+        },
+        {
+          "line": 978,
+          "text": "2026-11-20T21:10:39.6346397Z [inference/qwen3_6/27b_tp4_eager] (Worker pid=1691) DEBUG 11-20 20:53:51 [distributed/parallel_state.py:1829] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_c224517155e34ef7b0a9444cd726f185 backend=flagcx"
+        },
+        {
+          "line": 979,
+          "text": "2026-11-20T21:10:39.6347588Z [inference/qwen3_6/27b_tp4_eager] (Worker pid=1691) INFO 11-20 20:53:51 [distributed/parallel_state.py:1913] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_c224517155e34ef7b0a9444cd726f185 backend=flagcx"
+        },
+        {
+          "line": 987,
+          "text": "2026-11-20T21:10:39.6358087Z [inference/qwen3_6/27b_tp4_eager] (Worker pid=1692) DEBUG 11-20 20:53:52 [distributed/parallel_state.py:1829] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_c224517155e34ef7b0a9444cd726f185 backend=flagcx"
+        },
+        {
+          "line": 988,
+          "text": "2026-11-20T21:10:39.6359199Z [inference/qwen3_6/27b_tp4_eager] (Worker pid=1692) INFO 11-20 20:53:52 [distributed/parallel_state.py:1913] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_c224517155e34ef7b0a9444cd726f185 backend=flagcx"
+        }
+      ],
+      "graceful_all_worker_exit": [
+        {
+          "line": 6888,
+          "text": "2026-11-20T21:10:39.9478051Z [inference/qwen3_6/27b_tp4_eager] (EngineCore pid=1389) INFO 11-20 21:10:35 [v1/executor/multiproc_executor.py:487] [shutdown] Executor: all workers exited gracefully"
+        }
+      ]
+    },
+    "27b_tp4_graph": {
+      "V2_file_log_count": 17,
+      "rank1_V2_model_load": [
+        {
+          "line": 12434,
+          "text": "2026-11-20T21:17:40.0462329Z [inference/qwen3_6/27b_tp4_graph] (Worker_TP1 pid=156425) INFO 11-20 21:11:37 [v1/worker/gpu/model_runner.py:424] Model loading took 12.91 GiB memory and 7.413538 seconds"
+        }
+      ],
+      "flagcx_backend": [
+        {
+          "line": 7144,
+          "text": "2026-11-20T21:17:39.7265197Z [inference/qwen3_6/27b_tp4_graph] (Worker pid=156427) DEBUG 11-20 21:11:28 [distributed/parallel_state.py:1829] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_1098dc2a7a184884a32c7a00908542ed backend=flagcx"
+        },
+        {
+          "line": 7145,
+          "text": "2026-11-20T21:17:39.7266335Z [inference/qwen3_6/27b_tp4_graph] (Worker pid=156427) INFO 11-20 21:11:28 [distributed/parallel_state.py:1913] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_1098dc2a7a184884a32c7a00908542ed backend=flagcx"
+        },
+        {
+          "line": 7147,
+          "text": "2026-11-20T21:17:39.7268854Z [inference/qwen3_6/27b_tp4_graph] (Worker pid=156425) DEBUG 11-20 21:11:28 [distributed/parallel_state.py:1829] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_1098dc2a7a184884a32c7a00908542ed backend=flagcx"
+        },
+        {
+          "line": 7148,
+          "text": "2026-11-20T21:17:39.7270054Z [inference/qwen3_6/27b_tp4_graph] (Worker pid=156425) INFO 11-20 21:11:28 [distributed/parallel_state.py:1913] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_1098dc2a7a184884a32c7a00908542ed backend=flagcx"
+        },
+        {
+          "line": 7156,
+          "text": "2026-11-20T21:17:39.7281382Z [inference/qwen3_6/27b_tp4_graph] (Worker pid=156426) DEBUG 11-20 21:11:28 [distributed/parallel_state.py:1829] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_1098dc2a7a184884a32c7a00908542ed backend=flagcx"
+        },
+        {
+          "line": 7157,
+          "text": "2026-11-20T21:17:39.7282619Z [inference/qwen3_6/27b_tp4_graph] (Worker pid=156426) INFO 11-20 21:11:28 [distributed/parallel_state.py:1913] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_1098dc2a7a184884a32c7a00908542ed backend=flagcx"
+        },
+        {
+          "line": 7165,
+          "text": "2026-11-20T21:17:39.7293968Z [inference/qwen3_6/27b_tp4_graph] (Worker pid=156424) DEBUG 11-20 21:11:29 [distributed/parallel_state.py:1829] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_1098dc2a7a184884a32c7a00908542ed backend=flagcx"
+        },
+        {
+          "line": 7166,
+          "text": "2026-11-20T21:17:39.7295225Z [inference/qwen3_6/27b_tp4_graph] (Worker pid=156424) INFO 11-20 21:11:29 [distributed/parallel_state.py:1913] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_1098dc2a7a184884a32c7a00908542ed backend=flagcx"
+        }
+      ],
+      "graceful_all_worker_exit": [
+        {
+          "line": 12912,
+          "text": "2026-11-20T21:17:40.0672360Z [inference/qwen3_6/27b_tp4_graph] (EngineCore pid=156123) INFO 11-20 21:17:35 [v1/executor/multiproc_executor.py:487] [shutdown] Executor: all workers exited gracefully"
+        }
+      ]
+    },
+    "35b_a3b_tp4_graph": {
+      "V2_file_log_count": 17,
+      "rank1_V2_model_load": [
+        {
+          "line": 140527,
+          "text": "2026-11-20T21:25:23.4773750Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker_TP1 pid=203833) INFO 11-20 21:18:55 [v1/worker/gpu/model_runner.py:424] Model loading took 16.43 GiB memory and 14.011675 seconds"
+        }
+      ],
+      "flagcx_backend": [
+        {
+          "line": 13160,
+          "text": "2026-11-20T21:25:16.3162219Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker pid=203832) DEBUG 11-20 21:18:40 [distributed/parallel_state.py:1829] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_adb8e29203f94016923ea8cd79921281 backend=flagcx"
+        },
+        {
+          "line": 13161,
+          "text": "2026-11-20T21:25:16.3163385Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker pid=203832) INFO 11-20 21:18:40 [distributed/parallel_state.py:1913] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_adb8e29203f94016923ea8cd79921281 backend=flagcx"
+        },
+        {
+          "line": 13169,
+          "text": "2026-11-20T21:25:16.3174383Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker pid=203835) DEBUG 11-20 21:18:40 [distributed/parallel_state.py:1829] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_adb8e29203f94016923ea8cd79921281 backend=flagcx"
+        },
+        {
+          "line": 13170,
+          "text": "2026-11-20T21:25:16.3175801Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker pid=203835) INFO 11-20 21:18:40 [distributed/parallel_state.py:1913] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_adb8e29203f94016923ea8cd79921281 backend=flagcx"
+        },
+        {
+          "line": 13178,
+          "text": "2026-11-20T21:25:16.3187322Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker pid=203833) DEBUG 11-20 21:18:40 [distributed/parallel_state.py:1829] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_adb8e29203f94016923ea8cd79921281 backend=flagcx"
+        },
+        {
+          "line": 13179,
+          "text": "2026-11-20T21:25:16.3188565Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker pid=203833) INFO 11-20 21:18:40 [distributed/parallel_state.py:1913] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_adb8e29203f94016923ea8cd79921281 backend=flagcx"
+        },
+        {
+          "line": 13187,
+          "text": "2026-11-20T21:25:16.3199487Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker pid=203834) DEBUG 11-20 21:18:40 [distributed/parallel_state.py:1829] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_adb8e29203f94016923ea8cd79921281 backend=flagcx"
+        },
+        {
+          "line": 13188,
+          "text": "2026-11-20T21:25:16.3200754Z [inference/qwen3_6/35b_a3b_tp4_graph] (Worker pid=203834) INFO 11-20 21:18:40 [distributed/parallel_state.py:1913] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_adb8e29203f94016923ea8cd79921281 backend=flagcx"
+        }
+      ],
+      "graceful_all_worker_exit": [
+        {
+          "line": 140919,
+          "text": "2026-11-20T21:25:23.5158981Z [inference/qwen3_6/35b_a3b_tp4_graph] (EngineCore pid=203531) INFO 11-20 21:25:12 [v1/executor/multiproc_executor.py:487] [shutdown] Executor: all workers exited gracefully"
+        }
+      ]
+    },
+    "35b_a3b_tp4_eager": {
+      "V2_file_log_count": 9,
+      "rank1_V2_model_load": [
+        {
+          "line": 268544,
+          "text": "2026-11-20T21:32:02.2665244Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker_TP1 pid=283047) INFO 11-20 21:26:21 [v1/worker/gpu/model_runner.py:424] Model loading took 16.43 GiB memory and 14.467211 seconds"
+        }
+      ],
+      "flagcx_backend": [
+        {
+          "line": 141175,
+          "text": "2026-11-20T21:31:55.0075015Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker pid=283049) DEBUG 11-20 21:26:05 [distributed/parallel_state.py:1829] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_5246ddb8e1424d4797eb2dcdbe8f5023 backend=flagcx"
+        },
+        {
+          "line": 141176,
+          "text": "2026-11-20T21:31:55.0076221Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker pid=283049) INFO 11-20 21:26:05 [distributed/parallel_state.py:1913] world_size=4 rank=3 local_rank=3 distributed_init_method=file:///tmp/vllm_dist_5246ddb8e1424d4797eb2dcdbe8f5023 backend=flagcx"
+        },
+        {
+          "line": 141177,
+          "text": "2026-11-20T21:31:55.0077477Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker pid=283048) DEBUG 11-20 21:26:05 [distributed/parallel_state.py:1829] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_5246ddb8e1424d4797eb2dcdbe8f5023 backend=flagcx"
+        },
+        {
+          "line": 141178,
+          "text": "2026-11-20T21:31:55.0078717Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker pid=283048) INFO 11-20 21:26:05 [distributed/parallel_state.py:1913] world_size=4 rank=2 local_rank=2 distributed_init_method=file:///tmp/vllm_dist_5246ddb8e1424d4797eb2dcdbe8f5023 backend=flagcx"
+        },
+        {
+          "line": 141192,
+          "text": "2026-11-20T21:31:55.0098496Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker pid=283047) DEBUG 11-20 21:26:05 [distributed/parallel_state.py:1829] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_5246ddb8e1424d4797eb2dcdbe8f5023 backend=flagcx"
+        },
+        {
+          "line": 141193,
+          "text": "2026-11-20T21:31:55.0099719Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker pid=283047) INFO 11-20 21:26:05 [distributed/parallel_state.py:1913] world_size=4 rank=1 local_rank=1 distributed_init_method=file:///tmp/vllm_dist_5246ddb8e1424d4797eb2dcdbe8f5023 backend=flagcx"
+        },
+        {
+          "line": 141195,
+          "text": "2026-11-20T21:31:55.0102387Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker pid=283046) DEBUG 11-20 21:26:05 [distributed/parallel_state.py:1829] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_5246ddb8e1424d4797eb2dcdbe8f5023 backend=flagcx"
+        },
+        {
+          "line": 141196,
+          "text": "2026-11-20T21:31:55.0103582Z [inference/qwen3_6/35b_a3b_tp4_eager] (Worker pid=283046) INFO 11-20 21:26:05 [distributed/parallel_state.py:1913] world_size=4 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_5246ddb8e1424d4797eb2dcdbe8f5023 backend=flagcx"
+        }
+      ],
+      "graceful_all_worker_exit": [
+        {
+          "line": 268873,
+          "text": "2026-11-20T21:32:02.2810594Z [inference/qwen3_6/35b_a3b_tp4_eager] (EngineCore pid=282745) INFO 11-20 21:31:50 [v1/executor/multiproc_executor.py:487] [shutdown] Executor: all workers exited gracefully"
+        }
+      ]
+    }
+  },
+  "physical_PCI_mapping_established": false
+}

@@ -1,0 +1,42 @@
+{
+  "submitted_commit": "8f5ad9358d14f77475d2119ef29fab3ff899fe5b",
+  "parent": "59695b9a87a9e413ec2e8ec95b0aa06025bb4030",
+  "tree": "ab626fc0eefe76fb6c9344f2129b13332c932482",
+  "changed_paths": [
+    "tests/unit_tests/dispatch/test_sunrise_runtime.py"
+  ],
+  "patch_sha256": "710ce8b61db3b54b94b356d5b3227c74625d39be1e6e274b802d394d77d9eaea",
+  "contract": "All four non-PTPU parameters remain. One shared object sentinel compares before/after identity; an originally absent API must remain absent, and an existing API must retain its original object. No runtime API is created by the test fix.",
+  "production_changes": false,
+  "new_tests_or_skips": false,
+  "original_missing_API_control": {
+    "failed": 4,
+    "passed": 6,
+    "sha256": "d0983484d5e73da20f8312f0ba7a20e621f94d78d79dccdf17397ab21c20b5a1"
+  },
+  "fixed_controls": [
+    {
+      "api_state": "present",
+      "passed": 10,
+      "skipped": 0,
+      "exit": 0,
+      "sha256": "14fec20831f2fd7cb4ae5c754cc53ddb2e2686d904dad2bd8adb3c59c61137f4"
+    },
+    {
+      "api_state": "missing",
+      "passed": 10,
+      "skipped": 0,
+      "exit": 0,
+      "sha256": "8528edef8dfedb762bdb0288e7e31dfe24de9126f80a7ad427a7afd37f426176"
+    }
+  ],
+  "post_commit_CPU": {
+    "inherited_vendor": "kunlunxin",
+    "passed": 189,
+    "failed": 0,
+    "skipped": 0,
+    "original_log_sha256": "85046adb93ee5a617ff40497bf6a395a6c30daea47524439582f44b6c4f9ace8"
+  },
+  "complete_CI_run": 44852738258,
+  "complete_CI_result": "Running; source-level fixes require full new-head hardware CI before acceptance."
+}
