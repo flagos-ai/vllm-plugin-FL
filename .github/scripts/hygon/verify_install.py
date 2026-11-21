@@ -4,6 +4,7 @@
 import argparse
 import ast
 import base64
+import contextlib
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -127,6 +128,9 @@ def triton_origin(distributions, origin=None):
         origin = spec.origin
     owners = {}
     for name in ("flagtree", "triton"):
+        if name not in distributions:
+            # FlagTree replaces the standalone Triton distribution on this base.
+            continue
         try:
             owners[name] = owned_origin(distributions[name], origin)
         except RuntimeError:
@@ -156,7 +160,23 @@ def vendor_snapshot(distributions):
         )
     ]
     require(len(literals) == 1, "Torch version.py must contain one literal __version__")
-    sdk = Path("/opt/rocm/.info/version-dev").resolve(strict=True)
+    # DTK installs the SDK version file under /opt/dtk; /opt/rocm is only a
+    # legacy alias and is absent from the FlagOS 2.2 base image.
+    sdk_path = next(
+        (
+            path
+            for path in (
+                Path("/opt/rocm/.info/version-dev"),
+                Path("/opt/dtk/.info/version-dev"),
+            )
+            if path.exists()
+        ),
+        None,
+    )
+    require(
+        sdk_path is not None, "Missing DTK SDK version file under /opt/rocm or /opt/dtk"
+    )
+    sdk = sdk_path.resolve(strict=True)
     sdk_raw = regular_bytes(sdk, 8192)
     return {
         "distributions": {
@@ -190,13 +210,16 @@ def main():
     args = parser.parse_args()
     require(sys.flags.isolated, "Run this verifier with Python -I outside the checkout")
     vendor_distributions = {
-        name: ordinary_distribution(name)
-        for name in ("torch", "flag-gems", "flagtree", "triton")
+        name: ordinary_distribution(name) for name in ("torch", "flag-gems", "flagtree")
     }
+    # The FlagOS 2.2 Hygon base ships FlagTree as the only Triton provider,
+    # so a standalone Triton distribution is optional.
+    with contextlib.suppress(importlib.metadata.PackageNotFoundError):
+        vendor_distributions["triton"] = ordinary_distribution("triton")
     torch_dist = vendor_distributions["torch"]
     snapshot = vendor_snapshot(vendor_distributions)
     require(
-        torch_dist.version.split("+", 1)[0] == "2.10.0",
+        torch_dist.version.split("+", 1)[0] == "2.9.0",
         f"Unexpected vendor Torch: {torch_dist.version}",
     )
     if args.write_vendor_snapshot:
@@ -249,8 +272,8 @@ def main():
             f"Editable installation artifacts remain in {root}",
         )
     require(
-        distributions["vllm"].version == "0.28.0+empty",
-        f"Expected noneditable vLLM 0.28.0+empty: {distributions['vllm'].version}",
+        distributions["vllm"].version == "0.32.0+empty",
+        f"Expected noneditable vLLM 0.32.0+empty: {distributions['vllm'].version}",
     )
     for dist_name, variable in (
         ("flag-gems", "HYGON_FLAGGEMS_VERSION"),
@@ -267,8 +290,9 @@ def main():
         "vllm-plugin-fl": "vllm_fl",
         "flag-gems": "flag_gems",
         "flagtree": "triton",
-        "triton": "triton",
     }
+    if "triton" in distributions:
+        modules["triton"] = "triton"
     result = {
         "mode": "static" if args.static_only else "ordinary_gpu_import",
         "vendor": snapshot,
@@ -356,9 +380,11 @@ def main():
                 f"{module} ordinary import changed its origin",
             )
             facts["runtime_version"] = getattr(loaded, "__version__", None)
+        vllm_runtime_version = result["distributions"]["vllm"]["runtime_version"] or ""
         require(
-            result["distributions"]["vllm"]["runtime_version"] == "0.28.0",
-            "Imported vLLM must be 0.28.0; metadata alone is insufficient",
+            vllm_runtime_version.split("+")[0] == "0.32.0",
+            "Imported vLLM must be 0.32.0; metadata alone is insufficient, "
+            f"found {vllm_runtime_version}",
         )
         require(
             result["distributions"]["flagtree"]["runtime_version"].startswith("3.6.0"),

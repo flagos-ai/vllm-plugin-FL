@@ -195,6 +195,12 @@ def _init_vendor_device():
         )
 
         _patch_xpu_get_device()
+    elif vendor_name == "hygon":
+        from vllm_fl.dispatch.backends.vendor.hygon.patch import (
+            apply_hygon_patches,
+        )
+
+        apply_hygon_patches()
 
     if vendor_name == "amd":
         # vLLM's bundled triton_kernels import AMD architecture predicates that
