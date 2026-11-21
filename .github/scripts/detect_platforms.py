@@ -78,16 +78,16 @@ def _shared_build_script(source: str) -> str | None:
     )
 
 
-def _thead_only_build_change(base_ref: str) -> bool:
+def _thead_only_build_change(base_ref: str, head_ref: str) -> bool:
     try:
         base = subprocess.check_output(
-            ["git", "merge-base", base_ref, "HEAD"], encoding="utf-8"
+            ["git", "merge-base", base_ref, head_ref], encoding="utf-8"
         ).strip()
         source = [
             subprocess.check_output(
                 ["git", "show", f"{ref}:{BUILD_SCRIPT}"], encoding="utf-8"
             )
-            for ref in (base, "HEAD")
+            for ref in (base, head_ref)
         ]
     except subprocess.CalledProcessError:
         return False
@@ -139,7 +139,10 @@ def _validate_and_collect_exemptions(
 
 
 def from_registry(
-    changed_files: list[str] | None = None, *, base_ref: str | None = None
+    changed_files: list[str] | None = None,
+    *,
+    base_ref: str | None = None,
+    head_ref: str = "HEAD",
 ) -> list[str] | None:
     """Read platforms.yml and return enabled platform names, filtered by
     diff-based routing when changed_files is provided. Returns None if the
@@ -183,7 +186,7 @@ def from_registry(
     thead_build_only = bool(
         base_ref
         and BUILD_SCRIPT in changed_files
-        and _thead_only_build_change(base_ref)
+        and _thead_only_build_change(base_ref, head_ref)
     )
     if thead_build_only:
         support_files = support_files | {BUILD_SCRIPT}
@@ -283,6 +286,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--base-ref", help="PR base for classifying shared build changes"
     )
+    parser.add_argument(
+        "--head-ref",
+        default="HEAD",
+        help="PR head for classifying shared build changes",
+    )
     args = parser.parse_args(argv)
 
     changed: list[str] | None = None
@@ -297,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("[detect] No changed files → full run", file=sys.stderr)
 
-    platforms = from_registry(changed, base_ref=args.base_ref)
+    platforms = from_registry(changed, base_ref=args.base_ref, head_ref=args.head_ref)
 
     if platforms is not None:
         source = "platforms.yml"
