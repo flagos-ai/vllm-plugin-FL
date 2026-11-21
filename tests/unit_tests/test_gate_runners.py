@@ -43,7 +43,7 @@ from tests.e2e_tests.chat_cases import (
     validate_chat_case_tasks,
     validate_gate_case,
 )
-from tests.unit_tests.test_chat_cases import REQUEST_DATA_MARKERS, REPO_ROOT
+from tests.unit_tests.test_chat_cases import REPO_ROOT, REQUEST_DATA_MARKERS
 
 RUNNER_SOURCES = (
     REPO_ROOT / "tests/e2e_tests/serving/test_serving_smoke.py",
@@ -172,13 +172,17 @@ def _passing_text(expected, min_length):
 
 def _assert_execution_mode_split():
     legacy_cases = [{"name": "old", "messages": [{"role": "user", "content": "x"}]}]
-    gate_serving = [dict(legacy_cases[0], name="g", task="serving", scenario="text_single")]
-    gate_conc = [dict(legacy_cases[0], name="c", task="concurrent", scenario="text_concurrent_8")]
+    gate_serving = [
+        dict(legacy_cases[0], name="g", task="serving", scenario="text_single")
+    ]
+    gate_conc = [
+        dict(legacy_cases[0], name="c", task="concurrent", scenario="text_concurrent_8")
+    ]
 
     # Explicit task cases win over a present verification block.
-    assert (
-        resolve_execution_mode(gate_serving, True, "serving") == "gate"
-    ), "explicit task: serving must take priority over verification"
+    assert resolve_execution_mode(gate_serving, True, "serving") == "gate", (
+        "explicit task: serving must take priority over verification"
+    )
     assert resolve_execution_mode(gate_conc, True, "concurrent") == "gate"
     # Verification only applies when no explicit cases exist for the task.
     assert resolve_execution_mode(legacy_cases, True, "concurrent") == "verification"
@@ -270,7 +274,9 @@ def _assert_executor_single_gather_and_case_params():
         )
         assert call["model"] == "model-x"
         assert call["temperature"] == 0.0
-        assert call["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+        assert call["extra_body"] == {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
         assert call["messages"] == entry["messages"]
     assert all(output["passed"] for output in outputs)
     for output in outputs:
@@ -317,15 +323,11 @@ def _assert_run_concurrent_scenario_mock():
             assert client.closed and http_client.closed, "clients must be closed"
             assert client.api.max_inflight == 8
 
-            document = json.loads(
-                (document_dir / "text_concurrent_8.json").read_text()
-            )
+            document = json.loads((document_dir / "text_concurrent_8.json").read_text())
             assert document["summary"]["request_count"] == 8
             assert len(document["output"]) == 8
             assert document["schema_version"] == 1
-            validate_scenario_documents(
-                document_dir, (("text_concurrent_8", 8),)
-            )
+            validate_scenario_documents(document_dir, (("text_concurrent_8", 8),))
     finally:
         _restore_openai_httpx(saved)
 
@@ -365,13 +367,33 @@ def _assert_document_contract_counts():
         total_line = format_gate_total_log("serving", summary)
         assert "requests=2/2" in total_line and "checks=20/20" in total_line
         scenario_line = format_gate_scenario_log(
-            "serving", "text_single", [{"passed": True, "checks": {k: True for k in (
-                "non_empty", "minimum_length", "expected_semantics", "expected_order",
-                "no_bang_triplet", "no_mojibake", "no_control_characters",
-                "no_long_character_run", "no_repeated_word_run", "no_repeated_phrase",
-            )}}]
+            "serving",
+            "text_single",
+            [
+                {
+                    "passed": True,
+                    "checks": {
+                        k: True
+                        for k in (
+                            "non_empty",
+                            "minimum_length",
+                            "expected_semantics",
+                            "expected_order",
+                            "no_bang_triplet",
+                            "no_mojibake",
+                            "no_control_characters",
+                            "no_long_character_run",
+                            "no_repeated_word_run",
+                            "no_repeated_phrase",
+                        )
+                    },
+                }
+            ],
         )
-        assert scenario_line == "[Gate] serving scenario=text_single requests=1/1 checks=10/10"
+        assert (
+            scenario_line
+            == "[Gate] serving scenario=text_single requests=1/1 checks=10/10"
+        )
 
         # Failure variants must fail the validator loudly.
         (serving_dir / "image_single.json").unlink()
@@ -415,10 +437,16 @@ def _assert_document_contract_counts():
                 assert (total, checks_total) == (24, 240)
                 assert summary["passed_requests"] == 24
                 assert summary["passed_checks"] == 240
-                line = format_gate_total_log("concurrent", {
-                    "passed": True, "passed_requests": 24, "logical_requests": 24,
-                    "passed_checks": 240, "checks": 240,
-                })
+                line = format_gate_total_log(
+                    "concurrent",
+                    {
+                        "passed": True,
+                        "passed_requests": 24,
+                        "logical_requests": 24,
+                        "passed_checks": 240,
+                        "checks": 240,
+                    },
+                )
                 assert "requests=24/24" in line and "checks=240/240" in line
 
                 # A single dropped request breaks the contract.
@@ -462,10 +490,18 @@ def _assert_document_contract_counts():
 
     # Directory isolation: serving and concurrent roots never collide.
     serving_root = gate_results_root(
-        Path(tempfile.gettempdir()), platform="p", device="d", model="m", case="c-serving"
+        Path(tempfile.gettempdir()),
+        platform="p",
+        device="d",
+        model="m",
+        case="c-serving",
     )
     concurrent_root = gate_results_root(
-        Path(tempfile.gettempdir()), platform="p", device="d", model="m", case="c-concurrent"
+        Path(tempfile.gettempdir()),
+        platform="p",
+        device="d",
+        model="m",
+        case="c-concurrent",
     )
     assert serving_root != concurrent_root
     assert serving_root.name == "c-serving" and concurrent_root.name == "c-concurrent"
@@ -572,7 +608,9 @@ def _assert_serving_runner_gate_mode():
             media_dir = extra_args[extra_args.index("--allowed-local-media-path") + 1]
             from tests.e2e_tests.chat_cases import local_media_directory
 
-            expected_media = str(local_media_directory(module._GATE_CASES, module._REPO_ROOT))
+            expected_media = str(
+                local_media_directory(module._GATE_CASES, module._REPO_ROOT)
+            )
             assert media_dir == expected_media
             with contextlib.suppress(StopIteration):
                 fixture_generator.close()
@@ -648,9 +686,11 @@ def _assert_serving_runner_gate_mode():
             # Multimodal messages reach the streaming transport as file:// URIs.
             def fake_stream_capture(base_url, api_key, create_kwargs):
                 module._captured_stream_kwargs = create_kwargs
-                return _passing_text(
-                    image_single["expected"], image_single["min_length"]
-                ), "stop", None
+                return (
+                    _passing_text(image_single["expected"], image_single["min_length"]),
+                    "stop",
+                    None,
+                )
 
             module._stream_chat_completions = fake_stream_capture
             module._CFG.serve.stream = True
@@ -810,12 +850,12 @@ def _assert_platform_merge_preserves_gate_cases():
         cases = merged.serve.chat_cases
         summary = validate_gate_chat_cases(cases)
         assert summary["total"] == 26, f"{platform}/{device}/{case}"
-        assert len(
-            [c for c in cases if c.get("task") == "serving"]
-        ) == 2, f"{platform}/{device}/{case}"
-        assert len(
-            [c for c in cases if c.get("task") == "concurrent"]
-        ) == 24, f"{platform}/{device}/{case}"
+        assert len([c for c in cases if c.get("task") == "serving"]) == 2, (
+            f"{platform}/{device}/{case}"
+        )
+        assert len([c for c in cases if c.get("task") == "concurrent"]) == 24, (
+            f"{platform}/{device}/{case}"
+        )
         assert list(group_concurrent_cases(cases)) == [
             "text_concurrent_8",
             "image_concurrent_8",
@@ -832,9 +872,9 @@ def _assert_platform_merge_preserves_gate_cases():
         assert merged.engine.get("tensor_parallel_size") == base.engine.get(
             "tensor_parallel_size"
         ), f"{platform}/{device}/{case}: tensor_parallel_size drifted"
-        assert merged.engine.get("enforce_eager") == base.engine.get(
-            "enforce_eager"
-        ), f"{platform}/{device}/{case}: enforce_eager drifted"
+        assert merged.engine.get("enforce_eager") == base.engine.get("enforce_eager"), (
+            f"{platform}/{device}/{case}: enforce_eager drifted"
+        )
 
         # Platform-specific serve settings survive (kunlunxin example).
         if platform == "kunlunxin":

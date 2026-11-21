@@ -111,10 +111,7 @@ def server():
     # Build extra_args from engine config + serve-specific overrides, then
     # let the gate path add the local-media flag it owns.
     base_args = [*_CFG.serve_args(**serve.extra_engine), *serve.extra_args]
-    if _GATE_CASES:
-        extra_args = _gate_extra_args(base_args)
-    else:
-        extra_args = base_args
+    extra_args = _gate_extra_args(base_args) if _GATE_CASES else base_args
 
     with VllmServer(
         model=_CFG.model,
@@ -304,7 +301,8 @@ def _run_chat(base_url: str, headers: dict) -> None:
         [
             {
                 "name": "default",
-                "messages": serve.chat_messages or [{"role": "user", "content": "Hello"}],
+                "messages": serve.chat_messages
+                or [{"role": "user", "content": "Hello"}],
             }
         ]
         if not serve.chat_cases
