@@ -184,11 +184,18 @@ def fixture(
     config.inductor_compile_config = {}
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
-    # Fields vLLM 0.32's __post_init__ reads; the upstream dataclass supplies
-    # them as defaults, this contract double has to be explicit.
-    config.decoder_replay_cudagraph_capture_sizes = []
-    config.encoder_cudagraph_max_frames_per_batch = None
+    # vLLM 0.32 fields read by CompilationConfig.__post_init__ (the stub
+    # executes upstream's real defaults).
+    config.cudagraph_mm_encoder = False
+    config.encoder_cudagraph_token_budgets = []
     config.encoder_cudagraph_max_vision_items_per_batch = 0
+    config.encoder_cudagraph_max_frames_per_batch = None
+    config.decoder_replay_cudagraph_capture_sizes = []
+    config.decoder_replay_trim_threshold = 768
+    config.cudagraph_decoder_replay = True
+    config.ir_enable_torch_wrap = False
+    config.compile_ranges_endpoints = [8192]
+    config.max_cudagraph_capture_size = 0
     config.pass_config = SimpleNamespace(
         **{
             "fuse_attn_quant": False,
