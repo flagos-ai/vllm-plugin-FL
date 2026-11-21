@@ -14,7 +14,7 @@
 
 
 # Temporary manual diagnostics on this isolated branch; never a PR Gate.
-name: Iluvatar runner read-only probe
+name: Iluvatar allocator phase1 probe
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: iluvatar-readonly-runner-probe-${{ github.ref }}
+  group: iluvatar-allocator-phase1-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -32,245 +32,389 @@ jobs:
     runs-on: [iluvatar-cicd-vllm-plugin]
     timeout-minutes: 5
     steps:
-      - name: Read selected runner and Docker metadata
+      - name: Probe owned allocator and read selected metadata
         shell: bash
         env:
           RUNNER_NAME: ${{ runner.name }}
-          PROBE_OUTPUT: ${{ runner.temp }}/iluvatar-runner-probe-${{ github.run_id }}.json
+          PROBE_RUN_ID: ${{ github.run_id }}
+          PROBE_ATTEMPT: ${{ github.run_attempt }}
+          PROBE_OUTPUT: ${{ runner.temp }}/iluvatar-phase1-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: |
           python3 - <<'PY'
-          """Read selected runner/daemon metadata; never change daemon or device state."""
+          """Bounded allocator probe; mutate only the uniquely marked network we create."""
 
           import json
           import os
           import re
-          import shutil
           import socket
           import subprocess
           import time
+          import uuid
           from datetime import datetime, timezone
           from pathlib import Path
 
-          INFO = (
-              '{"name":{{json .Name}},"server_version":{{json .ServerVersion}},'
-              '"default_address_pools":{{json .DefaultAddressPools}}}'
+          INFO = '{"name":{{json .Name}},"id":{{json .ID}},"version":{{json .ServerVersion}}}'
+          CONTAINER = (
+              '{"id":{{json .Id}},"name":{{json .Name}},"mode":{{json .HostConfig.NetworkMode}},'
+              '"networks":[""{{range $k,$v := .NetworkSettings.Networks}},'
+              '{"name":{{json $k}},"id":{{json $v.NetworkID}}}{{end}}]}'
           )
-          PS = (
-              '{"id":{{json .ID}},"name":{{json .Names}},'
-              '"state":{{json .State}},"networks":{{json .Networks}}}'
-          )
-          NETWORK_LIST = '{"id":{{json .ID}},"name":{{json .Name}}}'
           NETWORK = (
               '{"id":{{json .Id}},"name":{{json .Name}},"created":{{json .Created}},'
-              '"driver":{{json .Driver}},"endpoint_count":{{len .Containers}},'
+              '"driver":{{json .Driver}},"endpoints":{{len .Containers}},'
               '"subnets":[""{{range .IPAM.Config}},{{json .Subnet}}{{end}}],'
-              '"label_keys":[""{{range $k,$v := .Labels}}'
-              "{{if eq (len $k) 6}},{{json $k}}{{end}}{{end}}]}"
+              '"keys":[""{{range $k,$v := .Labels}}{{if eq (len $k) 6}},{{json $k}}{{end}}{{end}}]}'
           )
+          OWN_NETWORK = NETWORK[:-1] + ',"task":{{json (index .Labels "codex.task")}}}'
+          OLD = {
+              "7e3d405f94a726b3cd2805b0af6db293162c20a9b8c161fc69f3a1d6985dd283": "github_network_25c0bfd2c8234213b3f6455aa6246c22",
+              "6a7645cd47b7d2ec25512eaf25c53c3bc33e44120b7a4e1999ef8fa905005af0": "github_network_587bc092196e4096b824e26b24d8ec35",
+              "c55a87a5fa4664fa98ef7dce3f18c9353ba091a83790fbcacd84e5528dfc3554": "github_network_836727bcc4d04a9c8f61f23ec65a7388",
+              "93a25811bba970af27dc91c92d8b16ea6788863f4d8c1f49254a4121fbbb24b6": "github_network_ecd94c99b97c40d3aaf3558425ad4808",
+          }
           END = time.monotonic() + 120
 
 
-          def scrub(value):
-              if isinstance(value, bytes):
-                  value = value.decode(errors="replace")
-              value = re.sub(r"(https?://)[^/\s@]+@", r"\1<redacted>@", value or "")
-              value = re.sub(
-                  r"(?i)\b(authorization\s*[:=]\s*)(?:Basic|Bearer)\s+\S+",
-                  r"\1<redacted>",
-                  value,
+          def scrub(text):
+              text = re.sub(r"(https?://)[^/\s@]+@", r"\1<redacted>@", text)
+              text = re.sub(
+                  r"(?i)(authorization\s*[:=]\s*)(?:Basic|Bearer)\s+\S+", r"\1<redacted>", text
               )
               return re.sub(
-                  r"(?i)\b(password|passwd|access_token|token)\s*[:=]\s*[^\s,;\"']+",
+                  r"(?i)\b(password|passwd|token|authorization)\s*[:=]\s*\S+",
                   r"\1=<redacted>",
-                  value,
+                  text,
               )
-
-
-          def clean(value):
-              if isinstance(value, dict):
-                  return {k: clean(v) for k, v in value.items()}
-              if isinstance(value, list):
-                  return [clean(v) for v in value]
-              return scrub(value) if isinstance(value, str) else value
 
 
           def run(args):
               remaining = END - time.monotonic()
               if remaining <= 0:
-                  return {"status": "probe_budget_exhausted", "stdout": "", "stderr": ""}
-              started = time.monotonic()
+                  return {"ok": False, "status": "budget_exhausted", "stdout": "", "stderr": ""}
               try:
                   result = subprocess.run(
                       args, capture_output=True, text=True, timeout=min(10, remaining)
                   )
                   return {
-                      "status": "ok" if result.returncode == 0 else "command_failed",
+                      "ok": result.returncode == 0,
                       "returncode": result.returncode,
-                      "elapsed_seconds": round(time.monotonic() - started, 3),
                       "stdout": result.stdout,
-                      "stderr": scrub(result.stderr)[:3000],
+                      "stderr": scrub(result.stderr)[:2000],
                   }
-              except subprocess.TimeoutExpired as exc:
+              except (subprocess.TimeoutExpired, OSError) as exc:
                   return {
-                      "status": "timeout",
-                      "elapsed_seconds": round(time.monotonic() - started, 3),
-                      "stdout": scrub(exc.stdout),
-                      "stderr": scrub(exc.stderr)[:3000],
-                  }
-              except OSError as exc:
-                  return {"status": "unavailable", "stdout": "", "stderr": scrub(str(exc))[:1000]}
-
-
-          def metadata(result):
-              return {key: value for key, value in result.items() if key != "stdout"}
-
-
-          def rows(result):
-              return [json.loads(line) for line in result["stdout"].splitlines() if line.strip()]
-
-
-          report = {
-              "observed_at_utc": datetime.now(timezone.utc).isoformat(),
-              "diagnostic_only": True,
-              "gate_result_claimed": False,
-              "hostname": socket.gethostname(),
-              "uid": os.getuid(),
-              "allowlisted_environment": {
-                  name: os.environ.get(name) for name in ("RUNNER_NAME", "NODE_NAME")
-              },
-              "probe_budget_seconds": 120,
-              "subprocess_timeout_max_seconds": 10,
-          }
-          try:
-              result = run(["docker", "info", "--format", INFO])
-              report["docker_info"] = metadata(result)
-              if result["status"] == "ok":
-                  data = json.loads(result["stdout"])
-                  pools = data.get("default_address_pools")
-                  report["docker_info"]["data"] = {
-                      "name": data.get("name"),
-                      "server_version": data.get("server_version"),
-                      "default_address_pools": (
-                          [{k: pool.get(k) for k in ("Base", "Size")} for pool in pools]
-                          if isinstance(pools, list)
-                          else None
-                      ),
+                      "ok": False,
+                      "status": type(exc).__name__,
+                      "stdout": "",
+                      "stderr": scrub(str(exc))[:500],
                   }
 
-              result = run(["docker", "ps", "--all", "--no-trunc", "--format", PS])
-              report["containers"] = metadata(result)
-              report["containers"]["items"] = (
-                  [
-                      {key: row.get(key) for key in ("id", "name", "state", "networks")}
-                      for row in rows(result)
-                  ]
-                  if result["status"] == "ok"
-                  else []
-              )
 
-              result = run(
-                  [
-                      "docker",
-                      "network",
-                      "ls",
-                      "--no-trunc",
-                      "--filter",
-                      "name=github_network_",
-                      "--format",
-                      NETWORK_LIST,
-                  ]
-              )
-              report["github_networks"] = metadata(result)
-              listed = rows(result) if result["status"] == "ok" else []
-              listing_succeeded = result["status"] == "ok"
-              report["github_networks"]["listed_count"] = len(listed)
-              inspected = []
-              for item in listed:
-                  network_id = item.get("id", "")
-                  if not re.fullmatch(r"[a-f0-9]{64}", network_id) or not str(
-                      item.get("name", "")
-                  ).startswith("github_network_"):
-                      continue
-                  result = run(["docker", "network", "inspect", "--format", NETWORK, network_id])
-                  entry = {"listed_id": network_id, **metadata(result)}
-                  if result["status"] == "ok":
-                      data = json.loads(result["stdout"])
-                      if data.get("id") != network_id or not str(data.get("name", "")).startswith(
-                          "github_network_"
-                      ):
-                          raise ValueError("Network identity changed during the read-only sample")
-                      entry["data"] = {
-                          key: data.get(key)
-                          for key in ("id", "name", "created", "driver", "endpoint_count")
-                      }
-                      entry["data"]["subnets"] = [
-                          v for v in data.get("subnets", []) if isinstance(v, str) and v
-                      ]
-                      entry["data"]["runner_label_keys_6hex"] = [
-                          v
-                          for v in data.get("label_keys", [])
-                          if isinstance(v, str) and re.fullmatch(r"[0-9a-fA-F]{6}", v)
-                      ]
-                  inspected.append(entry)
-                  if result["status"] == "probe_budget_exhausted":
-                      break
-              report["github_networks"]["items"] = inspected
-              report["github_networks"]["inspection_complete"] = (
-                  listing_succeeded
-                  and len(inspected) == len(listed)
-                  and all(item["status"] == "ok" for item in inspected)
-              )
-
-              smi = shutil.which("ixsmi")
-              if smi is None and os.access("/usr/local/corex-4.5.0/bin/ixsmi", os.X_OK):
-                  smi = "/usr/local/corex-4.5.0/bin/ixsmi"
-              if smi:
-                  result = run([smi])
-                  report["ixsmi_read_only"] = {
-                      **metadata(result),
-                      "stdout_excerpt": scrub(result["stdout"])[:20000],
-                      "stdout_truncated": len(result["stdout"]) > 20000,
-                  }
-              else:
-                  report["ixsmi_read_only"] = {"status": "not_available"}
-          except Exception as exc:
-              report["probe_exception"] = {
-                  "type": type(exc).__name__,
-                  "message": scrub(str(exc))[:1000],
-              }
-          finally:
-              report = clean(report)
-              output = Path(os.environ["PROBE_OUTPUT"])
-              output.parent.mkdir(parents=True, exist_ok=True)
-              output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-              print(
-                  json.dumps(
-                      {
-                          "diagnostic_only": True,
-                          "hostname": report["hostname"],
-                          "uid": report["uid"],
-                          "runner": report["allowlisted_environment"],
-                          "docker_info": report.get("docker_info"),
-                          "container_count": len(report.get("containers", {}).get("items", [])),
-                          "github_network_count": report.get("github_networks", {}).get(
-                              "listed_count"
-                          ),
-                          "network_inspection_complete": report.get("github_networks", {}).get(
-                              "inspection_complete"
-                          ),
-                          "ixsmi_status": report.get("ixsmi_read_only", {}).get("status"),
-                          "exception_type": report.get("probe_exception", {}).get("type"),
-                      },
-                      indent=2,
+          def data(args):
+              result = run(args)
+              if not result["ok"]:
+                  raise RuntimeError(
+                      json.dumps({k: v for k, v in result.items() if k != "stdout"})
                   )
+              return json.loads(result["stdout"])
+
+
+          def ids(args):
+              result = run(args)
+              values = result["stdout"].splitlines()
+              if (
+                  not result["ok"]
+                  or len(values) != len(set(values))
+                  or any(not re.fullmatch(r"[a-f0-9]{64}", item) for item in values)
+              ):
+                  raise RuntimeError(
+                      "Incomplete ID listing: "
+                      + json.dumps({k: v for k, v in result.items() if k != "stdout"})
+                  )
+              return sorted(values)
+
+
+          def own_probe(report, daemon, run_id, attempt):
+              name = f"codex-iluvatar-phase1-{run_id}-{attempt}-{uuid.uuid4().hex[:12]}"
+              label = "codex.task=" + name
+              label_list = [
+                  "docker",
+                  "network",
+                  "ls",
+                  "--no-trunc",
+                  "--quiet",
+                  "--filter",
+                  "label=" + label,
+              ]
+              name_list = [
+                  "docker",
+                  "network",
+                  "ls",
+                  "--no-trunc",
+                  "--quiet",
+                  "--filter",
+                  "name=^" + name + "$",
+              ]
+              report.update(
+                  name=name, task_label=name, create_attempted=False, old_network_mutations=False
               )
+              if ids(label_list) or ids(name_list):
+                  raise RuntimeError(
+                      "Unique task network identity already exists; no mutation allowed"
+                  )
+              if END - time.monotonic() < 90:
+                  report["outcome"] = "NOT_ATTEMPTED_BUDGET"
+                  return report
+              report["create_attempted"] = True
+              created = run(
+                  ["docker", "network", "create", "--driver", "bridge", "--label", label, name]
+              )
+              report["create"] = created
+              task_ids = ids(label_list)
+              if not task_ids:
+                  report["absence_proven"] = (
+                      not created["ok"]
+                      and not ids(name_list)
+                      and data(["docker", "info", "--format", INFO]) == daemon
+                  )
+                  report["outcome"] = (
+                      "DEFAULT_POOL_EXHAUSTED"
+                      if "could not find an available, non-overlapping IPv4 address pool"
+                      in created["stderr"]
+                      else "CREATE_FAILED_NO_TASK_NETWORK"
+                      if not created["ok"]
+                      else "CREATE_RESPONSE_INCONSISTENT"
+                  )
+                  return report
+              if len(task_ids) != 1:
+                  raise RuntimeError(
+                      "More than one exact task-labelled network; no removal allowed"
+                  )
+              network_id = task_ids[0]
+              report["created_id"] = network_id
+              report["ownership_origin"] = (
+                  "create_stdout"
+                  if created["ok"]
+                  else "exact_task_label_and_name_after_empty_preflight"
+              )
+              if created["ok"] and created["stdout"].strip() != network_id:
+                  raise RuntimeError("Created network ID disagrees with exact task listing")
+              if network_id in OLD or data(["docker", "info", "--format", INFO]) != daemon:
+                  raise RuntimeError("Daemon or network identity changed; no removal allowed")
+              network = data(
+                  ["docker", "network", "inspect", "--format", OWN_NETWORK, network_id]
+              )
+              network["keys"] = [
+                  value for value in network["keys"] if re.fullmatch(r"[0-9a-fA-F]{6}", value)
+              ]
+              report["before_remove"] = network
+              if not (
+                  network["id"] == network_id
+                  and network["name"] == name
+                  and network.get("task") == name
+                  and network["driver"] == "bridge"
+                  and network["endpoints"] == 0
+              ):
+                  raise RuntimeError(
+                      "Task network ownership/zero-endpoint guard rejected removal"
+                  )
+              # No force/prune: a concurrent attachment makes Docker reject this exact-ID removal.
+              report["remove"] = run(["docker", "network", "rm", network_id])
+              report["absence_proven"] = (
+                  not ids(label_list)
+                  and not ids(name_list)
+                  and data(["docker", "info", "--format", INFO]) == daemon
+              )
+              report["outcome"] = (
+                  "ALLOCATOR_NORMAL_TASK_REMOVED"
+                  if created["ok"] and report["absence_proven"]
+                  else "CREATE_ERROR_TASK_REMOVED"
+                  if report["absence_proven"]
+                  else "INCOMPLETE_TASK_CLEANUP"
+              )
+              return report
+
+
+          def snapshot():
+              container_ids = ids(["docker", "ps", "--all", "--quiet", "--no-trunc"])
+              containers = []
+              if container_ids:
+                  result = run(
+                      ["docker", "container", "inspect", "--format", CONTAINER, *container_ids]
+                  )
+                  if not result["ok"]:
+                      raise RuntimeError("Container reference inspection failed")
+                  for line in result["stdout"].splitlines():
+                      row = json.loads(line)
+                      containers.append(
+                          {
+                              "id": row["id"],
+                              "name": row["name"],
+                              "mode": row["mode"],
+                              "networks": sorted(
+                                  [item for item in row["networks"] if isinstance(item, dict)],
+                                  key=lambda x: (x["name"], x["id"]),
+                              ),
+                          }
+                      )
+                  if sorted(item["id"] for item in containers) != container_ids:
+                      raise RuntimeError("Container ID set incomplete or changed during inspect")
+              networks = {}
+              for network_id in OLD:
+                  result = run(["docker", "network", "inspect", "--format", NETWORK, network_id])
+                  if result["ok"]:
+                      row = json.loads(result["stdout"])
+                      row["subnets"] = [value for value in row["subnets"] if value]
+                      row["keys"] = sorted(
+                          value for value in row["keys"] if re.fullmatch(r"[0-9a-fA-F]{6}", value)
+                      )
+                      networks[network_id] = row
+                  else:
+                      networks[network_id] = {
+                          "unavailable": {k: v for k, v in result.items() if k != "stdout"}
+                      }
+              return {
+                  "container_ids": container_ids,
+                  "containers": sorted(containers, key=lambda x: x["id"]),
+                  "networks": networks,
+              }
+
+
+          def references(containers, network_id, network_name):
+              by_id = {item["id"]: item for item in containers}
+
+              def visit(item, seen):
+                  if item["id"] in seen:
+                      raise ValueError("Container network-mode cycle")
+                  mode = item["mode"]
+                  direct = mode in (network_id, network_name) or any(
+                      child.get("id") == network_id or child.get("name") == network_name
+                      for child in item["networks"]
+                  )
+                  if mode.startswith("container:"):
+                      target = mode.split(":", 1)[1]
+                      matches = [
+                          other
+                          for other in by_id.values()
+                          if other["id"] == target or other["name"].lstrip("/") == target
+                      ]
+                      if len(matches) != 1:
+                          raise ValueError("Unresolved container network-mode reference")
+                      direct = direct or visit(matches[0], seen | {item["id"]})
+                  return direct
+
+              return [item["id"] for item in containers if visit(item, set())]
+
+
+          def main():
+              report = {
+                  "observed_at_utc": datetime.now(timezone.utc).isoformat(),
+                  "hostname": socket.gethostname(),
+                  "uid": os.getuid(),
+                  "runner": os.environ.get("RUNNER_NAME"),
+                  "diagnostic_only": True,
+                  "gate_result_claimed": False,
+                  "old_network_cleanup_authorized": False,
+                  "original_failure_host_attributed": False,
+                  "budget_seconds": 120,
+                  "eligible_candidates": [],
+              }
+              try:
+                  run_id, attempt = os.environ["PROBE_RUN_ID"], os.environ["PROBE_ATTEMPT"]
+                  if not re.fullmatch(r"\d+", run_id) or not re.fullmatch(r"\d+", attempt):
+                      raise ValueError("Run/attempt identifiers must be numeric")
+                  before = report["daemon_before"] = data(["docker", "info", "--format", INFO])
+                  if not all(
+                      isinstance(before.get(key), str) and before[key] for key in ("name", "id")
+                  ):
+                      raise ValueError(
+                          "Daemon name and ID must both be available before allocation"
+                      )
+                  allocator = report["allocator"] = {}
+                  own_probe(allocator, before, run_id, attempt)
+                  first = report["first"] = snapshot()
+                  second = report["second"] = snapshot()
+                  after = report["daemon_after"] = data(["docker", "info", "--format", INFO])
+                  stable = bool(before.get("id")) and before == after and first == second
+                  report["snapshot_stable"] = stable
+                  if before != after:
+                      allocator["outcome"] = "UNKNOWN_DAEMON_CHANGED"
+                      allocator["absence_proven"] = False
+                  candidates = []
+                  report["candidate_assessments"] = {}
+                  for network_id, name in OLD.items():
+                      row = first["networks"][network_id]
+                      if not (
+                          stable
+                          and allocator.get("absence_proven")
+                          and before["name"] == "ub39"
+                          and row.get("id") == network_id
+                          and row.get("name") == name
+                      ):
+                          continue
+                      created = datetime.fromisoformat(
+                          re.sub(r"(\.\d{6})\d+", r"\1", row["created"]).replace("Z", "+00:00")
+                      )
+                      age = int((datetime.now(timezone.utc) - created).total_seconds())
+                      refs = references(first["containers"], network_id, name)
+                      report["candidate_assessments"][network_id] = {
+                          "age_seconds_floor": age,
+                          "referencing_container_ids": refs,
+                      }
+                      if (
+                          age > 86400
+                          and row["driver"] == "bridge"
+                          and row["endpoints"] == 0
+                          and row["keys"]
+                          and not refs
+                      ):
+                          candidates.append(network_id)
+                  report["eligible_candidates"] = candidates
+              except Exception as exc:
+                  report["incomplete"] = {
+                      "type": type(exc).__name__,
+                      "message": scrub(str(exc))[:1500],
+                  }
+              finally:
+                  report["possible_task_network_remaining"] = bool(
+                      report.get("allocator", {}).get("create_attempted")
+                  ) and not report.get("allocator", {}).get("absence_proven", False)
+                  output = Path(os.environ["PROBE_OUTPUT"])
+                  output.parent.mkdir(parents=True, exist_ok=True)
+                  output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+                  print(
+                      json.dumps(
+                          {
+                              key: report.get(key)
+                              for key in (
+                                  "diagnostic_only",
+                                  "gate_result_claimed",
+                                  "daemon_before",
+                                  "allocator",
+                                  "snapshot_stable",
+                                  "eligible_candidates",
+                                  "incomplete",
+                              )
+                          },
+                          indent=2,
+                      )
+                  )
+              return int(
+                  "incomplete" in report
+                  or not report.get("allocator", {}).get("absence_proven", False)
+              )
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+
           PY
 
-      - name: Retain read-only diagnostics
+      - name: Retain allocator diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: iluvatar-runner-probe-${{ github.run_id }}
-          path: ${{ runner.temp }}/iluvatar-runner-probe-${{ github.run_id }}.json
+          name: iluvatar-phase1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/iluvatar-phase1-${{ github.run_id }}-${{ github.run_attempt }}.json
           if-no-files-found: warn
           retention-days: 7
