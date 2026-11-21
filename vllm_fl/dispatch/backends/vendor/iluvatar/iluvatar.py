@@ -483,4 +483,6 @@ class IluvatarBackend(Backend):
         # DependencyFinder can hash the kernel without AttributeError on
         # triton < 3.3.  The kernel itself uses USE_TD=False at runtime, so
         # the stub is never called.
-        return AttentionBackendEnum.TRITON_ATTN.get_path()
+        # Prefill/decode-split backend: decode keeps the stock unified attention
+        # (3D split-K), prefill uses the GQA-packed paged prefill kernel.
+        return "vllm_fl.dispatch.backends.vendor.iluvatar.impl.attention.attention_split_backend.SplitAttentionBackend"

@@ -152,6 +152,24 @@ def register_builtins(registry: OpRegistry) -> None:
     except Exception as e:
         logger.warning(f"Failed to register Reference operators: {e}")
 
+    # Fused top-p sampling op (flagos: FlagGems 2-pass Gumbel tournament, reference: vLLM torch path)
+    try:
+        from vllm_fl.patches.topk_topp_sampler import register_top_p_sampling
+
+        register_top_p_sampling(registry)
+        logger.debug("Registered top_p_sampling operators")
+    except Exception as e:
+        logger.warning(f"Failed to register top_p_sampling operators: {e}")
+
+    # Fused Dual-Accumulator SwiGLU projection op (flagos: FlagGems fused_swiglu_proj, reference: PyTorch)
+    try:
+        from vllm_fl.patches.fused_swiglu_mlp import register_fused_swiglu_proj
+
+        register_fused_swiglu_proj(registry)
+        logger.debug("Registered fused_swiglu_proj operators")
+    except Exception as e:
+        logger.warning(f"Failed to register fused_swiglu_proj operators: {e}")
+
     # Auto-discover and register VENDOR implementations
     _register_vendor_backends(registry)
 

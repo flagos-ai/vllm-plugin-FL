@@ -919,6 +919,11 @@ class ModelRunnerFL(
             device="cpu",
             pin_memory=self.pin_memory,
         )
+        self._dummy_chunked_sampled_ids = torch.zeros(
+            (self.max_num_reqs, 1),
+            dtype=sampled_ids_dtype,
+            device=self.device,
+        )
 
         # Pre-allocated tensor for copying valid sampled token counts to CPU,
         # with dedicated stream for overlapping and event for coordination.
@@ -3703,10 +3708,11 @@ class ModelRunnerFL(
         discard_sampled_tokens_req_indices = np.nonzero(
             self.discard_request_mask.np[:num_reqs]
         )[0]
-        for i in discard_sampled_tokens_req_indices:
-            gen = self.input_batch.generators.get(int(i))
-            if gen is not None:
-                gen.set_offset(gen.get_offset() - 4)
+        if logits is not None:
+            for i in discard_sampled_tokens_req_indices:
+                gen = self.input_batch.generators.get(int(i))
+                if gen is not None:
+                    gen.set_offset(gen.get_offset() - 4)
 
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
@@ -4432,8 +4438,17 @@ class ModelRunnerFL(
                         kv_connector_output,
                     )
 
-                sample_hidden_states = hidden_states[logits_indices]
-                logits = self.model.compute_logits(sample_hidden_states)
+                if (
+                    self._is_all_reqs_chunked_prefill()
+                    and not self.num_prompt_logprobs
+                    and self.speculative_config is None
+                    and not envs.VLLM_COMPUTE_NANS_IN_LOGITS
+                ):
+                    sample_hidden_states = hidden_states[:0]
+                    logits = None
+                else:
+                    sample_hidden_states = hidden_states[logits_indices]
+                    logits = self.model.compute_logits(sample_hidden_states)
             else:
                 # Rare case.
                 assert not self.is_pooling_model
@@ -4532,13 +4547,22 @@ class ModelRunnerFL(
         self.execute_model_state = None
 
         # Apply structured output bitmasks if present.
-        if grammar_output is not None:
+        if grammar_output is not None and logits is not None:
             apply_grammar_bitmask(
                 scheduler_output, grammar_output, self.input_batch, logits
             )
 
         with record_function_or_nullcontext("gpu_model_runner: sample"):
-            sampler_output = self._sample(logits, spec_decode_metadata)
+            if logits is None and spec_decode_metadata is None:
+                self.input_batch.update_async_output_token_ids()
+                sampler_output = SamplerOutput(
+                    sampled_token_ids=self._dummy_chunked_sampled_ids[
+                        : self.input_batch.num_reqs
+                    ],
+                    logprobs_tensors=None,
+                )
+            else:
+                sampler_output = self._sample(logits, spec_decode_metadata)
 
         self._update_states_after_model_execute(
             sampler_output.sampled_token_ids, scheduler_output
@@ -7577,6 +7601,15 @@ class ModelRunnerFL(
                     with set_current_vllm_config(self.vllm_config):
                         indexes = backend.indexes_kv_by_block_stride()
                     spec = replace(spec, indexes_kv_by_block_stride=indexes)
+                    # Backends with a compact cache row (e.g. I8G32 8-bit paged KV cache) report
+                    # the row width they want allocated per (token, head), in cache-dtype slots.
+                    row_slots_fn = getattr(backend, "kv_cache_row_slots", None)
+                    if row_slots_fn is not None:
+                        row_slots = row_slots_fn(self.vllm_config)
+                        if row_slots is not None and row_slots != spec.head_size:
+                            spec = replace(
+                                spec, head_size=row_slots, head_size_v=row_slots
+                            )
                 kv_cache_spec[layer_name] = spec
 
         return kv_cache_spec

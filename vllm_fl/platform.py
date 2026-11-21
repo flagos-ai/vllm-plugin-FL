@@ -249,6 +249,70 @@ class PlatformFL(Platform):
             )
             compilation_config.cudagraph_mode = CUDAGraphMode.NONE
 
+        scheduler_config = vllm_config.scheduler_config
+        if (
+            scheduler_config is not None
+            and compilation_config.cudagraph_mode == CUDAGraphMode.FULL_DECODE_ONLY
+            and vllm_config.speculative_config is None
+        ):
+            max_decode_tokens = scheduler_config.max_num_seqs
+            if (
+                compilation_config.max_cudagraph_capture_size is None
+                or compilation_config.max_cudagraph_capture_size > max_decode_tokens
+            ):
+                compilation_config.max_cudagraph_capture_size = max_decode_tokens
+            if compilation_config.cudagraph_capture_sizes:
+                compilation_config.cudagraph_capture_sizes = [
+                    s
+                    for s in compilation_config.cudagraph_capture_sizes
+                    if s <= max_decode_tokens
+                ]
+
+        # Hardware-aware Roofline Decode-Slack Token-Budget Orchestration:
+        # When max_num_batched_tokens is at vLLM's online default (2048), reserve
+        # prefill_quantum + max_num_seqs so incoming prompts coalesce into single-step
+        # contiguous initial prefills alongside active decode tokens without breaking
+        # CUDAGraphs across 8-9 partial-chunk steps.
+        if (
+            os.environ.get("VLLM_FL_AUTO_BATCH_TOKENS", "1") == "1"
+            and scheduler_config is not None
+            and scheduler_config.max_num_batched_tokens in (None, 2048)
+            and model_config is not None
+            and not getattr(model_config, "is_encoder_decoder", False)
+            and parallel_config.pipeline_parallel_size == 1
+        ):
+            try:
+                total_mem = cls.get_device_total_memory(0)
+                max_seqs = int(scheduler_config.max_num_seqs or 128)
+                max_len = int(model_config.max_model_len or 131072)
+                target_quantum = int(os.environ.get("VLLM_FL_PREFILL_QUANTUM", "0"))
+                if target_quantum <= 0:
+                    if cls.vendor_name == "metax" and total_mem >= (48 << 30):
+                        target_quantum = min(8192, max_len)
+                    elif cls.vendor_name == "iluvatar" and total_mem >= (28 << 30):
+                        target_quantum = min(4096, max_len)
+                if target_quantum > 0:
+                    slack = ((max_seqs + 63) // 64) * 64
+                    target_tokens = min(max_len, target_quantum + slack)
+                    cur_tokens = int(scheduler_config.max_num_batched_tokens or 0)
+                    if target_tokens > cur_tokens:
+                        logger.info(
+                            "PlatformFL: elevating max_num_batched_tokens %s -> %d "
+                            "(Roofline prefill quantum %d + decode slack %d).",
+                            scheduler_config.max_num_batched_tokens,
+                            target_tokens,
+                            target_quantum,
+                            slack,
+                        )
+                        scheduler_config.max_num_batched_tokens = target_tokens
+                from vllm_fl.patches.scheduler_batching import (
+                    patch_vllm_scheduler_batching,
+                )
+
+                patch_vllm_scheduler_batching()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Auto batch token sizing skipped: %s", exc)
+
         # --------------------------------------------------------
         # maca specific config updates
         if cls.vendor_name == "metax":

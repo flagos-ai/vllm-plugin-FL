@@ -18,6 +18,7 @@ class RMSNormFL(RMSNorm):
         dtype: Optional[torch.dtype] = None,
     ) -> None:
         super().__init__(hidden_size, eps, var_hidden_size, has_weight, dtype)
+        _rms_norm.pre_resolve()
 
     def forward_oot(
         self,

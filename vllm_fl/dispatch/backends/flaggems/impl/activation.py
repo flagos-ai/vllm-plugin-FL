@@ -7,6 +7,7 @@ FlagGems activation operator implementations.
 from __future__ import annotations
 
 import torch
+from flag_gems.modules.activation import gems_silu_and_mul_merged
 
 
 def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
@@ -20,11 +21,7 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
-    from flag_gems.modules.activation import gems_silu_and_mul
-
-    d = x.shape[-1] // 2
-    x1, x2 = x[..., :d], x[..., d:]
-    return gems_silu_and_mul(x1, x2)
+    return gems_silu_and_mul_merged(x)
 
 
 def gelu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:

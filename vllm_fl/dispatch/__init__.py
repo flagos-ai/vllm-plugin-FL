@@ -77,6 +77,7 @@ Configuration File (YAML):
 """
 
 import os
+import torch
 
 from .types import OpImpl, BackendImplKind, BackendPriority, match_token
 from .registry import OpRegistry, OpRegistrySnapshot
@@ -182,7 +183,39 @@ class CachedOp:
         self._manager_epoch = -1
         self._policy_epoch = -1
 
+    def pre_resolve(self) -> None:
+        """Eagerly resolve the backend implementation outside torch.compile."""
+        if not _OP_FAST_PATH_ENABLED:
+            return
+        try:
+            mgr = get_default_manager()
+            impl = mgr._resolve_impl(self._op_name)
+            mgr._record_first_use(self._op_name, impl)
+            self._impl = impl
+            self._manager_id = id(mgr)
+            self._manager_epoch = mgr.policy_epoch
+            self._policy_epoch = get_policy_epoch()
+        except Exception:
+            pass
+
+    @torch._dynamo.disable
+    def _resolve_outside_compile(self):
+        mgr = get_default_manager()
+        impl = mgr._resolve_impl(self._op_name)
+        mgr._record_first_use(self._op_name, impl)
+        self._impl = impl
+        self._manager_id = id(mgr)
+        self._manager_epoch = mgr.policy_epoch
+        self._policy_epoch = get_policy_epoch()
+        return impl
+
     def __call__(self, *args, **kwargs):
+        if torch.compiler.is_compiling() and _OP_FAST_PATH_ENABLED and not self._use_manager_call:
+            impl = self._impl
+            if impl is None:
+                impl = self._resolve_outside_compile()
+            return impl.fn(*args, **kwargs)
+
         mgr = get_default_manager()
 
         if not _OP_FAST_PATH_ENABLED:
