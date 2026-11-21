@@ -46,25 +46,28 @@ constant. It is a deployment prerequisite for this runtime combination.
 The text attention backend is selected from its R-SWA capability requirements.
 On C550, an available FGV `paged_prefix_window_attention` API and compatible
 MACA KV-cache ABI enable vendor prefix/window decode for multiple requests.
-Native Triton retains KV layout, prefill, single-request decode and feature
-combinations outside that fast path. The documented image's original FGV pin
-does not provide the optional API, so that installation keeps native Triton.
+The optional `paged_causal_attention` API accelerates full and chunked prefill
+whose effective KV remains inside the original prompt. Mixed batches use
+scheduler metadata to split adjacent request runs, without moving KV data.
+Native Triton retains KV layout, single-request decode, generated multi-query
+requests and feature combinations outside those fast paths. The documented
+image's original FGV pin lacks these optional APIs and keeps native Triton.
 For the validated vendor provider, install the public runtime revision below
 inside the same image before starting the server:
 
 ```bash
 python -m pip install --no-deps --no-build-isolation --force-reinstall \
-  'git+https://github.com/cshujie131-bot/FlagGems-vllm.git@66c4970920c2834e23765a68bf7a08a16cae5874'
+  'git+https://github.com/cshujie131-bot/FlagGems-vllm.git@5cc9ef6214eb616a15cb84bafe2f94a96c9bdac3'
 ```
 
 This fixed revision preserves the image's e0055710 operator baseline and adds
-the public prefix/window API. Its numerical implementation and tests match
+the public prefix/window and paged causal APIs. Their implementations and tests match
 the [upstream operator submission](https://github.com/flagos-ai/FlagGems-vllm/pull/1386);
 the runtime pin avoids unrelated provider
-changes. Vendor decode is selected automatically from `use_rswa` when the API
-and native ABI are available; no model-specific backend switch is needed.
+changes. Vendor attention is selected automatically from `use_rswa` when each
+API and native ABI are available; no model-specific backend switch is needed.
 The startup example remains single-request serving. Multiple active decode
-requests are needed to select the vendor path; increasing the configured
+requests are needed to select vendor decode; increasing the configured
 sequence capacity alone does not change B1 dispatch.
 The TP1 example reserves 45% of the device memory and uses the default
 multimodal memory profiling. The MetaX split-half RoPE adapter retains the FGV

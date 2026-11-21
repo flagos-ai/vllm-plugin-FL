@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Retain Triton KV/prefill contracts and use MACA prefix/window decode."""
+"""Keep native KV contracts and route safe causal/prefix-window request runs."""
 
 from dataclasses import dataclass, fields
 
@@ -21,6 +21,7 @@ import triton
 import triton.language as tl
 
 import vllm.envs as envs
+from vllm.config import CUDAGraphMode
 from vllm.logger import init_logger
 from vllm.v1.attention.backend import AttentionType
 from vllm.v1.attention.backends.triton_attn import (
@@ -42,6 +43,14 @@ def vendor_rswa_available():
     return is_paged_prefix_window_attention_available()
 
 
+def vendor_causal_available():
+    try:
+        from flaggems_vllm import is_paged_causal_attention_available
+    except ImportError:
+        return False
+    return is_paged_causal_attention_available()
+
+
 @triton.jit
 def _disjoint_prefix_counts(PREFIX, LENGTHS, OUT, N: tl.constexpr,
                             WINDOW: tl.constexpr, BLOCK: tl.constexpr):
@@ -52,9 +61,28 @@ def _disjoint_prefix_counts(PREFIX, LENGTHS, OUT, N: tl.constexpr,
     tl.store(OUT + row, cut, row < N)
 
 
+@triton.jit
+def _normalize_query_starts(STARTS, OUT, ROW: tl.constexpr,
+                            TOKEN: tl.constexpr, N: tl.constexpr,
+                            BLOCK: tl.constexpr):
+    index = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    value = tl.load(STARTS + ROW + index, index < N, 0) - TOKEN
+    tl.store(OUT + index, value, index < N)
+
+
+@dataclass(frozen=True)
+class RSWAQueryRun:
+    kind: str
+    token_start: int
+    token_end: int
+    metadata: TritonAttentionMetadata
+    prefix_counts: torch.Tensor
+
+
 @dataclass
 class MetaXRSWAMetadata(TritonAttentionMetadata):
     disjoint_prefix_lens: torch.Tensor | None = None
+    query_runs: tuple[RSWAQueryRun, ...] = ()
 
 
 class MetaXRSWAMetadataBuilder(TritonAttentionMetadataBuilder):
@@ -66,13 +94,94 @@ class MetaXRSWAMetadataBuilder(TritonAttentionMetadataBuilder):
             vllm_config.scheduler_config.max_num_seqs,
             dtype=torch.int32, device=device,
         )
+        self._run_starts = torch.empty(
+            2 * vllm_config.scheduler_config.max_num_seqs + 1,
+            dtype=torch.int32, device=device,
+        )
+        mode = vllm_config.compilation_config.cudagraph_mode
+        parallel = vllm_config.parallel_config
+        # CPU boundaries are not exact for adaptive speculative verification.
+        # Full mixed graphs also cannot capture Python request classification.
+        self._split_requests = (
+            vllm_config.speculative_config is None
+            and (mode is None or mode.mixed_mode() != CUDAGraphMode.FULL)
+            and getattr(parallel, "decode_context_parallel_size", 1) == 1
+            and getattr(parallel, "prefill_context_parallel_size", 1) == 1
+        )
+
+    def _build_query_runs(self, base, common, cut):
+        if not self._split_requests or base.max_query_len <= 1 or cut is None:
+            return ()
+        starts = common.query_start_loc_cpu
+        lengths = common.seq_lens_cpu_upper_bound
+        prefixes = common.rswa_prefix_lens
+        if any(t is None or t.device.type != "cpu" for t in (starts, lengths, prefixes)):
+            return ()
+        count = common.num_reqs
+        offsets = starts[: count + 1].tolist()
+        upper = lengths[:count].tolist()
+        protected = prefixes[:count].tolist()
+        if len(offsets) != count + 1 or len(upper) != count or len(protected) != count:
+            return ()
+        if offsets[0] != 0 or offsets[-1] != base.num_actual_tokens:
+            return ()
+        kinds = []
+        for row in range(count):
+            size = offsets[row + 1] - offsets[row]
+            if size < 0 or upper[row] < size:
+                raise ValueError("Invalid R-SWA query/cache boundaries")
+            if size == 0:
+                kinds.append("skip")
+            elif size == 1:
+                kinds.append("decode")
+            elif upper[row] <= protected[row]:
+                # All keys for these queries are inside the protected prompt,
+                # so causal R-SWA is exactly ordinary causal attention.
+                kinds.append("prefill")
+            else:
+                kinds.append("native")
+        runs = []
+        first = cursor = 0
+        base_fields = {field.name: getattr(base, field.name)
+                       for field in fields(TritonAttentionMetadata)}
+        while first < count:
+            end = first + 1
+            while end < count and kinds[end] == kinds[first]:
+                end += 1
+            kind = kinds[first]
+            if kind != "skip":
+                n = end - first + 1
+                cu = self._run_starts[cursor:cursor + n]
+                cursor += n
+                _normalize_query_starts[(triton.cdiv(n, 128),)](
+                    base.query_start_loc, cu, first, offsets[first], n,
+                    128, num_warps=4,
+                )
+                run_fields = dict(base_fields)
+                run_fields.update(
+                    num_actual_tokens=offsets[end] - offsets[first],
+                    max_query_len=max(offsets[i + 1] - offsets[i]
+                                      for i in range(first, end)),
+                    query_start_loc=cu,
+                    max_seq_len=max(upper[first:end]),
+                    seq_lens=base.seq_lens[first:end],
+                    block_table=base.block_table[first:end],
+                    slot_mapping=base.slot_mapping[offsets[first]:offsets[end]],
+                    rswa_prefix_lens=base.rswa_prefix_lens[first:end],
+                )
+                runs.append(RSWAQueryRun(
+                    kind, offsets[first], offsets[end],
+                    TritonAttentionMetadata(**run_fields), cut[first:end],
+                ))
+            first = end
+        return tuple(runs)
 
     def build(self, common_prefix_len, common_attn_metadata, fast_build=False):
         if common_attn_metadata.num_reqs > self._prefix_counts.numel():
             raise ValueError("R-SWA metadata exceeds the configured request capacity")
         base = super().build(common_prefix_len, common_attn_metadata, fast_build)
         cut = None
-        if base.max_query_len == 1 and base.rswa_prefix_lens is not None:
+        if base.rswa_prefix_lens is not None:
             n = base.seq_lens.shape[0]
             if n > self._prefix_counts.numel():
                 raise ValueError("R-SWA metadata exceeds the configured request capacity")
@@ -86,6 +195,7 @@ class MetaXRSWAMetadataBuilder(TritonAttentionMetadataBuilder):
             **{field.name: getattr(base, field.name)
                for field in fields(TritonAttentionMetadata)},
             disjoint_prefix_lens=cut,
+            query_runs=self._build_query_runs(base, common_attn_metadata, cut),
         )
 
 
@@ -95,15 +205,15 @@ class MetaXRSWAImpl(TritonAttentionImpl):
         # Eligibility is determined before either numerical implementation
         # starts. Native Triton retains prefill, masks and unsupported layouts.
         meta = attn_metadata
+        if meta is None or (meta.max_query_len == 1 and meta.num_actual_tokens <= 1):
+            return super().forward(
+                layer, query, key, value, kv_cache, meta, output,
+                output_scale, output_block_scale,
+            )
         eligible = (
             meta is not None
             and self.attn_type == AttentionType.DECODER
-            and meta.max_query_len == 1
-            # Eager B1 is dominated by the two-call SDK wrapper. Keep the
-            # native segmented decode path for that measured regime.
-            and meta.num_actual_tokens > 1
             and getattr(meta, "disjoint_prefix_lens", None) is not None
-            and meta.num_actual_tokens == meta.seq_lens.shape[0]
             and meta.causal is True
             and meta.mm_prefix_range_tensor is None
             and self.head_size == 128
@@ -125,6 +235,56 @@ class MetaXRSWAImpl(TritonAttentionImpl):
         if not eligible:
             return super().forward(
                 layer, query, key, value, kv_cache, attn_metadata, output,
+                output_scale, output_block_scale,
+            )
+
+        if meta.max_query_len > 1:
+            runs = getattr(meta, "query_runs", ())
+            if not runs:
+                return super().forward(
+                    layer, query, key, value, kv_cache, meta, output,
+                    output_scale, output_block_scale,
+                )
+            import flaggems_vllm
+
+            causal_available = vendor_causal_available()
+            cache = kv_cache.transpose(1, 2)
+            k_cache, v_cache = cache.split(self.head_size, dim=-1)
+            # Decide every run's provider before numerical execution. Runtime
+            # failures propagate; no partially written batch is retried.
+            providers = [
+                "prefill" if run.kind == "prefill" and causal_available else
+                "decode" if run.kind == "decode" and
+                run.metadata.seq_lens.shape[0] > 1 else "native"
+                for run in runs
+            ]
+            for run, provider in zip(runs, providers):
+                start, end = run.token_start, run.token_end
+                run_q, run_out = query[start:end], output[start:end]
+                data = run.metadata
+                if provider == "prefill":
+                    flaggems_vllm.paged_causal_attention(
+                        run_q, k_cache, v_cache, data.query_start_loc,
+                        data.seq_lens, data.block_table, data.max_query_len,
+                        data.max_seq_len, self.scale, out=run_out,
+                    )
+                    logger.info_once("Using FGV/MACA paged causal R-SWA prefill")
+                elif provider == "decode":
+                    flaggems_vllm.paged_prefix_window_attention(
+                        run_q, k_cache, v_cache, data.seq_lens, data.block_table,
+                        run.prefix_counts, meta.rswa_window, self.scale, out=run_out,
+                    )
+                else:
+                    super().forward(
+                        layer, run_q, key[start:end] if key is not None else None,
+                        value[start:end] if value is not None else None,
+                        kv_cache, data, run_out, output_scale, output_block_scale,
+                    )
+            return output
+
+        if meta.num_actual_tokens != meta.seq_lens.shape[0]:
+            return super().forward(
+                layer, query, key, value, kv_cache, meta, output,
                 output_scale, output_block_scale,
             )
 
