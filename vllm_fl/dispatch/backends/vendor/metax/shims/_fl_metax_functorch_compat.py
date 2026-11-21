@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import os as _os
 
+from .._compat import legacy_torch_runtime
+
 _KEYS = {
     "autograd_cache_normalize_inputs": True,
 }
 
 
 def _enabled() -> bool:
-    return _os.environ.get("FL_METAX_FUNCTORCH_PATCH", "") != "0"
+    return legacy_torch_runtime() and _os.environ.get("FL_METAX_FUNCTORCH_PATCH", "") != "0"
 
 
 def install() -> dict:

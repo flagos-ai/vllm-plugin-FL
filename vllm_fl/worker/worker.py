@@ -225,7 +225,6 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
         # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
         # kernels inside spawned workers; when every rank shares the default
         # Triton cache directory, concurrent compilation of the same kernel
@@ -561,6 +560,7 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
+            vendor = getattr(current_platform, "vendor_name", None)
             if current_platform.device_type == "npu":
                 from vllm_fl.dispatch.backends.vendor.ascend.patches import (
                     ascend_v2_device,
@@ -571,13 +571,17 @@ class WorkerFL(WorkerBase):
                     GPUModelRunnerFLV2 as GPUModelRunnerV2,
                 )
             else:
-                if getattr(current_platform, "vendor_name", "") == "amd":
+                if vendor == "metax":
+                    from vllm_fl.worker.metax_v2 import prepare_metax_v2_runtime
+
+                    prepare_metax_v2_runtime(self.vllm_config)
+                elif vendor == "amd":
                     from vllm_fl.dispatch.backends.vendor.amd.v2_runner_compat import (
                         install_v2_runner_compat,
                     )
 
                     install_v2_runner_compat()
-                elif getattr(current_platform, "vendor_name", "") == "thead":
+                elif vendor == "thead":
                     # Platform-side adaptations for the upstream V2 runner; see
                     # vllm_fl/dispatch/backends/vendor/thead/patches/.
                     from vllm_fl.dispatch.backends.vendor.thead.patches import (
@@ -598,6 +602,12 @@ class WorkerFL(WorkerBase):
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
                 self.vllm_config, self.device
             )
+            if vendor == "metax":
+                init_logger("vllm.metax_v2").info_once(
+                    "MetaX V2 model runner: %s.%s",
+                    type(self.model_runner).__module__,
+                    type(self.model_runner).__qualname__,
+                )
         else:
             from vllm_fl.worker.model_runner import ModelRunnerFL
 
@@ -622,6 +632,16 @@ class WorkerFL(WorkerBase):
         ):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
 
+        if (
+            self.use_v2_model_runner
+            and getattr(current_platform, "vendor_name", None) == "metax"
+            and self.vllm_config.compilation_config.mode != CompilationMode.NONE
+        ):
+            # ModelRunnerFL normally resolves CachedOps before Dynamo tracing.
+            # Upstream V2 does not know FL's lazy dispatch registry.
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops()
         if self.vllm_config.weight_transfer_config is not None:
             self.weight_transfer_engine = WeightTransferEngineFactory.create_engine(
                 self.vllm_config.weight_transfer_config,
@@ -630,7 +650,10 @@ class WorkerFL(WorkerBase):
                 self.model_runner.get_model(),
             )
 
-        if self.device.type == "npu":
+        if (
+            self.device.type == "npu"
+            or getattr(current_platform, "vendor_name", "") == "metax"
+        ):
             # Keep the Dynamo thread guard stable from graph warmup to serving.
             set_torch_threads_for_runtime()
 
@@ -1147,9 +1170,13 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        # Ascend and Kunlunxin allow runtime JIT when kernel warmup is disabled.
-        jit_monitor_requires_warmup = (
+        # Ascend, MetaX and Kunlunxin permit runtime JIT without kernel warmup.
+        is_ascend_or_metax = (
             self.device.type == "npu"
+            or getattr(current_platform, "vendor_name", None) == "metax"
+        )
+        jit_monitor_requires_warmup = (
+            is_ascend_or_metax
             or getattr(current_platform, "vendor_name", None) == "kunlunxin"
         )
         if (
@@ -1170,7 +1197,7 @@ class WorkerFL(WorkerBase):
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
 
-        if self.device.type != "npu":
+        if not is_ascend_or_metax:
             set_torch_threads_for_runtime()
 
         return CompilationTimes(

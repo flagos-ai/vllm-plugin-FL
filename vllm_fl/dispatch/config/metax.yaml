@@ -29,6 +29,9 @@ op_backends:
   # attention_backend: prioritize vendor (MACA attention)
   attention_backend:
     - vendor:metax
+  # The generic alignment kernel does not handle MACA's invalid expert routes.
+  moe_align_block_size:
+    - vendor:metax
   # All other ops: prefer FlagGems (Triton), fallback to reference (PyTorch native)
   silu_and_mul:
     - flagos

@@ -17,10 +17,14 @@ import os
 import sys
 import types
 
+from .._compat import legacy_triton_runtime
+
 _STUB_MODULE = "_fl_triton_experimental_stub"
 
 
 def _env_enabled():
+    if not legacy_triton_runtime():
+        return False
     forced = os.environ.get("FL_TRITON_EXPERIMENTAL_STUB", "").strip().lower()
     if forced in ("0", "false", "off", "no"):
         return False
@@ -243,6 +247,8 @@ def _install_aggregate():
 
 
 def install():
+    if not legacy_triton_runtime():
+        return False
     forced = os.environ.get("FL_TRITON_EXPERIMENTAL_STUB", "").strip().lower()
     if forced in ("0", "false", "off", "no"):
         return False

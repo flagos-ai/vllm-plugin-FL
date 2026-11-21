@@ -55,8 +55,9 @@ class CommunicatorFL(DeviceCommunicatorBase):
                 from vllm.platforms import current_platform
 
                 vendor = getattr(current_platform, "vendor_name", None)
-                if self.device.type == "npu" or vendor == "amd":
-                    device_name = "AMD" if vendor == "amd" else "NPU"
+                is_metax_cuda = vendor == "metax" and self.device.type == "cuda"
+                if self.device.type == "npu" or vendor == "amd" or is_metax_cuda:
+                    device_name = {"amd": "AMD", "metax": "MetaX"}.get(vendor, "NPU")
                     raise RuntimeError(
                         f"FlagCX requested on {device_name} but failed to initialize"
                     ) from self.pyflagcx_comm.init_error

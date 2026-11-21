@@ -59,6 +59,8 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
 for the full official vLLM 0.32 CUDA image, pinned development dependencies,
 upstream V1/V2 runners and regression commands. FlagGems remains enabled.
+For MetaX C550, follow the [MetaX guide](./docs/usage/metax.md) for the pinned
+vLLM 0.32 MetaX image, setup, and serving commands.
 The NVIDIA setup targets vLLM 0.32.
 The source installation example below targets `0.5.0-dev` and uses vLLM 0.32.0,
 matching this branch's dependency declaration. Backend validation is tracked

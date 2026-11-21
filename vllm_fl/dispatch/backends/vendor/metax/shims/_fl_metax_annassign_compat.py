@@ -27,13 +27,15 @@ import importlib.abc as _abc
 import os as _os
 import sys as _sys
 
+from .._compat import legacy_triton_runtime
+
 _TARGET = "triton.compiler.code_generator"
 _MARK = "_fl_metax_annassign_patched"
 _STUB_MARK = "default: call visit_Assign"
 
 
 def _enabled():
-    return _os.environ.get("FL_METAX_ANNASSIGN_PATCH", "") != "0"
+    return legacy_triton_runtime() and _os.environ.get("FL_METAX_ANNASSIGN_PATCH", "") != "0"
 
 
 def _is_broken(text):

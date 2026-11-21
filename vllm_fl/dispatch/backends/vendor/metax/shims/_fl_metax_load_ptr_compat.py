@@ -18,6 +18,8 @@ import importlib.machinery
 import os
 import sys
 
+from .._compat import legacy_triton_runtime
+
 _TARGETS = (
     "vllm.v1.worker.gpu.buffer_utils",
     "vllm.v1.worker.gpu.block_table",
@@ -29,7 +31,7 @@ _STATE = {"armed": False, "patched": [], "detail": "init",
 
 def _enabled():
     v = os.environ.get("FL_METAX_LOAD_PTR_PATCH", "1").strip().lower()
-    return v not in ("", "0", "false", "no", "off")
+    return legacy_triton_runtime() and v not in ("", "0", "false", "no", "off")
 
 
 def _metax_active():

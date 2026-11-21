@@ -1,4 +1,4 @@
-"""MetaX (MACA) compatibility shims for the vLLM 0.28 empty wheel.
+"""MetaX (MACA) compatibility shims for the supported runtime stacks.
 
 These modules patch ``torch`` / ``triton`` / ``vllm`` in memory before the
 affected kernels are first compiled. They used to be installed as ``.pth``
@@ -22,6 +22,7 @@ modules. ``FL_BOOT_SHIMS_PATCH=0`` disables the whole set.
 
 import os
 
+from .._compat import legacy_torch_runtime, legacy_triton_runtime
 from ._fl_metax_gate import metax_active
 
 _MASTER_SWITCH = "FL_BOOT_SHIMS_PATCH"
@@ -41,20 +42,25 @@ def install() -> bool:
     if not metax_active() or not _master_enabled():
         return False
 
-    # Import order matters only for the triton stub: it must be registered
-    # before vllm's triton_utils imports triton.experimental.gluon.
-    from . import _fl_triton_experimental_stub  # noqa: F401
+    if legacy_triton_runtime():
+        # Keep the stub before the AST hooks and before vllm.triton_utils.
+        from . import _fl_triton_experimental_stub  # noqa: F401
+        from . import (  # noqa: F401
+            _fl_metax_annassign_compat,
+            _fl_metax_boolchain_compat,
+            _fl_metax_kths_compat,
+            _fl_metax_load_ptr_compat,
+        )
 
-    from . import (  # noqa: F401
-        _fl_metax_annassign_compat,
-        _fl_metax_boolchain_compat,
-        _fl_metax_functorch_compat,
-        _fl_metax_kths_compat,
-        _fl_metax_load_ptr_compat,
-        _fl_metax_moe_is_monolithic_compat,
-        _fl_metax_sampler_compat,
-        _fl_metax_torch_accel,
-    )
+    if legacy_torch_runtime():
+        from . import (  # noqa: F401
+            _fl_metax_functorch_compat,
+            _fl_metax_torch_accel,
+        )
+
+    # These work around vendor MoE/sampler behavior rather than a specific
+    # compiler API. A compiler upgrade alone does not establish correctness.
+    from . import _fl_metax_moe_is_monolithic_compat, _fl_metax_sampler_compat  # noqa: F401
     return True
 
 

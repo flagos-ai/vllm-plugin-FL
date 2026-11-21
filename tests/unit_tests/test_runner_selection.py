@@ -570,7 +570,7 @@ def test_ascend_forces_breakable_graph_off(monkeypatch, existing):
     assert os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] == "0"
 
 
-@pytest.mark.parametrize("vendor", ["metax", "iluvatar"])
+@pytest.mark.parametrize("vendor", ["metax", "iluvatar", "musa"])
 @pytest.mark.parametrize("requested", [None, "0", "1"])
 def test_register_preserves_upstream_runner_selection(monkeypatch, vendor, requested):
     from types import SimpleNamespace

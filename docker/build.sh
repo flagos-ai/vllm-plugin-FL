@@ -31,11 +31,11 @@ UBUNTU_VERSION="${UBUNTU_VERSION:-22.04}"
 VLLM_VERSION="${VLLM_VERSION:-0.19.0}"
 CANN_VERSION="${CANN_VERSION:-8.5.1}"
 CANN_CHIP="${CANN_CHIP:-910b}"
-METAX_BASE_IMAGE="${METAX_BASE_IMAGE:-harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-metax-0.20.0-maca.ai3.7.0.107-torch2.8-py312-ubuntu22.04-amd64}"
+METAX_BASE_IMAGE="${METAX_BASE_IMAGE:-harbor.baai.ac.cn/flagrelease-public/minicpm-ocr-1.0-metax-c550-gems5.5.0-pluginfl-0601420-vllm0.24.0-maca3.8.1.3:20261021@sha256:7c810404a21cb60d0a6d1f532baca82d1dea8ee428231f7fb066d609aacbadcf}"
 METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
-METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
-METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
+METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.8.1.3}"
+METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.32.0}"
 AMD_BASE_IMAGE="${AMD_BASE_IMAGE:-docker.io/vllm/vllm-openai-rocm:latest}"
 AMD_FLAGOS_RUNTIME_IMAGE="${AMD_FLAGOS_RUNTIME_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-amd-rocm7.2.4:2.3.0}"
 AMD_VLLM_VERSION="${AMD_VLLM_VERSION:-0.32.0}"
@@ -391,7 +391,7 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
         --build-arg "VLLM_VERSION=${METAX_VLLM_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="vllm-metax-${METAX_VLLM_VERSION}-maca.ai${METAX_MACA_VERSION}-torch2.8-${METAX_PYTHON_TAG}-ubuntu22.04-amd64-ci-git"
+        IMAGE_TAG="vllm-metax-${METAX_VLLM_VERSION}-maca.ai${METAX_MACA_VERSION}-torch2.10-${METAX_PYTHON_TAG}-ubuntu24.04-amd64-ci-git"
     fi
 elif [[ "${PLATFORM}" == "musa" ]]; then
     PYTHON_VERSION="${MUSA_PYTHON_VERSION}"

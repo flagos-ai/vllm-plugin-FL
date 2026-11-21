@@ -8,23 +8,25 @@
 # TODO(hank): Remove this once the torch issue is resolved.
 # _____________________________________________________
 
-import torch
 import copy
 import inspect
+from collections.abc import Sequence
+from typing import Any, Literal
 
-from torch._functorch._aot_autograd.schemas import AOTConfig
+import torch
 from torch._functorch._aot_autograd.autograd_cache import (
-    check_cacheable,
     AOTAutogradCacheDetails,
     AOTAutogradCachePickler,
+    check_cacheable,
 )
+from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._inductor.compile_fx import _CompileFxKwargs
-
+from torch._inductor.standalone_compile import CompiledArtifact, config, log
+from torch._inductor.utils import InputType
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch._inductor.standalone_compile import CompiledArtifact, config, log
-from typing import Literal, Sequence, Any
-from torch._inductor.utils import InputType
+
+from .._compat import legacy_torch_runtime
 
 
 def autograd_cache_key(
@@ -70,9 +72,8 @@ def standalone_compile_impl(
 ) -> CompiledArtifact:
     artifact_type = _get_compiled_artifact_type()
 
-    from torch.compiler._cache import CacheArtifactManager
-
     from torch._inductor.compile_fx import compile_fx
+    from torch.compiler._cache import CacheArtifactManager
 
     ignore_shape_env = False
     if dynamic_shapes == "from_example_inputs":
@@ -188,11 +189,15 @@ def standalone_compile(
 
 import torch._inductor
 
-torch._inductor.standalone_compile = standalone_compile
+if legacy_torch_runtime():
+    torch._inductor.standalone_compile = standalone_compile
 
 import torch._functorch._aot_autograd.autograd_cache
 
-torch._functorch._aot_autograd.autograd_cache.autograd_cache_key = autograd_cache_key
+if legacy_torch_runtime():
+    torch._functorch._aot_autograd.autograd_cache.autograd_cache_key = (
+        autograd_cache_key
+    )
 
 
 # -------------------------------------------------------------------
@@ -233,4 +238,5 @@ def __setattr__(self, name, value):
 
 from torch.backends.cuda import matmul
 
-matmul.__class__.__setattr__ = __setattr__
+if legacy_torch_runtime():
+    matmul.__class__.__setattr__ = __setattr__

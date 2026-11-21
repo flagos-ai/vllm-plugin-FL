@@ -4,7 +4,7 @@
 import ast
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
@@ -94,7 +94,10 @@ def test_npu_routing_preserves_scores_and_drops_padding(
     )
 
 
-def test_other_platform_keeps_upstream_padded_dispatch(router_functions):
+def test_other_platform_keeps_upstream_padded_dispatch(monkeypatch, router_functions):
+    platforms = ModuleType("vllm.platforms")
+    platforms.current_platform = SimpleNamespace(vendor_name="nvidia")
+    monkeypatch.setitem(sys.modules, platforms.__name__, platforms)
     mask = torch.tensor([True])
     router_functions["_get_padding_mask"] = lambda size: mask
     router_functions["_is_ascend_npu_tensor"] = lambda value: False

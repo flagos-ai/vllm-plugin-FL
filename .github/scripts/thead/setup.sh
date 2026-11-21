@@ -96,7 +96,7 @@ PY
   "pytest-xdist>=3.0.0" \
   "pytest-cov>=7.0.0" \
   "pytest-json-report>=1.5.0"
-"$PY" -I -B "$HERE/../install_flaggems_vllm.py"
+"$PY" -I -B "$HERE/../install_flaggems_vllm.py" --source-archive
 "$PY" -I -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   for name in THEAD_CI_WORK_DIR THEAD_CI_PYTHON VIRTUAL_ENV PATH HOME XDG_CACHE_HOME \

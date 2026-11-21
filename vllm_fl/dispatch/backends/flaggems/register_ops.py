@@ -30,6 +30,13 @@ def _bind_is_available(fn, is_available_fn):
     return wrapper
 
 
+def _supports_moe_alignment(is_available) -> bool:
+    from vllm.platforms import current_platform
+
+    # The generic kernel does not safely handle MetaX's padded expert IDs.
+    return getattr(current_platform, "vendor_name", None) != "metax" and is_available()
+
+
 def register_builtins(registry) -> None:
     """
     Register all FlagGems (DEFAULT) operator implementations.
@@ -123,7 +130,10 @@ def register_builtins(registry) -> None:
             op_name="moe_align_block_size",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            fn=_bind_is_available(
+                backend.moe_align_block_size,
+                functools.partial(_supports_moe_alignment, is_avail),
+            ),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
