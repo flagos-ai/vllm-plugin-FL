@@ -14,6 +14,7 @@ from transformers import PreTrainedTokenizerFast
 from vllm.config import ModelConfig
 from vllm.multimodal.processing.context import InputProcessingContext, TimingContext
 from vllm.multimodal.processing.inputs import ProcessorInputs
+from vllm.multimodal.utils import group_and_batch_mm_kwargs
 
 from vllm_fl.models.unlimited_ocr import UnlimitedOCRForCausalLM
 
@@ -109,3 +110,47 @@ def test_multiple_pages_keep_aspect_ratio_at_base_resolution(processor):
     torch.testing.assert_close(pixels, expected, rtol=0, atol=1e-6)
     assert data["images_spatial_crop"].tolist() == [[1, 1], [1, 1]]
     assert landscape.size == (2048, 1024) and portrait.size == (1024, 2048)
+
+
+@pytest.mark.parametrize("order", [(0, 1, 2), (1, 0, 2), (1, 2, 0), (0, 1, 0, 2)])
+def test_mixed_page_batch_preserves_local_crops(processor, order):
+    page = Image.new("RGB", (2048, 2048), "red")
+    page.paste("blue", (1024, 0, 2048, 1024))
+    page.paste("green", (0, 1024, 1024, 2048))
+    page.paste("white", (1024, 1024, 2048, 2048))
+    single = _apply(processor, [page])["mm_kwargs"]
+    double = _apply(processor, [page, Image.new("RGB", (2048, 2048), "blue")])[
+        "mm_kwargs"
+    ]
+    items = [*single["image"], *double["image"]]
+    selected = [items[i] for i in order]
+    batches = list(group_and_batch_mm_kwargs([("image", item) for item in selected]))
+    assert len(batches) == 1
+    modality, count, data = batches[0]
+    assert modality == "image" and count == len(order)
+    expected_crops = torch.cat(
+        [
+            item["images_crop"].data
+            for item in selected
+            if item["images_crop"].data.numel()
+        ]
+    )
+    assert data["images_crop"].shape == (16 * order.count(0), 3, 640, 640)
+    torch.testing.assert_close(data["images_crop"], expected_crops, rtol=0, atol=0)
+    torch.testing.assert_close(
+        data["pixel_values"],
+        torch.stack([item["pixel_values"].data for item in selected]),
+        rtol=0,
+        atol=0,
+    )
+
+
+@pytest.mark.parametrize("local_size", [512, 640])
+def test_empty_crops_keep_requested_local_resolution(processor, local_size):
+    page = Image.new("RGB", (2048, 2048), "red")
+    kwargs = {"image_size": local_size}
+    result = _apply(processor, [page, page], kwargs)
+    data = result["mm_kwargs"].get_data()
+    assert data["images_crop"].shape == (0, 3, local_size, local_size)
+    assert data["pixel_values"].shape == (2, 3, 1024, 1024)
+    assert kwargs == {"image_size": local_size}

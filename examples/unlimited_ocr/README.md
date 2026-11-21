@@ -104,6 +104,9 @@ directly to the 1024 base resolution, retaining each page's aspect ratio as in
 the reference multi-page path. The effective size and crop mode form part of
 the encoder-cache identity, so single-page crops and multi-page base views
 have separate entries.
+Empty local-crop fields retain the local crop resolution, so batching them
+with single-page requests cannot pad real crops to the global-view size.
 Assess transcription quality with the page layout and resolution in use.
-Mixed single-page and multi-page concurrency has a baseline transcription
-failure and is not qualified by the standalone page checks above.
+Mixed batching preserves per-page preprocessing geometry. Isolated character
+errors remain in reverse-ordered multi-page transcription; the standalone
+page checks do not establish dataset-level OCR accuracy.
