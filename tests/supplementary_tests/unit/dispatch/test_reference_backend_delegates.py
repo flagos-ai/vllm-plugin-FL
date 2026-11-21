@@ -77,11 +77,23 @@ class TestIsAvailableImportError:
     def test_cached_result_skips_probe(self, backend, monkeypatch):
         """Once cached, the probe body (and the import) never re-runs."""
         ReferenceBackend._available = False
-        # Any import attempt would prove the probe re-ran.
-        monkeypatch.setattr(
-            "builtins.__import__",
-            lambda *a, **k: (_ for _ in ()).throw(AssertionError("probe re-ran")),
+        # Only the probe's own ``import torch`` would prove the probe re-ran;
+        # every other import is delegated to the real builtin because
+        # pytest's own machinery (linecache/tokenize, plugin teardown) keeps
+        # importing modules while this test runs and would otherwise crash
+        # the whole session.
+        real_import = (
+            __builtins__["__import__"]
+            if isinstance(__builtins__, dict)
+            else __builtins__.__import__
         )
+
+        def torch_only_import(name, *args, **kwargs):
+            if name == "torch":
+                raise AssertionError("probe re-ran")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.__import__", torch_only_import)
         assert backend.is_available() is False
 
 
