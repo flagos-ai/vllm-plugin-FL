@@ -10,7 +10,7 @@ Use the vLLM 0.32.0 MetaX release image `harbor.baai.ac.cn/flagrelease-public/me
 
 ### Prepare runtime sources
 
-Run the following once in each fresh release container, from the model plugin checkout. The image imports vLLM from `/opt/vllm`. Fast-forward that checkout to the pinned 0.32.0 revision with the DSpark resampling counter fix before starting either node.
+Run the following once in each fresh release container, from the model plugin checkout. The image imports vLLM from `/opt/vllm`. Fast-forward that checkout to the pinned 0.32.0 revision with the DSpark resampling counter fix and the small-batch local AV allocator before starting either node. The DP8 profile uses up to eight requests per DP and five drafts per request, which fit the allocator’s single-warp path.
 
 ```bash
 python3 examples/deepseek_v41/prepare_metax_sources.py vllm /opt/vllm

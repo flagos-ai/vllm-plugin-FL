@@ -45,6 +45,6 @@
   "vllm_runtime": {
     "repository": "https://github.com/cshujie131-bot/vllm.git",
     "image_base": "5df63a7203cdb9328d824a27b682e77c7b9928be",
-    "revision": "abd6d8dd3dbe3f6e78087d8310e277135a455048"
+    "revision": "421cdcbc0f746274f2c09016430df1c2b3a82c62"
   }
 }
