@@ -16,6 +16,12 @@ Run the following once in each fresh release container, from the model plugin ch
 python3 examples/deepseek_v41/prepare_metax_sources.py vllm /opt/vllm
 ```
 
+For the operator source deployment, apply the pinned [SiLU tuning change](https://github.com/flagos-ai/FlagGems-vllm/pull/1387) to the dedicated FlagGems-vllm Git checkout that already contains the W4A8, Engram and sparse-attention APIs listed above. Run this during source preparation, before mounting the checkouts read-only or installing the operator package. Git stages the backport in that checkout.
+
+```bash
+python3 examples/deepseek_v41/prepare_metax_sources.py FlagGems-vllm "$SOURCE_ROOT/FlagGems-vllm"
+```
+
 ## Start the two nodes
 
 Run the [DP8 launcher](../../examples/deepseek_v41/metax_dp8_serve.sh) in each container. Supply the original local checkpoint path, the address of node 0, each node's own address and the inter-node network interface. The example uses local host Engram tables and requires sufficient host RAM and shared memory on both nodes.

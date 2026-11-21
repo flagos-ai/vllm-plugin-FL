@@ -14,7 +14,7 @@
     "FlagGems-vllm": {
       "repository": "https://github.com/flagos-ai/FlagGems-vllm",
       "upstream_base": "b434eafb1715849d1019ddcd480c5fc39461665c",
-      "src_sha256": "96e69875428dca4d50f8963a71ff6969f5ae40dcccb28294934c061d8290c880",
+      "src_sha256": "485ab784c16e7bf7332db61cf205877eddb33da272421f7eab1afdc2e872ccb3",
       "changed_source_files": {
         "src/flaggems_vllm/__init__.py": "917bc489b9b9de08c4d8fc7f1bb6100e4ab37d73c372065f19159c4e32cf4b5e",
         "src/flaggems_vllm/ops/__init__.py": "613d9e7418a8502c9f5a3639671ac47da33a676cf935aae6cd20546be2f0c9de",
@@ -37,9 +37,14 @@
         "src/flaggems_vllm/runtime/backend/_metax/ops/moe_align_block_size.py": "a549d5b5005b5dfe1ebdf65f92342790aa2f8e4492e29271837695b761eec9b2",
         "src/flaggems_vllm/runtime/backend/_metax/ops/persistent_topk.py": "bcb97f3390709fe6f58178a6d57dc96bd1d6cb6e544aedecb851cbc6c97b7a05",
         "src/flaggems_vllm/runtime/backend/_metax/tune_configs.yaml": "099160edae5c5b05db9b7e18766595c0beba45f5a9a87ad300326d572086ac46",
-        "src/flaggems_vllm/runtime/backend/_nvidia/tune_configs.yaml": "a308b3c17b5075c338c4b79965459fdee103e71b71de0772684e813ea9a0f947"
+        "src/flaggems_vllm/runtime/backend/_nvidia/tune_configs.yaml": "a308b3c17b5075c338c4b79965459fdee103e71b71de0772684e813ea9a0f947",
+        "src/flaggems_vllm/ops/silu_and_mul_with_clamp.py": "627ee488ea58ab6ed9147f1c8246e7dded394efc51af3f2148c1e797c6efd56a"
       },
-      "removed_source_files": []
+      "removed_source_files": [],
+      "silu_backport": {
+        "repository": "https://github.com/cshujie131-bot/FlagGems-vllm.git",
+        "revision": "3c39898de3236b67e27b9c2865f59356e83b2b07"
+      }
     }
   },
   "vllm_runtime": {
