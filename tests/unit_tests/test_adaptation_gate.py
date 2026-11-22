@@ -282,9 +282,7 @@ def test_runner_routes_standard_tasks_through_smoke_files(monkeypatch):
     ("case_count", "expected_quiet"),
     [(1, False), (2, True)],
 )
-def test_e2e_runner_streams_single_case_live(
-    monkeypatch, case_count, expected_quiet
-):
+def test_e2e_runner_streams_single_case_live(monkeypatch, case_count, expected_quiet):
     runner = object.__new__(TestRunner)
     runner.config = SimpleNamespace(e2e_serial=False, platform="demo")
     runner.report = SimpleNamespace(results=[])

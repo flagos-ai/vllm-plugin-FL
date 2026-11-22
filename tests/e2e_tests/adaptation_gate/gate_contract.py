@@ -87,7 +87,13 @@ def quality_checks(
         positions.append(position)
         if position >= 0:
             cursor = position + len(str(term))
-    mojibake_markers = ("\ufffd", chr(0x00C3), chr(0x00C2), "\u00e2\u20ac", "\u00ef\u00bf\u00bd")
+    mojibake_markers = (
+        "\ufffd",
+        chr(0x00C3),
+        chr(0x00C2),
+        "\u00e2\u20ac",
+        "\u00ef\u00bf\u00bd",
+    )
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return {
         "non_empty": bool(normalized),
@@ -456,7 +462,10 @@ def format_gate_scenario_log(
     """One grep-friendly log line with the real per-scenario counters."""
     passed_requests = sum(1 for output in outputs if output.get("passed") is True)
     passed_checks = sum(
-        1 for output in outputs for passed in output.get("checks", {}).values() if passed
+        1
+        for output in outputs
+        for passed in output.get("checks", {}).values()
+        if passed
     )
     total_checks = len(outputs) * len(QUALITY_CHECKS)
     return (
@@ -504,6 +513,7 @@ def run_concurrent_scenario(
     port: Any,
 ) -> list[dict[str, Any]]:
     """Execute one scenario: one client, one gather, one JSON document."""
+
     async def execute() -> list[dict[str, Any]]:
         client, http_client = create_gate_client(
             base_url=base_url, api_key=api_key, timeout=timeout

@@ -121,7 +121,9 @@ def resolve_case_image(case: dict[str, Any], repo_root: Path | str) -> Path:
             f"root: {raw!r}"
         ) from error
     if not candidate.is_file():
-        raise ValueError(f"Chat case {_case_name(case)!r} image_path is not a file: {raw!r}")
+        raise ValueError(
+            f"Chat case {_case_name(case)!r} image_path is not a file: {raw!r}"
+        )
     return candidate
 
 
@@ -219,7 +221,9 @@ def validate_gate_case(case: dict[str, Any], task: str) -> None:
     if case.get("task") != task:
         raise ValueError(f"Gate chat case {name!r} must declare task: {task}")
     scenario = case.get("scenario")
-    contract = GATE_SCENARIO_CONTRACT.get(scenario) if isinstance(scenario, str) else None
+    contract = (
+        GATE_SCENARIO_CONTRACT.get(scenario) if isinstance(scenario, str) else None
+    )
     if contract is None:
         raise ValueError(
             f"Gate chat case {name!r} references unknown scenario {scenario!r}; "
@@ -237,11 +241,15 @@ def validate_gate_case(case: dict[str, Any], task: str) -> None:
         or not expected
         or not all(isinstance(term, str) for term in expected)
     ):
-        raise ValueError(f"Gate chat case {name!r} needs a non-empty expected list of strings")
+        raise ValueError(
+            f"Gate chat case {name!r} needs a non-empty expected list of strings"
+        )
     for field_name in ("min_length", "max_tokens"):
         value = case.get(field_name)
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise ValueError(f"Gate chat case {name!r} needs an integer {field_name} >= 1")
+            raise ValueError(
+                f"Gate chat case {name!r} needs an integer {field_name} >= 1"
+            )
     if case.get("image_path"):
         prompt = case.get("prompt")
         if not isinstance(prompt, str) or not prompt.strip():
@@ -264,7 +272,9 @@ def gate_entry(case: dict[str, Any], repo_root: Path | str) -> dict[str, Any]:
     }
 
 
-def build_request_body(messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
+def build_request_body(
+    messages: list[dict[str, Any]], max_tokens: int
+) -> dict[str, Any]:
     """Raw ``/chat/completions`` JSON body for one gate request.
 
     Sampling is part of the gate contract: deterministic temperature and
@@ -302,7 +312,9 @@ def assemble_gate_extra_args(
     ``base_args`` must already contain the ModelConfig-derived serving
     arguments; the media directory is derived from the cases themselves.
     """
-    return apply_local_media_flag(list(base_args), local_media_directory(cases, repo_root))
+    return apply_local_media_flag(
+        list(base_args), local_media_directory(cases, repo_root)
+    )
 
 
 def validate_gate_chat_cases(
@@ -351,15 +363,21 @@ def validate_gate_chat_cases(
         for field_name in ("min_length", "max_tokens"):
             value = case.get(field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError(f"Gate chat case {name!r} needs an integer {field_name} >= 1")
+                raise ValueError(
+                    f"Gate chat case {name!r} needs an integer {field_name} >= 1"
+                )
         if case.get("image_path"):
             prompt = case.get("prompt")
             if not isinstance(prompt, str) or not prompt.strip():
-                raise ValueError(f"Image gate chat case {name!r} needs a non-empty prompt")
+                raise ValueError(
+                    f"Image gate chat case {name!r} needs a non-empty prompt"
+                )
         else:
             messages = case.get("messages")
             if not isinstance(messages, list) or not messages:
-                raise ValueError(f"Text gate chat case {name!r} needs non-empty messages")
+                raise ValueError(
+                    f"Text gate chat case {name!r} needs non-empty messages"
+                )
         counts[scenario] = counts.get(scenario, 0) + 1
 
     problems = []
