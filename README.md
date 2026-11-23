@@ -228,7 +228,8 @@ If there are multiple plugins in the current environment, you can specify use vl
 The [serve example](./examples/hy4_c550_serve.sh) targets two eight-card MetaX
 C550 nodes with the MetaX vLLM 0.24.0 runtime, the HY4-Preview
 `compressed-tensors` W8A8 checkpoint, BF16 activations and BF16 KV.
-It uses eager execution, TP16, PP1, expert parallelism and TCP.
+It uses eager execution, TP16, PP1, expert parallelism and RDMA collectives on
+`inbond1`.
 Install FL with the MetaX-specific FlagGems-vllm dependency. The pin includes
 the public C550 BF16 sparse MLA provider from
 [FlagGems-vllm #1364](https://github.com/flagos-ai/FlagGems-vllm/pull/1364).
@@ -246,6 +247,10 @@ Run on both nodes with the same checkpoint and dependencies. Set
 MODEL_DIR=/path/to/checkpoint NODE_RANK=0 NODE_IP="$LOCAL_IP" MASTER_ADDR="$HEAD_IP" \
     bash examples/hy4_c550_serve.sh
 ```
+
+Collectives default to RDMA on `SOCKET_IFNAME=inbond1`. Set `NET_TRANSPORT=tcp`
+to use TCP, or `SOCKET_IFNAME=auto` to leave the interface variables unset when
+the runtime already provides them.
 
 The example appends an INT8 linear exclusion using the existing dispatch
 override for compatibility with the MetaX baseline's FlagGems scaled-matmul
