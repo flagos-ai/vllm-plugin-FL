@@ -605,10 +605,38 @@ class TritonExpertsFL(TritonExperts):
                     )
                 )
                 return
-            # An unsupported combination falls through to the generic path so
-            # the caller gets the dispatch-selected implementation rather than
-            # a silently different kernel. The eligibility check runs before
-            # any compute, so a half-applied activation cannot leak here.
+            # The gate rejected this configuration. Falling through is not an
+            # option on TXDA: the generic Triton ``fused_moe_kernel`` uses
+            # ``tl.dot``, which this same method documents as producing wrong
+            # values here. Reject before any compute instead of running a
+            # known-bad kernel (or the unusable reference fallback).
+            if os.environ.get("VLLM_FL_TXDA_MOE_FALLBACK", "0").lower() in (
+                "1", "true", "on",
+            ):
+                logger.warning_once(
+                    "VLLM_FL_TXDA_MOE_FALLBACK=1: running the generic TXDA MoE "
+                    "path for an unsupported configuration; results may be "
+                    "incorrect."
+                )
+            else:
+                raise ValueError(
+                    "TXDA MoE has no verified kernel for this configuration "
+                    f"(activation={activation.value!r}, "
+                    f"quant={self.quant_config.quant_dtype!r}, "
+                    f"per_channel_quant={self.per_act_token_quant}, "
+                    f"block_shape={self.block_shape}, "
+                    f"apply_router_weight_on_input="
+                    f"{apply_router_weight_on_input}, "
+                    "expert_map="
+                    f"{'yes' if expert_map is not None else 'no'}). "
+                    "The FlagGems TX81 compact-grouped path requires "
+                    "silu-family activation, no expert map, no "
+                    "router-weight-on-input and plain bf16/fp16 or "
+                    "INT8-w8a16 with scales; FlagGems must be >= 5.5.0. "
+                    "Adjust the model/quantization, or set "
+                    "VLLM_FL_TXDA_MOE_FALLBACK=1 to force the generic path "
+                    "at your own risk."
+                )
 
         # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
         # adapters can be injected between GEMM1/activation/GEMM2.

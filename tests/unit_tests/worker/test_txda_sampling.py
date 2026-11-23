@@ -23,7 +23,7 @@ class _StopBeforeOutputCopy:
         raise _AfterGeneratorRollback
 
 
-def _runner_methods():
+def _runner_methods(device_type="txda"):
     # Execute the actual runner methods without importing its accelerator-only
     # dependencies, so the RNG regression also runs on CPU-only CI.
     path = Path(__file__).parents[3] / "vllm_fl/worker/model_runner.py"
@@ -40,6 +40,9 @@ def _runner_methods():
         "torch": torch,
         "np": np,
         "envs": SimpleNamespace(VLLM_COMPUTE_NANS_IN_LOGITS=False),
+        # The runner reads current_platform to pick TXDA's exact-state
+        # restore vs. the upstream rollback; the AST harness must supply it.
+        "current_platform": SimpleNamespace(device_type=device_type),
     }
     exec(
         compile(
@@ -99,7 +102,8 @@ def test_discarded_cpu_sample_restores_state_but_keeps_accepted_sample(speculati
 
 
 def test_accelerator_generator_keeps_philox_offset_rollback():
-    sample, bookkeeping = _runner_methods()
+    """Other accelerators keep upstream's fixed Philox rollback."""
+    sample, bookkeeping = _runner_methods(device_type="cuda")
     generator = Mock(device=SimpleNamespace(type="cuda"))
     generator.get_offset.return_value = 16
     batch = SimpleNamespace(
@@ -122,3 +126,41 @@ def test_accelerator_generator_keeps_philox_offset_rollback():
     generator.get_state.assert_not_called()
     generator.set_state.assert_not_called()
     generator.set_offset.assert_called_once_with(12)
+
+
+def test_txda_snapshot_only_covers_discarded_requests():
+    """TXDA restores the exact pre-sampling state; accepted requests are kept."""
+    sample, bookkeeping = _runner_methods(device_type="txda")
+    generators = {i: torch.Generator().manual_seed(200 + i) for i in range(2)}
+    initial = {i: g.get_state().clone() for i, g in generators.items()}
+    batch = SimpleNamespace(
+        sampling_metadata=SimpleNamespace(generators=generators),
+        update_async_output_token_ids=Mock(),
+        num_reqs=2,
+        generators=generators,
+        req_ids=["kept", "discarded"],
+        req_id_to_index={"kept": 0, "discarded": 1},
+    )
+
+    def draw(*args, **kwargs):
+        for g in generators.values():
+            torch.rand(5, generator=g)
+        return _StopBeforeOutputCopy()
+
+    runner = SimpleNamespace(
+        input_batch=batch,
+        sampler=draw,
+        rejection_sampler=draw,
+        use_async_scheduling=False,
+        _get_spec_decode_draft_probs=lambda metadata: None,
+        discard_request_mask=SimpleNamespace(np=np.array([False, True])),
+    )
+    result = sample(runner, None, None)
+    kept_state = generators[0].get_state().clone()
+    with pytest.raises(_AfterGeneratorRollback):
+        bookkeeping(runner, None, result, None, None, 2)
+
+    # TXDA keeps the exact snapshot: the accepted request keeps its draw, the
+    # discarded one is rewound to the pre-sampling state.
+    assert torch.equal(generators[1].get_state(), initial[1])
+    assert torch.equal(generators[0].get_state(), kept_state)

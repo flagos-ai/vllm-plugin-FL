@@ -696,9 +696,13 @@ class WorkerFL(WorkerBase):
         # torch.cuda handle the live capture path already uses on ROCm.
         # XPU stays excluded (see #39977).
         cudagraph_memory_estimate = 0
+        # ``is_cuda_alike`` already covers CUDA and ROCm; keeps MUSA, Metax and
+        # the other graph-capable vendors that relied on it. TXDA and Kunlunxin
+        # run graphs off the accelerator stream but still need the budget, so
+        # they are added to the original condition rather than replacing it.
         if (
             (
-                current_platform.is_cuda()
+                current_platform.is_cuda_alike()
                 or getattr(current_platform, "vendor_name", None) == "kunlunxin"
                 or current_platform.device_type == "txda"
             )

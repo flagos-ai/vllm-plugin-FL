@@ -128,7 +128,6 @@ def install_mamba_align_native() -> None:
     global _installed
     if _installed:
         return
-    _installed = True
 
     from vllm.model_executor.layers.mamba.mamba_utils import is_conv_state_dim_first
     from vllm.v1.worker import mamba_utils
@@ -275,3 +274,4 @@ def install_mamba_align_native() -> None:
     ctx_cls.run_fused_postprocess_align = _postprocess_align
     ctx_cls._fl_txda_native_align = True
     logger.info("Installed native TXDA Mamba align state copies")
+    _installed = True

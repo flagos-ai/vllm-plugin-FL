@@ -173,7 +173,6 @@ def install_block_table_native() -> None:
     global _installed
     if _installed:
         return
-    _installed = True
 
     from vllm.v1.attention.backends.utils import PAD_SLOT_ID
     from vllm.v1.worker.gpu import block_table as bt_mod
@@ -241,3 +240,4 @@ def install_block_table_native() -> None:
     bu.FusedStagedWriter.apply = _fused_apply
 
     logger.info("Installed native TXDA block-table gather / slot mapping")
+    _installed = True

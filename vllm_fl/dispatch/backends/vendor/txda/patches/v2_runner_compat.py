@@ -169,47 +169,62 @@ def install_v2_runner_compat() -> None:
 
     Call before the V2 runner is constructed so that the buffers, graph
     capture and stream primitives are created with the adapted helpers.
-    Idempotent.
+
+    The body is transactional: it snapshots every global it is about to
+    replace, and a failure restores them all so a retry starts clean. The
+    completion flag is only set once every step succeeded; otherwise a partially
+    applied install would make the next call return early and leave the process
+    with mismatched buffers, graphs and kernels.
     """
     global _installed
     if _installed:
         return
-    _installed = True
 
-    install_cuda_aliases()
-
-    from vllm.v1.worker.gpu import buffer_utils
-
-    # TXDA has no pinned/mapped host memory, so the V2 buffers always take the
-    # explicit-copy fallback. Override the answer only when the probe fails, so
-    # a build that grows real UVA keeps the upstream path.
-    if not mapped_host_buffers_available():
-        buffer_utils.is_uva_available = _uva_unavailable
-
-    # ``cudagraph_utils`` binds the process-group context manager at import
-    # time; reuse the device-agnostic context that the V1 ``ModelRunnerFL``
-    # resolves for this platform (FlagCX uses the accelerator stream APIs).
-    from vllm.v1.worker.gpu import cudagraph_utils
+    from vllm.v1.worker.gpu import buffer_utils, cudagraph_utils
 
     from vllm_fl.worker.model_runner import graph_capture as fl_graph_capture
 
-    if getattr(cudagraph_utils.graph_capture, "__name__", "") != getattr(
-        fl_graph_capture, "__name__", None
-    ):
-        cudagraph_utils.graph_capture = fl_graph_capture
+    from . import block_table_native, mamba_align
 
-    # The "align" Mamba state kernels address memory through runtime-loaded
-    # pointers, which the TXDA Triton backend miscompiles; swap in native
-    # tensor copies. See mamba_align.py.
-    from . import mamba_align
+    # Snapshot every global a step may replace, so a later failure can restore
+    # them all.
+    prev_is_uva = buffer_utils.is_uva_available
+    prev_graph_capture = cudagraph_utils.graph_capture
+    prev_flags = (mamba_align._installed, block_table_native._installed)
 
-    mamba_align.install_mamba_align_native()
+    def _rollback() -> None:
+        buffer_utils.is_uva_available = prev_is_uva
+        cudagraph_utils.graph_capture = prev_graph_capture
+        mamba_align._installed, block_table_native._installed = prev_flags
 
-    # The per-group block-table gather and the per-token slot mapping also
-    # address memory through runtime-loaded pointers; without the native
-    # replacements every token maps to KV slot 0 and the logits go NaN.
-    from . import block_table_native
+    try:
+        install_cuda_aliases()
 
-    block_table_native.install_block_table_native()
+        # TXDA has no pinned/mapped host memory, so the V2 buffers always take
+        # the explicit-copy fallback. Override only when the probe fails, so a
+        # build that grows real UVA keeps the upstream path.
+        if not mapped_host_buffers_available():
+            buffer_utils.is_uva_available = _uva_unavailable
 
+        # ``cudagraph_utils`` binds the process-group context manager at import
+        # time; reuse the device-agnostic context that the V1 ``ModelRunnerFL``
+        # resolves for this platform (FlagCX uses the accelerator stream APIs).
+        if getattr(cudagraph_utils.graph_capture, "__name__", "") != getattr(
+            fl_graph_capture, "__name__", None
+        ):
+            cudagraph_utils.graph_capture = fl_graph_capture
+
+        # The "align" Mamba state kernels address memory through
+        # runtime-loaded pointers, which the TXDA Triton backend miscompiles;
+        # swap in native tensor copies. See mamba_align.py.
+        mamba_align.install_mamba_align_native()
+
+        # The per-group block-table gather and the per-token slot mapping have
+        # the same defect; without them every token maps to KV slot 0.
+        block_table_native.install_block_table_native()
+    except Exception:
+        _rollback()
+        raise
+
+    _installed = True
     logger.info("Installed V2 runner adaptations (non-UVA buffers, FL graph capture)")

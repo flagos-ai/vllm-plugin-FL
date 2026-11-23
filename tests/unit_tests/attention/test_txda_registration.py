@@ -94,9 +94,11 @@ def test_dispatch_config_routes_txda_kernels():
         "flagos",
         "reference",
     ]
-    # rms_norm falls back across all three; the vendor impl is pure-torch
-    # (FlagGems Triton kernel exceeds the TXDA shared-memory limit).
-    assert config["op_backends"]["rms_norm"] == ["flagos", "vendor", "reference"]
+    # rms_norm is selected up front, not by error fallback: the FlagGems Triton
+    # kernel cannot run on TXDA (shared-memory limit) and an in-place residual
+    # path could have mutated its input before failing, so the vendor entry
+    # (which delegates to the shared reference contract) is the only candidate.
+    assert config["op_backends"]["rms_norm"] == ["vendor"]
     assert config["op_backends"]["invoke_fused_moe_triton_kernel"] == [
         "flagos",
         "vendor",

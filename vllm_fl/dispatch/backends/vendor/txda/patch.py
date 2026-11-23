@@ -105,21 +105,6 @@ def patch_current_stream_for_txda():
     # (pynccl, cuda_graph, ubatching, ray_communicator, our flagcx, ...).
     # Modules imported later pick up the patched attribute automatically.
     rebound = []
-    for mod_name, mod in list(sys.modules.items()):
-        if mod is None:
-            continue
-        try:
-            if mod.current_stream is _orig_current_stream:
-                mod.current_stream = _current_stream_txda
-                rebound.append(mod_name)
-        except AttributeError:
-            continue
-    torch_utils._fl_txda_stream_patched = True
-    logger.info(
-        "Patched vllm.utils.torch_utils.current_stream -> torch.txda"
-        ".current_stream (live lookup; rebound: %s)",
-        rebound or "none",
-    )
 
     def _undo() -> None:
         torch_utils.current_stream = _orig_current_stream
@@ -131,6 +116,29 @@ def patch_current_stream_for_txda():
             ):
                 mod.current_stream = _orig_current_stream
 
+    # Register the undo before mutating anything, so a module attribute that
+    # raises something other than AttributeError still leaves the global
+    # restorable instead of half-patched.
+    try:
+        for mod_name, mod in list(sys.modules.items()):
+            if mod is None:
+                continue
+            try:
+                if mod.current_stream is _orig_current_stream:
+                    mod.current_stream = _current_stream_txda
+                    rebound.append(mod_name)
+            except AttributeError:
+                continue
+    except Exception:
+        _undo()
+        raise
+
+    torch_utils._fl_txda_stream_patched = True
+    logger.info(
+        "Patched vllm.utils.torch_utils.current_stream -> torch.txda"
+        ".current_stream (live lookup; rebound: %s)",
+        rebound or "none",
+    )
     return _undo
 
 
