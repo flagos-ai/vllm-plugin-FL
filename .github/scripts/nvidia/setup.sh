@@ -7,6 +7,14 @@ git config --global --add safe.directory "$(pwd)"
 
 export PYTHONPATH=/opt/triton
 
+# Pin flaggems-vllm to the validated v0.2.0 release. The base image ships
+# 0.3.0.dev20261119 which triggers illegal-memory-access crashes during
+# CUDA-graph profiling on H20 with Qwen3.6-35B-A3B MoE (TMA descriptor
+# fault in mm, and a second fault in the fused_silu activation path).
+FLAGGEMS_VLLM_COMMIT=b5c2c2249319277ccda4d41aa0f65164bd9b2a19
+pip install --no-deps --no-build-isolation \
+    "flaggems-vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@${FLAGGEMS_VLLM_COMMIT}"
+
 # The test extras include pytest, pytest-xdist, and the audio dependencies.
 pip install --no-build-isolation -e ".[test]"
 

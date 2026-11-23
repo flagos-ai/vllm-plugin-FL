@@ -85,14 +85,14 @@ FROM base AS dev
 RUN PYTHONPATH=/opt/triton \
     pip install --no-cache-dir \
         pytest \
-        pytest-xdist>=3.0.0 \
+        "pytest-xdist>=3.0.0" \
         pytest-cov \
         pytest-timeout \
         pytest-json-report \
         numpy \
         requests \
         decorator \
-        "modelscope>=1.18.1" \
+        modelscope \
         ruff \
         pre-commit \
         ninja \

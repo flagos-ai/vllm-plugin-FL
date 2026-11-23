@@ -76,5 +76,13 @@ flagos_blacklist:
   # token batch. FlagGems 5.3.5 can cross-wire those rows under concurrency,
   # producing outputs from another request or repeated punctuation on A800.
   - scatter_
-# No NVIDIA OOT implementation is disabled without a reproduced model failure.
+  # No NVIDIA OOT implementation is disabled without a reproduced model failure.
+  # FlagGems Hopper TMA matmul triggers an illegal-memory-access in
+  # cuTensorMapEncodeTiled during CUDA-graph profiling on H20 with
+  # flaggems-vllm ≥ 0.3.0.dev (MoE expert routing produces transposed
+  # intermediates whose lifetime does not survive the profiling teardown).
+  # Confirmed by downgrade to flaggems-vllm v0.2.0; also blacklisted in
+  # nvidia_hopper.yaml. Fall back to cuBLAS.
+  - mm
+  - mm_out
 oot_blacklist: []
