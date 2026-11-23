@@ -159,20 +159,29 @@ def test_user_codegen_key_is_not_reserved(monkeypatch):
     assert config.additional_config == {"fl_gcu_codegen": "customer"}
 
 
+@pytest.mark.parametrize("vendor", ["enflame", "iluvatar", "kunlunxin"])
 @pytest.mark.parametrize("device", ["gcu", "cuda"])
 @pytest.mark.parametrize("native_available", [False, True])
 @pytest.mark.parametrize("backend", ["inductor", "eager"])
 def test_ir_provider_merge_preserves_device_and_build_guards(
-    monkeypatch, device, native_available, backend
+    monkeypatch, vendor, device, native_available, backend
 ):
     import vllm_fl.platform as platform_mod
 
+    # Both attributes belong to the simulated platform. Leaving vendor_name
+    # host-dependent makes this test assert CUDA priorities on Kunlunxin.
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
     monkeypatch.setattr(PlatformFL, "device_type", device)
     monkeypatch.setattr(platform_mod, "_vllm_c_available", lambda: native_available)
     config = config_for_platform(backend=backend)
     priority = PlatformFL.get_default_ir_op_priority(config)
     expected = ["native"]
-    if device != "gcu" and backend != "inductor" and native_available:
+    if (
+        vendor != "kunlunxin"
+        and device != "gcu"
+        and backend != "inductor"
+        and native_available
+    ):
         expected = ["vllm_c", "native"]
     assert priority.rms_norm == expected
     assert priority.fused_add_rms_norm == expected

@@ -18,11 +18,21 @@
 platform: hygon
 
 # Docker image for this hardware.
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci
+# vLLM 0.32.0 empty wheel + this plugin (non-editable) on the FlagOS 2.2 Hygon
+# base image; see docs/usage/hygon.md#vllm-032-experimental-path.
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-hygon-ci
 
 # Runner labels for this hardware.
 runner_labels:
   - hg-cicd-vllm-plugin-0240
+
+# Keep the extra-device unit matrix non-empty. `_platform_test.yml` builds it
+# from this list, and an empty matrix creates no job while still marking the
+# reusable-workflow call as failed, which turns ci-gate red even when every
+# rendered job passed. The unit pass already runs inside the functional job on
+# this runner, so this entry duplicates that pass. Drop it once the workflow
+# guards the empty case.
+unit_devices: [bw1000]
 
 # Container volumes (hardware-specific paths).
 container_volumes:
