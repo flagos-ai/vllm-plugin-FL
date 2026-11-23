@@ -342,6 +342,30 @@ def _register_gdn_packed_decode_patch() -> bool:
     return patch_fn()
 
 
+
+def _register_minicpm5_moe():
+    """Register MiniCPM5-15B-A2.5B (MoE) with vLLM's model/config registries.
+
+    The implementation lives in ``vllm_fl.models.minicpm5_moe`` (ported from
+    vLLM PR #68748) instead of patching vLLM, so stock vLLM 0.32 builds can
+    serve the checkpoint.
+    """
+    from vllm.model_executor.models import ModelRegistry
+    from vllm.transformers_utils.config import (
+        _CONFIG_REGISTRY,
+        _register_config_class,
+    )
+
+    from vllm_fl.models.minicpm5_moe_config import MiniCPM5MoEConfig
+
+    _CONFIG_REGISTRY["minicpm5_moe"] = MiniCPM5MoEConfig
+    _register_config_class("minicpm5_moe", MiniCPM5MoEConfig)
+    ModelRegistry.register_model(
+        "MiniCPM5MoEForCausalLM",
+        "vllm_fl.models.minicpm5_moe:MiniCPM5MoEForCausalLM",
+    )
+
+
 def register_model():
     """Register FL runtime extensions after vLLM model discovery."""
 
@@ -382,6 +406,9 @@ def register_model():
         return
 
     _register_flagcx_connector()
+
+    # Model-side support shipped by this plugin (stock vLLM has no entry).
+    _register_minicpm5_moe()
 
     # Register OOT quant kernels so kernel selection can find them
     register_quant_linear()
