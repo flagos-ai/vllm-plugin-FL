@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Published with the FlagRelease MiniCPM-OCR-1.0 MetaX deployment recipe:
-# https://modelscope.cn/models/FlagRelease/MiniCPM-OCR-1.0-BF16-metax-FlagOS
-ARG METAX_BASE_IMAGE=harbor.baai.ac.cn/flagrelease-public/minicpm-ocr-1.0-metax-c550-gems5.5.0-pluginfl-0601420-vllm0.24.0-maca3.8.1.3:20261021@sha256:7c810404a21cb60d0a6d1f532baca82d1dea8ee428231f7fb066d609aacbadcf
+ARG METAX_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-metax-maca3.8.1.3:2.3.0
 
 # ---------- base stage ----------
 FROM ${METAX_BASE_IMAGE} AS base
+
+# The FlagOS 2.3.0 runtime exports PYTHONPATH=/opt/flagtree through
+# /etc/profile.d via BASH_ENV. Docker RUN uses /bin/sh, which ignores it,
+# so FlagTree would be invisible while building.
+SHELL ["/bin/bash", "-c"]
 
 ENV DEBIAN_FRONTEND=noninteractive \
     GEMS_VENDOR=metax \

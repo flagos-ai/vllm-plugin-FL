@@ -18,7 +18,7 @@
 platform: metax
 
 # Docker image for this hardware.
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-metax-ci@sha256:734c6f7d620e2ca3be4fa382a9e2cd6e1d345a310e2e502f11317b5521b886ae
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-metax-2.3.0-ci@sha256:f2f3759ee5fb7b85a5d699b7e2c2a1b4cc9f93c3514619ee07e206d1a4dab932
 
 # Runner labels for this hardware.
 # Keep this aligned with the MetaX C550 runner label.

@@ -36,7 +36,7 @@ def native_versions() -> dict[str, str]:
             marker in distribution.version.lower()
             for marker in ("metax", "maca", "flagos")
         )
-        if name not in ("vllm", "vllm-plugin-fl") and (
+        if name not in ("vllm", "vllm-plugin-fl", "flaggems-vllm") and (
             name.startswith(_NATIVE_PREFIXES) or vendor_build
         ):
             versions[name] = distribution.version
