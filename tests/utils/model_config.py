@@ -150,23 +150,6 @@ class GenerateConfig:
 
 
 @dataclass
-class VerificationConfig:
-    """External verification case pack selected by a model test phase."""
-
-    source: str = ""
-    serving_scenarios: list[str] = field(default_factory=list)
-    concurrent_scenarios: list[str] = field(default_factory=list)
-
-    @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> VerificationConfig:
-        return cls(
-            source=str(raw.get("source", "")),
-            serving_scenarios=list(raw.get("serving_scenarios", [])),
-            concurrent_scenarios=list(raw.get("concurrent_scenarios", [])),
-        )
-
-
-@dataclass
 class ServeConfig:
     """Serving test configuration parsed from the ``serve`` section.
 
@@ -301,7 +284,6 @@ class ModelConfig:
     generate: GenerateConfig = field(default_factory=GenerateConfig)
     serve: ServeConfig = field(default_factory=ServeConfig)
     concurrent: ConcurrentConfig = field(default_factory=ConcurrentConfig)
-    verification: VerificationConfig = field(default_factory=VerificationConfig)
 
     @classmethod
     def load(
@@ -383,7 +365,6 @@ class ModelConfig:
 
         # Concurrent config (optional; defaults apply when absent)
         concurrent = ConcurrentConfig.from_dict(raw.get("concurrent") or {})
-        verification = VerificationConfig.from_dict(raw.get("verification") or {})
 
         return cls(
             model=model,
@@ -392,7 +373,6 @@ class ModelConfig:
             generate=generate,
             serve=serve,
             concurrent=concurrent,
-            verification=verification,
         )
 
     def engine_kwargs(self, **overrides: Any) -> dict[str, Any]:
