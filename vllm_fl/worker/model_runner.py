@@ -329,9 +329,10 @@ def _device_graph_capture(
         yield graph_capture_context
 
 
-if current_platform.dist_backend == "flagcx" or current_platform.device_type in (
-    "musa",
-    "npu",
+if (
+    current_platform.dist_backend == "flagcx"
+    or current_platform.device_type in ("musa", "npu")
+    or getattr(current_platform, "vendor_name", None) == "kunlunxin"
 ):
     graph_capture = _device_graph_capture
 
@@ -7943,7 +7944,7 @@ class ModelRunnerFL(
             2 if self.model_config.hf_config.model_type == "longcat_flash" else 1
         )
         attn_groups = [g for groups in self.attn_groups for g in groups]
-        if self.speculative_config:
+        if self.speculative_config and get_pp_group().is_last_rank:
             attn_groups += getattr(self.drafter, "draft_attn_groups", [])
         bind_kv_cache(
             kv_caches,

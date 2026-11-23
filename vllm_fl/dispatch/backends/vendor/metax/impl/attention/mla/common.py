@@ -213,7 +213,7 @@ from ..ops.merge_attn_states import merge_attn_states
 from ..utils.fa_utils import get_flash_attn_version
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.distributed.parallel_state import get_dcp_group
-from vllm.model_executor.layers.batch_invariant import (
+from vllm.model_executor.determinism.batch_invariant import (
     _batch_invariant_MODE as _bi_mode,
 )
 from vllm.model_executor.layers.linear import (

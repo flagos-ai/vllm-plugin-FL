@@ -7,6 +7,30 @@ from types import SimpleNamespace
 import pytest
 
 
+def test_amd_sparse_mla_rejected_before_dispatch(monkeypatch):
+    import vllm_fl.dispatch
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", "amd")
+
+    def fake_dispatch(op_name, *, use_mla, use_sparse):
+        assert (op_name, use_mla, use_sparse) == ("attention_backend", True, False)
+        return "dense_backend"
+
+    monkeypatch.setattr(vllm_fl.dispatch, "call_op", fake_dispatch)
+    with pytest.raises(NotImplementedError, match="Sparse MLA"):
+        PlatformFL.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=True, use_sparse=True)
+        )
+
+    assert (
+        PlatformFL.get_attn_backend_cls(
+            None, SimpleNamespace(use_mla=True, use_sparse=False)
+        )
+        == "dense_backend"
+    )
+
+
 def _make_ascend_vllm_config(
     *, backend="eager", compilation_mode=None, cudagraph_mode=None, enforce_eager=False
 ):
@@ -82,13 +106,50 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
-    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+    if vendor == "ascend":
+        expected = requested
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == expected
+
+
+@pytest.mark.parametrize("requested", [None, "0", "1"])
+def test_hygon_preserves_upstream_runner_selection(monkeypatch, requested):
+    """Hygon follows upstream's default (V2) and never pins the env var.
+
+    Unlike the vendors above, Hygon runs the upstream V2 runner, so
+    ``register()`` must leave ``VLLM_USE_V2_MODEL_RUNNER`` untouched: unset
+    stays unset (upstream picks V2), and explicit requests are honoured.
+    """
+    import os
+    from types import SimpleNamespace
+
+    import vllm_fl
+    import vllm_fl.utils
+
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    # Stub out the real vendor hooks: applying the Hygon patches would rebind
+    # process-global vLLM helpers and leak state into other tests.
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
+    monkeypatch.setattr(
+        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="hygon")
+    )
+
+    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    if requested is None:
+        assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
+    else:
+        assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == requested
 
 
 @pytest.mark.parametrize(
     "device_type,vendor,error_pattern",
     [
-        ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
@@ -105,6 +166,114 @@ def test_accelerator_rejects_explicit_upstream_v2_runner(
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
     with pytest.raises(ValueError, match=error_pattern):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
+
+
+def test_kunlunxin_accepts_v2_model_runner(monkeypatch):
+    """Kunlunxin P800 supports the V2 model runner as of vLLM 0.32."""
+    from types import SimpleNamespace
+
+    from vllm.config import CUDAGraphMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "kunlunxin")
+    parallel_config = SimpleNamespace(
+        worker_cls=None,
+        all2all_backend=None,
+        data_parallel_size=1,
+        tensor_parallel_size=1,
+    )
+    vllm_config = SimpleNamespace(
+        parallel_config=parallel_config,
+        model_config=None,
+        scheduler_config=SimpleNamespace(),
+        cache_config=None,
+        compilation_config=SimpleNamespace(
+            compile_sizes=[],
+            cudagraph_mode=CUDAGraphMode.NONE,
+        ),
+        attention_config=None,
+        use_v2_model_runner=True,
+    )
+    # Must not raise; kunlunxin no longer blocks the upstream V2 runner.
+    PlatformFL.check_and_update_config(vllm_config)
+    assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+
+@pytest.mark.parametrize("requested, expected", [(None, None), ("0", "0"), ("1", "1")])
+def test_kunlunxin_register_preserves_v2_default(monkeypatch, requested, expected):
+    """Kunlunxin no longer forces VLLM_USE_V2_MODEL_RUNNER=0 at registration."""
+    import os
+    from types import SimpleNamespace
+
+    import vllm_fl
+    import vllm_fl.utils
+
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    monkeypatch.setenv("VLLM_MOE_SKIP_PADDING", "1")
+    monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_install_kunlunxin_fla_alias", lambda: None)
+    monkeypatch.setattr(
+        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="kunlunxin")
+    )
+
+    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    assert os.environ["VLLM_MOE_SKIP_PADDING"] == "0"
+    if expected is None:
+        assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
+    else:
+        assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+
+
+@pytest.mark.parametrize(
+    ("requested", "sizes", "expected_mode", "expected_sizes"),
+    [
+        ("FULL_AND_PIECEWISE", [1, 2, 4, 8, 16, 32], "FULL_DECODE_ONLY", [1, 2, 4, 8]),
+        ("FULL_AND_PIECEWISE", [16, 32], "NONE", []),
+        ("PIECEWISE", [1, 2, 4, 8], "NONE", []),
+        ("NONE", [], "NONE", []),
+    ],
+)
+def test_kunlunxin_uses_bounded_native_decode_graphs(
+    monkeypatch, caplog, requested, sizes, expected_mode, expected_sizes
+):
+    from types import SimpleNamespace
+
+    from vllm.config import CUDAGraphMode
+    from vllm.config.compilation import CompilationMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "kunlunxin")
+    config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode[requested])
+    config.compilation_config.cudagraph_capture_sizes = sizes
+    config.compilation_config.max_cudagraph_capture_size = max(sizes, default=0)
+    config.kernel_config = SimpleNamespace(enable_jit_warmup=True)
+
+    PlatformFL.apply_config_platform_defaults(config)
+    assert config.compilation_config.mode == CompilationMode.NONE
+
+    PlatformFL.check_and_update_config(config)
+
+    assert config.compilation_config.cudagraph_mode == CUDAGraphMode[expected_mode]
+    assert config.kernel_config.enable_jit_warmup is False
+    assert config.compilation_config.cudagraph_capture_sizes == expected_sizes
+    assert config.compilation_config.max_cudagraph_capture_size == max(
+        expected_sizes, default=0
+    )
+    warned = "Kunlunxin graph capture disabled" in caplog.text
+    assert warned is (requested == "FULL_AND_PIECEWISE" and not expected_sizes)
+    if warned:
+        assert str(sizes) in caplog.text
 
 
 @pytest.mark.parametrize("tp", [1, 4])
@@ -232,7 +401,8 @@ def test_enflame_rejects_only_hybrid_speculative_align_cache(
     assert config.cache_config.mamba_cache_mode == mamba_cache_mode
 
 
-def test_ascend_preserves_full_decode_graphs(monkeypatch):
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_ascend_preserves_full_decode_graphs(monkeypatch, use_v2):
     from vllm.config import CUDAGraphMode
 
     from vllm_fl.platform import PlatformFL
@@ -240,10 +410,16 @@ def test_ascend_preserves_full_decode_graphs(monkeypatch):
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
     monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY)
+    config.use_v2_model_runner = use_v2
 
     PlatformFL.check_and_update_config(config)
 
     assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+    from vllm.config.compilation import CompilationMode
+
+    assert config.compilation_config.mode is (
+        CompilationMode.NONE if use_v2 else CompilationMode.VLLM_COMPILE
+    )
     assert config.compilation_config.backend == "eager"
     assert config.compilation_config.compile_sizes == []
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.FULL_DECODE_ONLY
@@ -476,6 +652,7 @@ def test_ir_defaults_follow_kernel_availability(
         platform_module, "_vllm_c_available", lambda: cuda_kernels_available
     )
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
     config = SimpleNamespace(
         compilation_config=SimpleNamespace(
             backend="inductor", mode=CompilationMode.NONE

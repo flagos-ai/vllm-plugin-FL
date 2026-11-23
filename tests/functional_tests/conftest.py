@@ -13,7 +13,7 @@ from the root tests/conftest.py. Only functional-specific fixtures belong here.
 import pytest
 
 
-@pytest.hookimpl(trylast=True)
+@pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionfinish(session, exitstatus):
     """Force clean exit after all plugins finish to avoid NPU GC destructor crash.
 
@@ -21,15 +21,18 @@ def pytest_sessionfinish(session, exitstatus):
     during interpreter shutdown, causing a segfault at a random GC location
     (e.g. _pytest/mark/structures.py) even after all tests have passed.
 
-    trylast=True ensures this hook runs after all other plugins (json-report,
-    coverage, etc.) have flushed their output files. os._exit() then bypasses
-    Python GC entirely, preventing the NPU destructor crash.
+    The outer wrapper resumes after terminal/JUnit/JSON/coverage hooks and
+    xdist's workerfinished notification. A regular trylast hook exits inside
+    those wrappers and makes every completed worker look crashed.
 
     It also drains any residual inductor SubprocPool whose _read_thread could
     segfault when the subprocess pipe breaks during NPU teardown.
     """
+    result = yield
+
     import contextlib
     import os
+    import sys
     import threading
 
     # --- drain residual inductor subprocess pool (if any) ---
@@ -62,4 +65,10 @@ def pytest_sessionfinish(session, exitstatus):
                 read_thread.join(timeout=3.0)
 
     # --- bypass Python GC to avoid NPU destructor memory corruption ---
-    os._exit(int(exitstatus))
+    # Other finish hooks may update the session's status after entry. Keep
+    # their nonzero result, then flush before bypassing interpreter teardown.
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(OSError, ValueError):
+            stream.flush()
+    os._exit(int(session.exitstatus))
+    return result

@@ -36,30 +36,32 @@ METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
 METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
 METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
+AMD_BASE_IMAGE="${AMD_BASE_IMAGE:-docker.io/vllm/vllm-openai-rocm:latest}"
+AMD_FLAGOS_RUNTIME_IMAGE="${AMD_FLAGOS_RUNTIME_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-amd-rocm7.2.4:2.3.0}"
+AMD_VLLM_VERSION="${AMD_VLLM_VERSION:-0.32.0}"
+AMD_PYTHON_VERSION="${AMD_PYTHON_VERSION:-3.12}"
+AMD_FLAGTREE_VERSION="${AMD_FLAGTREE_VERSION:-0.7.0+amd3.6}"
+AMD_FLAGGEMS_COMMIT="${AMD_FLAGGEMS_COMMIT:-292cec32414fbfea3745df5e5d640dd0fad210d7}"
+AMD_FLAGCX_COMMIT="${AMD_FLAGCX_COMMIT:-591cfbf}"
 MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06}"
 MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
 MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
-ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.28.0}"
-ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
-ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3b406c36212744b98b9720bf6d0a5387c09fe96b}"
-ASCEND_FLAGTREE_VERSION="${ASCEND_FLAGTREE_VERSION:-0.6.2a1+ascend3.5}"
+ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.32.0}"
+ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-ascend-cann9.0.0-910c:2.2.0-0.3.0@sha256:fc83d07a4fbecd090dc471e9caa5d978dc34715fcfcca537b7bbf720a298dd51}"
 ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853}"
 ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.10.6}"
 ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
 ENFLAME_VLLM_VERSION="${ENFLAME_VLLM_VERSION:-0.28.0}"
-KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/plugin/xvllm-ubuntu2204-py310-torch29-0200:v20.0.10.0}"
-KUNLUNXIN_DRIVER_VERSION="${KUNLUNXIN_DRIVER_VERSION:-5.0.21.43}"
+KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-kunlunxin-xre5.37.1:2.3.0-0.3.0@sha256:db1cceff13d438142abfd695500ac0820ebfe6ae13d909017a2ce073ac607b17}"
+KUNLUNXIN_DRIVER_VERSION="${KUNLUNXIN_DRIVER_VERSION:-5.37.1}"
 KUNLUNXIN_PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION:-3.10}"
 KUNLUNXIN_TORCH_VERSION="${KUNLUNXIN_TORCH_VERSION:-2.9.0}"
-KUNLUNXIN_VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION:-0.20.2}"
-KUNLUNXIN_FLAGGEMS_REF="${KUNLUNXIN_FLAGGEMS_REF:-v5.0.0}"
-KUNLUNXIN_FLAGCX_REF="${KUNLUNXIN_FLAGCX_REF:-v0.13.0}"
-KUNLUNXIN_PLUGIN_FL_REF="${KUNLUNXIN_PLUGIN_FL_REF:-38e7dbc20197e2db742c4e4c9687d36ea4df9900}"
-HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.baai.ac.cn/plugin/hygon-dtk26.04-tree0.6.0hcu3.6-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt2100-x64:202609041747@sha256:d2530485457ede1d17dbb26704a3d4408d760ff3e363402599e1738dc5828807}"
-HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.28.0}"
+KUNLUNXIN_VLLM_VERSION="0.32.0"
+HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-hygon-dtk26.04:2.2.0-0.3.0@sha256:40fcd205387f48339d6b6e143ccc9e9c1566e37ba26e73f07f0d9b13465c70f5}"
+HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.32.0}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
 HYGON_PYTHON_VERSION="${HYGON_PYTHON_VERSION:-3.10}"
 THEAD_BASE_IMAGE="${THEAD_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/sglang0.5.12-thead-ppu2.1.0:2.2.0-0.2.0@sha256:27de587ef3919caf649128795178ce4e516ee44991305f61d16fa033228c0149}"
@@ -102,9 +104,9 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin, amd (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
-    --image-name NAME      Image name (default: ${IMAGE_NAME})
+    --image-name NAME      Image repository (default: ${IMAGE_NAME}; Ascend: harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend)
     --image-tag TAG        Image tag (default: auto-generated)
     --index-url URL        PyPI index URL (for custom mirrors)
     --extra-index-url URL  Extra PyPI index URL
@@ -124,14 +126,21 @@ VERSIONS (override via environment variables):
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
     ASCEND_VLLM_VERSION  vLLM version to install in empty mode (default: ${ASCEND_VLLM_VERSION})
     ASCEND_BASE_IMAGE    Ascend CANN / torch_npu base image (default: ${ASCEND_BASE_IMAGE})
-    ASCEND_FLAGGEMS_VERSION FlagGems git ref for Ascend (default: ${ASCEND_FLAGGEMS_VERSION})
-    ASCEND_FLAGTREE_VERSION FlagTree Ascend wheel (default: ${ASCEND_FLAGTREE_VERSION})
+    FlagGems / FlagTree  Retained from ASCEND_BASE_IMAGE; not installed from separate refs
   MetaX:
     METAX_BASE_IMAGE     Base image (default: ${METAX_BASE_IMAGE})
     METAX_MACA_VERSION   MACA version used in generated image tag (default: ${METAX_MACA_VERSION})
     METAX_PYTHON_VERSION Python version used in generated image tag (default: ${METAX_PYTHON_VERSION})
     METAX_PYTHON_TAG     Python tag fragment used in generated image tag (default: ${METAX_PYTHON_TAG})
     METAX_VLLM_VERSION   vLLM version installed in empty mode (default: ${METAX_VLLM_VERSION})
+  AMD:
+    AMD_BASE_IMAGE       AMD ROCm base image, Torch must target gfx1100 (default: ${AMD_BASE_IMAGE})
+    AMD_FLAGOS_RUNTIME_IMAGE
+                         Image supplying FlagTree ${AMD_FLAGTREE_VERSION}; it is not on PyPI
+                         (default: ${AMD_FLAGOS_RUNTIME_IMAGE})
+    AMD_VLLM_VERSION     vLLM empty-mode version (default: ${AMD_VLLM_VERSION})
+    AMD_FLAGGEMS_COMMIT  FlagGems commit (needs triton_extra_name="hip"; default: ${AMD_FLAGGEMS_COMMIT})
+    AMD_FLAGCX_COMMIT    FlagCX commit (default: ${AMD_FLAGCX_COMMIT})
   MUSA:
     MUSA_BASE_IMAGE      Moore Threads base image (default: ${MUSA_BASE_IMAGE})
     MUSA_VERSION         MUSA version used in image tag (default: ${MUSA_VERSION})
@@ -149,10 +158,6 @@ VERSIONS (override via environment variables):
     KUNLUNXIN_DRIVER_VERSION Driver version used in generated image tag (default: ${KUNLUNXIN_DRIVER_VERSION})
     KUNLUNXIN_PYTHON_VERSION Python version in the base image (default: ${KUNLUNXIN_PYTHON_VERSION})
     KUNLUNXIN_TORCH_VERSION  PyTorch version in the base image (default: ${KUNLUNXIN_TORCH_VERSION})
-    KUNLUNXIN_VLLM_VERSION   vLLM version installed in empty mode (default: ${KUNLUNXIN_VLLM_VERSION})
-    KUNLUNXIN_FLAGGEMS_REF   FlagGems git ref (default: ${KUNLUNXIN_FLAGGEMS_REF})
-    KUNLUNXIN_FLAGCX_REF     FlagCX git ref (default: ${KUNLUNXIN_FLAGCX_REF})
-    KUNLUNXIN_PLUGIN_FL_REF  vllm-plugin-FL git ref (default: ${KUNLUNXIN_PLUGIN_FL_REF})
   Hygon:
     HYGON_BASE_IMAGE     Base image (default: ${HYGON_BASE_IMAGE})
     HYGON_VLLM_VERSION   vLLM version installed in empty mode (default: ${HYGON_VLLM_VERSION})
@@ -180,7 +185,7 @@ EXAMPLES:
     ./build.sh --platform ascend --target ci
 
     # Override the Ascend base image when validating a new stack
-    ASCEND_BASE_IMAGE=quay.io/ascend/vllm-ascend:v0.20.2rc1-a3 \
+    ASCEND_BASE_IMAGE="registry.example/flagos/ascend:tag" \
         ./build.sh --platform ascend --target ci
 
     # Build Hygon CI image
@@ -298,14 +303,17 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend"
+    fi
     BUILD_ARGS+=(
         --build-arg "ASCEND_BASE_IMAGE=${ASCEND_BASE_IMAGE}"
         --build-arg "VLLM_VERSION=${ASCEND_VLLM_VERSION}"
-        --build-arg "FLAGGEMS_VERSION=${ASCEND_FLAGGEMS_VERSION}"
-        --build-arg "FLAGTREE_VERSION=${ASCEND_FLAGTREE_VERSION}"
     )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="ascend-vllm${VLLM_VERSION}-a3-${TARGET}"
+        IMAGE_TAG="vllm${VLLM_VERSION}-a3-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     PYTHON_VERSION="${HYGON_PYTHON_VERSION}"
@@ -410,6 +418,7 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
         IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
+    BUILD_CONTEXT="${SCRIPT_DIR}/.."
     PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION}"
     VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION}"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
@@ -417,19 +426,33 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     fi
     BUILD_ARGS+=(
         --build-arg "KUNLUNXIN_BASE_IMAGE=${KUNLUNXIN_BASE_IMAGE}"
-        --build-arg "VLLM_VERSION=${KUNLUNXIN_VLLM_VERSION}"
-        --build-arg "FLAGGEMS_REF=${KUNLUNXIN_FLAGGEMS_REF}"
-        --build-arg "FLAGCX_REF=${KUNLUNXIN_FLAGCX_REF}"
-        --build-arg "VLLM_PLUGIN_FL_REF=${KUNLUNXIN_PLUGIN_FL_REF}"
-        --build-arg "DRIVER_VERSION=${KUNLUNXIN_DRIVER_VERSION}"
         --build-arg "INDEX_URL=${INDEX_URL}"
         --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-ci"
     fi
+elif [[ "${PLATFORM}" == "amd" ]]; then
+    PYTHON_VERSION="${AMD_PYTHON_VERSION}"
+    VLLM_VERSION="${AMD_VLLM_VERSION}"
+    # The plugin and the shared FlagGems-vllm installer are COPY inputs, so the
+    # context is the repository root rather than docker/amd/.
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    BUILD_ARGS+=(
+        --build-arg "AMD_BASE_IMAGE=${AMD_BASE_IMAGE}"
+        --build-arg "FLAGOS_RUNTIME_IMAGE=${AMD_FLAGOS_RUNTIME_IMAGE}"
+        --build-arg "VLLM_VERSION=${AMD_VLLM_VERSION}"
+        --build-arg "FLAGTREE_VERSION=${AMD_FLAGTREE_VERSION}"
+        --build-arg "FLAGGEMS_COMMIT=${AMD_FLAGGEMS_COMMIT}"
+        --build-arg "FLAGCX_COMMIT=${AMD_FLAGCX_COMMIT}"
+        --build-arg "INDEX_URL=${INDEX_URL}"
+        --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="amd-vllm${VLLM_VERSION}-rocm-gfx1100-py${AMD_PYTHON_VERSION}-${TARGET}"
+    fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', or 'kunlunxin'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', 'kunlunxin', or 'amd'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -443,8 +466,7 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  Base image:     ${ASCEND_BASE_IMAGE}"
-    msg "  FlagGems:       ${ASCEND_FLAGGEMS_VERSION}"
-    msg "  FlagTree:       ${ASCEND_FLAGTREE_VERSION}"
+    msg "  Vendor stack:   preserved from the pinned FlagOS application image"
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     msg "  DTK:            ${HYGON_DTK_VERSION}"
     msg "  Hygon Python:   ${HYGON_PYTHON_VERSION}"
@@ -468,9 +490,6 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     msg "  Driver:         ${KUNLUNXIN_DRIVER_VERSION}"
     msg "  Kunlunxin base: ${KUNLUNXIN_BASE_IMAGE}"
     msg "  Kunlunxin PyTorch: ${KUNLUNXIN_TORCH_VERSION}"
-    msg "  FlagGems:       ${KUNLUNXIN_FLAGGEMS_REF}"
-    msg "  FlagCX:         ${KUNLUNXIN_FLAGCX_REF}"
-    msg "  Plugin:         ${KUNLUNXIN_PLUGIN_FL_REF}"
 fi
 if [[ "${PLATFORM}" != "ascend" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"

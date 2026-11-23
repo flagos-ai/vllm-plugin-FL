@@ -35,6 +35,19 @@ _FLAGOS_OPLIST_LOCK = threading.Lock()
 _RECORDED_FLAGOS_OPS: Set[Tuple[str, str]] = set()  # (op_name, impl_id)
 
 
+def _can_retry_failed_op(op_name: str) -> bool:
+    if get_policy().strict:
+        return False
+    if op_name not in ("rms_norm", "rotary_embedding"):
+        return True
+    try:
+        from vllm.platforms import current_platform
+    except ImportError:
+        return True
+    # On AMD these kernels can modify their inputs before reporting an error.
+    return getattr(current_platform, "vendor_name", None) != "amd"
+
+
 def _record_default_flagos_op(op_name: str, impl: OpImpl) -> None:
     """Record dispatch-level op usage into the FlagGems oplist file.
 
@@ -514,6 +527,8 @@ class OpManager:
             fails, the system automatically tries the next available implementation.
           - VLLM_FL_STRICT=1: strict mode — fail immediately on the first error,
             no fallback is attempted.
+        AMD in-place RMSNorm and rotary embedding propagate execution errors
+        even in fallback mode.
 
         Logs on first call or when the implementation changes (e.g., backend switch).
 
@@ -528,9 +543,7 @@ class OpManager:
             RuntimeError: If all implementations fail (fallback mode) or
                          if the primary implementation fails (strict mode)
         """
-        enable_fallback = not get_policy().strict
-
-        if not enable_fallback:
+        if not _can_retry_failed_op(op_name):
             impl = self._resolve_impl(op_name)
             self._record_first_use(op_name, impl)
 

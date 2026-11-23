@@ -84,24 +84,25 @@ platforms:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
-  # Enablement follows the 0.5.0-dev line's own registry (the per-line
-  # compatibility matrix is the line's state, not main's): NVIDIA first for
-  # the vLLM 0.32 rollout, other backends re-enabled after their runtime
-  # and CI adaptations are ready.
+  # Enablement follows the 0.5.0-dev line's own compatibility matrix.
+  # NVIDIA and Ascend have completed their vLLM 0.32 runtime and CI
+  # adaptations; other backends remain disabled until theirs are ready.
   ascend:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/ascend.yaml
       - tests/platforms/ascend.yaml
     exempt_from_global:
       - vllm_fl/dispatch/config/ascend.yaml
   hygon:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/hygon.yaml
+      - vllm_fl/dispatch/backends/vendor/hygon/
       - tests/platforms/hygon.yaml
     exempt_from_global:
       - vllm_fl/dispatch/config/hygon.yaml
+      - vllm_fl/dispatch/backends/vendor/hygon/
   metax:
     enabled: false
     trigger_paths:
@@ -130,12 +131,18 @@ platforms:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/
   kunlunxin:
-    enabled: false
+    enabled: true
     trigger_paths:
+      - .github/configs/kunlunxin.yml
+      - .github/scripts/kunlunxin/
+      - docker/kunlunxin/
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
       - tests/platforms/kunlunxin.yaml
     exempt_from_global:
+      - .github/configs/kunlunxin.yml
+      - .github/scripts/kunlunxin/
+      - docker/kunlunxin/
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
   thead:

@@ -66,8 +66,9 @@ env_defaults:
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
   USE_FLAGGEMS: "1"
   VLLM_PLUGINS: "fl"
-  # The upstream V2 runner requires UVA support unavailable on the Hygon OOT platform.
-  VLLM_USE_V2_MODEL_RUNNER: "0"
+  # VLLM_USE_V2_MODEL_RUNNER is deliberately left unset: upstream defaults to
+  # the V2 runner and the Hygon platform follows that default. Do not pin the
+  # variable here or in the image, so CI exercises the same path as NVIDIA.
   TRITON_CACHE_DIR: "/tmp/triton_cache"
 
 bw1000:
@@ -77,13 +78,24 @@ bw1000:
       pr:
         inference:
           qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
-        serving:
-          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+        adaptation_gate:
+          qwen3_6:
+            - "27b_tp2_eager"
+            - "27b_tp2_graph"
+            - "35b_a3b_tp2_eager"
+            - "35b_a3b_tp2_graph"
       nightly:
         inference:
           qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
-        serving:
-          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+        adaptation_gate:
+          qwen3_6:
+            - "27b_tp2_eager"
+            - "27b_tp2_graph"
+            - "35b_a3b_tp2_eager"
+            - "35b_a3b_tp2_graph"
+    timeouts:
+      e2e:
+        adaptation_gate: 180
     functional:
       include: "*"
       exclude: []

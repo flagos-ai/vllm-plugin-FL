@@ -193,6 +193,23 @@ def _init_vendor_device():
         )
 
         _patch_xpu_get_device()
+    elif vendor_name == "hygon":
+        from vllm_fl.dispatch.backends.vendor.hygon.patch import (
+            apply_hygon_patches,
+        )
+
+        apply_hygon_patches()
+
+    if vendor_name == "amd":
+        # vLLM's bundled triton_kernels import AMD architecture predicates that
+        # FlagTree's target_info does not define. Without them every path that
+        # touches those kernels fails to import, which takes out MoE models
+        # while dense ones still serve. Must precede the model layer imports.
+        from vllm_fl.patches.flagtree_target_info import (
+            apply_flagtree_target_info,
+        )
+
+        apply_flagtree_target_info()
 
 
 def _install_metax_compat():
@@ -248,6 +265,10 @@ def register():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
+    if vendor_name == "kunlunxin":
+        # vLLM's padding-aware route calls the CUDA-only _moe_C op.
+        os.environ["VLLM_MOE_SKIP_PADDING"] = "0"
+
     if vendor_name != "nvidia":
         # Other accelerators still use EMPTY wheels. NVIDIA uses upstream's
         # native CUDA extensions and must not replace failed imports with stubs.
@@ -266,13 +287,12 @@ def register():
     if vendor_name == "kunlunxin":
         _install_kunlunxin_fla_alias()
 
-    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
-        # These backends default to ModelRunnerFL; choose it before VllmConfig
-        # reads model defaults for the upstream V2 runner. TXDA additionally
-        # supports the upstream V2 runner (see
+    if vendor_name in ("mthreads", "enflame", "gcu", "tsingmicro"):
+        # Choose the legacy runner before VllmConfig reads model defaults.
+        # TXDA additionally supports the upstream V2 runner (see
         # vendor/txda/patches/v2_runner_compat.py): an explicit
         # VLLM_USE_V2_MODEL_RUNNER=1 wins over this default (setdefault),
-        # while the other vendors reject V2 in
+        # while the other vendors here reject V2 in
         # PlatformFL.check_and_update_config.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":

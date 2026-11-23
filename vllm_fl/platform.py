@@ -56,98 +56,6 @@ def _vllm_c_available() -> bool:
         return False
 
 
-def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
-    """Configure eager FX execution with ordinary Ascend FULL decode graphs.
-
-    Ascend compiler options may be omitted or explicitly disabled with False.
-    The six recognized rc1 compiler options have no implementation here; reject
-    true values, non-booleans and unknown keys, including in eager mode.
-    """
-    from vllm.config import CompilationMode, CUDAGraphMode
-
-    additional_config = vllm_config.additional_config
-    if additional_config is None:
-        additional_config = {}
-    if not isinstance(additional_config, dict):
-        raise TypeError("additional_config must be a dict")
-    ascend_compilation = additional_config.get("ascend_compilation_config", {})
-    if not isinstance(ascend_compilation, dict):
-        raise TypeError("additional_config.ascend_compilation_config must be a dict")
-    disabled_compiler_options = {
-        "enable_npugraph_ex",
-        "enable_static_kernel",
-        "fuse_norm_quant",
-        "fuse_qknorm_rope",
-        "fuse_allreduce_rms",
-        "fuse_muls_add",
-    }
-    for name, enabled in ascend_compilation.items():
-        if name not in disabled_compiler_options:
-            raise ValueError(f"Unknown ascend_compilation_config option: {name!r}")
-        if not isinstance(enabled, bool):
-            raise TypeError(f"ascend_compilation_config.{name} must be bool")
-        if enabled:
-            raise NotImplementedError(
-                f"{name}=true is not supported by FL basic Ascend graph support"
-            )
-
-    compilation = vllm_config.compilation_config
-    model_config = vllm_config.model_config
-    enforce_eager = bool(model_config is not None and model_config.enforce_eager)
-    if (
-        model_config is None
-        or enforce_eager
-        or compilation.cudagraph_mode == CUDAGraphMode.NONE
-    ):
-        compilation.mode = CompilationMode.NONE
-        compilation.cudagraph_mode = CUDAGraphMode.NONE
-        return
-    if compilation.cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY:
-        raise NotImplementedError(
-            "FL basic Ascend graph support requires NONE or FULL_DECODE_ONLY"
-        )
-    # Match the runner's upstream switch (including vLLM's cached env value).
-    # BreakableCUDAGraphWrapper bypasses our runner-owned graph task lifecycle.
-    from vllm.envs import VLLM_USE_BREAKABLE_CUDAGRAPH
-
-    if VLLM_USE_BREAKABLE_CUDAGRAPH:
-        raise NotImplementedError(
-            "VLLM_USE_BREAKABLE_CUDAGRAPH=1 is not supported by FL Ascend graphs; "
-            "ordinary FULL_DECODE_ONLY graphs require the runner-owned runtime"
-        )
-    if vllm_config.parallel_config.use_ubatching:
-        raise NotImplementedError(
-            "FL basic Ascend FULL decode graphs do not support ubatching"
-        )
-    if compilation.mode not in (
-        None,
-        CompilationMode.NONE,
-        CompilationMode.VLLM_COMPILE,
-    ):
-        raise NotImplementedError(
-            "FL Ascend graph compilation supports VLLM_COMPILE or NONE"
-        )
-    if os.environ.get("ASCEND_LAUNCH_BLOCKING", "0") == "1":
-        raise ValueError("ACL graph is incompatible with ASCEND_LAUNCH_BLOCKING=1")
-    if (
-        getattr(compilation, "backend", None) == "inductor"
-        and compilation.mode != CompilationMode.NONE
-    ):
-        raise ValueError(
-            "Ascend graph execution requires compilation backend='eager'; "
-            "the Inductor backend is not supported on torch_npu."
-        )
-    compilation.mode = CompilationMode.VLLM_COMPILE
-    compilation.backend = "eager"
-    compilation.use_inductor = False
-    compilation.use_inductor_graph_partition = False
-    compilation.splitting_ops = []
-    compilation.cudagraph_num_of_warmups = 1
-    compilation.pass_config.fuse_norm_quant = False
-    compilation.pass_config.fuse_act_quant = False
-    compilation.pass_config.fuse_attn_quant = False
-
-
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -175,6 +83,18 @@ dist_backend_dict = {
 }
 
 
+def _use_flagcx(vendor_name: str) -> bool:
+    if "FLAGCX_PATH" in os.environ:
+        return True
+    if vendor_name != "kunlunxin":
+        return False
+    try:
+        from flagcx.api import FLAGCXLibrary
+    except (ImportError, OSError):
+        return False
+    return callable(FLAGCXLibrary)
+
+
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
@@ -193,18 +113,29 @@ class PlatformFL(Platform):
     # non-cuda_alike (iluvatar/ascend): device_name = device_type (used in torch.device)
     device_name = (
         vendor_name
-        if (device_type == "cuda" and vendor_name not in ("iluvatar", "hygon"))
+        if (device_type == "cuda" and vendor_name not in ("iluvatar", "hygon", "amd"))
         else device_type
-    )
-    # Keep small torch.compile helpers on the native NPU execution path.
-    # TXDA also uses eager: inductor's triton autotuning benchmarks via
-    # torch.cuda.synchronize(), which is unavailable on the PrivateUse1 torch.
-    simple_compile_backend = (
-        "eager" if device_type in ("npu", "txda") else "inductor"
     )
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
+    # Backend for vLLM's standalone ``@torch.compile`` call sites. A few layers
+    # compile themselves through ``current_platform.simple_compile_backend`` --
+    # ``get_masked_input_and_mask`` in
+    # ``vllm/model_executor/layers/vocab_parallel_embedding.py`` is the one an
+    # ordinary model hits. Those decorators read the attribute directly, so they
+    # bypass ``get_compile_backend()`` and still run Inductor even when the
+    # engine reports "Inductor compilation was disabled by user settings" under
+    # ``CompilationMode.NONE``. On AMD that fails inside ``warmup_kernels`` with
+    # ``ValueError: Expected a cuda device, but got: cpu`` from Inductor's
+    # ``preserve_rng_state``. Dynamo tracing itself is fine, so use the eager
+    # backend there: the traced graph is kept and only Inductor codegen is
+    # dropped.
+    simple_compile_backend: str = (
+        "eager"
+        if device_type == "npu" or vendor_name == "amd" or device_type == "txda"
+        else "inductor"
+    )
     device_control_env_var: str = (
         "ASCEND_RT_VISIBLE_DEVICES"
         if device_type == "npu"
@@ -217,7 +148,7 @@ class PlatformFL(Platform):
     ]
     dist_backend: str = (
         "flagcx"
-        if "FLAGCX_PATH" in os.environ
+        if _use_flagcx(device_info.vendor_name)
         else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
@@ -262,6 +193,17 @@ class PlatformFL(Platform):
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
+
+    def is_rocm(self) -> bool:
+        """Report AMD ROCm so vLLM's own ROCm handling applies.
+
+        ``PlatformFL`` registers as ``PlatformEnum.OOT``, so the base
+        implementation answers False for every vendor. vLLM gates a great deal
+        of behaviour on ``is_rocm()`` -- including skipping the TileLang JIT hook,
+        whose symbols are broken on ROCm and abort the process inside
+        ``tvm_ffi`` -- so AMD must answer truthfully here.
+        """
+        return self.vendor_name == "amd"
 
     def is_sleep_mode_available(self) -> bool:
         return self.vendor_name == "nvidia"
@@ -385,18 +327,18 @@ class PlatformFL(Platform):
 
     @classmethod
     def apply_config_platform_defaults(cls, vllm_config: "VllmConfig") -> None:
-        """Install MetaX graph defaults before vLLM finalizes graph settings.
+        """Install vendor defaults before vLLM resolves compilation and graphs.
 
-        vLLM calls this right after CLI parsing, before the cudagraph capture
-        sizes / max graph size are derived from the graph mode. Setting the
-        defaults here keeps a bare serve (no ``--compilation-config``)
-        capturing graphs without fighting the final configuration checks.
-
-        Explicit user configuration wins: ``--enforce-eager`` /
-        ``-O0`` (``mode == NONE``) and an explicit ``cudagraph_mode`` are left
-        untouched. Rewriting a finalized ``NONE`` to ``PIECEWISE`` afterwards
-        would also trip vLLM's "piecewise requires VLLM_COMPILE" assertion.
+        MetaX keeps explicit eager, optimization-level and graph settings.
+        Kunlunxin uses native decode graphs without torch.compile.
         """
+        if cls.device_type == "cuda" and cls.vendor_name == "kunlunxin":
+            from vllm.config.compilation import CompilationMode
+
+            # Resolve native kernel defaults before vLLM enables compile-only
+            # custom-op and IR behavior. Native decode graphs do not need it.
+            vllm_config.compilation_config.mode = CompilationMode.NONE
+            return
         if cls.vendor_name != "metax":
             return
 
@@ -498,22 +440,30 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        # TXDA installs its own adaptations for the upstream V2 runner (see
-        # vendor/txda/patches/v2_runner_compat.py), so it is not rejected
-        # here; Ascend and MUSA still require ModelRunnerFL.
-        if (
-            cls.device_type in {"npu", "musa"}
-            and vllm_config.use_v2_model_runner
-        ):
-            platform_name = {
-                "npu": "Ascend",
-                "musa": "MUSA",
-            }[cls.device_type]
+        # MUSA still requires ModelRunnerFL. Ascend adapted V2 upstream and
+        # TXDA installs its own adaptations (vendor/txda/patches/
+        # v2_runner_compat.py), so neither is rejected here.
+        if cls.device_type == "musa" and vllm_config.use_v2_model_runner:
+            platform_name = "MUSA"
             raise ValueError(
                 f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
+        if (
+            cls.vendor_name == "kunlunxin"
+            and getattr(vllm_config, "speculative_config", None) is not None
+            and (
+                getattr(model_config, "is_hybrid", False)
+                or getattr(model_config, "is_attention_free", False)
+            )
+            and vllm_config.cache_config.mamba_cache_mode == "align"
+        ):
+            raise ValueError(
+                "Kunlunxin does not support speculative decoding with Mamba "
+                "cache mode 'align'. Disable speculative decoding or use "
+                "--no-enable-prefix-caching."
+            )
         parallel_config = vllm_config.parallel_config
         if cls.device_type == "txda":
             if getattr(vllm_config, "speculative_config", None) is not None:
@@ -551,7 +501,7 @@ class PlatformFL(Platform):
                     "plugin/interservice/flagcx_wrapper.py and build/lib/libflagcx.so."
                 )
         if cls.device_type == "npu" and model_config is not None:
-            from vllm_fl.patches.ascend_glm_dsa import (
+            from vllm_fl.dispatch.backends.vendor.ascend.patches.ascend_glm_dsa import (
                 prepare_glm_dsa_dense_fallback,
             )
 
@@ -666,6 +616,10 @@ class PlatformFL(Platform):
             configure_compilation(compilation_config, model_config)
 
         if cls.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.patches.compilation import (
+                _configure_ascend_compilation,
+            )
+
             _configure_ascend_compilation(vllm_config)
 
         if (
@@ -716,35 +670,41 @@ class PlatformFL(Platform):
             )
             scheduler_config.async_scheduling = False
 
-        # `mode` is a real CompilationConfig field, but test stand-ins may omit it.
-        compilation_mode = getattr(compilation_config, "mode", CompilationMode.NONE)
-        if (
-            cls.device_type == "cuda"
-            and cls.vendor_name == "kunlunxin"
-            and (
-                compilation_config.cudagraph_mode != CUDAGraphMode.NONE
-                or compilation_mode != CompilationMode.NONE
-            )
-        ):
-            # P800: every cudagraph mode tested latches an `illegal memory
-            # access` (status= 700) on the first real request of a compiled
-            # model -- FULL (qwen3_6/35b_a3b_tp4_graph, job 120760210560) and
-            # PIECEWISE (qwen3_6/27b_tp4_graph and qwen3_6/35b_a3b_tp4_graph,
-            # jobs 120818798034 / 120818797949).  The report lands on whichever
-            # device op runs first, so the line number only follows that op.
-            # The eager configuration is the one that passes on P800
-            # (qwen3_6/27b_tp4_eager), and compile-without-cudagraph is
-            # untested here, so fall back to eager for the whole vendor.
-            logger.warning(
-                "Kunlunxin: disabling torch.compile and cudagraphs (mode %s, "
-                "cudagraph %s) for %s; compiled cudagraphs latch an illegal "
-                "memory access on P800.",
-                compilation_mode,
-                compilation_config.cudagraph_mode,
-                getattr(model_config, "model", "?"),
-            )
-            compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+        if cls.device_type == "cuda" and cls.vendor_name == "kunlunxin":
+            # P800 uses native decode graphs. Inductor and PIECEWISE capture
+            # can fault on the first real request on this runtime.
             compilation_config.mode = CompilationMode.NONE
+            compilation_config.cudagraph_mm_encoder = False
+            if kernel_config := getattr(vllm_config, "kernel_config", None):
+                # The upstream slot-mapping JIT warmup registers a Triton
+                # kernel that the vendor replaces with a Torch implementation.
+                kernel_config.enable_jit_warmup = False
+
+            graph_mode = compilation_config.cudagraph_mode
+            if graph_mode != CUDAGraphMode.NONE:
+                # Capture a bounded set of decode descriptors. Each descriptor
+                # has a private graph pool; uncaptured sizes run eagerly.
+                sizes = [
+                    size
+                    for size in compilation_config.cudagraph_capture_sizes or ()
+                    if size <= 8
+                ]
+                if graph_mode.has_full_cudagraphs() and sizes:
+                    compilation_config.cudagraph_mode = CUDAGraphMode.FULL_DECODE_ONLY
+                    compilation_config.cudagraph_capture_sizes = sizes
+                    compilation_config.max_cudagraph_capture_size = max(sizes)
+                    logger.info("Kunlunxin: capturing decode graph sizes %s", sizes)
+                else:
+                    if graph_mode.has_full_cudagraphs():
+                        logger.warning(
+                            "Kunlunxin graph capture disabled because none of the "
+                            "requested sizes %s fit the supported range of 1 to 8. "
+                            "Falling back to eager execution.",
+                            compilation_config.cudagraph_capture_sizes,
+                        )
+                    compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+                    compilation_config.cudagraph_capture_sizes = []
+                    compilation_config.max_cudagraph_capture_size = 0
 
         # --------------------------------------------------------
         # maca specific config updates
@@ -804,6 +764,8 @@ class PlatformFL(Platform):
 
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
+        if cls.vendor_name == "amd" and use_sparse:
+            raise NotImplementedError("Sparse MLA is unsupported by the AMD backend")
 
         backend_path = call_op(
             "attention_backend", use_mla=use_mla, use_sparse=use_sparse
@@ -825,6 +787,19 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_supported_vit_attn_backends(cls) -> list["AttentionBackendEnum"]:
+        if cls.vendor_name == "amd":
+            # AMD defers ViT backend selection to vLLM's ROCm platform, so it
+            # must accept everything that platform can return (notably the
+            # Triton flash-attention backend used on RDNA).
+            try:
+                from vllm.platforms.rocm import RocmPlatform
+            except ImportError:
+                logger.warning(
+                    "[vllm_fl] RocmPlatform unavailable; defaulting AMD ViT "
+                    "supported backends to TORCH_SDPA."
+                )
+                return [AttentionBackendEnum.TORCH_SDPA]
+            return RocmPlatform.get_supported_vit_attn_backends()
         return [
             AttentionBackendEnum.TORCH_SDPA,
             AttentionBackendEnum.FLASH_ATTN,
@@ -879,6 +854,25 @@ class PlatformFL(Platform):
                 return AttentionBackendEnum.FLASH_ATTN
             return AttentionBackendEnum.TORCH_SDPA
 
+        if cls.vendor_name == "amd":
+            # Do not let the capability probe below pick FLASH_ATTN: on ROCm
+            # that backend is Composable Kernel's FMHA, which is built for CDNA
+            # and segfaults on RDNA (observed on gfx1100 inside
+            # ck_tile::FmhaFwdKernel via mha_varlen_fwd while profiling a
+            # Qwen3.6 vision encoder). vLLM's own ROCm platform already splits
+            # the architectures -- Composable Kernel on CDNA, Triton flash
+            # attention on gfx11xx/gfx12xx -- so defer to it and inherit any
+            # upstream fix.
+            try:
+                from vllm.platforms.rocm import RocmPlatform
+            except ImportError:
+                logger.warning(
+                    "[vllm_fl] RocmPlatform unavailable; defaulting AMD ViT "
+                    "attn backend to TORCH_SDPA."
+                )
+                return AttentionBackendEnum.TORCH_SDPA
+            return RocmPlatform.get_vit_attn_backend(head_size, dtype, backend)
+
         # Try FlashAttention first
         if (cc := cls.get_device_capability()) and cc.major >= 8:
             try:
@@ -905,6 +899,8 @@ class PlatformFL(Platform):
                     "vllm_fl.dispatch.backends.vendor.iluvatar.communicator."
                     "IluvatarCommunicatorFL"
                 )
+            if cls.vendor_name == "amd":
+                return "vllm_fl.distributed.cuda_flagcx_communicator.CudaFlagcxCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
@@ -915,6 +911,13 @@ class PlatformFL(Platform):
     def get_static_graph_wrapper_cls(cls) -> str:
         if cls.device_type == "musa":
             return "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper"
+        if getattr(cls, "vendor_name", None) == "amd":
+            from vllm.config import get_current_vllm_config_or_none
+
+            config = get_current_vllm_config_or_none()
+            if config is not None and config.use_v2_model_runner:
+                # V2's graph profiler manages the upstream wrapper registry.
+                return "vllm.compilation.cuda_graph.CUDAGraphWrapper"
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod
@@ -939,6 +942,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "amd",
         ]
 
     @classmethod
@@ -989,7 +993,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
-        return cls.vendor_name != "hygon" and cls.dist_backend != "flagcx"
+        # AMD (ROCm) uses RCCL for collectives; vLLM's custom all-reduce assumes
+        # NVIDIA NVLink topology and is not validated on RDNA3, so disable it
+        # like hygon and let RCCL handle the reduction.
+        return cls.vendor_name not in ("hygon", "amd") and cls.dist_backend != "flagcx"
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
@@ -1019,6 +1026,36 @@ class PlatformFL(Platform):
             )
 
             patch_moe_router()
+
+        if cls.vendor_name == "amd":
+            cls._disable_rocm_native_kernels()
+
+    @classmethod
+    def _disable_rocm_native_kernels(cls) -> None:
+        """Turn off ROCm paths that need kernels an empty build does not ship.
+
+        Reporting ``is_rocm()`` lets vLLM apply its ROCm handling, but some of
+        those paths call into the native ``vllm._rocm_C`` extension, which an
+        empty install (``VLLM_TARGET_DEVICE=empty``) does not provide. Skinny
+        GEMM is the one reached by an ordinary dense model: vLLM defaults
+        ``VLLM_ROCM_USE_SKINNY_GEMM`` to True and then calls
+        ``ops.wvSplitK``/``ops.LLMM1``. Without the extension those raise
+        ``AttributeError``, so default them off here and let the operator keep
+        an explicit override.
+        """
+        import importlib.util
+
+        if importlib.util.find_spec("vllm._rocm_C") is not None:
+            return
+
+        if os.environ.get("VLLM_ROCM_USE_SKINNY_GEMM") is None:
+            os.environ["VLLM_ROCM_USE_SKINNY_GEMM"] = "0"
+            logger.info_once(
+                "AMD: disabling VLLM_ROCM_USE_SKINNY_GEMM because the native "
+                "vllm._rocm_C extension is not present in this empty build; "
+                "dense GEMMs use the Torch path. Set the variable explicitly "
+                "to override."
+            )
 
     @classmethod
     def supports_fp8(cls) -> bool:
@@ -1060,6 +1097,8 @@ class PlatformFL(Platform):
             cls.device_type == "txda"
             or cls.vendor_name in ("nvidia", "thead", "iluvatar")
             or (cls.device_type == "musa" and cls.dist_backend == "mccl")
+            # Keep FlagCX ctypes calls out of Dynamo's tracing.
+            or (cls.vendor_name == "amd" and cls.dist_backend == "flagcx")
         )
 
     @classmethod
@@ -1109,25 +1148,90 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Match CUDA's IR-op defaults without hardcoding CUDA APIs.
+
+        The ``using_inductor`` rule mirrors ``CudaPlatform`` on the vLLM this
+        plugin targets, 0.32: native while codegen is active, otherwise
+        ``vllm_c`` where available.
+
+        Empty-mode installs (``VLLM_TARGET_DEVICE=empty``, used by every
+        non-CUDA backend) register ``native`` only, while vLLM asserts that
+        every requested provider is a registered implementation. Ask the IR-op
+        registry directly rather than assuming ``vllm_c`` is present: an
+        importable ``vllm._C`` is not sufficient, since a ROCm base image can
+        provide the module while the empty reinstall leaves the IR ops with
+        ``native`` alone.
+        """
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
+
+        if cls.vendor_name == "kunlunxin":
+            # The P800 empty wheel has no vllm_c IR providers.
+            return IrOpPriorityConfig.with_default(["native"])
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"]
-        if not using_inductor and _vllm_c_available():
-            # ``vllm_c`` is only a valid provider when the build actually ships
-            # upstream's CUDA IR kernels. VLLM_TARGET_DEVICE=empty builds have no
-            # vllm._C, and keeping it in the priority list makes
-            # KernelConfig.set_default fail with "All providers in priority must
-            # be registered implementations".
-            default = ["vllm_c", "native"]
+        # NPU wheels register native IR implementations without vllm_c.
+        if not using_inductor and cls.device_type != "npu":
+            has_vllm_c = (
+                cls._vllm_c_is_registered_provider()
+                if cls.vendor_name == "amd"
+                else _vllm_c_available()
+            )
+            if has_vllm_c:
+                default = ["vllm_c", "native"]
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,
             fused_add_rms_norm=default,
         )
+
+    @staticmethod
+    def _vllm_c_is_registered_provider() -> bool:
+        """Return True when every IR op has a ``vllm_c`` implementation.
+
+        vLLM asserts that each provider named in ``ir_op_priority`` is a
+        registered implementation, so the question is not whether ``vllm._C``
+        imports but whether the IR ops actually gained a ``vllm_c`` entry. The
+        two diverge on a ROCm base image reinstalled in empty mode: the module
+        is importable while the ops are registered as ``native`` only, and
+        requesting ``vllm_c`` then aborts worker startup with
+        ``AssertionError: All providers in priority must be registered
+        implementations.``
+
+        Every field of ``IrOpPriorityConfig`` is checked, because
+        ``with_default`` applies the default list to all of them -- including
+        ops such as ``gelu_and_mul_sparse`` that this platform does not name
+        explicitly. Enumerating the config's fields keeps that in step if
+        upstream adds more.
+        """
+        try:
+            from dataclasses import fields
+
+            from vllm.config.kernel import IrOpPriorityConfig
+            from vllm.ir import op as ir_op, ops as ir_ops
+        except ImportError:
+            return False
+
+        try:
+            op_names = [f.name for f in fields(IrOpPriorityConfig)]
+        except TypeError:
+            return False
+        if not op_names:
+            return False
+
+        for name in op_names:
+            candidate = getattr(ir_ops, name, None)
+            if not isinstance(candidate, ir_op.IrOp):
+                # An op the registry does not expose cannot carry vllm_c.
+                return False
+            try:
+                if "vllm_c" not in candidate.impls:
+                    return False
+            except Exception:
+                return False
+        return True
 
     @classmethod
     def is_arch_support_pdl(cls) -> bool:
