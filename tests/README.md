@@ -224,6 +224,30 @@ serve:                                     # Optional: serving test config
   endpoints: [completion]
   completion_prompt: "please introduce yourself"
   max_tokens: 20
+
+# Quality-gate chat cases: explicit requests graded with the ten quality
+# checks, executed by the serving (task: serving) and concurrent
+# (task: concurrent) runners with JSON artifacts under test-results/gate/.
+serve:
+  chat_cases:
+    - name: text-single-llm-details
+      task: serving                        # serving (single requests) | concurrent (groups of 8)
+      scenario: text_single                # contract scenario name
+      messages:
+        - role: "user"
+          content: "..."
+      expected:                            # required terms, in order
+        - "large language model"
+      min_length: 256
+      max_tokens: 512
+    - name: image-single-05
+      task: serving
+      scenario: image_single
+      image_path: "tests/fixtures/images/sample.png"   # becomes a file:// URI
+      prompt: "..."
+      expected: ["hello"]
+      min_length: 1
+      max_tokens: 128
 ```
 
 ### Multimodal model example
@@ -270,8 +294,19 @@ generate:
 | `serve.max_tokens` | int | No | Max tokens for serving requests (default: 50) |
 | `serve.api_key` | str | No | API key for authenticated endpoints |
 | `serve.extra_engine` | dict | No | Engine param overrides for serving only |
+| `chat_cases[].task` | str | Gate cases only | `serving` or `concurrent`; absent means a classic endpoint chat case |
+| `chat_cases[].scenario` | str | Gate cases only | Contract scenario (`text_single`, `image_single`, `text_concurrent_8`, `image_concurrent_8`, `mixed_concurrent_8`) |
+| `chat_cases[].image_path` | str | Gate image cases | Repo-relative image file, sent as a `file://` URI |
+| `chat_cases[].prompt` | str | Gate image cases | Text part of the multimodal request |
+| `chat_cases[].expected` | list | Gate cases only | Required response terms, checked in order |
+| `chat_cases[].min_length` | int | Gate cases only | Minimum response length |
+| `chat_cases[].max_tokens` | int | Gate cases only | Per-request max tokens (overrides `serve.max_tokens`) |
 
-Platform `device_overrides.<device>.<case>` can override any `llm`, `generate`, or `serve` field for that device. A `null` value removes the inherited key from the base model YAML.
+Platform `device_overrides.<device>.<case>` can override any `llm`, `generate`,
+`serve`, or `concurrent` field for that device. A `null` value removes the
+inherited key from the base model YAML. Never override `serve.chat_cases`
+with a list: the deep merge replaces lists wholesale and would discard the
+model YAML's explicit gate inventory.
 
 ## Platform Config Format
 

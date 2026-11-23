@@ -160,7 +160,9 @@ def smoke_module(tmp_path, monkeypatch):
     cfg = SimpleNamespace(
         model=str(tmp_path),
         serve=SimpleNamespace(
-            endpoints=["chat"], request_model=lambda _: "Example-27B"
+            endpoints=["chat"],
+            chat_cases=[],
+            request_model=lambda _: "Example-27B",
         ),
     )
     monkeypatch.setenv("FL_TEST_MODEL", "example")

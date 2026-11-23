@@ -104,16 +104,17 @@ def build_e2e_matrix(
 ) -> list[dict]:
     """End-to-end model tests (inference, serving, concurrent).
 
-    These are slow and require model files.  Entries are grouped by
-    ``(task, device)`` so that all model/case combos for the same task
-    run inside a single job, avoiding repeated container startup and
-    project installation.
+    These are slow and require model files. Entries are grouped by
+    ``(task, device)`` so all model/case combos for the same task run inside
+    one job. The in-process device scheduler prevents multiple model-backed
+    cases from claiming the same physical cards.
 
     The ``e2e`` block in each device's YAML is keyed by CI stage
     (``pr`` / ``nightly`` / ``weekly``).  In ``weekly`` stage, falls back
     to ``nightly`` if no ``weekly`` key is defined.
     """
-    # Collect per-(task, device) groups
+    # Collect one group per (task, device). Device ownership is coordinated
+    # inside that job by TestRunner's scheduler.
     groups: dict[tuple[str, str], list[dict]] = {}
     for device in devices:
         section = config[device]
@@ -147,7 +148,7 @@ def build_e2e_matrix(
                 for case in cases:
                     groups[key].append({"model": model, "case": str(case)})
 
-    # Build one matrix entry per (task, device) group
+    # Build one matrix entry per (task, device) group.
     entries = []
     for (task_dir, device), case_list in groups.items():
         timeout = resolve_e2e_timeout(config, device, task_dir)
@@ -242,6 +243,7 @@ _FULL_RUN_PREFIXES: list[str] = [
     "tests/run.py",
     "tests/platforms/",
     "tests/conftest.py",
+    "tools/adaptation-gate-cases/",
     ".github/",
 ]
 

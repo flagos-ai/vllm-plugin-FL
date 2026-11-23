@@ -55,6 +55,10 @@ bi_v150:
           qwen3_6:
             - 27b_tp4_eager
             - 35b_a3b_tp4_eager
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
       nightly:
         inference:
           qwen3_6:
