@@ -229,6 +229,28 @@ def _register_gdn_packed_decode_patch() -> bool:
     return patch_fn()
 
 
+def _patch_lpu_kv_cache_plan() -> bool:
+    """Install the unpacked KV cache layout on LPU.
+
+    The KV cache plan is computed in the EngineCore process
+    (``vllm/v1/engine/core.py`` calls ``get_kv_cache_configs``), which runs
+    neither ``register_oot_ops()`` nor ``apply_evas_patches()``.  This
+    general-plugin entry point is the hook every process reaches, so the rebind
+    has to be installed here; the decision itself lives in the evas backend
+    (``patches/kv_config.py``), which the worker path also applies.
+    """
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "lpu":
+        return False
+
+    from vllm_fl.dispatch.backends.vendor.evas.patches.kv_config import (
+        apply_kv_config_unpacked,
+    )
+
+    return apply_kv_config_unpacked()
+
+
 def _patch_ascend_torch_accelerator() -> None:
     """Install the Ascend memory shim in every general-plugin process."""
     from vllm.platforms import current_platform
@@ -315,6 +337,12 @@ def register_model():
     register_router()
 
     _register_gdn_packed_decode_patch()
+
+    # EngineCore loads general plugins before it builds the KV cache plan
+    # (vllm/v1/engine/core.py: load_general_plugins then get_kv_cache_configs),
+    # so the rebind has to be installed from this hook; it is idempotent and a
+    # no-op off LPU.
+    _patch_lpu_kv_cache_plan()
 
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:

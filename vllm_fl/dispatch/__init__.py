@@ -251,6 +251,12 @@ class CachedOp:
             self._frozen = False
             if get_policy().strict:
                 raise
+            logger.warning(
+                "op '%s' fast-path impl '%s' failed; marking and falling back",
+                self._op_name,
+                impl.impl_id,
+                exc_info=True,
+            )
             mgr._mark_failed_impl(self._op_name, impl.impl_id)
             self._use_manager_call = True
             return mgr.call(self._op_name, *args, **kwargs)

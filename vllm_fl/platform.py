@@ -131,6 +131,7 @@ dist_backend_dict = {
     "cuda": "nccl",
     "musa": "mccl",
     "gcu": "eccl",
+    "lpu": "zccl",
 }
 
 
@@ -210,7 +211,9 @@ class PlatformFL(Platform):
     )
     device_type = device_info.device_type
     # vLLM 0.24 routes small torch.compile helpers through this platform key.
-    simple_compile_backend = "eager" if device_type == "npu" else "inductor"
+    simple_compile_backend = (
+        "eager" if device_type in ("npu", "lpu") else "inductor"
+    )
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
@@ -303,7 +306,7 @@ class PlatformFL(Platform):
     ### TODO(lms): change pin_memory depend device
     @classmethod
     def is_pin_memory_available(cls):
-        return cls.device_type in ["cuda", "xpu", "npu", "musa", "gcu"]
+        return cls.device_type in ["cuda", "xpu", "npu", "musa", "gcu", "lpu"]
 
     @classmethod
     def import_kernels(cls) -> None:
@@ -379,6 +382,9 @@ class PlatformFL(Platform):
             elif cls.device_type == "musa":
                 cache_config.block_size = 64
                 logger.info("Setting kv cache block size to 64 for MUSA.")
+            elif cls.device_type == "lpu":
+                cache_config.block_size = 128
+                logger.info("Setting kv cache block size to 128 for EVAS.")
             else:
                 cache_config.block_size = 16
         if cls.device_type == "npu":
@@ -594,6 +600,9 @@ class PlatformFL(Platform):
             return "vllm_fl.distributed.nccl_communicator.NcclCommunicatorFL"
         elif cls.vendor_name == "ascend":
             return "vllm_fl.distributed.device_communicators.npu_communicator.NPUCommunicator"
+        elif cls.vendor_name == "evas":
+            logger.info("Using CommunicatorFL for communication.")
+            return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
             logger.info("Using CudaCommunicator for communication.")
             return "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
@@ -675,6 +684,8 @@ class PlatformFL(Platform):
     def use_custom_allreduce(cls) -> bool:
         if cls.vendor_name == "hygon":
             return False
+        if cls.vendor_name == "evas":
+            return False
         return cls.dist_backend != "flagcx"
 
     @classmethod
@@ -698,6 +709,8 @@ class PlatformFL(Platform):
             from vllm.platforms.rocm import RocmPlatform
 
             return RocmPlatform.supports_fp8()
+        if cls.vendor_name == "evas":
+            return True
         minimum = {
             "nvidia": DeviceCapability(8, 9),
             "mthreads": DeviceCapability(3, 1),
@@ -814,6 +827,9 @@ class PlatformFL(Platform):
             if gcu is None:
                 return None
             major, minor = gcu.get_device_capability(device_id)
+            return DeviceCapability(major=major, minor=minor)
+        if cls.device_type == "lpu":
+            major, minor = torch.lpu.get_device_capability(device_id)
             return DeviceCapability(major=major, minor=minor)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
