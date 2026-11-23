@@ -515,14 +515,16 @@ def run_concurrent_scenario(
     """Execute one scenario: one client, one gather, one JSON document."""
 
     async def execute() -> list[dict[str, Any]]:
-        client, http_client = create_gate_client(
+        client, _http_client = create_gate_client(
             base_url=base_url, api_key=api_key, timeout=timeout
         )
         try:
             return await execute_gate_entries(client, served_model_name, entries)
         finally:
+            # AsyncOpenAI owns and closes the supplied httpx.AsyncClient.
+            # Closing it again here is both unnecessary and error-prone:
+            # httpx.AsyncClient exposes aclose(), not close().
             await client.close()
-            await http_client.close()
 
     outputs = asyncio.run(execute())
     write_gate_document(

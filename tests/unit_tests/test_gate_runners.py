@@ -119,7 +119,7 @@ def _fake_openai_httpx_modules():
             self.closed = False
             _FakeAsyncHttpClient.instances.append(self)
 
-        async def close(self):
+        async def aclose(self):
             self.closed = True
 
     class _FakeAsyncOpenAI:
@@ -136,6 +136,7 @@ def _fake_openai_httpx_modules():
 
         async def close(self):
             self.closed = True
+            await self.kwargs["http_client"].aclose()
 
     fake_openai = types.ModuleType("openai")
     fake_openai.AsyncOpenAI = _FakeAsyncOpenAI
