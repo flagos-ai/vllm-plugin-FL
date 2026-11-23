@@ -70,6 +70,10 @@ class IluvatarDeviceCheckTests(unittest.TestCase):
 
     def run_probe(self, mode="success", duration="10"):
         env = os.environ.copy()
+        # Vendor images may source BASH_ENV in every noninteractive shell and
+        # overwrite PATH/PYTHONPATH. Keep this subprocess test fully mocked.
+        env.pop("BASH_ENV", None)
+        env.pop("ENV", None)
         env.update(
             PYTHONPATH=str(self.directory),
             PROBE_TEST_MODE=mode,
@@ -147,6 +151,21 @@ class IluvatarDeviceCheckTests(unittest.TestCase):
         result, _ = self.run_probe()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Tensor smoke:", result.stdout)
+
+    def test_vendor_shell_startup_cannot_override_mock_environment(self):
+        startup = self.directory / "vendor-startup.sh"
+        startup.write_text("exit 91\n", encoding="utf-8")
+        previous = os.environ.get("BASH_ENV")
+        os.environ["BASH_ENV"] = str(startup)
+        try:
+            result, _ = self.run_probe()
+        finally:
+            if previous is None:
+                os.environ.pop("BASH_ENV", None)
+            else:
+                os.environ["BASH_ENV"] = previous
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("mock BI-V150", result.stdout)
 
     def test_invalid_timeout_fails_before_probe(self):
         result, _ = self.run_probe(duration="0")
