@@ -64,9 +64,7 @@ def flag_gems(monkeypatch):
     backend_pkg = ModuleType(_TX81_MODULE)
     sentinel = object()
     backend_pkg.fused_experts_impl = sentinel
-    monkeypatch.setitem(
-        sys.modules, _TX81_MODULE, backend_pkg
-    )
+    monkeypatch.setitem(sys.modules, _TX81_MODULE, backend_pkg)
     return sentinel
 
 
@@ -129,7 +127,5 @@ def test_missing_tx81_module_is_refused(txda_platform, monkeypatch):
     # No entry in sys.modules and no real package -> ImportError.
     monkeypatch.setitem(sys.modules, "flag_gems.runtime.backend._tsingmicro.tx81", None)
     monkeypatch.setitem(sys.modules, "flag_gems.runtime.backend._tsingmicro", None)
-    monkeypatch.delitem(
-        sys.modules, _TX81_MODULE, raising=False
-    )
+    monkeypatch.delitem(sys.modules, _TX81_MODULE, raising=False)
     assert _gate() is None

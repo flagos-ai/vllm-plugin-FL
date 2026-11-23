@@ -3,7 +3,7 @@
 """Failure and retry contract of the TXDA runtime-patch installer."""
 
 import sys
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
 import torch
@@ -72,11 +72,15 @@ def test_failure_midway_rolls_back_and_allows_retry(
     def boom():
         raise RuntimeError("second step failed")
 
-    monkeypatch.setattr(txda_patch, "_PATCH_STEPS", (
-        ("first", patched_stream),
-        ("second", boom),
-        ("third", lambda: calls.append("third")),
-    ))
+    monkeypatch.setattr(
+        txda_patch,
+        "_PATCH_STEPS",
+        (
+            ("first", patched_stream),
+            ("second", boom),
+            ("third", lambda: calls.append("third")),
+        ),
+    )
 
     with pytest.raises(RuntimeError, match="second step failed"):
         txda_patch.apply_txda_patches()
@@ -100,9 +104,7 @@ def test_retry_after_failure_applies_every_step(monkeypatch, fake_utils, restore
 
         return step
 
-    monkeypatch.setattr(txda_patch, "_PATCH_STEPS", (
-        ("a", make_step("a")),
-    ))
+    monkeypatch.setattr(txda_patch, "_PATCH_STEPS", (("a", make_step("a")),))
     txda_patch.apply_txda_patches()
     assert applied == ["a"]
     assert txda_patch._patches_applied is True
@@ -115,10 +117,14 @@ def test_retry_after_failure_applies_every_step(monkeypatch, fake_utils, restore
 def test_rollback_runs_newest_first(monkeypatch, restore_txda):
     order = []
     monkeypatch.setattr(txda_patch, "_patches_applied", True)
-    monkeypatch.setattr(txda_patch, "_undo_stack", [
-        ("one", lambda: order.append("one")),
-        ("two", lambda: order.append("two")),
-    ])
+    monkeypatch.setattr(
+        txda_patch,
+        "_undo_stack",
+        [
+            ("one", lambda: order.append("one")),
+            ("two", lambda: order.append("two")),
+        ],
+    )
 
     txda_patch.rollback_txda_patches()
 
@@ -130,7 +136,8 @@ def test_preflight_rejects_missing_txda(monkeypatch):
     monkeypatch.setattr(txda_patch, "_patches_applied", False)
     monkeypatch.setattr(txda_patch, "_undo_stack", [])
     monkeypatch.setattr(
-        txda_patch, "_preflight",
+        txda_patch,
+        "_preflight",
         lambda: (_ for _ in ()).throw(RuntimeError("TXDA runtime patches require")),
     )
     monkeypatch.setattr(txda_patch, "_PATCH_STEPS", (("never", lambda: None),))
