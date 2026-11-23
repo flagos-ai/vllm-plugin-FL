@@ -313,4 +313,6 @@ def test_fused_topk_padded_zeroes_weights_without_native_op(monkeypatch):
 
     torch.testing.assert_close(weights[:2], torch.ones((2, 2)))
     torch.testing.assert_close(weights[2:], torch.zeros((2, 2)))
-    torch.testing.assert_close(ids, torch.full((4, 2), 2, dtype=torch.int32))
+    # Padding rows are excluded from expert dispatch; their IDs are invalid.
+    expected_ids = torch.tensor([[2, 2], [2, 2], [-1, -1], [-1, -1]], dtype=torch.int32)
+    torch.testing.assert_close(ids, expected_ids)
