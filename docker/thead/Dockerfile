@@ -17,8 +17,7 @@ FROM scratch AS wheel_seed
 FROM harbor.baai.ac.cn/flagos-runtime/flagos-runtime-thead-ppu2.1.0:2.3.0@sha256:35fcbd0c3777f0af1f936fc725a91be76279ea77849d192ea11d6f90c12172bc AS runtime
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
-ENV PYTHONPATH=/opt/flagtree \
-    FLAGCX_PATH=/flagos/lib/python3.12/site-packages/flagcx \
+ENV FLAGCX_PATH=/flagos/lib/python3.12/site-packages/flagcx \
     PIP_CONFIG_FILE=/dev/null \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 

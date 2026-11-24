@@ -3,7 +3,6 @@
 # Install the checkout into the T-Head CI Runtime.
 set -euo pipefail
 
-export PATH="/flagos/bin:$PATH" VIRTUAL_ENV=/flagos PYTHONPATH=/opt/flagtree
 export TORCH_DEVICE_BACKEND_AUTOLOAD=1 VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_VENDOR="" VLLM_TARGET_DEVICE=empty
 export VLLM_PLUGINS=fl GEMS_VENDOR=thead USE_FLAGGEMS=1
@@ -33,7 +32,7 @@ assert current_platform.dist_backend == "flagcx", current_platform
 PYCODE
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
-  for name in PATH VIRTUAL_ENV PYTHONPATH TORCH_DEVICE_BACKEND_AUTOLOAD \
+  for name in TORCH_DEVICE_BACKEND_AUTOLOAD \
     VLLM_WORKER_MULTIPROC_METHOD VLLM_VENDOR VLLM_TARGET_DEVICE VLLM_PLUGINS \
     GEMS_VENDOR USE_FLAGGEMS FL_CONCURRENT_MAX_TOKENS XDG_CACHE_HOME \
     FLAGGEMS_CACHE_DIR TRITON_CACHE_DIR HF_HOME; do
