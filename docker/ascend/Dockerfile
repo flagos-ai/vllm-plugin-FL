@@ -49,8 +49,6 @@ COPY .github/scripts/install_flaggems_vllm.py .github/scripts/install_ascend_fla
 # when built by Podman/Buildah in default OCI mode (which ignores SHELL).
 RUN bash -euo pipefail -c "python /opt/fl-ci/install_ascend_flaggems_vllm.py"
 
-COPY .github/scripts/ascend/stack.py /opt/fl-ci/stack.py
-RUN bash -euo pipefail -c "python -B /opt/fl-ci/stack.py --build-only"
 
 COPY . /workspace/vllm-plugin-FL
 WORKDIR /workspace/vllm-plugin-FL

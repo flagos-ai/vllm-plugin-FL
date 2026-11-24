@@ -3,17 +3,12 @@
 # Use the dependency image built by docker/ascend/Dockerfile.
 set -euo pipefail
 
-HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-
 git config --global --add safe.directory "$(pwd)"
 
 VLLM_DIST_VERSION="$(python -c 'from importlib.metadata import version; print(version("vllm"))' 2>/dev/null || true)"
 
 if [[ "${VLLM_DIST_VERSION}" == "0.32.0+flagos" ]]; then
     # FlagOS Runtime 2.3.0 (CANN 9.2.1) + vLLM 0.32.0+flagos stack
-    # Preserve Runtime PYTHONPATH=/opt/flagtree compiler selection (do not pass -I).
-    python -B "$HERE/stack.py" --runtime-only
-
     if [[ ! -e .git && -z "${SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL:-}" ]]; then
         SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="$(python -c 'from importlib.metadata import PackageNotFoundError, version
 try:
@@ -37,7 +32,6 @@ for package in ("pytest", "pytest-xdist", "pytest-cov", "pytest-json-report", "p
     print(f"CI tool: {package}=={version(package)}")
 PY
 
-    python -B "$HERE/stack.py"
     exit 0
 fi
 
