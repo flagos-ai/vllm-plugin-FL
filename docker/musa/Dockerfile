@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# FlagOS 2.2 release runtime for Moore Threads: MUSA SDK 4.3.6, Python 3.10,
+# FlagOS 2.3.0 release runtime for Moore Threads: MUSA SDK 4.3.6, Python 3.10,
 # torch 2.9.0 + torch_musa 2.9.0, FlagTree 0.7.0, FlagGems 5.4.0.
 # https://flagos.io/resourcedownload -> release-info/runtime/mthreads-musa4.3.6
-ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-mthreads-musa4.3.6:2.2.0
+ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-mthreads-musa4.3.6:2.3.0@sha256:830696d24731df3f6a737206928bffc445c0b6357d0535ffcadc9825ac05dc46
 
 # ---------- base stage ----------
 FROM ${MUSA_BASE_IMAGE} AS base
