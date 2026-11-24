@@ -28,6 +28,7 @@ def runtime():
 
     def config_factory():
         return VllmConfig(
+            additional_config={"weight_nz_mode": 0},
             compilation_config=CompilationConfig(
                 mode=CompilationMode.NONE, custom_ops=["all"]
             ),
@@ -41,6 +42,9 @@ def runtime():
         )
 
     with ascend_single_rank_runtime(config_factory) as config:
+        from vllm_fl import register_quant_linear
+
+        register_quant_linear()
         yield config
 
 
@@ -83,7 +87,7 @@ def make_attention(runtime):
     from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
 
     from vllm_fl.kv_cache.deepseek_v4 import DeepseekV4CacheLayer
-    from vllm_fl.models.deepseek_v4 import DeepseekV4Attention
+    from vllm_fl.models.deepseek_v4_attention import DeepseekV4Attention
     from vllm_fl.worker.kv_cache_utils import bind_kv_cache
     from vllm_fl.worker.model_runner import ModelRunnerFL
 
@@ -214,11 +218,11 @@ def make_attention(runtime):
         rope = torch.stack([angle.cos(), angle.sin()], -1)
         old_quant = runtime.quant_config
         if mixed:
-            from vllm_fl.quantization.w8a8.compressed_tensors import (
-                AscendCompressedTensorsConfig,
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+                CompressedTensorsConfig,
             )
 
-            runtime.quant_config = AscendCompressedTensorsConfig.from_config(
+            runtime.quant_config = CompressedTensorsConfig.from_config(
                 {
                     "quant_method": "compressed-tensors",
                     "format": "int-quantized",
@@ -249,7 +253,6 @@ def make_attention(runtime):
                     "ignore": [],
                 }
             )
-            runtime.quant_config.weight_nz_mode = 0
         try:
             module = DeepseekV4Attention(runtime, cfg, leaves, rope, prefix=prefix).to(
                 "npu"
@@ -631,6 +634,7 @@ def test_attention_changed_input_graph(make_attention):
     for _ in range(2):
         history.add_(0.03125)
         expected = _oracle(env, history, list(range(8)))
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output, expected, rtol=0.02, atol=0.01)

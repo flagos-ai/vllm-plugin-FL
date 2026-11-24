@@ -285,3 +285,107 @@ def test_w8a8_linear_weight_layout_and_numerics_match_flaggems_contract(
 
     assert actual.shape == (1, 2, 3)
     assert torch.equal(actual, expected)
+
+
+def _adapter_config_class():
+    class Config:
+        def get_quant_method(self, layer, prefix):
+            return layer, prefix
+
+        def get_scheme_dict(self, layer, prefix=None):
+            return None
+
+        def _get_scheme_from_parts(
+            self,
+            weight_quant,
+            input_quant,
+            output_quant=None,
+            format=None,
+            layer_name=None,
+        ):
+            return weight_quant
+
+    return Config
+
+
+@pytest.mark.parametrize(
+    "api", ["get_quant_method", "get_scheme_dict", "_get_scheme_from_parts"]
+)
+@pytest.mark.parametrize("missing", [True, False])
+def test_ascend_linear_adapter_validates_before_writing(monkeypatch, api, missing):
+    config = _adapter_config_class()
+    if missing:
+        delattr(config, api)
+    else:
+        setattr(config, api, lambda self: None)
+    original = dict(vars(config))
+    monkeypatch.setattr(linear, "CompressedTensorsConfig", config)
+    monkeypatch.setattr(linear, "_is_ascend_npu", lambda: True)
+    with pytest.raises((AttributeError, TypeError)):
+        linear.install_ascend_w8a8_linear_adapter()
+    assert dict(vars(config)) == original
+
+
+def test_ascend_linear_adapter_uses_actual_wrappers_for_idempotence(monkeypatch):
+    config = _adapter_config_class()
+    marker = "_fl_ascend_w8a8_linear"
+    # A stale success marker must not prevent installing the real methods.
+    setattr(config, marker + "_method_installed", True)
+    monkeypatch.setattr(linear, "CompressedTensorsConfig", config)
+    monkeypatch.setattr(linear, "_is_ascend_npu", lambda: True)
+    original = config.get_quant_method
+    linear.install_ascend_w8a8_linear_adapter()
+    installed = dict(vars(config))
+    assert config.get_quant_method is not original
+    linear.install_ascend_w8a8_linear_adapter()
+    assert dict(vars(config)) == installed
+
+
+@pytest.mark.parametrize(
+    "failure_target",
+    [
+        "_get_scheme_from_parts",
+    ],
+)
+@pytest.mark.parametrize("preinstalled", [False, True])
+def test_ascend_linear_adapter_rolls_back_all_writes(
+    monkeypatch, failure_target, preinstalled
+):
+    base = _adapter_config_class()
+    marker = "_fl_ascend_w8a8_linear"
+    existing_wrapper = base.get_quant_method
+    if preinstalled:
+        setattr(existing_wrapper, marker, True)
+
+    class FailOnce(type):
+        def __setattr__(cls, name, value):
+            if name == failure_target and cls.fail:
+                type.__setattr__(cls, "fail", False)
+                raise RuntimeError("injected installation failure")
+            super().__setattr__(name, value)
+
+    class Config(base, metaclass=FailOnce):
+        fail = True
+
+    monkeypatch.setattr(linear, "CompressedTensorsConfig", Config)
+    monkeypatch.setattr(linear, "_is_ascend_npu", lambda: True)
+    originals = {name: value for name, value in vars(Config).items() if name != "fail"}
+    with pytest.raises(RuntimeError, match="injected installation failure"):
+        linear.install_ascend_w8a8_linear_adapter()
+    assert {
+        name: value for name, value in vars(Config).items() if name != "fail"
+    } == originals
+    assert Config.get_quant_method is existing_wrapper
+    linear.install_ascend_w8a8_linear_adapter()
+    installed = dict(vars(Config))
+    linear.install_ascend_w8a8_linear_adapter()
+    assert dict(vars(Config)) == installed
+
+
+def test_ascend_linear_adapter_leaves_other_platforms_untouched(monkeypatch):
+    config = _adapter_config_class()
+    original = dict(vars(config))
+    monkeypatch.setattr(linear, "CompressedTensorsConfig", config)
+    monkeypatch.setattr(linear, "_is_ascend_npu", lambda: False)
+    linear.install_ascend_w8a8_linear_adapter()
+    assert dict(vars(config)) == original

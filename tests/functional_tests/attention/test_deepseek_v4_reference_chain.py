@@ -17,13 +17,14 @@ def strict_dispatch():
     from vllm_fl.dispatch import get_default_manager, with_strict_mode
 
     with with_strict_mode():
+        manager = get_default_manager()
         for name in (
             "deepseek_v4_compressor",
             "deepseek_v4_sparse_attention",
             "deepseek_v4_indexer",
             "paged_cache_write",
         ):
-            assert get_default_manager().get_selected_impl_id(name) == "vendor.ascend"
+            assert manager.get_selected_impl_id(name) == "reference.torch"
         yield
 
 
@@ -63,6 +64,8 @@ def _chain_case(ratio):
 
 @pytest.mark.parametrize("ratio", [4, 128])
 def test_integrated_prefill_decode_chain(ratio):
+    from vllm_fl.dispatch import call_op
+
     args = _chain_case(ratio)
     x, _, _, _, cache, pos, slots, table, _, _, _, _ = args[:-1]
     # Retain chunked state updates through the full entry, including write-only
@@ -89,7 +92,8 @@ def test_integrated_prefill_decode_chain(ratio):
     end = 2 * ratio - 1
     ends = torch.tensor([end, end], device="npu")
     compact = torch.zeros(4, 4, 4, device="npu", dtype=torch.bfloat16)
-    compact[2, :2], compact[3, :2] = compressed[:2], compressed[2:]
+    output_slots = torch.tensor([8, 9, 12, 13], device="npu")
+    call_op("paged_cache_write", compressed, output_slots, compact)
     q = torch.full((2, 2, 4), 0.25, device="npu", dtype=torch.bfloat16)
     compact_table = torch.tensor([[2], [3]], device="npu", dtype=torch.int32)
     counts = torch.full((2,), 2, device="npu", dtype=torch.int32)
@@ -189,11 +193,15 @@ def test_empty_chain_inputs():
 def test_full_compressor_attention_pipeline_changed_inputs_graph():
     import torch_npu  # noqa: F401
 
+    from vllm_fl.dispatch import call_op
+
     args = _chain_case(4)
     cache, table = args[4], args[7]
+    initial_state = cache.clone()
     reqs = torch.tensor([0, 1], device="npu")
     ends = torch.tensor([7, 7], device="npu")
     compact = torch.zeros(4, 4, 4, device="npu", dtype=torch.bfloat16)
+    output_slots = torch.tensor([8, 9, 12, 13], device="npu")
     compact_table = torch.tensor([[2], [3]], device="npu", dtype=torch.int32)
     compact_lengths = torch.full((2,), 2, device="npu", dtype=torch.int32)
     swa_lengths = torch.full((2,), 8, device="npu", dtype=torch.int32)
@@ -202,8 +210,7 @@ def test_full_compressor_attention_pipeline_changed_inputs_graph():
 
     def run():
         compressed = _call("compressor", *args)
-        compact[2, :2].copy_(compressed[:2])
-        compact[3, :2].copy_(compressed[2:])
+        call_op("paged_cache_write", compressed, output_slots, compact)
         ids = _call(
             "indexer",
             q,
@@ -244,28 +251,38 @@ def test_full_compressor_attention_pipeline_changed_inputs_graph():
         args[0].add_(0.03125)
         args[2].mul_(1.03)
         q.add_(torch.tensor([0.1, -0.05, 0.08, -0.04], device="npu", dtype=q.dtype))
-        expected = tuple(value.clone() for value in run())
-        oracle_compressed, _ = _full_compressor_cpu_oracle(args)
-        oracle_compressed = oracle_compressed.npu()
-        oracle_output = torch.empty_like(q)
+        oracle_args = list(args)
+        oracle_args[4] = initial_state
+        oracle_compressed, oracle_state = _full_compressor_cpu_oracle(oracle_args)
+        queries = q.cpu().float()
+        oracle_ids = torch.empty((2, 2), dtype=torch.int32)
+        oracle_output = torch.empty_like(queries, dtype=q.dtype)
         for req in range(2):
             swa_values = [
-                (cache[PAGES[req][i // 4], i % 4, :4].to(q.dtype) * 0.03).float()
+                (oracle_state[PAGES[req][i // 4], i % 4, :4].to(q.dtype) * 0.03).float()
                 for i in (5, 6, 7)
             ]
-            matrix = torch.stack(
-                swa_values + list(oracle_compressed[req * 2 : req * 2 + 2].float())
+            compressed_keys = oracle_compressed[req * 2 : req * 2 + 2].float()
+            scores = (queries[req] @ compressed_keys.T).clamp_min(0).sum(0)
+            oracle_ids[req] = torch.tensor(
+                sorted(range(2), key=lambda key: (-scores[key].item(), key)),
+                dtype=torch.int32,
             )
-            logits = q[req].float() @ matrix.t() / 2
+            matrix = torch.stack(swa_values + list(compressed_keys))
+            logits = queries[req] @ matrix.T / 2
             oracle_output[req] = (logits.softmax(-1) @ matrix).to(q.dtype)
+        output.fill_(-123.0)
+        compressed_output.fill_(-123.0)
+        selected.fill_(-777)
+        cache.copy_(initial_state)
+        compact.zero_()
         graph.replay()
         torch.npu.synchronize()
-        torch.testing.assert_close(output, expected[0], rtol=0.01, atol=0.01)
-        torch.testing.assert_close(compressed_output, expected[1], rtol=0.01, atol=0.01)
-        torch.testing.assert_close(selected, expected[2])
-        torch.testing.assert_close(output, oracle_output, rtol=0.01, atol=0.01)
+        torch.testing.assert_close(cache.cpu(), oracle_state, rtol=1.3e-6, atol=1e-5)
+        torch.testing.assert_close(selected.cpu(), oracle_ids)
+        torch.testing.assert_close(output.cpu(), oracle_output, rtol=0.01, atol=0.01)
         torch.testing.assert_close(
-            compressed_output, oracle_compressed, rtol=0.01, atol=0.01
+            compressed_output.cpu(), oracle_compressed, rtol=0.01, atol=0.01
         )
         assert torch.isfinite(output).all()
         assert not torch.equal(output, previous)
@@ -409,6 +426,30 @@ def _check_full_compressor(args):
     return output
 
 
+def test_compressor_interleaved_state_rows():
+    backing = torch.full((32,), -1.0, device="npu")
+    state = backing.as_strided((3, 2, 4), (8, 12, 1))
+    args = _full_to_device(_full_compressor_case(4, 1, torch.float32, 0))
+    args[0] = args[0][:4]
+    args[4:10] = [
+        state,
+        torch.arange(4, device="npu"),
+        torch.arange(4, device="npu"),
+        torch.tensor([[0, 1]], device="npu"),
+        torch.tensor([0], device="npu"),
+        torch.tensor([3], device="npu"),
+    ]
+    _check_full_compressor(args)
+    # The view excludes these storage positions.
+    holes = [4, 5, 6, 7, 24, 25, 26, 27]
+    torch.testing.assert_close(backing.cpu()[holes], torch.full((8,), -1.0))
+    baseline = backing.clone()
+    args[4] = backing.as_strided((3, 2, 4), (8, 10, 1))
+    with pytest.raises(ValueError, match="disjoint .*spans"):
+        _call("compressor", *args)
+    torch.testing.assert_close(backing.cpu(), baseline.cpu())
+
+
 @pytest.mark.parametrize("ratio,dim", [(4, 512), (4, 128), (128, 512)])
 def test_full_compressor_cpu_output_and_state(ratio, dim):
     _check_full_compressor(_full_to_device(_full_compressor_case(ratio, dim)))
@@ -466,6 +507,7 @@ def test_full_compressor_mutating_metadata_graph():
         for actual, value in zip(args, changed):
             if isinstance(actual, torch.Tensor):
                 actual.copy_(value)
+        output.fill_(-123.0)
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(
@@ -718,6 +760,7 @@ def test_full_compressor_single_token_mutating_graph(ratio, dim):
         for actual, value in zip(args, changed):
             if isinstance(actual, torch.Tensor):
                 actual.copy_(value)
+        output.fill_(-123.0)
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(

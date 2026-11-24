@@ -145,6 +145,8 @@ def test_changed_logits_and_tokens_graph(dtype):
         logits.add_(torch.tensor([0.4, -0.2, 0.1, -0.3], device="npu", dtype=dtype))
         tokens.copy_(torch.tensor([step + 1, 1 - step, -1], device="npu"))
         expected, expected_ids = _oracle(logits, bias, True, tokens, table)
+        weights.fill_(float("nan"))
+        ids.fill_(-777)
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(weights, expected * 2.5, rtol=1e-6, atol=1e-6)

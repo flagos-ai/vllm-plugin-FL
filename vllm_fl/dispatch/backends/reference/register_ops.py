@@ -35,11 +35,18 @@ def register_builtins(registry) -> None:
 
     backend = ReferenceBackend()
     is_avail = backend.is_available
+    no_retry = (
+        "deepseek_v4_compressor",
+        "deepseek_v4_sparse_attention",
+        "deepseek_v4_indexer",
+        "paged_cache_write",
+    )
 
     # ReferenceBackend implements only part of the dispatch surface on some
     # vLLM 0.24 builds. One absent optional MoE helper must not prevent all
     # available PyTorch fallbacks from registering.
     op_names = (
+        *no_retry,
         "deepseek_v4_partial_rope",
         "deepseek_v4_hadamard",
         "deepseek_v4_index_quant",
@@ -79,6 +86,7 @@ def register_builtins(registry) -> None:
                 fn=_bind_is_available(fn, is_avail),
                 vendor=None,
                 priority=BackendPriority.REFERENCE,
+                allow_execution_fallback=op_name not in no_retry,
             )
         )
 

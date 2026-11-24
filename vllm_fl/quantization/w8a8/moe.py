@@ -13,6 +13,8 @@
 """Route vLLM 0.24 W8A8 INT8 MoE by hardware backend."""
 
 from importlib import import_module
+from inspect import signature
+from threading import RLock
 
 import torch
 
@@ -34,9 +36,64 @@ _SCHEME_MODULE = (
 # blacklists/whitelists keep governing the whole FL MoE pipeline.
 FLAGGEMS_W8A8_MOE_OP = "fused_moe"
 logger = init_logger(__name__)
+_INSTALL_LOCK = RLock()
 
 
 def install_fl_w8a8_moe_selector() -> bool:
+    """Install dependent MoE hooks atomically, retaining existing wrappers."""
+    with _INSTALL_LOCK:
+        oracle = import_module(_ORACLE_MODULE)
+        scheme = import_module(_SCHEME_MODULE)
+        from vllm.platforms import current_platform
+
+        targets = [
+            (scheme, "make_int8_moe_quant_config"),
+            (oracle, "select_int8_moe_backend"),
+            (scheme, "select_int8_moe_backend"),
+        ]
+        token = object()
+        signature(scheme.make_int8_moe_quant_config).bind(
+            w1_scale=token,
+            w2_scale=token,
+            a1_scale=None,
+            a2_scale=None,
+            w1_bias=None,
+            w2_bias=None,
+            per_act_token_quant=True,
+        )
+        for owner in (oracle, scheme):
+            signature(owner.select_int8_moe_backend).bind(
+                token, weight_key=None, activation_key=None
+            )
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+        ):
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import (
+                CompressedTensorsMoEMethod,
+            )
+
+            signature(CompressedTensorsMoEMethod.get_moe_method).bind(
+                token, token, token
+            )
+            targets.append((CompressedTensorsMoEMethod, "get_moe_method"))
+        missing = object()
+        originals = [
+            (owner, name, vars(owner).get(name, missing)) for owner, name in targets
+        ]
+        try:
+            return _install_fl_w8a8_moe_selector()
+        except Exception:
+            for owner, name, original in reversed(originals):
+                if original is missing:
+                    if name in vars(owner):
+                        delattr(owner, name)
+                else:
+                    setattr(owner, name, original)
+            raise
+
+
+def _install_fl_w8a8_moe_selector() -> bool:
     """Prefer FlagGems W8A8 MoE and retain the native NVIDIA fallback."""
     oracle_module = import_module(_ORACLE_MODULE)
     scheme_module = import_module(_SCHEME_MODULE)
@@ -87,6 +144,8 @@ def install_fl_w8a8_moe_selector() -> bool:
             True,
         )
         scheme_module.make_int8_moe_quant_config = make_int8_moe_quant_config_fl
+
+    _install_ascend_moe_method_factory()
 
     current_selector = oracle_module.select_int8_moe_backend
     if getattr(current_selector, _ADAPTER_MARKER, False):
@@ -230,6 +289,48 @@ def install_fl_w8a8_moe_selector() -> bool:
     # The compressed-tensors scheme imported the selector by name.
     scheme_module.select_int8_moe_backend = select_int8_moe_backend_fl
     return True
+
+
+_METHOD_FACTORY_MARKER = "_fl_ascend_w8a8_method_factory"
+
+
+def _install_ascend_moe_method_factory():
+    from vllm.platforms import current_platform
+
+    if (
+        getattr(current_platform, "vendor_name", None) != "ascend"
+        or current_platform.device_type != "npu"
+    ):
+        return
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import (
+        CompressedTensorsMoEMethod,
+    )
+
+    current = CompressedTensorsMoEMethod.get_moe_method
+    if getattr(current, _METHOD_FACTORY_MARKER, False):
+        return
+
+    def get_moe_method(config, layer, layer_name):
+        # The framework still parses and matches the checkpoint scheme. Only
+        # the selected native INT8 method needs a different post-load contract.
+        method = current(config, layer, layer_name)
+        from vllm.platforms import current_platform
+
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and current_platform.device_type == "npu"
+            and type(method) is CompressedTensorsW8A8Int8MoEMethod
+        ):
+            return AscendW8A8DynamicMoEMethod(
+                method.weight_quant,
+                method.input_quant,
+                layer.moe_config,
+                layer_name=layer_name,
+            )
+        return method
+
+    setattr(get_moe_method, _METHOD_FACTORY_MARKER, True)
+    CompressedTensorsMoEMethod.get_moe_method = staticmethod(get_moe_method)
 
 
 _prepare = CachedOp("w8a8_prepare_experts")

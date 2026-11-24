@@ -108,21 +108,12 @@ def _case(ratio, dtype, *, dim=64, tokens=5, sink=True, heads=4):
 
 
 def _call(args):
-    from vllm_fl.dispatch import (
-        SelectionPolicy,
-        call_op,
-        get_default_manager,
-        policy_context,
-    )
+    from vllm_fl.dispatch import call_op, get_default_manager, with_strict_mode
 
-    policy = SelectionPolicy.from_dict(
-        strict=True,
-        per_op_order={"deepseek_v4_sparse_attention": ["vendor:ascend"]},
-    )
-    with policy_context(policy):
-        assert (
-            get_default_manager().get_selected_impl_id("deepseek_v4_sparse_attention")
-            == "vendor.ascend"
+    with with_strict_mode():
+        manager = get_default_manager()
+        assert manager.get_selected_impl_id("deepseek_v4_sparse_attention") == (
+            "reference.torch"
         )
         return call_op("deepseek_v4_sparse_attention", *args)
 
@@ -170,6 +161,7 @@ def test_sparse_attention_graph_reloads_metadata(ratio):
         cpu[9][:, 0] = 0
         device[9].copy_(cpu[9])
     for _ in range(3):
+        output.fill_(float("nan"))
         graph.replay()
     torch.npu.synchronize()
     torch.testing.assert_close(
@@ -179,7 +171,7 @@ def test_sparse_attention_graph_reloads_metadata(ratio):
 
 @pytest.mark.parametrize("ratio", [0, 4, 128])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_sparse_attention_contiguous_cube(ratio, dtype):
+def test_sparse_attention_contiguous_head_dim_512(ratio, dtype):
     cpu, device = _case(ratio, dtype, dim=512)
     device = [
         tensor.contiguous() if isinstance(tensor, torch.Tensor) else tensor
@@ -198,16 +190,6 @@ def test_sparse_attention_empty_and_all_masked():
         result = _call(device).cpu()
         assert result.shape == (tokens, 4, 61)
         assert torch.count_nonzero(result) == 0
-
-
-def test_sparse_attention_default_vendor_selection():
-    from vllm_fl.dispatch import SelectionPolicy, get_default_manager, policy_context
-
-    with policy_context(SelectionPolicy(strict=True)):
-        assert (
-            get_default_manager().get_selected_impl_id("deepseek_v4_sparse_attention")
-            == "vendor.ascend"
-        )
 
 
 def test_sparse_attention_large_shared_storage_address():
@@ -358,7 +340,7 @@ def test_sparse_attention_prefill_random_indices_chunk_tail(dtype, ratio):
 
 @pytest.mark.parametrize("ratio", [0, 4, 128])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_sparse_attention_prefill_graph_workspace_reuse(ratio, dtype):
+def test_sparse_attention_prefill_graph_reloads_inputs(ratio, dtype):
     cpu = _model_prefill_case(ratio, dtype)
     device = _packed_device_inputs(cpu)
     for _ in range(2):
@@ -383,6 +365,7 @@ def test_sparse_attention_prefill_graph_workspace_reuse(ratio, dtype):
             for index in (4, 8, 9):
                 device[index].copy_(cpu[index])
         expected = _oracle(cpu)
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         rtol, atol = (2e-3, 2e-5) if dtype == torch.float16 else (8e-3, 2e-4)

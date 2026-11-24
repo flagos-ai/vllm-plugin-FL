@@ -29,6 +29,7 @@ def single_rank_runtime():
 
     def config_factory():
         return VllmConfig(
+            additional_config={"weight_nz_mode": 0},
             device_config=DeviceConfig(device="npu"),
             compilation_config=CompilationConfig(
                 mode=CompilationMode.NONE, cudagraph_mode=CUDAGraphMode.NONE
@@ -41,16 +42,19 @@ def single_rank_runtime():
 
 
 def _config(targets=None, ignore=None, model_class=None):
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
+    )
     from vllm.model_executor.model_loader.utils import configure_quant_config
 
     from vllm_fl import register_quant_linear
     from vllm_fl.models.deepseek_v4 import DeepseekV4ForCausalLM
     from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendCompressedTensorsConfig,
+        bind_compressed_tensors_model,
     )
 
     register_quant_linear()
-    result = AscendCompressedTensorsConfig.from_config(
+    result = CompressedTensorsConfig.from_config(
         {
             "quant_method": "compressed-tensors",
             "format": "int-quantized",
@@ -85,8 +89,13 @@ def _config(targets=None, ignore=None, model_class=None):
             "ignore": ignore or [],
         }
     )
-    result.weight_nz_mode = 0
-    configure_quant_config(result, model_class or DeepseekV4ForCausalLM)
+    selected_model = model_class or DeepseekV4ForCausalLM
+    bind_compressed_tensors_model(
+        result,
+        getattr(selected_model, "hf_to_vllm_mapper", None),
+        getattr(selected_model, "packed_modules_mapping", None),
+    )
+    configure_quant_config(result, selected_model)
     return result
 
 
@@ -157,36 +166,25 @@ def test_mixed_expertbank_rejected():
         config.get_quant_method(layer, "model.layers.0.mlp.experts")
 
 
-def test_registration_idempotent(monkeypatch):
-    from functools import cache
-
-    from vllm.model_executor.layers import quantization
-
-    from vllm_fl.quantization.w8a8 import (
-        compressed_tensors as compressed_tensors_config,
+def test_upstream_config_and_model_contract_are_idempotent():
+    from vllm.model_executor.layers.quantization import get_quantization_config
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
     )
+
+    from vllm_fl.models.deepseek_v4 import DeepseekV4ForCausalLM
     from vllm_fl.quantization.w8a8.compressed_tensors import (
-        AscendCompressedTensorsConfig,
+        bind_compressed_tensors_model,
     )
 
-    calls = []
-
-    def register(name):
-        def decorator(config_class):
-            calls.append((name, config_class))
-            return config_class
-
-        return decorator
-
-    monkeypatch.setattr(quantization, "register_quantization_config", register)
-    monkeypatch.setattr(
-        compressed_tensors_config,
-        "register_ascend_compressed_tensors",
-        cache(compressed_tensors_config.register_ascend_compressed_tensors.__wrapped__),
-    )
-    compressed_tensors_config.register_ascend_compressed_tensors()
-    compressed_tensors_config.register_ascend_compressed_tensors()
-    assert calls == [("compressed-tensors", AscendCompressedTensorsConfig)]
+    config = _config()
+    assert type(config) is CompressedTensorsConfig
+    assert get_quantization_config("compressed-tensors") is CompressedTensorsConfig
+    assert not hasattr(config, "weight_nz_mode")
+    mapper = DeepseekV4ForCausalLM.hf_to_vllm_mapper
+    packed = DeepseekV4ForCausalLM.packed_modules_mapping
+    assert bind_compressed_tensors_model(config, mapper, packed)
+    assert bind_compressed_tensors_model(config, mapper, packed)
 
 
 @pytest.fixture
@@ -285,6 +283,7 @@ def test_fresh_input_graph_replay(native, dtype):
     for _ in range(2):
         x.copy_(torch.randn_like(x))
         expected = method.apply(layer, x)
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output, expected)
@@ -334,12 +333,15 @@ def test_scoped_reference_dispatch(native):
     assert manager.get_selected_impl_id("w8a8_dynamic_linear") == before
 
 
-@pytest.mark.parametrize("groups", [1, 2])
-def test_grouped_wo_a_dynamic_projection(groups):
+@pytest.mark.parametrize(
+    "groups,input_width,output_width,tokens",
+    [(1, 128, 64, 3), (2, 128, 64, 3), (2, 16, 32768, 1)],
+)
+def test_grouped_wo_a_dynamic_projection(groups, input_width, output_width, tokens):
     from vllm_fl.dispatch.backends.reference.impl.quantization import (
         w8a8_dynamic_linear,
     )
-    from vllm_fl.quantization.w8a8.compressed_tensors import (
+    from vllm_fl.quantization.w8a8.linear import (
         AscendGroupedW8A8LinearMethod,
     )
 
@@ -350,10 +352,10 @@ def test_grouped_wo_a_dynamic_projection(groups):
     method.configure_grouped(groups)
     method.create_weights(
         layer,
-        128,
-        [64 * groups],
-        128,
-        64 * groups,
+        input_width,
+        [output_width * groups],
+        input_width,
+        output_width * groups,
         torch.bfloat16,
         weight_loader=lambda *args: None,
     )
@@ -363,19 +365,19 @@ def test_grouped_wo_a_dynamic_projection(groups):
             torch.randint(-32, 32, layer.weight.shape, device="npu", dtype=torch.int8)
         )
         # Values deliberately not representable in BF16: verify lossless loading.
-        scales = torch.linspace(0.010001, 0.020003, 64 * groups, device="npu").reshape(
-            -1, 1
-        )
+        scales = torch.linspace(
+            0.010001, 0.020003, output_width * groups, device="npu"
+        ).reshape(-1, 1)
         layer.weight_scale.copy_(scales)
     weight = layer.weight.detach().clone()
     torch.testing.assert_close(layer.weight_scale, scales, rtol=0, atol=0)
     assert layer.weight_scale.dtype == torch.float32
     method.process_weights_after_loading(layer)
-    x = torch.randn(3, groups * 128, dtype=torch.bfloat16, device="npu")
+    x = torch.randn(tokens, groups * input_width, dtype=torch.bfloat16, device="npu")
     expected = torch.cat(
         [
             w8a8_dynamic_linear(
-                x.reshape(3, groups, 128)[:, i].contiguous(),
+                x.reshape(tokens, groups, input_width)[:, i].contiguous(),
                 weight.chunk(groups)[i].t().contiguous(),
                 scales.chunk(groups)[i].flatten(),
             )
@@ -384,7 +386,41 @@ def test_grouped_wo_a_dynamic_projection(groups):
         dim=-1,
     )
     actual = method.apply_grouped(layer, x)
+    assert actual.shape == (tokens, groups * output_width)
+    assert torch.isfinite(actual).all()
     torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.04)
+
+
+@pytest.mark.parametrize("groups", [None, 2])
+def test_native_output_width_guard_before_preparation(groups):
+    from vllm.model_executor.kernels.linear import Int8ScaledMMLinearLayerConfig
+
+    from vllm_fl.quantization.w8a8.linear import (
+        AscendGroupedW8A8LinearMethod,
+        AscendInt8ScaledMMLinearKernel,
+    )
+
+    # Metadata-only tensors test rejection without allocating a large NPU weight.
+    rows = 65536 * (groups or 1)
+    layer = torch.nn.Module()
+    layer.weight = torch.nn.Parameter(
+        torch.empty(rows, 16, device="meta", dtype=torch.int8), requires_grad=False
+    )
+    layer.weight_scale = torch.nn.Parameter(
+        torch.empty(rows, 1, device="meta", dtype=torch.float32), requires_grad=False
+    )
+    if groups is None:
+        method = AscendInt8ScaledMMLinearKernel(
+            Int8ScaledMMLinearLayerConfig(
+                is_channelwise=True, is_static_input_scheme=False, input_symmetric=True
+            ),
+            ["weight", "weight_scale", "input_scale", "input_zero_point", "azp_adj"],
+        )
+    else:
+        method = AscendGroupedW8A8LinearMethod(_config())
+        method.configure_grouped(groups)
+    with pytest.raises(NotImplementedError, match="output width N=65536"):
+        method.process_weights_after_loading(layer)
 
 
 def _lm_head_layer():
@@ -425,7 +461,9 @@ def test_upstream_kernel_stays_native_for_flaggems_policy(monkeypatch, use_flagg
     method = config.get_quant_method(layer, "model.layers.0.self_attn.wq_a")
     layer, _ = make_layer(method, torch.bfloat16, layer=layer)
     assert type(layer.scheme.kernel) is AscendInt8ScaledMMLinearKernel
-    assert layer._fl_ascend_weight_nz_mode == 0
+    import torch_npu
+
+    assert torch_npu.get_npu_format(layer.weight) != 29
 
 
 @pytest.mark.parametrize("regex", [False, True])
@@ -527,17 +565,145 @@ def test_cached_ignore_matches_upstream_and_tracks_mutation():
                 name, config.ignore, config.packed_modules_mapping
             )
         )
-        assert outcome(lambda name=name: config._should_ignore_cached(name)) == expected
-        cache = config._ignore_cache
-        assert outcome(lambda name=name: config._should_ignore_cached(name)) == expected
-        assert config._ignore_cache is cache
+        assert (
+            outcome(
+                lambda name=name: config._fl_checkpoint_contract.should_ignore(
+                    config, name
+                )
+            )
+            == expected
+        )
+        cache = config._fl_checkpoint_contract.ignore_cache
+        assert (
+            outcome(
+                lambda name=name: config._fl_checkpoint_contract.should_ignore(
+                    config, name
+                )
+            )
+            == expected
+        )
+        assert config._fl_checkpoint_contract.ignore_cache is cache
 
     config.ignore = filler.copy()
-    assert not config._should_ignore_cached("new_literal")
-    previous = config._ignore_cache
+    assert not config._fl_checkpoint_contract.should_ignore(config, "new_literal")
+    previous = config._fl_checkpoint_contract.ignore_cache
     config.ignore.append("new_literal")
-    assert config._should_ignore_cached("new_literal")
-    assert config._ignore_cache is not previous
+    assert config._fl_checkpoint_contract.should_ignore(config, "new_literal")
+    assert config._fl_checkpoint_contract.ignore_cache is not previous
     config.ignore = filler + [r"re:(?i)^new_regex$"]
-    assert config._should_ignore_cached("NEW_REGEX")
-    assert not config._should_ignore_cached("new_literal")
+    assert config._fl_checkpoint_contract.should_ignore(config, "NEW_REGEX")
+    assert not config._fl_checkpoint_contract.should_ignore(config, "new_literal")
+
+
+@pytest.mark.parametrize("copy_kind", ["deepcopy", "pickle"])
+def test_shared_checkpoint_contract_survives_serialization(copy_kind):
+    import copy
+    import pickle
+
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
+    )
+
+    from vllm_fl.models.deepseek_v4 import DeepseekV4ForCausalLM
+    from vllm_fl.quantization.w8a8.compressed_tensors import (
+        bind_compressed_tensors_model,
+    )
+
+    config = _config([r"re:^head$", r"re:.*\.attn\.wq_a$"])
+    layer = _linear_layer()
+    expected = config.get_scheme_dict(layer, "lm_head")
+    clone = (
+        copy.deepcopy(config)
+        if copy_kind == "deepcopy"
+        else pickle.loads(pickle.dumps(config))
+    )
+    assert type(clone) is CompressedTensorsConfig
+    assert bind_compressed_tensors_model(
+        clone,
+        DeepseekV4ForCausalLM.hf_to_vllm_mapper,
+        DeepseekV4ForCausalLM.packed_modules_mapping,
+    )
+    assert clone.get_scheme_dict(layer, "lm_head") == expected
+    assert clone.get_scheme_dict(layer, "model.layers.0.self_attn.wq_a") is not None
+    assert not any(
+        callable(value) for value in vars(clone._fl_checkpoint_contract).values()
+    )
+
+
+def test_unmarked_checkpoint_config_retains_upstream_matching():
+    import copy
+    import inspect
+
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+        CompressedTensorsConfig,
+    )
+
+    opted_in = _config()
+    plain = CompressedTensorsConfig.from_config(copy.deepcopy(opted_in.config))
+    assert not hasattr(plain, "_fl_checkpoint_contract")
+    original = inspect.unwrap(CompressedTensorsConfig.get_scheme_dict)
+    layer = _linear_layer()
+    for name in (
+        "layers.0.attn.wq_a",
+        "model.layers.0.self_attn.wq_a",
+        "lm_head",
+        None,
+    ):
+        assert plain.get_scheme_dict(layer, name) == original(plain, layer, name)
+
+
+@pytest.mark.parametrize("quantized", [False, True])
+def test_model_grouped_projection_uses_standard_linear_apply(quantized):
+    from vllm.model_executor.layers.linear import ColumnParallelLinear
+
+    from vllm_fl.dispatch.backends.reference.impl.quantization import (
+        w8a8_dynamic_linear,
+    )
+    from vllm_fl.quantization.w8a8.linear import configure_grouped_projection
+
+    prefix = "model.layers.0.self_attn.wo_a"
+    layer = ColumnParallelLinear(
+        128,
+        128,
+        bias=False,
+        params_dtype=torch.bfloat16,
+        quant_config=_config([prefix]) if quantized else None,
+        prefix=prefix,
+        return_bias=False,
+    ).to("npu")
+    configure_grouped_projection(layer, 2)
+    with torch.no_grad():
+        if quantized:
+            layer.weight.copy_(
+                torch.randint(
+                    -24, 24, layer.weight.shape, device="npu", dtype=torch.int8
+                )
+            )
+            layer.weight_scale.fill_(0.015625)
+        else:
+            layer.weight.copy_(torch.randn_like(layer.weight))
+    weight = layer.weight.detach().clone()
+    scale = layer.weight_scale.detach().clone() if quantized else None
+    layer.quant_method.process_weights_after_loading(layer)
+    x = torch.randn(2, 2, 128, device="npu", dtype=torch.bfloat16)
+    if quantized:
+        expected = torch.cat(
+            [
+                w8a8_dynamic_linear(
+                    x[:, group].contiguous(),
+                    weight.chunk(2)[group].t().contiguous(),
+                    scale.chunk(2)[group].flatten(),
+                )
+                for group in range(2)
+            ],
+            dim=-1,
+        )
+    else:
+        expected = (
+            torch.einsum("tgi,goi->tgo", x.float(), weight.float().reshape(2, 64, 128))
+            .flatten(1)
+            .to(x.dtype)
+        )
+    actual = layer(x)
+    assert actual.shape == (2, 128)
+    torch.testing.assert_close(actual, expected, rtol=0.03, atol=0.04)
