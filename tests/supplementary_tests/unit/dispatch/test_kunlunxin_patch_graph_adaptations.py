@@ -462,6 +462,7 @@ class TestBreakablePrivatePools:
                 ns["patch_breakable_private_pools"](second)
                 assert second == []
             finally:
+                # restore the TRUE original, not the flagged install
                 real_breakable.BreakableCUDAGraphWrapper.__init__ = real_init
 
 
@@ -1287,6 +1288,51 @@ class TestGraphAdaptationsPreflight:
     def test_successful_publish_restores_on_repetition(self):
         # Publishing over an already-patched surface (double install) must
         # still succeed: the second run re-stages from the same owners.
+        import vllm.compilation.breakable_cudagraph as real_breakable
+        import vllm.v1.worker.gpu.cudagraph_utils as cudagraph_utils
+        import vllm_fl.distributed.communicator as comm_mod
+
+        # snapshot every owner the publish touches so it is fully restored
+        surfaces = [
+            (real_breakable, "is_breakable_cudagraph_enabled"),
+            (real_breakable.BreakableCUDAGraphWrapper, "__init__"),
+            (real_breakable.BreakableCUDAGraphWrapper, "__call__"),
+            (cudagraph_utils, "graph_capture"),
+            (comm_mod.CommunicatorFL, "all_reduce"),
+            (comm_mod.CommunicatorFL, "all_gather"),
+        ]
+        # is_breakable_cudagraph_enabled is also patched on the gpu_model_runner
+        # and fl_model_runner STUB modules, which die with the with-block.
+        snapshots = [
+            (owner, name, getattr(owner, name, None), name in vars(owner))
+            for owner, name in surfaces
+        ]
+        # patch_native_piecewise_boundaries wraps the two _forward_core /
+        # forward methods too
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            KunlunxinAttentionBackendImpl,
+        )
+        from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
+            QwenGatedDeltaNetAttention,
+        )
+
+        snapshots.append(
+            (
+                KunlunxinAttentionBackendImpl,
+                "forward",
+                KunlunxinAttentionBackendImpl.forward,
+                True,
+            )
+        )
+        snapshots.append(
+            (
+                QwenGatedDeltaNetAttention,
+                "_forward_core",
+                QwenGatedDeltaNetAttention._forward_core,
+                True,
+            )
+        )
+
         with _ModuleStubs() as stubs:
             ns = _load_patch_module()
             ns["patch_graph_adaptations"]()
@@ -1295,3 +1341,13 @@ class TestGraphAdaptationsPreflight:
             assert getattr(installed, "_kunlunxin_uniform_full", False) is True
             # second application is also fine (idempotent guards)
             ns["patch_graph_adaptations"]()
+
+        # restore every published surface exactly as it was
+        for owner, name, saved, existed in snapshots:
+            if existed:
+                setattr(owner, name, saved)
+            else:
+                try:
+                    delattr(owner, name)
+                except AttributeError:
+                    pass
