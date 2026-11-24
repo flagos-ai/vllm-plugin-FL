@@ -7,7 +7,7 @@ Adapted from the sglang-plugin-FL concurrent smoke test: N requests are
 submitted to a single engine in one ``LLM.generate`` call, so the scheduler
 runs them through continuous batching concurrently, then every output is
 validated. The ``concurrent`` block in the model YAML is optional —
-defaults keep the CI smoke small (8 requests, 64 tokens each).
+defaults keep the CI smoke small (8 requests, 256 tokens each).
 
 This test file is driven by environment variables set by ``tests/run.py``:
 
@@ -96,7 +96,7 @@ def _normalize_text_cases(raw_cases: list) -> list[dict]:
 
 _TEXT_CASES = _normalize_text_cases(_CFG.concurrent.text_prompts or _DEFAULT_TEXT_CASES)
 CONCURRENT_N = int(os.environ.get("FL_CONCURRENT_N", str(_CFG.concurrent.concurrent_n)))
-_SAMPLING = {"max_tokens": 64, "temperature": 0.0}
+_SAMPLING = {"max_tokens": 256, "temperature": 0.0}
 _SAMPLING.update(_CFG.concurrent.text_sampling)
 _SAMPLING["max_tokens"] = int(
     os.environ.get("FL_CONCURRENT_MAX_TOKENS", _SAMPLING["max_tokens"])
@@ -153,8 +153,10 @@ def test_concurrent() -> None:
 
         total_tokens = 0
         for i, (case, output) in enumerate(zip(items, outputs)):
-            text = output.outputs[0].text
-            total_tokens += len(output.outputs[0].token_ids)
+            completion = output.outputs[0]
+            text = completion.text
+            generated_tokens = len(completion.token_ids)
+            total_tokens += generated_tokens
 
             assert text.strip(), f"Empty output for request[{i}]: {case['text']}"
             print(f"  request[{i}]: {case['text']!r}")
@@ -165,7 +167,9 @@ def test_concurrent() -> None:
                 matched = any(item.lower() in lower for item in case["expected"])
                 assert matched, (
                     f"Expected one of {case['expected']!r} in output for "
-                    f"request[{i}], got: {text!r}"
+                    f"request[{i}] (finish_reason={completion.finish_reason!r}, "
+                    f"generated_tokens={generated_tokens}, "
+                    f"max_tokens={_SAMPLING['max_tokens']}), got: {text!r}"
                 )
 
         _report(CONCURRENT_N, elapsed, total_tokens)
