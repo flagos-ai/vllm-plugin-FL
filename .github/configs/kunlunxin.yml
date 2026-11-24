@@ -41,7 +41,3 @@ container_options: >-
   --env CUDA_VISIBLE_DEVICES=0,1,2,3
   --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
   --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
-
-# Run the dedicated unit job on the P800 runner (the functional job also runs
-# the unit pass; this makes the unit result a first-class PR check).
-unit_devices: [p800]

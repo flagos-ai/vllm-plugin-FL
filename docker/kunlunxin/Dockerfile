@@ -18,11 +18,12 @@
 # The digest is the published manifest digest; the config digest is
 # sha256:4961327d52a6feb2a71759e7e0055ce41c373ecbf42a802132ee8eb3ed52a663.
 ARG KUNLUNXIN_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-kunlunxin-xre5.37.1:2.3.0@sha256:cc0deb9c09cd49977e754892e85f4414835d142379949cc2d66261f63b47959d
-FROM ${KUNLUNXIN_BASE_IMAGE} AS dependencies
+FROM ${KUNLUNXIN_BASE_IMAGE} AS base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
+ARG KUNLUNXIN_VLLM_WHEEL_URL
 ARG VCS_REF=unknown
 ARG PLUGIN_SOURCE_SHA=77f141a961d75e54c0cf209de80c99a7c7eec04b
 
@@ -41,14 +42,14 @@ LABEL org.opencontainers.image.title="vllm-plugin-fl" \
 # kernels that exceed the XPU launch watchdog on P800. The whitelist is
 # deliberately not set for the same reason, since it forces native fallbacks.
 ENV PATH="/flagos/bin:${PATH}" \
+    PYTHONPATH=/opt/flagtree \
     GEMS_VENDOR=kunlunxin \
     VLLM_PLUGINS=fl \
     USE_FLAGGEMS=1 \
     VLLM_FL_PREFER=flagos
 
-# Pinned FlagCX 0.14.1 wheel, the Python 3.10 patched vLLM 0.32.0+flagos wheel,
-# and the runtime constraints that keep Torch/FlagTree/Triton/FlagGems/NumPy.
-COPY docker/kunlunxin/install-vllm.sh docker/kunlunxin/python310_compat.py docker/kunlunxin/constraints.txt /opt/kunlunxin-build/
+# Install FlagCX 0.14.1 and the Python 3.10-patched vLLM 0.32.0 wheel.
+COPY docker/kunlunxin/install-vllm.sh docker/kunlunxin/python310_compat.py /opt/kunlunxin-build/
 RUN bash /opt/kunlunxin-build/install-vllm.sh
 
 # Register the vLLM FlagGems providers in every derived image.
@@ -61,7 +62,7 @@ RUN PIP_INDEX_URL="${INDEX_URL:-https://pypi.org/simple}" CI_FLAGGEMS_VLLM_VENDO
 # needed because Torch's CMake package config enables the CUDA language.
 COPY . /opt/vllm-plugin-FL
 RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
-        --constraint /opt/kunlunxin-build/constraints.txt "cmake>=3.26" \
+        "cmake>=3.26" \
     && SETUPTOOLS_SCM_PRETEND_VERSION="0.5.0.dev0+g${PLUGIN_SOURCE_SHA}.xre5.37.1" \
        VLLM_VENDOR=cuda \
        PATH="/usr/local/cuda/bin:${PATH}" \
@@ -70,23 +71,19 @@ RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.
        python -m pip wheel --no-build-isolation --no-deps --no-cache-dir \
            -w /opt/kunlunxin-wheels /opt/vllm-plugin-FL
 
-FROM dependencies AS runtime
 RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
-        --constraint /opt/kunlunxin-build/constraints.txt \
         "modelscope==1.35.3" \
-    && python -m pip install --no-deps --force-reinstall /opt/kunlunxin-wheels/vllm_plugin_fl-*.whl
-
-FROM runtime AS base
+    && python -m pip install --no-deps --force-reinstall /opt/kunlunxin-wheels/vllm_plugin_fl-*.whl \
+    && python -m pip check
 
 FROM base AS ci
 RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
-        --constraint /opt/kunlunxin-build/constraints.txt \
         pytest pytest-cov pytest-timeout pytest-json-report pytest-xdist \
-        requests openai pillow decorator pyyaml sqlalchemy pybind11
+        requests openai pillow decorator pyyaml sqlalchemy pybind11 \
+    && python -m pip check
 
 FROM ci AS dev
 RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
-        --constraint /opt/kunlunxin-build/constraints.txt \
         pre-commit ruff
 
 FROM base AS release

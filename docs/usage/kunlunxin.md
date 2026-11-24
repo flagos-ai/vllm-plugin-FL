@@ -20,9 +20,7 @@ needed to install the plugin from your checkout. The image's Python is in
 `/flagos/bin`. Its base is the
 [FlagOS Runtime 2.3.0](https://flagos-ai.github.io/release-info/zh-cn/runtime/kunlunxin-xre5.37.1/)
 manifest
-`harbor.baai.ac.cn/flagos-runtime/flagos-runtime-kunlunxin-xre5.37.1:2.3.0@sha256:cc0deb9c09cd49977e754892e85f4414835d142379949cc2d66261f63b47959d`;
-`docker/kunlunxin/constraints.txt` pins the runtime packages that pip must
-not replace.
+`harbor.baai.ac.cn/flagos-runtime/flagos-runtime-kunlunxin-xre5.37.1:2.3.0@sha256:cc0deb9c09cd49977e754892e85f4414835d142379949cc2d66261f63b47959d`.
 
 ## Pull the runtime image
 
@@ -33,9 +31,11 @@ docker pull "$KUNLUNXIN_IMAGE"
 
 `docker/kunlunxin/Dockerfile` applies the [Python 3.10 compatibility patch](../../docker/kunlunxin/python310_compat.py)
 to the pinned vLLM wheel, installs the pinned FlagGems-vLLM source archive, and
-builds `vllm_fl._C` from the checkout inside the runtime so CI runs the checkout
-with a native extension built against the same Torch. Rebuild it with
-`bash docker/build.sh --platform kunlunxin --target ci`.
+builds `vllm_fl._C` against the image's Torch. CI setup installs its own checkout
+using the dependencies from that image. Rebuild it with
+`bash docker/build.sh --platform kunlunxin --target ci`. If a mirror hosts the
+same vendor wheel, pass its URL with `--build-arg KUNLUNXIN_VLLM_WHEEL_URL=...`.
+The compatibility script verifies the original wheel's SHA256 before patching.
 A source build of [upstream vLLM 0.32.0](https://github.com/vllm-project/vllm/blob/v0.32.0/pyproject.toml)
 in empty mode is also accepted by CI on Python 3.11–3.13.
 
