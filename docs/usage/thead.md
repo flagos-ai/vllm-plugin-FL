@@ -484,9 +484,10 @@ bash docker/build.sh --platform thead --target ci \
   --image-tag v0.32.0-thead-ci-dev
 ```
 
-The [wheel requirements](../../requirements/thead-ci.txt) pin the download URLs
-and SHA256 hashes. Set `THEAD_WHEELS_DIR` to reuse a local wheel cache.
-The image records the plugin commit and wheel checksum under `/opt/thead-ci`.
+The Dockerfile selects the vendor wheels and records the pinned plugin commit
+in the image labels. To supply a verified archived wheel, pass its pip direct
+reference with `--build-arg`, for example
+`FLAGGEMS_REQUIREMENT=flag-gems @ <wheel-url>#sha256=<hash>`.
 
 ## Recorded acceptance
 

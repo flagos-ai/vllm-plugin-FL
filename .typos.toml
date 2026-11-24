@@ -25,9 +25,6 @@ extend-ignore-re = [
 constant_pad_nd = "constant_pad_nd"
 
 [default.extend-words]
-# PyPI distribution name used in dependency locks
-certifi = "certifi"
-
 # ML / deep-learning terminology
 arange = "arange"
 rsqrt = "rsqrt"

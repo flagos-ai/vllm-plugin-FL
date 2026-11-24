@@ -162,11 +162,8 @@ VERSIONS (override via environment variables):
     HYGON_VLLM_WHEEL_DIR Optional directory containing one validated empty vLLM wheel
     HYGON_VLLM_WHEEL_SHA256 SHA256 required with HYGON_VLLM_WHEEL_DIR
   T-Head PPU:
-    THEAD_BASE_IMAGE     FlagOS base image with digest (default: ${THEAD_BASE_IMAGE})
     THEAD_VLLM_VERSION   vLLM empty-mode version (default: ${THEAD_VLLM_VERSION})
     THEAD_FLAGTREE_VERSION PPU FlagTree/Triton wheel version (default: ${THEAD_FLAGTREE_VERSION})
-    THEAD_FLAGGEMS_VERSION FlagGems version (default: ${THEAD_FLAGGEMS_VERSION})
-    THEAD_WHEELS_DIR     Optional for thead: cache directory with locked wheels
 
 EXAMPLES:
     # Build CUDA dev image
@@ -185,7 +182,6 @@ EXAMPLES:
     # Build Hygon CI image
     ./build.sh --platform hygon --target ci
     # Build T-Head PPU CI image from pre-downloaded wheels
-    THEAD_WHEELS_DIR=/path/to/wheels ./build.sh --platform thead --target ci
 
     # Build MetaX CI image
     ./build.sh --platform metax --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
@@ -375,10 +371,6 @@ elif [[ "${PLATFORM}" == "thead" ]]; then
                 err "T-Head plugin build arguments come from the pinned commit." ;;
         esac
     done
-    if [[ -n "${THEAD_WHEELS_DIR:-}" ]]; then
-        [[ -d "${THEAD_WHEELS_DIR}" ]] || err "THEAD_WHEELS_DIR directory does not exist."
-        BUILD_ARGS+=(--build-context "wheel_seed=${THEAD_WHEELS_DIR}")
-    fi
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${VLLM_VERSION}-thead-${TARGET}-dev"
     fi

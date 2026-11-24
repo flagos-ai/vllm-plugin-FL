@@ -54,9 +54,7 @@ THEAD_IMAGE_SUPPORT_FILES = {
     ".github/configs/thead.yml",
     ".github/scripts/detect_platforms.py",
     ".github/workflows/ci.yml",
-    ".typos.toml",
     "docs/usage/thead.md",
-    "requirements/thead-ci.txt",
     "tests/platforms/thead.yaml",
 }
 BUILD_SCRIPT = "docker/build.sh"
@@ -74,7 +72,7 @@ def _shared_build_script(source: str) -> str | None:
     if count != 1:
         return None
     return re.sub(
-        r"^(?:THEAD_[A-Z_]+=|    THEAD_WHEELS_DIR +)[^\n]*\n",
+        r"^(?:THEAD_[A-Z_]+=|    THEAD_[A-Z_]+[ =])[^\n]*\n",
         "",
         shared,
         flags=re.MULTILINE,
