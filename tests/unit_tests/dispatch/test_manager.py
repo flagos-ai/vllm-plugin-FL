@@ -523,6 +523,45 @@ class TestOpManagerCall:
         assert call_order == ["failing", "fallback"]
 
     @patch.dict(os.environ, {"VLLM_FL_STRICT": "0"})
+    def test_call_does_not_retry_stateful_failure(self, manager, registry):
+        calls = []
+        error = RuntimeError("stateful failure")
+
+        def primary(state):
+            calls.append("primary")
+            state.append(1)
+            raise error
+
+        def fallback(state):
+            calls.append("fallback")
+
+        registry.register_impl(
+            OpImpl(
+                "stateful_op",
+                "default.primary",
+                BackendImplKind.DEFAULT,
+                primary,
+                priority=200,
+                allow_execution_fallback=False,
+            )
+        )
+        registry.register_impl(
+            OpImpl(
+                "stateful_op",
+                "reference.fallback",
+                BackendImplKind.REFERENCE,
+                fallback,
+                priority=100,
+            )
+        )
+        state = []
+        with pytest.raises(RuntimeError) as exc:
+            manager.call("stateful_op", state)
+        assert exc.value is error
+        assert state == [1]
+        assert calls == ["primary"]
+
+    @patch.dict(os.environ, {"VLLM_FL_STRICT": "0"})
     def test_call_tracks_failed_impls(self, manager, registry):
         def failing_fn(x):
             raise RuntimeError("Failed")

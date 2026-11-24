@@ -98,3 +98,44 @@ def test_prewarm_does_not_freeze_when_io_dump_is_enabled(
 
     assert dispatch.prewarm_cached_ops() == 1
     assert cached._frozen is False
+
+
+def test_cached_op_does_not_retry_stateful_failure(isolated_dispatch, monkeypatch):
+    _, registry = isolated_dispatch
+    monkeypatch.setenv("VLLM_FL_STRICT", "0")
+    calls = []
+    error = RuntimeError("stateful failure")
+
+    def primary(state):
+        calls.append("primary")
+        state.append(1)
+        raise error
+
+    def fallback(state):
+        calls.append("fallback")
+
+    registry.register_impl(
+        OpImpl(
+            "stateful_op",
+            "default.primary",
+            BackendImplKind.DEFAULT,
+            primary,
+            priority=200,
+            allow_execution_fallback=False,
+        )
+    )
+    registry.register_impl(
+        OpImpl(
+            "stateful_op",
+            "reference.fallback",
+            BackendImplKind.REFERENCE,
+            fallback,
+            priority=100,
+        )
+    )
+    state = []
+    with pytest.raises(RuntimeError) as exc:
+        dispatch.CachedOp("stateful_op")(state)
+    assert exc.value is error
+    assert state == [1]
+    assert calls == ["primary"]

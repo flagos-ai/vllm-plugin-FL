@@ -4380,13 +4380,28 @@ class ModelRunnerFL(
             if self.use_ascend_attention:
                 from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
                     AscendAttentionState,
+                    supports_mtp_target_full,
                 )
 
-                # A fresh one-token prompt also looks uniform to the dispatcher,
-                # but the captured attention tasks only support DecodeOnly.
-                disable_full = (
-                    self._ascend_attn_state != AscendAttentionState.DecodeOnly
+                regular_decode = (
+                    self.speculative_config is None
+                    and self._ascend_attn_state == AscendAttentionState.DecodeOnly
                 )
+                mtp_verification = (
+                    supports_mtp_target_full(self.vllm_config)
+                    and self._ascend_attn_state == AscendAttentionState.SpecDecoding
+                    and self._is_uniform_decode(
+                        max_num_scheduled_tokens,
+                        self.num_spec_tokens + 1,
+                        num_tokens_unpadded,
+                        num_reqs,
+                    )
+                    and np.all(
+                        self.input_batch.num_computed_tokens_cpu[:num_reqs]
+                        >= self.input_batch.num_prompt_tokens[:num_reqs]
+                    )
+                )
+                disable_full = not (regular_decode or mtp_verification)
 
             cascade_attn_prefix_lens = None
             # Disable cascade attention when using microbatching (DBO)
@@ -5379,6 +5394,13 @@ class ModelRunnerFL(
                 )
             else:
                 mm_embed_inputs = None
+
+            if self.use_ascend_attention:
+                # Drafter metadata reconstruction omits platform extensions.
+                # Restore the current runner-owned phase at the draft boundary.
+                if self._ascend_attn_state is None:
+                    raise RuntimeError("Ascend drafting requires an attention state")
+                common_attn_metadata.attn_state = self._ascend_attn_state
 
             draft_token_ids = self.drafter.propose(
                 num_speculative_tokens=num_spec_tokens_to_schedule,

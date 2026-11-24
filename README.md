@@ -224,6 +224,39 @@ If there are multiple plugins in the current environment, you can specify use vl
     FlagGems/FlagTree installation when setting `USE_FLAGGEMS=1`.
 
 
+For Qwen3.6-27B BF16 on Ascend, set the speculative method to `mtp` and
+`num_speculative_tokens` to `1` or `3`. With `FULL_DECODE_ONLY`, uniform
+verification batches use target graphs while the draft model and prompt
+prefill run eagerly. This route requires PP1 and excludes MLA, quantization,
+LoRA, and microbatching.
+
+The Ascend GDN prefill API requires FP32 beta with BF16 projections.
+In the Ascend MTP environment, install the official revision containing the
+[FP32 beta fix](https://github.com/flagos-ai/FlagGems-vllm/pull/1292):
+
+```bash
+pip install 'flaggems_vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@683897e72e869a6ded1d490d76994aae529cee89'
+```
+
+Set `QWEN36_MODEL` to a local Qwen3.6-27B BF16 checkpoint. On two visible
+Ascend 910C devices, start the service:
+
+```bash
+VLLM_PLUGINS=fl USE_FLAGGEMS=0 VLLM_USE_BREAKABLE_CUDAGRAPH=0 \
+vllm serve "$QWEN36_MODEL" --served-model-name qwen36-mtp \
+  --tensor-parallel-size 2 --language-model-only \
+  --max-model-len 8192 --max-num-seqs 4 --max-num-batched-tokens 1024 \
+  --gpu-memory-utilization 0.85 --no-enable-prefix-caching \
+  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY"}' \
+  --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
+```
+
+```bash
+curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen36-mtp","messages":[{"role":"user","content":"Explain why leaves change color in autumn."}],"max_tokens":128}'
+```
+
 ### HY4 on NVIDIA
 
 HY4 is paired with this branch's vLLM 0.24.0 environment and the shared

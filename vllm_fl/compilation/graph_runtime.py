@@ -34,6 +34,7 @@ class GraphRuntimeController:
     @contextmanager
     def capture_scope(self, context: Any):
         from vllm_fl.compilation.graph_params import (
+            get_graph_params,
             prepare_graph_params,
             weak_ref_workspace,
         )
@@ -45,12 +46,13 @@ class GraphRuntimeController:
         context.capturing = True
         try:
             yield
+            weak_ref_workspace(num_tokens)
+        except BaseException:
+            get_graph_params().clear_shape(num_tokens)
+            raise
         finally:
-            try:
-                weak_ref_workspace(num_tokens)
-            finally:
-                context.capturing = False
-                self._active = False
+            context.capturing = False
+            self._active = False
 
     @contextmanager
     def replay_scope(self, context: Any):
