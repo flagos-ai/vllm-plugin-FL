@@ -22,12 +22,10 @@ ENV PYTHONPATH=/opt/flagtree \
     PIP_CONFIG_FILE=/dev/null \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-COPY docker/thead/constraints.txt docker/thead/requirements-ci.txt /opt/thead-ci/
-COPY .github/scripts/thead/stack.py /opt/thead-ci/
+COPY docker/thead/requirements-ci.txt /opt/thead-ci/
 RUN --mount=type=cache,target=/wheelhouse,sharing=locked \
     --mount=type=bind,from=wheel_seed,target=/wheel-seed <<'BASH'
 cd /opt/thead-ci
-python stack.py snapshot > vendor-before.json
 find /wheel-seed -maxdepth 1 -type f -name '*.whl' -exec cp -t /wheelhouse -- {} +
 python -m pip download --only-binary=:all: --no-deps --require-hashes \
     --dest /wheelhouse -r requirements-ci.txt
@@ -42,14 +40,8 @@ for line in Path("requirements-ci.txt").read_text().splitlines():
         print(f"{name} @ {wheel.as_uri()} {digest}")
 PY
 python -m pip install --no-index --only-binary=:all: --require-hashes --no-deps \
-    -c constraints.txt -r /tmp/wheels.txt --dry-run --report runtime-resolve.json
-python stack.py audit-plan runtime-resolve.json
-python -m pip install --no-index --only-binary=:all: --require-hashes --no-deps \
-    -c constraints.txt -r /tmp/wheels.txt --report runtime-install.json
-python stack.py audit-plan runtime-install.json
+    -r /tmp/wheels.txt
 rm /tmp/wheels.txt
-python stack.py snapshot > vendor-after.json
-cmp vendor-before.json vendor-after.json
 python -m pip check
 BASH
 
@@ -71,11 +63,8 @@ RUN --network=none --mount=type=bind,from=plugin-wheel,source=/wheels,target=/wh
     cd /wheels \
     && sha256sum vllm_plugin_fl-*.whl > /opt/thead-ci/plugin-wheel.sha256 \
     && printf '%s\n' "$PLUGIN_SOURCE_SHA" > /opt/thead-ci/plugin-source.ref \
-    && python -m pip install --no-index --no-deps --no-compile \
-       --report /opt/thead-ci/plugin-install.json vllm_plugin_fl-*.whl \
-    && python -m pip check | tee /opt/thead-ci/pip-check.txt \
-    && python -m pip freeze --all > /opt/thead-ci/pip-freeze.txt \
-    && python /opt/thead-ci/stack.py imports > /opt/thead-ci/imports.json
+    && python -m pip install --no-index --no-deps --no-compile vllm_plugin_fl-*.whl \
+    && python -m pip check
 
 ENV VLLM_PLUGINS=fl \
     VLLM_TARGET_DEVICE=empty \

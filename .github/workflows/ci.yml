@@ -126,9 +126,10 @@ jobs:
         id: changed
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Route the PR's own diff; the merge checkout can include newer base changes.
+            # Compare the merge checkout with its base parent to exclude
+            # changes already present on the base branch.
             git diff --no-renames --name-only \
-              "$PR_BASE_SHA...$PR_HEAD_SHA" \
+              "$GITHUB_SHA^1" "$GITHUB_SHA" \
               > /tmp/changed_files.txt
             echo "file=/tmp/changed_files.txt" >> "$GITHUB_OUTPUT"
             echo "Changed files:"
