@@ -278,8 +278,16 @@ class TestLoadKunlunxinFlagcxApi:
             api_restore()
 
     def test_missing_everything_raises_import_error(self, monkeypatch):
+        import importlib.util
+
         module = _import_fresh()
         monkeypatch.delenv("GEMS_VENDOR", raising=False)
+        # On hosts where the real `flagcx` wheel is installed (the P800 CI
+        # image ships it), the wheel fallback inside the loader succeeds and
+        # no ImportError is raised — the error contract only holds when the
+        # import chain is genuinely absent.
+        if importlib.util.find_spec("flagcx") is not None:
+            pytest.skip("real flagcx wheel present on this host")
         with pytest.raises(ImportError):
             module._load_kunlunxin_flagcx_api(None)
 
@@ -287,6 +295,12 @@ class TestLoadKunlunxinFlagcxApi:
 class TestModuleImportModes:
     def test_degraded_mode_without_flagcx_path(self, monkeypatch):
         """Without FLAGCX_PATH the module import degrades, not raises."""
+        import importlib.util
+
+        if importlib.util.find_spec("flagcx") is not None:
+            pytest.skip(
+                "real flagcx wheel present: the module does not degrade here"
+            )
         monkeypatch.delenv("FLAGCX_PATH", raising=False)
         monkeypatch.delenv("GEMS_VENDOR", raising=False)
 
@@ -830,3 +844,244 @@ class TestCopyFlagcxStream:
         c._copy_flagcx_stream(raw)
         assert library.stream_copies == 1
         assert library.copied_stream is raw
+
+
+class TestFullConstructorAgainstRecordingLibrary:
+    """Drive PyFlagcxCommunicator.__init__ past the library call.
+
+    Covers the unique-id fetch, the StatelessProcessGroup broadcast path,
+    the device-context selection, flagcxCommInitRank and the warmup
+    all_reduce (lines 260-339), with a plain (non-legacy) recording library.
+    """
+
+    @pytest.fixture
+    def warm_module(self, monkeypatch):
+        module = _import_fresh()
+        _patch_collective_globals(monkeypatch, module)
+        monkeypatch.setattr(
+            module, "flagcxUniqueId", lambda: SimpleNamespace(internal=[0] * 4)
+        )
+        # current_stream returns an object with synchronize().
+        monkeypatch.setattr(
+            module,
+            "current_stream",
+            lambda: SimpleNamespace(synchronize=lambda: None),
+        )
+        # The cpu device falls through to torch.cuda.device(self.device),
+        # which rejects non-CUDA devices; patch it with a null context so the
+        # constructor proceeds on CPU.
+        import contextlib
+
+        monkeypatch.setattr(
+            torch.cuda, "device", lambda device: contextlib.nullcontext()
+        )
+        return module
+
+    def test_stateless_group_init_completes_and_warms_up(self, warm_module, monkeypatch):
+        # Bind our stub group class as the module's StatelessProcessGroup so
+        # isinstance dispatch takes the stateless path.
+        monkeypatch.setattr(warm_module, "StatelessProcessGroup", StatelessGroup)
+        library = RecordingLibrary()
+        warm_module.FLAGCXLibrary = library
+        c = warm_module.PyFlagcxCommunicator(
+            StatelessGroup(rank=0, world_size=2), "cpu", library_path="unused"
+        )
+        assert c.available is True and c.disabled is False
+        assert c.comm == library.comm_handle
+        assert c.unique_id.internal == [7, 8, 9, 10]  # rank 0 fetches it
+        assert c.group.broadcasted[1] == 0
+        # Warmup all_reduce ran exactly once with a zeros(1) input.
+        warmup = [call for call in library.calls if call[0] == "AllReduce"]
+        assert len(warmup) == 1
+        assert warmup[0][3] == 1  # count == 1
+
+    def test_non_stateless_group_uses_dist_broadcast(self, warm_module, monkeypatch):
+        import torch.distributed as dist
+
+        library = RecordingLibrary()
+        warm_module.FLAGCXLibrary = library
+
+        broadcast_calls = []
+
+        class TorchGroup:
+            pass
+
+        monkeypatch.setattr(dist, "is_initialized", lambda: True)
+        monkeypatch.setattr(dist, "get_backend", lambda g: dist.Backend.GLOO)
+        monkeypatch.setattr(dist, "get_rank", lambda g: 0)
+        monkeypatch.setattr(dist, "get_world_size", lambda g: 2)
+        monkeypatch.setattr(dist, "get_process_group_ranks", lambda g: [0, 1])
+
+        def fake_broadcast(tensor, src, group):
+            broadcast_calls.append((src, [int(v) for v in tensor]))
+            tensor[0] = 42  # feed back a distinct byte pattern
+
+        monkeypatch.setattr(dist, "broadcast", fake_broadcast)
+
+        group = TorchGroup()
+        c = warm_module.PyFlagcxCommunicator(group, "cpu", library_path="unused")
+        assert c.available is True
+        # rank 0 fetched [7,8,9,10], broadcast in a 4-byte tensor.
+        assert broadcast_calls == [(0, [7, 8, 9, 10])]
+        assert c.unique_id.internal[0] == 42
+
+    def test_legacy_unique_id_api_reads_contents(self, warm_module, monkeypatch):
+        import ctypes
+
+        class CtypesUniqueId(ctypes.Structure):
+            _fields_ = [("internal", ctypes.c_uint8 * 4)]
+
+        monkeypatch.setattr(warm_module, "StatelessProcessGroup", StatelessGroup)
+        library = RecordingLibrary()
+        # Legacy wrapper: exposes `handler` but not `devHandle`.
+        library.handler = object()
+        warm_module.FLAGCXLibrary = library
+        legacy_uid = CtypesUniqueId()
+        legacy_uid.internal[:] = (5, 6, 7, 8)
+        library.flagcxGetUniqueId = lambda: SimpleNamespace(contents=legacy_uid)
+        c = warm_module.PyFlagcxCommunicator(
+            StatelessGroup(rank=0, world_size=2), "cpu", library_path="unused"
+        )
+        assert list(c.unique_id.internal) == [5, 6, 7, 8]
+        # The legacy init-rank call receives ctypes.pointer(unique_id): the
+        # pointed-to struct carries the same byte payload.
+        init = [call for call in library.calls if call[0] == "CommInitRank"]
+        assert init
+        assert list(init[0][2].contents.internal) == [5, 6, 7, 8]
+
+    def test_non_zero_rank_gets_empty_unique_id(self, warm_module, monkeypatch):
+        monkeypatch.setattr(warm_module, "StatelessProcessGroup", StatelessGroup)
+        library = RecordingLibrary()
+        warm_module.FLAGCXLibrary = library
+        group = StatelessGroup(rank=1, world_size=2)
+        # broadcast_obj delivers rank 0's fetched id to non-root ranks.
+        group.broadcast_obj = lambda value, src=0: SimpleNamespace(
+            internal=[7, 8, 9, 10]
+        )
+        c = warm_module.PyFlagcxCommunicator(
+            group, "cpu", library_path="unused"
+        )
+        init = [call for call in library.calls if call[0] == "CommInitRank"]
+        assert init == [("CommInitRank", 2, c.unique_id, 1)]
+        assert c.unique_id.internal == [7, 8, 9, 10]
+        # Warmup all_reduce follows the init.
+        assert [call[0] for call in library.calls] == ["CommInitRank", "AllReduce"]
+
+    def test_string_device_is_converted(self, warm_module, monkeypatch):
+        monkeypatch.setattr(warm_module, "StatelessProcessGroup", StatelessGroup)
+        library = RecordingLibrary()
+        warm_module.FLAGCXLibrary = library
+        c = warm_module.PyFlagcxCommunicator(
+            StatelessGroup(), "cpu", library_path="unused"
+        )
+        assert c.device == torch.device("cpu")
+
+
+class TestWheelAndAmdLoaders:
+    _WHEEL_API_SOURCE = (
+        "class flagcxUniqueId:\n"
+        "    internal = b''\n"
+        "class FLAGCXLibrary:\n"
+        "    pass\n"
+        "buffer_type = flagcxComm_t = flagcxDataTypeEnum = object()\n"
+        "flagcxRedOpTypeEnum = object()\n"
+    )
+
+    def test_load_flagcx_wheel_bindings_returns_six_names(self, tmp_path):
+        module = _import_fresh()
+        api = tmp_path / "api.py"
+        api.write_text(self._WHEEL_API_SOURCE, encoding="utf-8")
+        (
+            lib,
+            buffer_type,
+            comm_t,
+            dtype_enum,
+            uid_cls,
+            redop_enum,
+        ) = module._load_flagcx_wheel_bindings(api)
+        assert lib is not None and buffer_type is not None
+        assert comm_t is not None and dtype_enum is not None
+        assert uid_cls is not None and redop_enum is not None
+
+    def test_load_flagcx_wheel_bindings_incomplete_api(self, tmp_path):
+        module = _import_fresh()
+        api = tmp_path / "api.py"
+        api.write_text("class FLAGCXLibrary:\n    pass\n", encoding="utf-8")
+        with pytest.raises(ImportError, match="Incomplete FlagCX API"):
+            module._load_flagcx_wheel_bindings(api)
+
+    def test_load_flagcx_wheel_bindings_failure_restores_previous(self, tmp_path):
+        module = _import_fresh()
+        name = f"{module.__name__}._wheel_api"
+        sentinel = object()
+        sys.modules[name] = sentinel
+        api = tmp_path / "api.py"
+        api.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="boom"):
+            module._load_flagcx_wheel_bindings(api)
+        assert sys.modules[name] is sentinel
+
+    def test_load_amd_flagcx_api_executes_and_cleans_up(self, tmp_path):
+        module = _import_fresh()
+        api = tmp_path / "api.py"
+        api.write_text("MARKER = 'amd-api'\n", encoding="utf-8")
+        result = module._load_amd_flagcx_api(api)
+        assert result.MARKER == "amd-api"
+        # The module is left registered under its derived name.
+        name = f"{module.__name__}._amd_api"
+        assert sys.modules[name] is result
+        sys.modules.pop(name, None)
+
+    def test_load_amd_flagcx_api_failure_removes_module(self, tmp_path):
+        module = _import_fresh()
+        api = tmp_path / "api.py"
+        api.write_text("raise RuntimeError('amd boom')\n", encoding="utf-8")
+        name = f"{module.__name__}._amd_api"
+        with pytest.raises(RuntimeError, match="amd boom"):
+            module._load_amd_flagcx_api(api)
+        assert name not in sys.modules
+
+
+class TestConstructorDeviceContextsAndWarmup:
+    """Device-context selection branches and the warmup failure paths."""
+
+    @pytest.fixture
+    def warm_module(self, monkeypatch):
+        import contextlib
+
+        module = _import_fresh()
+        _patch_collective_globals(monkeypatch, module)
+        monkeypatch.setattr(
+            module, "flagcxUniqueId", lambda: SimpleNamespace(internal=[0] * 4)
+        )
+        monkeypatch.setattr(
+            module,
+            "current_stream",
+            lambda: SimpleNamespace(synchronize=lambda: None),
+        )
+        # The torch.cuda.device fallback is patched to a null context.
+        monkeypatch.setattr(
+            torch.cuda, "device", lambda device: contextlib.nullcontext()
+        )
+        monkeypatch.setattr(module, "StatelessProcessGroup", StatelessGroup)
+        return module
+
+    def test_warmup_failure_on_other_devices_keeps_handle(
+        self, warm_module, monkeypatch
+    ):
+        library = RecordingLibrary()
+        warm_module.FLAGCXLibrary = library
+        destroy_calls = []
+        monkeypatch.setattr(
+            warm_module.PyFlagcxCommunicator, "destroy", lambda self: destroy_calls.append(1)
+        )
+        monkeypatch.setattr(
+            warm_module.PyFlagcxCommunicator,
+            "all_reduce",
+            Mock(side_effect=RuntimeError("warmup boom")),
+        )
+        with pytest.raises(RuntimeError, match="warmup boom"):
+            warm_module.PyFlagcxCommunicator(
+                StatelessGroup(), "cpu", library_path="unused"
+            )
+        assert destroy_calls == []
