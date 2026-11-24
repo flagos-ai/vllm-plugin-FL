@@ -217,16 +217,16 @@ def patch_cuda_stream_for_musa():
 
             # shared_experts.py uses `from vllm.utils.torch_utils import aux_stream`
             # which binds the function object at import time — we must also
-            # patch the local reference in every module that has done so.
-            # Force-import each module so that sys.modules has them, then
-            # overwrite their local binding.
+            # patch the local reference in the module that has done so.
+            # Force-import it so that sys.modules has it, then overwrite the
+            # local binding. On vLLM 0.32 this is the only consumer:
+            # `vllm.worker.model_runner_base` no longer exists, and neither
+            # `models.utils` nor `fused_moe.runner.moe_runner` reference
+            # aux_stream.
             import importlib as _il
             import sys as _sys
             _modules_using_aux_stream = [
                 "vllm.model_executor.layers.fused_moe.runner.shared_experts",
-                "vllm.worker.model_runner_base",
-                "vllm.model_executor.models.utils",
-                "vllm.model_executor.layers.fused_moe.runner.moe_runner",
             ]
             for _mod_name in _modules_using_aux_stream:
                 try:

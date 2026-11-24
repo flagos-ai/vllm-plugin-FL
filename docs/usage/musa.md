@@ -316,62 +316,18 @@ actual CI run for its source, platform results and conditional skips.
 Installation checks or CPU tests alone do not establish device-kernel,
 multimodal-model, native ABI or performance acceptance.
 
-## Adaptation record
+## Adaptation notes
 
-The 0.32.0 adaptation was accepted on 2026-11-05:
+Durable behavior introduced by the 0.32.0 adaptation. Per-run acceptance
+records (dates, hosts, image digests, case counts) are kept in the PR record,
+not here.
 
-| Field | Value |
-|---|---|
-| Date | 2026-11-05 |
-| Platform | MUSA MTT S5000 ×4 (80 GiB per card) |
-| Host / container | `10.121.38.14`, container `flagos22` |
-| Branch | `vllm-plugin-FL` `0.5.0-dev` (vLLM 0.32.0 `empty` build) |
-| Models | Qwen3.6-27B, Qwen3.6-35B-A3B (TP4) |
-| Runtime | `flagos-runtime-mthreads-musa4.3.6:2.2.0`, plugin installed editable |
-| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:91fc3bd23ceb50fb8d9b0f702fbec116c7dddbe924ecfe96f2bab2820a8c8239` |
-| Dependency tuple | torch 2.9.0 (`torch.version.musa` = 40306), FlagGems 5.4.0, FlagTree 0.7.0+mthreads3.6, Triton 3.6.0 |
-| Gate | 4/4 groups `GATE_TEST_RC=0` (27B and 35B-A3B × eager and graph) |
-| Unit tests | raw full suite 2004 passed, 225 skipped, 0 failed; `FL_TEST_PLATFORM=musa` (CI path) 1883 passed, 231 skipped, 0 failed |
-| Evidence | Validation host `/data/mt032/final_{27b,35b}_{graph,eager}/` (`*.server.log`, `*.test.log`, gate results) |
-| Status | Accepted for MUSA; FlagCX combined gate not applicable (native MCCL) |
-
-Key changes in this adaptation:
-
-- vLLM 0.32 API drift: the runner passes the Mamba state-copy mapping returned by
-  `get_mamba_state_copy_funcs`, and MoE `topk_softmax` is redirected to the plugin
-  dispatch through the `vllm._custom_ops` leaf module.
-- `DeviceConfig` keeps a device with no index, so every TP rank binds to its own
-  card; the compatibility fallback handles both `auto` and `musa` device strings.
-- Graphs: MCCL collectives are split out of the captured graph, and the capture
-  ladder is thinned to at most 10 sizes because the torch_musa pool is not shared.
-- FlagTune is disabled by default (`USE_FLAGTUNE=0`) so serving does not require
-  the remote cost-model bundle.
-- CI setup asserts the pinned tuple (vLLM 0.32, FlagGems 5.4, FlagTree 0.7,
-  Triton 3.6, torch 2.9).
-
-### V2 runner acceptance (2026-11-12)
-
-| Field | Value |
-|---|---|
-| Date | 2026-11-12 |
-| Runner | Upstream V2 `GPUModelRunner` by default; `VLLM_USE_V2_MODEL_RUNNER` unset |
-| CI image | `plugin/vllm-plugin-fl:v0.32.0-musa-ci@sha256:91fc3bd23ceb50fb8d9b0f702fbec116c7dddbe924ecfe96f2bab2820a8c8239` |
-| Gate | 4/4 groups `GATE_TEST_RC=0` (27B and 35B-A3B × eager and graph); graph groups ran `cudagraph_mode=PIECEWISE` with per-rank `Graph capturing finished` records from the V2 runner (`model_runner.py:1127`) |
-| Unit tests | raw full suite 2004 passed, 225 skipped, 0 failed; `FL_TEST_PLATFORM=musa` (CI path) 1883 passed, 231 skipped, 0 failed |
-| Evidence | Validation host `/data/mt032/gate_v2_{eager,graph}/` (`*.server.log`, gate summaries), `/data/mt032/final_validation.log` |
-
-Key changes for the V2 default:
-
-- `register()` no longer forces `VLLM_USE_V2_MODEL_RUNNER=0` for mthreads, and
-  the platform no longer rejects an explicit `=1`; runner selection follows
-  upstream, as on NVIDIA.
-- `worker.py` installs the V2 compatibility shims only on MUSA: the
-  `torch.cuda` APIs used by the V2 internals are bound to `torch.musa`
-  (`is_available` is deliberately left untouched so Dynamo does not take the
-  CUDA RNG path), UVA buffers use explicit device copies, and dispatch ops are
-  warmed before the first compiled forward so `fullgraph` tracing never hits
-  the first-lookup dispatcher path.
-- MoE `topk_softmax` clears the 0.32 padding rows after the FL routing kernel
-  when the native `_moe_C` implementation is absent.
+- vLLM 0.32 API drift: the runner passes the Mamba state-copy mapping returned
+  by `get_mamba_state_copy_funcs`; MoE `topk_softmax` is redirected to the
+  plugin dispatch through the `vllm._custom_ops` leaf module.
+- `DeviceConfig` keeps a device with no index, so every TP rank binds to its
+  own card; the compatibility fallback handles both `auto` and `musa` device
+  strings.
 - The CI platform configuration lowers `gpu_memory_utilization` to 0.6 for the
-  V2 warmup.
+  V2 warmup, and `.github/scripts/musa/setup.sh` asserts the pinned dependency
+  tuple (vLLM 0.32, FlagGems 5.4, FlagTree 0.7, Triton 3.6, torch 2.9).
