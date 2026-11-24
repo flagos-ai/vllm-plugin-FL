@@ -44,7 +44,9 @@ from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.triton_compat import (
 
 
 class TestAcceleratorCompat:
-    @pytest.mark.platforms("kunlunxin")
+
+    pytestmark = pytest.mark.platforms("kunlunxin")
+
     def test_binds_only_missing_names_from_torch_cuda(self):
         # get_memory_info / current_device / set_device are absent on this
         # torch build's torch.accelerator; the rest already exist. Patching
@@ -70,7 +72,6 @@ class TestAcceleratorCompat:
                     f"{name} existed and must not be overridden"
                 )
 
-    @pytest.mark.platforms("kunlunxin")
     def test_names_absent_from_cuda_are_skipped(self):
         # A name missing on BOTH surfaces must be skipped, not invented.
         import torch
@@ -114,7 +115,6 @@ class TestAcceleratorCompat:
                 if value is not None:
                     setattr(torch.cuda, name, value)
 
-    @pytest.mark.platforms("kunlunxin")
     def test_apply_is_idempotent(self):
         import torch
 
@@ -164,21 +164,21 @@ def _fake_xpu_options():
 
 
 class TestTritonCompat:
-    @pytest.mark.platforms("kunlunxin")
+
+    pytestmark = pytest.mark.platforms("kunlunxin")
+
     def test_binds_launch_cooperative_grid_false(self):
         with _fake_xpu_options() as options:
             assert not hasattr(options, "launch_cooperative_grid")
             apply_triton_compat()
             assert options.launch_cooperative_grid is False
 
-    @pytest.mark.platforms("kunlunxin")
     def test_existing_attribute_is_never_overridden(self):
         with _fake_xpu_options() as options:
             options.launch_cooperative_grid = True
             apply_triton_compat()
             assert options.launch_cooperative_grid is True
 
-    @pytest.mark.platforms("kunlunxin")
     def test_absent_xpu_backend_is_a_noop(self):
         # On this build triton.backends.xpu.compiler does not exist; the
         # patch must return without raising and without creating anything.
@@ -195,6 +195,8 @@ class TestTritonCompat:
 
 
 class TestRopeCompat:
+
+    pytestmark = pytest.mark.platforms("kunlunxin")
     @pytest.fixture
     def rope_module(self):
         import vllm.v1.worker.gpu.mm.rope as rope
@@ -293,6 +295,8 @@ def _platform_fl_or_skip():
 
 
 class TestFlaUtilsCompat:
+
+    pytestmark = pytest.mark.platforms("kunlunxin")
     @pytest.fixture(autouse=True)
     def _restore_get_device_name(self):
         import torch
@@ -374,7 +378,6 @@ class TestFlaUtilsCompat:
             if saved is not None:
                 sys.modules[_FLA_UTILS] = saved
 
-    @pytest.mark.platforms("kunlunxin")
     def test_patch_xpu_get_device_gates_on_vendor(self, monkeypatch):
         from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
             _patch_xpu_get_device,
@@ -402,7 +405,6 @@ class TestFlaUtilsCompat:
         finally:
             PlatformFL.vendor_name = saved_vendor
 
-    @pytest.mark.platforms("kunlunxin")
     def test_patch_xpu_get_device_applies_on_kunlunxin(self):
         import torch
 

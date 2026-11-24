@@ -121,6 +121,8 @@ def test_registered_impl_is_resolvable_by_id(registered_impls):
 class TestBindIsAvailable:
     """_bind_is_available(fn, probe) -> wrapper with fn's behavior + probe."""
 
+    pytestmark = pytest.mark.platforms("kunlunxin")
+
     def _target(self):
         def recorded(a, b=0, *, c=None):
             """docstring that must survive"""
@@ -159,6 +161,8 @@ class TestBindIsAvailable:
 
 class TestOpImplIsAvailable:
     """OpImpl.is_available() honors the _is_available attribute on fn."""
+
+    pytestmark = pytest.mark.platforms("kunlunxin")
 
     def _impl_for(self, fn):
         return OpImpl(
