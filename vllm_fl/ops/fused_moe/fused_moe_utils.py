@@ -53,7 +53,7 @@ except ImportError:
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
-from vllm_fl.dispatch import CachedOp, call_op
+from vllm_fl.dispatch import CachedOp, call_op, resolve_op
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import get_oot_blacklist, use_flaggems
 
@@ -121,10 +121,12 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.XPU]
     elif current_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
-    elif getattr(current_platform, "vendor_name", "") == "iluvatar":
+    elif getattr(current_platform, "vendor_name", "") in ("iluvatar", "hygon"):
         # TODO(corex): remove when PlatformFL is_cuda()/is_cuda_alike() is
         # true. CoreX reports device_type=cuda but is_cuda()=False, so
         # VLLM_FL_PREFER=vendor / USE_FLAGGEMS=0 hit UnboundLocalError here.
+        # Hygon DCUs report is_cuda()=False as well, so they hit the same
+        # UnboundLocalError whenever FlagGems is disabled.
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.TRITON,
             UnquantizedMoeBackend.BATCHED_TRITON,
@@ -399,12 +401,11 @@ class TritonExpertsFL(TritonExperts):
             self._lora_context is None
             and getattr(current_platform, "vendor_name", None) == "kunlunxin"
         ):
-            from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_moe.fused_moe import (
-                fused_experts_impl as klx_fused_experts_impl,
-            )
-
+            # Resolve directly so unsupported arguments propagate the original
+            # provider error without disabling it for later valid requests.
+            fused_experts = resolve_op("fused_experts")
             output.copy_(
-                klx_fused_experts_impl(
+                fused_experts(
                     hidden_states,
                     w1,
                     w2,

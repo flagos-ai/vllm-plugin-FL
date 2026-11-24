@@ -114,6 +114,7 @@ jobs:
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Run unit tests
+        shell: bash
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
@@ -121,6 +122,7 @@ jobs:
             --scope unit
 
       - name: Run functional tests
+        shell: bash
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
