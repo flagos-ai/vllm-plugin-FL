@@ -29,13 +29,18 @@ Upstream follow-ups already exist, so creating duplicate PRs is unnecessary:
 - [FlagGems-vllm #1317](https://github.com/flagos-ai/FlagGems-vllm/pull/1317),
   head `2eb42fd2c5471446bea457f5f7a1ca65ae44ba09`: invalid-expert-ID
   filtering. At inspection it was open/unmerged, with `unittest-required`
-  failing and NVIDIA operator CI cancelled. Its reported H100 validation is
-  author-provided evidence, not a validation run performed for this record.
+  failing because the required NVIDIA operator lane was cancelled (job
+  `136455749312`: `python-op was expected to succeed, got: cancelled`).
+  Its reported H100 validation is author-provided evidence, not a validation
+  run performed for this record.
 - [FlagGems-vllm #1231](https://github.com/flagos-ai/FlagGems-vllm/pull/1231),
   head `40856d9224183ef2182c017705ab1502e45a167b`: Enflame migration.
   At inspection it was open/unmerged, with `rule-check-required` failing and
-  NVIDIA/backend tests skipped. Its existence alone does not establish full
-  coverage of R1's numerical implementations.
+  NVIDIA/backend tests skipped. The downloaded job `132381462791` reports
+  47 forbidden Torch compute calls across 158 checked files, including FLA
+  normalization/gates and MoE activations. These require operator-library
+  fixes; bypassing the policy would not resolve R1. Its existence alone does
+  not establish full coverage of R1's numerical implementations.
 
 R1/R2 remain open until the relevant operators/fixes are accepted upstream,
 validated and pinned to immutable official commits. The authenticated account
@@ -53,9 +58,9 @@ a downstream workaround, not evidence of a vendor upstream fix.
 |---|---|---|
 | R1 numerical implementations | OPEN | Official operator integration, independent tests and immutable official SHA. Private/Torch/CPU implementations remain. |
 | R2 dependency provenance | OPEN | Shared installer uses official sources and Iluvatar reuses its image, but preinstalled image provenance and official landing of old fork changes remain unproved. |
-| R3 full gate | Execution passed; provenance partial | All four groups completed 26 requests and 260/260 checks each, with zero skipped scenarios. Raw JSON, logs, launch commands and environment records are retained outside this PR to avoid shipping generated experiment artifacts. Local model metadata hashes are recorded, but immutable upstream model revisions remain unknown. |
+| R3 full gate | Previous execution passed; current-code rerun in progress | The earlier four groups each completed 26 requests and 260/260 checks with zero skipped scenarios. A fresh-cache rerun on RMS fix `e394a2a` is in progress; earlier results do not certify this commit. Raw JSON, logs, launch commands and environment records are retained outside this PR. All 15/26 weight shards match immutable Qwen revisions `1cda14dd71a3f47115850eb790f416f165da1cb5` (27B) / `345d467b117d1fd5eda9b879a5988de9ae5f47a7` (35B-A3B). These are weight matches, not exact model snapshots: both local `chat_template.jinja` and `tokenizer_config.json` differ, and 35B `configuration.json` differs. Hashed local overrides and per-file verification are preserved with the rerun artifacts. |
 | R4 image BOM | OPEN | Published digest not tied to verified SDK/FlagCX/ECCL package/source manifest. Development container is not a substitute. |
 | R5 runner docs | Corrected | Actual runner still must be recorded per serving log, not inferred from an unset environment variable. |
 | R6 RMS contract | Execution-mode consistency fixed; independent CUDA validation outstanding | Eligible GCU inference now uses the same RMS custom operator in eager and compiled execution. The real 12×1024 BF16 diagnostic changed from one mismatch (max abs 0.0009765625) to zero across eager, compile and graph replay. Eleven focused tests pass, including masked-width replay coverage; restoring the old compile-only guard makes the new regression fail. The public FlagGems implementation differs on 4231 elements (max abs 0.0625) on this input, so it cannot yet replace the CUDA-contract operator. The NVIDIA reference endpoint refused connections during this verification; independent provider parity remains unverified. |
 | R7 atomic install | Regression passed | Import/ABI failure, assignment rollback, same-process retry and idempotence covered. |
-| R8 CPU top-k | PARTIAL | Follow-up evidence contains 24 warmed ABBA service trials across both vocabularies and concurrency 1/4/16: mean ITL overhead 0.44–3.79%; 27B throughput has explicit wall-time outliers. Public FlagGems batch-1/vocab-151936 top-k completed exactly after 590.652 s cold compilation, 2.456 ms warmed. Larger-shape validation and controlled provider comparison remain required before replacing the CPU fallback. |
+| R8 CPU top-k | PARTIAL | Follow-up evidence contains 24 warmed ABBA service trials across both vocabularies and concurrency 1/4/16: mean ITL overhead 0.44–3.79%; 27B throughput has explicit wall-time outliers. Public FlagGems batch-1/vocab-151936 top-k completed exactly after 590.652 s cold compilation, 2.456 ms warmed. A separate hierarchical composition of public FlagGems top-k/gather passed exact value/index checks for batch 1/vocabulary 151936 and batches 4/16/vocabulary 248320. Warmed latency was 4.89/22.20/82.86 ms versus 0.63/2.63/8.19 ms for CPU top-k including transfers. This measured composition is 7.7–10.1× slower and was not adopted; it does not establish a lower bound for other device implementations. These are random-input operator microbenchmarks, not model-quality or end-to-end service results. A faster validated public provider remains outstanding. |
