@@ -23,6 +23,7 @@ ARG THEAD_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-thead/sim
 ARG VLLM_REQUIREMENT=vllm==0.32.0+flagos
 ARG FLAGGEMS_REQUIREMENT=flag-gems==5.5.0.dev20261117
 ARG FLAGGEMS_VLLM_REQUIREMENT=flaggems-vllm==0.3.0.dev20261117
+ARG FLASH_ATTN_REQUIREMENT=flash-attn-3==2.8.2+v0.1.0.ppu2.1.1
 ARG DAILY_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-daily/simple
 
 ENV FLAGCX_PATH=/flagos/lib/python3.12/site-packages/flagcx \
@@ -46,7 +47,7 @@ RUN PYTHONPATH=/opt/triton \
     && python -m pip install --no-cache-dir --no-deps \
         --index-url "${THEAD_INDEX_URL}" --extra-index-url "${DAILY_INDEX_URL}" \
         "${FLAGGEMS_REQUIREMENT}" "${FLAGGEMS_VLLM_REQUIREMENT}" \
-        "flagcx==0.14.1+ppu2.1.0" "flash-attn-3==2.8.2+v0.1.0.ppu2.1.1"
+        "flagcx==0.14.1+ppu2.1.0" "${FLASH_ATTN_REQUIREMENT}"
 
 WORKDIR /workspace
 

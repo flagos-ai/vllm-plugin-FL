@@ -486,8 +486,13 @@ bash docker/build.sh --platform thead --target ci \
 
 The Dockerfile selects the vendor wheels and records the pinned plugin commit
 in the image labels. To supply a verified archived wheel, pass its pip direct
-reference with `--build-arg`, for example
-`FLAGGEMS_REQUIREMENT=flag-gems @ <wheel-url>#sha256=<hash>`.
+reference through `FLAGGEMS_REQUIREMENT`, `FLAGGEMS_VLLM_REQUIREMENT` or
+`FLASH_ATTN_REQUIREMENT`. For example:
+
+```bash
+bash docker/build.sh --platform thead --target ci \
+  --build-arg "FLAGGEMS_REQUIREMENT=flag-gems @ $WHEEL_URL#sha256=$WHEEL_SHA256"
+```
 
 ## Recorded acceptance
 
