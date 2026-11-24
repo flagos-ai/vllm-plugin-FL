@@ -80,10 +80,7 @@ platforms:
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
       - tests/platforms/nvidia.yaml
-      # Shared image entry point and platform registry: image work touches
-      # docker/build.sh and platforms.yml for every vendor, so those changes
-      # are routed to the owning platform plus the NVIDIA regression baseline
-      # instead of fanning out to every enabled backend.
+      # Keep NVIDIA as a regression baseline for image changes.
       - .github/configs/platforms.yml
       - docker/build.sh
     exempt_from_global:

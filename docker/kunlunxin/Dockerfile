@@ -21,16 +21,17 @@ ARG INDEX_URL
 ARG EXTRA_INDEX_URL
 ARG KUNLUNXIN_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-kunlunxin/simple
 ARG KUNLUNXIN_VLLM_REQUIREMENT=vllm==0.32.0+flagos
+ARG FLAGGEMS_REQUIREMENT=flag-gems==5.5.0.dev20261124
+ARG DAILY_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-daily/simple
 ARG FLAGCX_WHEEL_URL=https://resource.flagos.net/repository/flagos-pypi-kunlunxin/packages/flagcx/0.14.1+xre5.37.1/flagcx-0.14.1+xre5.37.1-cp310-cp310-linux_x86_64.whl
 ARG FLAGCX_WHEEL_SHA256=b49203511f7906aaa3cebdbf304aff521a86f0540f6b57c6af6154092f8a658e
 ARG FLAGGEMS_VLLM_COMMIT=8ae5c22f5af6d650216f881c329c4dff20c182e1
 ARG FLAGGEMS_VLLM_SHA256=eab3544a5a6a2efaf7b3465a04ea0f867f77cfbe144ed7f2b8ad20c7b28bb36c
-ARG VCS_REF=unknown
-ARG PLUGIN_SOURCE_SHA=77f141a961d75e54c0cf209de80c99a7c7eec04b
+ARG PLUGIN_SOURCE_SHA=unknown
 
 LABEL org.opencontainers.image.title="vllm-plugin-fl" \
       org.opencontainers.image.source="https://github.com/flagos-ai/vllm-plugin-FL" \
-      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.revision="${PLUGIN_SOURCE_SHA}" \
       io.flagos.accelerator.backend="kunlunxin" \
       io.flagos.vllm.version="0.32.0" \
       io.flagos.xre.version="5.37.1" \
@@ -56,12 +57,12 @@ RUN PYTHONPATH=/opt/triton \
 RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
         "setuptools>=77.0.3,<81.0.0" "setuptools-scm>=8" wheel \
         packaging pybind11 pyyaml sqlalchemy "cmake>=3.26" \
+    && python -m pip install --no-cache-dir --no-deps --index-url "${DAILY_INDEX_URL}" \
+        "${FLAGGEMS_REQUIREMENT}" \
     && python -m pip install --no-cache-dir --no-deps --no-build-isolation \
         "flaggems-vllm @ https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/${FLAGGEMS_VLLM_COMMIT}#sha256=${FLAGGEMS_VLLM_SHA256}"
 
-# Build the plugin, including vllm_fl._C, from the pinned checkout inside the
-# runtime. The runtime ships CMake 3.22, while csrc/ requires 3.26; nvcc is only
-# needed because Torch's CMake package config enables the CUDA language.
+# Build the native plugin extension against the Runtime Torch.
 COPY . /opt/vllm-plugin-FL
 RUN SETUPTOOLS_SCM_PRETEND_VERSION="0.5.0.dev0+g${PLUGIN_SOURCE_SHA}.xre5.37.1" \
        VLLM_VENDOR=cuda \

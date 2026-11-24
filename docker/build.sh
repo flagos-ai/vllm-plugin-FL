@@ -421,11 +421,13 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     BUILD_CONTEXT="${SCRIPT_DIR}/.."
     PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION}"
     VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION}"
+    PLUGIN_SOURCE_SHA="$(git -C "${BUILD_CONTEXT}" rev-parse HEAD)"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
     BUILD_ARGS+=(
         --build-arg "KUNLUNXIN_BASE_IMAGE=${KUNLUNXIN_BASE_IMAGE}"
+        --build-arg "PLUGIN_SOURCE_SHA=${PLUGIN_SOURCE_SHA}"
         --build-arg "INDEX_URL=${INDEX_URL}"
         --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
     )

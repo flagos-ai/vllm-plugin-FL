@@ -11,7 +11,7 @@
 | vLLM | `0.32.0+flagos` wheel for Python 3.10 and XRE 5.37.1 |
 | PyTorch | `2.9.0+cu129` from the official FlagOS Runtime |
 | FlagTree and Triton | FlagTree `0.7.0+xpu3.6`, Triton `3.6.0` |
-| FlagGems | `5.4.0` |
+| FlagGems | `5.5.0.dev20261124` |
 | FlagGems-vLLM | [`8ae5c22`](https://github.com/flagos-ai/FlagGems-vllm/commit/8ae5c22f5af6d650216f881c329c4dff20c182e1) based on `v0.2.0`, with Kunlunxin Runner V2 sampling penalties and grammar masking |
 | FlagCX | `0.14.1+xre5.37.1` for tensor-parallel inference |
 
