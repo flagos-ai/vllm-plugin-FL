@@ -47,6 +47,7 @@
       "vllm_fl/utils.py",
       "vllm_fl/envs.py"
     ],
-    "toplevel": "vllm_fl/"
+    "toplevel": "vllm_fl/",
+    "dispatch.backends.vendor.kunlunxin": "vllm_fl/dispatch/backends/vendor/kunlunxin/"
   }
 }
