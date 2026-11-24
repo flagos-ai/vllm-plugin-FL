@@ -86,3 +86,30 @@ python3 tests/run.py --platform cuda --scope functional
 For real models, run the [adaptation gate](../tools/adaptation-gate-cases/README.md)
 in eager and graph modes. NVIDIA validation does not establish correctness on
 another vendor's runtime.
+
+## CosyVoice3-0.5B on MUSA
+
+The `cosyvoice3` extra pins the FlagGems-vllm revision for this integration
+review. Use the standard vLLM V1 engine with `VLLM_PLUGINS=fl`. Set
+`flagos_profile` to `"cosyvoice3-0.5b"` on the exported Hugging Face config.
+For existing exports, pass
+`additional_config={"flagos_profile": "cosyvoice3-0.5b"}` to the engine.
+The profile checks the export shape, prompt-embedding support, BF16 and
+TP/PP/DP of one on an MTT S5000 with vLLM 0.28.0 and
+Torch 2.11.0.post2+musa5.2.0.
+
+For the matching configuration, `FULL_AND_PIECEWISE` is the default when
+no graph mode is specified. Explicit `NONE`, `PIECEWISE` and
+`--enforce-eager` remain available. The model runner checks capture support
+for the selected Attention backend. Other models keep the platform defaults.
+
+The plugin binds the fused sampler to the matching engine's sampler instance.
+Set `flagos_fused_topk=False` in `additional_config` to disable fusion for that
+engine. The FlagGems operator policy still applies. The private V1 EngineCore
+can load the optional provider. A shared in-process engine can reuse an already
+loaded provider and otherwise uses native sampling. Missing Top-K APIs retain
+native sampling before any random numbers are drawn.
+
+The fused path accepts contiguous FP32 MUSA logits, vocabulary sizes up to
+8192 and normalized per-row Top-K values. Native sampling handles active
+Top-P, per-request generators, FP64, processed logprobs and other layouts.

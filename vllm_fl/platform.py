@@ -369,7 +369,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def apply_config_platform_defaults(cls, vllm_config: "VllmConfig") -> None:
-        """Install MetaX graph defaults before vLLM finalizes graph settings.
+        """Install platform graph defaults before vLLM finalizes graph settings.
 
         vLLM calls this right after CLI parsing, before the cudagraph capture
         sizes / max graph size are derived from the graph mode. Setting the
@@ -381,6 +381,11 @@ class PlatformFL(Platform):
         untouched. Rewriting a finalized ``NONE`` to ``PIECEWISE`` afterwards
         would also trip vLLM's "piecewise requires VLLM_COMPILE" assertion.
         """
+        if cls.device_type == "musa":
+            from vllm_fl.models.cosyvoice3 import apply_graph_default
+
+            apply_graph_default(vllm_config, cls)
+            return
         if cls.vendor_name != "metax":
             return
 
@@ -643,14 +648,20 @@ class PlatformFL(Platform):
             cls.device_type == "musa"
             and compilation_config.cudagraph_mode.has_full_cudagraphs()
         ):
-            logger.info(
-                "MUSA: Downgrading cudagraph_mode from %s to PIECEWISE because "
-                "FULL cudagraphs require musaStreamCaptureModeThreadLocal which "
-                "is not yet supported by torch_musa. PIECEWISE graphs still "
-                "provide graph capture benefits for non-TP-communication regions.",
-                compilation_config.cudagraph_mode,
-            )
-            compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+            from vllm_fl.models.cosyvoice3 import supports_mixed_graph
+
+            if (
+                compilation_config.cudagraph_mode != CUDAGraphMode.FULL_AND_PIECEWISE
+                or not supports_mixed_graph(vllm_config, cls)
+            ):
+                logger.info(
+                    "MUSA: Downgrading cudagraph_mode from %s to PIECEWISE because "
+                    "FULL cudagraphs require musaStreamCaptureModeThreadLocal which "
+                    "is not yet supported by torch_musa. PIECEWISE graphs still "
+                    "provide graph capture benefits for non-TP-communication regions.",
+                    compilation_config.cudagraph_mode,
+                )
+                compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
             parallel_config.all2all_backend == "deepep_high_throughput"
