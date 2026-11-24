@@ -62,7 +62,6 @@ LABEL org.opencontainers.image.title="vllm-plugin-fl" \
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONPATH=/opt/flagtree \
     VLLM_PLUGINS=fl \
     GEMS_VENDOR=iluvatar \
     FLAGGEMS_VERSION=${FLAGGEMS_VERSION}
@@ -83,7 +82,7 @@ RUN mkdir -p /opt/iluvatar/wheels \
 
 # Resolve vLLM alongside the Runtime vendor builds. Install the two
 # FlagGems wheels without extras so pip keeps the Runtime accelerator stack.
-RUN pip install --no-cache-dir \
+RUN PYTHONPATH=/opt/triton pip install --no-cache-dir \
         --index-url "${INDEX_URL}" \
         --extra-index-url "${VENDOR_INDEX_URL}" \
         --extra-index-url "${EXTRA_INDEX_URL}" \
