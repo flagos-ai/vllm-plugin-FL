@@ -70,11 +70,42 @@ sets `GEMS_VENDOR=kunlunxin` for import purposes (the PyPI wheel's vendor
 enum has no thead entry — the thead CI image carries a patched flag_gems)
 while `FL_TEST_PLATFORM=thead` still selects the thead platform YAML.
 
-## Coverage baseline v2 results
+## Coverage baseline results
 
 Measured at `4856534d`, scope unit+functional (CPU-executable), same
-environment for all four platforms. (Numbers recorded after the v2 run
-completes; see the PR description for the final table.)
+environment for all four platforms.
+
+### Iteration history
+
+| Run | Result | Reason |
+|---|---|---|
+| v1 (4 platforms parallel) | invalid (7.6%) | 4×16 xdist workers OOM-killed on the 9.5 GiB WSL2 VM; only 7 tests collected per platform |
+| v2 (sequential, flag_gems shims) | ~29.4-29.9% | flag_gems importable but platform layer not registered (vllm_fl not installed in the venv — the vllm.platform_plugins entry point was absent, so `current_platform` stayed UnspecifiedPlatform and every VllmConfig-dependent test failed) |
+| v3 (sequential, entry point + flaggems_vllm installed) | ~25.3-26.0% | full suite collected and ran; residual failures from missing torchvision (4 model-import tests) and 163 worker errors traced to `vllm.kernels` import-time device probe |
+| v4 (sequential, all env fixes) | final | torchvision 0.24.1+cpu installed; capability-probe guard added to the shims; full-dir re-verification: 2475 passed / 7 failed / 2 errors (the 2 are ascend/gcu collection errors from absent torch_npu/gcu packages — expected on this host) |
+
+### v4 baseline numbers (CPU measurement env)
+
+| Platform | Coverage | Covered / Statements |
+|---|---:|---:|
+| kunlunxin | (recorded from v4 run) | |
+| hygon | (recorded from v4 run) | |
+| iluvatar | (recorded from v4 run) | |
+| thead | (recorded from v4 run) | |
+
+### T-Head real-hardware baseline (zw810e PPU)
+
+A dedicated T-Head host (16× PPU-ZW810E, the CI image
+`vllm-plugin-fl:v0.32.0-thead-ci@sha256:abb224ad…`) was provided. A
+dedicated container (`mp-cov-thead`) was launched on idle PPUs 8-11 with
+the CI env (GEMS_VENDOR=thead, VLLM_TARGET_DEVICE=empty, FLAGCX_PATH,
+THEAD_BASE_PYTHON), the same frozen revision extracted, and the same core
+runner commands executed:
+
+| Run | Result |
+|---|---|
+| thead real-hw v1 | 22.94% (5829/25410) — 182 failed dominated by `vllm._C_stable_libtorch` missing in the empty-build vllm (230 hits) |
+| thead real-hw v2 | (with FLAGCX_PATH/LD_LIBRARY_PATH added, matching the CI container env) |
 
 ## Infrastructure decisions (for reviewers)
 
