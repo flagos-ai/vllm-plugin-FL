@@ -16,8 +16,7 @@
 # for Iluvatar CoreX 5.0.1. The runtime already contains Python 3.12, Torch
 # 2.13.0 / TorchVision 0.28.0 / TorchAudio 2.11.0 (+corex.5.0.1), FlagTree
 # 0.7.1a1+iluvatar3.6 (with its Triton 3.6.0), FlagCX 0.14.1+corex5.0.1 and
-# NumPy 1.26.4. Nothing below replaces those packages; the constraints file
-# enforces that and the final assertion fails the build on any drift.
+# NumPy 1.26.4. Keep the vendor builds when installing application packages.
 ARG ILUVATAR_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-iluvatar-corex5.0.1:2.3.0@sha256:fb0280be3f2b1c7feba3b1b933dce9e6ae85690c0b7edb615d7577c1c632777c
 
 # ---------- base stage ----------
@@ -63,11 +62,10 @@ LABEL org.opencontainers.image.title="vllm-plugin-fl" \
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/opt/flagtree \
     VLLM_PLUGINS=fl \
     GEMS_VENDOR=iluvatar \
     FLAGGEMS_VERSION=${FLAGGEMS_VERSION}
-
-COPY docker/iluvatar/constraints.txt /opt/iluvatar/constraints.txt
 
 # Download the validated wheels under their canonical names and check SHA256.
 RUN mkdir -p /opt/iluvatar/wheels \
@@ -83,18 +81,17 @@ RUN mkdir -p /opt/iluvatar/wheels \
         "${FLAGGEMS_VLLM_WHEEL_SHA256}" "${GEMS_VLLM_WHL}" \
         | sha256sum -c -
 
-# Install vLLM with its Python dependencies under constraints. The runtime's
-# Torch/TorchVision/TorchAudio, NumPy, FlagTree/Triton and FlagCX stay exactly
-# as shipped; FlagGems and FlagGems-vllm go in from the pinned wheels without
-# dependency resolution so no vendor extra (e.g. flag_gems[iluvatar-corex450])
-# can leak in. The .pth keeps FlagTree's Triton importable even though CI setup
-# unsets PYTHONPATH.
+# Resolve vLLM alongside the Runtime vendor builds. Install the two
+# FlagGems wheels without extras so pip keeps the Runtime accelerator stack.
 RUN pip install --no-cache-dir \
-        --constraint /opt/iluvatar/constraints.txt \
         --index-url "${INDEX_URL}" \
         --extra-index-url "${VENDOR_INDEX_URL}" \
         --extra-index-url "${EXTRA_INDEX_URL}" \
         --extra-index-url "${DAILY_INDEX_URL}" \
+        "torch==2.13.0+corex.5.0.1" "torchvision==0.28.0+corex.5.0.1" \
+        "torchaudio==2.11.0+corex.5.0.1" "flagcx==0.14.1+corex5.0.1" \
+        "numpy==1.26.4" "opencv-python-headless==5.0.0.93+flagos" \
+        "compressed-tensors==0.17.0+flagos" "xgrammar==0.2.8+flagos" \
         /opt/iluvatar/wheels/vllm-*.whl \
     && pip install --no-cache-dir --no-deps \
         /opt/iluvatar/wheels/flag_gems-*.whl \
@@ -103,7 +100,6 @@ RUN pip install --no-cache-dir \
         --index-url "${INDEX_URL}" \
         --extra-index-url "${EXTRA_INDEX_URL}" \
         setuptools-scm==9.2.2 wheel==0.45.1 \
-    && echo /opt/flagtree > /flagos/lib/python3.12/site-packages/flagtree.pth \
     && rm -rf /opt/iluvatar/wheels
 
 # The plugin is built from the locked source revision supplied by build.sh
@@ -115,7 +111,6 @@ RUN cd /opt/iluvatar/plugin-src \
         pip wheel --no-deps --no-build-isolation --wheel-dir /opt/iluvatar/plugin-build . \
     && pip install --no-deps --no-index /opt/iluvatar/plugin-build/vllm_plugin_fl-*.whl \
     && pip install --no-cache-dir \
-        --constraint /opt/iluvatar/constraints.txt \
         --index-url "${INDEX_URL}" \
         --extra-index-url "${EXTRA_INDEX_URL}" \
         modelscope==1.35.3 \
@@ -180,7 +175,8 @@ RUN pip install --no-cache-dir \
         pillow \
         decorator \
         pyyaml \
-        sqlalchemy
+        sqlalchemy \
+    && pip check
 
 WORKDIR /workspace
 
