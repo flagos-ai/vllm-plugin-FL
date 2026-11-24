@@ -56,6 +56,7 @@ THEAD_IMAGE_SUPPORT_FILES = {
     ".github/workflows/ci.yml",
     ".typos.toml",
     "docs/usage/thead.md",
+    "requirements/thead-ci.txt",
     "tests/platforms/thead.yaml",
 }
 BUILD_SCRIPT = "docker/build.sh"

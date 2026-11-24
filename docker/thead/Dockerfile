@@ -22,7 +22,7 @@ ENV PYTHONPATH=/opt/flagtree \
     PIP_CONFIG_FILE=/dev/null \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-COPY docker/thead/requirements-ci.txt /opt/thead-ci/
+COPY requirements/thead-ci.txt /opt/thead-ci/requirements-ci.txt
 RUN --mount=type=cache,target=/wheelhouse,sharing=locked \
     --mount=type=bind,from=wheel_seed,target=/wheel-seed <<'BASH'
 cd /opt/thead-ci

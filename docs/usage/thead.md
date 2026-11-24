@@ -476,6 +476,18 @@ python tests/run.py --platform thead --device zw810e --scope e2e --stage pr
 python tests/run.py --platform thead --device zw810e --scope benchmark --stage pr
 ```
 
+### Build the CI image
+
+```bash
+bash docker/build.sh --platform thead --target ci \
+  --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl \
+  --image-tag v0.32.0-thead-ci-dev
+```
+
+The [wheel requirements](../../requirements/thead-ci.txt) pin the download URLs
+and SHA256 hashes. Set `THEAD_WHEELS_DIR` to reuse a local wheel cache.
+The image records the plugin commit and wheel checksum under `/opt/thead-ci`.
+
 ## Recorded acceptance
 
 The vLLM 0.32 adaptation was accepted on the CI stack above with the default V2
