@@ -36,7 +36,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | BAAI/bge-m3 | Supported | [test](./tests/e2e_tests/serving/test_bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
 | MiniMax-M3.1-Flash | Supported | [example](./examples/minimax_m31_offline_inference.py) / [deployment guide](./docs/minimax-m31.md) |
-| HY4-Preview | Merging (NVIDIA) | [installation](#hy4-on-nvidia) |
+| HY4-Preview | Merging (NVIDIA); MetaX C550 validation pending | [NVIDIA installation](#hy4-on-nvidia) / [MetaX serve example](./examples/hy4_c550_serve.sh) |
 
 ### Supported Chips
 
@@ -223,6 +223,40 @@ If there are multiple plugins in the current environment, you can specify use vl
     standard Python-only FL installation above is sufficient. Use a compatible
     FlagGems/FlagTree installation when setting `USE_FLAGGEMS=1`.
 
+
+### HY4 on MetaX C550
+
+The [serve example](./examples/hy4_c550_serve.sh) targets two eight-card MetaX
+C550 nodes with the MetaX vLLM 0.24.0 runtime, the HY4-Preview
+`compressed-tensors` W8A8 checkpoint, BF16 activations and BF16 KV.
+It uses eager execution, TP16, PP1, expert parallelism and RDMA collectives on
+`inbond1`.
+Install FL with the MetaX-specific FlagGems-vllm dependency. The pin includes
+the public C550 BF16 sparse MLA provider from
+[FlagGems-vllm #1364](https://github.com/flagos-ai/FlagGems-vllm/pull/1364).
+Use a dedicated environment for this example so its operator version can be
+installed alongside the matching MetaX vLLM runtime.
+
+```bash
+python -m pip install --no-build-isolation -e '.[hy4-metax]'
+```
+
+Run on both nodes with the same checkpoint and dependencies. Set
+`NODE_RANK=0` on the head and `NODE_RANK=1` on the worker.
+
+```bash
+MODEL_DIR=/path/to/checkpoint NODE_RANK=0 NODE_IP="$LOCAL_IP" MASTER_ADDR="$HEAD_IP" \
+    bash examples/hy4_c550_serve.sh
+```
+
+Collectives default to RDMA on `SOCKET_IFNAME=inbond1`. Set `NET_TRANSPORT=tcp`
+to use TCP, or `SOCKET_IFNAME=auto` to leave the interface variables unset when
+the runtime already provides them.
+
+The example appends an INT8 linear exclusion using the existing dispatch
+override for compatibility with the MetaX baseline's FlagGems scaled-matmul
+contract. An explicit `VLLM_FL_FLAGOS_WHITELIST` takes precedence over the
+append override.
 
 ### HY4 on NVIDIA
 

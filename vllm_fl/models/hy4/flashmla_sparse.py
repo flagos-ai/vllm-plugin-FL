@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Sink-capable FlashMLA sparse backend for HY V4 (NVIDIA).
+"""Sink-capable FlashMLA sparse backend for HY V4.
 
 HY V4 adds a per-head learnable attention sink on top of sparse MLA. The
 vendored FlashMLA kernels already accept an ``attn_sink`` argument, but vLLM's
@@ -87,6 +87,10 @@ class HYV4FlashMLASparseImpl(FlashMLASparseImpl):
         )
         self._validate_sinks(sinks, num_heads)
         self.sinks = sinks
+
+    @staticmethod
+    def _sparse_attention(*args, **kwargs):
+        return flash_mla_sparse_fwd(*args, **kwargs)
 
     @staticmethod
     def _validate_sinks(sinks: torch.Tensor | None, num_heads: int) -> None:
@@ -242,7 +246,7 @@ class HYV4FlashMLASparseImpl(FlashMLASparseImpl):
             q = q_padded
 
         topk_indices = topk_indices.view(num_tokens, 1, -1)
-        output = flash_mla_sparse_fwd(
+        output = self._sparse_attention(
             q,
             kv_c_and_k_pe_cache,
             topk_indices,
@@ -269,3 +273,25 @@ class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
     @classmethod
     def supports_sink(cls) -> bool:
         return True
+
+
+def make_hy4_metax_sparse_backend(implementation):
+    """Bind the already-selected BF16 provider to this HY4 model."""
+
+    class MetaXSparseImpl(HYV4FlashMLASparseImpl):
+        _sparse_attention = staticmethod(implementation)
+
+    class MetaXSparseBackend(HYV4FlashMLASparseBackend):
+        supported_kv_cache_dtypes = ["auto", "bfloat16"]
+
+        @staticmethod
+        def get_impl_cls() -> type[MetaXSparseImpl]:
+            return MetaXSparseImpl
+
+        @classmethod
+        def supports_compute_capability(cls, capability) -> bool:
+            # Provider availability was checked against the actual C550 device
+            # before constructing this backend.
+            return True
+
+    return MetaXSparseBackend

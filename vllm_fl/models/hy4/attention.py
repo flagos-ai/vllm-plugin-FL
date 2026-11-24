@@ -367,7 +367,10 @@ class HYV4MLAAttention(nn.Module):
         # Do not silently degrade sparse layers into dense attention. Probe the
         # sparse MLA backend directly and fail fast with the real error.
         kv_cache_dtype = cache_config.cache_dtype if cache_config else "auto"
-        if self.is_sparse:
+        sparse_backend = runtime_plan.sparse_backend if self.is_sparse else None
+        if sparse_backend is not None:
+            self._validate_sink_backend(sparse_backend, kv_cache_dtype)
+        elif self.is_sparse:
             try:
                 get_attn_backend(
                     head_size=self.kv_lora_rank + self.qk_rope_head_dim,
@@ -515,9 +518,10 @@ class HYV4MLAAttention(nn.Module):
         # holds the local TP shard.
         self.learnable_sink = bool(getattr(config, "learnable_sink", False))
         sinks = None
-        sink_backend: type[AttentionBackend] | None = None
+        sink_backend = sparse_backend
         if self.learnable_sink:
-            sink_backend = self._resolve_sink_backend(kv_cache_dtype)
+            if sink_backend is None:
+                sink_backend = self._resolve_sink_backend(kv_cache_dtype)
             self.learnable_sink_param = nn.Parameter(
                 torch.empty(
                     self.num_local_heads,
@@ -572,8 +576,21 @@ class HYV4MLAAttention(nn.Module):
 
         from .flashmla_sparse import HYV4FlashMLASparseBackend
 
+        self._validate_sink_backend(HYV4FlashMLASparseBackend, kv_cache_dtype)
+        logger.info_once(
+            "HYV4 learnable sink enabled: using the sink-capable "
+            "FLASHMLA_SPARSE impl instead of %s, which cannot apply sinks.",
+            selected_cls.get_name(),
+        )
+        return HYV4FlashMLASparseBackend
+
+    def _validate_sink_backend(
+        self, backend: type[AttentionBackend], kv_cache_dtype: str
+    ) -> None:
         # Mirror how the selector derives the configuration-dependent inputs so
         # this check accepts exactly what the backend would accept at runtime.
+        head_size = self.kv_lora_rank + self.qk_rope_head_dim
+        dtype = torch.get_default_dtype()
         capability = current_platform.get_device_capability()
         if capability is None:
             raise RuntimeError(
@@ -586,7 +603,7 @@ class HYV4MLAAttention(nn.Module):
             if cache_config is not None and cache_config.user_specified_block_size
             else None
         )
-        invalid_reasons = HYV4FlashMLASparseBackend.validate_configuration(
+        invalid_reasons = backend.validate_configuration(
             head_size=head_size,
             dtype=dtype,
             kv_cache_dtype=cast(CacheDType, kv_cache_dtype),
@@ -601,18 +618,10 @@ class HYV4MLAAttention(nn.Module):
         )
         if invalid_reasons:
             raise RuntimeError(
-                f"HY4 requires attention sink support; {selected_cls.get_name()} "
-                "has no sinks and HYV4FlashMLASparseBackend rejected "
+                f"HY4 requires attention sink support; {backend.get_name()} rejected "
                 f"device={current_platform.device_type}, dtype={dtype}, "
                 f"kv_cache_dtype={kv_cache_dtype}: {', '.join(invalid_reasons)}"
             )
-
-        logger.info_once(
-            "HYV4 learnable sink enabled: using the sink-capable "
-            "FLASHMLA_SPARSE impl instead of %s, which cannot apply sinks.",
-            selected_cls.get_name(),
-        )
-        return HYV4FlashMLASparseBackend
 
     def _force_sparse_mqa(self) -> None:
         """Keep every token on the sink-capable sparse MQA path.

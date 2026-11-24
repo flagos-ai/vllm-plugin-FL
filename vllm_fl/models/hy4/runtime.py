@@ -98,6 +98,7 @@ class HY4RuntimePlan:
     operations: Mapping[str, Callable]
     prefill_backend: type
     kv_cache_dtypes: tuple[str, ...]
+    sparse_backend: type | None = None
 
 
 def _prefill_is_available(backend) -> bool:
@@ -156,15 +157,27 @@ def validate_hy4_runtime(vllm_config) -> HY4RuntimePlan:
 
     from vllm_fl.dispatch.types import BackendImplKind
 
-    if not current_platform.is_cuda():
-        raise ValueError("HY4 currently requires an NVIDIA CUDA runtime")
+    is_metax = getattr(current_platform, "vendor_name", None) == "metax"
+    if not (current_platform.is_cuda() or is_metax):
+        raise ValueError("HY4 requires an NVIDIA CUDA or MetaX C550 runtime")
     cache_dtype = vllm_config.cache_config.cache_dtype
     if cache_dtype not in ("auto", "bfloat16", "fp8", "fp8_e4m3"):
         raise ValueError(f"Unsupported HY4 KV cache dtype: {cache_dtype}")
+    if is_metax:
+        if not vllm_config.model_config.enforce_eager:
+            raise ValueError("HY4 on MetaX C550 requires enforce_eager=True")
+        if vllm_config.model_config.dtype != torch.bfloat16:
+            raise ValueError("HY4 on MetaX C550 requires BF16 model dtype")
+        if cache_dtype not in ("auto", "bfloat16"):
+            raise ValueError("HY4 on MetaX C550 requires BF16 KV cache")
+        sparse_override = vllm_config.attention_config.backend
+        if sparse_override is not None and sparse_override.name != "FLASHMLA_SPARSE":
+            raise ValueError("HY4 on MetaX C550 requires the FLASHMLA_SPARSE backend")
+
     import vllm.model_executor.layers.attention.mla_attention as mla_attention
 
     config = vllm_config.model_config.hf_text_config
-    native_sparse = native_hy4_available(config.index_topk)
+    native_sparse = not is_metax and native_hy4_available(config.index_topk)
     selected = {
         name: _resolve_registered_operator(name, native_available=native_sparse)
         for name in _FLAGGEMS_INDEXER_OPS
@@ -190,12 +203,16 @@ def validate_hy4_runtime(vllm_config) -> HY4RuntimePlan:
     concat = _resolve_registered_operator("concat_mla_q")
     native_cache = cache.kind == BackendImplKind.VENDOR
     native_concat = concat.kind == BackendImplKind.VENDOR
-    native_prefill = select_hy4_prefill_backend(
-        vllm_config, mla_attention.get_mla_prefill_backend
-    )
     explicit = vllm_config.attention_config.mla_prefill_backend is not None
+    native_prefill = (
+        select_hy4_prefill_backend(vllm_config, mla_attention.get_mla_prefill_backend)
+        if not is_metax or explicit
+        else None
+    )
     if explicit:
         flaggems_explicit = native_prefill.get_name() == "FLAGGEMS_MLA_PREFILL"
+        if is_metax and not flaggems_explicit:
+            raise ValueError("HY4 on MetaX C550 requires FlagGems MLA prefill")
         permitted = (
             _flaggems_operator_allowed("mla_prefill_backend")
             if flaggems_explicit
@@ -242,12 +259,20 @@ def validate_hy4_runtime(vllm_config) -> HY4RuntimePlan:
         implementation = _resolve_registered_operator("flash_attn_varlen_func").fn
         implementations["flash_attn_varlen_func"] = implementation
         prefill_backend = _make_hy4_flaggems_mla_prefill_backend(implementation)
+    sparse_backend = None
+    if is_metax:
+        from .flashmla_sparse import make_hy4_metax_sparse_backend
+
+        sparse_backend = make_hy4_metax_sparse_backend(
+            implementations["flash_mla_sparse_fwd"]
+        )
     return HY4RuntimePlan(
         "native" if native_indexer else "flaggems",
         _resolve_query_quantizer(),
         MappingProxyType(implementations),
         prefill_backend,
         ("auto", "bfloat16") if portable else ("auto", "bfloat16", "fp8", "fp8_e4m3"),
+        sparse_backend,
     )
 
 
@@ -336,7 +361,7 @@ def _install_fallback(tx, plan: HY4RuntimePlan) -> bool:
     if getattr(sparse_indexer, "_hy4_runtime_installed", False):
         return bool(plan.operations)
     implementations = plan.operations
-    if plan.provider == "flaggems":
+    if plan.provider == "flaggems" and plan.sparse_backend is None:
         flash_mla_sparse_fwd = implementations["flash_mla_sparse_fwd"]
 
         # HY4's sink-capable backend imports these functions by value.  Rebind its
