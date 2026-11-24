@@ -36,7 +36,9 @@ def rms_norm_gcu(
     )
     if (
         x.device.type == "gcu"
-        and torch.compiler.is_compiling()
+        # Keep the reduction tree and rounding identical in eager, compiled
+        # execution and graph replay. A compile-only provider changes BF16
+        # boundary values even when both formulas implement the CUDA contract.
         and not torch.is_grad_enabled()
         and x.is_contiguous()
         and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
