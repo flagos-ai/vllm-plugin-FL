@@ -2,16 +2,50 @@
 
 ## Integration and verification scope
 
-Integrated target `0.5.0-dev@77f141a961d75e54c0cf209de80c99a7c7eec04b`
-as merge commit `262f814db849e4687bdabd5417832ed9cf83265a`.
-Exact remote SHA independently verified; GitHub reports `mergeable=true`.
-This is not a CI success claim.
+Review baseline: `05edf01bbb2bb62d4fe1c56f20018576459cd80a`, independently
+verified against the PR branch. It includes target `0.5.0-dev@f0e89ad`
+through merge commit `dc03bf2`. The shared `vllm_fl/worker/model_runner.py`
+and `vllm_fl/worker/worker.py` have no diff against that target. This is not
+a claim that all required CI has passed.
 
-The generated Enflame PR matrix preserves three inference cases and four
-separate adaptation-gate jobs (27B/35B-A3B × eager/graph). Matrix generation
-proves routing, not execution. Local host regressions: **52 passed**, including
-gate validation, compilation policy, provider installation and V2 buffer retry.
-Ruff checks/formatting and shell syntax checks passed.
+The Enflame PR matrix preserves three inference cases and four separate
+adaptation-gate jobs (27B/35B-A3B × eager/graph). Independently inspected
+archived artifacts `14790260671`, `14793802294`, `14796392600`, and
+`14809741567` each contain five scenarios, 26 requests and 260 passing
+quality checks. These archived runs do not establish hardware coverage of
+subsequent integration commits. Local focused regressions on the review
+baseline passed: **55 Enflame/provider/config tests** and **29 Hygon cleanup
+tests**. They do not replace hardware or cross-platform CI validation.
+
+The official FlagGems-vllm main branch at
+`23e7747dbb99fef74f23480adf69133739c32141` still diverges from required
+Iluvatar fork commit `90dd13cd721f2ff139e6f42ef36854518c0b2b95`
+(GitHub compare: ahead 113, behind 1). Merely changing the installer URL
+would therefore not prove the required changes landed upstream. Direct source
+inspection also found that main's four-stage MoE alignment still lacks the
+fork's negative/out-of-range expert-ID masks in stages 1 and 4.
+Upstream follow-ups already exist, so creating duplicate PRs is unnecessary:
+
+- [FlagGems-vllm #1317](https://github.com/flagos-ai/FlagGems-vllm/pull/1317),
+  head `2eb42fd2c5471446bea457f5f7a1ca65ae44ba09`: invalid-expert-ID
+  filtering. At inspection it was open/unmerged, with `unittest-required`
+  failing and NVIDIA operator CI cancelled. Its reported H100 validation is
+  author-provided evidence, not a validation run performed for this record.
+- [FlagGems-vllm #1231](https://github.com/flagos-ai/FlagGems-vllm/pull/1231),
+  head `40856d9224183ef2182c017705ab1502e45a167b`: Enflame migration.
+  At inspection it was open/unmerged, with `rule-check-required` failing and
+  NVIDIA/backend tests skipped. Its existence alone does not establish full
+  coverage of R1's numerical implementations.
+
+R1/R2 remain open until the relevant operators/fixes are accepted upstream,
+validated and pinned to immutable official commits. The authenticated account
+has no push/merge permission on the official provider repository.
+
+The dtype-codegen workaround now retains the vendor helper and removes only
+four recognized integer rewrite statements. Unknown helper ABI/source emits a
+warning and skips adaptation. `FL_GCU_PRESERVE_DTYPE_CODEGEN=0` selects the
+vendor path; changing this mode changes the compilation cache salt. This is
+a downstream workaround, not evidence of a vendor upstream fix.
 
 ## Review disposition
 
