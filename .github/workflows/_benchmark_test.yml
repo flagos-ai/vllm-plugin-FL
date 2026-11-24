@@ -71,6 +71,9 @@ jobs:
     name: "Benchmark Smoke (${{ inputs.platform }}/${{ inputs.device }})"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
+    defaults:
+      run:
+        shell: bash
     container:
       image: ${{ inputs.ci_image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
@@ -103,7 +106,6 @@ jobs:
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Run benchmark smoke tests
-        shell: bash
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
