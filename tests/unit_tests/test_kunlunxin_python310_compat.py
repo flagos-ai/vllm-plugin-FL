@@ -10,7 +10,10 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "docker/kunlunxin/python310_compat.py"
+_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / ".github/scripts/kunlunxin/python310_compat.py"
+)
 _SPEC = importlib.util.spec_from_file_location("kunlunxin_python310_compat", _SCRIPT)
 assert _SPEC is not None and _SPEC.loader is not None
 _COMPAT = importlib.util.module_from_spec(_SPEC)

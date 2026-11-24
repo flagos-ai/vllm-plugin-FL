@@ -142,6 +142,7 @@ platforms:
       - .github/configs/kunlunxin.yml
       - .github/scripts/kunlunxin/
       - docker/kunlunxin/
+      - tests/unit_tests/test_kunlunxin_python310_compat.py
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
       - tests/platforms/kunlunxin.yaml
@@ -151,6 +152,7 @@ platforms:
       - .github/configs/kunlunxin.yml
       - .github/scripts/kunlunxin/
       - docker/kunlunxin/
+      - tests/unit_tests/test_kunlunxin_python310_compat.py
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
       - .github/configs/platforms.yml

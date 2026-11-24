@@ -49,7 +49,7 @@ ENV PATH="/flagos/bin:${PATH}" \
     VLLM_FL_PREFER=flagos
 
 # Install FlagCX 0.14.1 and the Python 3.10-patched vLLM 0.32.0 wheel.
-COPY docker/kunlunxin/install-vllm.sh docker/kunlunxin/python310_compat.py /opt/kunlunxin-build/
+COPY .github/scripts/kunlunxin/install-vllm.sh .github/scripts/kunlunxin/python310_compat.py /opt/kunlunxin-build/
 RUN bash /opt/kunlunxin-build/install-vllm.sh
 
 # Register the vLLM FlagGems providers in every derived image.

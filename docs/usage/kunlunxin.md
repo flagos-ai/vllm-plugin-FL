@@ -29,7 +29,7 @@ KUNLUNXIN_IMAGE=<validated CI image reference>
 docker pull "$KUNLUNXIN_IMAGE"
 ```
 
-`docker/kunlunxin/Dockerfile` applies the [Python 3.10 compatibility patch](../../docker/kunlunxin/python310_compat.py)
+`docker/kunlunxin/Dockerfile` applies the [Python 3.10 compatibility patch](../../.github/scripts/kunlunxin/python310_compat.py)
 to the pinned vLLM wheel, installs the pinned FlagGems-vLLM source archive, and
 builds `vllm_fl._C` against the image's Torch. CI setup installs its own checkout
 using the dependencies from that image. Rebuild it with
