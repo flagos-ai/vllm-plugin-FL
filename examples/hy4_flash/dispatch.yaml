@@ -1,0 +1,5 @@
+prefer: flagos
+strict: true
+op_backends:
+  grouped_topk:
+    - flagos
