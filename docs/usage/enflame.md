@@ -22,6 +22,9 @@ contain each candidate's plugin changes.
 | FlagTree | `0.7.0+enflame3.6`, the Enflame-specific release |
 | Triton GCU | `3.6.0+1.0.20260722`; FlagTree provides the `triton` Python namespace |
 | FlagGems | `5.5.0.dev0` |
+| TOPS SDK / TOPS ATen | `3.8.20260714` / `3.8.20260710` |
+| FlagCX / ECCL | `0.13.0` / `3.7.1.2` |
+| Preinstalled FlagGems-vllm | `0.3.0.dev1`; local wheel provenance, public source SHA unverified |
 | OpenAI SDK / pandas | `3.28.0` / `3.0.6` |
 | FlagGems-vllm setup pin | Official `flagos-ai/FlagGems-vllm`, commit `93fd1b0c1dc3b084dbf6872630fc9bb6113218ed` (`0.3.0.dev1`); verify the resolved installation separately |
 
@@ -30,13 +33,16 @@ contain each candidate's plugin changes.
 The recipe pins official vLLM commit
 `5df63a7203cdb9328d824a27b682e77c7b9928be` and FlagGems tag
 `v5.5.0.dev0` (peeled commit `2bcfe2656dad0b654077fcfe7d66e6a93542afab`).
-These are source/build requirements, not a complete bill of materials for the
-published digest. In particular, the base image name contains
-`pcp_tops3.8.20260714` and `cx_0.13.0`, but a name is not proof of its installed
-TOPS/SDK or communication-library contents. The exact SDK packages, FlagCX and
-ECCL library versions/hashes, and public source revisions for binary vendor
-packages have not yet been tied to that digest. Image provenance remains
-incomplete until those records are supplied; do not infer it from a separately
+These are source/build requirements, not a complete source bill of materials.
+[Verified image-layer package records](../validation/pr675-image-732e3d5/README.md)
+now tie the SDK, FlagCX, ECCL and compiler/operator package metadata to the
+published digest. The SDK layer and every later overlay were downloaded and
+SHA256 verified; later overlays upgrade Triton GCU to the July 22 build and
+supply FlagGems 5.5 and vLLM 0.32. Inherited image labels still mention 0.28.
+The records include metadata hashes and available wheel hashes/direct URLs.
+Public Git SHAs for local/binary builds and hashes/paths of communication
+libraries actually loaded at runtime remain unverified. Image provenance is
+therefore incomplete; do not infer those missing records from a separately
 modified development container.
 
 For the exact digest and plugin SHA being validated, retain the image inspection,

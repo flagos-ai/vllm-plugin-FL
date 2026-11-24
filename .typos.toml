@@ -43,6 +43,12 @@ HSA = "HSA"
 
 [files]
 extend-exclude = [
+    # Immutable captured evidence and third-party package metadata; READMEs stay checked.
+    "docs/validation/pr675-e394a2a/**/*.json",
+    "docs/validation/pr675-e394a2a/**/*.log",
+    "docs/validation/pr675-e394a2a/model-provenance/**",
+    "docs/validation/pr675-image-732e3d5/**/*.json",
+    "docs/validation/pr675-image-732e3d5/metadata/**",
     # Auto-generated or third-party
     "*.egg-info/**",
     "build/**",

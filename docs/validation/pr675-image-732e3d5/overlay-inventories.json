@@ -1,0 +1,1237 @@
+[
+  {
+    "index": 45,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 6943,
+      "digest": "sha256:a7b835624709b3877f3febe6f739937413c96a123fcb167d74f295593c004a86"
+    },
+    "files": [
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_deb%5flocal_dists_xenial_Release",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_deb%5flocal_dists_xenial_stable_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-backports_InRelease",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-backports_main_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-backports_main_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-backports_multiverse_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-backports_restricted_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-backports_universe_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-backports_universe_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_InRelease",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_main_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_main_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_multiverse_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_multiverse_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_restricted_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_restricted_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_universe_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-security_universe_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_InRelease",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_main_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_main_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_multiverse_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_multiverse_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_restricted_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_restricted_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_universe_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble-updates_universe_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble_InRelease",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble_main_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble_main_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble_multiverse_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble_multiverse_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble_restricted_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble_universe_binary-amd64_Packages.lz4",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.artifact.enflame.cn_artifactory_ubuntu%5frepo%5fremote_ubuntu_dists_noble_universe_dep11_Components-amd64.yml.gz",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.auxfiles",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.lock",
+        "whiteout": true
+      },
+      {
+        "path": "var/lib/apt/lists/.wh.partial",
+        "whiteout": true
+      }
+    ]
+  },
+  {
+    "index": 46,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 32906503,
+      "digest": "sha256:87d03d2f577e95edbe1097e514b768851aae7043be76001dfa0c5e237615aa51"
+    },
+    "files": [
+      {
+        "path": "usr/local/bin/.wh.scikit-build",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/bin/.wh.scikit-build-core",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cloudpickle/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.cloudpickle-1.6.0.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cloudpickle-3.1.2.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cloudpickle-3.1.2.dist-info/METADATA",
+        "sha256": "3d0263bfe9ee4f23b244bdcaff73acbe7a1957ebf82743b6ae42693adc48d721"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cloudpickle-3.1.2.dist-info/WHEEL",
+        "sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cmake-4.4.4.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cmake-4.4.4.dist-info/METADATA",
+        "sha256": "f8c88fffa2575df110630597a94297db3cbbf1b2f2c195d4fb7b063e1d98d20f"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cmake-4.4.4.dist-info/WHEEL",
+        "sha256": "a75a4b0e302d11c27220ebf667aee8f84f1971e0d180eef5cce72e9456f2e9f3"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/packaging/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.packaging-26.0.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/packaging-26.3.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/packaging-26.3.dist-info/METADATA",
+        "sha256": "70fdb89fc4d4a9a043bf7372b8972bcc883fddff34ab55e9cf80d73875384763"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/packaging-26.3.dist-info/WHEEL",
+        "sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pkg_resources/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/scikit_build_core/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/scikit_build_core-0.11.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/scikit_build_core-0.11.0.dist-info/METADATA",
+        "sha256": "73926cfe5835e8c8d2d7ddc05bd756999f56bdacaf1799460ad9cc8109524162"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/scikit_build_core-0.11.0.dist-info/WHEEL",
+        "sha256": "aad0b0a12256807936d52d4a6f88a1773236ae527564a688bab4e3fe780e8724"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.scikit_build_core-1.0.3.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/semantic_version-2.10.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/semantic_version-2.10.0.dist-info/METADATA",
+        "sha256": "7414d469a569046b6a246bfb1f105aab1b7abfdc32a95253f15432ea30159aa6"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/semantic_version-2.10.0.dist-info/WHEEL",
+        "sha256": "67e9f2629c2b712ab17ddbb1e4c6e7fc3439db988fec9d831b72601af398c934"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/autocommand-2.2.2.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/autocommand-2.2.2.dist-info/METADATA",
+        "sha256": "3800d9b91dceea2065a6ed6279383362e97ac38b8e56b9343f404ee531860099"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/autocommand-2.2.2.dist-info/WHEEL",
+        "sha256": "db07a93359e4e034b8785a58ad6d534ea3dca0635f1e184efe2e66e1c3a299ba"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/backports.tarfile-1.2.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/backports.tarfile-1.2.0.dist-info/METADATA",
+        "sha256": "8215c54ead77d9dc5a108a25c6bdc72b5999aa6f62c9499a440359412afa5a51"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/backports.tarfile-1.2.0.dist-info/WHEEL",
+        "sha256": "189eedfe4581172c1b6a02b97a8f48a14c0b5baa3239e4ca990fbd8871553714"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/METADATA",
+        "sha256": "a3e38b9ee4326289d4864704f30e299ee769e2309ce9f4a75f0de1a50ad0a356"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/WHEEL",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco.text-4.0.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco.text-4.0.0.dist-info/METADATA",
+        "sha256": "5c2fd09012c954f139b10624978d5335a654c34014cd06f6f466ca683dbc9c56"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco.text-4.0.0.dist-info/WHEEL",
+        "sha256": "5b287efe76740c9628947367d7f84c6b894ceee0de743fd1195c1b9938f222d9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco_context-6.1.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco_context-6.1.0.dist-info/METADATA",
+        "sha256": "0435ebfc52055c5a9974ed20c171b6454383eaf9dbb1508814ba7ad97c59d712"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco_context-6.1.0.dist-info/WHEEL",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco_functools-4.4.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco_functools-4.4.0.dist-info/METADATA",
+        "sha256": "2e79da8dc3469924abe3ac8b22a3feb5692a79bf9f47bbc86b6535d618641849"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/jaraco_functools-4.4.0.dist-info/WHEEL",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/more_itertools-10.8.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/more_itertools-10.8.0.dist-info/METADATA",
+        "sha256": "6ab3515145abe58b067f087c867631cf4cf5d653fed81b9642ee12086c3904b8"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/more_itertools-10.8.0.dist-info/WHEEL",
+        "sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/packaging-26.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/packaging-26.0.dist-info/METADATA",
+        "sha256": "3362bb7d6a26da2962ba8daaa4785cd0bacac21aba908a1195cc8f59580a265a"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/packaging-26.0.dist-info/WHEEL",
+        "sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/platformdirs-4.4.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/platformdirs-4.4.0.dist-info/METADATA",
+        "sha256": "bbc5216d5f4c77bfbc57227264d52e66bccde71ccf79e75e1a6046d029d30223"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/platformdirs-4.4.0.dist-info/WHEEL",
+        "sha256": "aad0b0a12256807936d52d4a6f88a1773236ae527564a688bab4e3fe780e8724"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/tomli-2.4.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/tomli-2.4.0.dist-info/METADATA",
+        "sha256": "f5ac0a1f8fba908b4646cd655309e91aad969b6787616ac571ca462a3832ffce"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/tomli-2.4.0.dist-info/WHEEL",
+        "sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/wheel-0.46.3.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/wheel-0.46.3.dist-info/METADATA",
+        "sha256": "22910aa97ca89cbcc20a019e27fe31360b7929a4bd66ca0d310f99a44f6ccd35"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/wheel-0.46.3.dist-info/WHEEL",
+        "sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/zipp-3.23.0.dist-info/INSTALLER",
+        "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/zipp-3.23.0.dist-info/METADATA",
+        "sha256": "bdd67d4d16cf0bf3b893e7d18cd3d2d774adb82f37ed985bc7770c607226b35b"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools/_vendor/zipp-3.23.0.dist-info/WHEEL",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.setuptools-69.5.1.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools-80.10.2.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools-80.10.2.dist-info/METADATA",
+        "sha256": "dbcc9841388b7fb55c2190288fd683b183b0fb557f57a338d86553ef471d287d"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools-80.10.2.dist-info/WHEEL",
+        "sha256": "c14c80f0e6ae95195b7f032d990b2f367806af140702f90a72f466762ce5262d"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools_rust-1.13.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools_rust-1.13.0.dist-info/METADATA",
+        "sha256": "0b6b38c834cc8597bb72270656cf98175ebb522daba799dba34678804b91503c"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools_rust-1.13.0.dist-info/WHEEL",
+        "sha256": "69e6228a0d35958183cc1812f07c565ce837b95eb51bd8a33acba9fa4f68d6c9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools_scm-10.3.4.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools_scm-10.3.4.dist-info/METADATA",
+        "sha256": "cd44047af046cbb74c19c0b250bc6eb7ad9233d2bb18ccdb37e36e42770d5dd6"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/setuptools_scm-10.3.4.dist-info/WHEEL",
+        "sha256": "61532836a2b3111b7ec23519c09df7c41180c27165fb872a6d8913b566b88ad1"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/vcs_versioning-2.6.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/vcs_versioning-2.6.0.dist-info/METADATA",
+        "sha256": "10bc8293fc925b604592c40dacc5d10ae6b1767ce5e0479e42a182d6ebfb55f4"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/vcs_versioning-2.6.0.dist-info/WHEEL",
+        "sha256": "61532836a2b3111b7ec23519c09df7c41180c27165fb872a6d8913b566b88ad1"
+      }
+    ]
+  },
+  {
+    "index": 47,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 1363095346,
+      "digest": "sha256:cc89171b957bc745cdd9ab07a2b154b24dc83d96152e2785a64feb6fa735bf3e"
+    },
+    "files": [
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flag_gems/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.flag_gems-5.4.0.dev0.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flag_gems-5.4.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flag_gems-5.4.0.dist-info/METADATA",
+        "sha256": "2d1bed201f2ff70b924cc84e7a4d91b0fca83352e8fb160b9e79a3fd6da92cf0"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flag_gems-5.4.0.dist-info/WHEEL",
+        "sha256": "6de799f3af847d749cc2547f1cabb84a594c0bdc14123ffc67fe052777a0236c"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flagtree-0.7.0+enflame3.6.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flagtree-0.7.0+enflame3.6.dist-info/METADATA",
+        "sha256": "33b6cf824ce5d78576b79e2431edfe22d4e60a6a3701fa2fd787f21ea490d4f3"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flagtree-0.7.0+enflame3.6.dist-info/WHEEL",
+        "sha256": "534d96963bacec16b1cb7e473924a3d644e7b56f70920f73c1885776cfff3789"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.triton-3.6.0.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton_dist/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton_gcu/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.triton_gcu-3.6.0+1.0.20260710.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton_gcu-3.6.0+1.0.20260722.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton_gcu-3.6.0+1.0.20260722.dist-info/METADATA",
+        "sha256": "82a949afccbc56ce3d17b3036ff3ae8e80575d4aacb77e39814ae86ac1040185"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton_gcu-3.6.0+1.0.20260722.dist-info/WHEEL",
+        "sha256": "a2241587fe4f9d033413780f762cf4f5608d9b08870cc6867abfde96a0777283"
+      }
+    ]
+  },
+  {
+    "index": 48,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 283196529,
+      "digest": "sha256:1799610008cd1cafc4e6d1c2201b8d42df3bea7c4139eb0a1766689c129a9a72"
+    },
+    "files": [
+      {
+        "path": "usr/local/bin/.wh.openai",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/apache_tvm_ffi-0.1.14.post1.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/apache_tvm_ffi-0.1.14.post1.dist-info/METADATA",
+        "sha256": "892a70f9ecee5579202fb3e3918300095a4c5803dea970e10b7340a98f4f06e5"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/apache_tvm_ffi-0.1.14.post1.dist-info/WHEEL",
+        "sha256": "7d54fd6ae91d00311a090ea2d80888a8610e82960f6fb743e0291ef71e2ff46f"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.apache_tvm_ffi-0.1.9.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/click/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.click-8.3.3.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/click-8.5.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/click-8.5.0.dist-info/METADATA",
+        "sha256": "e87bce0bd194de70dfb8e708e0a6b0483009f25611804eaf87bfeb63e6c20501"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/click-8.5.0.dist-info/WHEEL",
+        "sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/compressed_tensors/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.compressed_tensors-0.15.0.1.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/compressed_tensors-0.17.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/compressed_tensors-0.17.0.dist-info/METADATA",
+        "sha256": "56ce9fd55e575110a8654f7c3f727a1a4a0bc8d600e05a381c8ff3fed0c93c98"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/compressed_tensors-0.17.0.dist-info/WHEEL",
+        "sha256": "69e6228a0d35958183cc1812f07c565ce837b95eb51bd8a33acba9fa4f68d6c9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/google/_upb/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/google/protobuf/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/hf_xet/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.hf_xet-1.5.0.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/hf_xet-1.7.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/hf_xet-1.7.0.dist-info/METADATA",
+        "sha256": "05975b1239f188bb418539f178ef68a693ea6824f20c30583a02eea94faf650a"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/hf_xet-1.7.0.dist-info/WHEEL",
+        "sha256": "3b91e51afb00e5b710092708799363799659ba72160d63d5b4d5a88dd6bc7524"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/httpcore2-2.13.1.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/httpcore2-2.13.1.dist-info/METADATA",
+        "sha256": "37a0ea0674e98b7c3a1f99c17d9bb5457de27a0f93c8b6560c9d17d525139abb"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/httpcore2-2.13.1.dist-info/WHEEL",
+        "sha256": "ccec20e2307acd7da453dd7437e70c6b08e2bc3ead3bc3445af135da37b56d59"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/httpx2-2.13.1.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/httpx2-2.13.1.dist-info/METADATA",
+        "sha256": "b75b03a003b5593e000907cf7239fcc3f688b8f17db4ecff883d11221ea988fc"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/httpx2-2.13.1.dist-info/WHEEL",
+        "sha256": "ccec20e2307acd7da453dd7437e70c6b08e2bc3ead3bc3445af135da37b56d59"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/huggingface_hub/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.huggingface_hub-1.14.0.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/huggingface_hub-1.33.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/huggingface_hub-1.33.0.dist-info/METADATA",
+        "sha256": "bee565776d66f486d224f74024b656a69ed42e2639d80b18811fca4365adc42e"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/huggingface_hub-1.33.0.dist-info/WHEEL",
+        "sha256": "61532836a2b3111b7ec23519c09df7c41180c27165fb872a6d8913b566b88ad1"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/idna/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.idna-2.8.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/idna-3.20.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/idna-3.20.dist-info/METADATA",
+        "sha256": "dbd8c14c1e4ca1e0c9824a6dbc7cbbf78884f38eb52d91148cd3025f671e4b85"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/idna-3.20.dist-info/WHEEL",
+        "sha256": "96a37c8d7b7f425a05386731f644adbd66ebca17c45e8236176cfe614466df9d"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/jiter/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.jiter-0.14.0.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/jiter-0.17.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/jiter-0.17.0.dist-info/METADATA",
+        "sha256": "738fc5b25c7cbaf81392886a95661322888c5691205b57a0975a1da1f62e3ea7"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/jiter-0.17.0.dist-info/WHEEL",
+        "sha256": "71d661618d9b707f61ac372a0d51047692f4339b639a602bfa5c14ab5e4211d6"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/lark/__pyinstaller/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/lark/grammars/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/lark/parsers/__pycache__/.wh.resolve_ambig.cpython-312.pyc",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/lark/parsers/.wh.resolve_ambig.py",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/lark/tools/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.lark-1.1.4.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/lark-1.2.2.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/lark-1.2.2.dist-info/METADATA",
+        "sha256": "4beebd1ee349af492d96f6fb2795c4e3c8216ffe9a8589fc92c756f47701f9dd"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/lark-1.2.2.dist-info/WHEEL",
+        "sha256": "1e20998f3bb2e83c3485d5f94772c214f0e6152e015a5f07fbc5b7f577e6817e"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/llguidance/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.llguidance-0.7.30.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/llguidance-1.7.6.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/llguidance-1.7.6.dist-info/METADATA",
+        "sha256": "2682828c9b1c128f7e272513859114671f744c6c6dbb567b8c32ef947bb752ad"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/llguidance-1.7.6.dist-info/WHEEL",
+        "sha256": "3cdbc8616c26ab0e793cb7f75e28f9987c1bd520c33a8a85630fa3fc82fed897"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/mistral_common/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.mistral_common-1.11.2.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/mistral_common-1.12.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/mistral_common-1.12.0.dist-info/METADATA",
+        "sha256": "5a9b4b2cfb8ee8b4e2aae7f820f02f354d514a3af29bab4da9f7e0d829b2524d"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/mistral_common-1.12.0.dist-info/WHEEL",
+        "sha256": "61532836a2b3111b7ec23519c09df7c41180c27165fb872a6d8913b566b88ad1"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/numpy/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.numpy-1.26.4.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/numpy-2.3.5.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/numpy-2.3.5.dist-info/METADATA",
+        "sha256": "6002f29765e5bc1a3be4a1b92ed56b64968a0fecba73e7f81cd536d0c40f4fa3"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/numpy-2.3.5.dist-info/WHEEL",
+        "sha256": "ac90a994678616346852fc495a154e351832198199a0e921c9e8f4b372b28e82"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/numpy.libs/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/openai/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.openai-2.6.1.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/openai-3.28.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/openai-3.28.0.dist-info/METADATA",
+        "sha256": "2ccf7558861abb71955b3aabe0c62f8502fe9f3214da9889bcf0274d0eb6ec43"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/openai-3.28.0.dist-info/WHEEL",
+        "sha256": "5b77e4a649bbfb07fdbc123967eeecd1e5a478cfaca6eefc23c35e6fdf037848"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/outlines_core/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.outlines_core-0.1.26.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/outlines_core-0.2.14.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/outlines_core-0.2.14.dist-info/METADATA",
+        "sha256": "230d5c9e5e3c48be711a817824f7cd08ba4dd21c64dd0cb997cfa82e444bc7de"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/outlines_core-0.2.14.dist-info/WHEEL",
+        "sha256": "d7397713dcccbc0b92cbe3922178c241ab076113b798324e49963c79dea5b544"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pandas/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.pandas-1.4.3.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pandas-3.0.6.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pandas-3.0.6.dist-info/METADATA",
+        "sha256": "c2e8c472e1f49c30b7b00dc1cde8b8ed384b1b6d85b4d5ffe163e800e71dbc61"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pandas-3.0.6.dist-info/WHEEL",
+        "sha256": "e424f5c4056d500dd22b82d6fd776833d2ada373c93d53f5ac121f2bc058a9c3"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/prometheus_fastapi_instrumentator/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.prometheus_fastapi_instrumentator-7.1.0.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/prometheus_fastapi_instrumentator-8.1.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/prometheus_fastapi_instrumentator-8.1.0.dist-info/METADATA",
+        "sha256": "b862db98656f73054bc87f0df8087808b3c95c52b003ad14870d2c8b72ee895d"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/prometheus_fastapi_instrumentator-8.1.0.dist-info/WHEEL",
+        "sha256": "10612f4a984562a5cab36dfe91005ec8da093f59eb4fc649290a22e69e4360bf"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/protobuf-6.33.6.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/protobuf-6.33.6.dist-info/METADATA",
+        "sha256": "6f3b31fd64380f5e60ed10f5a2954699bcc1f6266eb74316f0ba96702d30546f"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/protobuf-6.33.6.dist-info/WHEEL",
+        "sha256": "978099b1259e6440e7a6172af3a711977ab780bf4d9f8a87707f0a90f3d2261f"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.protobuf-7.35.1.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/starlette/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.starlette-0.52.1.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/starlette-1.7.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/starlette-1.7.0.dist-info/METADATA",
+        "sha256": "f7870fc19ab7c2e364887057340b9fb47e9bda74d24b06c58ca399494abfe019"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/starlette-1.7.0.dist-info/WHEEL",
+        "sha256": "ccec20e2307acd7da453dd7437e70c6b08e2bc3ead3bc3445af135da37b56d59"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton-3.6.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton-3.6.0.dist-info/METADATA",
+        "sha256": "5c9071db9b057bec89cd6d7f76f61e5f28a5e8d3717ff6c85420cf8015ee0321"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton-3.6.0.dist-info/WHEEL",
+        "sha256": "d5cac0c6b007e6b51bbd6518d54474972de8eca9d3d63a34ffdf15f11639f853"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/truststore-0.10.5.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/truststore-0.10.5.dist-info/METADATA",
+        "sha256": "1fd496f290853214e630d96f7163d2dd916f84ebe634b58aa827d6853e8f8610"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/truststore-0.10.5.dist-info/WHEEL",
+        "sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/tvm_ffi/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/vllm/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.vllm-0.20.2.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/vllm-0.28.0+empty.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/vllm-0.28.0+empty.dist-info/METADATA",
+        "sha256": "fcf002e230a5365c103896e4638df66eb248d3dbcbe2a568a494944faf6532e9"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/vllm-0.28.0+empty.dist-info/WHEEL",
+        "sha256": "7bb6243d8c819748748f2b2621a2aca80bae62600dea860ccf2f7c60878b7a2f"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/vllm-0.28.0+empty.dist-info/direct_url.json",
+        "sha256": "947ee42458104311ca7c682c301474ee745c25bc85968044a5fe14dae115e5db"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/xgrammar/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.xgrammar-0.1.32.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/xgrammar-0.2.8.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/xgrammar-0.2.8.dist-info/METADATA",
+        "sha256": "91ffa7936f8bde807ef453245bb41617818b06190d610f9777b135f746197bd8"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/xgrammar-0.2.8.dist-info/WHEEL",
+        "sha256": "ff085f3d715a4e97dea2901f950f986c870ef1816434b1bceeaa2d6a27a95924"
+      }
+    ]
+  },
+  {
+    "index": 49,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 1170897673,
+      "digest": "sha256:70c1780d4f01d2630bcd7e6307b4e748a02a7339ba25daa50e004883ac4d649c"
+    },
+    "files": [
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flagtree/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flagtree-0.7.0+enflame3.6.dist-info/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flagtree-0.7.0+enflame3.6.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flagtree-0.7.0+enflame3.6.dist-info/METADATA",
+        "sha256": "33b6cf824ce5d78576b79e2431edfe22d4e60a6a3701fa2fd787f21ea490d4f3"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/flagtree-0.7.0+enflame3.6.dist-info/WHEEL",
+        "sha256": "534d96963bacec16b1cb7e473924a3d644e7b56f70920f73c1885776cfff3789"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/mlir/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/triton/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.triton-3.6.0.dist-info",
+        "whiteout": true
+      }
+    ]
+  },
+  {
+    "index": 50,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 3214,
+      "digest": "sha256:3da54d7d99a9005a99e4f55ae535d9771b79807705ef4c7df05161c2b4c02ceb"
+    },
+    "files": []
+  },
+  {
+    "index": 51,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 32,
+      "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1"
+    },
+    "files": []
+  },
+  {
+    "index": 52,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 32,
+      "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1"
+    },
+    "files": []
+  },
+  {
+    "index": 53,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 99,
+      "digest": "sha256:afa264445838e9de90351eec598af95c7ae4f109dbf47e6a5ae2c8bfdfa8ad97"
+    },
+    "files": []
+  },
+  {
+    "index": 54,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 12059084,
+      "digest": "sha256:79114568c34c6ab3053b661e3c53738c850698713999f2d18bf26582ed4c9323"
+    },
+    "files": [
+      {
+        "path": "usr/local/lib/python3.12/site-packages/_pytest/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cfgv-3.5.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cfgv-3.5.0.dist-info/METADATA",
+        "sha256": "ae126b80e15f39d0feff7368cefea2ea6478fdcedcde52918d0f58b668e19137"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/cfgv-3.5.0.dist-info/WHEEL",
+        "sha256": "d153540d6409cdf45a8582379de021cf65156d10adceda4de5d3c7006be61977"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/identify-2.6.20.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/identify-2.6.20.dist-info/METADATA",
+        "sha256": "83427f3660c7851cdb165c22b5b2822dccf65be42cecdd6c1bc76a1809e968c0"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/identify-2.6.20.dist-info/WHEEL",
+        "sha256": "4dd4392ed3702eec530a3831379d4081d539c3e2a407db6d98b6f38d31f4da98"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/nodeenv-1.11.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/nodeenv-1.11.0.dist-info/METADATA",
+        "sha256": "3cf9d0f2b02e832d65709376d339ee45896e512f9cdbd2b8845c0bb73b3e3b2b"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/nodeenv-1.11.0.dist-info/WHEEL",
+        "sha256": "e1805f098347e3094ba6fde9cead616c4b8895703858969b28b16ead9ede4cbd"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pre_commit-4.7.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pre_commit-4.7.0.dist-info/METADATA",
+        "sha256": "6e8ac1ff53ee27dde25df4f3fbccdb4c2f869c06215b28e21f4a85249f1d507a"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pre_commit-4.7.0.dist-info/WHEEL",
+        "sha256": "4dd4392ed3702eec530a3831379d4081d539c3e2a407db6d98b6f38d31f4da98"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest/.wh..wh..opq",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/.wh.pytest-8.3.3.dist-info",
+        "whiteout": true
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest-8.4.1.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest-8.4.1.dist-info/METADATA",
+        "sha256": "3e6f6ba5b37585c7d54b9283e9804a647e83e953dc9c9759df81fba0e391ed1f"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest-8.4.1.dist-info/WHEEL",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest_json_report-1.5.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest_json_report-1.5.0.dist-info/METADATA",
+        "sha256": "bc0a2ee03dbae5a6bb6085855c5df84b53c6f362e72a4b50623c8572b41e3f72"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest_json_report-1.5.0.dist-info/WHEEL",
+        "sha256": "1b5e87e00dc87a84269cead8578b9e6462928e18a95f1f3373c9eef451a5bcc0"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest_metadata-3.1.1.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest_metadata-3.1.1.dist-info/METADATA",
+        "sha256": "24399360810b9a62033a17847d8f250ecb0054c4fff4237fd37ec660d39f93bf"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/pytest_metadata-3.1.1.dist-info/WHEEL",
+        "sha256": "4c93e729db6b4ae7bbc59fc0546929f585dcbc3ae86ec8c176cd5dbb7371e9d7"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/ruff-0.17.0.dist-info/INSTALLER",
+        "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/ruff-0.17.0.dist-info/METADATA",
+        "sha256": "fdedd8c8c33d135d85701a017fdda0d3331f42673b5746fa0d69365f312209bf"
+      },
+      {
+        "path": "usr/local/lib/python3.12/site-packages/ruff-0.17.0.dist-info/WHEEL",
+        "sha256": "9d1b8ac16650753920001d727880fc6720369d6190678253e69694e8e84c4429"
+      }
+    ]
+  },
+  {
+    "index": 55,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 32,
+      "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1"
+    },
+    "files": []
+  },
+  {
+    "index": 56,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 92,
+      "digest": "sha256:9fb913e8ca50882aa04a8530a7041e01270e34d92da326cbecd70dd8f7a6caf0"
+    },
+    "files": []
+  },
+  {
+    "index": 57,
+    "layer": {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 32,
+      "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1"
+    },
+    "files": []
+  }
+]

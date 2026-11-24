@@ -1,0 +1,11 @@
+(APIServer pid=2744410) INFO 11-24 07:52:54 [api_utils.py:286] non-default args: {'model_tag': '/models/Qwen3.6-27B', 'host': '127.0.0.1', 'port': 18410, 'model': '/models/Qwen3.6-27B', 'trust_remote_code': True, 'allowed_local_media_path': '/workspace/pr675-remove-added-tests/tools/adaptation-gate-cases/images', 'max_model_len': 32768, 'served_model_name': ['qwen'], 'tensor_parallel_size': 2}
+[2026-11-24 07:53:58] [INFO] [vllm_fl.dispatch.backends.vendor.gcu.worker.worker] Using V2 Model Runner
+[rank1]:E1124 08:00:52.103000 2747362 site-packages/torch/_inductor/runtime/triton_heuristics.py:874] Traceback (most recent call last):
+[rank0]:E1124 08:00:52.918000 2747361 site-packages/torch/_inductor/runtime/triton_heuristics.py:874] Traceback (most recent call last):
+[rank1]:E1124 08:02:08.311000 2747362 site-packages/torch/_inductor/runtime/triton_heuristics.py:874] Traceback (most recent call last):
+[rank0]:E1124 08:02:08.990000 2747361 site-packages/torch/_inductor/runtime/triton_heuristics.py:874] Traceback (most recent call last):
+(Worker_TP0 pid=2747361) INFO 11-24 08:29:43 [model_runner.py:1127] Graph capturing finished in 969 secs, took 0.57 GiB
+(Worker_TP1 pid=2747362) INFO 11-24 08:29:43 [model_runner.py:1127] Graph capturing finished in 969 secs, took 0.57 GiB
+(Worker_TP1 pid=2747362) INFO 11-24 08:48:01 [model_runner.py:1127] Graph capturing finished in 958 secs, took 0.58 GiB
+(Worker_TP0 pid=2747361) INFO 11-24 08:48:01 [model_runner.py:1127] Graph capturing finished in 958 secs, took 0.58 GiB
+INFO:     Application startup complete.

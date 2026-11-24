@@ -1,0 +1,11 @@
+{
+  "commit": "e394a2ac468a168fc864a9966b63e687d26dc496",
+  "model": "/models/Qwen3.6-35B-A3B",
+  "mode": "eager",
+  "devices": "6,7",
+  "port": 18432,
+  "expected_scenarios": 5,
+  "expected_requests": 26,
+  "test_exit_code": 0,
+  "server_exit_code": 0
+}
