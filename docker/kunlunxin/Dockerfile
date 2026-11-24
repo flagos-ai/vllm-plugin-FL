@@ -12,18 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-# Official FlagOS Runtime 2.3.0 for Kunlunxin XRE 5.37.1.
-# https://flagos-ai.github.io/release-info/zh-cn/runtime/kunlunxin-xre5.37.1/
-# The digest is the published manifest digest; the config digest is
-# sha256:4961327d52a6feb2a71759e7e0055ce41c373ecbf42a802132ee8eb3ed52a663.
+# FlagOS Runtime 2.3.0 for Kunlunxin XRE 5.37.1.
 ARG KUNLUNXIN_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-kunlunxin-xre5.37.1:2.3.0@sha256:cc0deb9c09cd49977e754892e85f4414835d142379949cc2d66261f63b47959d
 FROM ${KUNLUNXIN_BASE_IMAGE} AS base
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG KUNLUNXIN_VLLM_WHEEL_URL
+ARG KUNLUNXIN_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-kunlunxin/simple
+ARG KUNLUNXIN_VLLM_REQUIREMENT=vllm==0.32.0+flagos
+ARG FLAGCX_WHEEL_URL=https://resource.flagos.net/repository/flagos-pypi-kunlunxin/packages/flagcx/0.14.1+xre5.37.1/flagcx-0.14.1+xre5.37.1-cp310-cp310-linux_x86_64.whl
+ARG FLAGCX_WHEEL_SHA256=b49203511f7906aaa3cebdbf304aff521a86f0540f6b57c6af6154092f8a658e
+ARG FLAGGEMS_VLLM_COMMIT=8ae5c22f5af6d650216f881c329c4dff20c182e1
+ARG FLAGGEMS_VLLM_SHA256=eab3544a5a6a2efaf7b3465a04ea0f867f77cfbe144ed7f2b8ad20c7b28bb36c
 ARG VCS_REF=unknown
 ARG PLUGIN_SOURCE_SHA=77f141a961d75e54c0cf209de80c99a7c7eec04b
 
@@ -36,34 +37,33 @@ LABEL org.opencontainers.image.title="vllm-plugin-fl" \
       io.flagos.host.driver.version="5.0.21.47" \
       io.flagos.plugin.source.sha="${PLUGIN_SOURCE_SHA}"
 
-# The application image this replaces exported VLLM_FL_PREFER=flagos plus an
-# operator whitelist; the Runtime 2.3.0 base exports neither. PREFER=flagos is
-# required: without it the multimodal encoder profiling forward falls back to
-# kernels that exceed the XPU launch watchdog on P800. The whitelist is
-# deliberately not set for the same reason, since it forces native fallbacks.
-ENV PATH="/flagos/bin:${PATH}" \
-    PYTHONPATH=/opt/flagtree \
-    GEMS_VENDOR=kunlunxin \
+# Use vendor ops during multimodal profiling on P800.
+ENV GEMS_VENDOR=kunlunxin \
     VLLM_PLUGINS=fl \
     USE_FLAGGEMS=1 \
     VLLM_FL_PREFER=flagos
 
-# Install FlagCX 0.14.1 and the Python 3.10-patched vLLM 0.32.0 wheel.
-COPY .github/scripts/kunlunxin/install-vllm.sh .github/scripts/kunlunxin/python310_compat.py /opt/kunlunxin-build/
-RUN bash /opt/kunlunxin-build/install-vllm.sh
+# Install the vendor-provided, Python 3.10-compatible vLLM wheel.
+RUN PYTHONPATH=/opt/triton \
+    PIP_EXTRA_INDEX_URL="${KUNLUNXIN_INDEX_URL}${EXTRA_INDEX_URL:+ $EXTRA_INDEX_URL}" \
+    python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+        "${KUNLUNXIN_VLLM_REQUIREMENT}" \
+        "flagcx @ ${FLAGCX_WHEEL_URL}#sha256=${FLAGCX_WHEEL_SHA256}" \
+        "torch==2.9.0+cu129" "torchvision==0.24.0+cu129" "torchaudio==2.9.0+cu129" \
+        "numpy==1.26.4" "regex==2026.4.4"
 
-# Register the vLLM FlagGems providers in every derived image.
-COPY .github/scripts/install_flaggems_vllm.py /opt/kunlunxin-build/install_flaggems_vllm.py
-RUN PIP_INDEX_URL="${INDEX_URL:-https://pypi.org/simple}" CI_FLAGGEMS_VLLM_VENDOR=kunlunxin \
-    python /opt/kunlunxin-build/install_flaggems_vllm.py --source-archive
+# Runner V2 on P800 uses this provider's sampling and grammar operators.
+RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+        "setuptools>=77.0.3,<81.0.0" "setuptools-scm>=8" wheel \
+        packaging pybind11 pyyaml sqlalchemy "cmake>=3.26" \
+    && python -m pip install --no-cache-dir --no-deps --no-build-isolation \
+        "flaggems-vllm @ https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/${FLAGGEMS_VLLM_COMMIT}#sha256=${FLAGGEMS_VLLM_SHA256}"
 
 # Build the plugin, including vllm_fl._C, from the pinned checkout inside the
 # runtime. The runtime ships CMake 3.22, while csrc/ requires 3.26; nvcc is only
 # needed because Torch's CMake package config enables the CUDA language.
 COPY . /opt/vllm-plugin-FL
-RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
-        "cmake>=3.26" \
-    && SETUPTOOLS_SCM_PRETEND_VERSION="0.5.0.dev0+g${PLUGIN_SOURCE_SHA}.xre5.37.1" \
+RUN SETUPTOOLS_SCM_PRETEND_VERSION="0.5.0.dev0+g${PLUGIN_SOURCE_SHA}.xre5.37.1" \
        VLLM_VENDOR=cuda \
        PATH="/usr/local/cuda/bin:${PATH}" \
        CUDACXX=/usr/local/cuda/bin/nvcc \

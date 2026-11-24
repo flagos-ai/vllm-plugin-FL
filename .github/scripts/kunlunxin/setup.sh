@@ -3,14 +3,6 @@
 # Install the checkout into the Kunlunxin CI Runtime.
 set -euo pipefail
 
-if [[ -r /etc/bash_env.sh && ${BASH_ENV:-} != /etc/bash_env.sh ]]; then
-  # shellcheck disable=SC1091
-  source /etc/bash_env.sh
-fi
-
-unset BASH_ENV VLLM_FL_FLAGOS_WHITELIST
-export PATH="/flagos/bin:$PATH"
-export PYTHONPATH=/opt/flagtree
 export USE_FLAGGEMS="${USE_FLAGGEMS:-1}" VLLM_FL_PREFER="${VLLM_FL_PREFER:-flagos}"
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
@@ -44,8 +36,7 @@ print(f"Kunlunxin CI uses vLLM {version('vllm')} and {vllm_fl.__file__}")
 PYCODE
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
-  printf '%s\n' 'BASH_ENV=' 'VLLM_FL_FLAGOS_WHITELIST=' >> "$GITHUB_ENV"
-  for name in PATH PYTHONPATH LD_LIBRARY_PATH FLAGCX_PATH USE_FLAGGEMS VLLM_FL_PREFER; do
+  for name in LD_LIBRARY_PATH FLAGCX_PATH USE_FLAGGEMS VLLM_FL_PREFER; do
     if [[ -n "${!name:-}" ]]; then
       printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
     fi

@@ -8,7 +8,7 @@
 | Host driver | `5.0.21.47` |
 | Container XPU runtime (XRE) | `5.37.1` |
 | Python | 3.10 with the FlagOS wheel and matching Kunlunxin runtime packages |
-| vLLM | `0.32.0+flagos` from the Kunlunxin package index |
+| vLLM | `0.32.0+flagos` wheel for Python 3.10 and XRE 5.37.1 |
 | PyTorch | `2.9.0+cu129` from the official FlagOS Runtime |
 | FlagTree and Triton | FlagTree `0.7.0+xpu3.6`, Triton `3.6.0` |
 | FlagGems | `5.4.0` |
@@ -29,15 +29,19 @@ KUNLUNXIN_IMAGE=<validated CI image reference>
 docker pull "$KUNLUNXIN_IMAGE"
 ```
 
-`docker/kunlunxin/Dockerfile` applies the [Python 3.10 compatibility patch](../../.github/scripts/kunlunxin/python310_compat.py)
-to the pinned vLLM wheel, installs the pinned FlagGems-vLLM source archive, and
-builds `vllm_fl._C` against the image's Torch. CI setup installs its own checkout
-using the dependencies from that image. Rebuild it with
-`bash docker/build.sh --platform kunlunxin --target ci`. If a mirror hosts the
-same vendor wheel, pass its URL with `--build-arg KUNLUNXIN_VLLM_WHEEL_URL=...`.
-The compatibility script verifies the original wheel's SHA256 before patching.
-A source build of [upstream vLLM 0.32.0](https://github.com/vllm-project/vllm/blob/v0.32.0/pyproject.toml)
-in empty mode is also accepted by CI on Python 3.11–3.13.
+Build the CI image with `bash docker/build.sh --platform kunlunxin --target ci`.
+The build installs the vendor-provided `vllm==0.32.0+flagos` wheel, which must
+support Python 3.10 and XRE 5.37.1. To use an approved wheel hosted outside
+the default index, pass its URL and checksum as a pip requirement:
+
+```bash
+bash docker/build.sh --platform kunlunxin --target ci \
+  --build-arg "KUNLUNXIN_VLLM_REQUIREMENT=vllm @ $WHEEL_URL#sha256=$WHEEL_SHA256"
+```
+
+The recipe builds `vllm_fl._C` against the Runtime's Torch. CI installs the
+checkout with the image's existing dependencies. The Runtime's Bash profile
+selects FlagTree for execution.
 
 ## Start a service
 
@@ -55,12 +59,10 @@ docker run --rm -it --ipc=host \
   --entrypoint /bin/bash "$KUNLUNXIN_IMAGE"
 ```
 
-In the container, load the vendor library paths and install the plugin using the
-preinstalled dependencies.
+In the container's Bash session, install the plugin using the preinstalled
+dependencies.
 
 ```sh
-source /etc/bash_env.sh
-unset BASH_ENV FLAGCX_PATH VLLM_FL_FLAGOS_WHITELIST
 PLUGIN_SOURCE=$(mktemp -d)
 tar -xzf /tmp/vllm-plugin-fl.tar.gz -C "$PLUGIN_SOURCE"
 SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.dev0 python -m pip install \
@@ -99,8 +101,8 @@ with the command above left the preinstalled package versions unchanged.
 The chat request returned HTTP 200 with Paris as the answer.
 
 Run the [P800 device check](../../.github/scripts/kunlunxin/check.sh) first.
-The CI setup script checks Python and vLLM package metadata before installing
-the checkout. It then checks plugin selection and availability of four P800 cards.
+The CI setup script installs the checkout and checks the vLLM version, plugin
+selection, and availability of four P800 cards.
 
 The Kunlunxin CI matrix runs offline inference and OpenAI-compatible serving
 for Qwen3.6-27B and Qwen3.6-35B-A3B with BF16 and FlagCX TP4 in both eager
