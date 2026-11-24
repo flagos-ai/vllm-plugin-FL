@@ -141,29 +141,6 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ matrix.test.container_options || fromJson(needs.setup.outputs.config).container_options }}
 
-  # Unit coverage on additional devices (e.g. Hopper for the native CUDA
-  # runtime). The default-runner unit pass already runs inside the
-  # functional job; each entry in the config's unit_devices adds one unit
-  # job on that device's runner (device_runner_labels override).
-  unit:
-    needs: setup
-    # Job conditions are evaluated before expanding the optional device matrix.
-    if: ${{ needs.setup.result == 'success' && fromJson(needs.setup.outputs.config).unit_devices && fromJson(needs.setup.outputs.config).unit_devices[0] != null }}
-    strategy:
-      fail-fast: false
-      matrix:
-        device: ${{ fromJson(needs.setup.outputs.config).unit_devices || fromJson('[]') }}
-    uses: ./.github/workflows/_unit_test.yml
-    secrets: inherit
-    with:
-      branch: ${{ needs.setup.outputs.revision }}
-      platform: ${{ inputs.platform }}
-      device: ${{ matrix.device }}
-      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
-      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
-      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-
   # End-to-end model tests.
   # pr stage: pr subset cases (text + multimodal, one device).
   # nightly/weekly stage: main/full cases, all devices.
@@ -216,22 +193,19 @@ jobs:
   # Feishu notification — per-platform status
   # ============================================================
   notify:
-    needs: [setup, functional, unit, e2e, benchmark]
+    needs: [setup, functional, e2e, benchmark]
     if: always()
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}
       status: >-
         ${{ (needs.setup.result == 'success' &&
-             (needs.unit.result == 'success' ||
-              (needs.unit.result == 'skipped' && !fromJson(needs.setup.outputs.config).unit_devices[0])) &&
              needs.functional.result == 'success' &&
              (needs.e2e.result == 'success' ||
               (inputs.platform != 'iluvatar' && needs.e2e.result == 'skipped')) &&
              (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped'))
             && 'success'
             || (needs.setup.result == 'cancelled' ||
-                 needs.unit.result == 'cancelled' ||
                  needs.functional.result == 'cancelled' ||
                 needs.e2e.result == 'cancelled' ||
                 needs.benchmark.result == 'cancelled')

@@ -103,6 +103,7 @@ jobs:
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Run benchmark smoke tests
+        shell: bash
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
