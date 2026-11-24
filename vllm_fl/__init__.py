@@ -287,7 +287,7 @@ def register():
     if vendor_name == "kunlunxin":
         _install_kunlunxin_fla_alias()
 
-    if vendor_name in ("mthreads", "enflame", "gcu", "tsingmicro"):
+    if vendor_name in ("enflame", "gcu", "tsingmicro"):
         # Choose the legacy runner before VllmConfig reads model defaults.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":

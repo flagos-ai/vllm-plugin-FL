@@ -26,7 +26,9 @@ device_overrides:
       - qwen3_6/35b_a3b_tp4_eager
       - qwen3_6/35b_a3b_tp4_graph
     llm:
-      gpu_memory_utilization: 0.80
+      # The V2 runner warms up kernels that need extra temporary device
+      # memory (FlagGems radix-sort); 0.8 leaves too little and OOMs.
+      gpu_memory_utilization: 0.60
       trust_remote_code: true
 
 env_defaults:

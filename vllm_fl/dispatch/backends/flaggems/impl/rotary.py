@@ -14,7 +14,12 @@ import torch
 from vllm.platforms import current_platform
 
 if current_platform.device_type == "musa":
-    from .musa_ops import rotary_embedding as musa_rotary_embedding
+    # Absolute import: the FlagGems rotary tests and the MUSA unit tests load
+    # this module from its file path, where a relative import has no parent
+    # package.
+    from vllm_fl.dispatch.backends.flaggems.impl.musa_ops import (
+        rotary_embedding as musa_rotary_embedding,
+    )
 
 
 @functools.cache

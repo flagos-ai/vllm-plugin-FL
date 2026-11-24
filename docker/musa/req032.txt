@@ -1,0 +1,65 @@
+# Runtime dependencies of vLLM 0.32.0 (Requires-Dist minus extras), installed with
+# --no-deps on the Moore Threads stack.
+#
+# Keep torch / torch_musa / triton / flagtree / flag_gems out of this list: they are
+# provisioned by the FlagOS 2.2 runtime image, and letting pip resolve vLLM's tree
+# replaces them (compressed-tensors==0.17.0 asks for torch>=2.10, which pulls an
+# upstream CUDA torch 2.14 wheel over the MUSA torch 2.9.0 build).
+#
+# blake3 is pinned: 1.0.11 ships no cp310 wheel, so pip falls back to the sdist and
+# tries to bootstrap a Rust toolchain from static.rust-lang.org inside the build.
+regex
+cachetools
+psutil
+sentencepiece
+requests>=2.33.0
+tqdm
+blake3==1.0.10
+py-cpuinfo
+transformers>=5.16.1,<5.20.0
+huggingface_hub>=1.31.0
+tokenizers>=0.23.2
+safetensors>=0.6.2
+protobuf>=5.29.6
+fastapi>=0.133.0,<0.137.0
+starlette>=1.0.1
+aiohttp>=3.14.3
+openai>=2.25.0
+pydantic>=2.12.0
+prometheus_client>=0.18.0
+pillow>=12.3.0
+prometheus-fastapi-instrumentator>=8.0.0
+tiktoken>=0.6.0
+lm-format-enforcer==0.11.3
+llguidance>=1.7.0,<1.8.0
+outlines_core==0.2.14
+lark==1.2.2
+xgrammar==0.2.8
+typing_extensions>=4.10
+filelock>=3.20.3
+partial-json-parser
+jsonschema>=4.23.0
+pyzmq>=25.0.0
+msgspec
+mistral_common>=1.11.6
+opencv-python-headless>=4.13.0
+pyyaml
+einops
+compressed-tensors==0.17.0
+depyf==0.20.0
+cloudpickle
+watchfiles
+python-json-logger
+ninja
+pybase64
+cbor2
+ijson
+setproctitle
+oss-harmony>=0.0.11
+anthropic>=0.71.0
+model-hosting-container-standards>=0.1.14,<1.0.0
+mcp>=2.0.0,<3.0.0
+opentelemetry-sdk>=1.27.0
+opentelemetry-api>=1.27.0
+opentelemetry-exporter-otlp>=1.27.0
+opentelemetry-semantic-conventions-ai>=0.4.1
