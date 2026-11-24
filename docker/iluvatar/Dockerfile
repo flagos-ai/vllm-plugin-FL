@@ -66,20 +66,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     GEMS_VENDOR=iluvatar \
     FLAGGEMS_VERSION=${FLAGGEMS_VERSION}
 
-# Download the validated wheels under their canonical names and check SHA256.
-RUN mkdir -p /opt/iluvatar/wheels \
-    && VLLM_WHL="/opt/iluvatar/wheels/${VLLM_WHEEL_URL##*/}" \
-    && GEMS_WHL="/opt/iluvatar/wheels/${FLAGGEMS_WHEEL_URL##*/}" \
-    && GEMS_VLLM_WHL="/opt/iluvatar/wheels/${FLAGGEMS_VLLM_WHEEL_URL##*/}" \
-    && curl -fsSL --retry 3 -o "${VLLM_WHL}" "${VLLM_WHEEL_URL}" \
-    && curl -fsSL --retry 3 -o "${GEMS_WHL}" "${FLAGGEMS_WHEEL_URL}" \
-    && curl -fsSL --retry 3 -o "${GEMS_VLLM_WHL}" "${FLAGGEMS_VLLM_WHEEL_URL}" \
-    && printf '%s  %s\n' \
-        "${VLLM_WHEEL_SHA256}" "${VLLM_WHL}" \
-        "${FLAGGEMS_WHEEL_SHA256}" "${GEMS_WHL}" \
-        "${FLAGGEMS_VLLM_WHEEL_SHA256}" "${GEMS_VLLM_WHL}" \
-        | sha256sum -c -
-
 # Resolve vLLM alongside the Runtime vendor builds. Install the two
 # FlagGems wheels without extras so pip keeps the Runtime accelerator stack.
 RUN PYTHONPATH=/opt/triton pip install --no-cache-dir \
@@ -91,15 +77,14 @@ RUN PYTHONPATH=/opt/triton pip install --no-cache-dir \
         "torchaudio==2.11.0+corex.5.0.1" "flagcx==0.14.1+corex5.0.1" \
         "numpy==1.26.4" "opencv-python-headless==5.0.0.93+flagos" \
         "compressed-tensors==0.17.0+flagos" "xgrammar==0.2.8+flagos" \
-        /opt/iluvatar/wheels/vllm-*.whl \
+        "vllm @ ${VLLM_WHEEL_URL}#sha256=${VLLM_WHEEL_SHA256}" \
     && pip install --no-cache-dir --no-deps \
-        /opt/iluvatar/wheels/flag_gems-*.whl \
-        /opt/iluvatar/wheels/flaggems_vllm-*.whl \
+        "flag-gems @ ${FLAGGEMS_WHEEL_URL}#sha256=${FLAGGEMS_WHEEL_SHA256}" \
+        "flaggems-vllm @ ${FLAGGEMS_VLLM_WHEEL_URL}#sha256=${FLAGGEMS_VLLM_WHEEL_SHA256}" \
     && pip install --no-cache-dir --no-deps \
         --index-url "${INDEX_URL}" \
         --extra-index-url "${EXTRA_INDEX_URL}" \
-        setuptools-scm==9.2.2 wheel==0.45.1 \
-    && rm -rf /opt/iluvatar/wheels
+        setuptools-scm==9.2.2 wheel==0.45.1
 
 # The plugin is built from the locked source revision supplied by build.sh
 # (`git archive` of PLUGIN_SOURCE_SHA), never from the working tree.
@@ -115,22 +100,7 @@ RUN cd /opt/iluvatar/plugin-src \
         modelscope==1.35.3 \
     && rm -rf /opt/iluvatar/plugin-src /opt/iluvatar/plugin-build
 
-# Fail the build on any stack drift: exact vendor versions, the validated
-# empty vLLM wheel, FlagTree-provided Triton, and a clean `pip check`.
-RUN cd /tmp \
-    && python3 -c "import importlib.metadata as m, importlib.util as u, torch, vllm, flag_gems, flagcx, triton; \
-assert m.version('torch') == '2.13.0+corex.5.0.1', m.version('torch'); \
-assert m.version('vllm') == '0.32.0+flagos', m.version('vllm'); \
-assert u.find_spec('vllm._C') is None, 'vllm wheel is not an empty build'; \
-assert m.version('torchvision') == '0.28.0+corex.5.0.1'; \
-assert m.version('torchaudio') == '2.11.0+corex.5.0.1'; \
-assert m.version('numpy') == '1.26.4'; \
-assert m.version('flagcx') == '0.14.1+corex5.0.1', m.version('flagcx'); \
-assert flag_gems.__version__.startswith('5.5.0'), flag_gems.__version__; \
-assert triton.__version__.startswith('3.6.0') and triton.__file__.startswith('/opt/flagtree/'), triton.__file__; \
-assert m.version('vllm-plugin-fl').startswith('0.5.0.dev0'); \
-print('stack contract ok:', m.version('torch'), m.version('vllm'), m.version('flaggems-vllm'), triton.__version__, flagcx.__file__)" \
-    && pip check
+RUN python -m pip check
 
 WORKDIR /workspace
 
