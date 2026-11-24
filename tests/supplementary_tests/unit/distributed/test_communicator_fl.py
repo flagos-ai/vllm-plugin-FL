@@ -227,6 +227,30 @@ class TestInit:
             if not hasattr(type(current_platform), "vendor_name"):
                 del current_platform.vendor_name
 
+    def test_use_all2all_true_initializes_manager(
+        self, mocked_base_init, monkeypatch
+    ):
+        """__init__ calls _init_all2all_manager when use_all2all is set."""
+        manager_init = []
+        monkeypatch.setattr(
+            CommunicatorFL,
+            "_init_all2all_manager",
+            lambda self, group: manager_init.append(group),
+        )
+        monkeypatch.setattr(
+            "vllm_fl.distributed.communicator.PyFlagcxCommunicator",
+            lambda group, device: _FakePyFlagcx(),
+        )
+        tcp_store_group = object()
+        comm = CommunicatorFL(
+            cpu_group=object(),
+            device=torch.device("cpu"),
+            tcp_store_group=tcp_store_group,
+            use_all2all=True,
+        )
+        assert comm.pyflagcx_comm is not None
+        assert manager_init == [tcp_store_group]
+
     def test_disabled_pyflagcx_tolerated_on_other_devices(
         self, mocked_base_init, monkeypatch
     ):
@@ -458,6 +482,18 @@ class TestReduceScatterV:
         assert out.shape == (3,)  # sizes[rank_in_group]
         assert fake.calls[0][0] == "reduce_scatterv"
         assert fake.calls[0][3] == (3, 4)
+
+    def test_negative_dim_converted(self):
+        fake = _FakePyFlagcx()
+        comm = _make_communicator(world_size=2, pyflagcx=fake, rank_in_group=0)
+        x = torch.arange(8, dtype=torch.float32).reshape(2, 4)
+
+        out = comm.reduce_scatterv(x, dim=-1, sizes=[2, 2])
+
+        # dim=-1 resolves to 1: movedim(0,1) permutes (2,4)->(4,2); the
+        # sizes[rank] slice comes back and moves to dim 1 again.
+        assert out.shape == (2, 2)
+        assert fake.calls[0][0] == "reduce_scatterv"
 
     def test_missing_pyflagcx_asserts(self):
         comm = _make_communicator(pyflagcx=None)
