@@ -10,6 +10,7 @@ import os
 import re
 import time
 import unicodedata
+import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -124,21 +125,28 @@ def safe_component(value: str) -> str:
 def gate_results_root(
     repo_root: Path,
     *,
+    run_id: str,
     platform: str,
     device: str,
     model: str,
     case: str,
 ) -> Path:
-    """Build a stable result root without allowing values to add path levels."""
+    """Build a per-run result root without allowing values to add path levels."""
     return (
         repo_root
         / "test-results"
         / "gate"
+        / safe_component(run_id)
         / safe_component(platform)
         / safe_component(device)
         / safe_component(model)
         / safe_component(case)
     ).resolve()
+
+
+def gate_run_id(environment: Mapping[str, str]) -> str:
+    """Return the framework run id, or create one for direct pytest runs."""
+    return environment.get("FL_RUN_ID") or uuid.uuid4().hex
 
 
 def append_loopback_no_proxy(value: str | None) -> str:

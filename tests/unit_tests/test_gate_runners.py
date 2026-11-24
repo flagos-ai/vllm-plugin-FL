@@ -492,6 +492,7 @@ def _assert_document_contract_counts():
     # Directory isolation: serving and concurrent roots never collide.
     serving_root = gate_results_root(
         Path(tempfile.gettempdir()),
+        run_id="run-123",
         platform="p",
         device="d",
         model="m",
@@ -499,6 +500,7 @@ def _assert_document_contract_counts():
     )
     concurrent_root = gate_results_root(
         Path(tempfile.gettempdir()),
+        run_id="run-123",
         platform="p",
         device="d",
         model="m",

@@ -28,8 +28,10 @@ from tests.e2e_tests.adaptation_gate.gate_contract import (
     QUALITY_CHECKS,
     SCENARIOS,
     append_loopback_no_proxy,
+    ensure_clean_gate_directory,
     ensure_gate_server_alive,
     gate_results_root,
+    gate_run_id,
     resolve_request_timeout,
     temporary_environment,
     validate_gate_documents,
@@ -215,6 +217,7 @@ def test_gate_progress_is_log_friendly_for_complete_contract(tmp_path):
 def test_gate_results_root_uses_safe_unique_components(tmp_path):
     eager = gate_results_root(
         tmp_path,
+        run_id="run/123",
         platform="demo/vendor",
         device="card 0",
         model="qwen3_6",
@@ -222,6 +225,7 @@ def test_gate_results_root_uses_safe_unique_components(tmp_path):
     )
     graph = gate_results_root(
         tmp_path,
+        run_id="run/123",
         platform="demo/vendor",
         device="card 0",
         model="qwen3_6",
@@ -232,11 +236,36 @@ def test_gate_results_root_uses_safe_unique_components(tmp_path):
     assert eager.relative_to(tmp_path.resolve()).parts == (
         "test-results",
         "gate",
+        "run-123",
         "demo-vendor",
         "card-0",
         "qwen3_6",
         "27b_tp4_eager",
     )
+
+
+def test_gate_results_are_isolated_per_run_and_stale_guard_is_preserved(tmp_path):
+    common = {
+        "platform": "demo",
+        "device": "card",
+        "model": "qwen3_6",
+        "case": "27b_tp2_eager-serving",
+    }
+    first = gate_results_root(tmp_path, run_id="run-1", **common)
+    second = gate_results_root(tmp_path, run_id="run-2", **common)
+
+    ensure_clean_gate_directory(first)
+    (first / "text_single.json").write_text("{}")
+
+    assert first != second
+    assert ensure_clean_gate_directory(second) == second
+    with pytest.raises(RuntimeError, match="stale gate results"):
+        ensure_clean_gate_directory(first)
+
+
+def test_gate_run_id_reuses_framework_id_or_generates_unique_ids():
+    assert gate_run_id({"FL_RUN_ID": "framework-run"}) == "framework-run"
+    assert gate_run_id({}) != gate_run_id({})
 
 
 def test_runner_routes_standard_tasks_through_smoke_files(monkeypatch):
@@ -400,6 +429,7 @@ def test_qwen36_yamls_carry_explicit_inventory_without_verification(case):
 def test_phase_results_use_distinct_paths(tmp_path):
     serving = gate_results_root(
         tmp_path,
+        run_id="run-123",
         platform="demo",
         device="card",
         model="qwen3_6",
@@ -407,6 +437,7 @@ def test_phase_results_use_distinct_paths(tmp_path):
     )
     concurrent = gate_results_root(
         tmp_path,
+        run_id="run-123",
         platform="demo",
         device="card",
         model="qwen3_6",

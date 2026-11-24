@@ -43,6 +43,7 @@ from tests.e2e_tests.adaptation_gate.gate_contract import (
     format_gate_total_log,
     gate_failure_details,
     gate_results_root,
+    gate_run_id,
     temporary_environment,
     validate_scenario_documents,
     write_gate_document,
@@ -75,6 +76,7 @@ if not _MODEL or not _CASE:
 
 _CFG = ModelConfig.load(_MODEL, _CASE, platform=_PLATFORM, device=_DEVICE)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_GATE_RUN_ID = gate_run_id(os.environ)
 
 # Execution mode: explicit task cases take the quality-gate path; chat
 # cases without ``task`` keep the classic endpoint smoke (mode 3).
@@ -155,6 +157,7 @@ def gate_serving_context(server):
         return
     document_dir = gate_results_root(
         _REPO_ROOT,
+        run_id=_GATE_RUN_ID,
         platform=_PLATFORM,
         device=_DEVICE,
         model=_MODEL,
