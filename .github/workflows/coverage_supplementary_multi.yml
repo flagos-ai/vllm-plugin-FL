@@ -1,0 +1,264 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Multi-platform supplementary coverage suite — idle-time execution.
+#
+# Runs tests/supplementary_tests/ on the four vendor runners (kunlunxin,
+# hygon, iluvatar, thead) and produces, per platform, from ONE frozen
+# revision:
+#   1. core baseline       (existing unit + functional scopes)
+#   2. supplementary-only  (tests/supplementary_tests/run.py)
+#   3. combined            (statement-level union, same scope)
+#   4. per-area reports    (tools/coverage/area_report.py)
+#   5. delta report        (tools/coverage/delta_report.py)
+#
+# Deliberately independent of the PR pipeline: workflow_dispatch + a
+# Saturday 06:00 UTC schedule that avoids the nightly (18:00 UTC daily),
+# the weekly (Sunday 18:00 UTC), and the nvidia supplementary workflow's
+# Sunday 06:00 UTC windows. It registers no PR status and does not affect
+# the ci-gate.
+
+name: Supplementary Coverage (Multi-Platform)
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch or ref to run against (default 0.5.0-dev)"
+        required: false
+        type: string
+        default: "0.5.0-dev"
+      platforms:
+        description: "Comma-separated platforms (empty = all four)"
+        required: false
+        type: string
+        default: ""
+  schedule:
+    # Saturday 06:00 UTC = Saturday 14:00 Beijing — after Friday's nightly,
+    # 12h before the Saturday 18:00 UTC nightly claims the same pools.
+    - cron: "0 6 * * 6"
+
+concurrency:
+  group: coverage-supplementary-multi
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    name: Build platform matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout (config subset)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || '0.5.0-dev' }}
+          sparse-checkout: |
+            .github/configs
+            .github/scripts/generate_coverage_matrix.py
+            tests/platforms
+
+      - name: Install PyYAML
+        run: python -m pip install --quiet pyyaml
+
+      - name: Generate matrix
+        id: matrix
+        run: |
+          python .github/scripts/generate_coverage_matrix.py \
+            ${{ inputs.platforms && format('--platforms {0}', inputs.platforms) || '' }}
+
+  coverage:
+    name: Supplementary coverage (${{ matrix.platform.platform }})
+    needs: setup
+    if: ${{ needs.setup.outputs.matrix != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.setup.outputs.matrix) }}
+    runs-on: ${{ fromJson(matrix.platform.runner_labels) }}
+    timeout-minutes: 600
+    container:
+      image: ${{ matrix.platform.image }}
+      volumes: ${{ fromJson(matrix.platform.container_volumes) }}
+      options: ${{ matrix.platform.container_options }}
+
+    steps:
+      - name: Resolve frozen revision
+        id: rev
+        run: |
+          BRANCH="${{ inputs.branch || '0.5.0-dev' }}"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout (frozen revision)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.rev.outputs.branch }}
+          # depth 0 so the exact SHA is recorded in reports
+          fetch-depth: 0
+
+      - name: Record revision metadata
+        id: meta
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Frozen revision: $SHA"
+
+      - name: Check device availability
+        run: bash .github/scripts/${{ matrix.platform.platform }}/check.sh
+
+      - name: Install project
+        run: bash .github/scripts/${{ matrix.platform.platform }}/setup.sh
+
+      - name: Record environment metadata
+        run: |
+          python - <<'PY'
+          import json, platform
+          info = {"python": platform.python_version()}
+          try:
+              import torch
+              info["torch"] = torch.__version__
+              info["gpu"] = (
+                  torch.cuda.get_device_name(0)
+                  if torch.cuda.is_available() else "none"
+              )
+              info["gpu_count"] = torch.cuda.device_count()
+          except Exception:
+              info["torch"] = "unavailable"
+          try:
+              import pytest
+              info["pytest"] = pytest.__version__
+          except Exception:
+              pass
+          try:
+              import coverage
+              info["coverage"] = coverage.__version__
+          except Exception:
+              pass
+          with open("coverage-env.json", "w") as f:
+              json.dump(info, f, indent=2)
+          print(json.dumps(info))
+          PY
+
+      # ------------------------------------------------------------------
+      # Phase 0 — clean workspace (no stale coverage data ever crosses
+      # phases or platforms; each matrix leg runs in its own container)
+      # ------------------------------------------------------------------
+      - name: Clean workspace
+        run: |
+          rm -f .coverage .coverage.* coverage-*.json report-*.json test-results-*.json test-results-*.xml
+          echo "workspace cleaned"
+
+      # ------------------------------------------------------------------
+      # Phase 1 — core baseline (existing scopes, unchanged commands)
+      # ------------------------------------------------------------------
+      - name: Core baseline — unit scope
+        run: python tests/run.py --platform ${{ matrix.platform.platform }} --device ${{ matrix.platform.device }} --scope unit
+
+      - name: Core baseline — functional scope (appends into coverage-<platform>.json)
+        run: python tests/run.py --platform ${{ matrix.platform.platform }} --device ${{ matrix.platform.device }} --scope functional
+
+      - name: Snapshot core baseline
+        run: |
+          cp coverage-${{ matrix.platform.platform }}.json coverage-${{ matrix.platform.platform }}-core.json
+          cp test-results-${{ matrix.platform.platform }}.json test-results-${{ matrix.platform.platform }}-core.json 2>/dev/null || true
+          cp test-results-${{ matrix.platform.platform }}.xml test-results-${{ matrix.platform.platform }}-core.xml 2>/dev/null || true
+          rm -f .coverage .coverage.*
+          echo "core baseline snapshot saved"
+
+      # ------------------------------------------------------------------
+      # Phase 2 — supplementary-only
+      # ------------------------------------------------------------------
+      - name: Supplementary suite
+        run: python tests/supplementary_tests/run.py --platform ${{ matrix.platform.platform }} --device ${{ matrix.platform.device }}
+
+      - name: Snapshot supplementary-only report
+        run: |
+          cp coverage-${{ matrix.platform.platform }}-supp.json coverage-${{ matrix.platform.platform }}-supp-only.json
+          cp test-results-${{ matrix.platform.platform }}.json test-results-${{ matrix.platform.platform }}-supp.json 2>/dev/null || true
+          cp test-results-${{ matrix.platform.platform }}.xml test-results-${{ matrix.platform.platform }}-supp.xml 2>/dev/null || true
+          rm -f .coverage .coverage.*
+          echo "supplementary-only snapshot saved"
+
+      # ------------------------------------------------------------------
+      # Phase 3 — combined, per-area, and delta reports
+      # ------------------------------------------------------------------
+      - name: Combined + per-area + delta reports
+        run: |
+          P=${{ matrix.platform.platform }}
+          SHA=${{ steps.meta.outputs.sha }}
+          python tools/coverage/merge_coverage.py \
+            --baseline coverage-$P-core.json \
+            --supplementary coverage-$P-supp-only.json \
+            --output coverage-$P-combined.json \
+            --scope tools/coverage/scope_$P.json \
+            --commit-sha "$SHA"
+          for TAG in core supp-only combined; do
+            case $TAG in
+              core) REPORT=coverage-$P-core.json ;;
+              supp-only) REPORT=coverage-$P-supp-only.json ;;
+              combined) REPORT=coverage-$P-combined.json ;;
+            esac
+            python tools/coverage/area_report.py \
+              --report $REPORT \
+              --scope tools/coverage/scope_$P.json \
+              --tag "$P-$TAG" \
+              --output-json coverage-$P-areas-$TAG.json \
+              --output-md coverage-$P-areas-$TAG.md
+          done
+          python tools/coverage/delta_report.py \
+            --baseline-areas coverage-$P-areas-core.json \
+            --after-areas coverage-$P-areas-combined.json \
+            --platform "$P" \
+            --output-json coverage-$P-delta.json \
+            --output-md coverage-$P-delta.md \
+            --commit-sha "$SHA"
+
+      - name: Job summary
+        if: always()
+        run: |
+          P=${{ matrix.platform.platform }}
+          {
+            echo "## Supplementary coverage — $P (${{ matrix.platform.device }})"
+            echo
+            echo "Frozen revision: \`${{ steps.meta.outputs.sha }}\`"
+            echo
+            echo "### Core baseline (per area)"
+            echo
+            cat coverage-$P-areas-core.md 2>/dev/null || echo "_missing_"
+            echo
+            echo "### Combined (core + supplementary)"
+            echo
+            cat coverage-$P-areas-combined.md 2>/dev/null || echo "_missing_"
+            echo
+            echo "### Delta (core → combined)"
+            echo
+            cat coverage-$P-delta.md 2>/dev/null || echo "_missing_"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-supplementary-multi-${{ matrix.platform.platform }}
+          retention-days: 90
+          path: |
+            coverage-*.json
+            coverage-*.md
+            coverage-env.json
+            test-results-*.json
+            test-results-*.xml

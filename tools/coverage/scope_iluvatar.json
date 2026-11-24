@@ -1,0 +1,52 @@
+{
+  "schema_version": 2,
+  "platform": "iluvatar",
+  "device": "bi_v150",
+  "description": "Effective coverage scope for vllm-plugin-FL 0.5.0-dev on iluvatar bi_v150. Measurement scope is pyproject.toml [tool.coverage.run] (source=vllm_fl, unchanged); this file only drives REPORT-time filtering so baseline and combined numbers share one denominator.",
+  "measurement": {
+    "source": [
+      "vllm_fl"
+    ],
+    "config": "pyproject.toml [tool.coverage.*]",
+    "note": "measurement scope never changes; only reporting is filtered"
+  },
+  "reporting_exclude": [
+    "vllm_fl/dispatch/backends/vendor/amd/",
+    "vllm_fl/dispatch/backends/vendor/ascend/",
+    "vllm_fl/dispatch/backends/vendor/cuda/",
+    "vllm_fl/dispatch/backends/vendor/gcu/",
+    "vllm_fl/dispatch/backends/vendor/hygon/",
+    "vllm_fl/dispatch/backends/vendor/kunlunxin/",
+    "vllm_fl/dispatch/backends/vendor/metax/",
+    "vllm_fl/dispatch/backends/vendor/musa/",
+    "vllm_fl/dispatch/backends/vendor/sunrise/",
+    "vllm_fl/dispatch/backends/vendor/template/",
+    "vllm_fl/dispatch/backends/vendor/thead/",
+    "vllm_fl/dispatch/backends/vendor/txda/"
+  ],
+  "vendor_includes": [
+    "vllm_fl/dispatch/backends/vendor/iluvatar/"
+  ],
+  "areas": {
+    "worker": "vllm_fl/worker/",
+    "dispatch.core": "vllm_fl/dispatch/",
+    "dispatch.backends.flaggems": "vllm_fl/dispatch/backends/flaggems/",
+    "dispatch.backends.reference": "vllm_fl/dispatch/backends/reference/",
+    "distributed": "vllm_fl/distributed/",
+    "attention": "vllm_fl/attention/",
+    "kv_cache": "vllm_fl/kv_cache/",
+    "ops": "vllm_fl/ops/",
+    "quantization": "vllm_fl/quantization/",
+    "compilation": "vllm_fl/compilation/",
+    "models": "vllm_fl/models/",
+    "patches": "vllm_fl/patches/",
+    "platform_config": [
+      "vllm_fl/configs/",
+      "vllm_fl/platform.py",
+      "vllm_fl/nvidia_platform.py",
+      "vllm_fl/utils.py",
+      "vllm_fl/envs.py"
+    ],
+    "toplevel": "vllm_fl/"
+  }
+}
