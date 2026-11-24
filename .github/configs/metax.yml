@@ -38,3 +38,4 @@ container_options: >-
   --device /dev/mxcd:/dev/mxcd:rwm
   --env GEMS_VENDOR=metax
   --env VLLM_PLUGINS=fl
+  --env PYTHONPATH=/opt/flagtree

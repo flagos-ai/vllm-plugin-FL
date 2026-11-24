@@ -25,6 +25,7 @@ SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive \
     GEMS_VENDOR=metax \
     VLLM_PLUGINS=fl \
+    PYTHONPATH=/opt/flagtree \
     PATH="/flagos/bin:/opt/conda/bin:${PATH}"
 
 RUN apt-get update \
