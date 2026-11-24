@@ -33,9 +33,17 @@ the CI image and env.
 | Ops | 840 | 160 | 680 | 19.0% | _get_priority_backends hygon arm |
 | Quantization | 702 | 91 | 611 | 13.0% | — |
 
-## iluvatar (bi_v150, CPU measurement env — final numbers from v5)
+## iluvatar (bi_v150, CPU measurement env)
 
-(Measured in the same environment; table recorded from the v5 run.)
+| Module | Statements | Covered | Missing | Coverage | Supplementary focus |
+|---|---:|---:|---:|---:|---|
+| Worker | 3969 | 299 | 3670 | 7.5% | worker sleep/wake, model_runner_v2 |
+| Dispatch (core) | 2724 | 2014 | 710 | 73.9% | — |
+| vendor.iluvatar | 712 | 127 | 585 | 17.8% | backend class, communicator, moe_router, vision_precision, shutdown, pipeline |
+| Attention | 106 | 38 | 68 | 35.8% | — |
+| Distributed | 1426 | 267 | 1159 | 18.7% | communicator FL |
+| Ops | 840 | 160 | 680 | 19.0% | — |
+| Quantization | 702 | 91 | 611 | 13.0% | — |
 
 ## thead (zw810e, REAL PPU hardware)
 
