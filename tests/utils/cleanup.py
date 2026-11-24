@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import signal
 import subprocess
 import time
@@ -323,7 +324,17 @@ def _mem_info_cuda() -> list[tuple[int, int]]:
 
 
 def _mem_info_ascend() -> list[tuple[int, int]]:
-    """Return [(free_bytes, total_bytes), ...] for each Ascend NPU."""
+    """Return [(free_bytes, total_bytes), ...] for each Ascend NPU.
+
+    ``torch.npu.mem_get_info`` only reflects the calling process, so memory
+    held by another container on the same host reads as free and the guard
+    lets vLLM start on an occupied card. npu-smi queries the driver for
+    device-wide usage; torch remains the fallback when that query fails.
+    """
+    entries = _mem_info_ascend_smi()
+    if entries:
+        return entries
+
     import torch
 
     try:
@@ -336,6 +347,45 @@ def _mem_info_ascend() -> list[tuple[int, int]]:
         return result
     except (ImportError, AttributeError):
         return []
+
+
+_HBM_PAIR = re.compile(r"(\d+)\s*/\s*(\d+)")
+
+
+def _mem_info_ascend_smi() -> list[tuple[int, int]]:
+    """Parse device-wide HBM usage from ``npu-smi info``."""
+    try:
+        result = subprocess.run(
+            ["npu-smi", "info"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+
+    entries = []
+    for line in result.stdout.splitlines():
+        parts = line.split("|")
+        if len(parts) < 4:
+            continue
+        ids = parts[1].split()
+        # Chip rows carry two numeric ids (NPU, chip); card headers have a name.
+        if len(ids) != 2 or not all(i.isdigit() for i in ids):
+            continue
+        pairs = _HBM_PAIR.findall(parts[3])
+        if not pairs:
+            continue
+        # The last pair on a chip row is HBM usage; earlier ones are AICore
+        # memory counters (0/0 on most drivers).
+        used_mb, total_mb = (int(x) for x in pairs[-1])
+        if total_mb <= 0:
+            continue
+        free_mb = max(total_mb - used_mb, 0)
+        entries.append((free_mb * 1024 * 1024, total_mb * 1024 * 1024))
+    return entries
 
 
 def _mem_info_noop() -> list[tuple[int, int]]:

@@ -1,0 +1,43 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Coverage ownership is intentionally separate from CI trigger routing in
+# platforms.yml.  A trigger path says which jobs to run; this file says which
+# backend directory under vendor_root belongs in a platform's coverage
+# denominator.  Every platform in platforms.yml must be listed here.
+
+vendor_root: vllm_fl/dispatch/backends/vendor
+
+platforms:
+  nvidia:
+    backend: cuda
+  ascend:
+    backend: ascend
+  # Hygon resolves to vendor/cuda (there is no vendor/hygon), but
+  # CudaBackend.is_available() only accepts device_name=nvidia, so no vendor
+  # backend can execute on Hygon.  Count shared code only until one exists.
+  hygon:
+    mode: shared_only
+  metax:
+    backend: metax
+  musa:
+    backend: musa
+  enflame:
+    backend: gcu
+  kunlunxin:
+    backend: kunlunxin
+  thead:
+    backend: thead
+  iluvatar:
+    backend: iluvatar

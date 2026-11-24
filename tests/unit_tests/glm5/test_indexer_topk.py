@@ -139,6 +139,8 @@ def test_topk_execution_error_propagates_once(monkeypatch):
 @pytest.mark.gpu
 @pytest.mark.parametrize("decode", [False, True])
 def test_topk_backend_eager_and_refreshed_graph(monkeypatch, decode, request):
+    if not torch.cuda.is_available():
+        pytest.skip("TopK graph replay requires CUDA graphs")
     device_env = request.config.getoption("test_device_env", default="")
     if device_env:
         assert len(os.environ[device_env].split(",")) == 1
