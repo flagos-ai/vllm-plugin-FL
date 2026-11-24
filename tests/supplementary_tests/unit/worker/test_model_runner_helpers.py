@@ -146,14 +146,29 @@ def test_device_graph_capture_builds_context_when_missing(monkeypatch):
     assert streams == [capture_stream]
 
 
-def test_module_graph_capture_is_the_device_context():
-    """The FL module must expose its accelerator-safe capture helper.
+def test_module_graph_capture_binding_matches_platform():
+    """The FL module binds ``graph_capture`` per the vendor conditional.
 
-    On the FL platform the vendor-conditional block binds ``graph_capture`` to
-    the local ``_device_graph_capture`` (flagcx/musa/npu/kunlunxin vendors);
-    this asserts the binding rather than upstream's graph_capture.
+    flagcx/musa/npu/kunlunxin vendors get the local accelerator-safe
+    ``_device_graph_capture``; every other platform (e.g. iluvatar with
+    its nccl backend) keeps upstream's ``graph_capture`` import. Both
+    are valid module states — assert the binding matches the platform
+    the module actually resolved under.
     """
-    assert MR.graph_capture is MR._device_graph_capture
+    import vllm.platforms as vp
+
+    cp = vp.current_platform
+    device_wants_local = (
+        getattr(cp, "dist_backend", "") == "flagcx"
+        or getattr(cp, "device_type", "") in ("musa", "npu")
+        or getattr(cp, "vendor_name", None) == "kunlunxin"
+    )
+    if device_wants_local:
+        assert MR.graph_capture is MR._device_graph_capture
+    else:
+        assert MR.graph_capture is not MR._device_graph_capture
+        # upstream import is a distinct callable bound at module scope
+        assert callable(MR.graph_capture)
 
 
 # ---------------------------------------------------------------------------

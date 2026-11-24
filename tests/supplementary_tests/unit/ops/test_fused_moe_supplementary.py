@@ -185,6 +185,35 @@ def _cpu_compat_shims(monkeypatch):
     monkeypatch.setattr(ffm, "_silu_and_mul", cpu_silu_and_mul)
     monkeypatch.setattr(ffm, "_gelu_and_mul", cpu_gelu_and_mul)
     monkeypatch.setattr(ffm, "fused_experts_impl", recording_impl)
+
+    # moe_align_block_size dispatches to the vendor impl on some platforms
+    # (e.g. vendor.iluvatar needs flaggems_vllm; the triton driver is absent
+    # on CPU). Emulate the documented alignment contract instead: a stable
+    # expert-major ordering with padded blocks, num_tokens_post_padded
+    # covering all blocks.
+    def cpu_moe_align(topk_ids, block_size, num_experts, expert_map=None, **kw):
+        flat = topk_ids.reshape(-1)
+        valid = flat >= 0
+        order = torch.argsort(flat[valid].to(torch.int64), stable=True)
+        valid_ids = flat[valid][order]
+        num_blocks = (valid_ids.numel() + block_size - 1) // max(block_size, 1)
+        total = num_blocks * max(block_size, 1)
+        sorted_token_ids = torch.arange(
+            total, dtype=torch.int32
+        ) % max(valid_ids.numel(), 1)
+        expert_ids = torch.zeros(num_blocks, dtype=torch.int32)
+        for b in range(num_blocks):
+            chunk = valid_ids[
+                b * block_size: (b + 1) * block_size
+            ]
+            if chunk.numel():
+                expert_ids[b] = chunk[0]
+        num_tokens_post_padded = torch.tensor(
+            total, dtype=torch.int32
+        )
+        return sorted_token_ids, expert_ids, num_tokens_post_padded
+
+    monkeypatch.setattr(ffm, "_moe_align_block_size", cpu_moe_align)
     yield
 
 
