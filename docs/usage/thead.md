@@ -58,6 +58,22 @@ The published image digest is
 `sha256:abb224ad4e56ce9a978c1b868a65b439d6ddd8b9260bf5dc1baa97180ae14174`.
 The image includes vendor PyTorch, the PPU SDK and `flash_attn_3`, plus the
 ordinary Python stack in the table.
+
+> **Alternative: FlagOS Runtime image.** If you deploy in a FlagOS Runtime image
+> (`flagos-runtime-thead-ppu*`) instead of this CI image, three things differ:
+> - FlagTree is provided on `PYTHONPATH=/opt/flagtree`, not installed into
+>   site-packages. Do **not** run interpreters with `python -I` there: isolated
+>   mode ignores `PYTHONPATH`, so FlagGems/Triton fail to import, `register()`
+>   raises, and platform detection silently falls back to the built-in CUDA
+>   platform (which then fails on `vllm._C_stable_libtorch`). Either drop `-I`,
+>   or install FlagTree into the environment's site-packages as this guide's venv
+>   does — then `-I` is safe.
+> - The PPU `flash_attn_3` wheel is not bundled; install it yourself. It backs the
+>   `vendor.thead` attention registration, so without it engine startup fails
+>   importing `flash_attn_3._C`.
+> - Export the runtime environment before serving (step 4): `VLLM_PLUGINS=fl`,
+>   `GEMS_VENDOR=thead`, `TORCH_DEVICE_BACKEND_AUTOLOAD=1`,
+>   `VLLM_WORKER_MULTIPROC_METHOD=spawn`, plus the cache directories.
 The following versions were confirmed on 2026-10-14 on the same host and
 container used for model acceptance. SDK/runtime versions come from the
 container; VBIOS was checked on all four reserved host cards (12–15).
