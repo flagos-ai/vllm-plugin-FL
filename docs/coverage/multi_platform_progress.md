@@ -88,10 +88,43 @@ environment for all four platforms.
 
 | Platform | Coverage | Covered / Statements |
 |---|---:|---:|
-| kunlunxin | (recorded from v4 run) | |
-| hygon | (recorded from v4 run) | |
-| iluvatar | (recorded from v4 run) | |
-| thead | (recorded from v4 run) | |
+| kunlunxin | 26.54% | 6743 / 25410 |
+| hygon | 25.63% | 6512 / 25410 |
+| iluvatar | 25.62% | 6510 / 25410 |
+| thead | 26.01% | 6609 / 25410 |
+
+## Coverage gain (interim measurement)
+
+Interim supplementary-only run (kunlunxin gate, WIP files still being
+fixed) merged against the v5 baseline on the effective scope:
+
+**kunlunxin effective scope: 33.3% → 62.7% (9430/15033)**
+
+| area | baseline → combined |
+|---|---|
+| distributed | 19.0% → 96.6% (flagcx_connector 748/748 closed) |
+| dispatch.core | 50.6% → 90.9% |
+| compilation | 93.6% → 93.6% |
+| kv_cache | 83.8% → 83.8% |
+| quantization | 16.1% → 73.1% |
+| dispatch.backends.vendor.kunlunxin | 23.2% → 61.9% |
+| ops | 19.0% → 57.3% |
+| platform_config | 53.3% → 54.5% |
+| worker | 7.4% → 38.7% |
+| models | 0% → 0% (deepseek_v4 targeted by the final wave) |
+
+Remaining major gaps: worker (2433 missing, of which ~1500 are
+real-hardware-only paths per the worker agent's report), vendor
+impls (813), flaggems backend impls (418), platform rows (362),
+patches (226), models/deepseek_v4 (259).
+
+NOTE: CI images for the 0.5.0-dev line are being rebuilt by the
+image owners; all real-hardware numbers above (and the thead
+baseline) are measurements from the previous image generation and
+will be re-validated on the new images. The supplementary tests
+themselves are hardware-validated for test-code correctness (92
+passed on real PPU; 809+ passed on real P800 including 5
+environment-adaptive fixes verified on both hosts).
 
 ### T-Head real-hardware baseline (zw810e PPU)
 
