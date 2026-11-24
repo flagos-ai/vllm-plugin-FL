@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 import torch
+
 import vllm
 from vllm.config import CompilationMode, CUDAGraphMode
 
@@ -215,7 +216,9 @@ def test_private_engine_can_load_provider(sampler_case, platform, monkeypatch):
     sampler, _, _, fused, _ = sampler_case
     monkeypatch.delitem(sys.modules, "flaggems_vllm")
     monkeypatch.setattr(
-        cosyvoice3.multiprocessing, "current_process", lambda: SimpleNamespace(name="EngineCore")
+        cosyvoice3.multiprocessing,
+        "current_process",
+        lambda: SimpleNamespace(name="EngineCore"),
     )
     load_provider = Mock(return_value=fused)
     monkeypatch.setattr(topk_sampling, "_load_fused_topk", load_provider)
@@ -230,7 +233,10 @@ def test_existing_native_musa_compatibility_ignores_retired_switch(monkeypatch):
     native_forward = topk_topp_sampler.TopKTopPSampler.forward_native
     monkeypatch.setattr(topk_topp_sampler, "apply_top_k_top_p", Mock())
     musa_patch.patch_topk_topp_sampler()
-    assert topk_topp_sampler.apply_top_k_top_p is topk_topp_sampler.apply_top_k_top_p_pytorch
+    assert (
+        topk_topp_sampler.apply_top_k_top_p
+        is topk_topp_sampler.apply_top_k_top_p_pytorch
+    )
     assert topk_topp_sampler.TopKTopPSampler.forward_native is native_forward
 
 
@@ -243,7 +249,8 @@ def test_mixed_graph_default_requires_identity(platform, marker):
 
 
 @pytest.mark.parametrize(
-    "mode", [CUDAGraphMode.NONE, CUDAGraphMode.PIECEWISE, CUDAGraphMode.FULL_DECODE_ONLY]
+    "mode",
+    [CUDAGraphMode.NONE, CUDAGraphMode.PIECEWISE, CUDAGraphMode.FULL_DECODE_ONLY],
 )
 def test_mixed_graph_default_preserves_explicit_mode(platform, mode):
     config = make_config()
@@ -253,9 +260,12 @@ def test_mixed_graph_default_preserves_explicit_mode(platform, mode):
 
 
 @pytest.mark.parametrize(
-    "change", ["eager", "no_compile", "other_backend", "other_device", "tp", "fp16", "runtime"]
+    "change",
+    ["eager", "no_compile", "other_backend", "other_device", "tp", "fp16", "runtime"],
 )
-def test_mixed_graph_default_preserves_unsupported_configs(platform, change, monkeypatch):
+def test_mixed_graph_default_preserves_unsupported_configs(
+    platform, change, monkeypatch
+):
     config = make_config()
     if change == "eager":
         config.model_config.enforce_eager = True
