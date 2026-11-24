@@ -1,3 +1,0 @@
-(APIServer pid=3079891) INFO 11-24 08:39:49 [api_utils.py:286] non-default args: {'model_tag': '/models/Qwen3.6-27B', 'host': '127.0.0.1', 'port': 18430, 'model': '/models/Qwen3.6-27B', 'trust_remote_code': True, 'allowed_local_media_path': '/workspace/pr675-rms-code-verify/tools/adaptation-gate-cases/images', 'max_model_len': 32768, 'enforce_eager': True, 'served_model_name': ['qwen'], 'tensor_parallel_size': 2}
-[2026-11-24 08:40:52] [INFO] [vllm_fl.dispatch.backends.vendor.gcu.worker.worker] Using V2 Model Runner
-INFO:     Application startup complete.

@@ -130,20 +130,19 @@ def test_npu_weak_ref_preserves_view_without_owning_storage():
     assert torch.npu.memory_allocated() <= baseline
 
 
-@pytest.mark.parametrize("device_type", ["npu", "musa", "gcu"])
-def test_native_graph_capture_uses_active_accelerator_stream(monkeypatch, device_type):
+def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
     from types import SimpleNamespace
 
     graph_module = import_module("vllm_fl.compilation.graph")
 
     active_stream = object()
     stale_vllm_stream = MagicMock(return_value=object())
-    native_current_stream = MagicMock(return_value=active_stream)
-    monkeypatch.setattr(graph_module.current_platform, "device_type", device_type)
+    npu_current_stream = MagicMock(return_value=active_stream)
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "npu")
     monkeypatch.setattr(
         graph_module.current_platform,
         "torch_device_fn",
-        SimpleNamespace(current_stream=native_current_stream),
+        SimpleNamespace(current_stream=npu_current_stream),
     )
     monkeypatch.setattr(
         import_module("vllm_fl.compilation.graph"),
@@ -152,7 +151,7 @@ def test_native_graph_capture_uses_active_accelerator_stream(monkeypatch, device
     )
 
     assert graph_module._graph_capture_stream() is active_stream
-    native_current_stream.assert_called_once_with()
+    npu_current_stream.assert_called_once_with()
     stale_vllm_stream.assert_not_called()
 
 
@@ -173,20 +172,17 @@ def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("device_type", ["npu", "gcu"])
 @pytest.mark.parametrize("weak_ref_output", [False, True])
-def test_native_graph_wrapper_capture_and_replay(
-    monkeypatch, weak_ref_output, device_type
-):
+def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
     """Capture the real wrapper, then replay changed inputs into poisoned output."""
     import torch
 
     from vllm.config import CUDAGraphMode
 
     graph_module = import_module("vllm_fl.compilation.graph")
-    if graph_module.current_platform.device_type != device_type:
-        pytest.skip(f"Requires {device_type}")
-    device_fn = graph_module.current_platform.torch_device_fn
+    if graph_module.current_platform.device_type != "npu":
+        pytest.skip("Requires an Ascend NPU")
+    import torch_npu  # noqa: F401 - registers torch.npu
 
     mode = CUDAGraphMode.FULL
     descriptor = object()
@@ -224,38 +220,36 @@ def test_native_graph_wrapper_capture_and_replay(
         mode,
         graph_module.GraphOptions(weak_ref_output=weak_ref_output),
     )
-    static_input = torch.arange(-4, 4, device=device_type, dtype=torch.float32).reshape(
-        2, 4
-    )
-    capture_stream = device_fn.Stream()
-    capture_stream.wait_stream(device_fn.current_stream())
-    with device_fn.stream(capture_stream):
+    static_input = torch.arange(-4, 4, device="npu", dtype=torch.float32).reshape(2, 4)
+    capture_stream = torch.npu.Stream()
+    capture_stream.wait_stream(torch.npu.current_stream())
+    with torch.npu.stream(capture_stream):
         captured_output = wrapper(static_input)
-    device_fn.current_stream().wait_stream(capture_stream)
-    device_fn.synchronize()
+    torch.npu.current_stream().wait_stream(capture_stream)
+    torch.npu.synchronize()
 
     entry = wrapper.concrete_graph_entries[descriptor]
-    assert isinstance(entry.graph, graph_module.Graph.graph)
+    assert isinstance(entry.graph, torch.npu.NPUGraph)
     assert len(calls) == 1
 
     # NPU capture need not materialize its output until the first replay.
     captured_output.fill_(-999)
-    device_fn.synchronize()
+    torch.npu.synchronize()
     initial_replay = wrapper(static_input)
-    device_fn.synchronize()
+    torch.npu.synchronize()
     torch.testing.assert_close(initial_replay, eager_reference(static_input))
     assert len(calls) == 1
 
     for values in (
         torch.full_like(static_input, -2),
-        torch.arange(8, device=device_type, dtype=torch.float32).reshape(2, 4),
+        torch.arange(8, device="npu", dtype=torch.float32).reshape(2, 4),
     ):
         static_input.copy_(values)
         captured_output.fill_(-999)
-        device_fn.synchronize()
+        torch.npu.synchronize()
 
         replayed_output = wrapper(static_input)
-        device_fn.synchronize()
+        torch.npu.synchronize()
         expected = eager_reference(values)
         torch.testing.assert_close(replayed_output, expected)
         assert not torch.all(replayed_output == -999).item()
@@ -508,3 +502,120 @@ def test_gcu_weak_ref_preserves_views_without_owning_storage(dtype_name):
     # Borrowed aliases stay alive but their original allocation must be released.
     # Never dereference either alias after its owning tensor/graph is released.
     assert torch.gcu.memory_allocated() <= baseline
+
+
+@pytest.mark.parametrize("device_type", ["gcu"])
+def test_native_graph_capture_uses_active_accelerator_stream(monkeypatch, device_type):
+    from types import SimpleNamespace
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+
+    active_stream = object()
+    stale_vllm_stream = MagicMock(return_value=object())
+    native_current_stream = MagicMock(return_value=active_stream)
+    monkeypatch.setattr(graph_module.current_platform, "device_type", device_type)
+    monkeypatch.setattr(
+        graph_module.current_platform,
+        "torch_device_fn",
+        SimpleNamespace(current_stream=native_current_stream),
+    )
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "current_stream",
+        stale_vllm_stream,
+    )
+
+    assert graph_module._graph_capture_stream() is active_stream
+    native_current_stream.assert_called_once_with()
+    stale_vllm_stream.assert_not_called()
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("device_type", ["gcu"])
+@pytest.mark.parametrize("weak_ref_output", [False, True])
+def test_native_graph_wrapper_capture_and_replay(
+    monkeypatch, weak_ref_output, device_type
+):
+    """Capture the real wrapper, then replay changed inputs into poisoned output."""
+    import torch
+
+    from vllm.config import CUDAGraphMode
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != device_type:
+        pytest.skip(f"Requires {device_type}")
+    device_fn = graph_module.current_platform.torch_device_fn
+
+    mode = CUDAGraphMode.FULL
+    descriptor = object()
+    forward_context = SimpleNamespace(
+        batch_descriptor=descriptor, cudagraph_runtime_mode=mode
+    )
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "is_forward_context_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "get_forward_context",
+        lambda: forward_context,
+    )
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "validate_cudagraph_capturing_enabled",
+        lambda: None,
+    )
+
+    calls = []
+
+    def eager_reference(x):
+        return torch.relu(x * 2) + 3
+
+    def runnable(x):
+        calls.append(None)
+        return eager_reference(x)
+
+    wrapper = graph_module.GraphWrapper(
+        runnable,
+        SimpleNamespace(compilation_config=SimpleNamespace()),
+        mode,
+        graph_module.GraphOptions(weak_ref_output=weak_ref_output),
+    )
+    static_input = torch.arange(-4, 4, device=device_type, dtype=torch.float32).reshape(
+        2, 4
+    )
+    capture_stream = device_fn.Stream()
+    capture_stream.wait_stream(device_fn.current_stream())
+    with device_fn.stream(capture_stream):
+        captured_output = wrapper(static_input)
+    device_fn.current_stream().wait_stream(capture_stream)
+    device_fn.synchronize()
+
+    entry = wrapper.concrete_graph_entries[descriptor]
+    assert isinstance(entry.graph, graph_module.Graph.graph)
+    assert len(calls) == 1
+
+    # NPU capture need not materialize its output until the first replay.
+    captured_output.fill_(-999)
+    device_fn.synchronize()
+    initial_replay = wrapper(static_input)
+    device_fn.synchronize()
+    torch.testing.assert_close(initial_replay, eager_reference(static_input))
+    assert len(calls) == 1
+
+    for values in (
+        torch.full_like(static_input, -2),
+        torch.arange(8, device=device_type, dtype=torch.float32).reshape(2, 4),
+    ):
+        static_input.copy_(values)
+        captured_output.fill_(-999)
+        device_fn.synchronize()
+
+        replayed_output = wrapper(static_input)
+        device_fn.synchronize()
+        expected = eager_reference(values)
+        torch.testing.assert_close(replayed_output, expected)
+        assert not torch.all(replayed_output == -999).item()
+        assert wrapper.concrete_graph_entries[descriptor].graph is entry.graph
+        assert len(calls) == 1

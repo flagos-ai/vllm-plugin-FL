@@ -6,6 +6,8 @@ FlagGems normalization operator implementations.
 
 from __future__ import annotations
 
+from typing import Optional, Union
+
 import torch
 
 from vllm.platforms import current_platform
@@ -17,8 +19,8 @@ if current_platform.device_type == "musa":
 def rms_norm_flaggems(
     obj,
     x: torch.Tensor,
-    residual: torch.Tensor | None = None,
-) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    residual: Optional[torch.Tensor] = None,
+) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
     """
     RMS normalization using FlagGems.
 

@@ -31,12 +31,6 @@ op_backends:
     - vendor:thead
     - flagos
     - reference
-  # FlagGems-vllm stage4 can dereference padded expert id -1 during
-  # PIECEWISE capture on PPU. Select the bounds-checked, capture-safe
-  # implementation before launching a kernel: fallback after an illegal
-  # address cannot recover the device context.
-  moe_align_block_size:
-    - reference
   rms_norm:
     - flagos
     - reference

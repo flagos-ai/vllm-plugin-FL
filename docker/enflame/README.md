@@ -6,7 +6,7 @@ The Dockerfile targets official vLLM 0.32.0 at commit
 manifest digest
 `sha256:732e3d505e89203215727189b0820dd601dc426c4b05092259bdabeec7c68b71`.
 Registry availability does not prove that this recipe was used for that image
-or that a new hardware run passed. The 0.28 results below are historical.
+or that a new hardware run passed.
 
 The recipe keeps the vendor torch 2.11.0+cpu / torch_gcu
 2.11.0+3.8.20260713 stack and installs the official vLLM 0.32.0 empty-device
@@ -24,7 +24,7 @@ different build. Wheel hashes are checked against the official
 The current official [S60/tops1.10.6 configuration](https://github.com/flagos-ai/build-infra/blob/bbc9ae28e946a59c94e2af63d2d8aae04ff846ec/configs.yaml)
 and [Enflame installation guide](https://github.com/flagos-ai/FlagTree/wiki/User-manual-for-enflame)
 select this FlagTree version. FlagGems v5.4.0's own older backend matrix
-selects 0.6.1+enflame3.6; the newer combination is validated below.
+selects 0.6.1+enflame3.6.
 
 Enflame supports the vLLM 0.32 V1 and V2 runner selection contract. V1 uses
 `ModelRunnerFL`; V2 uses the GCU runner with device buffer, stream and sampling
@@ -39,32 +39,8 @@ decoding for hybrid align-mode serving. Other speculative/cache combinations
 still require their own validation; accepting a configuration is not evidence
 of device support.
 
-## Historical 0.28 image validation
-
-The 2026-10-13 dependency image was validated on S60 with host driver 1.10.6.
-The compiler-file guard and 12 cold-cache FlagGems normal-operator cases passed.
-The original Qwen3.6-27B inference and Qwen3.6-35B-A3B serving cases passed in
-both eager and graph modes at plugin commit
-`2cd00248d3992088b2432201629ab295d4d94034`. These image checks are separate
-from each candidate commit's original adaptation Gate. The old vLLM 0.20.2
-vendor wrapper remains available as `Dockerfile.v0.20.2`.
-
-The local image ID is
-`sha256:4feef9aed222a8cffd9fab610288053c3f2ee5acdfc3540786e47d7daea48f0e`.
-The canonical dependency image name follows the other vLLM 0.28 backends:
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci`.
-This tag was published on 2026-10-20 and aliases the unchanged image originally
-published on 2026-10-13 as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci-2cd00248d399-compiler`.
-An anonymous manifest lookup confirmed that both names identify the same content.
-Its registry manifest digest is
-`sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`.
-Authenticated and anonymous pulls by this digest both resolved to the local
-image ID above. Historical 0.28 CI used the canonical tag with this digest and installed the tested plugin checkout
-with `--no-deps`; the dependency image does not bake in that checkout.
-
-See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
-model serving, and validation commands.
+See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup
+and model serving.
 
 ## Build a local candidate
 
@@ -114,9 +90,7 @@ requirements, overwriting FlagTree's `triton` namespace while leaving its
 package metadata intact. The recipe constrains that dependency to 3.6.0,
 then removes upstream Triton and force-reinstalls the hash-pinned Enflame
 FlagTree wheel. `verify_compiler.py` checks the active module origin and
-FlagTree RECORD hashes for its shipped `triton` files during the build and
-CI setup, without initializing a GPU. Runtime and original Gate validation
-are still required after this source-file check.
+FlagTree RECORD hashes for its shipped `triton` files during the build, without initializing a GPU.
 
 The build explicitly upgrades the OpenAI Python SDK to `OPENAI_VERSION=3.28.0`
 and pandas to `PANDAS_VERSION=3.0.6` after common requirements, using the same
@@ -126,7 +100,7 @@ task service attempt to fail while importing `vllm.tool_parsers.utils`.
 The next CLI check exposed the bundle's older pandas binary failing against
 NumPy 2 with `numpy.dtype size changed`. After these private environment
 upgrades, `vllm serve --help` exits successfully and vendor torch remains
-unchanged. Model serving and Gate acceptance remain to be verified.
+unchanged. Model serving requires separate hardware validation.
 
 FlagGems 5.4's Python wheel has no native C++ extension bundled. The optional
 `flag-gems-cpp-gcu` package must match the Python package's version and
@@ -135,10 +109,8 @@ Install it only when a required operator path needs it, then test that path
 separately. Python operator/device smoke is independent of C++ coverage.
 
 The runtime `index_fill` adapter validates the supported FlagGems version and
-private launcher/kernel API. Exact release-byte verification runs separately in
-`docker/enflame/verify_index_fill.py` during CI setup. Setup executes that script
-from the tested checkout, so this separation does not require a new dependency
-image.
+private launcher/kernel API. Exact release-byte verification is available in
+`docker/enflame/verify_index_fill.py`.
 
 ## Temporary vendor compatibility adapters
 
@@ -170,42 +142,3 @@ layout; sharing and reinitialization also change the binding lifecycle.
 Moving these checks to initialization requires a binding contract that covers
 those paths and direct wrapper calls. An object-identity cache or a check before
 the final layout is established would weaken the safety boundary.
-
-## Validate on an S60 host
-
-Select device IDs after checking memory and process ownership. Model YAMLs
-use `/data/models/Qwen`; mount the actual host model directory there
-read-only. Keep the container's default private PID namespace because the
-test runner performs process cleanup. Use a unique task container and
-tmux sessions for setup, service and tests.
-
-Current S60 CI configures memory utilization `0.90`, max model length `8192`,
-max sequences `64` and max batched tokens `4096` for the four Qwen3.6 TP2
-cases. Graph compilation explicitly selects `none,+SiluAndMul` and capture
-sizes `[1,2,4,8,16,32]`; eager cases retain `enforce_eager`. These bounds reserve
-memory and limit prefill/graph workspace; they are model-scoped capacity
-settings, not relaxed quality thresholds. A historical 32768-context,
-256-sequence capacity run does not validate this configuration or a new SHA.
-Run all four adaptation Gate combinations and preserve all five scenarios
-(26 requests and 260 quality checks per combination), including failed,
-skipped and unexecuted items. See the [deployment guide](../../docs/usage/enflame.md)
-for commands and required provenance.
-
-Inside that task container, from the private plugin checkout:
-
-```bash
-bash .github/scripts/enflame/check.sh
-bash .github/scripts/enflame/setup.sh
-python tests/run.py --platform enflame --scope unit
-python tests/run.py --platform enflame --scope functional
-python tests/run.py --platform enflame --scope e2e --task inference \
-  --model qwen3_6 --case 27b_tp2_eager
-```
-
-The container must receive `VLLM_PLUGINS=fl`, the verified
-`TOPS_VISIBLE_DEVICES` pair and the runtime environment variables set by
-the Dockerfile. These suites supplement the original cases in
-[`tools/adaptation-gate-cases`](../../tools/adaptation-gate-cases/README.md).
-Run the configured models in eager and graph modes and retain each raw
-result JSON; evaluate `summary.passed` and every request's checks before
-reporting Gate acceptance.

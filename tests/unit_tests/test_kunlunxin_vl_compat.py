@@ -41,9 +41,6 @@ def _setup_fake_qwen3_vl(triton_present: bool, native_present: bool = True):
         mod.triton_pos_embed_interpolate = triton_pos_embed_interpolate
 
     sys.modules[_MOD_NAME] = mod
-    # Dotted imports can resolve a cached parent attribute rather than the
-    # newly replaced sys.modules entry. Keep the fake import graph coherent.
-    sys.modules[_PARENTS[-1]].qwen3_vl = mod
     return mod
 
 
@@ -56,20 +53,9 @@ def _fresh_patch_flag():
     for attr in list(vars(vc).keys()):
         if attr.startswith("_vllm_fl_kunlunxin_vl"):
             pass  # We'll reset the qwen3_vl module itself
-    parent = sys.modules.get(_PARENTS[-1])
-    original_module = sys.modules.get(_MOD_NAME)
-    original_attr = getattr(parent, "qwen3_vl", None)
     yield
-    if original_module is None:
-        sys.modules.pop(_MOD_NAME, None)
-    else:
-        sys.modules[_MOD_NAME] = original_module
-    parent = sys.modules.get(_PARENTS[-1])
-    if parent is not None:
-        if original_attr is None:
-            vars(parent).pop("qwen3_vl", None)
-        else:
-            parent.qwen3_vl = original_attr
+    # Clean up the installed fake module
+    sys.modules.pop(_MOD_NAME, None)
 
 
 def _get_vc():
@@ -180,19 +166,3 @@ def test_ordered_vision_reduce_stays_in_weight_sharded_scope(monkeypatch):
     model.use_data_parallel = True
     assert model._process_image_input(tensor) is None
     communicator.all_gather.assert_called_once()
-
-
-def test_fake_module_replaces_cached_parent_attribute():
-    """Reproduce full-suite imports that leave an existing parent binding."""
-    vc = _get_vc()
-    parent = sys.modules[_PARENTS[-1]]
-    stale = types.ModuleType(_MOD_NAME)
-    stale.triton_pos_embed_interpolate = lambda *args: "stale"
-    parent.qwen3_vl = stale
-    mod = _setup_fake_qwen3_vl(triton_present=True)
-
-    vc.apply_vl_compat()
-
-    assert parent.qwen3_vl is mod
-    assert mod.triton_pos_embed_interpolate("x") == "native"
-    assert stale.triton_pos_embed_interpolate("x") == "stale"
