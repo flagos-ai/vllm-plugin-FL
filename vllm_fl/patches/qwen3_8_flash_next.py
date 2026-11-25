@@ -8,15 +8,23 @@ without modifying either the checkpoint or the installed vLLM package.
 
 from __future__ import annotations
 
-import logging
+import inspect
+from copy import copy
 from typing import TYPE_CHECKING
 
+from vllm.logger import init_logger
 from vllm.model_executor.models.config import Qwen3_5ForConditionalGenerationConfig
+from vllm.multimodal.video import VIDEO_LOADER_REGISTRY, Qwen3VLVideoBackend
+
+from vllm_fl.models.qwen3_8_flash_next.common.multimodal import (
+    validate_video_fps,
+    validate_video_pruning,
+)
 
 if TYPE_CHECKING:
     from vllm.config import ModelConfig, VllmConfig
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 def _strip_mrope(model_config: ModelConfig) -> None:
@@ -110,6 +118,7 @@ class Qwen3_8FlashNextForConditionalGenerationConfig(
             )
 
         multimodal_config = vllm_config.model_config.multimodal_config
+        validate_video_pruning(multimodal_config)
         if multimodal_config is not None and multimodal_config.language_model_only:
             _strip_mrope(vllm_config.model_config)
 
@@ -119,6 +128,9 @@ class Qwen3_8FlashNextForConditionalGenerationConfig(
                 "Qwen4Exp Day0 serves normal next-token generation first; "
                 "native MTP/speculative decoding is a separate follow-up gate"
             )
+
+        if multimodal_config is not None and not multimodal_config.language_model_only:
+            _configure_qwen3_8_video_loader(vllm_config.model_config)
 
 
 class Qwen3_8FlashNextForCausalLMConfig(Qwen3_8FlashNextForConditionalGenerationConfig):
@@ -227,6 +239,63 @@ def _register_compilation_boundaries() -> None:
     ):
         if op not in CompilationConfig._attention_ops:
             CompilationConfig._attention_ops.append(op)
+
+
+class Qwen3_8FlashNextVideoBackend(Qwen3VLVideoBackend):
+    """Keep Qwen3.8 FPS validation local to its video backend."""
+
+    @classmethod
+    def compute_frames_index_to_sample(cls, source, target, **kwargs):
+        validate_video_fps(source.original_fps, name="source video fps")
+        validate_video_fps(target.fps, name="target video fps")
+        return super().compute_frames_index_to_sample(source, target, **kwargs)
+
+
+def _configure_qwen3_8_video_loader(model_config: ModelConfig) -> None:
+    """Select a model-local loader through vLLM's media I/O configuration."""
+    multimodal_config = model_config.multimodal_config
+    media_io_kwargs = multimodal_config.media_io_kwargs
+    video_kwargs = media_io_kwargs.get("video", {})
+    backend = video_kwargs.get("video_backend")
+    name = "qwen3_8_flash_next"
+    # Retain explicit alternate loaders, including empty/None (env fallback),
+    # and vLLM's config/request override precedence. Never remap a shared
+    # processor name to a model-specific backend.
+    if "video_backend" in video_kwargs and backend not in ("qwen3_vl", name):
+        return
+
+    original = getattr(
+        Qwen3VLVideoBackend.compute_frames_index_to_sample, "__func__", None
+    )
+    if not callable(original):
+        raise TypeError("Qwen3 video frame selection must be a class method")
+    signature = inspect.signature(original)
+    signature.bind(Qwen3VLVideoBackend, object(), object(), min_frames=4)
+    if not any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    ):
+        raise TypeError("Qwen3 video frame selection must accept keyword options")
+
+    registered = VIDEO_LOADER_REGISTRY.name2class.get(name)
+    if registered is not None and registered is not Qwen3_8FlashNextVideoBackend:
+        raise ValueError(f"Video backend {name!r} is already registered")
+    # A config may be shared by another model or passed to another process.
+    # Copy only the containers changed here; all other modality settings stay.
+    updated_config = copy(multimodal_config)
+    updated_config.media_io_kwargs = {
+        **media_io_kwargs,
+        "video": {**video_kwargs, "video_backend": name},
+    }
+    try:
+        if registered is None:
+            VIDEO_LOADER_REGISTRY.register(name)(Qwen3_8FlashNextVideoBackend)
+        if backend != name:
+            model_config.multimodal_config = updated_config
+    except Exception:
+        if registered is None:
+            VIDEO_LOADER_REGISTRY.name2class.pop(name, None)
+        raise
 
 
 def apply_qwen3_8_flash_next_patches() -> bool:

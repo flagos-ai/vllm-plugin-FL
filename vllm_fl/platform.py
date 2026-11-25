@@ -215,7 +215,9 @@ class PlatformFL(Platform):
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
     dist_backend: str = (
-        "flagcx" if _flagcx_backend_enabled() else dist_backend_dict.get(device_name, "nccl")
+        "flagcx"
+        if _flagcx_backend_enabled()
+        else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
     # translated into the ordinal visible to this process. Leaving the
@@ -343,6 +345,7 @@ class PlatformFL(Platform):
                 from vllm_fl.dispatch.backends.vendor.txda.patch import (
                     apply_txda_patches,
                 )
+
                 apply_txda_patches()
             except Exception as e:
                 logger.warning(f"Failed to apply txda patches: {e}")
@@ -535,6 +538,8 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_supported_vit_attn_backends(cls) -> list["AttentionBackendEnum"]:
+        if cls.vendor_name == "thead":
+            return [AttentionBackendEnum.TORCH_SDPA]
         return [
             AttentionBackendEnum.TORCH_SDPA,
             AttentionBackendEnum.FLASH_ATTN,
@@ -549,6 +554,17 @@ class PlatformFL(Platform):
     ) -> "AttentionBackendEnum":
         from vllm_fl.attention.utils import patch_mm_encoder_attention
 
+        if cls.vendor_name == "thead":
+            # Match the OOT forward binding. A CUDA-shaped API does not imply
+            # NVIDIA FlashAttention support on PPU.
+            if backend not in (None, AttentionBackendEnum.TORCH_SDPA):
+                raise ValueError(
+                    f"Backend {backend} is not supported for T-Head vision "
+                    "attention; use TORCH_SDPA."
+                )
+            patch_mm_encoder_attention()
+            logger.info_once("Using TORCH_SDPA for T-Head vision attention")
+            return AttentionBackendEnum.TORCH_SDPA
         patch_mm_encoder_attention()
         if backend is not None:
             assert backend in cls.get_supported_vit_attn_backends(), (
@@ -775,10 +791,7 @@ class PlatformFL(Platform):
                 # path — the GroupCoordinator that matters is built after
                 # check_and_update_config has finalized cudagraph_mode.
                 return False
-            return (
-                vllm_config.compilation_config.cudagraph_mode
-                != CUDAGraphMode.NONE
-            )
+            return vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         # HIP communicators also use ctypes. Keep them opaque to Dynamo,
         # matching vLLM's ROCm platform even when is_cuda_alike() is False.
         return cls.vendor_name in ("nvidia", "amd", "hygon", "thead", "iluvatar")
