@@ -9,7 +9,6 @@ import os
 from collections.abc import Generator
 from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
-from types import NoneType
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -1041,7 +1040,9 @@ class WorkerFL(WorkerBase):
             output = self.model_runner.execute_model(
                 scheduler_output, intermediate_tensors
             )
-            if isinstance(output, (ModelRunnerOutput, NoneType)):
+            if not isinstance(output, IntermediateTensors):
+                # Pooling and embedding runners return their own output types.
+                # Only a pipeline-parallel forward pass yields IntermediateTensors.
                 return output
 
         assert isinstance(output, IntermediateTensors)
