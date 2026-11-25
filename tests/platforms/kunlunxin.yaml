@@ -143,16 +143,11 @@ p800:
         - test_musa_collective_splitting.py
         - worker/test_musa_compile_logging.py
     benchmark:
-      # Disabled until the dummy profiling forward works on P800. The serve
-      # smoke case (dense Qwen3-0.6B, load_format=dummy) never reaches
-      # /health: the first forward in profile_run blocks forever in
-      # torch.accelerator.synchronize() -> cudaDeviceSynchronize, and the
-      # harness only fails after its 600s startup budget. The hang happens
-      # before any request is served, so it is unrelated to the code paths
-      # changed here; track it as a separate P800/FlagGems follow-up.
       pr:
-        enabled: false
+        enabled: true
         types:
+          - throughput
+          - latency
           - serve
       nightly:
         enabled: false

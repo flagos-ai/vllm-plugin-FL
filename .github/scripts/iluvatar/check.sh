@@ -15,6 +15,16 @@ else
   echo "::warning::Neither ixsmi nor nvidia-smi found; probing via torch."
 fi
 
+benchmark_model=/data/models/Qwen/Qwen3-0.6B
+for model_file in config.json tokenizer.json; do
+  model_path="${benchmark_model}/${model_file}"
+  if [[ -r "${model_path}" ]]; then
+    echo "Benchmark model file is readable: ${model_path}"
+  else
+    echo "::warning::Benchmark model file is missing or unreadable: ${model_path}"
+  fi
+done
+
 # The torch probe occasionally wedges while the CoreX user space talks to an
 # older kernel driver (the process holds a device context and never returns).
 # A hung probe would otherwise burn the job's full timeout, so bound every
@@ -23,9 +33,12 @@ PROBE_SRC=$(cat <<'PY'
 import shutil
 import subprocess
 
+print("[Iluvatar probe] Importing torch")
 import torch
 
+print(f"[Iluvatar probe] Checking torch {torch.__version__} CUDA availability")
 assert torch.cuda.is_available(), "Iluvatar accelerator is unavailable"
+print("[Iluvatar probe] Counting devices")
 count = torch.cuda.device_count()
 assert count >= 4, f"At least 4 Iluvatar devices are required, found {count}"
 
@@ -62,7 +75,9 @@ def report_device_memory():
 
 
 try:
+    print("[Iluvatar probe] Allocating a tensor on cuda:0")
     tensor = torch.ones((32, 32), device="cuda:0")
+    print("[Iluvatar probe] Synchronizing cuda:0")
     torch.cuda.synchronize()
 except Exception:
     report_device_memory()
@@ -78,7 +93,7 @@ probe_ok=0
 for attempt in 1 2 3; do
   echo "=== Device probe attempt ${attempt}/3 (timeout 180s) ==="
   rc=0
-  timeout 180 python -c "${PROBE_SRC}" || rc=$?
+  timeout 180 python -u -c "${PROBE_SRC}" || rc=$?
   if [[ "${rc}" -eq 0 ]]; then
     probe_ok=1
     break
