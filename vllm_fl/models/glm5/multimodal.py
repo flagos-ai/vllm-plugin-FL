@@ -1081,6 +1081,12 @@ class Glm5NextForConditionalGeneration(
                 prefix=maybe_prefix(prefix, "language_model"),
                 architectures=["Glm5NextForCausalLM"],
             )
+            # GLM5-PP: the runner asks the top-level model for the
+            # intermediate-tensors factory (vLLM convention, see
+            # deepseek_v2.py); delegate it to the text model.
+            self.make_empty_intermediate_tensors = (
+                self.language_model.make_empty_intermediate_tensors
+            )
 
     def get_encoder_cudagraph_config(self):
         config = super().get_encoder_cudagraph_config()

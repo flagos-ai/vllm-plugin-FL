@@ -137,6 +137,42 @@ def _hc_contract(x: torch.Tensor) -> torch.Tensor:
     return x.mean(dim=1)
 
 
+def _make_mhc_intermediate_tensors_factory(hidden_size: int, streams: int):
+    """Pipeline-boundary payload for GLM5-Next mHC.
+
+    ``mhc_pre`` produces ``post_mix [T, n, 1]`` and ``comb_mix [T, n, n]`` in
+    float32 and keeps them, together with the residual streams ``[T, n, D]``,
+    alive across layers. A pipeline stage that starts mid-model cannot rebuild
+    them: it would have to run ``mhc_pre`` on an already contracted state.
+    """
+
+    def make_empty_intermediate_tensors(
+        batch_size: int,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> IntermediateTensors:
+        return IntermediateTensors(
+            {
+                "hidden_states": torch.zeros(
+                    (batch_size, hidden_size), dtype=dtype, device=device
+                ),
+                "residual": torch.zeros(
+                    (batch_size, streams, hidden_size), dtype=dtype, device=device
+                ),
+                # mhc_pre returns post_mix as (..., n, 1); keep the trailing
+                # dim so the receiver buffer matches what the sender packs.
+                "post": torch.zeros(
+                    (batch_size, streams, 1), dtype=torch.float32, device=device
+                ),
+                "comb": torch.zeros(
+                    (batch_size, streams, streams), dtype=torch.float32, device=device
+                ),
+            }
+        )
+
+    return make_empty_intermediate_tensors
+
+
 class Glm5NextMLP(nn.Module):
     """Reference GLM5-Next SwiGLU, including the trained clamp."""
 
@@ -611,7 +647,16 @@ class Glm5NextMLAAttention(DeepseekV2MLAAttention):
         from vllm_fl.activation import PendingPatch, temporary_patches
 
         construction_patches = []
-        if current_platform.is_cuda() and not use_nvidia_reference():
+        # PlatformFL.is_cuda() means "vendor == nvidia" (see vllm_fl/platform.py),
+        # so the original guard `is_cuda() and not use_nvidia_reference()` was never
+        # true on any platform: NVIDIA took vLLM's native FLASH_ATTN prefill path,
+        # while every non-NVIDIA accelerator ended up with no MLA prefill backend
+        # registered at all.  MetaX C550 then aborts model construction with
+        #   No valid MLA prefill backend found with MLAPrefillSelectorConfig(...)
+        #     Reasons: {FLASH_ATTN: [required dependencies not available]}
+        # Gate on the missing reference kernels alone, so the portable FlagGems
+        # prefill backend is installed wherever the native one is unavailable.
+        if not use_nvidia_reference():
             from vllm.model_executor.layers import sparse_attn_indexer
             from vllm.model_executor.layers.attention import mla_attention
 
@@ -1001,9 +1046,16 @@ class Glm5NextModel(nn.Module):
         else:
             self.norm = PPMissingLayer()
 
-        self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(
-            ["hidden_states", "residual"], config.hidden_size
-        )
+        if config.mhc:
+            # GLM5-PP: mHC keeps residual/post/comb between layers, so a
+            # pipeline stage that starts mid-model needs all of them.
+            self.make_empty_intermediate_tensors = _make_mhc_intermediate_tensors_factory(
+                config.hidden_size, config.mhc_num_residual_streams
+            )
+        else:
+            self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(
+                ["hidden_states", "residual"], config.hidden_size
+            )
         self.use_mha = False
         self.num_redundant_experts = (
             vllm_config.parallel_config.eplb_config.num_redundant_experts
@@ -1034,7 +1086,11 @@ class Glm5NextModel(nn.Module):
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
-            post = comb = None
+            # GLM5-PP: mHC state arrives with the hidden state; without it the
+            # first layer of this stage would take the ``post is None`` branch
+            # and re-run mhc_pre on a contracted state.
+            post = intermediate_tensors.tensors.get("post")
+            comb = intermediate_tensors.tensors.get("comb")
 
         for layer in self.layers[self.start_layer : self.end_layer]:
             hidden_states, residual, post, comb = layer(
@@ -1042,9 +1098,13 @@ class Glm5NextModel(nn.Module):
             )
 
         if not get_pp_group().is_last_rank:
-            return IntermediateTensors(
-                {"hidden_states": hidden_states, "residual": residual}
-            )
+            tensors = {"hidden_states": hidden_states, "residual": residual}
+            # GLM5-PP: forward the hyper-connection state.
+            if post is not None:
+                tensors["post"] = post
+            if comb is not None:
+                tensors["comb"] = comb
+            return IntermediateTensors(tensors)
         return self.norm(hidden_states)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
@@ -1117,6 +1177,13 @@ class Glm5NextForCausalLM(
         else:
             self.lm_head = PPMissingLayer()
         self.logits_processor = LogitsProcessor(self.config.vocab_size)
+        # GLM5-PP: the runner builds its per-stage payload via
+        # ``model.make_empty_intermediate_tensors``; every other vLLM model
+        # re-exposes it on the ForCausalLM wrapper (see deepseek_v2.py) and
+        # this one did not, so pipeline stage > 0 had no factory at all.
+        self.make_empty_intermediate_tensors = (
+            self.model.make_empty_intermediate_tensors
+        )
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.embed_input_ids(input_ids)
