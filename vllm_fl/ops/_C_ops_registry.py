@@ -163,6 +163,11 @@ def _C_ops_present() -> bool:
         return False
     names = [name for name, _ in _QUERY_OP_IMPLS]
     names += [name for name, _ in _CUDA_FALLBACK_IMPLS]
+    # vllm_fl._C always registers ``weak_ref_tensor``; on empty-wheel
+    # backends it is the only native op present, so counting it here
+    # makes register_op_schemas skip every fallback schema and
+    # activation layers fail on the missing torch.ops._C.silu_and_mul.
+    names = [name for name in names if name != "weak_ref_tensor"]
     return any(hasattr(ops, name) for name in names)
 
 
