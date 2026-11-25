@@ -34,6 +34,10 @@ ARG FLAGGEMS_WHEEL_SHA256=cae4b8409763c88e3e6e7ead44cc900f20de391a1000fb7ad6efe8
 ARG FLAGGEMS_VLLM_VERSION=0.3.0.dev20261119
 ARG FLAGGEMS_VLLM_WHEEL_URL=https://resource.flagos.net/repository/flagos-pypi-daily/packages/flaggems-vllm/0.3.0.dev20261119/flaggems_vllm-0.3.0.dev20261119-py3-none-any.whl
 ARG FLAGGEMS_VLLM_WHEEL_SHA256=b9947e9da1c8ca02eec68f8a0a0fa72595507a79b24f3c2f77cd00af344d42d6
+# vLLM's metadata requires this exact build, so it is pinned the same way as
+# the wheels above: by URL and SHA-256, never by "whatever the index resolves".
+ARG OPENCV_WHEEL_URL=https://resource.flagos.net/repository/flagos-pypi-iluvatar/packages/opencv-python-headless/5.0.0.93+flagos/opencv_python_headless-5.0.0.93+flagos-cp37-abi3-manylinux_2_28_x86_64.whl
+ARG OPENCV_WHEEL_SHA256=33e9053e6a8d8e2fe98bc4f14ef0e5305d8dea47f328506e037051e6404a567b
 ARG PLUGIN_SOURCE_SHA=unknown
 ARG PLUGIN_VERSION=0.5.0.dev0
 ARG INDEX_URL=https://pypi.org/simple
@@ -75,7 +79,7 @@ RUN PYTHONPATH=/opt/triton python -m pip install --no-cache-dir \
         --extra-index-url "${DAILY_INDEX_URL}" \
         "torch==2.13.0+corex.5.0.1" "torchvision==0.28.0+corex.5.0.1" \
         "torchaudio==2.11.0+corex.5.0.1" "flagcx==0.14.1+corex5.0.1" \
-        "numpy==1.26.4" "opencv-python-headless==5.0.0.93+flagos" \
+        "numpy==1.26.4" "opencv-python-headless @ ${OPENCV_WHEEL_URL}#sha256=${OPENCV_WHEEL_SHA256}" \
         "compressed-tensors==0.17.0+flagos" "xgrammar==0.2.8+flagos" \
         "vllm @ ${VLLM_WHEEL_URL}#sha256=${VLLM_WHEEL_SHA256}"
 
