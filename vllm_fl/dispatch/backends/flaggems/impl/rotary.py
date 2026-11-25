@@ -100,10 +100,11 @@ def apply_rotary_emb_flaggems(
 
     # FlagGems requires both Q and K. One head of Q supplies the unused K
     # result; the out-of-place call keeps the input and unrotated tail intact.
+    # Keep K dense too: its output must not inherit Q's multi-head token stride.
     rotated, _ = rotary_embedding_flaggems(
         obj,
         rotary_input,
-        rotary_input[:, :, :1, :],
+        rotary_input[:, :, :1, :].contiguous(),
         cos,
         sin,
         position_ids,

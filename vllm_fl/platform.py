@@ -44,7 +44,7 @@ logger = init_logger(__name__)
 
 
 def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
-    """Configure eager FX execution with ordinary Ascend FULL decode graphs.
+    """Configure eager FX execution with Ascend decode or pooling graphs.
 
     Ascend compiler options may be omitted or explicitly disabled with False.
     The six recognized rc1 compiler options have no implementation here; reject
@@ -85,9 +85,22 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
         compilation.mode = CompilationMode.NONE
         compilation.cudagraph_mode = CUDAGraphMode.NONE
         return
-    if compilation.cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY:
+    # Causal pooling runs prefill rather than a decode loop. Capture its FX segments
+    # with the shared graph wrapper, keeping attention and cache writes eager.
+    pooling_piecewise = (
+        getattr(model_config, "runner_type", None) == "pooling"
+        and getattr(model_config, "attn_type", None) == "decoder"
+        and compilation.cudagraph_mode.has_piecewise_cudagraphs()
+    )
+    if pooling_piecewise:
+        compilation.cudagraph_mode = CUDAGraphMode.PIECEWISE
+    if (
+        compilation.cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY
+        and not pooling_piecewise
+    ):
         raise NotImplementedError(
-            "FL basic Ascend graph support requires NONE or FULL_DECODE_ONLY"
+            "FL Ascend graphs require NONE, FULL_DECODE_ONLY, or PIECEWISE "
+            "for causal pooling models"
         )
     # Match the runner's upstream switch (including vLLM's cached env value).
     # BreakableCUDAGraphWrapper bypasses our runner-owned graph task lifecycle.
@@ -116,11 +129,32 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     compilation.backend = "eager"
     compilation.use_inductor = False
     compilation.use_inductor_graph_partition = False
-    compilation.splitting_ops = []
-    compilation.cudagraph_num_of_warmups = 1
     compilation.pass_config.fuse_norm_quant = False
     compilation.pass_config.fuse_act_quant = False
     compilation.pass_config.fuse_attn_quant = False
+    if pooling_piecewise:
+        compilation.set_splitting_ops_for_v1(
+            all2all_backend=vllm_config.parallel_config.all2all_backend,
+            data_parallel_size=vllm_config.parallel_config.data_parallel_size,
+        )
+        if compilation.cudagraph_mode not in (
+            CUDAGraphMode.NONE, CUDAGraphMode.PIECEWISE
+        ):
+            raise NotImplementedError(
+                "Ascend pooling requires PIECEWISE attention boundaries; "
+                "the requested compiler passes require full graph capture"
+            )
+        if compilation.cudagraph_mode == CUDAGraphMode.PIECEWISE and not (
+            compilation.splitting_ops_contain_attention()
+            and compilation.splitting_ops_contain_kv_cache_update()
+        ):
+            raise NotImplementedError(
+                "Ascend pooling PIECEWISE graphs require attention and KV-cache "
+                "update splitting ops; the explicit splitting_ops list is incomplete"
+            )
+    else:
+        compilation.splitting_ops = []
+    compilation.cudagraph_num_of_warmups = 1
 
 
 _P = ParamSpec("_P")

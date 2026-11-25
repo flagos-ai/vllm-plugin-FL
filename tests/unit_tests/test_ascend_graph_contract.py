@@ -403,18 +403,23 @@ def test_non_npu_capture_uses_existing_policy(monkeypatch):
     assert calls == ["device"]
 
 
-def _configure(monkeypatch, *, breakable=False):
+def _configure(monkeypatch, *, breakable=False, use_real_config=False):
     # Extract the standalone helper, avoiding PlatformFL's device discovery and
     # unrelated operator registration at import time on another vendor's CI.
-    graph_modes = NS(NONE="none", FULL_DECODE_ONLY="decode", PIECEWISE="piecewise")
-    compile_modes = NS(NONE="none", VLLM_COMPILE="vllm")
-    _module(
-        monkeypatch,
-        "vllm.config",
-        CUDAGraphMode=graph_modes,
-        CompilationMode=compile_modes,
-    )
-    _module(monkeypatch, "vllm.envs", VLLM_USE_BREAKABLE_CUDAGRAPH=breakable)
+    if use_real_config:
+        import vllm.envs as vllm_envs
+
+        monkeypatch.setattr(vllm_envs, "VLLM_USE_BREAKABLE_CUDAGRAPH", breakable)
+    else:
+        graph_modes = NS(NONE="none", FULL_DECODE_ONLY="decode", PIECEWISE="piecewise")
+        compile_modes = NS(NONE="none", VLLM_COMPILE="vllm")
+        _module(
+            monkeypatch,
+            "vllm.config",
+            CUDAGraphMode=graph_modes,
+            CompilationMode=compile_modes,
+        )
+        _module(monkeypatch, "vllm.envs", VLLM_USE_BREAKABLE_CUDAGRAPH=breakable)
     source = ast.parse((ROOT / "platform.py").read_text())
     helper = next(
         n
@@ -541,6 +546,126 @@ def test_full_decode_uses_eager_fx(monkeypatch, enabled):
     assert not compilation.use_inductor and compilation.splitting_ops == []
     assert compilation.cudagraph_num_of_warmups == 1
     assert not any(vars(compilation.pass_config).values())
+
+
+@pytest.mark.parametrize("requires_full", [False, True])
+def test_pooling_piecewise_keeps_attention_outside_graph(monkeypatch, requires_full):
+    monkeypatch.delenv("ASCEND_LAUNCH_BLOCKING", raising=False)
+    configure = _configure(monkeypatch)
+
+    class PiecewiseMode(str):
+        def has_piecewise_cudagraphs(self):
+            return True
+
+    config = _config()
+    config.model_config.runner_type = "pooling"
+    config.model_config.attn_type = "decoder"
+    config.compilation_config.cudagraph_mode = PiecewiseMode("piecewise")
+    config.parallel_config.all2all_backend = "allgather_reducescatter"
+    config.parallel_config.data_parallel_size = 1
+    calls = []
+
+    def set_splitting_ops(**kwargs):
+        assert not config.compilation_config.pass_config.fuse_attn_quant
+        calls.append(kwargs)
+        config.compilation_config.splitting_ops = [
+            "vllm::unified_attention_with_output"
+        ]
+        if requires_full:
+            config.compilation_config.cudagraph_mode = "full"
+
+    config.compilation_config.set_splitting_ops_for_v1 = set_splitting_ops
+    config.compilation_config.splitting_ops_contain_attention = lambda: True
+    config.compilation_config.splitting_ops_contain_kv_cache_update = lambda: True
+    if requires_full:
+        with pytest.raises(NotImplementedError, match="require full graph capture"):
+            configure(config)
+        return
+    configure(config)
+    assert config.compilation_config.cudagraph_mode == "piecewise"
+    assert config.compilation_config.backend == "eager"
+    assert config.compilation_config.splitting_ops == [
+        "vllm::unified_attention_with_output"
+    ]
+    assert calls == [
+        {
+            "all2all_backend": "allgather_reducescatter",
+            "data_parallel_size": 1,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "split_case",
+    ["default", "valid_explicit", "missing_attention", "attention_only", "empty"],
+)
+def test_pooling_piecewise_real_config_boundaries(monkeypatch, split_case):
+    from vllm.config import CompilationConfig, CompilationMode, CUDAGraphMode
+
+    monkeypatch.delenv("ASCEND_LAUNCH_BLOCKING", raising=False)
+    canonical = CompilationConfig(
+        mode=CompilationMode.VLLM_COMPILE,
+        cudagraph_mode=CUDAGraphMode.PIECEWISE,
+        splitting_ops=None,
+    )
+    canonical.pass_config.fuse_attn_quant = False
+    canonical.use_inductor_graph_partition = False
+    canonical.set_splitting_ops_for_v1(
+        all2all_backend="allgather_reducescatter", data_parallel_size=1
+    )
+    default_ops = list(canonical.splitting_ops)
+    attention_ops = set(CompilationConfig._attention_ops)
+    split_lists = {
+        "default": None,
+        "valid_explicit": default_ops + ["custom::boundary"],
+        "missing_attention": [op for op in default_ops if op not in attention_ops],
+        "attention_only": list(CompilationConfig._attention_ops),
+        "empty": [],
+    }
+    config = _config()
+    config.model_config.runner_type = "pooling"
+    config.model_config.attn_type = "decoder"
+    config.parallel_config.all2all_backend = "allgather_reducescatter"
+    config.parallel_config.data_parallel_size = 1
+    config.compilation_config = CompilationConfig(
+        mode=CompilationMode.VLLM_COMPILE,
+        cudagraph_mode=CUDAGraphMode.PIECEWISE,
+        splitting_ops=split_lists[split_case],
+    )
+    configure = _configure(monkeypatch, use_real_config=True)
+    if split_case in ("missing_attention", "attention_only"):
+        with pytest.raises(
+            NotImplementedError, match="splitting_ops list is incomplete"
+        ):
+            configure(config)
+        return
+    configure(config)
+    compilation = config.compilation_config
+    assert compilation.backend == "eager"
+    if split_case == "empty":
+        assert compilation.cudagraph_mode == CUDAGraphMode.NONE
+        assert compilation.splitting_ops == []
+    else:
+        assert compilation.cudagraph_mode == CUDAGraphMode.PIECEWISE
+        assert compilation.splitting_ops_contain_attention()
+        assert compilation.splitting_ops_contain_kv_cache_update()
+        expected = default_ops if split_case == "default" else split_lists[split_case]
+        assert compilation.splitting_ops == expected
+
+
+@pytest.mark.parametrize(
+    "runner_type,attn_type", [("generate", "decoder"), ("pooling", "encoder_only")]
+)
+def test_other_attention_piecewise_remains_unsupported(
+    monkeypatch, runner_type, attn_type
+):
+    config = _config()
+    config.model_config.runner_type = runner_type
+    config.model_config.attn_type = attn_type
+    config.compilation_config.cudagraph_mode = "piecewise"
+    with pytest.raises(NotImplementedError, match="pooling models"):
+        _configure(monkeypatch)(config)
+    assert not hasattr(config.compilation_config, "backend")
 
 
 def test_runtime_has_no_accelerator_import_side_effects():
