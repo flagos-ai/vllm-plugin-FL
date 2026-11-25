@@ -28,18 +28,57 @@ def get_ocr_rswa_window(model_config) -> int | None:
     return getattr(model_config.hf_config, "rswa_window", None)
 
 
+def ocr_tp1_optimized(config) -> bool:
+    if not is_unlimited_ocr(config.model_config):
+        return False
+    options = getattr(config, "additional_config", None) or {}
+    enabled = options.get("ocr_tp1_optimized", False)
+    if type(enabled) is not bool:
+        raise ValueError("ocr_tp1_optimized must be a boolean")
+    return enabled
+
+
+def ocr_head_major_kv_enabled(config) -> bool:
+    if not ocr_tp1_optimized(config):
+        return False
+    if (
+        config.parallel_config.tensor_parallel_size != 1
+        or config.model_config.dtype != torch.bfloat16
+        or config.cache_config.cache_dtype not in ("auto", "bfloat16")
+        or getattr(getattr(config, "kv_transfer_config", None), "kv_connector", None)
+    ):
+        raise ValueError("Head-major OCR KV requires TP1 with a local BF16 cache")
+    return True
+
+
+def ocr_prefill_top6_binding():
+    """Resolve the optional operator before the first live forward."""
+    from vllm_fl.dispatch import get_default_manager
+    from vllm_fl.dispatch.binding import OperatorBinding
+
+    binding = OperatorBinding(get_default_manager(), "softmax_topk_unbiased")
+    binding.preflight()
+    return binding
+
+
 def _ocr_flaggems_silu() -> bool:
     from vllm_fl.utils import get_flag_gems_whitelist_blacklist, use_flaggems
 
     whitelist, _ = get_flag_gems_whitelist_blacklist()
     if not use_flaggems():
         if whitelist:
-            raise ValueError("An OCR FlagGems whitelist requires USE_FLAGGEMS=1 and FlagOS preference")
+            raise ValueError(
+                "An OCR FlagGems whitelist requires USE_FLAGGEMS=1 and FlagOS preference"
+            )
         return False
     if set(whitelist or ()) != {"silu_and_mul"}:
-        raise ValueError("Unlimited-OCR requires VLLM_FL_FLAGOS_WHITELIST=silu_and_mul when FlagGems is enabled")
+        raise ValueError(
+            "Unlimited-OCR requires VLLM_FL_FLAGOS_WHITELIST=silu_and_mul when FlagGems is enabled"
+        )
     if os.getenv("VLLM_FL_USE_FLAGGEMS_VLLM", "0").lower() in ("1", "true"):
-        raise ValueError("Unlimited-OCR requires the official flag_gems activation provider")
+        raise ValueError(
+            "Unlimited-OCR requires the official flag_gems activation provider"
+        )
     return True
 
 
@@ -112,7 +151,23 @@ def validate_ocr_config(config, *, device_type, vendor):
         or config.lora_config is not None
     ):
         raise ValueError("Unlimited-OCR supports ordinary TP1 or TP2 without LoRA")
-    if config.scheduler_config.async_scheduling:
+    optimized = ocr_head_major_kv_enabled(config)
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.attention_mask import (
+        rswa_mask_limit_mib,
+    )
+
+    scheduler = config.scheduler_config
+    rows = scheduler.max_num_batched_tokens
+    if not optimized:
+        rows *= scheduler.max_num_seqs
+    if rows * model.max_model_len > (rswa_mask_limit_mib(True) << 20):
+        raise ValueError("The configured OCR batch exceeds the R-SWA mask budget")
+    if config.scheduler_config.async_scheduling and not (
+        parallel.tensor_parallel_size == 1
+        and parallel.pipeline_parallel_size == 1
+        and parallel.data_parallel_size == 1
+        and config.speculative_config is None
+    ):
         raise ValueError("Unlimited-OCR requires synchronous scheduling")
     mode = config.compilation_config.cudagraph_mode
     if mode not in (CUDAGraphMode.NONE, CUDAGraphMode.FULL_DECODE_ONLY):
@@ -134,7 +189,9 @@ def validate_ocr_config(config, *, device_type, vendor):
         or _REQUIRED_OOT.intersection(get_oot_blacklist() or ())
         or (whitelist is not None and not _REQUIRED_OOT.issubset(whitelist))
     ):
-        raise ValueError("Unlimited-OCR requires FL OOT dispatch for all required operators")
+        raise ValueError(
+            "Unlimited-OCR requires FL OOT dispatch for all required operators"
+        )
     return True
 
 

@@ -256,57 +256,32 @@ R-SWA retains the full KV cache and uses a 2,048 MiB mask budget per rank.
 Prefix caching and speculative decoding are disabled. For single-device
 eager serving, use `--devices 0 --tp 1 --eager --max-num-seqs 4`.
 
+For single-device serving with optimized BF16 execution and asynchronous scheduling:
+
+```bash
+python examples/unlimited_ocr/serve.py /path/to/Unlimited-OCR \
+  --devices 0 --tp 1 --optimized --async-scheduling --block-size 256 \
+  --max-num-seqs 64 --max-num-batched-tokens 12288 \
+  --rswa-mask-mib 8192 --gpu-memory-utilization 0.95
+```
+
+`--optimized` sets the vLLM additional configuration option
+`ocr_tp1_optimized=true` for a single rank with a local BF16 KV cache. This
+selects head-major KV storage, expert weight prepacking and optimized
+attention and expert routing. A missing or false option uses the standard
+path. Scheduling is independent: omit `--async-scheduling` for synchronous
+operation. The default port is 10000; use `--port` to override it.
+
 To route the SiLU-and-multiply activation through the official FlagGems package,
 set `USE_FLAGGEMS=1 VLLM_FL_FLAGOS_WHITELIST=silu_and_mul` when launching the
 example. This selects the FL `default.flagos` activation and keeps R-SWA, RoPE
-and MoE on their Ascend routes. The benchmark results below use the default
-torch-npu configuration.
+and MoE on their Ascend routes.
 
 Send one image and a text prompt to `/v1/chat/completions` for
 `Unlimited-OCR`. The example uses a single BOS, Gundam image preprocessing
 (`image_size=640`, `base_size=1024`, `crop_mode=true`) and the FL NGram
-logits processor. Both measurements below set `ngram_size=35` and
-`window_size=128` per request.
-
-#### Validation
-
-The tables show the FL OCR baseline `8f36bf1` followed by the measured FL
-revision `d5aacf5e2002`. The two builds used different pairs of Ascend 910C
-devices. At `d5aacf5e2002`, 298 targeted tests passed, TP2 graph capture and
-replay were verified on both ranks, and TP1 eager serving was verified with
-one image.
-
-Performance used EvalScope 1.14.1 `random_vl` with 1,024 streaming requests per run
-and concurrency 64. Each build ran once per length with zero failures and a
-mean of 1,024 output tokens. Each request included one synthetic 2,048 × 2,048
-RGB image. Generation used a 1,024-token fixed length, seed 42, temperature 0
-and disabled EOS and stop criteria. Server input counts include image and
-template tokens. Total throughput counts server input and output tokens.
-
-| Text tokens | Server input tokens | Output tokens/s | Total tokens/s | Mean TTFT (ms) | Mean TPOT (ms) |
-|------------:|--------------------:|----------------:|---------------:|---------------:|---------------:|
-| 1,024 | 2,938 | 1,826.93 → 1,806.14 | 7,068.64 → 6,988.20 | 2,884.50 → 2,989.70 | 32.17 → 32.46 |
-| 4,096 | 6,010 | 1,531.12 → 1,509.97 | 10,517.45 → 10,372.19 | 2,168.76 → 2,353.82 | 39.54 → 39.94 |
-| 16,384 | 18,298 | 811.07 → 805.77 | 15,304.17 → 15,204.11 | 13,349.97 → 13,599.42 | 65.11 → 65.38 |
-
-OmniDocBench v1.5 used one request per page at concurrency 64 with the
-`document parsing.` prompt, non-streaming generation, temperature 0, seed 1024
-and an 8,192-token output cap. Official `quick_match` scoring covered all
-1,355 Markdown outputs.
-The CDM self-check returned F1 = 1.0. Both builds had zero HTTP failures.
-Scoring included 14 → 16 length-truncated outputs and two empty Markdown
-outputs per build. The edit metrics use a 0–1 scale (lower is better). The
-other scores use a 0–100 scale (higher is better). Overall averages text
-accuracy (`(1 - Text Edit) × 100`), Formula CDM and Table TEDS.
-
-| Metric | Baseline | Measured FL revision |
-|--------|---------:|---------------------:|
-| Text Edit | 0.03970 | 0.03913 |
-| Formula CDM | 91.685 | 91.240 |
-| Table TEDS | 91.033 | 90.682 |
-| Table TEDS-S | 94.640 | 93.946 |
-| Reading-order Edit | 0.04419 | 0.04484 |
-| Overall | 92.916 | 92.670 |
+logits processor. For document recognition, use the prompt `document parsing.`
+and pass `ngram_size=35` and `window_size=128` in the request's `vllm_xargs`.
 
 ### HY4 on NVIDIA
 

@@ -68,6 +68,20 @@ def register_builtins(registry: OpRegistry) -> None:
             vendor="ascend",
             priority=BackendPriority.VENDOR,
         ),
+        OpImpl(
+            op_name="softmax_topk_unbiased",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                backend.softmax_topk_unbiased,
+                lambda: is_avail()
+                and has_npu_operator(
+                    "npu_moe_gating_top_k_softmax_v2", "k", "renorm", "output_softmax"
+                ),
+            ),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
         # Activation
         OpImpl(
             op_name="silu_and_mul",
@@ -138,21 +152,25 @@ def register_builtins(registry: OpRegistry) -> None:
         ),
     ]
 
-    for op_name in ("gdn_decode", "gdn_prefill"):
-        impls.append(OpImpl(
-            op_name=op_name,
+    for op_name in ("gdn_decode", "gdn_prefill", "ocr_expert_prepack"):
+        impls.append(
+            OpImpl(
+                op_name=op_name,
+                impl_id="vendor.ascend",
+                kind=BackendImplKind.VENDOR,
+                fn=_bind_is_available(getattr(backend, op_name), is_avail),
+                vendor="ascend",
+                priority=BackendPriority.VENDOR,
+            )
+        )
+    impls.append(
+        OpImpl(
+            op_name="fused_experts",
             impl_id="vendor.ascend",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(getattr(backend, op_name), is_avail),
+            fn=_bind_is_available(backend.fused_experts, is_avail),
             vendor="ascend",
             priority=BackendPriority.VENDOR,
-        ))
-    impls.append(OpImpl(
-        op_name="fused_experts",
-        impl_id="vendor.ascend",
-        kind=BackendImplKind.VENDOR,
-        fn=_bind_is_available(backend.fused_experts, is_avail),
-        vendor="ascend",
-        priority=BackendPriority.VENDOR,
-    ))
+        )
+    )
     registry.register_many(impls)

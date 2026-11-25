@@ -38,8 +38,20 @@ def main():
     parser.add_argument("--port", type=int, default=10000)
     parser.add_argument("--max-num-seqs", type=int, default=64)
     parser.add_argument("--max-num-batched-tokens", type=int, default=1024)
+    parser.add_argument("--block-size", type=int, choices=(128, 256), default=128)
     parser.add_argument("--rswa-mask-mib", type=int, default=2048)
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.80)
     parser.add_argument("--eager", action="store_true")
+    parser.add_argument(
+        "--async-scheduling",
+        action="store_true",
+        help="Overlap scheduling and execution on one NPU.",
+    )
+    parser.add_argument(
+        "--optimized",
+        action="store_true",
+        help="Enable the optimized local BF16 TP1 runtime.",
+    )
     args = parser.parse_args()
 
     if not re.fullmatch(r"[0-9]+(?:,[0-9]+)*", args.devices):
@@ -52,10 +64,14 @@ def main():
         args.max_num_batched_tokens,
         args.rswa_mask_mib,
     )
-    if not (1 <= seqs <= budget and 1 <= mask <= 8192 and seqs * budget <= mask * 32):
+    if not (1 <= seqs <= budget and 1 <= mask <= 8192):
         parser.error(
-            "R-SWA requires 1 <= sequences <= budget and sequences * budget <= mask MiB * 32"
+            "Expected 1 <= max-num-seqs <= max-num-batched-tokens and 1..8192 MiB of mask memory"
         )
+    if args.optimized and args.tp != 1:
+        parser.error("Optimized OCR serving requires TP1")
+    if args.async_scheduling and args.tp != 1:
+        parser.error("Asynchronous OCR scheduling requires TP1")
     if not args.eager and os.environ.get("ASCEND_LAUNCH_BLOCKING") == "1":
         parser.error("FULL_DECODE_ONLY requires ASCEND_LAUNCH_BLOCKING=0")
 
@@ -88,9 +104,10 @@ def main():
         "--max-model-len=32768",
         f"--max-num-seqs={seqs}",
         f"--max-num-batched-tokens={budget}",
+        f"--block-size={args.block_size}",
         "--enable-chunked-prefill",
-        "--no-async-scheduling",
-        "--gpu-memory-utilization=0.80",
+        "--async-scheduling" if args.async_scheduling else "--no-async-scheduling",
+        f"--gpu-memory-utilization={args.gpu_memory_utilization}",
         "--no-enable-prefix-caching",
         f"--chat-template={CHAT_TEMPLATE}",
         "--mm-processor-cache-gb=0",
@@ -98,6 +115,8 @@ def main():
         '--mm-processor-kwargs={"image_size":640,"base_size":1024,"crop_mode":true}',
         "--logits-processors=vllm_fl.models.ocr_ngram:NGramPerReqLogitsProcessorFL",
     ]
+    if args.optimized:
+        argv.extend(("--additional-config", json.dumps({"ocr_tp1_optimized": True})))
     if args.eager:
         argv.append("--enforce-eager")
     else:

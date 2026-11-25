@@ -29,6 +29,7 @@ class RswaGraphBuffers:
 @dataclass(kw_only=True)
 class RswaGraphParams(GraphParams):
     rswa_buffers: RswaGraphBuffers
+    skip_pages_logged: bool = False
 
     def prepare_shape(self, num_tokens: int) -> None:
         if num_tokens not in self.rswa_buffers.capture_sizes:
@@ -68,6 +69,8 @@ class RswaGraphRuntime(GraphRuntimeController):
             yield
         finally:
             del context.rswa_graph_params
+            if hasattr(context, "rswa_read_lengths"):
+                del context.rswa_read_lengths
             if hasattr(context, "rswa_graph_inputs"):
                 del context.rswa_graph_inputs
 
