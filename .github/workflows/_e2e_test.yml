@@ -141,6 +141,7 @@ jobs:
             --check-models
 
       - name: Run E2E test
+        shell: bash
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
