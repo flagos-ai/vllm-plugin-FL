@@ -8,16 +8,15 @@ import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
 # so calling _fused_moe_pkg.FusedMoE() inside FusedMoEFL would recurse
 # infinitely.  Capturing it here breaks the cycle.
 _OrigFusedMoE = _fused_moe_pkg.FusedMoE
+from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
     UnquantizedFusedMoEMethod,
 )
-from vllm.logger import init_logger
 
 from .fused_moe_utils import select_unquantized_moe_backend_oot
 from vllm_fl.ops.fused_moe.router import replace_router_with_fl
-
 
 logger = init_logger(__name__)
 
@@ -33,6 +32,53 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
                 moe_config=self.moe,
                 prefer_flaggems_experts=True,
             )
+        )
+
+    def _setup_kernel(self, layer, w13, w2):
+        # Keep upstream parameter replacement, layout conversion and gate-config
+        # propagation, including in-place updates of captured parameter storage.
+        first_setup = self.moe_kernel is None
+        super()._setup_kernel(layer, w13, w2)
+        if not first_setup:
+            return
+        from vllm.platforms import current_platform
+
+        if getattr(current_platform, "vendor_name", None) != "ascend":
+            return
+        parallel = self.moe.moe_parallel_config
+        if (
+            not parallel.use_ep
+            or parallel.ep_size <= 1
+            or not 1024 <= self.moe.hidden_dim <= 8192
+        ):
+            return
+        from vllm_fl.distributed.device_communicators.npu_moe_runtime import (
+            is_a3_device,
+        )
+
+        if not is_a3_device():
+            return
+        from .ascend_bf16_experts import AscendBF16DispatchedExperts
+
+        # Explicit model SP keeps its existing AgRs prepare/finalize contract.
+        if not AscendBF16DispatchedExperts._supports_parallel_config(parallel):
+            return
+        if not AscendBF16DispatchedExperts._supports_activation(self.moe.activation):
+            raise NotImplementedError("Unsupported Ascend BF16 dispatched activation")
+        from vllm.config import get_current_vllm_config
+        from vllm.distributed import get_ep_group
+        from vllm.model_executor.layers.fused_moe.modular_kernel import FusedMoEKernel
+
+        from .ascend_prepare_finalize import NpuMoEPrepareAndFinalize
+
+        experts = AscendBF16DispatchedExperts(self.moe, self.moe_quant_config)
+        runtime = get_ep_group().device_communicator.get_moe_runtime(
+            get_current_vllm_config(),
+            device=layer.w13_weight.device,
+        )
+        self.moe_kernel = FusedMoEKernel(
+            NpuMoEPrepareAndFinalize(runtime, self.moe.num_experts),
+            experts,
         )
 
     @property

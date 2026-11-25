@@ -27,6 +27,10 @@ strict: false
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:ascend : Ascend-specific vendor backend
 op_backends:
+  minimax_m3_kernels:
+    - vendor
+  bf16_grouped_experts:
+    - vendor
   # attention_backend: prioritize vendor as FlagGems implementation is incomplete
   attention_backend:
     - vendor
