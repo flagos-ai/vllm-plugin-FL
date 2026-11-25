@@ -15,6 +15,12 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
+# These cases drive the graph-safe cache scatter on a real device; under
+# pytest-xdist they race other workers for the vendor device layer and fail
+# with "CUDA error: unknown error" from the accelerator stream, so the file
+# runs in the serial pass instead.
+pytestmark = pytest.mark.serial
+
 
 @pytest.fixture(autouse=True)
 def require_cuda_cache_device(request):
