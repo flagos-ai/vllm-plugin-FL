@@ -99,7 +99,9 @@ def rotary_embedding_flaggems(
             return query, key
         return q_embed, k_embed
 
-    from flaggems_vllm import apply_rotary_pos_emb as gems_rope_forward
+    from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
+
+    gems_rope_forward = gems_import("apply_rotary_pos_emb")
 
     # The pinned FlagGems-vllm GCU in-place split-half kernel corrupts values
     # for both compact and packed Q/K views. Its out-of-place path preserves

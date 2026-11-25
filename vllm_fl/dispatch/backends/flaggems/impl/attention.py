@@ -9,7 +9,9 @@ from typing import ClassVar
 
 import numpy as np
 import torch
-from flaggems_vllm import flash_attn_varlen_func
+from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
+
+flash_attn_varlen_func = gems_import("flash_attn_varlen_func")
 
 from vllm import envs
 from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config

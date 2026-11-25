@@ -13,6 +13,9 @@ from .impl.inductor import apply_inductor_gcu_patch
 from .impl.kv_zeroer import apply_kv_zeroer_gcu_patch
 from .impl.mamba_copy import apply_mamba_copy_gcu_patch
 from .impl.sampler import apply_sampler_cpu_detour
+from .impl.reference_moe import apply_reference_moe_gcu_patch
+from .impl.fused_sigmoid_gating import apply_fused_sigmoid_gating_gcu_patch
+from .impl.norm_gated_compat import install_rms_norm_gated_opaque
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
@@ -39,6 +42,13 @@ def apply_gcu_patches() -> None:
     apply_mamba_copy_gcu_patch()
     apply_index_fill_gcu_patch()
     apply_inductor_gcu_patch()
+    # Vendor-neutral fallbacks adjusted for GCU only (int32 routing, chunked
+    # per-expert counts, no gather on the sampler hot path).
+    apply_reference_moe_gcu_patch()
+    apply_fused_sigmoid_gating_gcu_patch()
+    # gcu300 Inductor cannot register-allocate the fused gated-RMSNorm kernel;
+    # keep it opaque (no-op unless running on gcu300 / env opt-out).
+    install_rms_norm_gated_opaque()
     _patches_applied = True
 
 

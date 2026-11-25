@@ -39,7 +39,9 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     ):
         return musa_silu_and_mul(x)
 
-    from flaggems_vllm import silu_and_mul as gems_silu_and_mul
+    from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
+
+    gems_silu_and_mul = gems_import("silu_and_mul")
 
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]
@@ -57,7 +59,9 @@ def gelu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
-    from flaggems_vllm import gelu_and_mul
+    from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
+
+    gelu_and_mul = gems_import("gelu_and_mul")
 
     approximate = getattr(obj, "approximate", "none") if obj is not None else "none"
     d = x.shape[-1] // 2

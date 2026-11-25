@@ -262,6 +262,23 @@ try:
 except ImportError:  # vLLM >= 0.28 moved it here
     from vllm.v1.pool.late_interaction_runner import LateInteractionRunner
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+
+
+def _input_batch_kernel_block_sizes_kwarg(kernel_block_sizes: list[int]) -> dict:
+    """Build the optional ``kernel_block_sizes`` kwarg for ``InputBatch``.
+
+    Newer vLLM builds (the vendor 0.30.0 stack used on S60 and upstream builds
+    after the per-group kernel block size change) declare ``kernel_block_sizes``
+    as a required positional parameter, while the vLLM 0.32 builds the plugin
+    was originally rebased onto make it optional. Only pass it when the
+    installed signature accepts it so this code path works on both.
+    """
+    import inspect
+
+    parameters = inspect.signature(InputBatch.__init__).parameters
+    if "kernel_block_sizes" in parameters:
+        return {"kernel_block_sizes": kernel_block_sizes}
+    return {}
 from vllm.v1.worker.gpu_ubatch_wrapper import UBatchWrapper
 from vllm.v1.worker.kv_connector_model_runner_mixin import KVConnectorModelRunnerMixin
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
@@ -869,6 +886,9 @@ class ModelRunnerFL(
             block_sizes=[placeholder_block_size],
             max_num_blocks_per_req=[placeholder_max_num_blocks],
             num_spec_tokens=self.num_spec_tokens,
+            **_input_batch_kernel_block_sizes_kwarg(
+                self._init_kernel_block_sizes
+            ),
             logitsprocs=build_logitsprocs(
                 self.vllm_config,
                 self.device,
@@ -2731,28 +2751,50 @@ class ModelRunnerFL(
                     ],
                 )
 
+            # vLLM >= 0.32 moved the per-layer build calls onto AttentionGroup
+            # (build_metadata / build_metadata_for_cudagraph_capture /
+            # map_to_kernel_block_table). The vendor 0.30 build on S60 still
+            # exposes only the builder-level API (build /
+            # build_for_cudagraph_capture) and no kernel-block table mapping.
+            group_has_build = hasattr(attn_group, "build_metadata")
             if for_cudagraph_capture:
-                attn_metadata_i = attn_group.build_metadata_for_cudagraph_capture(
-                    common_attn_metadata, ubid or 0
-                )
+                if group_has_build:
+                    attn_metadata_i = attn_group.build_metadata_for_cudagraph_capture(
+                        common_attn_metadata, ubid or 0
+                    )
+                else:
+                    attn_metadata_i = builder.build_for_cudagraph_capture(
+                        common_attn_metadata
+                    )
             elif (
                 cache_key in cached_attn_metadata
                 and builder.supports_update_block_table
             ):
+                if hasattr(attn_group, "map_to_kernel_block_table"):
+                    block_table = attn_group.map_to_kernel_block_table(
+                        common_attn_metadata.block_table_tensor, ubid or 0
+                    )
+                else:
+                    block_table = common_attn_metadata.block_table_tensor
                 attn_metadata_i = builder.update_block_table(
                     cached_attn_metadata[cache_key],
-                    attn_group.map_to_kernel_block_table(
-                        common_attn_metadata.block_table_tensor, ubid or 0
-                    ),
+                    block_table,
                     common_attn_metadata.slot_mapping,
                 )
             else:
-                attn_metadata_i = attn_group.build_metadata(
-                    common_attn_metadata,
-                    ubid or 0,
-                    cascade_attn_prefix_len,
-                    **extra_attn_metadata_args,
-                )
+                if group_has_build:
+                    attn_metadata_i = attn_group.build_metadata(
+                        common_attn_metadata,
+                        ubid or 0,
+                        cascade_attn_prefix_len,
+                        **extra_attn_metadata_args,
+                    )
+                else:
+                    attn_metadata_i = builder.build(
+                        common_prefix_len=cascade_attn_prefix_len,
+                        common_attn_metadata=common_attn_metadata,
+                        **extra_attn_metadata_args,
+                    )
                 if builder.supports_update_block_table:
                     cached_attn_metadata[cache_key] = attn_metadata_i
 
@@ -7857,6 +7899,7 @@ class ModelRunnerFL(
                     block_sizes=block_sizes,
                     max_num_blocks_per_req=max_num_blocks,
                     num_spec_tokens=self.num_spec_tokens,
+                    **_input_batch_kernel_block_sizes_kwarg(kernel_block_sizes),
                     logitsprocs=self.input_batch.logitsprocs,
                     logitsprocs_need_output_token_ids=self.input_batch.logitsprocs_need_output_token_ids,
                     is_pooling_model=self.is_pooling_model,
@@ -7905,11 +7948,20 @@ class ModelRunnerFL(
     ) -> dict[str, torch.Tensor]:
         from contextlib import nullcontext
 
-        from vllm.v1.worker.gpu_model_runner import (
-            bind_kv_cache,
-            map_kv_caches_to_kernel_blocks,
-        )
-        from vllm.v1.worker.utils import allocate_kv_cache
+        # ``bind_kv_cache`` lives in vllm.v1.worker.utils before 0.32 and is
+        # re-exported from gpu_model_runner after it; importing the utils
+        # spelling works on both.
+        from vllm.v1.worker.utils import allocate_kv_cache, bind_kv_cache
+
+        try:
+            # vLLM >= 0.32 hands bind_kv_cache a per-kernel-block view of the
+            # cache. The vendor 0.30 build used on S60 predates that and has no
+            # map_kv_caches_to_kernel_blocks / layer_kv_caches parameter.
+            from vllm.v1.worker.gpu_model_runner import (
+                map_kv_caches_to_kernel_blocks,
+            )
+        except ImportError:
+            map_kv_caches_to_kernel_blocks = None
 
         with kv_cache_allocation_context or nullcontext():
             kv_caches = allocate_kv_cache(
@@ -7932,14 +7984,25 @@ class ModelRunnerFL(
         attn_groups = [g for groups in self.attn_groups for g in groups]
         if self.speculative_config and get_pp_group().is_last_rank:
             attn_groups += getattr(self.drafter, "draft_attn_groups", [])
-        bind_kv_cache(
-            kv_caches,
-            self.compilation_config.static_forward_context,
-            self.kv_caches,
-            num_attn_module,
-            kv_cache_groups=kv_cache_config.kv_cache_groups,
-            layer_kv_caches=map_kv_caches_to_kernel_blocks(kv_caches, attn_groups),
-        )
+        if map_kv_caches_to_kernel_blocks is None:
+            bind_kv_cache(
+                kv_caches,
+                self.compilation_config.static_forward_context,
+                self.kv_caches,
+                num_attn_module,
+                kv_cache_groups=kv_cache_config.kv_cache_groups,
+            )
+        else:
+            bind_kv_cache(
+                kv_caches,
+                self.compilation_config.static_forward_context,
+                self.kv_caches,
+                num_attn_module,
+                kv_cache_groups=kv_cache_config.kv_cache_groups,
+                layer_kv_caches=map_kv_caches_to_kernel_blocks(
+                    kv_caches, attn_groups
+                ),
+            )
         return kv_caches
 
     def maybe_add_kv_sharing_layers_to_kv_cache_groups(

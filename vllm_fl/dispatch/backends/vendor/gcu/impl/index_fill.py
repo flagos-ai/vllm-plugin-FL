@@ -10,10 +10,13 @@ from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
 from math import prod
 
-# The private launcher/kernel contract is supported for this release only.
+# The private launcher/kernel contract is supported for these releases only.
 # CI verifies exact release bytes separately in docker/enflame/verify_index_fill.py;
 # comments, formatting and source paths are not runtime API requirements.
+# 5.5.0.dev1 keeps the same index_fill launcher/kernel contract as 5.4.0
+# (checked structurally below), which the local Enflame 5.5 dev build relies on.
 _SUPPORTED_VERSION = "5.4.0"
+_SUPPORTED_VERSIONS = (_SUPPORTED_VERSION, "5.5.0.dev1")
 _MAX_GRID_X = 65535
 _MAX_GRID_Y = 255
 _PATCH_STATE = "_fl_gcu_index_fill_patch"
@@ -177,10 +180,10 @@ def _install_index_fill_gcu_patch(module) -> bool:
         raise RuntimeError(
             "FlagGems version is unavailable for Enflame adapter"
         ) from exc
-    if installed_version != _SUPPORTED_VERSION:
+    if installed_version not in _SUPPORTED_VERSIONS:
         raise RuntimeError(
             f"Unsupported FlagGems version {installed_version} for Enflame adapter; "
-            f"expected {_SUPPORTED_VERSION}"
+            f"expected one of {', '.join(_SUPPORTED_VERSIONS)}"
         )
 
     kernel = getattr(module, "index_fill_kernel", None)

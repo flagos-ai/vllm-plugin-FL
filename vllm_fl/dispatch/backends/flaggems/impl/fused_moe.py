@@ -64,7 +64,9 @@ def moe_align_block_size_flaggems(
 def topk_softmax_flaggems(
     topk_weights, topk_indices, token_expert_indices, gating_output, renormalize=False
 ):
-    from flaggems_vllm import topk_softmax
+    from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
+
+    topk_softmax = gems_import("topk_softmax")
 
     # FlagGems' fused renormalization corrupts the first token on Ascend when
     # the routed token count exceeds 48. The non-renormalizing kernel is
@@ -112,7 +114,9 @@ def invoke_fused_moe_triton_kernel_flaggems(
     block_shape=None,
     B_bias=None,
 ):
-    from flaggems_vllm import invoke_fused_moe_triton_kernel
+    from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
+
+    invoke_fused_moe_triton_kernel = gems_import("invoke_fused_moe_triton_kernel")
 
     invoke_fused_moe_triton_kernel(
         A,
@@ -148,7 +152,9 @@ def grouped_topk_flaggems(
     bias,
     scoring_func=0,
 ):
-    from flaggems_vllm import grouped_topk
+    from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
+
+    grouped_topk = gems_import("grouped_topk")
 
     return grouped_topk(
         scores,
@@ -169,17 +175,22 @@ def moe_sum_flaggems(inp, out):
         # the official GCU kernel; retain the stride-aware provider below.
         # Remove this branch once the pinned provider supports GCU launch
         # limits and passes large-token value and graph-replay checks.
-        from flaggems_vllm.ops.moe_sum import _check_moe_sum_inputs
+        try:
+            from flaggems_vllm.ops.moe_sum import _check_moe_sum_inputs
 
-        _check_moe_sum_inputs(inp, out)
+            _check_moe_sum_inputs(inp, out)
+        except ImportError:
+            # flaggems_vllm 不在时用 flag_gems.moe_sum 自带的输入校验
+            pass
         from flag_gems import moe_sum
 
         moe_sum(inp, out)
         return
 
     try:
-        from flaggems_vllm import moe_sum
+        from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
 
+        moe_sum = gems_import("moe_sum")
         moe_sum(inp, out)
         return
     except Exception:
