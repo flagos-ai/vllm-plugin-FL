@@ -15,6 +15,9 @@
 # FlagOS Runtime 2.3.0 for T-Head PPU 2.1.0.
 ARG THEAD_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-thead-ppu2.1.0:2.3.0@sha256:35fcbd0c3777f0af1f936fc725a91be76279ea77849d192ea11d6f90c12172bc
 
+# Empty fallback for builds that use the package indexes.
+FROM scratch AS wheelhouse
+
 # ---------- base stage ----------
 FROM ${THEAD_BASE_IMAGE} AS base
 
@@ -22,10 +25,12 @@ SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
 ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
+ARG PIP_NO_INDEX=0
 ARG THEAD_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-thead/simple
-ARG VLLM_REQUIREMENT="vllm @ https://resource.flagos.net/repository/flagos-pypi-thead/packages/vllm/0.32.0+flagos/vllm-0.32.0+flagos-py3-none-any.whl#sha256=ab55d53def642e67070b3645ca8f5928e9230f0ff013d35eba9fabc5d7628d12"
+ARG VLLM_REQUIREMENT="vllm @ https://resource.flagos.net/repository/flagos-pypi-thead/packages/vllm/0.32.0+flagos/vllm-0.32.0+flagos-py3-none-any.whl#sha256=445821b41d2494c595a89bc476bdbcf18d70e9c1e78ab5b60b587f5c0454580d"
 ARG FLAGGEMS_REQUIREMENT=flag-gems==5.5.0.dev20261117
 ARG FLAGGEMS_VLLM_REQUIREMENT=flaggems-vllm==0.3.0.dev20261117
+ARG FLAGCX_REQUIREMENT=flagcx==0.14.1+ppu2.1.0
 ARG FLASH_ATTN_REQUIREMENT=flash-attn-3==2.8.2+v0.1.0.ppu2.1.1
 ARG DAILY_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-daily/simple
 
@@ -40,9 +45,10 @@ ENV FLAGCX_PATH=/flagos/lib/python3.12/site-packages/flagcx \
 
 # Resolve the vendor vLLM wheel against the Runtime Torch ABI.
 # Expose Triton to pip only for this installation.
-RUN PYTHONPATH=/opt/triton \
+RUN --mount=type=bind,from=wheelhouse,target=/wheelhouse \
+    PYTHONPATH=/opt/triton \
     PIP_EXTRA_INDEX_URL="${THEAD_INDEX_URL}${EXTRA_INDEX_URL:+ ${EXTRA_INDEX_URL}}" \
-    python -m pip install --no-cache-dir --index-url "${INDEX_URL}" \
+    python -m pip install --no-cache-dir --find-links /wheelhouse --index-url "${INDEX_URL}" \
         "${VLLM_REQUIREMENT}" \
         "torch==2.10.0+v0.1.0.ppu2.1.1" "torchvision==0.25.0+v0.1.0.ppu2.1.1" \
         "torchaudio==2.10.0+v0.1.0.ppu2.1.1" "numpy==1.26.4" \
@@ -50,10 +56,11 @@ RUN PYTHONPATH=/opt/triton \
         wheel packaging pybind11 sqlalchemy
 
 # Install the pinned provider wheels without re-resolving the Runtime stack.
-RUN PIP_EXTRA_INDEX_URL="${DAILY_INDEX_URL}${EXTRA_INDEX_URL:+ ${EXTRA_INDEX_URL}}" \
-    python -m pip install --no-cache-dir --no-deps --index-url "${THEAD_INDEX_URL}" \
+RUN --mount=type=bind,from=wheelhouse,target=/wheelhouse \
+    PIP_EXTRA_INDEX_URL="${DAILY_INDEX_URL}${EXTRA_INDEX_URL:+ ${EXTRA_INDEX_URL}}" \
+    python -m pip install --no-cache-dir --no-deps --find-links /wheelhouse --index-url "${THEAD_INDEX_URL}" \
         "${FLAGGEMS_REQUIREMENT}" "${FLAGGEMS_VLLM_REQUIREMENT}" \
-        "flagcx==0.14.1+ppu2.1.0" "${FLASH_ATTN_REQUIREMENT}"
+        "${FLAGCX_REQUIREMENT}" "${FLASH_ATTN_REQUIREMENT}"
 
 WORKDIR /workspace
 
@@ -70,8 +77,9 @@ RUN --mount=type=bind,from=plugin_source,target=/src,rw \
         python -m pip install --no-deps --no-build-isolation --no-cache-dir /src
 
 # Install the test tools used by UT, FT, E2E and benchmark.
-RUN PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}" \
-    python -m pip install --no-cache-dir --index-url "${INDEX_URL}" \
+RUN --mount=type=bind,from=wheelhouse,target=/wheelhouse \
+    PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}" \
+    python -m pip install --no-cache-dir --find-links /wheelhouse --index-url "${INDEX_URL}" \
         pytest pytest-cov pytest-timeout pytest-json-report "pytest-xdist>=3.0.0" \
         requests openai pillow decorator \
     && python -m pip check

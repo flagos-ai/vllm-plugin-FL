@@ -173,6 +173,8 @@ VERSIONS (override via environment variables):
     HYGON_GIT_CONFIG    Optional Git-only proxy config mounted as a BuildKit secret
     HYGON_VLLM_WHEEL_DIR Optional directory containing one validated empty vLLM wheel
     HYGON_VLLM_WHEEL_SHA256 SHA256 required with HYGON_VLLM_WHEEL_DIR
+  T-Head PPU:
+    THEAD_WHEEL_DIR      Verified wheel directory for an offline build
 
 EXAMPLES:
     # Build CUDA dev image
@@ -379,6 +381,10 @@ elif [[ "${PLATFORM}" == "thead" ]]; then
         --build-arg "PLUGIN_SOURCE_SHA=${source_sha}"
         --build-arg "SOURCE_DATE_EPOCH=${source_epoch}"
     )
+    if [[ -n "${THEAD_WHEEL_DIR:-}" ]]; then
+        [[ -d "${THEAD_WHEEL_DIR}" ]] || err "THEAD_WHEEL_DIR directory does not exist."
+        BUILD_ARGS+=(--build-context "wheelhouse=${THEAD_WHEEL_DIR}" --build-arg "PIP_NO_INDEX=1")
+    fi
     [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
     [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
     for arg in "${EXTRA_BUILD_ARGS[@]}"; do
