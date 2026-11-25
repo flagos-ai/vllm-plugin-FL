@@ -15,6 +15,7 @@ export TRITON_CACHE_DIR="$cache_dir/triton" HF_HOME="$cache_dir/huggingface"
 mkdir -p "$FLAGGEMS_CACHE_DIR" "$TRITON_CACHE_DIR"
 
 git config --global --add safe.directory "$PWD"
+python .github/scripts/install_flaggems_vllm.py --source-archive
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip check
 

@@ -8,5 +8,6 @@ set -euo pipefail
 : "${CUDA_VISIBLE_DEVICES:?CUDA_VISIBLE_DEVICES is not set}"
 
 git config --global --add safe.directory "$PWD"
+python .github/scripts/install_flaggems_vllm.py --source-archive
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip check

@@ -13,6 +13,8 @@ if [[ -n "${FLAGCX_PATH:-}" && -d "$FLAGCX_PATH/build/lib" ]]; then
 fi
 
 git config --global --add safe.directory "$PWD"
+# Runner V2 needs the P800 sampling and grammar providers.
+CI_FLAGGEMS_VLLM_VENDOR=kunlunxin python .github/scripts/install_flaggems_vllm.py --source-archive
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip check
 
