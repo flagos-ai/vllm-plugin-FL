@@ -251,6 +251,21 @@ class PleShortConvAttentionMetadataBuilder(ShortConvAttentionMetadataBuilder):
         **kwargs: Any,
     ) -> PleShortConvAttentionMetadata:
         m = common_attn_metadata
+        if self.use_spec_decode and (
+            num_accepted_tokens is None or num_decode_draft_tokens_cpu is None
+        ):
+            # vLLM 0.24 MRV1 only forwards these kwargs to GDN/Mamba2.
+            # The model-scoped worker hook supplies them without changing
+            # the global backend whitelist or another model's runner.
+            from vllm_fl.worker.qwen3_8_flash_next import get_ple_spec_metadata
+
+            state_metadata = get_ple_spec_metadata()
+            if state_metadata is None:
+                raise RuntimeError(
+                    "PLE MTP metadata was not prepared by the Qwen worker hook"
+                )
+            num_accepted_tokens = state_metadata[0][: m.num_reqs]
+            num_decode_draft_tokens_cpu = state_metadata[1][: m.num_reqs]
         spec_sequence_masks_cpu: torch.Tensor | None = None
         # Detect speculative-decode requests. We use -1 to mark prefill and
         # plain-decode requests, so any value >= 0 is a (multi-query)
@@ -347,6 +362,7 @@ class PleShortConvAttentionMetadataBuilder(ShortConvAttentionMetadataBuilder):
             non_spec_state_indices_tensor = None
             spec_query_start_loc = query_start_loc[: num_spec_decodes + 1]
             non_spec_query_start_loc = None
+            non_spec_query_start_loc_cpu = None
         else:
             # Mixed batch: build a per-token group key consistent with the
             # request grouping above (spec=0 | decode=1 | prefill=2) and a

@@ -14,4 +14,7 @@ coverage.xml
 # Reports
 report*.json
 test-results-*
+
+# Native MetaX host-memory extension build output.
+vllm_fl/_metax_host_memory*.so
 pytest-diagnostics/

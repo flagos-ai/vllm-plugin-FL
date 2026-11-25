@@ -29,6 +29,7 @@ class Qwen3_8FlashNextTextConfig(Qwen3NextConfig):
     model_type = "qwen3_8_flash_next_text"
     base_config_key = "text_config"
     keys_to_ignore_at_inference = ["past_key_values"]
+    supports_qwen38_ngram_context = True
 
     def __init__(
         self,
@@ -250,6 +251,7 @@ class Qwen3_8FlashNextConfig(PretrainedConfig):
             self.text_config = text_config
 
         self.image_token_id = image_token_id
+        self.image_token_index = image_token_id
         self.video_token_id = video_token_id
         self.vision_start_token_id = vision_start_token_id
         self.vision_end_token_id = vision_end_token_id

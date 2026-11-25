@@ -17,7 +17,6 @@ from vllm.model_executor.layers.attention.attention import (
     set_default_quant_scales,
 )
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
-from vllm.model_executor.layers.layernorm import GemmaRMSNorm
 from vllm.model_executor.layers.linear import QKVParallelLinear, RowParallelLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
@@ -41,10 +40,17 @@ from vllm.v1.kv_cache_interface import (
     get_kv_quant_mode,
 )
 
-from ..common.qsa_cache import QSAForwardMetadata, QSAMetadataBuilder
+from ..common.qsa_cache import (
+    PreparedQSAMetadataBuilder,
+    QSAForwardMetadata,
+    QSAMetadataBuilder,
+)
+from .gemma_norm import Qwen38GemmaRMSNorm
 from .indexer_qsa import QSAIndexer
 from .nvidia_fast_paths import has_native_cache_update, native_cache_update
 from .quantization import without_modelopt_fp4
+from .runtime import is_metax
+from vllm_fl.dispatch import resolve_op
 
 
 def _prepared_qsa_token_to_req(
@@ -58,9 +64,7 @@ def _prepared_qsa_token_to_req(
     never prepared. Reading it would route every token to request row zero.
     Call this after the indexer has prepared the compressed metadata.
     """
-    compressed = cast(
-        QSAForwardMetadata, metadata[indexer.compressed_key_cache.prefix]
-    )
+    compressed = cast(QSAForwardMetadata, metadata[indexer.compressed_key_cache.prefix])
     if compressed.num_actual_tokens != num_tokens:
         raise RuntimeError("QSA main and compressed metadata token counts disagree")
     return compressed.token_to_req[:num_tokens]
@@ -134,7 +138,7 @@ class Qwen3_8FlashNextQSAAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_builder_cls() -> type[QSAMetadataBuilder]:
-        return QSAMetadataBuilder
+        return PreparedQSAMetadataBuilder if is_metax() else QSAMetadataBuilder
 
     @staticmethod
     def get_kv_cache_shape(
@@ -261,13 +265,26 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             max_position=config.max_position_embeddings,
             rope_parameters=config.rope_parameters,
         )
-        self.q_norm = GemmaRMSNorm(self.head_dim, eps=config.rms_norm_eps)
-        self.k_norm = GemmaRMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        fused_gemma = bool(
+            vllm_config.additional_config.get("qwen38_fused_gemma_norm", False)
+        )
+        self.q_norm = Qwen38GemmaRMSNorm(
+            self.head_dim, eps=config.rms_norm_eps, use_fused=fused_gemma
+        )
+        self.k_norm = Qwen38GemmaRMSNorm(
+            self.head_dim, eps=config.rms_norm_eps, use_fused=fused_gemma
+        )
 
         mm_config = model_config.multimodal_config
         text_only = mm_config is None or mm_config.language_model_only
+        self._metax = is_metax()
+        if self._metax:
+            self._qsa_store_cache_rows = resolve_op("qsa_store_cache_rows")
+            self._qsa_sparse_paged_attention = resolve_op("qsa_sparse_paged_attention")
+            self._qsa_sparse_split_count = resolve_op("qsa_sparse_split_count")
         self.use_fused_qk_norm_rope_gate = (
-            self.attn_output_gate
+            not self._metax
+            and self.attn_output_gate
             and getattr(self.rotary_emb, "is_neox_style", False)
             and current_platform.is_cuda()
             and text_only
@@ -310,6 +327,17 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         # The global vLLM workspace is shared by sequential layers; retaining
         # these views here prevents a later rows/TopK bucket from resizing the
         # allocation referenced by an already-captured graph.
+        self._qsa_packed_workspaces = {}
+        self._qsa_long_context = bool(
+            vllm_config.additional_config.get("qwen38_qsa_long_context", False)
+            and vllm_config.speculative_config is None
+        )
+        self._qsa_native_attention = bool(
+            self._metax
+            and vllm_config.speculative_config is None
+            and vllm_config.additional_config.get("qwen38_qsa_native_attention", False)
+        )
+        self._qsa_native_graph_workspaces: dict[tuple, dict[str, torch.Tensor]] = {}
         self._qsa_split_workspaces: dict[
             tuple[int, int, int, int, int, int],
             tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -365,7 +393,11 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             positions,
             self.topk_indices_buffer[:num_tokens],
         )
-        token_to_req = _prepared_qsa_token_to_req(metadata, self.indexer, num_tokens)
+        token_to_req = (
+            side_metadata.token_to_req[:num_tokens]
+            if self._metax
+            else _prepared_qsa_token_to_req(metadata, self.indexer, num_tokens)
+        )
         if selected.shape != (
             num_tokens,
             self.indexer.output_width,
@@ -375,39 +407,125 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         if key_cache.dtype != torch.bfloat16 or query.dtype != torch.bfloat16:
             raise NotImplementedError("Qwen3.8-Flash-Next QSA requires BF16 Q/K/V")
 
-        from .ops.qsa import (
-            qsa_prepare_split_workspace,
-            qsa_sparse_paged_attention,
-            qsa_store_kv_cache_rows,
-        )
+        from .ops.qsa import qsa_prepare_split_workspace
 
-        slot_mapping = main_metadata.slot_mapping[:num_tokens]
-        if num_tokens and has_native_cache_update():
-            # Isolated NVIDIA fast path: keep the model-owned QSA backend and
-            # use only vLLM's measured fused cache-update operator.
-            native_cache_update(
-                key[:num_tokens],
-                value[:num_tokens],
-                key_cache,
-                value_cache,
+        if self._metax:
+            slot_mapping = main_metadata.slot_mapping[:num_tokens]
+            flat_width = self.num_kv_heads * self.head_dim
+            flat_key_cache = key_cache.view(
+                key_cache.shape[0], key_cache.shape[1], 1, flat_width
+            )
+            flat_value_cache = value_cache.view(
+                value_cache.shape[0], value_cache.shape[1], 1, flat_width
+            )
+            self._qsa_store_cache_rows(
+                flat_key_cache,
                 slot_mapping,
-                self.kv_cache_dtype,
-                self._k_scale,
-                self._v_scale,
+                key[:num_tokens].reshape(num_tokens, 1, flat_width),
+            )
+            self._qsa_store_cache_rows(
+                flat_value_cache,
+                slot_mapping,
+                value[:num_tokens].reshape(num_tokens, 1, flat_width),
             )
         else:
-            # Cross-vendor fallback: one stride-aware launch writes K and V
-            # without flattening the allocator-owned head/dim layout.
-            qsa_store_kv_cache_rows(
-                key_cache,
-                value_cache,
-                slot_mapping,
-                key[:num_tokens],
-                value[:num_tokens],
+            from .ops.qsa import (
+                qsa_sparse_paged_attention,
+                qsa_store_kv_cache_rows,
             )
 
-        output.zero_()
-        if num_tokens:
+            slot_mapping = main_metadata.slot_mapping[:num_tokens]
+            if num_tokens and has_native_cache_update():
+                # Isolated NVIDIA fast path: keep the model-owned QSA backend and
+                # use only vLLM's measured fused cache-update operator.
+                native_cache_update(
+                    key[:num_tokens],
+                    value[:num_tokens],
+                    key_cache,
+                    value_cache,
+                    slot_mapping,
+                    self.kv_cache_dtype,
+                    self._k_scale,
+                    self._v_scale,
+                )
+            else:
+                # Cross-vendor fallback: one stride-aware launch writes K and V
+                # without flattening the allocator-owned head/dim layout.
+                qsa_store_kv_cache_rows(
+                    key_cache,
+                    value_cache,
+                    slot_mapping,
+                    key[:num_tokens],
+                    value[:num_tokens],
+                )
+
+        full_output = self._metax and getattr(
+            self._qsa_sparse_paged_attention, "_qwen38_full_output", False
+        )
+        if not full_output:
+            output.zero_()
+        elif num_tokens < output.shape[0]:
+            # Packed attention overwrites active rows, including empty rows.
+            output[num_tokens:].zero_()
+        if num_tokens and self._metax:
+            _, split_workspace = qsa_prepare_split_workspace(
+                query[:num_tokens],
+                key_cache,
+                self.topk_indices_buffer.shape[1],
+                self._qsa_split_workspaces,
+                num_splits=self._qsa_sparse_split_count(
+                    query[:num_tokens], key_cache, self.topk_indices_buffer.shape[1]
+                ),
+            )
+            native_workspace = getattr(main_metadata, "native_workspace", None)
+            if native_workspace is not None:
+                from ..common.qsa_workspace import retain_native_graph_workspace
+
+                native_workspace = retain_native_graph_workspace(
+                    self._qsa_native_graph_workspaces,
+                    native_workspace,
+                    query[:num_tokens],
+                    getattr(
+                        metadata[self.indexer.compressed_key_cache.prefix],
+                        "score_columns",
+                        None,
+                    ),
+                )
+            self._qsa_sparse_paged_attention(
+                query[:num_tokens],
+                key_cache,
+                value_cache,
+                self.topk_indices_buffer[:num_tokens],
+                main_metadata.block_table,
+                token_to_req,
+                self.scaling,
+                output[:num_tokens],
+                split_workspace=split_workspace,
+                gate=gate[:num_tokens],
+                packed_workspace_cache=self._qsa_packed_workspaces,
+                prefer_native=self._qsa_native_attention,
+                native_workspace=native_workspace,
+                score_columns=(
+                    getattr(
+                        metadata[self.indexer.compressed_key_cache.prefix],
+                        "score_columns",
+                        None,
+                    )
+                    if self._qsa_long_context
+                    else None
+                ),
+                pack_rows=(
+                    getattr(main_metadata, "pack_rows", None)
+                    if getattr(
+                        metadata[self.indexer.compressed_key_cache.prefix],
+                        "score_columns",
+                        None,
+                    )
+                    == 512
+                    else None
+                ),
+            )
+        elif num_tokens:
             _, split_workspace = qsa_prepare_split_workspace(
                 query[:num_tokens],
                 key_cache,

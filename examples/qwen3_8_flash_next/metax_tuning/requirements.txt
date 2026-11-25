@@ -1,0 +1,3 @@
+flag_gems @ https://github.com/cshujie131-bot/FlagGems/archive/4818d1b178644d80c0cff0c176a339b20a3da161.tar.gz
+flaggems_vllm @ https://github.com/cshujie131-bot/FlagGems-vllm/archive/960fcbe2333044bb94ad35c10212213ca4488ffa.tar.gz
+vllm @ https://github.com/cshujie131-bot/vllm/archive/33f44bfa5f0e197ed84c4a4615de3eeeb6832c8c.tar.gz

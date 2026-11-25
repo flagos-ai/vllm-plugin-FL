@@ -5,10 +5,23 @@
 # is not compiled for this platform.
 
 import logging
+from contextlib import suppress
 
 import torch
 
 logger = logging.getLogger(__name__)
+
+
+def _get_host_device_view(tensor):
+    from vllm_fl.utils import DeviceInfo
+
+    if DeviceInfo().vendor_name == "metax":
+        from vllm_fl.dispatch.backends.vendor.metax.host_memory import (
+            get_cuda_view_from_cpu_tensor,
+        )
+
+        return get_cuda_view_from_cpu_tensor(tensor)
+    return tensor
 
 
 # Fallback implementations for query ops
@@ -18,7 +31,7 @@ _QUERY_OP_IMPLS = [
     ("cutlass_group_gemm_supported", lambda cap: cap >= 90),
     ("cutlass_scaled_mm_supports_fp4", lambda cap: cap >= 100),
     ("weak_ref_tensor", lambda t: t),
-    ("get_cuda_view_from_cpu_tensor", lambda t: t),
+    ("get_cuda_view_from_cpu_tensor", _get_host_device_view),
 ]
 
 
@@ -48,16 +61,16 @@ def register_op_schemas():
     if getattr(register_op_schemas, "_lib", None) is not None:
         return
 
-    try:
+    with suppress(ImportError, OSError):
         import vllm._C  # noqa: F401
+
         return
-    except (ImportError, OSError):
-        pass
 
     # Pre-load mcoplib._C (MetaX) so its TORCH_LIBRARY registrations land
     # before our FRAGMENT definitions.  The hasattr check below will then
     # skip any ops already registered by mcoplib, avoiding c10::Error.
     import importlib.util
+
     if importlib.util.find_spec("mcoplib") is not None:
         try:
             import mcoplib._C  # noqa: F401
@@ -86,15 +99,11 @@ def register_op_schemas():
             logger.debug("Failed to register _C op schema '%s': %s", full_name, e)
 
     for name, fn in _QUERY_OP_IMPLS:
-        try:
+        with suppress(Exception):
             lib.impl(name, fn, "CompositeImplicitAutograd")
-        except Exception:
-            pass
 
     for name, fn in _CUDA_FALLBACK_IMPLS:
-        try:
+        with suppress(Exception):
             lib.impl(name, fn, "CUDA")
-        except Exception:
-            pass
 
     register_op_schemas._lib = lib

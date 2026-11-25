@@ -81,3 +81,75 @@ def test_priority_uses_runtime_platform(monkeypatch, rocm):
     if rocm:
         expected.insert(0, moe.UnquantizedMoeBackend.AITER)
     assert moe._get_priority_backends(config) == expected
+
+
+@pytest.mark.parametrize("direct_output", [False, True])
+def test_silu_output_path_is_executed_once(monkeypatch, direct_output):
+    from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+
+    from vllm_fl.ops.fused_moe import activation as module
+
+    inputs = torch.arange(12, dtype=torch.float32).reshape(2, 6) / 10
+    output = torch.full((2, 3), float("nan"))
+    expected = torch.nn.functional.silu(inputs[:, :3]) * inputs[:, 3:]
+    default = Mock(return_value=expected)
+
+    def write_output(input_tensor, output_tensor):
+        output_tensor.copy_(expected)
+
+    direct = Mock(side_effect=write_output)
+    monkeypatch.setattr(module, "_silu_and_mul", default)
+    result = module.apply_moe_activation(
+        MoEActivation.SILU,
+        output,
+        inputs,
+        silu_out=direct if direct_output else None,
+    )
+    assert result is output
+    torch.testing.assert_close(output, expected)
+    if direct_output:
+        direct.assert_called_once_with(inputs, output)
+        default.assert_not_called()
+    else:
+        default.assert_called_once_with(None, inputs)
+        direct.assert_not_called()
+
+
+def test_silu_output_failure_is_not_retried(monkeypatch):
+    from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+
+    from vllm_fl.ops.fused_moe import activation as module
+
+    default = Mock()
+    direct = Mock(side_effect=RuntimeError("direct output failed"))
+    monkeypatch.setattr(module, "_silu_and_mul", default)
+    with pytest.raises(RuntimeError, match="direct output failed"):
+        module.apply_moe_activation(
+            MoEActivation.SILU,
+            torch.empty(2, 3),
+            torch.ones(2, 6),
+            silu_out=direct,
+        )
+    direct.assert_called_once()
+    default.assert_not_called()
+
+
+def test_clamped_cpu_activation_preserves_clamp_with_output_callback(monkeypatch):
+    from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+
+    from vllm_fl.ops.fused_moe import activation as module
+
+    inputs = torch.ones(2, 6)
+    output = torch.empty(2, 3)
+    clamped = Mock(return_value=output)
+    direct = Mock()
+    default = Mock()
+    monkeypatch.setattr(module, "upstream_apply_moe_activation", clamped)
+    monkeypatch.setattr(module, "_silu_and_mul", default)
+    result = module.apply_moe_activation(
+        MoEActivation.SILU, output, inputs, clamp_limit=7.0, silu_out=direct
+    )
+    assert result is output
+    clamped.assert_called_once_with(MoEActivation.SILU, output, inputs, clamp_limit=7.0)
+    direct.assert_not_called()
+    default.assert_not_called()
