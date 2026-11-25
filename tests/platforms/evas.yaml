@@ -1,0 +1,94 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Evas (LPU) platform configuration.
+#
+# Device facts below are read from the hardware, not assumed:
+#   torch.lpu.get_device_name() -> E100
+#   torch.lpu.get_device_capability() -> (9, 0)
+#   one card, two dies, 48 GB usable
+#
+# The evas backend is registered by vllm_fl and pinned by
+# tests/unit_tests/test_lpu_platform_divergences.py.
+
+# ---- Platform-level settings ------------------------------------------------
+platform: evas
+vendor: evas
+
+device_types:
+  e100:
+    compute_capability: "9.0"
+    memory_gb: 48
+    tags: [lpu, bf16, fp8]
+
+# Default numerical tolerance for result comparison.
+# UNVERIFIED: carried over from the template default until the first LPU e2e
+# run; tighten or relax only against a recorded baseline, not by guess.
+tolerance:
+  inference:
+    default: {rtol: 1e-3, atol: 1e-3}
+    bfloat16: {rtol: 1e-3, atol: 1e-3}
+
+# Device-level overrides for specific test cases (optional).
+device_overrides:
+  e100:
+    llm:
+      # LPU reserves KV for the checkpoint's native window unless capped, and
+      # the profiling dummy forward is sized by max_num_batched_tokens; both
+      # defaults cost minutes or a failed init.
+      max_model_len: 2048
+      max_num_batched_tokens: 512
+      enable_flashinfer_autotune: false
+      enforce_eager: true
+    serve:
+      startup_retries: 120
+
+# Features not supported on this platform.
+# LPU does NOT exclude flaggems: the evas backend resolves its ops through the
+# FlagGems `_evas` overrides, so flaggems-tagged cases are the ones we want.
+unsupported_features: []
+
+# Default environment variables for this platform.
+# Intentionally empty: the LPU toolchain variables are supplied by whoever
+# launches the tests, never by CI defaults.
+env_defaults: {}
+
+# ---- Device-specific test configurations ------------------------------------
+e100:
+  name: "e100"
+  tests:
+    e2e:
+      pr:
+        inference:
+          qwen3:
+            - 06b_tp1_eager
+      nightly:
+        inference:
+          qwen3:
+            - 06b_tp1_eager
+    timeouts:
+      e2e:
+        serving: 180
+        concurrent: 180
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []
+    benchmark:
+      pr:
+        enabled: false
+      nightly:
+        enabled: false

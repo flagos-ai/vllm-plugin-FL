@@ -1,0 +1,89 @@
+# vLLM-FL Dispatch Configuration for Evas (LPU)
+# Auto-loaded when running on LPU hardware (vendor_name == "evas")
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flagos        : Default FlagOS implementation (Triton)
+#   - reference     : PyTorch reference implementation
+#   - vendor        : Any available vendor backend (auto-detected)
+#   - vendor:evas   : EVAS-specific vendor backend
+op_backends:
+  attention_backend:
+    - vendor:evas
+  # silu_and_mul / rms_norm / rotary_embedding need no vendor pin: the flag_os
+  # impls resolve through flag_gems.modules.* (gems_silu_and_mul /
+  # gems_rms_forward / gems_rope_forward) to the top-level _evas overrides
+  # (_evas/fused/silu_and_mul.py / _evas/ops/rms_norm.py /
+  # _evas/fused/rotary_embedding.py).
+  # gelu_and_mul MUST stay on vendor:evas: its flag_os impl imports from the
+  # flag_gems.fused.* submodule (bypassing the top-level override) and hits a
+  # Triton kernel that cannot compile on LPU.
+  gelu_and_mul:
+    - vendor:evas
+  # silu_and_mul_with_clamp is deliberately NOT pinned: the flag_os impl
+  # (vllm_fl/dispatch/backends/flaggems/impl/activation.py) has an LPU path that
+  # is the vLLM native formula, and pinning it would make the OOT-enabled and
+  # OOT-disabled runs diverge numerically.
+  # Generic FusedMoE pipeline ops need no vendor pin: the flag_os impls
+  # (flag_gems) resolve LPU-safe pure-PyTorch bodies via the _evas/fused
+  # top-level overrides (topk_softmax / topk_softplus_sqrt / grouped_topk /
+  # moe_align_block_size(_triton) / invoke_fused_moe_triton_kernel / moe_sum).
+  # flash_mla_with_kvcache MUST go to vendor:evas: the flaggems DEFAULT impl
+  # imports the sm90 Triton kernel from flag_gems.fused (bypassing the evas
+  # pure-PyTorch override), which cannot run on LPU. The evas VENDOR impl points
+  # at the top-level flag_gems.flash_mla_with_kvcache override.
+  flash_mla_with_kvcache:
+    - vendor:evas
+  # DSV4 generic FP8 attention ops: MUST go to vendor:evas. The flaggems DEFAULT
+  # impls are gated off on LPU (via the platform blacklist) and would fall
+  # through to the reference pass stubs. The evas VENDOR impls point at the
+  # top-level flag_gems overrides (the _evas/fused uint8-E4M3 + fp32-scale
+  # pure-PyTorch implementations).
+  # Exception: deepseek_v4_fp8_einsum is NOT pinned here — its flaggems DEFAULT
+  # impl calls flag_gems.fp8_einsum (now provided by _evas/ops/fp8_einsum.py),
+  # so it resolves to default.flagos on LPU.
+  fused_inv_rope_fp8_quant:
+    - vendor:evas
+  fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert:
+    - vendor:evas
+  dequantize_and_gather_k_cache:
+    - vendor:evas
+  # The two DSV4 sparse-indexer reductions have a default.flagos registration
+  # (flaggems impl/mla_ops.py register_mla_operators). On LPU that impl is gated
+  # off by is_available (it requires a CUDA platform) and its kernels would be
+  # the radix-reduction dead end anyway; the evas VENDOR impl points at the
+  # top-level flag_gems overrides. Pin vendor:evas so the order does not depend
+  # on that gate.
+  top_k_per_row_prefill:
+    - vendor:evas
+  top_k_per_row_decode:
+    - vendor:evas
+
+# FlagGems operator blacklist on LPU (ops known to crash / misbehave).
+flagos_blacklist:
+  - masked_fill
+  - masked_fill_
+  - copy_
+  - to_copy
+  - pow_scalar
+  - clamp
+  - clamp_
+  - index_put_
+  - index_put
+  - _index_put_impl_
+  - nonzero
+
+# OOT (Out-of-Tree) operator blacklist
+# These operators will NOT be registered as OOT replacements.
+# oot_blacklist:
+#   - fused_moe

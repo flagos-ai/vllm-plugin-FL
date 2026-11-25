@@ -53,6 +53,8 @@ class Graph:
         graph = torch.ptpu.PTPUGraph
     elif current_platform.device_type == "txda":
         graph = torch.txda.TXDAGraph
+    elif current_platform.device_type == "lpu":
+        graph = torch.lpu.LPUGraph
     else:
         raise NotImplementedError("not support graph")
 

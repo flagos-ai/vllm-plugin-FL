@@ -295,6 +295,12 @@ class OpManager:
                     f"Op '{op_name}' using '{impl_id}' "
                     f"(kind={impl.kind.value}, vendor={impl.vendor})"
                 )
+            elif last_impl_id in self._failed_impls.get(op_name, ()):
+                logger.warning(
+                    f"Op '{op_name}' switched from '{last_impl_id}' to '{impl_id}' "
+                    f"after '{last_impl_id}' failed (kind={impl.kind.value}, "
+                    f"vendor={impl.vendor})"
+                )
             else:
                 logger.info(
                     f"Op '{op_name}' switched from '{last_impl_id}' to '{impl_id}' "

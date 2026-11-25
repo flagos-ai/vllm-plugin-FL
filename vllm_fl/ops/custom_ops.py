@@ -184,6 +184,10 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
 
         apply_kunlunxin_patches()
 
+    if current_platform.device_type == "lpu":
+        from vllm_fl.dispatch.backends.vendor.evas.patch import apply_evas_patches
+        apply_evas_patches()
+
     # --- FusedMoE monkey-patch (vllm >= 0.24.0) ---
     # FusedMoE is a factory function in vllm 0.24.0+, not a PluggableLayer
     # subclass, so it cannot be registered via CustomOp/PluggableLayer.register_oot.
