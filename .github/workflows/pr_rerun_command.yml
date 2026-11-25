@@ -78,6 +78,21 @@ jobs:
             --jq '.[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.createdAt, .databaseId] | @tsv' \
             | sort -r | head -n 5 | cut -f2)
           if [ -z "$run_ids" ]; then
+            # No completed failed/cancelled run for this head yet: fall back
+            # to the newest run in any state. An in-progress run can already
+            # carry failed jobs (e.g. one platform's e2e went red while
+            # others still queue on busy pools); its per-job loop below
+            # re-triggers them — the run-level call refuses in-progress
+            # runs and the fallback handles that.
+            latest_id=$(gh run list --repo "${{ github.repository }}" \
+              --commit "$head_sha" --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty')
+            if [ -n "$latest_id" ]; then
+              echo "No completed failed run; retrying failed jobs of newest run $latest_id (state: any)"
+              run_ids="$latest_id"
+            fi
+          fi
+          if [ -z "$run_ids" ]; then
             echo "::error::No failed or cancelled workflow run found for head SHA $head_sha."
             exit 1
           fi
