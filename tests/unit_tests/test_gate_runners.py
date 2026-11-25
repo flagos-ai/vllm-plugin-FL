@@ -887,6 +887,34 @@ def _assert_platform_merge_preserves_gate_cases():
             assert merged.serve.extra_body == {
                 "chat_template_kwargs": {"enable_thinking": False}
             }
+        # ascend/910c: the unified graph cases receive the Ascend V2
+        # decode-graph engine options from the device override group, while
+        # the eager cases stay free of them (the dedicated *_graph_ascend
+        # model YAMLs are gone).
+        if platform == "ascend" and device == "910c":
+            v2_config = {
+                "backend": "eager",
+                "cudagraph_mode": "FULL_DECODE_ONLY",
+                "cudagraph_capture_sizes": [1, 2, 4],
+                "max_cudagraph_capture_size": 4,
+            }
+            if case.endswith("_graph"):
+                assert merged.engine.get("compilation_config") == v2_config, (
+                    f"ascend/910c/{case}: V2 graph compilation_config missing"
+                )
+                assert merged.serve.extra_engine.get("compilation_config") == (
+                    '{"backend":"eager","cudagraph_mode":"FULL_DECODE_ONLY",'
+                    '"cudagraph_capture_sizes":[1,2,4],'
+                    '"max_cudagraph_capture_size":4}'
+                ), f"ascend/910c/{case}: V2 graph serve extra_engine missing"
+            else:
+                assert "compilation_config" not in merged.engine, (
+                    f"ascend/910c/{case}: compilation_config leaked onto a "
+                    "non-graph case"
+                )
+                assert not (merged.serve.extra_engine or {}).get(
+                    "compilation_config"
+                ), f"ascend/910c/{case}: serve compilation_config leaked"
         # The legacy verification compatibility path stays removed after merge.
         assert not hasattr(merged, "verification"), f"{platform}/{device}/{case}"
 

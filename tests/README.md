@@ -308,6 +308,28 @@ inherited key from the base model YAML. Never override `serve.chat_cases`
 with a list: the deep merge replaces lists wholesale and would discard the
 model YAML's explicit gate inventory.
 
+When only a subset of a device's cases needs extra options (for example
+graph-mode engine settings that must not leak onto eager cases), add an
+`override_groups` list under the same device. Each group carries its own
+`cases` list plus `llm`/`serve` keys, and groups matching the model/case are
+deep-merged on top of the flat block:
+
+```yaml
+device_overrides:
+  910c:
+    cases:
+      - qwen3_6/27b_tp2_eager
+      - qwen3_6/27b_tp2_graph
+    llm:
+      max_model_len: 4096
+    override_groups:
+      - cases:
+          - qwen3_6/27b_tp2_graph
+        llm:
+          compilation_config:
+            backend: eager
+```
+
 ## Platform Config Format
 
 Platform configs (`tests/platforms/<platform>.yaml`) define which tests to run per device type, tolerance settings, and environment defaults.

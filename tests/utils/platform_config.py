@@ -13,6 +13,7 @@ platform YAML files.
 
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -106,6 +107,17 @@ def _resolve_platform_file(
         f"Available platforms: {', '.join(available)}. "
         f"Use template.yaml to create a new platform configuration."
     )
+
+
+def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Return ``base`` deeply merged with ``override`` (dicts fuse, else replace)."""
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge_dict(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
 
 
 @dataclass
@@ -329,6 +341,20 @@ class PlatformConfig:
                   - model_name/e2e_test_case_name
                 llm:
                   gpu_memory_utilization: 0.9
+                override_groups:
+                  - cases:
+                      - model_name/graph_case_name
+                    llm:
+                      compilation_config: {...}
+
+        The flat ``cases``/``llm``/``serve`` block applies to every listed
+        case. ``override_groups`` carries additional case-specific layers:
+        each group lists its own ``cases`` and any ``llm``/``serve`` (or
+        other model-config) keys; groups whose cases contain this model/case
+        are deep-merged on top of the flat block in list order. This lets one
+        device share base overrides while giving a subset of cases (e.g.
+        graph-mode cases) extra engine options without duplicating model
+        YAML files.
 
         The ``tolerance`` key under the same device remains reserved for
         numerical tolerance overrides and is not treated as a model override.
@@ -337,19 +363,48 @@ class PlatformConfig:
         if not isinstance(dev_override, dict):
             return {}
 
+        case_key = f"{model}/{case}"
+        merged: dict[str, Any] = {}
+
         cases = dev_override.get("cases", []) or []
         if not isinstance(cases, list):
             raise TypeError(f"device_overrides.{self.device}.cases must be a list")
+        if case_key in cases:
+            merged.update(
+                {
+                    key: value
+                    for key, value in dev_override.items()
+                    if key not in {"cases", "tolerance", "override_groups"}
+                }
+            )
 
-        case_key = f"{model}/{case}"
-        if case_key not in cases:
-            return {}
+        groups = dev_override.get("override_groups", []) or []
+        if not isinstance(groups, list):
+            raise TypeError(
+                f"device_overrides.{self.device}.override_groups must be a list"
+            )
+        for group in groups:
+            if not isinstance(group, dict):
+                raise TypeError(
+                    f"device_overrides.{self.device}.override_groups entries "
+                    "must be dicts"
+                )
+            group_cases = group.get("cases", []) or []
+            if not isinstance(group_cases, list):
+                raise TypeError(
+                    f"device_overrides.{self.device}.override_groups[].cases "
+                    "must be a list"
+                )
+            if case_key in group_cases:
+                for key, value in group.items():
+                    if key == "cases":
+                        continue
+                    if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                        merged[key] = _deep_merge_dict(merged[key], value)
+                    else:
+                        merged[key] = copy.deepcopy(value)
 
-        return {
-            key: value
-            for key, value in dev_override.items()
-            if key not in {"cases", "tolerance"}
-        }
+        return merged
 
     def get_e2e_tests(self) -> E2eTestConfig:
         """Return e2e test configuration for the active device."""

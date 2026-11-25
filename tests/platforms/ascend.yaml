@@ -47,15 +47,15 @@ tolerance:
 
 # Device-level overrides for specific test cases (optional).
 # The vLLM 0.32 matrix selects Ascend V2 eager and FULL_DECODE_ONLY cases.
-# Graph compilation settings live only in the Ascend graph case files.
-# The legacy FL runner retains separate Ascend decode-graph support.
+# The graph cases run the common graph model YAMLs; the V2 decode-graph
+# compilation options live in the override group below.
 device_overrides:
   910c:
     cases:
       - qwen3_6/27b_tp2_eager
       - qwen3_6/35b_a3b_tp2_eager
-      - qwen3_6/27b_tp2_graph_ascend
-      - qwen3_6/35b_a3b_tp2_graph_ascend
+      - qwen3_6/27b_tp2_graph
+      - qwen3_6/35b_a3b_tp2_graph
     llm:
       max_model_len: 4096
       max_num_batched_tokens: 4096
@@ -74,6 +74,26 @@ device_overrides:
         - "--no-enable-prefix-caching"
       stream: true
       max_tokens: 1024
+
+    override_groups:
+      # The two graph cases additionally run the Ascend V2 decode-graph
+      # engine options that used to live in the dedicated
+      # qwen3_6/*_tp2_graph_ascend model YAMLs (now unified onto the common
+      # graph cases). The eager cases must not receive these options.
+      - cases:
+          - qwen3_6/27b_tp2_graph
+          - qwen3_6/35b_a3b_tp2_graph
+        llm:
+          compilation_config:
+            backend: eager
+            cudagraph_mode: FULL_DECODE_ONLY
+            cudagraph_capture_sizes: [1, 2, 4]
+            max_cudagraph_capture_size: 4
+        serve:
+          extra_engine:
+            # The shared serve CLI adapter requires JSON for structured
+            # engine options.
+            compilation_config: '{"backend":"eager","cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4],"max_cudagraph_capture_size":4}'
 
 # Features not supported on this platform.
 # Test cases whose model name contains any of these strings will be skipped.
@@ -101,39 +121,39 @@ env_defaults:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
-            - 27b_tp2_graph_ascend
-            - 35b_a3b_tp2_graph_ascend
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_graph
         serving:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
-            - 27b_tp2_graph_ascend
-            - 35b_a3b_tp2_graph_ascend
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_graph
         concurrent:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
-            - 27b_tp2_graph_ascend
-            - 35b_a3b_tp2_graph_ascend
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
-            - 27b_tp2_graph_ascend
-            - 35b_a3b_tp2_graph_ascend
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_graph
         serving:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
-            - 27b_tp2_graph_ascend
-            - 35b_a3b_tp2_graph_ascend
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_graph
         concurrent:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
-            - 27b_tp2_graph_ascend
-            - 35b_a3b_tp2_graph_ascend
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_graph
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
