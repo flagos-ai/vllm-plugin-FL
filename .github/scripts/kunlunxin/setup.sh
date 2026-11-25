@@ -15,7 +15,14 @@ fi
 git config --global --add safe.directory "$PWD"
 # Runner V2 needs the P800 sampling and grammar providers.
 CI_FLAGGEMS_VLLM_VENDOR=kunlunxin python .github/scripts/install_flaggems_vllm.py --source-archive
-python -m pip install --no-build-isolation --no-deps -e .
+# Rebuild the native extension for the checkout used by this test run.
+torch_package="$(python -c 'from importlib.util import find_spec; print(find_spec("torch").submodule_search_locations[0])')"
+torch_dir="$torch_package/share/cmake/Torch"
+test -f "$torch_dir/TorchConfig.cmake"
+cuda_home="${CUDA_HOME:-/usr/local/cuda}"
+VLLM_VENDOR=cuda PATH="$cuda_home/bin:$PATH" CUDACXX="$cuda_home/bin/nvcc" \
+  CMAKE_ARGS="-DTorch_DIR=$torch_dir" \
+  python -m pip install --no-build-isolation --no-deps -e .
 python -m pip check
 
 python - <<'PYCODE'
@@ -26,6 +33,7 @@ import flag_gems  # noqa: F401
 import torch
 import triton
 import vllm_fl
+import vllm_fl._C  # noqa: F401
 from vllm.platforms import current_platform
 
 assert version("vllm") in {"0.32.0+flagos", "0.32.0+empty"}, version("vllm")

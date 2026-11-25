@@ -14,6 +14,8 @@
 
 # FlagOS Runtime 2.3.0 for Kunlunxin XRE 5.37.1.
 ARG KUNLUNXIN_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-kunlunxin-xre5.37.1:2.3.0@sha256:cc0deb9c09cd49977e754892e85f4414835d142379949cc2d66261f63b47959d
+
+# ---------- base stage ----------
 FROM ${KUNLUNXIN_BASE_IMAGE} AS base
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
@@ -44,7 +46,8 @@ ENV GEMS_VENDOR=kunlunxin \
     USE_FLAGGEMS=1 \
     VLLM_FL_PREFER=flagos
 
-# Install the vendor-provided, Python 3.10-compatible vLLM wheel.
+# Resolve the vendor vLLM wheel against the Runtime Torch ABI.
+# Expose Triton to pip only for this installation.
 RUN PYTHONPATH=/opt/triton \
     PIP_EXTRA_INDEX_URL="${KUNLUNXIN_INDEX_URL}${EXTRA_INDEX_URL:+ $EXTRA_INDEX_URL}" \
     python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
@@ -53,8 +56,10 @@ RUN PYTHONPATH=/opt/triton \
         "torch==2.9.0+cu129" "torchvision==0.24.0+cu129" "torchaudio==2.9.0+cu129" \
         "numpy==1.26.4" "regex==2026.4.4"
 
-# Runner V2 on P800 uses this provider's sampling and grammar operators.
-RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+# Install build tools and the FlagGems stack.
+# P800 Runner V2 needs the pinned provider for sampling and grammar masking.
+RUN PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}" \
+    python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
         "setuptools>=77.0.3,<81.0.0" "setuptools-scm>=8" wheel \
         packaging pybind11 pyyaml sqlalchemy "cmake>=3.26" \
     && python -m pip install --no-cache-dir --no-deps --index-url "${DAILY_INDEX_URL}" \
@@ -62,29 +67,55 @@ RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.
     && python -m pip install --no-cache-dir --no-deps --no-build-isolation \
         "flaggems-vllm @ https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/${FLAGGEMS_VLLM_COMMIT}#sha256=${FLAGGEMS_VLLM_SHA256}"
 
-# Build the native plugin extension against the Runtime Torch.
-COPY . /opt/vllm-plugin-FL
-RUN SETUPTOOLS_SCM_PRETEND_VERSION="0.5.0.dev0+g${PLUGIN_SOURCE_SHA}.xre5.37.1" \
-       VLLM_VENDOR=cuda \
-       PATH="/usr/local/cuda/bin:${PATH}" \
-       CUDACXX=/usr/local/cuda/bin/nvcc \
-       CMAKE_ARGS="-DTorch_DIR=$(python -c 'import torch.utils; print(torch.utils.cmake_prefix_path)' 2>/dev/null | tail -1)/Torch" \
-       python -m pip wheel --no-build-isolation --no-deps --no-cache-dir \
-           -w /opt/kunlunxin-wheels /opt/vllm-plugin-FL
+# Install the plugin's model-loading dependency.
+RUN PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}" \
+    python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+        "modelscope==1.35.3"
 
-RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
-        "modelscope==1.35.3" \
-    && python -m pip install --no-deps --force-reinstall /opt/kunlunxin-wheels/vllm_plugin_fl-*.whl \
+WORKDIR /workspace
+
+# ---------- plugin wheel stage ----------
+FROM base AS plugin-wheel
+
+# Build the native extension against the Runtime Torch using the archived checkout.
+WORKDIR /src
+COPY pyproject.toml setup.py README.md LICENSE ./
+COPY csrc ./csrc
+COPY vllm_fl ./vllm_fl
+RUN torch_package="$(python -c 'from importlib.util import find_spec; print(find_spec("torch").submodule_search_locations[0])')" \
+    && torch_dir="${torch_package}/share/cmake/Torch" \
+    && test -f "${torch_dir}/TorchConfig.cmake" \
+    && cuda_home="${CUDA_HOME:-/usr/local/cuda}" \
+    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="0.5.0.dev0+g${PLUGIN_SOURCE_SHA}.xre5.37.1" \
+        VLLM_VENDOR=cuda PATH="${cuda_home}/bin:${PATH}" CUDACXX="${cuda_home}/bin/nvcc" \
+        CMAKE_ARGS="-DTorch_DIR=${torch_dir}" \
+        python -m pip wheel --no-build-isolation --no-deps --no-cache-dir -w /wheels .
+
+# ---------- runtime stage ----------
+FROM base AS runtime
+
+# Install the wheel without copying the build checkout into the runtime.
+RUN --mount=type=bind,from=plugin-wheel,source=/wheels,target=/wheels \
+    python -m pip install --no-deps --no-index --force-reinstall /wheels/vllm_plugin_fl-*.whl \
     && python -m pip check
 
-FROM base AS ci
-RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+# ---------- ci stage ----------
+FROM runtime AS ci
+
+# Install the test tools used by UT, FT, E2E and benchmark.
+RUN PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}" \
+    python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
         pytest pytest-cov pytest-timeout pytest-json-report pytest-xdist \
         requests openai pillow decorator pyyaml sqlalchemy pybind11 \
     && python -m pip check
 
+# ---------- dev stage ----------
 FROM ci AS dev
-RUN python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
+
+# Install developer tools on top of the CI environment.
+RUN PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}" \
+    python -m pip install --no-cache-dir --index-url "${INDEX_URL:-https://pypi.org/simple}" \
         pre-commit ruff
 
-FROM base AS release
+# ---------- release stage ----------
+FROM runtime AS release

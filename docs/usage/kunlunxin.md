@@ -39,34 +39,27 @@ bash docker/build.sh --platform kunlunxin --target ci \
   --build-arg "KUNLUNXIN_VLLM_REQUIREMENT=vllm @ $WHEEL_URL#sha256=$WHEEL_SHA256"
 ```
 
-The recipe builds `vllm_fl._C` against the Runtime's Torch. CI installs the
-checkout with the image's existing dependencies. The Runtime's Bash profile
-selects FlagTree for execution.
+The build archives the repository's committed HEAD and compiles `vllm_fl._C`
+against the Runtime's Torch. CI rebuilds the extension from the test checkout
+and checks that it can be imported. The Runtime's Bash profile selects
+FlagTree for execution.
 
 ## Start a service
 
-From the plugin checkout, archive the commit you want to run. Select four
-available cards and mount the model directory read-only.
+Use an image built from the commit you want to run. Select four available
+cards and mount the model directory read-only.
 
 ```sh
-PLUGIN_ARCHIVE=$(mktemp --suffix=.tar.gz)
-git archive --format=tar.gz -o "$PLUGIN_ARCHIVE" HEAD
 docker run --rm -it --ipc=host \
   --device /dev/xpuctrl --device /dev/xpu0 --device /dev/xpu1 \
   --device /dev/xpu2 --device /dev/xpu3 \
   -p 127.0.0.1:8000:8000 -v /data/models:/data/models:ro \
-  -v "$PLUGIN_ARCHIVE:/tmp/vllm-plugin-fl.tar.gz:ro" \
   --entrypoint /bin/bash "$KUNLUNXIN_IMAGE"
 ```
 
-In the container's Bash session, install the plugin using the preinstalled
-dependencies.
+In the container's Bash session, start the service using the installed plugin.
 
 ```sh
-PLUGIN_SOURCE=$(mktemp -d)
-tar -xzf /tmp/vllm-plugin-fl.tar.gz -C "$PLUGIN_SOURCE"
-SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.dev0 python -m pip install \
-  --no-index --no-deps --no-build-isolation "$PLUGIN_SOURCE"
 export GEMS_VENDOR=kunlunxin
 export VLLM_PLUGINS=fl
 export USE_FLAGGEMS=1

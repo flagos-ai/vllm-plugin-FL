@@ -173,9 +173,6 @@ VERSIONS (override via environment variables):
     HYGON_GIT_CONFIG    Optional Git-only proxy config mounted as a BuildKit secret
     HYGON_VLLM_WHEEL_DIR Optional directory containing one validated empty vLLM wheel
     HYGON_VLLM_WHEEL_SHA256 SHA256 required with HYGON_VLLM_WHEEL_DIR
-  T-Head PPU:
-    THEAD_VLLM_VERSION   vLLM empty-mode version (default: ${THEAD_VLLM_VERSION})
-    THEAD_FLAGTREE_VERSION PPU FlagTree/Triton wheel version (default: ${THEAD_FLAGTREE_VERSION})
 
 EXAMPLES:
     # Build CUDA dev image
@@ -197,7 +194,8 @@ EXAMPLES:
     # Build the Iluvatar CoreX 5.0.1 CI image on FlagOS Runtime 2.3.0
     # (the plugin is built from PLUGIN_SOURCE_SHA, default: HEAD)
     ./build.sh --platform iluvatar --target ci
-    # Build T-Head PPU CI image from pre-downloaded wheels
+    # Build the T-Head PPU CI image on FlagOS Runtime 2.3.0
+    ./build.sh --platform thead --target ci
 
     # Build MetaX CI image
     ./build.sh --platform metax --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
@@ -381,6 +379,8 @@ elif [[ "${PLATFORM}" == "thead" ]]; then
         --build-arg "PLUGIN_SOURCE_SHA=${source_sha}"
         --build-arg "SOURCE_DATE_EPOCH=${source_epoch}"
     )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
     for arg in "${EXTRA_BUILD_ARGS[@]}"; do
         case "${arg}" in
             PLUGIN_SOURCE_SHA|PLUGIN_SOURCE_SHA=*|SOURCE_DATE_EPOCH|SOURCE_DATE_EPOCH=*)
@@ -431,7 +431,14 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     BUILD_CONTEXT="${SCRIPT_DIR}/.."
     PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION}"
     VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION}"
+    DOCKERFILE="docker/kunlunxin/Dockerfile"
     PLUGIN_SOURCE_SHA="$(git -C "${BUILD_CONTEXT}" rev-parse HEAD)"
+    for arg in "${EXTRA_BUILD_ARGS[@]}"; do
+        case "${arg}" in
+            PLUGIN_SOURCE_SHA|PLUGIN_SOURCE_SHA=*)
+                err "Kunlunxin PLUGIN_SOURCE_SHA is set to the archived repository HEAD." ;;
+        esac
+    done
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
@@ -442,7 +449,7 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
         --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-ci"
+        IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "iluvatar" ]]; then
     PYTHON_VERSION="${ILUVATAR_PYTHON_VERSION}"
@@ -572,7 +579,7 @@ docker_build() {
         "$1"
 }
 
-if [[ "${PLATFORM}" == "hygon" || "${PLATFORM}" == "iluvatar" ]]; then
+if [[ "${PLATFORM}" == "hygon" || "${PLATFORM}" == "iluvatar" || "${PLATFORM}" == "kunlunxin" ]]; then
     git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | docker_build -
 else
     docker_build "${BUILD_CONTEXT}"
