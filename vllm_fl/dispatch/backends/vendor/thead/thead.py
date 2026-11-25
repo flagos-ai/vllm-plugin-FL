@@ -64,6 +64,66 @@ class TheadBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def mla_prefill_is_available(self):
+        from .impl.mla_prefill import is_available
+
+        return self.is_available() and is_available()
+
+    def mla_prefill(self, **kwargs):
+        from .impl.mla_prefill import mla_prefill_thead
+
+        return mla_prefill_thead(**kwargs)
+
+    def bf16_indexer_cache_write(self, *args, **kwargs):
+        from .impl.native_extensions import bf16_indexer_cache_write
+
+        return bf16_indexer_cache_write(*args, **kwargs)
+
+    def dynamic_per_token_quant_int8(self, *args, **kwargs):
+        from .impl.native_extensions import dynamic_per_token_quant_int8
+        return dynamic_per_token_quant_int8(*args, **kwargs)
+
+    def moe_align_block_size(self, *args, **kwargs):
+        from .impl.native_extensions import moe_align_block_size
+        return moe_align_block_size(*args, **kwargs)
+
+    def moe_sum(self, *args, **kwargs):
+        from .impl.native_extensions import moe_sum
+        return moe_sum(*args, **kwargs)
+
+    def topk_softmax(self, *args, **kwargs):
+        from .impl.native_extensions import topk_softmax
+        return topk_softmax(*args, **kwargs)
+
+    def grouped_topk(self, *args, **kwargs):
+        from .impl.native_extensions import grouped_topk
+        return grouped_topk(*args, **kwargs)
+
+    def native_cache_ops_are_available(self) -> bool:
+        from .impl.native_extensions import native_extension_is_available
+        return self.is_available() and native_extension_is_available(
+            "cache", "_C_cache_ops::concat_and_cache_mla"
+        )
+
+    def native_dynamic_quant_is_available(self) -> bool:
+        from .impl.native_extensions import native_extension_is_available
+        return self.is_available() and native_extension_is_available(
+            "core", "_C::dynamic_scaled_int8_quant"
+        )
+
+    def native_moe_ops_are_available(self) -> bool:
+        from .impl.native_extensions import native_extension_is_available
+        required = (
+            "_moe_C::grouped_topk",
+            "_moe_C::topk_softmax",
+            "_moe_C::moe_align_block_size",
+            "_moe_C::moe_sum",
+        )
+        return self.is_available() and all(
+            native_extension_is_available("moe", op_name)
+            for op_name in required
+        )
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """SiLU activation followed by element-wise multiplication."""
         from vllm.model_executor.layers.activations import silu_and_mul
@@ -111,6 +171,12 @@ class TheadBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        if use_mla and use_sparse:
+            return (
+                "vllm_fl.dispatch.backends.vendor.thead.impl.mla."
+                "TheadMLASparseBackend"
+            )
+
         if use_mla or use_sparse:
             # Fall back to standard FLASH_ATTN for MLA/sparse
             from vllm.v1.attention.backends.registry import AttentionBackendEnum

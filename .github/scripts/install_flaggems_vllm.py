@@ -8,9 +8,10 @@ import sys
 from importlib.metadata import PackageNotFoundError, distribution, version
 
 # Public HY4/GLM APIs, portable math/constexpr hints, and Kunlunxin GLM fixes.
-# Includes library main and flagos-ai/FlagGems-vllm#941.
-COMMIT = "80a8e9716abed1bac3fc0ba5fd4e9f650ae3f989"
-REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
+# Includes library main, flagos-ai/FlagGems-vllm#941, and the non-TLE
+# Top-k layout/Hygon counter fixes from flagos-ai/FlagGems-vllm#1099.
+COMMIT = "a3f87a1beecf8a02bf65a356510b7f7f3169faf2"
+REPOSITORY = "https://github.com/ZenithJoyH/FlagGems-vllm.git"
 RUNTIME_PACKAGES = ("torch", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
 
@@ -56,12 +57,12 @@ def main():
             f"flaggems-vllm @ git+{REPOSITORY}@{COMMIT}",
         )
     if not source_is_installed():
-        raise RuntimeError(f"FlagGems-vllm must come from upstream commit {COMMIT}")
+        raise RuntimeError(f"FlagGems-vllm must come from pinned commit {COMMIT}")
     after = {name: package_version(name) for name in RUNTIME_PACKAGES}
     if after != before:
         raise RuntimeError(f"CI runtime dependencies changed: {before} -> {after}")
     print(
-        f"FlagGems-vllm: upstream commit {COMMIT}, "
+        f"FlagGems-vllm: pinned commit {COMMIT}, "
         f"package metadata {package_version('flaggems-vllm')}"
     )
 

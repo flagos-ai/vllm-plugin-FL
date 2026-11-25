@@ -364,6 +364,11 @@ class PlatformFL(Platform):
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 
+        if cls.vendor_name == "thead":
+            from vllm_fl.attention.mla_prefill import configure_mla_prefill
+
+            configure_mla_prefill(vllm_config)
+
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         cache_config = vllm_config.cache_config
