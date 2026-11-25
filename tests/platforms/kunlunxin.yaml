@@ -55,15 +55,9 @@ device_overrides:
       extra_args:
         - "--reasoning-parser"
         - "qwen3"
-      chat_cases:
-        - name: text
-          messages:
-            - role: "user"
-              content: "The capital of France is"
-          expected: "Paris"
-        - name: image
-          generated_image: true
-          prompt: "Describe all visible text, colors, and shapes in English."
+      # No serve.chat_cases override here: the model YAML now carries the
+      # explicit 26-case gate inventory, and a list override would replace
+      # it wholesale during ModelConfig deep merge.
       extra_body:
         chat_template_kwargs:
           enable_thinking: false
@@ -88,7 +82,13 @@ p800:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
-        adaptation_gate:
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        concurrent:
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
@@ -101,7 +101,7 @@ p800:
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
-        adaptation_gate:
+        serving:
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
@@ -110,11 +110,13 @@ p800:
         concurrent:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
     timeouts:
       e2e:
         inference: 180
-        adaptation_gate: 180
+        serving: 180
         concurrent: 180
     functional:
       include: "*"

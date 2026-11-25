@@ -28,13 +28,14 @@ from tests.e2e_tests.adaptation_gate.gate_contract import (
     QUALITY_CHECKS,
     SCENARIOS,
     append_loopback_no_proxy,
-    build_server_args,
-    format_gate_progress,
+    ensure_clean_gate_directory,
+    ensure_gate_server_alive,
     gate_results_root,
+    gate_run_id,
     resolve_request_timeout,
-    summarize_gate_progress,
     temporary_environment,
     validate_gate_documents,
+    validate_scenario_documents,
 )
 from tests.run import _MODEL_E2E_TASKS, TestCase, TestRunner
 from tests.utils.platform_config import E2eTestConfig, PlatformConfig
@@ -81,11 +82,41 @@ def test_contract_accepts_original_26_requests_and_260_checks(tmp_path):
     }
 
 
+def test_split_job_contracts_preserve_26_requests_and_260_checks(tmp_path):
+    _write_valid_documents(tmp_path)
+    serving = (("text_single", 1), ("image_single", 1))
+    concurrent = (
+        ("text_concurrent_8", 8),
+        ("image_concurrent_8", 8),
+        ("mixed_concurrent_8", 8),
+    )
+    serving_dir = tmp_path / "serving"
+    concurrent_dir = tmp_path / "concurrent"
+    serving_dir.mkdir()
+    concurrent_dir.mkdir()
+    for scenario, _ in serving:
+        (serving_dir / f"{scenario}.json").write_text(
+            (tmp_path / f"{scenario}.json").read_text()
+        )
+    for scenario, _ in concurrent:
+        (concurrent_dir / f"{scenario}.json").write_text(
+            (tmp_path / f"{scenario}.json").read_text()
+        )
+
+    serving_result = validate_scenario_documents(serving_dir, serving)
+    concurrent_result = validate_scenario_documents(concurrent_dir, concurrent)
+
+    assert serving_result["logical_requests"] == 2
+    assert serving_result["checks"] == 20
+    assert concurrent_result["logical_requests"] == 24
+    assert concurrent_result["checks"] == 240
+
+
 def test_contract_rejects_missing_scenario(tmp_path):
     _write_valid_documents(tmp_path)
     (tmp_path / "image_single.json").unlink()
 
-    with pytest.raises(AssertionError, match="five original scenarios"):
+    with pytest.raises(AssertionError, match="unexpected scenario set"):
         validate_gate_documents(tmp_path)
 
 
@@ -171,50 +202,22 @@ def test_request_timeout_rejects_invalid_values(value):
 
 
 def test_gate_progress_is_log_friendly_for_complete_contract(tmp_path):
-    _write_valid_documents(tmp_path)
+    """The live total log line reports the real counters."""
+    from tests.e2e_tests.adaptation_gate.gate_contract import format_gate_total_log
 
-    summary = summarize_gate_progress(tmp_path)
+    _write_valid_documents(tmp_path)
+    summary = validate_gate_documents(tmp_path)
 
     assert summary["passed"] is True
-    assert format_gate_progress("total", summary) == (
-        "[Gate] total: PASS; scenarios=5/5; requests=26/26 passed "
-        "(26 observed); checks=260/260 passed (260 observed)"
+    assert format_gate_total_log("serving", summary) == (
+        "[Gate] serving total: PASS; requests=26/26; checks=260/260"
     )
-
-
-def test_gate_progress_exposes_missing_checks_without_asserting(tmp_path):
-    _write_valid_documents(tmp_path)
-    document = _document(tmp_path, "text_single")
-    document["output"][0]["passed"] = False
-    document["output"][0]["checks"] = {}
-    _replace_document(tmp_path, "text_single", document)
-
-    assert summarize_gate_progress(tmp_path) == {
-        "expected_scenarios": 5,
-        "observed_scenarios": 5,
-        "expected_requests": 26,
-        "observed_requests": 26,
-        "passed_requests": 25,
-        "expected_checks": 260,
-        "observed_checks": 250,
-        "passed_checks": 250,
-        "passed": False,
-    }
-
-
-def test_gate_progress_can_report_one_scenario(tmp_path):
-    _write_valid_documents(tmp_path)
-
-    summary = summarize_gate_progress(tmp_path, "image_concurrent_8")
-
-    assert summary["observed_scenarios"] == 1
-    assert summary["passed_requests"] == 8
-    assert summary["passed_checks"] == 80
 
 
 def test_gate_results_root_uses_safe_unique_components(tmp_path):
     eager = gate_results_root(
         tmp_path,
+        run_id="run/123",
         platform="demo/vendor",
         device="card 0",
         model="qwen3_6",
@@ -222,6 +225,7 @@ def test_gate_results_root_uses_safe_unique_components(tmp_path):
     )
     graph = gate_results_root(
         tmp_path,
+        run_id="run/123",
         platform="demo/vendor",
         device="card 0",
         model="qwen3_6",
@@ -232,6 +236,7 @@ def test_gate_results_root_uses_safe_unique_components(tmp_path):
     assert eager.relative_to(tmp_path.resolve()).parts == (
         "test-results",
         "gate",
+        "run-123",
         "demo-vendor",
         "card-0",
         "qwen3_6",
@@ -239,57 +244,41 @@ def test_gate_results_root_uses_safe_unique_components(tmp_path):
     )
 
 
-def _fake_model_config(extra_args=None):
-    serve = SimpleNamespace(
-        extra_engine={"dtype": "bfloat16"},
-        extra_args=list(extra_args or ["--reasoning-parser", "qwen3"]),
-    )
+def test_gate_results_are_isolated_per_run_and_stale_guard_is_preserved(tmp_path):
+    common = {
+        "platform": "demo",
+        "device": "card",
+        "model": "qwen3_6",
+        "case": "27b_tp2_eager-serving",
+    }
+    first = gate_results_root(tmp_path, run_id="run-1", **common)
+    second = gate_results_root(tmp_path, run_id="run-2", **common)
 
-    class Config:
-        def __init__(self):
-            self.serve = serve
+    ensure_clean_gate_directory(first)
+    (first / "text_single.json").write_text("{}")
 
-        def serve_args(self, **overrides):
-            assert overrides == {"dtype": "bfloat16"}
-            return ["--max-model-len", "8192", "--dtype", "bfloat16"]
-
-    return Config()
-
-
-def test_build_server_args_preserves_config_and_allows_gate_images(tmp_path):
-    image_dir = tmp_path / "images"
-
-    args = build_server_args(_fake_model_config(), image_dir)
-
-    assert args == [
-        "--max-model-len",
-        "8192",
-        "--dtype",
-        "bfloat16",
-        "--reasoning-parser",
-        "qwen3",
-        "--allowed-local-media-path",
-        str(image_dir.resolve()),
-    ]
+    assert first != second
+    assert ensure_clean_gate_directory(second) == second
+    with pytest.raises(RuntimeError, match="stale gate results"):
+        ensure_clean_gate_directory(first)
 
 
-@pytest.mark.parametrize(
-    "value",
-    ["--allowed-local-media-path", "--allowed-local-media-path=/other/images"],
-)
-def test_build_server_args_rejects_duplicate_media_path(tmp_path, value):
-    config = _fake_model_config([value])
-
-    with pytest.raises(ValueError, match="must be supplied only"):
-        build_server_args(config, tmp_path)
+def test_gate_run_id_reuses_framework_id_or_generates_unique_ids():
+    assert gate_run_id({"FL_RUN_ID": "framework-run"}) == "framework-run"
+    assert gate_run_id({}) != gate_run_id({})
 
 
-def test_runner_routes_adaptation_gate_to_unified_module(monkeypatch):
+def test_runner_routes_standard_tasks_through_smoke_files(monkeypatch):
     config = SimpleNamespace(
         platform="demo",
         device="card",
         get_e2e_tests=lambda: E2eTestConfig(
-            tests={"nightly": {"adaptation_gate": {"qwen3_6": ["27b_tp4_eager"]}}}
+            tests={
+                "nightly": {
+                    "serving": {"qwen3_6": ["27b_tp4_eager"]},
+                    "concurrent": {"qwen3_6": ["27b_tp4_eager"]},
+                }
+            }
         ),
         should_skip_model=lambda _: False,
         get_e2e_variants=lambda: [],
@@ -300,29 +289,29 @@ def test_runner_routes_adaptation_gate_to_unified_module(monkeypatch):
         platform="demo",
         device="card",
         scope="e2e",
-        task="adaptation_gate",
+        task=None,
     )
     cases = runner.discover_tests()
 
-    assert len(cases) == 1
-    assert cases[0].task == "adaptation_gate"
-    assert cases[0].pytest_path.endswith(
-        "tests/e2e_tests/adaptation_gate/test_adaptation_gate.py"
+    assert [case.task for case in cases] == ["serving", "concurrent"]
+    assert cases[0].pytest_path.endswith("serving/test_serving_smoke.py")
+    assert cases[1].pytest_path.endswith("concurrent/test_concurrent_smoke.py")
+    assert all(
+        case.extra_env
+        == {
+            "FL_TEST_MODEL": "qwen3_6",
+            "FL_TEST_CASE": "27b_tp4_eager",
+        }
+        for case in cases
     )
-    assert cases[0].extra_env == {
-        "FL_TEST_MODEL": "qwen3_6",
-        "FL_TEST_CASE": "27b_tp4_eager",
-    }
-    assert "adaptation_gate" in _MODEL_E2E_TASKS
+    assert _MODEL_E2E_TASKS == ("inference", "serving", "concurrent")
 
 
 @pytest.mark.parametrize(
     ("case_count", "expected_quiet"),
     [(1, False), (2, True)],
 )
-def test_e2e_runner_streams_single_sharded_case_live(
-    monkeypatch, case_count, expected_quiet
-):
+def test_e2e_runner_streams_single_case_live(monkeypatch, case_count, expected_quiet):
     runner = object.__new__(TestRunner)
     runner.config = SimpleNamespace(e2e_serial=False, platform="demo")
     runner.report = SimpleNamespace(results=[])
@@ -345,9 +334,9 @@ def test_e2e_runner_streams_single_sharded_case_live(
     monkeypatch.setattr(runner, "_run_single", fake_run_single)
     cases = [
         TestCase(
-            name=f"adaptation_gate/qwen3_6/case-{index}",
+            name=f"concurrent/qwen3_6/case-{index}",
             pytest_path="unused",
-            task="adaptation_gate",
+            task="concurrent",
             num_devices=1,
         )
         for index in range(case_count)
@@ -358,17 +347,17 @@ def test_e2e_runner_streams_single_sharded_case_live(
     assert quiet_values == [expected_quiet] * case_count
 
 
-def test_matrix_declares_gate_timeout_and_tools_as_full_run_trigger():
+def test_matrix_uses_standard_tasks_and_tools_as_full_run_trigger():
     path = Path(__file__).parents[2] / ".github/scripts/generate_matrix.py"
     spec = importlib.util.spec_from_file_location("_gate_generate_matrix", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    assert module.DEFAULT_TIMEOUT["adaptation_gate"] == 180
+    assert "adaptation_gate" not in module.DEFAULT_TIMEOUT
     assert "tools/adaptation-gate-cases/" in module._FULL_RUN_PREFIXES
 
 
-def test_matrix_shards_each_gate_case_but_keeps_other_tasks_grouped():
+def test_matrix_groups_standard_task_cases_for_in_job_device_scheduling():
     path = Path(__file__).parents[2] / ".github/scripts/generate_matrix.py"
     spec = importlib.util.spec_from_file_location("_gate_shard_matrix", path)
     module = importlib.util.module_from_spec(spec)
@@ -378,9 +367,7 @@ def test_matrix_shards_each_gate_case_but_keeps_other_tasks_grouped():
             "tests": {
                 "e2e": {
                     "pr": {
-                        "adaptation_gate": {
-                            "qwen3_6": ["27b_tp4_eager", "27b_tp4_graph"]
-                        },
+                        "concurrent": {"qwen3_6": ["27b_tp4_eager", "27b_tp4_graph"]},
                         "inference": {"qwen3": ["4b_tp2", "8b_tp2"]},
                     }
                 }
@@ -398,12 +385,12 @@ def test_matrix_shards_each_gate_case_but_keeps_other_tasks_grouped():
     matrix = module.build_e2e_matrix(
         config, ["card"], [], ci_stage="pr", device_configs=hardware
     )
-    gate_entries = [entry for entry in matrix if entry["task"] == "adaptation_gate"]
+    concurrent_entries = [entry for entry in matrix if entry["task"] == "concurrent"]
     inference_entries = [entry for entry in matrix if entry["task"] == "inference"]
 
-    assert len(gate_entries) == 2
-    assert all(len(json.loads(entry["cases"])) == 1 for entry in gate_entries)
-    assert all(entry["image"] == "example/image" for entry in gate_entries)
+    assert len(concurrent_entries) == 1
+    assert len(json.loads(concurrent_entries[0]["cases"])) == 2
+    assert concurrent_entries[0]["image"] == "example/image"
     assert len(inference_entries) == 1
     assert len(json.loads(inference_entries[0]["cases"])) == 2
 
@@ -414,3 +401,58 @@ def test_e2e_workflow_uploads_gate_documents():
     ).read_text()
 
     assert "test-results/gate/" in workflow
+
+
+@pytest.mark.parametrize(
+    "case",
+    sorted(
+        path.stem
+        for path in (Path(__file__).parents[1] / "models/qwen3_6").glob("*.yaml")
+    ),
+)
+def test_qwen36_yamls_carry_explicit_inventory_without_verification(case):
+    import yaml
+
+    from tests.utils.model_config import ModelConfig
+
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / f"models/qwen3_6/{case}.yaml").read_text()
+    )
+    assert "verification" not in raw, case
+    assert len(raw["serve"]["chat_cases"]) == 26, case
+
+    config = ModelConfig.load("qwen3_6", case)
+    assert not hasattr(config, "verification"), case
+    assert len(config.serve.chat_cases) == 26, case
+
+
+def test_phase_results_use_distinct_paths(tmp_path):
+    serving = gate_results_root(
+        tmp_path,
+        run_id="run-123",
+        platform="demo",
+        device="card",
+        model="qwen3_6",
+        case="27b_tp2_eager-serving",
+    )
+    concurrent = gate_results_root(
+        tmp_path,
+        run_id="run-123",
+        platform="demo",
+        device="card",
+        model="qwen3_6",
+        case="27b_tp2_eager-concurrent",
+    )
+
+    assert serving != concurrent
+
+
+def test_dead_gate_server_fails_without_waiting_for_client_timeout():
+    process = SimpleNamespace(poll=lambda: 42)
+    server = SimpleNamespace(
+        _process=process,
+        preserve_failure_logs=lambda message: f"{message}: log",
+    )
+
+    with pytest.raises(RuntimeError, match="exited before the concurrent"):
+        ensure_gate_server_alive(server, "concurrent")

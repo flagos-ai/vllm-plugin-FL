@@ -179,7 +179,6 @@ class ServeConfig:
         embedding_input: Input text for ``/v1/embeddings`` endpoint tests.
     """
 
-    adaptation_gate: bool = False
     api_key: str = ""
     extra_engine: dict[str, Any] = field(default_factory=dict)
     extra_args: list[str] = field(default_factory=list)
@@ -203,7 +202,6 @@ class ServeConfig:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> ServeConfig:
         return cls(
-            adaptation_gate=bool(raw.get("adaptation_gate", False)),
             api_key=raw.get("api_key", ""),
             extra_engine=raw.get("extra_engine", {}),
             extra_args=raw.get("extra_args", []),
