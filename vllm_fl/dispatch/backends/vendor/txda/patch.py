@@ -444,6 +444,54 @@ def patch_noop_device_guard_for_txda():
     return _undo
 
 
+def patch_torch_compile_off_for_txda():
+    """Make ``torch.compile`` a no-op on TXDA.
+
+    vLLM decorates several helpers with ``@torch.compile`` at import time,
+    using ``simple_compile_backend`` (``"eager"`` on TXDA). "eager" only skips
+    Inductor code generation; Dynamo still traces the function and emits an FX
+    graph. On TXDA that graph is wrong: it inserts ``_to_copy(..., device="cpu")``
+    for intermediates, so ``get_masked_input_and_mask`` turns its int64 masks
+    into host tensors. Under cudagraph capture those D2H copies synchronize the
+    capture stream and the capture is aborted:
+
+        get_masked_input_and_mask -> _to_copy(device=cpu) -> txStreamSynchronize
+        while the stream is capturing
+
+    Tracing buys nothing on TXDA (the backend is eager either way), so replace
+    ``torch.compile`` with the identity decorator. Modules decorated before this
+    runs keep their wrapper; callers that import them later get the plain
+    function. Set VLLM_FL_TXDA_TORCH_COMPILE=1 to keep the upstream behaviour.
+    """
+    if os.environ.get("VLLM_FL_TXDA_TORCH_COMPILE", "0").lower() in (
+        "1", "true", "on",
+    ):
+        return None
+
+    if getattr(torch, "_fl_txda_compile_disabled", False):
+        return None
+
+    original_compile = torch.compile
+
+    def _identity_compile(fn=None, *args, **kwargs):
+        if fn is None:
+            return lambda f: f
+        return fn
+
+    torch.compile = _identity_compile
+    torch._fl_txda_compile_disabled = True
+    logger.info(
+        "Disabled torch.compile on TXDA (Dynamo graphs insert CPU copies that "
+        "break graph capture)"
+    )
+
+    def _undo() -> None:
+        torch.compile = original_compile
+        torch._fl_txda_compile_disabled = False
+
+    return _undo
+
+
 @contextlib.contextmanager
 def capture_guard_context():
     """Keep TXDA kernels on the capture stream for the duration of a capture.
@@ -487,4 +535,5 @@ _PATCH_STEPS = (
     ("cuda_stream_apis", patch_cuda_stream_apis_for_txda),
     ("device_guard", patch_noop_device_guard_for_txda),
     ("aux_stream", patch_aux_stream_for_txda),
+    ("torch_compile", patch_torch_compile_off_for_txda),
 )

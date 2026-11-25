@@ -429,9 +429,17 @@ class TritonExpertsFL(TritonExperts):
             expert_tokens_meta,
             activation,
         )
-        if current_platform.device_type == "npu":
+        if current_platform.device_type in ("npu", "txda"):
             # Reserve prefill capacity before capture fixes workspace
             # addresses and locks the shared workspace against growth.
+            # ``model_runner.capture_model`` calls ``lock_workspace()`` after
+            # capturing, so the workspace is frozen at ``M`` from the decode
+            # (capture) batch. A larger prefill batch — e.g. 16 concurrent
+            # requests x ~20 prompt tokens with ``--max-num-batched-tokens
+            # 512`` — then trips "Workspace is locked but allocation ...
+            # requires X MB, current size is Y MB". Sizing by the configured
+            # per-step token budget keeps every batch shape within the frozen
+            # buffer. TXDA shares the NPU constraint, so it opts in here too.
             max_tokens = max(M, self.moe_config.max_num_tokens)
             workspace13 = (max_tokens, *workspace13[1:])
             workspace2 = (max_tokens, *workspace2[1:])
@@ -572,6 +580,15 @@ class TritonExpertsFL(TritonExperts):
                 w2_scale=self.w2_scale,
             )
             if txda_fused_experts_impl is not None:
+                # The on-device meta builder needs the expert count; the weight
+                # shape is not visible to it, so publish it here.
+                from flag_gems.runtime.backend._tsingmicro.tx81.fused import (
+                    fused_moe as _fx_mod,
+                )
+
+                _publish = getattr(_fx_mod, "_fl_txda_set_num_experts", None)
+                if _publish is not None and global_num_experts > 0:
+                    _publish(global_num_experts)
                 # The fused kernel has dedicated clamp/alpha/beta parameters;
                 # the activation config must be forwarded or clamped /
                 # non-default SwiGLU models would silently change their math.

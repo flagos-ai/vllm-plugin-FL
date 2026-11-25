@@ -57,10 +57,19 @@ op_backends:
 flagos_blacklist:
   - copy
   - copy_
-  - cat
+  # NOTE: ``cat`` must NOT be excluded. Without a FlagGems kernel, ATen's
+  # composite ``cat`` copies every input to the CPU and back (a D2H that is
+  # fatal under graph capture). The TXDA ``cat`` copies through StridedBuffer
+  # on device instead, which is what capture needs.
   - stack
   - hstack
-  - index_select
+  # `index_select` must NOT be excluded. torch_txda registers no native
+  # index_select; with FlagGems excluding it, aten::index_select falls through
+  # to the txda `fallback_cpu` backend (self.cpu() -> D2H) which both
+  # synchronizes (fatal under graph capture) and is ~10x slower. The FlagGems
+  # TXDA kernel gathers dim-0 dense rows on device and captures cleanly. RoPE
+  # calls `cos_sin_cache.index_select(0, positions)` on every forward, so
+  # excluding it aborts the capture at the first attention layer.
   - index_put
   - index_put_
   - index_add
@@ -70,9 +79,12 @@ flagos_blacklist:
   - repeat
   - tile
   - flip
-  - embedding
   - slice_backward
   - diagonal_copy
+  # `embedding` is deliberately NOT excluded: the FlagGems TXDA kernel is a
+  # single 16-CTA tile that reads the index on device. Excluding it falls back
+  # to the ATen CPU composite kernel, which copies the weight to host and
+  # synchronizes — fatal under graph capture.
 
 
 oot_blacklist:

@@ -598,10 +598,6 @@ class PlatformFL(Platform):
             compilation_config.inductor_compile_config["benchmark_combo_kernel"] = False
 
         if cls.device_type == "txda":
-            if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
-                raise ValueError(
-                    "Tsingmicro TXDA graph mode is not supported. Use --enforce-eager."
-                )
             if compilation_config.mode != CompilationMode.NONE:
                 raise ValueError(
                     "Tsingmicro TXDA supports eager execution only; compilation "
@@ -943,6 +939,7 @@ class PlatformFL(Platform):
             "enflame",
             "kunlunxin",
             "amd",
+            "tsingmicro",
         ]
 
     @classmethod

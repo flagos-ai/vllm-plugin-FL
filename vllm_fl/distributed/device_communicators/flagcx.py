@@ -322,6 +322,16 @@ class PyFlagcxCommunicator:
                 )
 
                 self._all_reduce_stream = FlagCXAllReduceStream(self.device)
+            elif self.device.type == "txda":
+                # TXDA NCCL synchronises the legacy default stream (NULL
+                # handle) while preparing a collective, which spins forever.
+                # Submitting on a dedicated stream keeps every collective on a
+                # real handle. See .../vendor/txda/patches/flagcx.py.
+                from vllm_fl.dispatch.backends.vendor.txda.patches.flagcx import (
+                    TXDAFlagCXAllReduceStream,
+                )
+
+                self._all_reduce_stream = TXDAFlagCXAllReduceStream(self.device)
 
             try:
                 stream = self._current_stream()
