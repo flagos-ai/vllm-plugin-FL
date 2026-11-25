@@ -55,6 +55,7 @@ def test_reference_dispatch_with_optional_flaggems(
 
     manager, registry = dispatch_manager
     monkeypatch.setenv("USE_FLAGGEMS", enabled)
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST", raising=False)
     monkeypatch.setenv("VLLM_FL_FLAGOS_WHITELIST", "sigmoid")
     monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", "0")
     register_flaggems(registry)
