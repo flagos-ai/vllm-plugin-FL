@@ -326,7 +326,7 @@ class OpManager:
             return cached
 
         candidates = self._compute_candidates(op_name, policy)
-        order = policy.per_op_order_dict.get(op_name) or self._default_order(policy)
+        order = policy.get_per_op_order(op_name) or self._default_order(policy)
 
         chosen: OpImpl | None = None
         for token in order:
@@ -437,7 +437,7 @@ class OpManager:
             return cached
 
         candidates = self._compute_candidates(op_name, policy)
-        order = policy.per_op_order_dict.get(op_name) or self._default_order(policy)
+        order = policy.get_per_op_order(op_name) or self._default_order(policy)
 
         sorted_candidates: list[OpImpl] = []
         for token in order:

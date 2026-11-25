@@ -42,6 +42,7 @@ def register_builtins(registry) -> None:
     op_names = (
         "dynamic_per_token_quant_int8",
         "silu_and_mul",
+        "silu_and_mul_native",
         "silu_and_mul_with_clamp",
         "gelu_and_mul",
         "rms_norm",
@@ -62,7 +63,11 @@ def register_builtins(registry) -> None:
         impls.append(
             OpImpl(
                 op_name=op_name,
-                impl_id="reference.torch",
+                impl_id=(
+                    "reference.torch.native"
+                    if op_name.endswith("_native")
+                    else "reference.torch"
+                ),
                 kind=BackendImplKind.REFERENCE,
                 fn=_bind_is_available(fn, is_avail),
                 vendor=None,

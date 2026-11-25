@@ -46,6 +46,18 @@ def _get_current_platform():
     return current_platform
 
 
+def get_fl_moe_config_name(quant_config, output_dtype: torch.dtype) -> str | None:
+    """Return the tuned-config selector used by FL MoE kernels.
+
+    vLLM 0.24 does not distinguish INT8 W8A8 from the unquantized case in
+    ``FusedMoEQuantConfig.config_name``.  FL needs a distinct selector because
+    W8A8 and W8A16 use different tuned Triton configurations.
+    """
+    if quant_config.use_int8_w8a8:
+        return "int8_w8a8"
+    return quant_config.config_name(output_dtype)
+
+
 def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBackend]:
     """
     Get available backends in priority order based on platform and config.
@@ -165,6 +177,13 @@ def select_unquantized_moe_backend_oot(
         # Reuse the upstream modular weights/workspace/finalization contract;
         # apply() below dispatches NPU computation to packaged torch_npu ops.
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
+
+    if str(getattr(runtime_platform, "vendor_name", "")).lower() == "hygon":
+        from vllm_fl.dispatch.backends.vendor.hygon.impl.moe.triton_experts import (
+            HygonTritonExpertsFL,
+        )
+
+        return UnquantizedMoeBackend.TRITON, HygonTritonExpertsFL
 
     # Keep the FlagGems Triton path for both the default and an explicitly
     # requested Triton backend.  Other explicit choices remain authoritative;
@@ -501,6 +520,7 @@ class TritonExpertsFL(TritonExperts):
             and runtime_platform.is_cuda()
             and activation == MoEActivation.SILU
             and self.quant_config.gemm1_clamp_limit is None
+            and not self.quant_config.use_int8_w8a8
         ):
             if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
                 import flaggems_vllm as fused_ops
@@ -535,8 +555,10 @@ class TritonExpertsFL(TritonExperts):
             )
             return
 
-        # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
-        # adapters can be injected between GEMM1/activation/GEMM2.
+        # Staged pipeline (call_op dispatch). INT8 W8A8 enters here because
+        # prepare/finalize has already quantized GEMM1 input; calling the
+        # monolithic helper would quantize that INT8 tensor a second time.
+        # LoRA also needs this path so adapters can be injected between stages.
         # Check constraints.
         if self.quant_config.use_int4_w4a16:
             assert hidden_states.size(-1) // 2 == w1.size(2), "Hidden size mismatch"
@@ -550,6 +572,7 @@ class TritonExpertsFL(TritonExperts):
         assert w1.stride(-1) == 1, "Stride of last dimension must be 1"
         assert w2.stride(-1) == 1, "Stride of last dimension must be 1"
         assert hidden_states.dtype in [
+            torch.int8,
             torch.float32,
             torch.float16,
             torch.bfloat16,
@@ -564,28 +587,37 @@ class TritonExpertsFL(TritonExperts):
         if global_num_experts == -1:
             global_num_experts = E
 
+        if self.quant_config.use_int8_w8a8:
+            if hidden_states.dtype != torch.int8 or a1q_scale is None:
+                raise RuntimeError(
+                    "FL W8A8 MoE expects prepare/finalize to provide INT8 "
+                    "activations and dynamic per-token scales"
+                )
+            if w1.dtype != torch.int8 or w2.dtype != torch.int8:
+                raise RuntimeError("FL W8A8 MoE requires INT8 w1 and w2 weights")
+
         config = try_get_optimal_moe_config(
             w1.size(),
             w2.size(),
             top_k_num,
-            self.quant_config.config_name(hidden_states.dtype),
+            get_fl_moe_config_name(self.quant_config, output.dtype),
             num_tokens,
             block_shape=self.block_shape,
         )
 
-        if hidden_states.dtype == torch.bfloat16:
+        if output.dtype == torch.bfloat16:
             compute_type = tl.bfloat16
-        elif hidden_states.dtype == torch.float16:
+        elif output.dtype == torch.float16:
             compute_type = tl.float16
-        elif hidden_states.dtype == torch.float32:
+        elif output.dtype == torch.float32:
             compute_type = tl.float32
-        elif (
-            hidden_states.dtype == torch.float8_e4m3fn
-            or hidden_states.dtype == torch.float8_e4m3fnuz
+        elif output.dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
         ):
             compute_type = tl.bfloat16
         else:
-            raise ValueError(f"Unsupported compute_type: {hidden_states.dtype}")
+            raise ValueError(f"Unsupported compute_type: {output.dtype}")
 
         # Note that the output tensor might be in workspace1
         intermediate_cache1 = _resize_cache(workspace2, (num_tokens, top_k_num, N))
@@ -678,6 +710,13 @@ class TritonExpertsFL(TritonExperts):
             self.block_shape,
             quantization_emulation=self.quantization_emulation,
         )
+        if self.quant_config.use_int8_w8a8 and (
+            qintermediate_cache2.dtype != torch.int8 or a2q_scale is None
+        ):
+            raise RuntimeError(
+                "FL W8A8 MoE GEMM2 expects INT8 activations and dynamic "
+                "per-token scales"
+            )
 
         _invoke_fused_moe_triton_kernel(
             qintermediate_cache2,
