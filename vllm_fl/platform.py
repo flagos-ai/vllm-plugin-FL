@@ -214,6 +214,19 @@ class PlatformFL(Platform):
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
+    # Ray 默认会给每个 worker actor 设置 per-actor 的设备可见性环境变量
+    # (MetaX 是 cuda-alike,对应 CUDA_VISIBLE_DEVICES)。一旦 actor 被收成单卡可见,
+    # 基于 local_rank 的设备索引就会指错卡。这里让 Ray 不要设它,保持节点上所有
+    # 设备可见,local_rank -> device 的映射才是对的。
+    # 移植自 v0.3.0-dev-ray(c1b4317,"add ray devices support");TP=8xPP=4 四机必开。
+    # 注意:本分支另有一套按 vendor 分发的 device_control_env_var 翻译机制,
+    # 但 metax 不在 VENDOR_DEVICE_MAP 里 -> 落到 base-class 占位符 -> 静默 no-op,
+    # 所以那套机制覆盖不到这个场景,本修复不可省。
+    ray_noset_device_env_vars: list[str] = (
+        ["RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES"]
+        if device_info.device_type == "cuda"
+        else []
+    )
     dist_backend: str = (
         "flagcx" if _flagcx_backend_enabled() else dist_backend_dict.get(device_name, "nccl")
     )
@@ -428,10 +441,49 @@ class PlatformFL(Platform):
             )
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
+        # MetaX reports device_type "cuda" but runs MCCL, whose collectives
+        # cannot be replayed from a captured graph either. A FULL decode graph
+        # necessarily captures them, so downgrade to PIECEWISE first.
+        metax_mode = compilation_config.cudagraph_mode
         if (
-            cls.device_type in ("musa", "ptpu")
+            cls.vendor_name == "metax"
+            and metax_mode is not None
+            and metax_mode.has_full_cudagraphs()
+            and os.environ.get("VLLM_FL_METAX_ALLOW_FULL_GRAPH", "0") != "1"
+        ):
+            logger.info(
+                "METAX: Downgrading cudagraph_mode from %s to PIECEWISE. MetaX "
+                "runs MCCL, whose collectives do not run inside a captured "
+                "stream, so FULL decode graphs are not usable. PIECEWISE graphs "
+                "still capture the non-communication regions.",
+                compilation_config.cudagraph_mode,
+            )
+            compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+
+        # SPLITTING_OPS is keyed by device_type for MUSA/PTPU, but MetaX shares
+        # device_type "cuda" with other vendors, so it is keyed by vendor name.
+        splitting_key = "metax" if cls.vendor_name == "metax" else cls.device_type
+        # ``cudagraph_mode`` is still unresolved (None) here: vLLM resolves it
+        # in ``resolve_cudagraph_mode`` during engine initialization, so the
+        # piecewise gate would always be False for MetaX. Apply the split
+        # unconditionally under TP there (except when the user asked for no
+        # graphs at all); calling it is also what lets vLLM pick PIECEWISE as
+        # the default mode later.
+        keep_collectives_eager = (
+            cls.vendor_name == "metax"
+            and not (model_config is not None and model_config.enforce_eager)
+            and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        )
+        if (
+            splitting_key in SPLITTING_OPS
             and parallel_config.tensor_parallel_size > 1
-            and compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+            and (
+                keep_collectives_eager
+                or (
+                    compilation_config.cudagraph_mode is not None
+                    and compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+                )
+            )
         ):
             effective_dp_size = (
                 parallel_config.data_parallel_size
@@ -442,7 +494,7 @@ class PlatformFL(Platform):
                 compilation_config,
                 all2all_backend=parallel_config.all2all_backend,
                 data_parallel_size=effective_dp_size,
-                device_type=cls.device_type,
+                device_type=splitting_key,
             )
             logger.info(
                 "%s: Keeping TP collective ops outside PIECEWISE graph "

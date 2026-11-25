@@ -156,8 +156,8 @@ def validate_hy4_runtime(vllm_config) -> HY4RuntimePlan:
 
     from vllm_fl.dispatch.types import BackendImplKind
 
-    if not current_platform.is_cuda():
-        raise ValueError("HY4 currently requires an NVIDIA CUDA runtime")
+    if not (current_platform.is_cuda() or current_platform.is_cuda_alike()):
+        raise ValueError("HY4 currently requires an NVIDIA CUDA or CUDA-alike runtime")
     cache_dtype = vllm_config.cache_config.cache_dtype
     if cache_dtype not in ("auto", "bfloat16", "fp8", "fp8_e4m3"):
         raise ValueError(f"Unsupported HY4 KV cache dtype: {cache_dtype}")
@@ -348,6 +348,15 @@ def _install_fallback(tx, plan: HY4RuntimePlan) -> bool:
 
         tx.set(native_sparse, "flash_mla_sparse_fwd", flash_mla_sparse_fwd)
         tx.set(hy4_sparse, "flash_mla_sparse_fwd", flash_mla_sparse_fwd)
+        # A valid MetaX configuration produces no validation errors, so resource
+        # tuning cannot depend on validate_configuration() finding a reason.
+        # Install the tiles with the same transaction, before any layer launch.
+        from vllm.platforms import current_platform
+
+        if current_platform.is_cuda_alike() and not current_platform.is_cuda():
+            hy4_sparse.HYV4FlashMLASparseBackend._maybe_retune_triton_sparse_prefill(
+                tx=tx
+            )
 
         logger.warning_once(
             "HY4: using the resolved FlagGems indexer/top-k and sparse MLA path."

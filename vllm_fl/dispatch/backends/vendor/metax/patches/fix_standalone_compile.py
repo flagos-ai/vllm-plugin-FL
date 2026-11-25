@@ -22,6 +22,12 @@ from torch._inductor.compile_fx import _CompileFxKwargs
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch._inductor.standalone_compile import CompiledArtifact, config, log
+import inspect
+
+try:  # torch >= 2.10: ``CompiledArtifact`` became an ABC
+    from torch._inductor.standalone_compile import CacheCompiledArtifact
+except ImportError:  # older torches only ship the concrete base class
+    CacheCompiledArtifact = None
 from typing import Literal, Sequence, Any
 from torch._inductor.utils import InputType
 
@@ -124,6 +130,10 @@ def standalone_compile_impl(
                 "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
             )
 
+    # torch 2.10 made ``CompiledArtifact`` an ABC; ``CacheCompiledArtifact`` is
+    # the concrete subclass torch itself returns from ``standalone_compile``.
+    if CacheCompiledArtifact is not None and inspect.isabstract(CompiledArtifact):
+        return CacheCompiledArtifact(compiled_fn, artifacts)
     return CompiledArtifact(compiled_fn, artifacts)
 
 
