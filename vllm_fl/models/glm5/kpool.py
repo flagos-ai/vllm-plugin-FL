@@ -186,6 +186,10 @@ class KpoolTailMetadataBuilder(AttentionMetadataBuilder):
         # particular, do not allocate the normal indexer's paged-MQA buffers,
         # whose kernel block must be 32/64 rather than kpool (4).
         super().__init__(kv_cache_spec, layer_names, vllm_config, device)
+        self._slot_mapping_capacity = (
+            vllm_config.scheduler_config.max_num_batched_tokens
+        )
+        self._slot_mapping_buffer: torch.Tensor | None = None
 
     @classmethod
     def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
@@ -214,6 +218,25 @@ class KpoolTailMetadataBuilder(AttentionMetadataBuilder):
                 common_attn_metadata.num_reqs,
                 self.kv_cache_spec.block_size,
             )
+            # Metadata is built outside FULL capture. Replacing its tensor on
+            # each step leaves existing graphs reading a stale (possibly freed)
+            # input. One builder-owned allocation serves all captured batches.
+            size = slot_mapping.numel()
+            if size > self._slot_mapping_capacity:
+                raise ValueError("KPool tail slot mapping exceeds fixed capacity")
+            if self._slot_mapping_buffer is None:
+                self._slot_mapping_buffer = slot_mapping.new_empty(
+                    self._slot_mapping_capacity
+                )
+            buffer = self._slot_mapping_buffer
+            if (
+                buffer.dtype != slot_mapping.dtype
+                or buffer.device != slot_mapping.device
+            ):
+                raise ValueError("KPool tail slot mapping dtype/device changed")
+            stable_mapping = buffer[:size]
+            stable_mapping.copy_(slot_mapping)
+            slot_mapping = stable_mapping
         return DeepseekV32IndexerMetadata(
             seq_lens=common_attn_metadata.seq_lens,
             max_seq_len=common_attn_metadata.max_seq_len,

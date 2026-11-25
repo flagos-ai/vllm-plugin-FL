@@ -32,6 +32,28 @@ original model-size candidate order are preserved.
 The source commit is fixed for reproducible installs; CI verifies pip's
 `direct_url.json` rather than accepting another checkout with the same version.
 
+### Sparse MLA small-head and decode-graph dependency
+
+The compact small-head Sparse MLA adapter requires
+[FlagGems-vllm #1044](https://github.com/flagos-ai/FlagGems-vllm/pull/1044).
+It consumes the selected provider's `supported_query_heads` and
+`supports_single_token_decode_graph` attributes; missing graph support remains
+an eager boundary. Providers without native H4 support retain the existing
+head-padding path. Model-side metadata mapping and graph workspace remain
+plugin-owned.
+
+This integration is pending that operator PR's merge and validation. The shared
+pin above is intentionally unchanged: its portability branch and #1044's main
+branch have diverged, so replacing it with the review head would also drop
+other backends' compatibility changes. Before merging the plugin integration,
+select a public fixed commit containing both sets of changes and update the
+GLM extra, shared CI installer and installation documentation together. Do not
+use a floating branch or assume that merging #1044 alone updates this pin.
+The operator PR's current review head is
+`7dac5f76e085e2b6a860f7a80bb413d92ce39ff5`; this identifies the API under review,
+not an additional default installation requirement or a validated all-platform
+release.
+
 Every hardware platform's CI setup calls the shared installer with its selected
 Python interpreter. It verifies the source commit in `direct_url.json` and keeps
 the existing Torch, Triton, FlagGems, vLLM, and NumPy versions. NVIDIA CI alone

@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar, Optional, Union
+from typing import Any, ClassVar
 
 import numpy as np
 import torch
+
 from vllm.config import VllmConfig
 from vllm.config.cache import CacheDType
 from vllm.logger import init_logger
@@ -33,7 +34,11 @@ from vllm.v1.attention.backend import (
     SparseMLAAttentionImpl,
 )
 from vllm.v1.attention.backends.mla.prefill.base import MLAPrefillBackend
-from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.kv_cache_interface import (
+    AttentionSpec,
+    MLAAttentionSpec,
+    UniformTypeKVCacheSpecs,
+)
 
 import vllm_fl.envs as fl_envs
 
@@ -51,7 +56,7 @@ class MLAFLBackend(MLACommonBackend):
         return "MLAFL"
 
     @staticmethod
-    def get_impl_cls() -> type["MLAFLImpl"]:
+    def get_impl_cls() -> type[MLAFLImpl]:
         return MLAFLImpl
 
 
@@ -356,42 +361,66 @@ class FlagGemsMLAPrefillBackend(MLAPrefillBackend):
 __all__ = ["FlagGemsMLAPrefillBackend"]
 
 
-def _flag_op(module: str, name: str):
-    from vllm_fl.models.glm5.indexer_backend import _load_flaggems_op
-
-    return _load_flaggems_op(module, name)
-
-
-def _resolve_sparse_mla_kernels():
+def _resolve_sparse_mla_kernel(name, *, required=True):
     from vllm_fl.dispatch.binding import OperatorBinding
-    from vllm_fl.dispatch.manager import OpManager
+    from vllm_fl.dispatch.capabilities import get_flaggems_vllm_operator
+    from vllm_fl.dispatch.manager import OpManager, get_default_manager
     from vllm_fl.dispatch.types import BackendImplKind, OpImpl
     from vllm_fl.utils import use_flaggems_op
 
-    # This boundary owns its public API/preflight and eager graph contract.
-    manager = OpManager(register_builtins=False)
-    bindings = []
-    for name in ("concat_and_cache_mla", "flash_mla_sparse_fwd"):
-        op = _flag_op(name, name)
-        if op is None:
+    op = get_flaggems_vllm_operator(name)
+    if op is None:
+        if required:
             raise RuntimeError(f"Sparse MLA requires FlagGems-vllm {name}")
+        return None
 
-        def call(*args, _op=op, **kwargs):
-            return _op(*args, **kwargs)
+    # Preserve the model adapter's ABI while sharing policy and capabilities.
+    manager = OpManager(register_builtins=False)
 
-        call._is_available = lambda _name=name: use_flaggems_op(_name)
-        manager.registry.register_impl(
-            OpImpl(name, "glm5.flaggems", BackendImplKind.DEFAULT, call)
-        )
-        binding = OperatorBinding(
-            manager, name, graph_capabilities={"glm5.flaggems": False}
-        )
-        binding.describe()
-        bindings.append(binding)
-    return tuple(bindings)
+    def call(*args, **kwargs):
+        return op(*args, **kwargs)
+
+    call._is_available = lambda: use_flaggems_op(name)
+    call.supported_query_heads = getattr(op, "supported_query_heads", (64, 128))
+    manager.registry.register_impl(
+        OpImpl(name, "glm5.flaggems", BackendImplKind.DEFAULT, call)
+    )
+    graph_capabilities = {
+        "glm5.flaggems": getattr(op, "supports_single_token_decode_graph", False)
+    }
+    if name == "flash_mla_sparse_fwd":
+        # Discovery and optional SDK checks belong to the vendor backend.
+        platform_manager = get_default_manager()
+        platform_manager.ensure_initialized()
+        for impl in platform_manager.registry.get_implementations(name):
+            if impl.kind == BackendImplKind.VENDOR:
+                manager.registry.register_impl(impl)
+                graph_capabilities[impl.impl_id] = getattr(
+                    impl.fn, "supports_single_token_decode_graph", False
+                )
+    binding = OperatorBinding(manager, name, graph_capabilities=graph_capabilities)
+    binding.preflight()
+    return binding
+
+
+def _resolve_sparse_mla_kernels():
+    return tuple(
+        _resolve_sparse_mla_kernel(name)
+        for name in ("concat_and_cache_mla", "flash_mla_sparse_fwd")
+    )
 
 
 def sparse_mla_cudagraph_support(head_size):
+    if head_size == 512:
+        binding = _resolve_sparse_mla_kernel("flash_mla_sparse_fwd", required=False)
+        if binding is None:
+            return AttentionCGSupport.NEVER, "Sparse MLA operator is unavailable"
+        selected = binding.preflight()[0]
+        if binding.graph_capabilities.get(selected.impl_id, False):
+            return (
+                AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE,
+                "Public sparse MLA supports uniform single-token decode",
+            )
     return AttentionCGSupport.NEVER, "Sparse MLA runs at the eager attention boundary"
 
 
@@ -412,15 +441,29 @@ class FlagGemsSparseMLAMetadata(AttentionMetadata):
 class FlagGemsSparseMLAMetadataBuilder(
     AttentionMetadataBuilder[FlagGemsSparseMLAMetadata]
 ):
-    # Sparse MLA remains an eager attention boundary.
+    # Keep unknown shapes/providers eager; resolve supported decode per spec.
     _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.NEVER
 
     @classmethod
     def get_cudagraph_support(
         cls,
         vllm_config: VllmConfig,
-        kv_cache_spec: AttentionSpec,
+        kv_cache_spec: AttentionSpec | UniformTypeKVCacheSpecs,
     ) -> AttentionCGSupport:
+        if isinstance(kv_cache_spec, UniformTypeKVCacheSpecs):
+            # A token-granular group also contains compressed indexer states.
+            # Each backend is queried separately; inspect only this backend's
+            # uncompressed MLA specs, not the group's nonexistent head_size.
+            specs = [
+                spec
+                for spec in kv_cache_spec.kv_cache_specs.values()
+                if isinstance(spec, MLAAttentionSpec) and spec.compress_ratio == 1
+            ]
+            return min(
+                (cls.get_cudagraph_support(vllm_config, spec) for spec in specs),
+                key=lambda support: support.value,
+                default=AttentionCGSupport.NEVER,
+            )
         del vllm_config
         support, _ = sparse_mla_cudagraph_support(
             getattr(kv_cache_spec, "head_size", None)
@@ -481,17 +524,16 @@ class FlagGemsSparseMLAMetadataBuilder(
 class FlagGemsSparseMLABackend(AttentionBackend):
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.bfloat16]
     supported_kv_cache_dtypes: ClassVar[list[CacheDType]] = ["auto", "bfloat16"]
-    # vLLM 0.24 resolves cudagraph support through the metadata builder, but
-    # newer runners also inspect the backend class.  Keep both declarations in
-    # sync: NEVER while a correctness fallback with host scalar reads is
-    # reachable.  See FlagGemsSparseMLAMetadataBuilder for the rationale.
+    # vLLM 0.24 queries the metadata builder; newer runners may query the
+    # backend too. Both APIs resolve the per-spec operator capability while
+    # this class default remains conservative.
     _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.NEVER
 
     @classmethod
     def get_cudagraph_support(
         cls,
         vllm_config: VllmConfig,
-        kv_cache_spec: AttentionSpec,
+        kv_cache_spec: AttentionSpec | UniformTypeKVCacheSpecs,
     ) -> AttentionCGSupport:
         return FlagGemsSparseMLAMetadataBuilder.get_cudagraph_support(
             vllm_config, kv_cache_spec
@@ -551,37 +593,12 @@ def _convert_request_to_physical_indices(
     token_indices: torch.Tensor,
     block_size: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    token_indices_i64 = token_indices.to(torch.int64)
-    request_ids_i64 = request_ids.to(torch.int64).reshape(-1, 1)
-    block_ids = torch.div(token_indices_i64, block_size, rounding_mode="floor")
-    valid = (token_indices_i64 >= 0) & (block_ids < block_table.shape[1])
-    safe_blocks = block_ids.clamp(min=0, max=block_table.shape[1] - 1)
-    rows = request_ids_i64.expand_as(safe_blocks)
-    physical_blocks = block_table[rows, safe_blocks].to(torch.int64)
-    valid = valid & (physical_blocks >= 0)
-    physical = physical_blocks * block_size + torch.remainder(
-        token_indices_i64, block_size
-    )
-    valid_lengths = valid.sum(dim=-1).to(torch.int32)
+    from vllm_fl.attention.sparse_mla_metadata import convert_sparse_indices
 
-    # ``flash_mla_sparse_fwd`` consumes only ``indices[:topk_length]``.  A
-    # missing logical block can create an invalid entry in the middle of the
-    # indexer's result, so merely replacing invalid entries with -1 would both
-    # expose -1 to the kernel and drop later valid tokens.  Compact valid
-    # physical slots to a contiguous prefix, matching vLLM's reference
-    # ``COMPACT_TO_FRONT`` conversion contract.  The extra column is a sink for
-    # every invalid entry and keeps this path free of host synchronization.
-    width = physical.shape[-1]
-    compact_dst = valid.to(torch.int64).cumsum(dim=-1) - 1
-    compact_dst = torch.where(valid, compact_dst, width)
-    compact = torch.full(
-        (*physical.shape[:-1], width + 1),
-        -1,
-        dtype=physical.dtype,
-        device=physical.device,
-    )
-    compact.scatter_(dim=-1, index=compact_dst, src=physical)
-    return compact[..., :width].to(torch.int32), valid_lengths
+    # Stable compaction is required: invalid logical pages can leave holes in
+    # the indexer's selection. Fuse the conversion to avoid full-size int64
+    # temporaries while preserving the valid prefix consumed by sparse MLA.
+    return convert_sparse_indices(request_ids, block_table, token_indices, block_size)
 
 
 class FlagGemsSparseMLAImpl(SparseMLAAttentionImpl[FlagGemsSparseMLAMetadata]):
@@ -671,7 +688,15 @@ class FlagGemsSparseMLAImpl(SparseMLAAttentionImpl[FlagGemsSparseMLAMetadata]):
             -1, 1, kv_c_and_k_pe_cache.shape[-1]
         )
         actual_heads = q.shape[1]
-        padded_heads = 64 if actual_heads <= 64 else 128
+        selected = self._sparse_attn.preflight()[0]
+        supported_heads = getattr(selected.fn, "supported_query_heads", (64, 128))
+        padded_heads = (
+            actual_heads
+            if actual_heads in supported_heads
+            else 64
+            if actual_heads <= 64
+            else 128
+        )
         q_padded = pad_attention_heads(q, padded_heads)
         output = self._sparse_attn(
             q_padded,
