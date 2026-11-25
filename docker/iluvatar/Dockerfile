@@ -23,7 +23,12 @@ ARG ILUVATAR_BASE_IMAGE
 ARG VLLM_VERSION=0.32.0
 ARG VLLM_WHEEL_URL=https://resource.flagos.net/repository/flagos-pypi-iluvatar/packages/vllm/0.32.0+flagos/vllm-0.32.0+flagos-py3-none-any.whl
 ARG VLLM_WHEEL_SHA256=8863d2a86ae2928f3a5575e2eef829ef91654cc16469aad26cb63a7f009f6b2a
-ARG FLAGGEMS_VERSION=5.5.0.dev20261118
+# Named FLAGGEMS_PIN, not FLAGGEMS_VERSION: a build ARG is visible as an
+# environment variable to every RUN shell, and the Runtime's BASH_ENV hook takes
+# that name as a request to install that exact FlagGems from the daily index.
+# The daily line has rotated past this build, so the request would abort the
+# build before the pinned wheel below is installed.
+ARG FLAGGEMS_PIN=5.5.0.dev20261118
 ARG FLAGGEMS_WHEEL_URL=https://resource.flagos.net/repository/flagos-pypi-daily/packages/flag-gems/5.5.0.dev20261118/flag_gems-5.5.0.dev20261118-py3-none-any.whl
 ARG FLAGGEMS_WHEEL_SHA256=cae4b8409763c88e3e6e7ead44cc900f20de391a1000fb7ad6efe8c215b86316
 ARG FLAGGEMS_VLLM_VERSION=0.3.0.dev20261119
@@ -52,15 +57,14 @@ LABEL org.opencontainers.image.title="vllm-plugin-fl" \
       io.flagos.runtime.version="2.3.0" \
       io.flagos.corex.version="5.0.1" \
       io.flagos.vllm.version="${VLLM_VERSION}" \
-      io.flagos.flaggems.version="${FLAGGEMS_VERSION}" \
+      io.flagos.flaggems.version="${FLAGGEMS_PIN}" \
       io.flagos.plugin.source.commit="${PLUGIN_SOURCE_SHA}"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     VLLM_PLUGINS=fl \
-    GEMS_VENDOR=iluvatar \
-    FLAGGEMS_VERSION=${FLAGGEMS_VERSION}
+    GEMS_VENDOR=iluvatar
 
 # Resolve the vendor vLLM wheel against the Runtime Torch ABI.
 # Expose Triton to pip only for this installation.
