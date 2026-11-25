@@ -516,6 +516,12 @@ class TestFlaModuleRelocation:
 
     def test_noop_when_new_package_absent(self, fla, monkeypatch):
         """Without the >= 0.28 package there is nothing to alias."""
+        # The installed vllm really ships the new third_party package, and a
+        # fake sys.modules["vllm"] cannot hide it from the path finders (the
+        # finder resolves vllm.third_party through the real parent's
+        # __path__). Pin the existence probe so the absent-package branch
+        # runs regardless of what this build ships.
+        monkeypatch.setattr(fla, "_module_exists", lambda name: name != self._NEW)
         layers = _fake_pkg("vllm.model_executor.layers")
         monkeypatch.setitem(sys.modules, "vllm", _fake_pkg("vllm"))
         monkeypatch.setitem(sys.modules, "vllm.model_executor", _fake_pkg("vllm.model_executor"))
