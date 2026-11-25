@@ -261,13 +261,12 @@ def _install_gcu_dtype_preserving_codegen(provider) -> None:
     marker = "_fl_gcu_dtype_preserving_codegen"
     if getattr(original, marker, False) is True:
         return
-    if tuple(inspect.signature(original).parameters) != ("graph_lowering_self",):
-        logger.warning("Skipping GCU dtype codegen adapter: unknown vendor ABI")
-        return
     # Retain the vendor's cache, logging, float64 lowering and module loading.
     # Remove only the four observed integer ABI/limit rewrites. Unknown source
     # is never silently substituted with Torch's entire implementation.
     try:
+        if tuple(inspect.signature(original).parameters) != ("graph_lowering_self",):
+            raise ValueError("unknown vendor ABI")
         tree = ast.parse(textwrap.dedent(inspect.getsource(original)))
         function = tree.body[0]
         expected = {

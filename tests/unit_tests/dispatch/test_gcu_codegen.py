@@ -37,7 +37,7 @@ def test_preserves_vendor_actions_and_integer_storage_abi(monkeypatch):
     assert adapted.__wrapped__ is vendor_compile
 
 
-@pytest.mark.parametrize("reason", ["source", "abi", "opt_out"])
+@pytest.mark.parametrize("reason", ["source", "abi", "signature", "opt_out"])
 def test_unknown_vendor_or_disabled_adapter_is_not_replaced(monkeypatch, reason):
     warnings = []
     monkeypatch.setattr(
@@ -48,6 +48,10 @@ def test_unknown_vendor_or_disabled_adapter_is_not_replaced(monkeypatch, reason)
     original = vendor_compile
     if reason == "abi":
         original = lambda self, extra: None
+    if reason == "signature":
+        monkeypatch.setattr(
+            original, "__signature__", "unsupported vendor signature", raising=False
+        )
     if reason == "source":
         monkeypatch.setattr(
             inductor.inspect,

@@ -27,6 +27,24 @@ contain each candidate's plugin changes.
 | Preinstalled FlagGems-vllm | `0.3.0.dev1`; local wheel provenance, public source SHA unverified |
 | OpenAI SDK / pandas | `3.28.0` / `3.0.6` |
 
+The pinned image's package metadata records the following installation sources.
+Wheel hashes identify installed artifacts; they do not identify public source commits.
+
+| Component | Recorded source |
+|---|---|
+| TorchGCU | TOPS SDK bundle wheel; SHA256 `2796fc7c1a5188a5a1462679b61e6f24bf5536fdb21e5573a82a253c0239bd3e` |
+| TOPS SDK / TOPS ATen / ECCL | Vendor Debian package metadata; source commits unavailable |
+| FlagCX | Local `/sgl-workspace/FlagCX` directory; source commit unrecorded |
+| FlagTree / Triton GCU | Installed wheel metadata confirms the versions above; public source commits unrecorded |
+| FlagGems | Local `flag_gems-5.5.0.dev0` wheel; SHA256 `8bbc0a8fbf4840f5ef8fcf70ff86cdab11f0248e86e0db8ed1f7e969bdb6d5be` |
+| FlagGems-vllm | Local `flaggems_vllm-0.3.0.dev1` wheel; SHA256 `8a6ad92b7dc09987f0460362a59fdbed4d6081e3476289e82e52264e8220b1ad` |
+| vLLM | Editable `/workspace/gate-src/vllm` directory; installed version `0.32.0+empty`, source commit unrecorded |
+
+The image retains older vLLM 0.28 OCI labels. Those labels cannot establish the
+source revision of its installed 0.32 packages. The image recipe pins the official
+vLLM source for a new build; the published image's missing source revisions still
+need confirmation from its publisher before a source-reproducible rebuild can be claimed.
+
 The `+cpu` PyTorch version is the vendor package's version string; execution
 uses `torch_gcu` and the `gcu` device. Do not replace it with a generic PyTorch
 wheel. Likewise, a generic FlagTree build or standalone upstream Triton wheel
@@ -200,6 +218,21 @@ vllm serve "/data/models/Qwen/$MODEL_NAME" \
   --compilation-config '{"custom_ops":["none","+SiluAndMul"],"cudagraph_capture_sizes":[1,2,4,8,16,32]}' \
   "${mode_args[@]}" 2>&1 | tee "/logs/$MODEL_NAME-$MODE-server.log"
 ```
+
+These settings match the checked-in S60 inference configurations:
+
+| Setting | Purpose |
+|---|---|
+| `gpu_memory_utilization=0.90` | Sets vLLM's device-memory budget; leaves room for runtime and compilation allocations. |
+| `max_num_seqs=64` | Caps the number of sequences scheduled together. |
+| `max_num_batched_tokens=4096` | Caps tokens processed in one scheduling iteration, including chunked prefill. |
+| `custom_ops=["none","+SiluAndMul"]` | Disables optional custom-op paths globally, then enables `SiluAndMul` for this tested backend configuration. |
+| `cudagraph_capture_sizes=[1,2,4,8,16,32]` | Bounds the graph batch sizes captured during startup; these sizes do not set the sequence limit. |
+
+The observed graph-capture stack for the validated 27B configuration used
+`vllm/v1/worker/gpu/model_runner.py`, the V2 runner path in vLLM 0.32.
+This observation applies to that configuration; record the actual runner for each
+new model or configuration rather than inferring it from an unset environment variable.
 
 Cold-cache compilation and graph capture can take substantial time. The native
 S60 inference jobs allow 120 minutes. Follow the service log and wait for startup to
