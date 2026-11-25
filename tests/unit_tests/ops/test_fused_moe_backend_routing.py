@@ -8,6 +8,52 @@ from unittest.mock import Mock
 import pytest
 
 
+@pytest.mark.parametrize("scoring_func", ["softmax", "sigmoid"])
+@pytest.mark.parametrize("renormalize", [False, True])
+@pytest.mark.parametrize("groups_kept", [1, 4])
+@pytest.mark.parametrize("dtype,scale", [("float32", 1.0), ("bfloat16", 1.5)])
+def test_grouped_router_matches_masked_expert_topk(
+    monkeypatch, scoring_func, renormalize, groups_kept, dtype, scale
+):
+    import torch
+
+    from vllm_fl.ops.fused_moe import router
+
+    # Two experts per group. The winning groups are 0 and 2 respectively,
+    # but each token's second-highest logit belongs to a different group.
+    logits = torch.tensor(
+        [[3, -1, 2, 0, 1, 0, -2, -3], [1, 2, -2, -3, -1, 3, 0, 1]],
+        dtype=getattr(torch, dtype),
+    )
+    scores = logits.softmax(dim=-1) if scoring_func == "softmax" else logits.sigmoid()
+    mask = torch.ones_like(scores)
+    if groups_kept == 1:
+        mask.zero_()
+        mask[0, :2] = 1
+        mask[1, 4:6] = 1
+    expected_weights, expected_ids = (scores * mask).topk(2, dim=-1, sorted=False)
+    if renormalize:
+        expected_weights /= expected_weights.sum(dim=-1, keepdim=True)
+    expected_weights *= scale
+
+    monkeypatch.setattr(router.rocm_aiter_ops, "is_fused_moe_enabled", lambda: False)
+    config = SimpleNamespace(
+        num_expert_group=4,
+        topk_group=groups_kept,
+        top_k=2,
+        scoring_func=scoring_func,
+        renormalize=renormalize,
+        routed_scaling_factor=scale,
+        e_score_correction_bias=None,
+    )
+    weights, ids = router.GroupedTopKRouterFL._compute_routing(
+        config, torch.zeros(2, 4), logits, indices_type=torch.int32
+    )
+
+    torch.testing.assert_close(weights, expected_weights.float(), rtol=0, atol=0)
+    torch.testing.assert_close(ids, expected_ids.int())
+
+
 def _import_fused_moe_utils():
     try:
         from vllm_fl.ops.fused_moe import fused_moe_utils

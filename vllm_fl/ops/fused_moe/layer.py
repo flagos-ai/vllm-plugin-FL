@@ -8,16 +8,15 @@ import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
 # so calling _fused_moe_pkg.FusedMoE() inside FusedMoEFL would recurse
 # infinitely.  Capturing it here breaks the cycle.
 _OrigFusedMoE = _fused_moe_pkg.FusedMoE
+from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
     UnquantizedFusedMoEMethod,
 )
-from vllm.logger import init_logger
 
 from .fused_moe_utils import select_unquantized_moe_backend_oot
 from vllm_fl.ops.fused_moe.router import replace_router_with_fl
-
 
 logger = init_logger(__name__)
 
@@ -28,12 +27,16 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
 
     def __init__(self, moe: FusedMoEConfig):
         super().__init__(moe)
-        self.unquantized_backend, self.experts_cls = (
-            select_unquantized_moe_backend_oot(
-                moe_config=self.moe,
-                prefer_flaggems_experts=True,
-            )
+        self.unquantized_backend, self.experts_cls = select_unquantized_moe_backend_oot(
+            moe_config=self.moe,
+            prefer_flaggems_experts=True,
         )
+
+    def process_weights_after_loading(self, layer):
+        super().process_weights_after_loading(layer)
+        prepack = getattr(self, "ocr_expert_prepack", None)
+        if prepack is not None:
+            prepack(layer)
 
     @property
     def is_monolithic(self) -> bool:

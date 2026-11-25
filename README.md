@@ -30,6 +30,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Qwen3.8-Flash-Next / Qwen4Exp | Supported | [implementation](./vllm_fl/models/qwen3_8_flash_next/) |
 | Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
+| Unlimited-OCR | Ascend 910C BF16 | [example](./examples/unlimited_ocr/serve.py) / [serving and validation](#unlimited-ocr-on-ascend) |
 | GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
 | GLM-5.3 Flash | Supported | [implementation](./vllm_fl/models/glm5/model.py) |
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
@@ -223,6 +224,65 @@ If there are multiple plugins in the current environment, you can specify use vl
     standard Python-only FL installation above is sufficient. Use a compatible
     FlagGems/FlagTree installation when setting `USE_FLAGGEMS=1`.
 
+
+### Unlimited-OCR on Ascend
+
+Unlimited-OCR loads the original checkpoint through FL's model and multimodal
+registration. NPU execution uses FL and torch-npu. The verified environment
+is Ascend 910C with CANN 9.0.1, Python
+3.12.13, PyTorch 2.10.0+cpu, torch-npu 2.10.0.post2, Transformers 5.13.0 and
+torchvision 0.25.0+cpu.
+
+Load the CANN toolkit environment. Use the source install above with
+`VLLM_TARGET_DEVICE=empty` at the pinned vLLM 0.24 revision and install
+Python-only FL in that environment. Install official FlagGems v5.3.4 as
+described above for both OCR routes. FL uses its standard FlagGems device
+detector during startup, including when `USE_FLAGGEMS=0` selects torch-npu
+for inference.
+[Pinned vLLM source](https://github.com/vllm-project/vllm/tree/ee0da84ab9e04ac7610e28580af62c365e898389)
+
+From the repository root, pass the checkpoint path and one Ascend device ID
+per tensor-parallel rank to the serving example.
+
+```bash
+python examples/unlimited_ocr/serve.py /path/to/Unlimited-OCR --devices 0,1 --tp 2
+```
+
+The example selects FL and the torch-npu path (`VLLM_PLUGINS=fl`,
+`USE_FLAGGEMS=0`). Its defaults are BF16 weights and KV cache, TP2,
+`FULL_DECODE_ONLY` with capture sizes 1, 2, 4, 8, 16, 32 and 64, synchronous
+scheduling and chunked prefill. It uses a 32,768-token context, 64 active
+sequences, a 1,024-token batch budget and 0.80 device-memory utilization.
+R-SWA retains the full KV cache and uses a 2,048 MiB mask budget per rank.
+Prefix caching and speculative decoding are disabled. For single-device
+eager serving, use `--devices 0 --tp 1 --eager --max-num-seqs 4`.
+
+For single-device serving with optimized BF16 execution and asynchronous scheduling:
+
+```bash
+python examples/unlimited_ocr/serve.py /path/to/Unlimited-OCR \
+  --devices 0 --tp 1 --optimized --async-scheduling --block-size 256 \
+  --max-num-seqs 64 --max-num-batched-tokens 12288 \
+  --rswa-mask-mib 8192 --gpu-memory-utilization 0.95
+```
+
+`--optimized` sets the vLLM additional configuration option
+`ocr_tp1_optimized=true` for a single rank with a local BF16 KV cache. This
+selects head-major KV storage, expert weight prepacking and optimized
+attention and expert routing. A missing or false option uses the standard
+path. Scheduling is independent: omit `--async-scheduling` for synchronous
+operation. The default port is 10000; use `--port` to override it.
+
+To route the SiLU-and-multiply activation through the official FlagGems package,
+set `USE_FLAGGEMS=1 VLLM_FL_FLAGOS_WHITELIST=silu_and_mul` when launching the
+example. This selects the FL `default.flagos` activation and keeps R-SWA, RoPE
+and MoE on their Ascend routes.
+
+Send one image and a text prompt to `/v1/chat/completions` for
+`Unlimited-OCR`. The example uses a single BOS, Gundam image preprocessing
+(`image_size=640`, `base_size=1024`, `crop_mode=true`) and the FL NGram
+logits processor. For document recognition, use the prompt `document parsing.`
+and pass `ngram_size=35` and `window_size=128` in the request's `vllm_xargs`.
 
 ### HY4 on NVIDIA
 

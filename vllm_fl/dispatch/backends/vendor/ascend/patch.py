@@ -5,6 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 _patches_applied = False
 
+
 def apply_ascend_patches():
     """Apply all Ascend-specific patches."""
     global _patches_applied
@@ -27,6 +28,7 @@ def apply_ascend_patches():
 def patch_sampler_filter():
     """Use the packaged A2/A3 filter while retaining vLLM's sampler contract."""
     import torch_npu
+
     from vllm.v1.sample.ops import topk_topp_sampler
 
     def apply_top_k_top_p(logits, k, p):
@@ -65,14 +67,17 @@ def patch_gdn():
         name="QwenGatedDeltaNetAttention",
     )
 
+
 def patch_causal_conv1d():
     """Patch causal_conv1d ops with Ascend implementations."""
     try:
         import vllm.model_executor.layers.mamba.ops.causal_conv1d as _conv1d_lib
         import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
 
-        from .impl.causal_conv1d import causal_conv1d_fn as causal_conv1d_fn_npu
-        from .impl.causal_conv1d import causal_conv1d_update_npu
+        from .impl.causal_conv1d import (
+            causal_conv1d_fn as causal_conv1d_fn_npu,
+            causal_conv1d_update_npu,
+        )
 
         _conv1d_lib.causal_conv1d_fn = causal_conv1d_fn_npu
         _conv1d_lib.causal_conv1d_update = causal_conv1d_update_npu
@@ -82,10 +87,12 @@ def patch_causal_conv1d():
     except Exception as e:
         logger.warning("Failed to patch causal_conv1d ops: %s", e)
 
+
 def patch_fused_moe():
     """Patch fused MoE ops with Ascend implementations."""
     # TODO ops' triton implementation is not ready yet
     from .impl.fused_moe import fused_experts_impl
+
     try:
         import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
 
@@ -95,14 +102,10 @@ def patch_fused_moe():
     except Exception as e:
         logger.warning("Failed to patch fused_moe ops: %s", e)
 
+
 def patch_fla_ops():
     """Patch FLA ops and fused_gdn_gating with Ascend implementations."""
     try:
-        import vllm.model_executor.layers.fla.ops as _fla_ops_lib
-        import vllm.model_executor.layers.fla.ops.chunk as _fla_chunk_lib
-        import vllm.model_executor.layers.fla.ops.fused_recurrent as _fla_recurrent_lib
-        import vllm.model_executor.layers.fla.ops.layernorm_guard as _fla_layernorm_lib
-        import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
         from flag_gems.runtime.backend._ascend.fla import (
             chunk_gated_delta_rule_fwd,
             fused_recurrent_gated_delta_rule_fwd,
@@ -111,17 +114,36 @@ def patch_fla_ops():
             LayerNormFn as ascend_LayerNormFn,
         )
 
+        import vllm.model_executor.layers.fla.ops as _fla_ops_lib
+        import vllm.model_executor.layers.fla.ops.chunk as _fla_chunk_lib
+        import vllm.model_executor.layers.fla.ops.fused_recurrent as _fla_recurrent_lib
+        import vllm.model_executor.layers.fla.ops.layernorm_guard as _fla_layernorm_lib
+        import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
+
         from .impl.fla import chunk_gated_delta_rule_npu
 
         _fla_ops_lib.chunk_gated_delta_rule_fwd = chunk_gated_delta_rule_fwd
         _fla_chunk_lib.chunk_gated_delta_rule_fwd = chunk_gated_delta_rule_fwd
         _fla_chunk_lib.chunk_gated_delta_rule = chunk_gated_delta_rule_npu
-        _fla_recurrent_lib.fused_recurrent_gated_delta_rule_fwd = fused_recurrent_gated_delta_rule_fwd
+        _fla_recurrent_lib.fused_recurrent_gated_delta_rule_fwd = (
+            fused_recurrent_gated_delta_rule_fwd
+        )
         _fla_layernorm_lib.LayerNormFn = ascend_LayerNormFn
         _qwen3_next_lib.chunk_gated_delta_rule = chunk_gated_delta_rule_npu
         logger.info("Patched FLA ops for Ascend")
     except Exception as e:
         logger.warning("Failed to patch FLA ops: %s", e)
+
+
+def ascend_vision_oot_classes():
+    from .impl.mm_encoder_attention import AscendMMEncoderAttention
+    from .impl.vocab_parallel_embedding import AscendVocabParallelEmbedding
+
+    return {
+        "VocabParallelEmbedding": AscendVocabParallelEmbedding,
+        "MMEncoderAttention": AscendMMEncoderAttention,
+    }
+
 
 def patch_op_cls():
     """Patch MMEncoderAttention to use manual matmul attention on NPU.
@@ -135,19 +157,14 @@ def patch_op_cls():
     try:
         from vllm.model_executor.custom_op import CustomOp
 
-        from .impl.mm_encoder_attention import AscendMMEncoderAttention
-        from .impl.vocab_parallel_embedding import AscendVocabParallelEmbedding
-        REGISTERED_ASCEND_OPS = {
-            "VocabParallelEmbedding": AscendVocabParallelEmbedding,
-            "MMEncoderAttention": AscendMMEncoderAttention,
-        }
-        for name, op_cls in REGISTERED_ASCEND_OPS.items():
+        for name, op_cls in ascend_vision_oot_classes().items():
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=name)
         logger.info("Patched MMEncoderAttention for NPU (matmul attention)")
     except Exception as e:
         logger.warning("Failed to patch MMEncoderAttention: %s", e)
 
-def refresh_block_size(vllm_config, block_size = 128):
+
+def refresh_block_size(vllm_config, block_size=128):
     """
     Refresh the block size in cache config.
     """
@@ -164,8 +181,34 @@ def refresh_block_size(vllm_config, block_size = 128):
     if not scheduler_config or not model_config:
         return
 
+    if cache_config.block_size in (128, 256):
+        from vllm_fl.models.ocr_runtime import is_unlimited_ocr
+
+        if is_unlimited_ocr(model_config) and not hasattr(
+            cache_config, "_fl_ocr_block_size"
+        ):
+            cache_config._fl_ocr_block_size = cache_config.block_size
+
+    expected = getattr(cache_config, "_fl_ocr_block_size", None)
+    if expected is not None:
+        if cache_config.block_size != expected:
+            raise ValueError(
+                f"Unlimited-OCR requested {expected}-token KV pages, "
+                f"got {cache_config.block_size}"
+            )
+        return
+
     # Hybrid state pages are aligned by the Mamba configuration verifier.
-    if not model_config.is_hybrid and cache_config.block_size != block_size:
-        if cache_config.enable_prefix_caching or scheduler_config.enable_chunked_prefill:
-            logger.info(f"Block size is set to {block_size} if prefix cache or chunked prefill is enabled.")
-            cache_config.block_size = block_size
+    if (
+        not model_config.is_hybrid
+        and cache_config.block_size != block_size
+        and (
+            cache_config.enable_prefix_caching
+            or scheduler_config.enable_chunked_prefill
+        )
+    ):
+        logger.info(
+            "Block size is set to %d if prefix cache or chunked prefill is enabled.",
+            block_size,
+        )
+        cache_config.block_size = block_size
