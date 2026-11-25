@@ -18,7 +18,7 @@
 platform: nvidia
 
 # Docker image for this hardware (default for all devices)
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci@sha256:02b65e788e4ce2352ff1f41099744c33e196707b36a2e68461f78bfbe799a884
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-cuda-dev
 
 # Container volumes (hardware-specific paths)
 container_volumes:
