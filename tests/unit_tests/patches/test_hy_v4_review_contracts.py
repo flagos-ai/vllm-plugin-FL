@@ -220,7 +220,7 @@ def test_fallback_failure_rolls_back_real_module_attributes(monkeypatch):
 
     monkeypatch.delattr(indexer, "_hy4_runtime_installed", raising=False)
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True, is_cuda_alike=lambda: True)
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
@@ -261,7 +261,7 @@ def test_fp8_kv_requires_native_metadata(monkeypatch):
     from vllm import platforms
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True, is_cuda_alike=lambda: True)
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(
@@ -355,7 +355,7 @@ def test_preflight_requires_callable_implementations(monkeypatch, name):
     from vllm import platforms
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True, is_cuda_alike=lambda *_: True)
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
@@ -378,7 +378,7 @@ def test_fallback_success_idempotence_and_prefill_selection(monkeypatch):
 
     monkeypatch.delattr(indexer, "_hy4_runtime_installed", raising=False)
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True, is_cuda_alike=lambda: True)
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
@@ -422,7 +422,7 @@ def test_native_core_without_prefill_is_not_a_complete_native_plan(
     from vllm.v1.attention.ops import flashmla
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True, is_cuda_alike=lambda *_: True)
     )
     from vllm.utils import deep_gemm
 
@@ -471,7 +471,7 @@ def test_portable_prefill_rejects_unsupported_dimensions_before_install(
     from vllm import platforms
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True, is_cuda_alike=lambda *_: True)
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "use_flaggems_op", lambda name: True)

@@ -5,7 +5,7 @@ from functools import wraps
 
 import torch
 
-from .query_quant import flaggems_per_token_group_quant_fp8
+from .query_quant import _fp8_query_dtype, flaggems_per_token_group_quant_fp8
 from vllm_fl.dispatch.capabilities import get_flaggems_vllm_operator
 from vllm_fl.utils import use_flaggems_op
 
@@ -30,7 +30,9 @@ def _flaggems_query_quantizer(implementation):
     def quantize(x, group_size, *, use_ue8m0):
         if torch.compiler.is_compiling():
             return flaggems_per_token_group_quant_fp8(x, group_size, use_ue8m0)
-        return implementation(x, group_size, scale_ue8m0=use_ue8m0)
+        return implementation(
+            x, group_size, dtype=_fp8_query_dtype(), scale_ue8m0=use_ue8m0
+        )
 
     return quantize
 
@@ -55,7 +57,9 @@ def get_operator(name):
 def is_available(name):
     from vllm.platforms import current_platform
 
-    if not current_platform.is_cuda() or not use_flaggems_op(name):
+    # These providers are portable Triton kernels and do not need NVIDIA;
+    # CUDA-alike vendors (e.g. MetaX) expose the same torch.cuda API.
+    if not current_platform.is_cuda_alike() or not use_flaggems_op(name):
         return False
     if name == "mla_prefill_backend":
         return is_available("flash_attn_varlen_func")
