@@ -117,6 +117,7 @@ zw810e:
       exclude: []
     benchmark:
       pr:
-        enabled: false
+        enabled: true
+        types: [throughput, latency, serve]
       nightly:
         enabled: false

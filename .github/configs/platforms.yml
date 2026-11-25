@@ -80,15 +80,10 @@ platforms:
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
       - tests/platforms/nvidia.yaml
-      # Keep NVIDIA as a regression baseline for image changes.
-      - .github/configs/platforms.yml
-      - docker/build.sh
     exempt_from_global:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
-      - .github/configs/platforms.yml
-      - docker/build.sh
   # Enablement follows the 0.5.0-dev line's own compatibility matrix.
   # NVIDIA and Ascend have completed their vLLM 0.32 runtime and CI
   # adaptations; other backends remain disabled until theirs are ready.
@@ -144,31 +139,39 @@ platforms:
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
       - tests/platforms/kunlunxin.yaml
-      - .github/configs/platforms.yml
-      - docker/build.sh
     exempt_from_global:
       - .github/configs/kunlunxin.yml
       - .github/scripts/kunlunxin/
       - docker/kunlunxin/
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
-      - .github/configs/platforms.yml
-      - docker/build.sh
   thead:
     enabled: true
     trigger_paths:
+      - .github/configs/thead.yml
+      - .github/scripts/thead/
+      - docker/thead/
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
       - tests/platforms/thead.yaml
     exempt_from_global:
+      - .github/configs/thead.yml
+      - .github/scripts/thead/
+      - docker/thead/
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
   iluvatar:
     enabled: true
     trigger_paths:
+      - .github/configs/iluvatar.yml
+      - .github/scripts/iluvatar/
+      - docker/iluvatar/
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/
       - tests/platforms/iluvatar.yaml
     exempt_from_global:
+      - .github/configs/iluvatar.yml
+      - .github/scripts/iluvatar/
+      - docker/iluvatar/
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/
