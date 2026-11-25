@@ -25,6 +25,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Model | Status | Reference |
 |-------|--------|-----------|
 | CosyVoice3 speech LLM (BF16) | Merging (Ascend A2; TP1, eager / FULL decode; speech tokens only) | [example](./examples/cosyvoice3_llm.py) |
+| CosyVoice3 (MetaX C550, end-to-end TTS) | Validation pending | [offline example](./examples/cosyvoice3_c550_offline_inference.py) |
 | Qwen3.5-397B-A17B | Supported | [example](./examples/qwen3_5_offline_inference.py) |
 | Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
 | Qwen3.8-Flash-Next / Qwen4Exp | Supported | [implementation](./vllm_fl/models/qwen3_8_flash_next/) |
@@ -223,6 +224,29 @@ If there are multiple plugins in the current environment, you can specify use vl
     standard Python-only FL installation above is sufficient. Use a compatible
     FlagGems/FlagTree installation when setting `USE_FLAGGEMS=1`.
 
+
+### CosyVoice3 on MetaX C550
+
+The [offline example](./examples/cosyvoice3_c550_offline_inference.py) runs
+Fun-CosyVoice3-0.5B-2512 on one C550 using vLLM for speech tokens and CosyVoice
+for Flow and HiFT. It checks that the FL platform is selected and validates
+the generated audio before writing a 24 kHz mono WAV.
+
+Start with the MetaX vLLM 0.24.0 runtime and the plugin installed. Use
+[CosyVoice](https://github.com/FunAudioLLM/CosyVoice/tree/074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc)
+at commit `074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc` with its Matcha-TTS
+submodule and inference dependencies, including SoundFile. Keep the MetaX
+PyTorch and torchaudio builds from your runtime when installing CosyVoice
+dependencies. Use a writable checkpoint directory for CosyVoice's initial vLLM export.
+
+```bash
+GEMS_VENDOR=metax VLLM_PLUGINS=fl VLLM_ENABLE_V1_MULTIPROCESSING=0 \
+PYTHONPATH="$COSYVOICE_DIR:$COSYVOICE_DIR/third_party/Matcha-TTS" \
+python examples/cosyvoice3_c550_offline_inference.py \
+    --model-dir "$MODEL_DIR" --reference-wav "$REFERENCE_WAV" \
+    --reference-text "$REFERENCE_TEXT" --text "This is a synthesis test." \
+    --output speech.wav
+```
 
 ### HY4 on NVIDIA
 
