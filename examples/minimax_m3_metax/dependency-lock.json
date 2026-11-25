@@ -1,0 +1,24 @@
+{
+  "flag_gems": {
+    "distribution": "flag-gems",
+    "repository": "https://github.com/cshujie131-bot/FlagGems",
+    "commit": "c7a255b6bb24d3e5b3c1d40aa392e590d84c29d6",
+    "base_commit": "a7620cc191a0b42e040194622c5758b22a7a25dc",
+    "source_prs": [
+      "https://github.com/flagos-ai/FlagGems/pull/7320"
+    ],
+    "status": "source PR not merged; selective backport onto validated base"
+  },
+  "flaggems_vllm": {
+    "distribution": "flaggems-vllm",
+    "repository": "https://github.com/cshujie131-bot/FlagGems-vllm",
+    "commit": "ff12e0bfa9e124827739ae2e4ce7d7592c7e65b1",
+    "base_commit": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19",
+    "source_prs": [
+      "https://github.com/flagos-ai/FlagGems-vllm/pull/960",
+      "https://github.com/flagos-ai/FlagGems-vllm/pull/961",
+      "https://github.com/flagos-ai/FlagGems-vllm/pull/962"
+    ],
+    "status": "source PRs not merged; selective backports onto validated base"
+  }
+}

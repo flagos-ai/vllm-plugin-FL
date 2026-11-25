@@ -1,0 +1,19 @@
+{
+  "commit": "ee0da84ab9e04ac7610e28580af62c365e898389",
+  "files": {
+    "__init__.py": "6ef7e79230d80052a3672a804dd261a6d619e9881b53857d8fde6c6c954af0e9",
+    "common/__init__.py": "e3c55cbb0d7a8bd47df6f3378835644645f5d3bc89b45793b5d5a02d013e5c58",
+    "common/indexer.py": "2872a8f3b8294b888c749f8e19f650eb456dc636d6e67b98a317e7afeb6b0d34",
+    "common/mm_preprocess.py": "439dcb69a988cb318086edc9d408d893c9b25fc1454db6dc06123af81ffbc1f9",
+    "common/sparse_attention.py": "b6a0249e5b789db260a30d1402ea576fdbc202c1253c68f52148d360d8833134",
+    "common/vision_tower.py": "cbb37cee3bcfeeba018495a9abe8345f4d7b2d692042d3215d8420a4d441a74d",
+    "common/ops/__init__.py": "573b39a5af5024a51e8e6ba945397e9d8faf63a69bf29b01fd558c142a1e0760",
+    "common/ops/index_topk.py": "08a1ecfee1a8890dbca7934fdd474cb19f8f38d475c1cced938145d1a177d874",
+    "common/ops/sparse_attn.py": "fefbbcb4ab1e6c4d40538d515e8bf7c247a4cc3ceb8682587b2909b3f0619460",
+    "nvidia/__init__.py": "e3c55cbb0d7a8bd47df6f3378835644645f5d3bc89b45793b5d5a02d013e5c58",
+    "nvidia/indexer_msa.py": "31db2c8e8c4d085db4aa9c7988db76ac3cb895253a6d936d14eee709fa7774cb",
+    "nvidia/model.py": "86a3955aa4cb592659975a7decf70a472181413077e182293648cad915c0161f",
+    "nvidia/mtp.py": "967fc97f088768ff21e85393b1d9212be2e3f398bd69c4f90cce6a2b0c145251",
+    "nvidia/sparse_attention_msa.py": "bb5488603e14b0bab4e4f01f28a68e304e027552fe1ad0beb658baa1e87ce250"
+  }
+}

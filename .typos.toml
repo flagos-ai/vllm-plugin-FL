@@ -26,6 +26,7 @@ extend-ignore-re = [
 rsqrt = "rsqrt"
 dout = "dout"
 bfloat = "bfloat"
+subtile = "subtile"
 
 # Hardware / vendor terminology
 npu = "npu"

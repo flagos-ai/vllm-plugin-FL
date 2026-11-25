@@ -71,3 +71,31 @@ def test_unexpected_import_failure_propagates(initialize):
     with pytest.raises(RuntimeError) as caught:
         run("nvidia")
     assert caught.value is error
+
+
+@pytest.mark.parametrize("vendor", ["metax", "maca", "kunlunxin"])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_minimax_preparation_is_opt_in_and_metax_only(
+    initialize, monkeypatch, vendor, enabled
+):
+    run, importer = initialize
+    prepare, xpu = Mock(), Mock()
+    monkeypatch.setitem(
+        sys.modules,
+        "vllm_fl.minimax_m3_config",
+        SimpleNamespace(is_enabled=lambda: enabled),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "vllm_fl.patches.minimax_m3_metax.startup",
+        SimpleNamespace(prepare_platform=prepare),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils",
+        SimpleNamespace(_patch_xpu_get_device=xpu),
+    )
+    run(vendor)
+    assert prepare.call_count == int(enabled and vendor in {"metax", "maca"})
+    assert xpu.call_count == int(vendor == "kunlunxin")
+    importer.assert_not_called()

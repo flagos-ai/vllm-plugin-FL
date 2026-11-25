@@ -80,42 +80,42 @@ import os
 
 import torch
 
-from .types import OpImpl, BackendImplKind, BackendPriority, match_token
-from .registry import OpRegistry, OpRegistrySnapshot
-from .policy import (
-    SelectionPolicy,
-    PolicyManager,
-    get_policy,
-    get_policy_epoch,
-    set_global_policy,
-    reset_global_policy,
-    policy_context,
-    policy_from_config,
-    with_strict_mode,
-    with_preference,
-    with_allowed_vendors,
-    with_denied_vendors,
-    PREFER_DEFAULT,
-    PREFER_VENDOR,
-    PREFER_REFERENCE,
-)
-from .manager import OpManager, get_default_manager, reset_default_manager
-from .ops import VLLMFLBackendBase
 from .discovery import (
-    discover_plugins,
-    get_discovered_plugins,
-    clear_discovered_plugins,
     PLUGIN_GROUP,
     PLUGIN_MODULES_ENV,
+    clear_discovered_plugins,
+    discover_plugins,
+    get_discovered_plugins,
 )
-from .logger_manager import get_logger, set_log_level
+from .io_common import list_model_layers, register_tensor_stat, tensor_stats
 from .io_dumper import (
-    enable_io_dump,
     disable_io_dump,
+    enable_io_dump,
     io_dump_step,
     is_dump_enabled,
 )
-from .io_common import list_model_layers, register_tensor_stat, tensor_stats
+from .logger_manager import get_logger, set_log_level
+from .manager import OpManager, get_default_manager, reset_default_manager
+from .ops import VLLMFLBackendBase
+from .policy import (
+    PREFER_DEFAULT,
+    PREFER_REFERENCE,
+    PREFER_VENDOR,
+    PolicyManager,
+    SelectionPolicy,
+    get_policy,
+    get_policy_epoch,
+    policy_context,
+    policy_from_config,
+    reset_global_policy,
+    set_global_policy,
+    with_allowed_vendors,
+    with_denied_vendors,
+    with_preference,
+    with_strict_mode,
+)
+from .registry import OpRegistry, OpRegistrySnapshot
+from .types import BackendImplKind, BackendPriority, OpImpl, match_token
 
 logger = get_logger()
 
@@ -160,6 +160,9 @@ class CachedOp:
     manager/fallback path on every invocation. Hot layer paths can use CachedOp
     to call the resolved implementation directly after the first lookup.
 
+    Set retry_on_error=False when a failed numerical call must propagate without
+    selecting another implementation. The default preserves existing behavior.
+
     The cache is invalidated by both OpManager.policy_epoch and
     PolicyManager.policy_epoch. The latter matters for policy_context() and
     set_global_policy(), which can change the effective backend without
@@ -178,10 +181,12 @@ class CachedOp:
         "_manager_id",
         "_manager_epoch",
         "_policy_epoch",
+        "_retry_on_error",
     )
 
-    def __init__(self, op_name: str) -> None:
+    def __init__(self, op_name: str, *, retry_on_error: bool = True) -> None:
         self._op_name = op_name
+        self._retry_on_error = retry_on_error
         self._impl = None
         self._frozen = False
         self._use_manager_call = False
@@ -198,11 +203,11 @@ class CachedOp:
 
         mgr = get_default_manager()
 
-        if not _OP_FAST_PATH_ENABLED:
-            return mgr.call(self._op_name, *args, **kwargs)
-
-        if is_dump_enabled():
-            return mgr.call(self._op_name, *args, **kwargs)
+        if not _OP_FAST_PATH_ENABLED or is_dump_enabled():
+            if self._retry_on_error:
+                return mgr.call(self._op_name, *args, **kwargs)
+            impl = self.bind()
+            return mgr._call_with_hooks(self._op_name, impl.fn, args, kwargs)
 
         manager_epoch = mgr.policy_epoch
         manager_id = id(mgr)
@@ -216,7 +221,7 @@ class CachedOp:
             self._frozen = False
             self._use_manager_call = False
 
-        if self._use_manager_call:
+        if self._use_manager_call and self._retry_on_error:
             return mgr.call(self._op_name, *args, **kwargs)
 
         impl = self._impl
@@ -233,6 +238,9 @@ class CachedOp:
             self._manager_id = manager_id
             self._manager_epoch = mgr.policy_epoch
             self._policy_epoch = get_policy_epoch()
+
+        if not self._retry_on_error:
+            return impl.fn(*args, **kwargs)
 
         try:
             return impl.fn(*args, **kwargs)
@@ -254,6 +262,39 @@ class CachedOp:
             mgr._mark_failed_impl(self._op_name, impl.impl_id)
             self._use_manager_call = True
             return mgr.call(self._op_name, *args, **kwargs)
+
+    @property
+    def allows_error_fallback(self):
+        """Whether execution failures may trigger another implementation."""
+        return self._retry_on_error
+
+    @property
+    def op_name(self):
+        return self._op_name
+
+    def inspect_binding(self):
+        """Read the current effective implementation without resetting fallback state."""
+        mgr = get_default_manager()
+        if (
+            self._impl is not None
+            and self._manager_id == id(mgr)
+            and self._manager_epoch == mgr.policy_epoch
+            and self._policy_epoch == get_policy_epoch()
+        ):
+            return self._impl
+        return mgr._resolve_impl(self._op_name)
+
+    def bind(self):
+        """Resolve this call site using the same policy epochs as __call__."""
+        mgr = get_default_manager()
+        impl = mgr._resolve_impl(self._op_name)
+        mgr._record_first_use(self._op_name, impl)
+        self._impl = impl
+        self._use_manager_call = False
+        self._manager_id = id(mgr)
+        self._manager_epoch = mgr.policy_epoch
+        self._policy_epoch = get_policy_epoch()
+        return impl
 
 
 def prewarm_cached_ops() -> int:

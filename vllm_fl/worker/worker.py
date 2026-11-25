@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
+
 from vllm import envs
 from vllm.config import CUDAGraphMode, VllmConfig, set_current_vllm_config
 from vllm.config.compilation import CompilationMode
@@ -47,7 +48,6 @@ except ImportError:
         pass
 
 
-import vllm_fl.envs as fl_envs
 from vllm.distributed.parallel_state import get_pcp_group, get_pp_group, get_tp_group
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -66,6 +66,8 @@ from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
+
+import vllm_fl.envs as fl_envs
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
@@ -197,7 +199,6 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
         # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
         # kernels inside spawned workers; when every rank shares the default
         # Triton cache directory, concurrent compilation of the same kernel
@@ -248,6 +249,7 @@ class WorkerFL(WorkerBase):
             patch_mm_encoder_attention,
             patch_oot_apply_rotary_emb,
         )
+
         patch_mm_encoder_attention()
         patch_oot_apply_rotary_emb()
 
@@ -260,10 +262,12 @@ class WorkerFL(WorkerBase):
 
         from vllm_fl.ops.custom_ops import register_oot_ops
 
-        register_oot_ops()
+        register_oot_ops(**self.oot_registration_kwargs())
 
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
+
+            registration_kwargs = self.flaggems_registration_kwargs()
 
             # Get whitelist and blacklist from environment variables
             whitelist, blacklist = get_flag_gems_whitelist_blacklist(
@@ -273,7 +277,7 @@ class WorkerFL(WorkerBase):
 
             # Only rank 0 records the oplist to avoid file truncation and
             # interleaved writes when tensor-parallel-size > 1.
-            should_record = (rank == 0)
+            should_record = rank == 0
 
             # Use whitelist if specified (takes precedence over blacklist)
             if whitelist:
@@ -283,6 +287,7 @@ class WorkerFL(WorkerBase):
                     record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                    **registration_kwargs,
                 )
             elif blacklist:
                 logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
@@ -291,11 +296,15 @@ class WorkerFL(WorkerBase):
                     record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                    **registration_kwargs,
                 )
             else:
                 logger.info("[FlagGems] Enable all ops")
                 flag_gems.enable(
-                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
+                    record=should_record,
+                    once=True,
+                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                    **registration_kwargs,
                 )
 
     # def sleep(self, level: int = 1) -> None:
@@ -352,9 +361,23 @@ class WorkerFL(WorkerBase):
     #         context = nullcontext()
     #     return context
 
+    def oot_registration_kwargs(self):
+        return {}
+
+    def flaggems_registration_kwargs(self):
+        return {}
+
     def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+
+    def model_runner_type(self):
+        from vllm_fl.worker.model_runner import ModelRunnerFL
+
+        return ModelRunnerFL
+
+    def warmup_kernels(self):
+        kernel_warmup(self)
 
     def init_device(self):
         # Iluvatar: patch sampler ops to disable torch.compile (flagtree triton
@@ -375,9 +398,8 @@ class WorkerFL(WorkerBase):
                 patch_sampler_compile_for_iluvatar()
             except Exception as _e:
                 import logging as _lg
-                _lg.getLogger(__name__).warning(
-                    "iluvatar worker patch failed: %s", _e
-                )
+
+                _lg.getLogger(__name__).warning("iluvatar worker patch failed: %s", _e)
 
         # PTPU: register the Inductor/Dynamo/Triton wiring in EVERY worker
         # process (torch.compile runs here, not in EngineCore, and the
@@ -392,6 +414,7 @@ class WorkerFL(WorkerBase):
                 register_ptpu_inductor_backend()
             except Exception as _e:
                 import logging as _lg
+
                 _lg.getLogger(__name__).warning(
                     "ptpu inductor backend registration failed: %s", _e
                 )
@@ -520,10 +543,8 @@ class WorkerFL(WorkerBase):
         num_ubatches = 2 if self.vllm_config.parallel_config.enable_dbo else 1
         init_workspace_manager(self.device, num_ubatches)
 
-        from vllm_fl.worker.model_runner import ModelRunnerFL
-
         # Construct the model runner
-        self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
+        self.model_runner = self.model_runner_type()(self.vllm_config, self.device)
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
@@ -816,10 +837,9 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        if (
-            current_platform.device_type == "txda"
-            or getattr(current_platform, "vendor_name", None) in ("kunlunxin", "thead")
-        ):
+        if current_platform.device_type == "txda" or getattr(
+            current_platform, "vendor_name", None
+        ) in ("kunlunxin", "thead"):
             # vLLM 0.24 imports MiniMax's NVIDIA implementation even for
             # unrelated models, initializing unsupported FlashInfer CUDA APIs.
             # The actual model dummy runs and graph capture remain below.
@@ -833,7 +853,7 @@ class WorkerFL(WorkerBase):
             )
         else:
             try:
-                kernel_warmup(self)
+                self.warmup_kernels()
             except ImportError as e:
                 # vllm 0.24.0's kernel_warmup unconditionally imports
                 # minimax_m3_msa_warmup, whose chain reaches torchvision.
