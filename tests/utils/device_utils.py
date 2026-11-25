@@ -106,6 +106,7 @@ def get_backend() -> str:
             "kunlunxin": "kunlunxin",
             "tianshu": "tianshu",
             "thead": "thead",
+            "mthreads": "musa",
         }.get(vendor, "nvidia")
     try:
         import torch_npu  # noqa: F401

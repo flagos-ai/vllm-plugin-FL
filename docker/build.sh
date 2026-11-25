@@ -43,12 +43,12 @@ AMD_PYTHON_VERSION="${AMD_PYTHON_VERSION:-3.12}"
 AMD_FLAGTREE_VERSION="${AMD_FLAGTREE_VERSION:-0.7.0+amd3.6}"
 AMD_FLAGGEMS_COMMIT="${AMD_FLAGGEMS_COMMIT:-292cec32414fbfea3745df5e5d640dd0fad210d7}"
 AMD_FLAGCX_COMMIT="${AMD_FLAGCX_COMMIT:-591cfbf}"
-MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06}"
-MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
-MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
+MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-mthreads-musa4.3.6:2.2.0}"
+MUSA_VERSION="${MUSA_VERSION:-4.3.6}"
+MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.32.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
-MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
+MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.32.0}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-ascend-cann9.0.0-910c:2.2.0-0.3.0@sha256:fc83d07a4fbecd090dc471e9caa5d978dc34715fcfcca537b7bbf720a298dd51}"
 ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853}"
@@ -399,7 +399,11 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
     fi
-    BUILD_ARGS+=(--build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}")
+    BUILD_ARGS+=(
+        --build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${MUSA_VLLM_VERSION}"
+        --build-arg "FLAGGEMS_VERSION=${MUSA_FLAGGEMS_VERSION}"
+    )
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${VLLM_VERSION}-musa-${TARGET}"
     fi
