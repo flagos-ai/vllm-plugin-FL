@@ -8,7 +8,8 @@ Covers ``vllm_fl/dispatch/backends/vendor/iluvatar/shutdown.py``:
 * ``_live_processes`` filters to running, non-zombie entries.
 * ``_wait_for_workers`` returns the still-live remainder after a timeout.
 * ``_cleanup_workers`` terminates then kills retained workers and raises
-  when they survive both.
+  when they survive both; a worker that vanishes between wait and signal
+  is swallowed (the psutil NoSuchProcess except branch, L53-54).
 * ``_with_worker_cleanup`` wraps a shutdown callable so descendants are
   cleaned up even when shutdown raises; idempotent via its marker flag.
 * ``install_worker_cleanup`` swaps ``vllm.v1.engine.utils.shutdown``.
@@ -224,6 +225,53 @@ class TestCleanupWorkers:
             _cleanup_workers([immortal])
         assert immortal.terminated == 1
         assert immortal.killed == 1
+
+    def test_vanishing_worker_does_not_break_cleanup(self, fake_psutil):
+        """A worker that exits between wait and terminate is skipped (L53-54).
+
+        The first wait reports the worker still alive; by the time the
+        terminate signal is sent the process has vanished, so psutil raises
+        NoSuchProcess and the loop must continue instead of failing.
+        """
+        import psutil
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.shutdown import (
+            _cleanup_workers,
+        )
+
+        class VanishingOnTerminate(FakeProcess):
+            def terminate(self):
+                raise psutil.NoSuchProcess(self.pid)
+
+        ghost = VanishingOnTerminate(7)
+        # first wait (in _cleanup_workers) says alive; second and third (after
+        # each action) report it gone
+        fake_psutil.on_wait(lambda procs, timeout: ([], list(procs)))
+        fake_psutil.on_wait(lambda procs, timeout: (list(procs), []))
+        fake_psutil.on_wait(lambda procs, timeout: (list(procs), []))
+        _cleanup_workers([ghost])  # must not raise
+        assert ghost.terminated == 0, "terminate raised before counting"
+
+    def test_vanishing_worker_on_kill_path(self, fake_psutil):
+        """The NoSuchProcess swallow also covers the kill action pass."""
+        import psutil
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.shutdown import (
+            _cleanup_workers,
+        )
+
+        class VanishingOnKill(FakeProcess):
+            survives_terminate = True
+
+            def kill(self):
+                raise psutil.NoSuchProcess(self.pid)
+
+        ghost = VanishingOnKill(9)
+        fake_psutil.on_wait(lambda procs, timeout: ([], list(procs)))
+        fake_psutil.on_wait(lambda procs, timeout: ([], list(procs)))
+        fake_psutil.on_wait(lambda procs, timeout: (list(procs), []))
+        _cleanup_workers([ghost])  # must not raise
+        assert ghost.terminated == 1, "terminate still ran before the vanishing"
 
 
 class TestWithWorkerCleanup:
