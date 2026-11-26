@@ -31,6 +31,97 @@ def test_amd_sparse_mla_rejected_before_dispatch(monkeypatch):
     )
 
 
+@pytest.mark.parametrize(
+    ("use_rswa", "vendor_supports_rswa", "requested", "block_size", "expected"),
+    [
+        (False, False, "TRITON_ATTN", 16, "vendor"),
+        (True, True, None, 16, "vendor"),
+        (True, False, None, 16, "triton"),
+        (True, False, "TRITON_ATTN", 16, "triton"),
+        (True, False, "TRITON_ATTN", 8, None),
+        (True, False, "FLASH_ATTN", 16, None),
+    ],
+)
+def test_metax_attention_dispatch_respects_rswa(
+    monkeypatch, use_rswa, vendor_supports_rswa, requested, block_size, expected
+):
+    import torch
+
+    from vllm.platforms.interface import DeviceCapability
+    from vllm.utils import import_utils
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
+    from vllm.v1.attention.selector import AttentionSelectorConfig
+
+    from vllm_fl import dispatch
+    from vllm_fl.platform import PlatformFL
+
+    vendor_path = "configured.vendor.AttentionBackend"
+    vendor_backend = SimpleNamespace(
+        supports_rswa=lambda: vendor_supports_rswa,
+        validate_configuration=lambda **kwargs: [],
+    )
+    resolve_backend = import_utils.resolve_obj_by_qualname
+
+    def resolve(path):
+        if path == vendor_path:
+            return vendor_backend
+        return resolve_backend(path)
+
+    def select_configured_backend(op_name, *, use_mla, use_sparse, **extras):
+        assert (op_name, use_mla, use_sparse) == ("attention_backend", False, False)
+        assert extras == (
+            {"use_rswa": True}
+            if use_rswa and requested in (None, "TRITON_ATTN")
+            else {}
+        )
+        return vendor_path
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", "metax")
+    monkeypatch.setattr(
+        PlatformFL, "get_device_capability", lambda device_id=0: DeviceCapability(8, 0)
+    )
+    monkeypatch.setattr(dispatch, "call_op", select_configured_backend)
+    monkeypatch.setattr(import_utils, "resolve_obj_by_qualname", resolve)
+    selector = AttentionSelectorConfig(
+        head_size=128,
+        dtype=torch.bfloat16,
+        kv_cache_dtype="auto",
+        block_size=block_size,
+        use_rswa=use_rswa,
+    )
+    selected_backend = AttentionBackendEnum[requested] if requested else None
+    if selected_backend == AttentionBackendEnum.FLASH_ATTN:
+        from vllm_fl.dispatch.backends.vendor.metax.impl.attention.flash_attn import (
+            MacaFlashAttentionBackend,
+        )
+
+        monkeypatch.setattr(
+            AttentionBackendEnum, "get_class", lambda backend: MacaFlashAttentionBackend
+        )
+    if expected is None:
+        with pytest.raises(ValueError, match="cannot satisfy R-SWA requirements"):
+            PlatformFL.get_attn_backend_cls(selected_backend, selector)
+    else:
+        expected_path = (
+            vendor_path
+            if expected == "vendor"
+            else AttentionBackendEnum.TRITON_ATTN.get_path()
+        )
+        assert (
+            PlatformFL.get_attn_backend_cls(selected_backend, selector) == expected_path
+        )
+
+
+def test_non_metax_attention_keeps_dispatch_for_rswa(monkeypatch):
+    from vllm_fl import dispatch
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", "mthreads")
+    monkeypatch.setattr(dispatch, "call_op", lambda *args, **kwargs: "existing.backend")
+    selector = SimpleNamespace(use_mla=False, use_sparse=False, use_rswa=True)
+    assert PlatformFL.get_attn_backend_cls(None, selector) == "existing.backend"
+
+
 def _make_ascend_vllm_config(
     *, backend="eager", compilation_mode=None, cudagraph_mode=None, enforce_eager=False
 ):

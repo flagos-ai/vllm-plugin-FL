@@ -53,7 +53,7 @@ class TxdaBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
-    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False, use_rswa: bool = False) -> str:
         """
         Get the attention backend class path for tsingmicro TX.
 
@@ -69,6 +69,9 @@ class TxdaBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        if use_rswa:
+            raise NotImplementedError("R-SWA selection is unsupported by this vendor backend")
+
         if use_mla or use_sparse:
             raise NotImplementedError(
                 "TXDA SDPA does not support MLA or sparse attention"

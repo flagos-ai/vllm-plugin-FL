@@ -1,5 +1,5 @@
 # Copyright 2026 FlagOS Contributors
-"""CPU contracts for the NVIDIA RoPE mutation workaround."""
+"""CPU contracts for vendor RoPE mutation workarounds."""
 
 import importlib.util
 import sys
@@ -22,7 +22,7 @@ def _load_rotary():
     return module.rotary_embedding_flaggems
 
 
-@pytest.mark.parametrize("vendor", ["nvidia", "musa"])
+@pytest.mark.parametrize("vendor", ["nvidia", "musa", "metax"])
 @pytest.mark.parametrize("inplace", [False, True])
 @pytest.mark.parametrize("interleaved", [False, True])
 @pytest.mark.parametrize("packed_views", [False, True])
@@ -47,8 +47,8 @@ def test_provider_routing_preserves_mutation_and_storage(
         assert c is cos and s is sin
         assert position_ids is positions
         assert rotary_interleaved is interleaved
-        if vendor == "nvidia":
-            assert not inplace, "NVIDIA must not call the unsafe in-place kernel"
+        if vendor == "nvidia" or (vendor == "metax" and not interleaved):
+            assert not inplace, "The unsafe in-place kernel must not execute"
         calls.append(inplace)
         result_q, result_k = q + 5, k - 7
         if inplace:
@@ -81,7 +81,8 @@ def test_provider_routing_preserves_mutation_and_storage(
         inplace=inplace,
     )
 
-    assert calls == [False if vendor == "nvidia" else inplace]
+    copyback = vendor == "nvidia" or (vendor == "metax" and not interleaved)
+    assert calls == [False if copyback else inplace]
     for actual, value, saved, stride, delta in zip(
         result, (query, key), before, strides, (5, -7)
     ):

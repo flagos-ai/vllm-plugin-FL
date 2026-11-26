@@ -124,7 +124,7 @@ class KunlunxinBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False, use_rswa: bool = False) -> str:
         """
         Get the attention backend class path for Kunlunxin hardware.
 
@@ -135,6 +135,9 @@ class KunlunxinBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        if use_rswa:
+            raise NotImplementedError("R-SWA selection is unsupported by this vendor backend")
+
         # TODO: Implement MLA (Multi-head Latent Attention) support for Kunlunxin
         if use_mla:
             # TODO: Implement MLA with sparse attention support for Kunlunxin

@@ -150,7 +150,8 @@ class FlagGemsBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False,
+                          use_rswa: bool = False) -> str:
         """
         Get the attention backend class path for FlagGems.
 
@@ -175,6 +176,9 @@ class FlagGemsBackend(Backend):
 
         if use_sparse:
             raise ValueError("use_sparse=True requires use_mla=True.")
+
+        if use_rswa:
+            return AttentionBackendEnum.TRITON_ATTN.get_path()
 
         use_flaggems_attn = os.environ.get(
             "VLLM_FL_USE_FLAGGEMS_ATTN", "0"

@@ -265,7 +265,8 @@ class ReferenceBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False,
+                          use_rswa: bool = False) -> str:
         """
         Get the attention backend class path for reference (vLLM native).
 
@@ -281,6 +282,11 @@ class ReferenceBackend(Backend):
         """
         # Return vLLM's native flash attention backend as reference
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+        if use_rswa:
+            if use_mla or use_sparse:
+                raise NotImplementedError("R-SWA requires dense MHA")
+            return AttentionBackendEnum.TRITON_ATTN.get_path()
 
         if use_mla:
             # vLLM native MLA backend
