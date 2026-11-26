@@ -174,6 +174,9 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.vendor_name == "iluvatar":
+            from vllm_fl.dispatch.backends.vendor.iluvatar.admission import configure_scheduler
+            configure_scheduler(vllm_config.scheduler_config)
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 

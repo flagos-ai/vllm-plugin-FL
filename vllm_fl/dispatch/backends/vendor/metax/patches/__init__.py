@@ -15,3 +15,6 @@ from . import gdn_linear_attn  # noqa: F401 — register MacaGatedDeltaNetAttent
 # TODO: remove when MetaX Triton support is available.
 import vllm.utils.import_utils as iu
 iu.has_triton_kernels = lambda: False
+
+from . import ffn_projection  # noqa: F401
+from . import scheduler_opt  # noqa: F401
