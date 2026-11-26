@@ -165,6 +165,13 @@ def register_model():
     apply_qwen3_5_text_patches()
     patch_vllm_moe_sum()
 
+    from vllm.platforms import current_platform
+    if getattr(current_platform, "vendor_name", None) == "iluvatar":
+        from vllm_fl.patches.prefix_cache import install as install_prefix_cache
+        install_prefix_cache()
+        from vllm_fl.patches.bytelevel import install_vllm as install_bytelevel
+        install_bytelevel()
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them

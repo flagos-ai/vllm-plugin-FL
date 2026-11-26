@@ -350,6 +350,44 @@ class WorkerFL(WorkerBase):
                 # backend selection works. Must run in every Worker process.
                 patch_torch_inductor_for_iluvatar()
                 patch_sampler_compile_for_iluvatar()
+                # Own prefill and decode attention kernels for TRITON_ATTN.
+                from vllm_fl.dispatch.backends.vendor.iluvatar.attention import (
+                    patch_triton_attn_for_iluvatar,
+                )
+                patch_triton_attn_for_iluvatar(self.vllm_config)
+                # Sort-free top-p for top-p-only sampling batches.
+                from vllm_fl.dispatch.backends.vendor.iluvatar.top_p import (
+                    patch_top_p_for_iluvatar,
+                )
+                patch_top_p_for_iluvatar()
+                # One-kernel sampling (temperature, top-p cut, draw) for plain random top-p batches.
+                from vllm_fl.dispatch.backends.vendor.iluvatar.top_p import (
+                    patch_fused_sampler_for_iluvatar,
+                )
+                patch_fused_sampler_for_iluvatar()
+                # lm_head GEMM: FlagGems' linear_kernel is wrong for M = 2..8 at large N (E019 attempts 14-18).
+                from vllm_fl.dispatch.backends.vendor.iluvatar.lin_own import (
+                    patch_lm_head_linear_for_iluvatar,
+                )
+                patch_lm_head_linear_for_iluvatar()
+                from vllm_fl.dispatch.backends.vendor.iluvatar.jit_audit import (
+                    install as install_jit_audit,
+                )
+                install_jit_audit()
+                # W8A8 int8 linear layers (qkv/o/gate_up/down).
+                from vllm_fl.dispatch.backends.vendor.iluvatar.w8a8 import (
+                    patch_linear_w8a8_for_iluvatar,
+                )
+                patch_linear_w8a8_for_iluvatar()
+                from vllm_fl.dispatch.backends.vendor.iluvatar.head_w8a8 import (
+                    patch_output_projection,
+                )
+                patch_output_projection(self.model_config, self.parallel_config)
+                # E043 fused decoder-layer halves (norm+quant+qkv, norm+quant+gate_up(silu)+down).
+                from vllm_fl.dispatch.backends.vendor.iluvatar.fused_layers import (
+                    patch_decoder_for_iluvatar,
+                )
+                patch_decoder_for_iluvatar()
             except Exception as _e:
                 import logging as _lg
                 _lg.getLogger(__name__).warning(
@@ -597,6 +635,31 @@ class WorkerFL(WorkerBase):
             - profile_result.non_kv_cache_memory
             - cudagraph_memory_estimate_applied
         )
+
+        # Dummy model profiling omits the combination of a live history workspace
+        # and a full wide prefill MLP. Reserve one original BF16 GU and INT8 A8
+        # activation pair from the currently advertised long batch size.
+        shape = self.model_config.hf_config
+        rows = self.scheduler_config.max_num_batched_tokens
+        if (getattr(current_platform, "vendor_name", None) == "iluvatar"
+                and rows >= 32768 and getattr(shape, "hidden_size", 0) > 0
+                and getattr(shape, "intermediate_size", 0) > 0
+                and getattr(shape, "num_hidden_layers", 0) > 0
+                and self.parallel_config.tensor_parallel_size == 1
+                and self.parallel_config.pipeline_parallel_size == 1
+                and self.vllm_config.speculative_config is None):
+            width = shape.intermediate_size
+            workspace_bytes = rows * width * (2 * 2 + 1)
+            # Keep wide-step residual, projection output and residual handoff live
+            # alongside BF16 gate/up and INT8 intermediate data.
+            hidden_bytes = rows * shape.hidden_size * 3 * 2
+            workspace_bytes += hidden_bytes
+            logger.info("E443 wide hidden headroom=%d bytes", hidden_bytes)
+            self.available_kv_cache_memory_bytes -= workspace_bytes
+            if self.available_kv_cache_memory_bytes <= 0:
+                raise RuntimeError("Insufficient memory for wide prefill workspace and KV cache")
+            logger.info("E424 reserved wide prefill workspace=%d bytes, rows=%d, width=%d",
+                        workspace_bytes, rows, width)
 
         unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
         logger.debug(

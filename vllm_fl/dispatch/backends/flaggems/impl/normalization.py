@@ -27,10 +27,14 @@ def rms_norm_flaggems(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    from flag_gems.modules.normalization import gems_rms_forward
+    from vllm.platforms import current_platform
 
-    # Get weight and epsilon from obj
     weight = obj.weight
     epsilon = obj.variance_epsilon
+    if getattr(current_platform, "vendor_name", "") == "metax":
+        from flag_gems.fused.metax_fast_ops import fast_rms_forward
+
+        return fast_rms_forward(x, residual, weight, epsilon)
+    from flag_gems.modules.normalization import gems_rms_forward
 
     return gems_rms_forward(x, residual, weight, epsilon)

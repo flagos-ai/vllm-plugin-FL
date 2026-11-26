@@ -180,6 +180,45 @@ class PlatformFL(Platform):
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         cache_config = vllm_config.cache_config
+        if cls.vendor_name == "iluvatar":
+            from vllm_fl.worker.scheduler_fl import install_prefill_first
+            install_prefill_first()
+            hf = getattr(model_config, "hf_config", None)
+            if (hf is not None and getattr(hf, "hidden_size", 0) > 0
+                    and getattr(hf, "intermediate_size", 0) > 0
+                    and getattr(hf, "num_hidden_layers", 0) > 0
+                    and parallel_config.tensor_parallel_size == 1
+                    and parallel_config.pipeline_parallel_size == 1
+                    and vllm_config.speculative_config is None):
+                from vllm_fl.worker.e388_prefill_policy import install
+                sc = vllm_config.scheduler_config
+                sc.max_num_batched_tokens = 32768
+                sc.max_num_scheduled_tokens = 32768
+                compile_config = vllm_config.compilation_config
+                endpoints = compile_config.compile_ranges_endpoints or []
+                compile_config.compile_ranges_endpoints = sorted(set([*endpoints, 2048, 8192, 16384]))
+                install()
+        if cls.vendor_name == "iluvatar" and cache_config is not None and cache_config.cache_dtype == "auto":
+            # Iluvatar BI-V150 compressed K4V2 per-token-head KV cache.
+            cache_config.cache_dtype = "int8_per_token_head"
+            logger.info("BI-V150: KV cache int8_per_token_head (K4V2 page format)")
+            from vllm_fl import kv4_probe
+            kv4_probe.patch_page_budget()
+        if (
+            cls.vendor_name == "metax"
+            and cache_config is not None
+            and cache_config.cache_dtype == "auto"
+            and model_config is not None
+            and not model_config.use_mla
+            and model_config.get_head_size() == 128
+            and model_config.get_num_attention_heads(parallel_config)
+            == 8 * model_config.get_num_kv_heads(parallel_config)
+        ):
+            # MetaX C500 INT8 per-token-head KV cache.
+            import os
+            if os.environ.get("FL_DEV_BF16_KV") != "1":
+                cache_config.cache_dtype = "int8_per_token_head"
+                logger.info("C500: KV cache dtype int8_per_token_head")
         if cache_config and cache_config.block_size is None:
             # Ascend NPU requires block_size to be a multiple of 128
             # CUDA can use smaller block sizes like 16
@@ -259,6 +298,21 @@ class PlatformFL(Platform):
                 attention_config.use_trtllm_ragged_deepseek_prefill = False
                 attention_config.use_trtllm_attention = False
                 attention_config.disable_flashinfer_prefill = True
+            sched_cfg = getattr(vllm_config, "scheduler_config", None)
+            hf = getattr(model_config, "hf_config", None) if model_config is not None else None
+            if (
+                sched_cfg is not None
+                and hf is not None
+                and getattr(hf, "hidden_size", 0) > 0
+                and getattr(hf, "num_hidden_layers", 0) > 0
+                and parallel_config.tensor_parallel_size == 1
+            ):
+                cur_bt = getattr(sched_cfg, "max_num_batched_tokens", None)
+                if cur_bt is None or cur_bt <= 8192:
+                    sched_cfg.max_num_batched_tokens = 32768
+                    logger.info("C500: max_num_batched_tokens=32768 (was %s)", cur_bt)
+                from vllm_fl.worker import metax_prefill_policy
+                metax_prefill_policy.install()
 
     @classmethod
     def get_attn_backend_cls(

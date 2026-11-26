@@ -35,6 +35,20 @@ def rotary_embedding_flaggems(
     Returns:
         Tuple of (embedded_query, embedded_key)
     """
+    from vllm.platforms import current_platform
+
+    if getattr(current_platform, "vendor_name", "") == "metax":
+        from flag_gems.fused.metax_fast_ops import fast_rope_forward
+
+        return fast_rope_forward(
+            query,
+            key,
+            cos,
+            sin,
+            positions,
+            is_neox_style,
+            inplace,
+        )
     from flag_gems.modules.rotary_embedding import gems_rope_forward
 
     return gems_rope_forward(
