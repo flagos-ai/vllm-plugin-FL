@@ -34,7 +34,19 @@ the single-process default of 1.
 import pytest
 import torch
 
-pytest.importorskip("flaggems_vllm")
+# flaggems_vllm can fail to import in more ways than ImportError: on a
+# GPU-less machine its device finder raises RuntimeError ("No device were
+# detected"). importorskip only catches ImportError, so guard with a plain
+# try/except and skip module-level for any failure — the kernel tests below
+# need a real accelerator anyway, and the pure-torch contract tests are
+# re-homed in tests/unit_tests/dispatch/ where no flaggems import happens.
+try:
+    pytest.importorskip("flaggems_vllm")
+except Exception:  # pragma: no cover - environment-dependent
+    pytest.skip(
+        "flaggems_vllm unavailable (no accelerator / package missing)",
+        allow_module_level=True,
+    )
 pytest.importorskip("vllm")
 
 from vllm.v1.attention.backend import AttentionType  # noqa: E402
@@ -120,7 +132,6 @@ class _FakeLayer(torch.nn.Module):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_split_kv_cache_views_packed_k_and_v():
     """_split_kv_cache returns strided K/V halves of the 4D paged cache."""
@@ -144,7 +155,6 @@ def test_split_kv_cache_views_packed_k_and_v():
         _split_kv_cache(torch.zeros(2, 3, 4), HEAD_SIZE)
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_impl_init_attribute_surface():
     """The impl exposes the attributes its consumers read at runtime."""
@@ -163,7 +173,6 @@ def test_impl_init_attribute_surface():
     assert decoder_sw.sliding_window == (511, 0)
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_impl_dcp_world_size_defaults_to_one():
     """vllm 0.32's AttentionImpl.__new__ provides dcp_world_size.
@@ -191,7 +200,6 @@ def test_impl_dcp_world_size_defaults_to_one():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 @pytest.mark.parametrize(
     "lengths,seqlens",
@@ -286,7 +294,6 @@ def _paged_setup(device, seq_len, block_size):
     return q, k, v, cache, block_table, slot_mapping
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 @pytest.mark.parametrize("seq_len,block_size", [(12, 8), (16, 16), (1, 8)])
 def test_decoder_forward_with_kv_cache_matches_oracle(device, seq_len, block_size):

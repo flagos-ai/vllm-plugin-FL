@@ -238,7 +238,6 @@ def _gpu_kv_cache(device, num_blocks=4):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_required_kvcache_layout_contract():
     """Full attention forces HND; MLA and model-less configs do not.
@@ -261,7 +260,6 @@ def test_required_kvcache_layout_contract():
     )
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_side_channel_port_scales_with_parallel_ranks():
     """The ZMQ side-channel port offsets by DP rank * TP size.
@@ -282,7 +280,6 @@ def test_side_channel_port_scales_with_parallel_ranks():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_scheduler_tracks_remote_prefill_request_lifecycle():
     """A do_remote_prefill request flows through the scheduler accounting.
@@ -326,7 +323,6 @@ def test_scheduler_tracks_remote_prefill_request_lifecycle():
     assert scheduler._reqs_need_recv == {}
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_scheduler_consumer_role_fills_send_side_metadata():
     """The producer role emits send entries; the consumer does not.
@@ -354,7 +350,6 @@ def test_scheduler_consumer_role_fills_send_side_metadata():
     assert metadata.reqs_to_send == {}
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_scheduler_mamba_prefill_asks_for_n_minus_1_tokens():
     """Mamba/GDN decode requests ask the prefill side for N-1 tokens.
@@ -371,7 +366,6 @@ def test_scheduler_mamba_prefill_asks_for_n_minus_1_tokens():
     assert plain._get_remote_prefill_token_count(50) == 50
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_scheduler_truncates_mamba_request_for_prefill_once():
     """The P-side mamba truncation drops the last token exactly once.
@@ -405,7 +399,6 @@ def test_scheduler_truncates_mamba_request_for_prefill_once():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_worker_consumer_registers_gpu_cache_and_shuts_down(device):
     """Consumer registration runs the real engine calls; shutdown is safe.
@@ -436,7 +429,6 @@ def test_worker_consumer_registers_gpu_cache_and_shuts_down(device):
         worker.zmq_ctx.socket(zmq.PULL)
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_worker_producer_starts_sender_thread_and_joins_it(device):
     """Producer registration starts the ZMQ sender thread; shutdown joins it.
@@ -463,7 +455,6 @@ def test_worker_producer_starts_sender_thread_and_joins_it(device):
     assert not worker._sender_t.is_alive()
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_worker_registration_requires_at_least_one_cache(device):
     """Registering no cache tensors is a hard RuntimeError.
@@ -490,7 +481,6 @@ def test_worker_registration_requires_at_least_one_cache(device):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_group_concurrent_contiguous_groups_runs():
     """Only runs contiguous in BOTH src and dst are merged."""
@@ -508,7 +498,6 @@ def test_group_concurrent_contiguous_groups_runs():
     assert group_concurrent_contiguous([], []) == ([], [])
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_tp_ratio_and_sender_transfer_plan_matrix():
     """The heterogeneous-TP planning table is exact for both directions."""
@@ -582,7 +571,6 @@ def test_tp_ratio_and_sender_transfer_plan_matrix():
         _get_tp_ratio(3, 2)
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_expand_transfer_regions_splits_blocks_first_layout():
     """Blocks-first layouts emit a K and a V region per registered tensor."""
@@ -612,7 +600,6 @@ def test_expand_transfer_regions_splits_blocks_first_layout():
     assert regions[0].kv_block_len == 256
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_align_and_validate_region_pairing():
     """Region alignment pairs by (layer, occurrence) and validates indices."""
@@ -649,7 +636,6 @@ def test_align_and_validate_region_pairing():
     assert "matching KV region counts" in err
 
 
-@pytest.mark.supplementary
 @pytest.mark.gpu
 def test_build_transfer_params_builds_absolute_va_triples():
     """_build_transfer_params maps regions to (src, dst, size) VA triples.
