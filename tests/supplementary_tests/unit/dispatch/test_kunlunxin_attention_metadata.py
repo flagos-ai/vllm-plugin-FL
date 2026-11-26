@@ -38,6 +38,16 @@ import torch
 pytestmark = [pytest.mark.supplementary]
 
 
+def _module_importable(name: str) -> bool:
+    """True when the named top-level module can be found on this host."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -613,12 +623,20 @@ class TestPagedAttentionHelpers:
 
 class TestAvailabilityHelpers:
     def test_ops_unavailable_on_cpu(self):
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
-            is_kunlunxin_ops_available,
-        )
+        import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as att_mod
 
-        # torch_xmlir is not installed on the CPU runner
-        assert is_kunlunxin_ops_available() in (True, False)
+        # The module-level availability flag is latched at import time from
+        # the try-import of torch_xmlir + xtorch_ops. On a CPU host without
+        # the vendor SDK the flag must be False; a host that does carry the
+        # SDK (a P800 CI image) cannot exercise the unavailable branch.
+        if "xtorch_ops" in sys.modules or _module_importable("xtorch_ops"):
+            pytest.skip(
+                "xtorch_ops is importable on this host; the "
+                "unavailable-SDK branch cannot be observed"
+            )
+        assert att_mod._KUNLUNXIN_OPS_AVAILABLE is False
+        # the probe answers the flag, not a fresh probe
+        assert att_mod.is_kunlunxin_ops_available() is False
 
     def test_is_full_graph_runtime_false_without_context(self):
         import vllm.forward_context as forward_context_module
@@ -823,3 +841,4 @@ class TestForwardProfilingPath:
                 sys.modules.pop("torch_xmlir", None)
             else:
                 sys.modules["torch_xmlir"] = saved_xml
+
