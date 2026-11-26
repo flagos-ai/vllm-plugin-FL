@@ -92,17 +92,31 @@ platforms:
     trigger_paths:
       - vllm_fl/dispatch/config/ascend.yaml
       - tests/platforms/ascend.yaml
+      - .github/configs/ascend.yml
+      - .github/scripts/ascend/
+      - docker/ascend/
     exempt_from_global:
       - vllm_fl/dispatch/config/ascend.yaml
+      - .github/configs/ascend.yml
+      - .github/scripts/ascend/
+      - docker/ascend/
   hygon:
     enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/hygon.yaml
       - vllm_fl/dispatch/backends/vendor/hygon/
       - tests/platforms/hygon.yaml
+      - .github/configs/hygon.yml
+      - .github/configs/platforms.yml
+      - .github/scripts/hygon/
+      - docker/hygon/
     exempt_from_global:
       - vllm_fl/dispatch/config/hygon.yaml
       - vllm_fl/dispatch/backends/vendor/hygon/
+      - .github/configs/hygon.yml
+      - .github/configs/platforms.yml
+      - .github/scripts/hygon/
+      - docker/hygon/
   metax:
     enabled: false
     trigger_paths:
@@ -113,12 +127,18 @@ platforms:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
   musa:
-    enabled: false
+    enabled: true
     trigger_paths:
+      - .github/configs/musa.yml
+      - .github/scripts/musa/
+      - docker/musa/
       - vllm_fl/dispatch/config/musa.yaml
       - vllm_fl/dispatch/backends/vendor/musa/
       - tests/platforms/musa.yaml
     exempt_from_global:
+      - .github/configs/musa.yml
+      - .github/scripts/musa/
+      - docker/musa/
       - vllm_fl/dispatch/config/musa.yaml
       - vllm_fl/dispatch/backends/vendor/musa/
   enflame:

@@ -1,0 +1,9 @@
+cann-shmem==1.6.0
+flag-gems==5.4.0
+flagcx==0.14.1+cann9.2.1
+flagtree==0.7.1a1+ascend3.5
+numpy==1.26.4
+torch==2.13.0+cpu
+torch-npu==2.13.0
+torchaudio==2.11.0+cpu
+torchvision==0.28.0+cpu

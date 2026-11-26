@@ -1,0 +1,9 @@
+flag-gems==5.4.0
+flagcx==0.14.1+musa5.3.0
+flagtree==0.7.0+mthreads3.6
+numpy==1.26.4
+torch==2.13.0.post1+musa20261110
+torch-musa==2.13.0.post1+musa20261110
+torchaudio==2.11.0.post2+musa20261110
+torchvision==0.28.0.post1+musa5.3.0
+triton-musa==3.6.0+musa5.3.0

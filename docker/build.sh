@@ -43,14 +43,16 @@ AMD_PYTHON_VERSION="${AMD_PYTHON_VERSION:-3.12}"
 AMD_FLAGTREE_VERSION="${AMD_FLAGTREE_VERSION:-0.7.0+amd3.6}"
 AMD_FLAGGEMS_COMMIT="${AMD_FLAGGEMS_COMMIT:-292cec32414fbfea3745df5e5d640dd0fad210d7}"
 AMD_FLAGCX_COMMIT="${AMD_FLAGCX_COMMIT:-591cfbf}"
-MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06}"
-MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
-MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
-MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
-MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
-MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
+MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-mthreads-musa5.3.0:2.3.0}"
+MUSA_VERSION="${MUSA_VERSION:-5.3.0}"
+MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.32.0+flagos}"
+MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.12}"
+MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.13.0.post1}"
+MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.32.0}"
-ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-ascend-cann9.0.0-910c:2.2.0-0.3.0@sha256:fc83d07a4fbecd090dc471e9caa5d978dc34715fcfcca537b7bbf720a298dd51}"
+ASCEND_VLLM_DIST_VERSION="${ASCEND_VLLM_DIST_VERSION:-0.32.0+flagos}"
+ASCEND_FLAGGEMS_VLLM_VERSION="${ASCEND_FLAGGEMS_VLLM_VERSION:-0.3.0.dev20261125}"
+ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.2.1-910c:2.3.0}"
 ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853}"
 ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.10.6}"
 ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
@@ -105,7 +107,7 @@ Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
     --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin, amd (default: ${PLATFORM})
-    --target TARGET        Build target: dev, ci, release (default: ${TARGET})
+    --target TARGET        Build target: dev, test, ci, release (default: ${TARGET})
     --image-name NAME      Image repository (default: ${IMAGE_NAME}; Ascend: harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend)
     --image-tag TAG        Image tag (default: auto-generated)
     --index-url URL        PyPI index URL (for custom mirrors)
@@ -124,9 +126,11 @@ VERSIONS (override via environment variables):
   Ascend:
     CANN_VERSION         CANN version (default: ${CANN_VERSION})
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
-    ASCEND_VLLM_VERSION  vLLM version to install in empty mode (default: ${ASCEND_VLLM_VERSION})
-    ASCEND_BASE_IMAGE    Ascend CANN / torch_npu base image (default: ${ASCEND_BASE_IMAGE})
-    FlagGems / FlagTree  Retained from ASCEND_BASE_IMAGE; not installed from separate refs
+    ASCEND_VLLM_VERSION       vLLM line used in the image tag (default: ${ASCEND_VLLM_VERSION})
+    ASCEND_VLLM_DIST_VERSION  vllm wheel version installed from the FlagOS index (default: ${ASCEND_VLLM_DIST_VERSION})
+    ASCEND_FLAGGEMS_VLLM_VERSION FlagGems-vLLM wheel version (default: ${ASCEND_FLAGGEMS_VLLM_VERSION})
+    ASCEND_BASE_IMAGE    FlagOS Runtime base image (default: ${ASCEND_BASE_IMAGE})
+    FlagGems / FlagTree / Torch / CANN  Retained from ASCEND_BASE_IMAGE; not installed from separate refs
   MetaX:
     METAX_BASE_IMAGE     Base image (default: ${METAX_BASE_IMAGE})
     METAX_MACA_VERSION   MACA version used in generated image tag (default: ${METAX_MACA_VERSION})
@@ -142,9 +146,9 @@ VERSIONS (override via environment variables):
     AMD_FLAGGEMS_COMMIT  FlagGems commit (needs triton_extra_name="hip"; default: ${AMD_FLAGGEMS_COMMIT})
     AMD_FLAGCX_COMMIT    FlagCX commit (default: ${AMD_FLAGCX_COMMIT})
   MUSA:
-    MUSA_BASE_IMAGE      Moore Threads base image (default: ${MUSA_BASE_IMAGE})
+    MUSA_BASE_IMAGE      FlagOS MUSA runtime base image (default: ${MUSA_BASE_IMAGE})
     MUSA_VERSION         MUSA version used in image tag (default: ${MUSA_VERSION})
-    MUSA_VLLM_VERSION    vLLM empty-mode version (default: ${MUSA_VLLM_VERSION})
+    MUSA_VLLM_VERSION    vLLM FlagOS wheel version; the tag strips the +flagos local part (default: ${MUSA_VLLM_VERSION})
     MUSA_PYTHON_VERSION  Python version in base image (default: ${MUSA_PYTHON_VERSION})
     MUSA_TORCH_VERSION   PyTorch version in base image (default: ${MUSA_TORCH_VERSION})
     MUSA_FLAGGEMS_VERSION FlagGems version in base image (default: ${MUSA_FLAGGEMS_VERSION})
@@ -247,8 +251,8 @@ done
 # Validate
 # ==============================================================================
 
-if [[ "${TARGET}" != "dev" && "${TARGET}" != "ci" && "${TARGET}" != "release" ]]; then
-    err "Invalid target '${TARGET}'. Must be 'dev', 'ci', or 'release'."
+if [[ "${TARGET}" != "dev" && "${TARGET}" != "test" && "${TARGET}" != "ci" && "${TARGET}" != "release" ]]; then
+    err "Invalid target '${TARGET}'. Must be 'dev', 'test', 'ci', or 'release'."
 fi
 
 if ! command -v docker &>/dev/null; then
@@ -303,17 +307,29 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
+    # The runtime recipe COPYs docker/ascend/constraints.txt, so build
+    # from the repository root (like hygon/kunlunxin), not docker/ascend/.
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    DOCKERFILE="docker/ascend/Dockerfile"
+    # New recipe stages: base -> dev / test; map the legacy ci target.
+    if [[ "${TARGET}" == "ci" ]]; then
+        TARGET="dev"
+    fi
+    if [[ "${TARGET}" == "release" ]]; then
+        err "The ascend runtime recipe has no release stage; use --target dev or --target test."
+    fi
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
-        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend"
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
     BUILD_ARGS+=(
-        --build-arg "ASCEND_BASE_IMAGE=${ASCEND_BASE_IMAGE}"
-        --build-arg "VLLM_VERSION=${ASCEND_VLLM_VERSION}"
+        --build-arg "BUILD_BASE_IMAGE=${ASCEND_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${ASCEND_VLLM_DIST_VERSION}"
+        --build-arg "FLAGGEMS_VLLM_VERSION=${ASCEND_FLAGGEMS_VLLM_VERSION}"
     )
-    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
-    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "UV_DEFAULT_INDEX=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "FLAGOS_ASCEND_INDEX_URL=${EXTRA_INDEX_URL}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="vllm${VLLM_VERSION}-a3-${TARGET}"
+        IMAGE_TAG="v${VLLM_VERSION}-ascend-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     PYTHON_VERSION="${HYGON_PYTHON_VERSION}"
@@ -396,12 +412,16 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
 elif [[ "${PLATFORM}" == "musa" ]]; then
     PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
     VLLM_VERSION="${MUSA_VLLM_VERSION}"
+    # The plugin's constraints.txt is a COPY input, so the context is the
+    # repository root rather than docker/musa/ (mirrors the hygon branch).
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
-        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
-    BUILD_ARGS+=(--build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}")
+    BUILD_ARGS+=(--build-arg "BUILD_BASE_IMAGE=${MUSA_BASE_IMAGE}")
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "UV_DEFAULT_INDEX=${INDEX_URL}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="v${VLLM_VERSION}-musa-${TARGET}"
+        IMAGE_TAG="v${MUSA_VLLM_VERSION%%+*}-musa-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "enflame" ]]; then
     PYTHON_VERSION="${ENFLAME_PYTHON_VERSION}"
@@ -466,7 +486,7 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  Base image:     ${ASCEND_BASE_IMAGE}"
-    msg "  Vendor stack:   preserved from the pinned FlagOS application image"
+    msg "  Vendor stack:   preserved from the pinned FlagOS runtime image"
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     msg "  DTK:            ${HYGON_DTK_VERSION}"
     msg "  Hygon Python:   ${HYGON_PYTHON_VERSION}"
