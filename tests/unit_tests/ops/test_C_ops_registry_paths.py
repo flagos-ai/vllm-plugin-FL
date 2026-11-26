@@ -1,10 +1,11 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for remaining ``vllm_fl.ops._C_ops_registry`` branches.
+"""Corner-branch tests for ``vllm_fl.ops._C_ops_registry``.
 
 The core suite (``tests/unit_tests/test_op_schema_registry.py``) drives the
 fresh-loaded module through the happy-path registration, the native-extension
-skip and the optional-op exclusion.  The supplementary helpers file covers the
+skip and the optional-op exclusion.  The helpers file in this directory
+(test_C_ops_registry_helpers.py) covers the
 repetition-penalty oracle and the non-AMD view stub.  Still uncovered:
 
 * ``_accelerator_view_from_cpu_tensor`` AMD delegation (with the
@@ -33,10 +34,8 @@ from pathlib import Path
 import pytest
 import torch
 
-pytestmark = [pytest.mark.supplementary]
-
 _REGISTRY_PATH = (
-    Path(__file__).resolve().parents[4] / "vllm_fl" / "ops" / "_C_ops_registry.py"
+    Path(__file__).resolve().parents[3] / "vllm_fl" / "ops" / "_C_ops_registry.py"
 )
 
 

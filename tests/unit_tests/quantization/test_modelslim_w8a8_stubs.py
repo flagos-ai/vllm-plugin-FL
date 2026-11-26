@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for ``vllm_fl.quantization.modelslim_w8a8``.
+"""Gap-filling tests for ``vllm_fl.quantization.modelslim_w8a8``.
 
 ``modelslim_w8a8`` imports the external ``vllm`` layer/parameter graph at
 module level. On CPU-only machines that graph is absent, so the helper below
@@ -26,9 +26,6 @@ from typing import Any
 
 import pytest
 import torch
-
-pytestmark = pytest.mark.supplementary
-
 
 def _make_module(name: str) -> types.ModuleType:
     module = types.ModuleType(name)

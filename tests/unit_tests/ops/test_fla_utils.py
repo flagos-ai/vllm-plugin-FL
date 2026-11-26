@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for vllm_fl.ops.fla.utils.input_guard.
+"""input_guard contract tests for vllm_fl.ops.fla.utils.
 
 ``vllm_fl.ops.fla``'s package __init__ imports chunk.py, which needs vllm at
 import time.  The tests below stub the small vllm surface chunk.py reads
@@ -130,7 +130,6 @@ finally:
 class TestInputGuard:
     """input_guard contiguity and device-context behaviour on CPU."""
 
-    @pytest.mark.supplementary
     def test_non_contiguous_args_made_contiguous(self):
         """Transposed tensors are made contiguous before the call."""
         calls = []
@@ -145,7 +144,6 @@ class TestInputGuard:
         assert calls == [(True, True)]
         torch.testing.assert_close(out, base.t() + base.t() + 10)
 
-    @pytest.mark.supplementary
     def test_kwargs_tensors_also_guarded(self):
         """Keyword tensors are made contiguous too."""
         seen = {}
@@ -160,7 +158,6 @@ class TestInputGuard:
         fn(x=base.t(), y=base.t() * 2)
         assert seen == {"x": True, "y": True}
 
-    @pytest.mark.supplementary
     def test_non_tensor_args_pass_through_untouched(self):
         """Non-tensor arguments are forwarded unchanged."""
         captured = {}
@@ -173,27 +170,14 @@ class TestInputGuard:
         fn([1, 2], "text", flag=False)
         assert captured == {"a": [1, 2], "b": "text", "flag": False}
 
-    @pytest.mark.supplementary
-    def test_first_tensor_drives_device_context(self):
-        """The first tensor argument (even non-contiguous) picks the device.
+    def test_kwargs_only_tensor_still_found(self):
+        """A tensor passed only by keyword still drives the device context.
 
-        input_guard enters a torch.cuda.device context from the first
-        tensor's device index; the autouse fixture neutralizes the context
-        on this CPU-only build, and records which index was requested below
-        in test_device_context_uses_first_tensor_index.
+        A recording ``torch.cuda.device`` double asserts the guard entered
+        the device-context path for the kwargs-only tensor: the CPU tensor's
+        index (None) is what reached the double, and no second context was
+        opened for the non-tensor keyword.
         """
-        base = torch.arange(4).reshape(2, 2)
-
-        @input_guard
-        def fn(a, b):
-            return a.shape, b
-
-        shape, b = fn(base, "marker")
-        assert shape == (2, 2) and b == "marker"
-
-    @pytest.mark.supplementary
-    def test_device_context_uses_first_tensor_index(self):
-        """The device context index comes from the first tensor argument."""
         requested = []
 
         def fake_device(idx):
@@ -201,17 +185,17 @@ class TestInputGuard:
             return nullcontext()
 
         with mock.patch.object(torch.cuda, "device", fake_device):
-            t = torch.ones(2)
 
             @input_guard
-            def fn(a, b):
-                return a
+            def fn(scale=1.0, data=None):
+                return data * scale
 
-            fn(t, t.clone())
-        # A CPU tensor's device index is None — passed through verbatim.
+            t = torch.ones(2, 2)
+            torch.testing.assert_close(fn(data=t), t)
+        # The kwargs-only tensor was found: its device index (None on CPU)
+        # opened exactly one device context.
         assert requested == [None]
 
-    @pytest.mark.supplementary
     def test_no_tensors_uses_nullcontext(self):
         """With no tensor anywhere the guard still runs the function."""
 
@@ -222,7 +206,6 @@ class TestInputGuard:
         assert fn(21) == 42
         assert fn(21, b=3) == 63
 
-    @pytest.mark.supplementary
     def test_wrapper_preserves_metadata(self):
         """functools.wraps keeps the original name and docstring."""
 
@@ -235,7 +218,6 @@ class TestInputGuard:
         assert documented_fn.__name__ == "documented_fn"
         assert documented_fn.__doc__ == "Docstring survives."
 
-    @pytest.mark.supplementary
     def test_result_values_unaffected_by_guard(self):
         """Guarded arithmetic equals unguarded arithmetic on contiguous input."""
         a = torch.randn(3, 4)
@@ -246,14 +228,3 @@ class TestInputGuard:
             return x + y
 
         torch.testing.assert_close(add(a, b), a + b, rtol=1e-6, atol=1e-7)
-
-    @pytest.mark.supplementary
-    def test_kwargs_only_tensor_still_found(self):
-        """A tensor passed only by keyword still triggers the device path."""
-
-        @input_guard
-        def fn(scale=1.0, data=None):
-            return data * scale
-
-        t = torch.ones(2, 2)
-        torch.testing.assert_close(fn(data=t), t)

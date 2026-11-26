@@ -1,45 +1,32 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for fused MoE backend selection, routing, and experts.
+"""Backend-selection and TritonExpertsFL tests for ``vllm_fl.ops.fused_moe.fused_moe_utils``.
 
-Three modules previously uncovered by the core suite:
+The OOT backend-selection oracle (``select_unquantized_moe_backend_oot``,
+``_get_priority_backends``, ``_move_to_back``, the log closures and
+``_return_or_raise``), ``_prepare_expert_assignment``'s naive-block fast
+path, the ``FlashinferMoeBackend`` version shim, and ``TritonExpertsFL``'s
+``apply``/``moe_sum``/``workspace_shapes`` dispatch boundaries — the parts of
+``vllm_fl.ops.fused_moe.fused_moe_utils`` the core suite leaves uncovered.
 
-* ``vllm_fl.ops.fused_moe.fused_moe_utils`` -- the OOT backend-selection
-  oracle (``select_unquantized_moe_backend_oot``, ``_get_priority_backends``,
-  ``_move_to_back``, the log closures and ``_return_or_raise``),
-  ``_prepare_expert_assignment``'s naive-block fast path, the
-  ``FlashinferMoeBackend`` version shim, and ``TritonExpertsFL``'s
-  ``apply``/``moe_sum``/``workspace_shapes`` dispatch boundaries.
-* ``vllm_fl.ops.fused_moe.router`` -- ``_sqrtsoftplus_topk`` and
-  ``_fl_grouped_topk`` numeric math (checked against independent plain-Python
-  oracles), ``_has_native_moe_topk``, both FL router ``_compute_routing``
-  methods, and ``replace_router_with_fl``.
-* ``vllm_fl.ops.fused_moe.fused_moe`` -- ``fused_experts_impl``'s constraint
-  assertions, activation normalization, and the boundary calls it hands to the
-  dispatch system.
-
-The modules import ``vllm`` at module level.  On machines without the real
+The module imports ``vllm`` at module level.  On machines without the real
 package a stub ``vllm`` graph is installed first (external boundary only);
-with the real ``vllm`` present the same modules import against it.  Either
+with the real ``vllm`` present the module imports against it.  Either
 way, every platform probe, config lookup, kernel class, and dispatched op is
 swapped at test time via ``monkeypatch`` on module attributes, so the code
-under test always runs its own logic.  Numeric expectations are computed
-independently with plain-Python softmax / softplus arithmetic; where logits
-tie exactly only the contract -- distinct indices sharing the tied
-probability -- is asserted, never the order (same contract as
-``TestTopkSoftmax`` in ``test_reference_backend.py``).
+under test always runs its own logic.
+
+The FlagGems-MoE policy gate ``_should_use_fl_triton_experts`` is covered by
+``tests/unit_tests/ops/test_fused_moe_factory.py``'s
+``test_fl_triton_experts_policy`` truth table and is not re-tested here.
 """
 
-import math
 import sys
 import types
 from typing import Any
 
 import pytest
 import torch
-
-pytestmark = pytest.mark.supplementary
-
 
 # ---------------------------------------------------------------------------
 # Windows (no real vllm): install the external vllm boundary the fused_moe
@@ -315,7 +302,7 @@ def _install_stub_vllm_graph() -> None:
 
 
 # Snapshot every pre-existing vllm/vllm_fl entry, install the stub graph
-# when the real vllm is absent, import the three modules under test, then
+# when the real vllm is absent, import the module under test, then
 # restore. The imports stay alive after the restore because the tested code
 # lives in the vllm_fl modules themselves, which remain in sys.modules; but
 # nothing of the stub graph leaks into sys.modules for later files — without
@@ -331,9 +318,7 @@ _SAVED = {
 if not _HAS_VLLM:  # pragma: no cover - Windows machines without vllm
     _install_stub_vllm_graph()
 try:
-    import vllm_fl.ops.fused_moe.fused_moe as fl_fused  # noqa: E402
     import vllm_fl.ops.fused_moe.fused_moe_utils as fmu  # noqa: E402
-    import vllm_fl.ops.fused_moe.router as fl_router  # noqa: E402
 finally:
     if not _HAS_VLLM:  # pragma: no cover - restore only what stubs touched
         for name in [
@@ -477,6 +462,22 @@ class _Kernel:
         return (cls.supported, cls.reason)
 
 
+@pytest.fixture
+def clean_fl_env(monkeypatch):
+    """Clear every ``VLLM_FL_*`` env var for the test (restored on teardown).
+
+    The supplementary conftest's helper of the same name: the selector gate
+    below pins the FlagGems policy off, and a stray ``VLLM_FL_*`` variable
+    set by an earlier test would flip the gate.
+    """
+    import os
+
+    fl_vars = [k for k in os.environ if k.startswith("VLLM_FL_")]
+    for key in fl_vars:
+        monkeypatch.delenv(key, raising=False)
+    return monkeypatch.setenv
+
+
 @pytest.fixture(autouse=True)
 def _pin_selector_env(monkeypatch, clean_fl_env):
     """Keep FlagGems policy off around every test (selector gate baseline)."""
@@ -495,13 +496,12 @@ def _real_vllm_dtype_namespace(monkeypatch):
     is handed straight to the (stubbed) kernel boundary, so distinct string
     sentinels preserve the code under test while keeping the attribute reads
     working.  With the stub graph (Windows) ``tl`` already carries the same
-    sentinels, making the patch a no-op there.  Both ``fl_fused.tl`` and
-    ``fmu.tl`` reference the same module object, and the assertion in
-    ``test_compute_type_follows_dtype`` reads the attribute back through
-    ``vllm.triton_utils.tl``, so the values are set (not replaced) on the
-    shared placeholder module and restored afterwards.
+    sentinels, making the patch a no-op there.  ``fmu.tl`` (and the same
+    object the fused_moe module binds) is patched here so the attribute reads
+    in this file's tests keep working; the values are set (not replaced) on
+    the shared placeholder module and restored afterwards.
     """
-    for module in (fl_fused.tl, fmu.tl):
+    for module in (fmu.tl,):
         for name in ("float16", "bfloat16", "float32"):
             monkeypatch.setattr(module, name, f"<{name}-sentinel>", raising=False)
 
@@ -515,20 +515,17 @@ def _real_vllm_dtype_namespace(monkeypatch):
 class TestFlashinferMoeBackendShim:
     """The vLLM 0.28-compatibility FlashinferMoeBackend value shim."""
 
-    @pytest.mark.supplementary
     def test_init_normalizes_value(self):
         """The constructor lowercases and strips the value."""
         shim = fmu.FlashinferMoeBackend("  CUTLASS ")
         assert shim.value == "cutlass"
         assert fmu.FlashinferMoeBackend("TrtLlm").value == "trtllm"
 
-    @pytest.mark.supplementary
     def test_class_constants(self):
         """The two shipped constants are their lowercase names."""
         assert fmu.FlashinferMoeBackend.CUTLASS == "cutlass"
         assert fmu.FlashinferMoeBackend.TENSORRT_LLM == "trtllm"
 
-    @pytest.mark.supplementary
     def test_eq_matches_value_and_substring(self):
         """Equality holds for equal values and for a member of this value."""
         shim = fmu.FlashinferMoeBackend("trtllm")
@@ -539,7 +536,6 @@ class TestFlashinferMoeBackendShim:
         assert shim != "cutlass"
         assert shim != "trtllm-v2"
 
-    @pytest.mark.supplementary
     def test_eq_reads_other_value_attribute(self):
         """Equality falls back to the other object's .value attribute."""
         shim = fmu.FlashinferMoeBackend("cutlass")
@@ -554,45 +550,12 @@ class TestFlashinferMoeBackendShim:
         unrelated = types.SimpleNamespace(value="trtllm")
         assert shim != unrelated
 
-    @pytest.mark.supplementary
     def test_hash_and_str_roundtrip(self):
         """Hash and str are the normalized value."""
         shim = fmu.FlashinferMoeBackend(" TrtLlm ")
         assert hash(shim) == hash("trtllm")
         assert str(shim) == "trtllm"
         assert {shim: 1}["trtllm"] == 1
-
-
-# ---------------------------------------------------------------------------
-# _should_use_fl_triton_experts
-# ---------------------------------------------------------------------------
-
-
-class TestShouldUseFlTritonExperts:
-    """The FlagGems-MoE policy gate combining platform and blacklist probes."""
-
-    @pytest.mark.supplementary
-    def test_policy_gate_truth_table(self, monkeypatch):
-        """Each combination of the four policy inputs is honoured."""
-        cases = [
-            # is_cuda, is_oot, is_cpu, flaggems, blacklist, expected
-            (True, False, False, True, None, True),
-            (False, True, False, True, None, True),
-            (True, False, True, True, None, False),
-            (True, False, False, False, None, False),
-            (True, False, False, True, ["fused_moe"], False),
-        ]
-        for is_cuda, is_oot, is_cpu, gems, blacklist, expected in cases:
-            monkeypatch.setattr(
-                fmu,
-                "current_platform",
-                _FakePlatform(is_cuda=is_cuda, is_out_of_tree=is_oot, is_cpu=is_cpu),
-            )
-            monkeypatch.setattr(fmu, "use_flaggems", lambda gems=gems: gems)
-            monkeypatch.setattr(
-                fmu, "get_oot_blacklist", lambda blacklist=blacklist: blacklist
-            )
-            assert fmu._should_use_fl_triton_experts() is expected
 
 
 # ---------------------------------------------------------------------------
@@ -603,14 +566,12 @@ class TestShouldUseFlTritonExperts:
 class TestGetPriorityBackends:
     """Platform-conditioned priority ordering of unquantized MoE backends."""
 
-    @pytest.mark.supplementary
     def test_rocm_lists_aiter_first(self, monkeypatch):
         """ROCm puts AITER ahead of the two Triton variants."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_rocm=True))
         backends = fmu._get_priority_backends(_fake_moe_config())
         assert [b.name for b in backends] == ["AITER", "TRITON", "BATCHED_TRITON"]
 
-    @pytest.mark.supplementary
     def test_cuda_default_flashinfer_first(self, monkeypatch):
         """Default CUDA order: FlashInfer variants before the Triton pair."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_cuda=True))
@@ -622,7 +583,6 @@ class TestGetPriorityBackends:
             "BATCHED_TRITON",
         ]
 
-    @pytest.mark.supplementary
     def test_hopper_demotes_flashinfer(self, monkeypatch):
         """Device capability family 90 moves both FlashInfer variants to the back."""
         monkeypatch.setattr(
@@ -638,7 +598,6 @@ class TestGetPriorityBackends:
             "FLASHINFER_CUTLASS",
         ]
 
-    @pytest.mark.supplementary
     def test_dp_greater_than_one_demotes_flashinfer_cutlass(self, monkeypatch):
         """DP>1 moves only FLASHINFER_CUTLASS behind the Triton variants."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_cuda=True))
@@ -650,7 +609,6 @@ class TestGetPriorityBackends:
             "FLASHINFER_CUTLASS",
         ]
 
-    @pytest.mark.supplementary
     def test_swigluoai_demotes_both_flashinfer(self, monkeypatch):
         """SWIGLUOAI activation demotes both FlashInfer variants."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_cuda=True))
@@ -664,21 +622,18 @@ class TestGetPriorityBackends:
             "FLASHINFER_CUTLASS",
         ]
 
-    @pytest.mark.supplementary
     def test_xpu_platform_lists_xpu_only(self, monkeypatch):
         """XPU platforms offer only the XPU backend."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_xpu=True))
         backends = fmu._get_priority_backends(_fake_moe_config())
         assert [b.name for b in backends] == ["XPU"]
 
-    @pytest.mark.supplementary
     def test_cpu_platform_lists_cpu_only(self, monkeypatch):
         """CPU platforms offer only the CPU backend."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_cpu=True))
         backends = fmu._get_priority_backends(_fake_moe_config())
         assert [b.name for b in backends] == ["CPU"]
 
-    @pytest.mark.supplementary
     def test_iluvatar_vendor_lists_triton_variants(self, monkeypatch):
         """The iluvatar vendor branch keeps the Triton variants reachable."""
         monkeypatch.setattr(
@@ -703,7 +658,6 @@ class TestSelectUnquantizedMoeBackendOot:
         """Run the selector with a neutral CPU platform by default."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_cpu=True))
 
-    @pytest.mark.supplementary
     def test_tpu_short_circuits(self, monkeypatch):
         """TPU platforms return (TPU, None) before any config probe."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_tpu=True))
@@ -711,7 +665,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend.name == "TPU"
         assert experts is None
 
-    @pytest.mark.supplementary
     def test_npu_rejects_parallel_configs(self, monkeypatch):
         """NPU raises NotImplementedError for EP / DP / LoRA / batched configs."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(device_type="npu"))
@@ -724,7 +677,6 @@ class TestSelectUnquantizedMoeBackendOot:
             with pytest.raises(NotImplementedError, match="non-EP, DP1"):
                 fmu.select_unquantized_moe_backend_oot(cfg)
 
-    @pytest.mark.supplementary
     def test_npu_rejects_unsupported_explicit_backend(self, monkeypatch):
         """NPU only accepts moe_backend in ('auto', 'triton')."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(device_type="npu"))
@@ -733,7 +685,6 @@ class TestSelectUnquantizedMoeBackendOot:
                 _fake_moe_config(moe_backend="flashinfer_cutlass")
             )
 
-    @pytest.mark.supplementary
     def test_npu_returns_fl_triton_experts(self, monkeypatch):
         """NPU with a supported config selects TRITON and TritonExpertsFL."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(device_type="npu"))
@@ -741,7 +692,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend.name == "TRITON"
         assert experts is fmu.TritonExpertsFL
 
-    @pytest.mark.supplementary
     def test_fl_triton_experts_policy_short_circuit(self, monkeypatch):
         """OOT accelerators with FlagGems enabled select TritonExpertsFL."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_out_of_tree=True))
@@ -751,7 +701,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend.name == "TRITON"
         assert experts is fmu.TritonExpertsFL
 
-    @pytest.mark.supplementary
     def test_lora_with_trtllm_support_selects_trtllm_experts(self, monkeypatch):
         """BF16 LoRA support routes to FLASHINFER_TRTLLM with the LoRA experts."""
         # select_unquantized_moe_backend_oot imports the experts module
@@ -774,7 +723,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert experts is not None
         assert experts.__name__ == "TrtLlmBf16LoRAExperts"
 
-    @pytest.mark.supplementary
     def test_lora_without_trtllm_support_selects_triton(self, monkeypatch):
         """Without BF16 LoRA support, LoRA falls back to the TRITON backend."""
         monkeypatch.setattr(fmu, "_trtllm_bf16_lora_supported", lambda cfg: False)
@@ -786,7 +734,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend.name == "TRITON"
         assert experts is triton_cls
 
-    @pytest.mark.supplementary
     def test_explicit_runner_backend_maps_and_selects(self, monkeypatch):
         """A runner backend other than auto/humming is mapped and returned."""
         requested = _fl_backend("XPU")
@@ -800,7 +747,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend is requested
         assert experts is xpu_cls
 
-    @pytest.mark.supplementary
     def test_explicit_runner_backend_unsupported_raises_value_error(self, monkeypatch):
         """An explicit backend with no supporting kernel raises ValueError."""
         requested = _fl_backend("XPU")
@@ -816,7 +762,6 @@ class TestSelectUnquantizedMoeBackendOot:
                 _fake_moe_config(moe_backend="explicit_choice")
             )
 
-    @pytest.mark.supplementary
     def test_explicit_triton_upgrades_to_batched_format(self, monkeypatch):
         """TRITON under batched activation format upgrades to BATCHED_TRITON."""
         requested = _fl_backend("TRITON")
@@ -836,7 +781,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend.name == "BATCHED_TRITON"
         assert seen_formats and seen_formats[0].name == "BatchedExperts"
 
-    @pytest.mark.supplementary
     def test_explicit_backend_logs_selection_message(self, monkeypatch, caplog):
         """A supported explicit backend logs the selection message once."""
         requested = _fl_backend("XPU")
@@ -854,7 +798,6 @@ class TestSelectUnquantizedMoeBackendOot:
             )
         assert any("out of potential backends" in rec.message for rec in caplog.records)
 
-    @pytest.mark.supplementary
     def test_auto_selects_first_supported_priority_backend(self, monkeypatch):
         """auto walks the priority list and returns the first supported pair."""
         cpu_cls = _Kernel()
@@ -863,7 +806,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend.name == "CPU"
         assert experts is cpu_cls
 
-    @pytest.mark.supplementary
     def test_auto_skips_unsupported_and_selects_next(self, monkeypatch):
         """auto continues past unsupported kernel classes to the next one."""
         classes = [_Kernel(False, "not on this device"), _Kernel()]
@@ -876,7 +818,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend.name == "CPU"
         assert experts is classes[1]
 
-    @pytest.mark.supplementary
     def test_auto_raises_when_no_backend_supports(self, monkeypatch):
         """auto with zero supported backends raises NotImplementedError."""
         monkeypatch.setattr(
@@ -887,7 +828,6 @@ class TestSelectUnquantizedMoeBackendOot:
         with pytest.raises(NotImplementedError, match="No Unquantized MoE backend"):
             fmu.select_unquantized_moe_backend_oot(_fake_moe_config())
 
-    @pytest.mark.supplementary
     def test_auto_raises_without_any_backend_list(self, monkeypatch):
         """A platform matching no branch leaves the list unset and fails."""
         monkeypatch.setattr(
@@ -898,7 +838,6 @@ class TestSelectUnquantizedMoeBackendOot:
         with pytest.raises((NotImplementedError, UnboundLocalError, AttributeError)):
             fmu.select_unquantized_moe_backend_oot(_fake_moe_config())
 
-    @pytest.mark.supplementary
     def test_aiter_env_forces_aiter_selection(self, monkeypatch):
         """VLLM_ROCM_USE_AITER(_MOE) fully on selects AITER directly."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_rocm=True))
@@ -912,7 +851,6 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend.name == "AITER"
         assert experts is aiter_cls
 
-    @pytest.mark.supplementary
     def test_aiter_env_rdna_drops_aiter_from_list(self, monkeypatch):
         """RDNA-enabled builds drop AITER and continue down the priority list."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_rocm=True))
@@ -925,7 +863,6 @@ class TestSelectUnquantizedMoeBackendOot:
         backend, _experts = fmu.select_unquantized_moe_backend_oot(_fake_moe_config())
         assert backend.name == "TRITON"  # AITER was removed from the list
 
-    @pytest.mark.supplementary
     def test_aiter_env_partial_flag_drops_aiter(self, monkeypatch):
         """AITER env set but a flag off falls through without AITER."""
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(is_rocm=True))
@@ -947,7 +884,6 @@ class TestSelectUnquantizedMoeBackendOot:
 class TestPrepareExpertAssignment:
     """The naive-block fast path versus the moe_align_block_size dispatch."""
 
-    @pytest.mark.supplementary
     def test_small_problem_without_map_uses_naive_path(self, monkeypatch):
         """tokens*topk*4 <= experts with no map skips block alignment."""
         called = []
@@ -972,7 +908,6 @@ class TestPrepareExpertAssignment:
             num_post, torch.tensor([topk_ids.numel() * 16], dtype=torch.int32)
         )
 
-    @pytest.mark.supplementary
     def test_large_problem_falls_back_to_align(self, monkeypatch):
         """tokens*topk*4 > experts dispatches to moe_align_block_size."""
         captured = {}
@@ -1002,7 +937,6 @@ class TestPrepareExpertAssignment:
         assert captured["num_experts"] == 4
         assert captured["ignore_invalid_experts"] is True
 
-    @pytest.mark.supplementary
     def test_expert_map_forces_align(self, monkeypatch):
         """An expert map present always takes the aligned path."""
         called = []
@@ -1021,7 +955,6 @@ class TestPrepareExpertAssignment:
         )
         assert called == [1]
 
-    @pytest.mark.supplementary
     def test_int8_with_block_shape_forces_align(self, monkeypatch):
         """int8/int4 with block shapes never take the naive path."""
         called = []
@@ -1042,7 +975,6 @@ class TestPrepareExpertAssignment:
         )
         assert called == [1]
 
-    @pytest.mark.supplementary
     def test_block_shape_second_dim_zero_keeps_naive(self, monkeypatch):
         """block_shape[1] == 0 disables the quantized guard (naive still taken)."""
         called = []
@@ -1098,7 +1030,6 @@ class TestTritonExpertsFLWorkspace:
         experts = fmu.TritonExpertsFL(moe_config, None)
         return experts, captured
 
-    @pytest.mark.supplementary
     def test_workspace_shapes_passthrough_on_non_npu(self, monkeypatch):
         """Non-NPU platforms return the base shapes untouched."""
         shapes = ((8, 16, 8), (8, 4, 16), (8, 8))
@@ -1106,7 +1037,6 @@ class TestTritonExpertsFLWorkspace:
         monkeypatch.setattr(fmu, "current_platform", _FakePlatform(device_type="cpu"))
         assert experts.workspace_shapes(8, 16, 8, 2, 4, 4, None, None) == shapes
 
-    @pytest.mark.supplementary
     def test_workspace_shapes_npu_grows_to_max_tokens(self, monkeypatch):
         """NPU pads the workspace token dim to moe_config.max_num_tokens."""
         shapes = ((8, 16, 8), (8, 4, 16), (8, 8))
@@ -1119,7 +1049,6 @@ class TestTritonExpertsFLWorkspace:
         # The base implementation got the arguments unchanged.
         assert captured["base_args"] == (8, 16, 8, 2, 4, 4, None, None)
 
-    @pytest.mark.supplementary
     def test_workspace_shapes_npu_keeps_larger_m(self, monkeypatch):
         """NPU keeps M when it already exceeds max_num_tokens."""
         shapes = ((48, 16, 8), (48, 4, 16), (48, 8))
@@ -1129,7 +1058,6 @@ class TestTritonExpertsFLWorkspace:
         assert w13 == (48, 16, 8)
         assert w2 == (48, 4, 16)
 
-    @pytest.mark.supplementary
     def test_moe_sum_forwards_to_cached_op(self, monkeypatch):
         """moe_sum hands both tensors to the moe_sum CachedOp unchanged."""
 
@@ -1265,7 +1193,6 @@ class TestTritonExpertsFLApply:
         )
         experts.adjust_N_for_activation = staticmethod(lambda N, activation: N // 2)
 
-    @pytest.mark.supplementary
     def test_apply_npu_routes_to_grouped_moe_experts_op(self, monkeypatch):
         """NPU tensors route through the grouped_moe_experts dispatch op."""
 
@@ -1318,7 +1245,6 @@ class TestTritonExpertsFLApply:
         # copy came from the scripted dispatch result.
         torch.testing.assert_close(out, hidden * 2.0)
 
-    @pytest.mark.supplementary
     def test_apply_kunlunxin_routes_to_fused_experts_op(self, monkeypatch):
         """The kunlunxin vendor resolves the fused_experts op directly."""
         out, hidden, w1, w2, tw, ti = self._apply_args()
@@ -1361,7 +1287,6 @@ class TestTritonExpertsFLApply:
         assert resolved["kwargs"]["apply_router_weight_on_input"] is True
         torch.testing.assert_close(out, hidden + 1.0)
 
-    @pytest.mark.supplementary
     def test_apply_cuda_fast_path_uses_flaggems_vllm(self, monkeypatch):
         """NVIDIA without LoRA delegates to flaggems_vllm.fused_experts_impl."""
         out, hidden, w1, w2, tw, ti = self._apply_args()
@@ -1397,7 +1322,6 @@ class TestTritonExpertsFLApply:
         assert calls["activation"] == "silu"
         torch.testing.assert_close(out, hidden * 3.0)
 
-    @pytest.mark.supplementary
     def test_apply_triton_pipeline_dispatch_contracts(self, monkeypatch):
         """The generic Triton pipeline hands both GEMMs to the kernel op."""
         out, hidden, w1, w2, tw, ti = self._apply_args()
@@ -1453,7 +1377,6 @@ class TestTritonExpertsFLApply:
         assert kernels[1]["top_k"] == 1
         assert sum_recorder.calls
 
-    @pytest.mark.supplementary
     def test_apply_triton_pipeline_lora_step_injection(self, monkeypatch):
         """A LoRA context inserts w13/w2 adapter calls between the stages."""
         out, hidden, w1, w2, tw, ti = self._apply_args()
@@ -1500,1014 +1423,3 @@ class TestTritonExpertsFLApply:
             False,
         )
         assert order == ["w13", "w2"]
-
-
-# ---------------------------------------------------------------------------
-# _sqrtsoftplus_topk
-# ---------------------------------------------------------------------------
-
-
-class TestSqrtsoftplusTopk:
-    """The pure-torch DSV4 sqrt(softplus) routing fallback."""
-
-    @staticmethod
-    def _call(logits, **kwargs):
-        return fl_router._sqrtsoftplus_topk(
-            gating_output=logits,
-            e_score_correction_bias=kwargs.get("bias"),
-            topk=kwargs.get("topk", 2),
-            renormalize=kwargs.get("renormalize", False),
-            indices_type=kwargs.get("indices_type"),
-            input_tokens=kwargs.get("input_tokens"),
-            hash_indices_table=kwargs.get("hash_indices_table"),
-            routed_scaling_factor=kwargs.get("routed_scaling_factor", 1.0),
-        )
-
-    @pytest.mark.supplementary
-    def test_matches_independent_oracle(self):
-        """Weights are sqrt(softplus(logits)) gathered at the biased top-k."""
-        logits = torch.tensor([[0.0, 1.0, -1.0, 3.0]], dtype=torch.float32)
-        bias = torch.tensor([[0.4, 0.0, 0.8, -0.2]], dtype=torch.float32)
-        weights, ids = self._call(logits, bias=bias, topk=2)
-        # Independent oracle: softplus spelled with log1p(exp), hand-sorted
-        # selection scores.
-        sp = [math.log1p(math.exp(v.item())) for v in logits[0]]
-        scores = [math.sqrt(v) for v in sp]
-        choice = [scores[j] + bias[0, j].item() for j in range(4)]
-        order = sorted(range(4), key=lambda j: -choice[j])
-        assert set(ids[0].tolist()) == set(order[:2])
-        for slot in range(2):
-            torch.testing.assert_close(
-                weights[0, slot].item(),
-                scores[ids[0, slot].item()],
-                rtol=1e-5,
-                atol=1e-6,
-            )
-
-    @pytest.mark.supplementary
-    def test_nan_logits_score_last_for_selection_only(self):
-        """NaN logits score as -1e30 for selection; weights stay raw scores."""
-        logits = torch.tensor([[float("nan"), 1.0, 2.0]], dtype=torch.float32)
-        weights, ids = self._call(logits, topk=2)
-        assert set(ids[0].tolist()) == {1, 2}  # the NaN expert is never selected
-        sp = [math.log1p(math.exp(v)) for v in (1.0, 2.0)]
-        expected = sorted([math.sqrt(v) for v in sp], reverse=True)
-        got = sorted(weights[0].tolist(), reverse=True)
-        for exp, got_v in zip(expected, got):
-            torch.testing.assert_close(got_v, exp, rtol=1e-5, atol=1e-6)
-
-    @pytest.mark.supplementary
-    def test_renormalize_and_scaling_factor(self):
-        """Renormalize divides by the selected sum; scaling multiplies after."""
-        logits = torch.tensor([[0.5, 2.0, 4.0]], dtype=torch.float32)
-        weights, ids = self._call(
-            logits, topk=3, renormalize=True, routed_scaling_factor=0.5
-        )
-        sp = [math.log1p(math.exp(v.item())) for v in logits[0]]
-        scores = [math.sqrt(v) for v in sp]
-        total = sum(scores)
-        # topk(sorted=False) returns the three ids in arbitrary order, so the
-        # oracle is checked per slot through the returned ids.
-        for slot in range(3):
-            expected = 0.5 * scores[ids[0, slot].item()] / total
-            torch.testing.assert_close(
-                weights[0, slot].item(), expected, rtol=1e-4, atol=1e-6
-            )
-
-    @pytest.mark.supplementary
-    def test_zero_denominator_guard(self):
-        """A non-positive denominator is replaced by 1, not NaN."""
-        # softplus(-inf) = 0, so the renormalize denominator is 0 and the
-        # torch.where guard replaces it with 1: weights stay 0, not NaN.
-        logits = torch.tensor([[-float("inf"), -float("inf")]])
-        weights, ids = self._call(logits, topk=2, renormalize=True)
-        assert len(set(ids[0].tolist())) == 2
-        torch.testing.assert_close(weights, torch.zeros(1, 2))
-
-    @pytest.mark.supplementary
-    def test_indices_dtype_default_and_override(self):
-        """indices_type=None writes int32; an explicit dtype is honoured."""
-        logits = torch.tensor([[0.0, 1.0]])
-        _w, ids_default = self._call(logits, topk=1)
-        assert ids_default.dtype == torch.int32
-        _w, ids_i64 = self._call(logits, topk=1, indices_type=torch.int64)
-        assert ids_i64.dtype == torch.int64
-
-    @pytest.mark.supplementary
-    def test_hash_table_drives_selection_instead_of_scores(self):
-        """With a hash table the ids come from token lookups, not topk."""
-        # Hash values are expert ids and must index the gating output, so
-        # every value stays below the 3-expert logits width.
-        hash_table = torch.tensor([[1, 0], [2, 0]], dtype=torch.int64)
-        weights, ids = self._call(
-            torch.tensor([[0.0, 9.0, 4.0]]),
-            topk=2,
-            indices_type=torch.int64,
-            input_tokens=torch.tensor([1], dtype=torch.int64),
-            hash_indices_table=hash_table,
-        )
-        torch.testing.assert_close(ids, torch.tensor([[2, 0]], dtype=torch.int64))
-        # Weights still gather sqrt(softplus(logits)) at those indices.
-        sp0 = math.sqrt(math.log1p(math.exp(0.0)))
-        sp2 = math.sqrt(math.log1p(math.exp(4.0)))
-        torch.testing.assert_close(weights[0, 0].item(), sp2, rtol=1e-4, atol=1e-5)
-        torch.testing.assert_close(weights[0, 1].item(), sp0, rtol=1e-4, atol=1e-5)
-
-    @pytest.mark.supplementary
-    def test_hash_table_casts_input_token_dtype(self):
-        """input_tokens are cast to the hash table's dtype before lookup."""
-        hash_table = torch.tensor([[1, 0], [2, 0]], dtype=torch.int32)
-        weights, ids = self._call(
-            torch.tensor([[0.0, 9.0, 4.0]]),
-            topk=2,
-            input_tokens=torch.tensor([1], dtype=torch.int64),
-            hash_indices_table=hash_table,
-        )
-        assert ids.dtype == torch.int32
-        assert set(ids[0].tolist()) == {2, 0}
-        assert weights.shape == (1, 2)
-
-
-# ---------------------------------------------------------------------------
-# _has_native_moe_topk
-# ---------------------------------------------------------------------------
-
-
-class TestHasNativeMoeTopk:
-    """The torch.ops._moe_C.topk_softmax capability probe."""
-
-    @pytest.mark.supplementary
-    def test_reports_false_without_topk_softmax(self, monkeypatch):
-        """A _moe_C namespace lacking topk_softmax keeps the probe False."""
-        monkeypatch.setattr(torch.ops, "_moe_C", types.SimpleNamespace(), raising=False)
-        assert fl_router._has_native_moe_topk() is False
-
-    @pytest.mark.supplementary
-    def test_reports_true_with_topk_softmax(self, monkeypatch):
-        """A _moe_C namespace exposing topk_softmax makes the probe True."""
-        monkeypatch.setattr(
-            torch.ops,
-            "_moe_C",
-            types.SimpleNamespace(topk_softmax=lambda *a: None),
-            raising=False,
-        )
-        assert fl_router._has_native_moe_topk() is True
-
-
-# ---------------------------------------------------------------------------
-# _fl_grouped_topk: numeric math (pure torch, no dispatch)
-# ---------------------------------------------------------------------------
-
-
-class TestFlGroupedTopk:
-    """The grouped top-k router math against independent plain-Python oracles."""
-
-    @pytest.mark.supplementary
-    def test_softmax_no_bias_matches_group_oracle(self):
-        """softmax scoring without bias matches the plain-loop oracle."""
-        torch.manual_seed(7)
-        gating = torch.randn(4, 8, dtype=torch.float32) * 1.5
-        weights, ids = fl_router._fl_grouped_topk(
-            hidden_states=torch.zeros(4, 3),
-            gating_output=gating,
-            topk=2,
-            renormalize=True,
-            num_expert_group=2,
-            topk_group=1,
-        )
-        rows = gating.tolist()
-        for row in range(4):
-            # Independent oracle: softmax, per-group max, mask, topk.
-            exps = [math.exp(v) for v in rows[row]]
-            denom = sum(exps)
-            probs = [e / denom for e in exps]
-            group_scores = [max(probs[:4]), max(probs[4:])]
-            chosen = 0 if group_scores[0] >= group_scores[1] else 1
-            allowed = set(range(chosen * 4, chosen * 4 + 4))
-            picked = sorted(((probs[i], i) for i in allowed), key=lambda t: -t[0])[:2]
-            assert set(ids[row].tolist()) == {t[1] for t in picked}
-            total = sum(t[0] for t in picked)
-            got = {ids[row, s].item(): weights[row, s].item() for s in range(2)}
-            for prob, idx in picked:
-                torch.testing.assert_close(got[idx], prob / total, rtol=1e-4, atol=1e-6)
-
-    @pytest.mark.supplementary
-    def test_sigmoid_no_bias_matches_group_oracle(self):
-        """sigmoid scoring without bias matches the plain-loop oracle."""
-        torch.manual_seed(11)
-        gating = torch.randn(3, 9, dtype=torch.float32)
-        weights, ids = fl_router._fl_grouped_topk(
-            hidden_states=torch.zeros(3, 3),
-            gating_output=gating,
-            topk=3,
-            renormalize=False,
-            num_expert_group=3,
-            topk_group=2,
-            scoring_func="sigmoid",
-        )
-        rows = gating.tolist()
-        for row in range(3):
-            probs = [1.0 / (1.0 + math.exp(-v)) for v in rows[row]]
-            group_scores = [max(probs[g * 3 : g * 3 + 3]) for g in range(3)]
-            chosen = sorted(range(3), key=lambda g: -group_scores[g])[:2]
-            allowed = {g * 3 + j for g in chosen for j in range(3)}
-            picked = sorted(((probs[i], i) for i in allowed), key=lambda t: -t[0])[:3]
-            assert set(ids[row].tolist()) == {t[1] for t in picked}
-            got = {ids[row, s].item(): weights[row, s].item() for s in range(3)}
-            for prob, idx in picked:
-                torch.testing.assert_close(got[idx], prob, rtol=1e-4, atol=1e-6)
-
-    @pytest.mark.supplementary
-    def test_unknown_scoring_func_raises(self):
-        """An unsupported scoring function raises ValueError (no bias)."""
-        with pytest.raises(ValueError, match="Unsupported scoring function"):
-            fl_router._fl_grouped_topk(
-                hidden_states=torch.zeros(1, 3),
-                gating_output=torch.zeros(1, 8),
-                topk=1,
-                renormalize=False,
-                num_expert_group=2,
-                topk_group=1,
-                scoring_func="bogus",
-            )
-
-    @pytest.mark.supplementary
-    def test_unknown_scoring_func_with_bias_raises(self):
-        """The biased path also rejects unsupported scoring functions."""
-        with pytest.raises(ValueError, match="Unsupported scoring function"):
-            fl_router._fl_grouped_topk(
-                hidden_states=torch.zeros(1, 3),
-                gating_output=torch.zeros(1, 8),
-                topk=1,
-                renormalize=False,
-                num_expert_group=2,
-                topk_group=1,
-                scoring_func="bogus",
-                e_score_correction_bias=torch.zeros(8),
-            )
-
-    @pytest.mark.supplementary
-    def test_routed_scaling_factor_scales_weights(self):
-        """routed_scaling_factor multiplies the selected weights."""
-        torch.manual_seed(13)
-        gating = torch.randn(2, 8, dtype=torch.float32)
-        base_w, base_i = fl_router._fl_grouped_topk(
-            hidden_states=torch.zeros(2, 3),
-            gating_output=gating,
-            topk=2,
-            renormalize=False,
-            num_expert_group=2,
-            topk_group=1,
-        )
-        scaled_w, scaled_i = fl_router._fl_grouped_topk(
-            hidden_states=torch.zeros(2, 3),
-            gating_output=gating,
-            topk=2,
-            renormalize=False,
-            num_expert_group=2,
-            topk_group=1,
-            routed_scaling_factor=2.5,
-        )
-        # Tie order is unspecified: compare value multisets per row.
-        for row in range(2):
-            assert set(scaled_i[row].tolist()) == set(base_i[row].tolist())
-            for b, s in zip(
-                sorted(base_w[row].tolist()), sorted(scaled_w[row].tolist())
-            ):
-                torch.testing.assert_close(s, b * 2.5, rtol=1e-4, atol=1e-6)
-
-    @pytest.mark.supplementary
-    def test_token_count_mismatch_raises(self):
-        """hidden_states / gating_output row mismatch fails the assert."""
-        with pytest.raises(AssertionError, match="Number of tokens mismatch"):
-            fl_router._fl_grouped_topk(
-                hidden_states=torch.zeros(2, 3),
-                gating_output=torch.zeros(3, 8),
-                topk=1,
-                renormalize=False,
-                num_expert_group=2,
-                topk_group=1,
-            )
-
-    @pytest.mark.supplementary
-    def test_output_dtypes_are_normalized(self):
-        """Weights come back float32 and ids int32 regardless of input dtype."""
-        weights, ids = fl_router._fl_grouped_topk(
-            hidden_states=torch.zeros(1, 3),
-            gating_output=torch.zeros(1, 8, dtype=torch.float64),
-            topk=1,
-            renormalize=False,
-            num_expert_group=2,
-            topk_group=1,
-        )
-        assert weights.dtype == torch.float32
-        assert ids.dtype == torch.int32
-
-
-# ---------------------------------------------------------------------------
-# _fl_grouped_topk biased path (dispatched through the CachedOp boundary)
-# ---------------------------------------------------------------------------
-
-
-class TestFlGroupedTopkBiased:
-    """The e_score_correction_bias path routed through the grouped_topk op."""
-
-    @pytest.mark.supplementary
-    def test_sigmoid_bias_forwards_to_grouped_topk_dispatch(self, monkeypatch):
-        """sigmoid+bias hands the raw logits to grouped_topk with mode 1."""
-        captured = {}
-
-        def fake_grouped_topk(
-            scores,
-            num_expert_group,
-            topk_group,
-            topk,
-            renormalize,
-            scaling,
-            bias,
-            mode,
-        ):
-            captured.update(
-                scores=scores,
-                num_expert_group=num_expert_group,
-                topk_group=topk_group,
-                topk=topk,
-                renormalize=renormalize,
-                scaling=scaling,
-                bias=bias,
-                mode=mode,
-            )
-            return (
-                torch.tensor([[0.5, 0.25]]),
-                torch.tensor([[1, 0]], dtype=torch.int32),
-            )
-
-        _replace_cached_op(monkeypatch, fl_router, "_grouped_topk", fake_grouped_topk)
-        bias = torch.tensor([0.1, -0.1])
-        weights, ids = fl_router._fl_grouped_topk(
-            hidden_states=torch.zeros(1, 3),
-            gating_output=torch.tensor([[0.3, 0.7]]),
-            topk=2,
-            renormalize=False,
-            num_expert_group=1,
-            topk_group=1,
-            scoring_func="sigmoid",
-            e_score_correction_bias=bias,
-        )
-        torch.testing.assert_close(weights, torch.tensor([[0.5, 0.25]]))
-        assert ids.tolist() == [[1, 0]]
-        # Sigmoid mode is encoded as 1; the raw logits are handed over.
-        assert captured["mode"] == 1
-        assert captured["num_expert_group"] == 1
-        assert captured["bias"] is bias
-        torch.testing.assert_close(captured["scores"], torch.tensor([[0.3, 0.7]]))
-
-    @pytest.mark.supplementary
-    def test_softmax_bias_applies_softmax_first(self, monkeypatch):
-        """softmax+bias softmaxes the logits before the dispatched call."""
-        captured = {}
-
-        def fake_grouped_topk(
-            scores,
-            num_expert_group,
-            topk_group,
-            topk,
-            renormalize,
-            scaling,
-            bias,
-            mode,
-        ):
-            captured.update(scores=scores, mode=mode)
-            return torch.tensor([[0.5]]), torch.tensor([[0]], dtype=torch.int32)
-
-        _replace_cached_op(monkeypatch, fl_router, "_grouped_topk", fake_grouped_topk)
-        fl_router._fl_grouped_topk(
-            hidden_states=torch.zeros(1, 3),
-            gating_output=torch.tensor([[0.0, math.log(3.0)]]),
-            topk=1,
-            renormalize=False,
-            num_expert_group=1,
-            topk_group=1,
-            scoring_func="softmax",
-            e_score_correction_bias=torch.zeros(2),
-        )
-        assert captured["mode"] == 0
-        # Independent oracle: softmax([0, ln3]) = [1/4, 3/4].
-        torch.testing.assert_close(
-            captured["scores"], torch.tensor([[0.25, 0.75]]), rtol=1e-6, atol=1e-6
-        )
-
-    @pytest.mark.supplementary
-    def test_dispatched_result_is_returned_verbatim(self, monkeypatch):
-        """The dispatched kernel's outputs are returned unchanged."""
-        sentinel_w = torch.tensor([[0.125]])
-        sentinel_i = torch.tensor([[3]], dtype=torch.int32)
-        _replace_cached_op(
-            monkeypatch,
-            fl_router,
-            "_grouped_topk",
-            lambda *a, **k: (sentinel_w, sentinel_i),
-        )
-        weights, ids = fl_router._fl_grouped_topk(
-            hidden_states=torch.zeros(1, 3),
-            gating_output=torch.zeros(1, 4),
-            topk=1,
-            renormalize=False,
-            num_expert_group=1,
-            topk_group=1,
-            scoring_func="sigmoid",
-            e_score_correction_bias=torch.zeros(4),
-        )
-        assert weights is sentinel_w
-        assert ids is sentinel_i
-
-
-# ---------------------------------------------------------------------------
-# GroupedTopKRouterFL._compute_routing
-# ---------------------------------------------------------------------------
-
-
-class TestGroupedTopKRouterComputeRouting:
-    """GroupedTopKRouterFL's grouping-validity gate and dispatch choice."""
-
-    def _router(self, **overrides):
-        """A router instance answering only the routing probes."""
-        params = dict(
-            top_k=2,
-            renormalize=True,
-            num_expert_group=2,
-            topk_group=1,
-            scoring_func="softmax",
-            routed_scaling_factor=1.0,
-            e_score_correction_bias=None,
-            num_fused_shared_experts=0,
-        )
-        params.update(overrides)
-        router = types.SimpleNamespace(**params)
-        # Invoke the FL method unbound, exactly as the class-level patch does.
-        router._compute_routing = (
-            fl_router.GroupedTopKRouterFL._compute_routing.__get__(router)
-        )
-        return router
-
-    @pytest.mark.supplementary
-    def test_invalid_grouping_without_bias_uses_fused_topk(self, monkeypatch):
-        """num_experts <= num_expert_group routes through plain fused_topk."""
-        router = self._router()
-        recorded = {}
-
-        def fake_fused_topk(**kwargs):
-            recorded.update(kwargs)
-            return (
-                torch.tensor([[0.5, 0.5]]),
-                torch.tensor([[0, 1]], dtype=torch.int32),
-                None,
-            )
-
-        monkeypatch.setattr(fl_router, "fused_topk", fake_fused_topk)
-        # 2 logits columns <= num_expert_group=2 makes the grouping invalid.
-        weights, ids = router._compute_routing(
-            torch.zeros(1, 3), torch.zeros(1, 2), None
-        )
-        assert recorded["topk"] == 2
-        assert recorded["renormalize"] is True
-        torch.testing.assert_close(weights, torch.tensor([[0.5, 0.5]]))
-        assert ids.tolist() == [[0, 1]]
-
-    @pytest.mark.supplementary
-    def test_invalid_grouping_with_bias_uses_fused_topk_bias(self, monkeypatch):
-        """A bias present on invalid grouping routes through fused_topk_bias."""
-        bias = torch.tensor([0.1, 0.2, 0.3, 0.4])
-        router = self._router(e_score_correction_bias=bias)
-        recorded = {}
-
-        def fake_fused_topk_bias(**kwargs):
-            recorded.update(kwargs)
-            return (
-                torch.tensor([[0.6, 0.4]]),
-                torch.tensor([[3, 0]], dtype=torch.int32),
-            )
-
-        monkeypatch.setattr(fl_router, "fused_topk_bias", fake_fused_topk_bias)
-        # 3 logits columns % num_expert_group=2 != 0 makes the grouping
-        # invalid, exercising the bias branch of the fallback.
-        weights, ids = router._compute_routing(
-            torch.zeros(1, 3), torch.zeros(1, 3), None
-        )
-        # .data detaches into a fresh view each access, so the recorded value
-        # is checked for shared storage against the tensor's own data.
-        assert recorded["e_score_correction_bias"].data_ptr() == bias.data_ptr()
-        assert recorded["topk"] == 2
-        torch.testing.assert_close(weights, torch.tensor([[0.6, 0.4]]))
-
-    @pytest.mark.supplementary
-    def test_invalid_grouping_bias_applies_scaling_after(self, monkeypatch):
-        """routed_scaling_factor is applied on top of the bias-router result."""
-        bias = torch.tensor([0.1, 0.2])
-        router = self._router(e_score_correction_bias=bias, routed_scaling_factor=2.0)
-        monkeypatch.setattr(
-            fl_router,
-            "fused_topk_bias",
-            lambda **k: (torch.tensor([[0.5, 0.25]]), torch.tensor([[0, 1]])),
-        )
-        weights, _ids = router._compute_routing(
-            torch.zeros(1, 3), torch.zeros(1, 2), None
-        )
-        torch.testing.assert_close(weights, torch.tensor([[1.0, 0.5]]))
-
-    @pytest.mark.supplementary
-    def test_aiter_enabled_routes_to_rocm_partial(self, monkeypatch):
-        """AITER-enabled builds route to rocm_aiter_grouped_topk."""
-        router = self._router()
-        monkeypatch.setattr(
-            fl_router.rocm_aiter_ops, "is_fused_moe_enabled", lambda: True
-        )
-        monkeypatch.setattr(
-            fl_router.rocm_aiter_ops,
-            "is_fusion_moe_shared_experts_enabled",
-            lambda: True,
-        )
-        recorded = {}
-
-        def fake_aiter_topk(**kwargs):
-            recorded.update(kwargs)
-            return torch.tensor([[0.9]]), torch.tensor([[1]], dtype=torch.int32)
-
-        monkeypatch.setattr(fl_router, "rocm_aiter_grouped_topk", fake_aiter_topk)
-        weights, ids = router._compute_routing(
-            torch.zeros(1, 3), torch.zeros(1, 8), None
-        )
-        assert recorded["num_fused_shared_experts"] == 0
-        assert recorded["num_expert_group"] == 2
-        torch.testing.assert_close(weights, torch.tensor([[0.9]]))
-        assert ids.tolist() == [[1]]
-
-    @pytest.mark.supplementary
-    def test_aiter_shared_experts_mismatch_asserts(self, monkeypatch):
-        """AITER with shared experts disabled asserts num_fused_shared_experts==0."""
-        router = self._router(num_fused_shared_experts=2)
-        monkeypatch.setattr(
-            fl_router.rocm_aiter_ops, "is_fused_moe_enabled", lambda: True
-        )
-        monkeypatch.setattr(
-            fl_router.rocm_aiter_ops,
-            "is_fusion_moe_shared_experts_enabled",
-            lambda: False,
-        )
-        with pytest.raises(AssertionError):
-            router._compute_routing(torch.zeros(1, 3), torch.zeros(1, 8), None)
-
-    @pytest.mark.supplementary
-    def test_aiter_disabled_routes_to_fl_grouped_topk(self, monkeypatch):
-        """AITER disabled routes valid groupings through _fl_grouped_topk."""
-        router = self._router()
-        monkeypatch.setattr(
-            fl_router.rocm_aiter_ops, "is_fused_moe_enabled", lambda: False
-        )
-        recorded = {}
-
-        def fake_fl_grouped_topk(**kwargs):
-            recorded.update(kwargs)
-            return (
-                torch.tensor([[0.7, 0.3]]),
-                torch.tensor([[2, 5]], dtype=torch.int32),
-            )
-
-        monkeypatch.setattr(fl_router, "_fl_grouped_topk", fake_fl_grouped_topk)
-        weights, ids = router._compute_routing(
-            torch.zeros(1, 3), torch.zeros(1, 8), None
-        )
-        assert recorded["num_expert_group"] == 2
-        assert recorded["topk_group"] == 1
-        torch.testing.assert_close(weights, torch.tensor([[0.7, 0.3]]))
-        assert ids.tolist() == [[2, 5]]
-
-    @pytest.mark.supplementary
-    def test_indivisible_grouping_is_invalid(self, monkeypatch):
-        """num_experts not divisible by num_expert_group is invalid grouping."""
-        router = self._router(num_expert_group=3)
-        recorded = {}
-
-        def fake_fl_grouped_topk(**kwargs):
-            recorded.update(kwargs)
-            return torch.tensor([[1.0]]), torch.tensor([[0]], dtype=torch.int32)
-
-        monkeypatch.setattr(
-            fl_router.rocm_aiter_ops, "is_fused_moe_enabled", lambda: False
-        )
-        monkeypatch.setattr(fl_router, "_fl_grouped_topk", fake_fl_grouped_topk)
-        # 4 experts / 3 groups is indivisible: valid_grouping() returns False,
-        # so the no-bias fallback (plain fused_topk) runs instead.
-        monkeypatch.setattr(
-            fl_router,
-            "fused_topk",
-            lambda **k: (
-                torch.tensor([[0.4]]),
-                torch.tensor([[0]], dtype=torch.int32),
-                None,
-            ),
-        )
-        weights, _ids = router._compute_routing(
-            torch.zeros(1, 3), torch.zeros(1, 4), None
-        )
-        assert recorded == {}  # _fl_grouped_topk was never reached
-        torch.testing.assert_close(weights, torch.tensor([[0.4]]))
-
-
-# ---------------------------------------------------------------------------
-# FusedTopKBiasRouterFL._compute_routing
-# ---------------------------------------------------------------------------
-
-
-class TestFusedTopKBiasRouterComputeRouting:
-    """FusedTopKBiasRouterFL's sqrtsoftplus-ascend and shared-expert paths."""
-
-    def _router(self, **overrides):
-        params = dict(
-            top_k=2,
-            renormalize=False,
-            scoring_func="softmax",
-            routed_scaling_factor=1.0,
-            e_score_correction_bias=None,
-            num_fused_shared_experts=0,
-            global_num_experts=8,
-            shared_expert_weight=0.5,
-            _hash_indices_table=None,
-            bias_vl=None,
-            image_sentinel_lo=None,
-        )
-        params.update(overrides)
-        router = types.SimpleNamespace(**params)
-        router._compute_routing = (
-            fl_router.FusedTopKBiasRouterFL._compute_routing.__get__(router)
-        )
-        return router
-
-    @pytest.mark.supplementary
-    def test_softmax_routes_through_fused_topk_bias(self, monkeypatch):
-        """Non-sqrtsoftplus scoring routes through upstream fused_topk_bias."""
-        router = self._router()
-        recorded = {}
-
-        def fake_fused_topk_bias(**kwargs):
-            recorded.update(kwargs)
-            return (
-                torch.tensor([[0.5, 0.5]]),
-                torch.tensor([[0, 1]], dtype=torch.int32),
-            )
-
-        monkeypatch.setattr(fl_router, "fused_topk_bias", fake_fused_topk_bias)
-        weights, ids = router._compute_routing(
-            torch.zeros(1, 3), torch.zeros(1, 8), None
-        )
-        assert recorded["topk"] == 2
-        assert recorded["bias_vl"] is None
-        torch.testing.assert_close(weights, torch.tensor([[0.5, 0.5]]))
-        assert ids.tolist() == [[0, 1]]
-
-    @pytest.mark.supplementary
-    def test_correction_bias_data_is_forwarded(self, monkeypatch):
-        """The registered nn.Parameter .data is what reaches fused_topk_bias."""
-        bias = torch.nn.Parameter(torch.tensor([0.1, 0.2, 0.3, 0.4]))
-        router = self._router(e_score_correction_bias=bias)
-        recorded = {}
-
-        def fake_fused_topk_bias(**kwargs):
-            recorded.update(kwargs)
-            return (
-                torch.tensor([[0.5, 0.5]]),
-                torch.tensor([[0, 1]], dtype=torch.int32),
-            )
-
-        monkeypatch.setattr(fl_router, "fused_topk_bias", fake_fused_topk_bias)
-        router._compute_routing(torch.zeros(1, 3), torch.zeros(1, 4), None)
-        # .data detaches into a fresh view each access, so the recorded value
-        # is checked for shared storage against the parameter's own data.
-        torch.testing.assert_close(recorded["e_score_correction_bias"], bias.data)
-        assert recorded["e_score_correction_bias"].data_ptr() == bias.data_ptr()
-
-    @pytest.mark.supplementary
-    def test_shared_experts_are_appended(self, monkeypatch):
-        """num_fused_shared_experts > 0 appends the shared expert slots."""
-        router = self._router(
-            num_fused_shared_experts=2,
-            global_num_experts=8,
-            shared_expert_weight=0.5,
-        )
-        monkeypatch.setattr(
-            fl_router,
-            "fused_topk_bias",
-            lambda **k: (
-                torch.tensor([[0.25, 0.75]]),
-                torch.tensor([[1, 0]], dtype=torch.int32),
-            ),
-        )
-        weights, ids = router._compute_routing(
-            torch.zeros(1, 3), torch.zeros(1, 8), None
-        )
-        # Independent oracle: ids gain [8, 9], weights gain [0.5, 0.5].
-        assert ids.tolist() == [[1, 0, 8, 9]]
-        torch.testing.assert_close(weights, torch.tensor([[0.25, 0.75, 0.5, 0.5]]))
-
-
-# ---------------------------------------------------------------------------
-# replace_router_with_fl
-# ---------------------------------------------------------------------------
-
-
-class TestReplaceRouterWithFl:
-    """The class-level monkey-patch installation of the FL router methods."""
-
-    @pytest.mark.supplementary
-    def test_patch_assigns_fl_compute_routing_to_all_three(self, monkeypatch):
-        """The three upstream router classes receive the FL _compute_routing."""
-        # The upstream classes are bound in fl_router's own namespace at its
-        # import (the same objects replace_router_with_fl patches), so they
-        # are reached through it rather than a fresh vllm import — which on
-        # stub hosts would fail after the file-scope restore removed the
-        # stub graph.
-        m1 = fl_router
-        m2 = fl_router
-        m3 = fl_router
-
-        # Pin the originals through monkeypatch so the patch is auto-reversed.
-        for module, cls_name in (
-            (m1, "FusedTopKRouter"),
-            (m2, "FusedTopKBiasRouter"),
-            (m3, "GroupedTopKRouter"),
-        ):
-            cls = getattr(module, cls_name)
-            monkeypatch.setattr(
-                cls, "_compute_routing", lambda self, *a, **k: ("orig", "orig")
-            )
-        fl_router.replace_router_with_fl()
-        assert (
-            m1.FusedTopKRouter._compute_routing
-            is fl_router.FusedTopKRouterFL._compute_routing
-        )
-        assert (
-            m3.GroupedTopKRouter._compute_routing
-            is fl_router.GroupedTopKRouterFL._compute_routing
-        )
-        assert (
-            m2.FusedTopKBiasRouter._compute_routing
-            is fl_router.FusedTopKBiasRouterFL._compute_routing
-        )
-
-
-# ---------------------------------------------------------------------------
-# fused_experts_impl dispatch contracts
-# ---------------------------------------------------------------------------
-
-
-class TestFusedExpertsImplContracts:
-    """fused_experts_impl shape assertions and boundary-call contracts.
-
-    The Triton GEMM kernels and the config lookup are external boundaries;
-    recorders replace them so the tests assert what the function hands to the
-    dispatch system, not the kernels themselves.
-    """
-
-    E, N, K, TOPK = 2, 8, 4, 2
-
-    def _make_inputs(self, num_tokens=3, dtype=torch.float32):
-        hidden = torch.randn(num_tokens, self.K, dtype=dtype)
-        w1 = torch.randn(self.E, 2 * self.N, self.K, dtype=dtype)
-        w2 = torch.randn(self.E, self.K, self.N, dtype=dtype)
-        tw = torch.rand(num_tokens, self.TOPK, dtype=dtype)
-        ti = torch.randint(0, self.E, (num_tokens, self.TOPK))
-        return hidden, w1, w2, tw, ti
-
-    @pytest.fixture
-    def recorders(self, monkeypatch):
-        """Record every boundary call fused_experts_impl makes."""
-        calls = {"align": [], "kernel": [], "moe_sum": [], "config": []}
-
-        def fake_align(ids, block_size, num_experts, expert_map, **kwargs):
-            calls["align"].append((tuple(ids.shape), block_size, num_experts))
-            return (
-                torch.zeros(8, dtype=torch.int32),
-                torch.zeros(4, dtype=torch.int32),
-                torch.tensor([8], dtype=torch.int32),
-            )
-
-        def fake_kernel(*args, **kwargs):
-            # Positional contract of _invoke_fused_moe_triton_kernel:
-            # (A, B, C, A_scale, B_scale, topk_weights, sorted_ids,
-            #  expert_ids, num_post_pad, mul_routed_weight, top_k, config)
-            calls["kernel"].append(
-                {
-                    "B_shape": tuple(args[1].shape),
-                    "C_shape": tuple(args[2].shape),
-                    "mul_routed_weight": args[9],
-                    "top_k": args[10],
-                    "compute_type": kwargs.get("compute_type"),
-                }
-            )
-
-        def fake_moe_sum(inp, out):
-            calls["moe_sum"].append((tuple(inp.shape), tuple(out.shape)))
-            torch.sum(inp, dim=1, out=out)
-
-        def fake_silu_and_mul(unused, x):
-            # Independent oracle: silu over the first half, multiplied by the
-            # second half — the contract the real dispatched kernel provides.
-            d = x.shape[-1] // 2
-            return torch.nn.functional.silu(x[..., :d]) * x[..., d:]
-
-        def fake_config(*args, **kwargs):
-            calls["config"].append(args)
-            return {"BLOCK_SIZE_M": 16}
-
-        monkeypatch.setattr(fl_fused, "_moe_align_block_size", fake_align)
-        monkeypatch.setattr(fl_fused, "_invoke_fused_moe_triton_kernel", fake_kernel)
-        _replace_cached_op(monkeypatch, fl_fused, "_moe_sum", fake_moe_sum)
-        # _silu_and_mul is a CachedOp too: resolving it initializes the
-        # dispatch system, which probes vllm.platforms and cannot run on a
-        # stub host. Replacing it with the numeric oracle keeps the dispatch
-        # boundary (like the other kernels) out of the contract under test.
-        _replace_cached_op(monkeypatch, fl_fused, "_silu_and_mul", fake_silu_and_mul)
-        # vLLM 0.32's _get_config_quant_dtype lacks the ocp_mx_scheme kwarg
-        # the FL call site passes, and the config lookup signature differs per
-        # vLLM version: pin both to the contract fused_experts_impl expects.
-        monkeypatch.setattr(
-            fl_fused, "_get_config_quant_dtype", lambda **kwargs: None, raising=False
-        )
-        monkeypatch.setattr(
-            fl_fused, "try_get_optimal_moe_config", fake_config, raising=False
-        )
-        return calls
-
-    @pytest.mark.supplementary
-    def test_happy_path_dispatch_contract(self, recorders):
-        """Both GEMMs, the activation, and moe_sum receive proper shapes."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        out = fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti)
-        assert out.shape == hidden.shape
-        assert len(recorders["kernel"]) == 2
-        first, second = recorders["kernel"]
-        # The implementation reads N from w1's second dim — the fused
-        # gate+up width, i.e. 2 * the per-gate N the inputs are built with.
-        fused_n = 2 * self.N
-        assert first["B_shape"] == (self.E, fused_n, self.K)
-        assert first["C_shape"] == (hidden.size(0), self.TOPK, fused_n)
-        assert second["B_shape"] == (self.E, self.K, self.N)
-        assert second["C_shape"] == (hidden.size(0), self.TOPK, self.K)
-        # First GEMM multiplies routed weights iff requested on input;
-        # the second GEMM applies them iff the first did not.
-        assert first["mul_routed_weight"] is False
-        assert second["mul_routed_weight"] is True
-        assert second["top_k"] == 1
-        # Alignment gets the block size from the config lookup.
-        assert recorders["align"][0] == (ti.shape, 16, self.E)
-        assert recorders["moe_sum"][0] == (
-            (hidden.size(0), self.TOPK, self.K),
-            (hidden.size(0), self.K),
-        )
-
-    @pytest.mark.supplementary
-    def test_inplace_writes_into_hidden_states(self, recorders):
-        """inplace=True writes the result into the hidden_states tensor."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        out = fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti, inplace=True)
-        assert out is hidden
-
-    @pytest.mark.supplementary
-    def test_router_weight_on_input_flips_gemm_flags(self, recorders):
-        """apply_router_weight_on_input inverts both GEMM weight flags."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        fl_fused.fused_experts_impl(
-            hidden, w1, w2, tw, ti, apply_router_weight_on_input=True
-        )
-        first, second = recorders["kernel"]
-        assert first["mul_routed_weight"] is True
-        assert second["mul_routed_weight"] is False
-
-    @pytest.mark.supplementary
-    def test_compute_type_follows_dtype(self, recorders):
-        """The Triton compute type is chosen from the activation dtype."""
-        # fl_fused binds the upstream tl namespace at its own import; the
-        # stub graph is gone by test time on vllm-less hosts, so the bound
-        # reference is used instead of importing vllm.triton_utils.
-        _vtu = fl_fused
-
-        hidden, w1, w2, tw, ti = self._make_inputs(dtype=torch.float16)
-        fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti)
-        assert recorders["kernel"][0]["compute_type"] is _vtu.tl.float16
-        recorders["kernel"].clear()
-        hidden, w1, w2, tw, ti = self._make_inputs(dtype=torch.bfloat16)
-        fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti)
-        assert recorders["kernel"][0]["compute_type"] is _vtu.tl.bfloat16
-
-    @pytest.mark.supplementary
-    def test_gelu_activation_routes_to_gelu_and_mul(self, recorders, monkeypatch):
-        """activation='gelu' dispatches gelu_and_mul instead of silu_and_mul."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-
-        def fake_gelu(out, x):
-            d = x.shape[-1] // 2
-            return torch.nn.functional.gelu(x[..., :d]) * x[..., d:]
-
-        gelu_rec = _replace_cached_op(monkeypatch, fl_fused, "_gelu_and_mul", fake_gelu)
-        fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti, activation="gelu")
-        assert gelu_rec.calls
-
-    @pytest.mark.supplementary
-    def test_no_mul_activations_stay_in_torch(self, recorders):
-        """silu_no_mul keeps the activation inside torch (F.silu path)."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        out = fl_fused.fused_experts_impl(
-            hidden, w1, w2, tw, ti, activation="silu_no_mul"
-        )
-        assert len(recorders["kernel"]) == 2  # GEMMs still ran
-        assert out.shape == hidden.shape
-
-    @pytest.mark.supplementary
-    def test_unsupported_activation_raises(self, recorders):
-        """An unknown activation name raises ValueError."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        with pytest.raises(ValueError, match="Unsupported FusedMoe activation"):
-            fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti, activation="relu")
-
-    @pytest.mark.supplementary
-    def test_hidden_size_mismatch_raises(self, recorders):
-        """A hidden size inconsistent with w1 fails the shape assertion."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        bad_w1 = torch.randn(self.E, 2 * self.N, self.K + 2)
-        with pytest.raises(AssertionError, match="Hidden size mismatch"):
-            fl_fused.fused_experts_impl(hidden, bad_w1, w2, tw, ti)
-
-    @pytest.mark.supplementary
-    def test_topk_shape_mismatch_raises(self, recorders):
-        """topk_weights / topk_ids shape disagreement fails the assertion."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        with pytest.raises(AssertionError, match="topk shape mismatch"):
-            fl_fused.fused_experts_impl(hidden, w1, w2, tw[:, :1], ti)
-
-    @pytest.mark.supplementary
-    def test_int4_hidden_size_halved_assertion(self, recorders):
-        """use_int4_w4a16 checks hidden // 2 == w1.size(2)."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        # int4 packs 2 weights per element: w1 must see K columns packed
-        # from K/2 hidden elements. A matching w1 passes; a mismatched one
-        # raises.
-        ok_w1 = torch.randn(self.E, 2 * self.N, self.K // 2)
-        fl_fused.fused_experts_impl(hidden, ok_w1, w2, tw, ti, use_int4_w4a16=True)
-        bad_w1 = torch.randn(self.E, 2 * self.N, self.K // 2 + 1)
-        with pytest.raises(AssertionError, match="Hidden size mismatch"):
-            fl_fused.fused_experts_impl(hidden, bad_w1, w2, tw, ti, use_int4_w4a16=True)
-
-    @pytest.mark.supplementary
-    def test_enum_activation_is_normalized_to_string(self, recorders, monkeypatch):
-        """A MoEActivation enum is normalized via its .value attribute."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-
-        def fake_silu(out, x):
-            d = x.shape[-1] // 2
-            return torch.nn.functional.silu(x[..., :d]) * x[..., d:]
-
-        silu_rec = _replace_cached_op(monkeypatch, fl_fused, "_silu_and_mul", fake_silu)
-        fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti, activation=_fl_enum("SILU"))
-        assert silu_rec.calls
-
-    @pytest.mark.supplementary
-    def test_global_num_experts_defaults_from_w1(self, recorders):
-        """global_num_experts=-1 derives the expert count from w1.size(0)."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti)
-        assert recorders["align"][0][2] == self.E
-
-    @pytest.mark.supplementary
-    def test_explicit_global_num_experts_forwarded(self, recorders):
-        """An explicit global_num_experts reaches the alignment boundary."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti, global_num_experts=17)
-        assert recorders["align"][0][2] == 17
-
-    @pytest.mark.supplementary
-    def test_quantized_activation_paths_dispatch_kernel(self, recorders):
-        """fp8 flags flow through to the kernel boundary unchanged."""
-        hidden, w1, w2, tw, ti = self._make_inputs()
-        fl_fused.fused_experts_impl(
-            hidden, w1, w2, tw, ti, use_fp8_w8a8=True, per_channel_quant=True
-        )
-        assert len(recorders["kernel"]) == 2
-
-    @pytest.mark.supplementary
-    def test_single_chunk_runs_one_config_lookup(self, recorders):
-        """num_tokens < CHUNK_SIZE runs one chunk and one config lookup."""
-        hidden, w1, w2, tw, ti = self._make_inputs(num_tokens=3)
-        fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti)
-        assert len(recorders["config"]) == 1
-        assert len(recorders["moe_sum"]) == 1
-
-    @pytest.mark.supplementary
-    def test_out_dtype_matches_input(self, recorders):
-        """float16 and bfloat16 inputs flow through with matching dtypes."""
-        for dtype in (torch.float16, torch.bfloat16):
-            recorders["kernel"].clear()
-            recorders["moe_sum"].clear()
-            hidden, w1, w2, tw, ti = self._make_inputs(dtype=dtype)
-            out = fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti)
-            assert out.dtype == dtype
-            assert len(recorders["kernel"]) == 2

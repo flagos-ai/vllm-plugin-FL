@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary edge tests for the W8A8/W4A8 quantization family.
+"""Edge tests for the W8A8/W4A8 quantization family.
 
 Two groups of gaps left by the core suite (tests/unit_tests/quantization/):
 
@@ -39,9 +39,6 @@ from typing import Any
 
 import pytest
 import torch
-
-pytestmark = pytest.mark.supplementary
-
 
 def _make_module(name: str) -> types.ModuleType:
     module = types.ModuleType(name)

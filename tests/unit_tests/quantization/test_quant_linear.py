@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for vllm_fl.quantization.quant_linear.
+"""Platform-resolution tests for vllm_fl.quantization.quant_linear.
 
 ``quant_linear`` imports ``vllm.platforms`` at module level, so each scenario
 below installs a stub vllm platform graph and reloads the module: the
@@ -110,6 +110,22 @@ def _stub_w8a8_installers(calls):
     return (w_linear, w_moe, w_packed)
 
 
+@pytest.fixture
+def clean_fl_env(monkeypatch):
+    """Clear every ``VLLM_FL_*`` env var for the test (restored on teardown).
+
+    The supplementary conftest's helper of the same name: the tests below
+    pin OOT / FlagGems policy off, and a stray ``VLLM_FL_*`` variable set
+    by an earlier test would change what the module under test reads.
+    """
+    import os
+
+    fl_vars = [k for k in os.environ if k.startswith("VLLM_FL_")]
+    for key in fl_vars:
+        monkeypatch.delenv(key, raising=False)
+    return monkeypatch.setenv
+
+
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch, clean_fl_env):
     """Keep OOT / FlagGems env vars unset around each test."""
@@ -138,7 +154,6 @@ def _reload_quant_linear(platform):
 class TestResolveSourcePlatform:
     """_resolve_source_platform platform-check priority order."""
 
-    @pytest.mark.supplementary
     @pytest.mark.parametrize(
         ("is_cuda_alike", "is_rocm", "is_cpu", "expected"),
         [
@@ -159,7 +174,6 @@ class TestResolveSourcePlatform:
         quant_linear, enum, _ = _reload_quant_linear(platform)
         assert quant_linear._resolve_source_platform() is enum[expected.upper()]
 
-    @pytest.mark.supplementary
     def test_check_order_cuda_before_rocm(self):
         """is_cuda_alike is consulted before is_rocm."""
         calls = []
@@ -177,7 +191,6 @@ class TestResolveSourcePlatform:
 class TestAddOotQuantKernel:
     """add_oot_quant_kernel copies every registry to the OOT key."""
 
-    @pytest.mark.supplementary
     def test_all_five_registries_populated(self):
         """OOT lists are copies of the CUDA source lists (not the same object)."""
         kernel_a, kernel_b = object(), object()
@@ -213,7 +226,6 @@ class TestAddOotQuantKernel:
         assert [name for name, _ in calls] == ["linear", "packed", "moe"]
         assert calls[0][1] is stubs._POSSIBLE_INT8_KERNELS
 
-    @pytest.mark.supplementary
     def test_idempotent_second_call_keeps_existing_lists(self):
         """A second call does not overwrite or duplicate OOT entries."""
         platform = types.SimpleNamespace(
@@ -232,7 +244,6 @@ class TestAddOotQuantKernel:
 
         assert stubs._POSSIBLE_KERNELS[enum.OOT] == [extra]
 
-    @pytest.mark.supplementary
     def test_missing_source_list_gives_empty_oot_list(self):
         """A source platform with no registered list yields an empty OOT list."""
         platform = types.SimpleNamespace(

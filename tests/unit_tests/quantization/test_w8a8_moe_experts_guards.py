@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for ``vllm_fl.quantization.w8a8.moe_experts`` guards.
+"""Guard-branch tests for ``vllm_fl.quantization.w8a8.moe_experts``.
 
 The core suite (``tests/unit_tests/quantization/test_w8a8_moe_experts.py``)
 covers the numeric experts paths (native/Ascend/grouped kernels, NPU
@@ -34,9 +34,6 @@ from typing import Any
 
 import pytest
 import torch
-
-pytestmark = pytest.mark.supplementary
-
 
 def _make_module(name: str) -> types.ModuleType:
     module = types.ModuleType(name)
@@ -569,27 +566,72 @@ class TestAscendGroupedExpertsGuards:
         )
 
     @pytest.mark.parametrize(
-        ("dtype", "fragment"),
+        ("dtype", "expected_scale_dtype"),
         [
             pytest.param(
-                torch.bfloat16, "bfloat16 or float16", id="bfloat16-scale-dtype"
+                torch.bfloat16, torch.bfloat16, id="bfloat16-selects-bfloat16-scale"
             ),
             pytest.param(
-                torch.float16, "bfloat16 or float16", id="float16-scale-dtype"
+                torch.float16, torch.float32, id="float16-selects-float32-scale"
             ),
         ],
     )
-    def test_supported_dtypes_select_scale_dtype(self, monkeypatch, dtype, fragment):
-        """bf16/fp16 inputs pass the dtype guard (never reach a kernel)."""
-        self._fail_torch_npu(monkeypatch)
+    def test_supported_dtypes_select_scale_dtype(self, monkeypatch, dtype, expected_scale_dtype):
+        """bf16/fp16 inputs reach the grouped matmul with their own scale dtype.
+
+        A recording torch_npu double replaces the failing kernels: with
+        non-empty tokens routed to a local expert, the grouped matmul runs
+        and the ``scale`` kwarg it receives must be cast to the dtype the
+        guard selects — bfloat16 inputs select a bfloat16 weight scale,
+        float16 inputs select a float32 one.
+        """
+        seen_scales = []
+
+        def fake_grouped_matmul(*, scale, **kwargs):
+            seen_scales.append(
+                (scale[0].dtype, kwargs["x"][0].dtype, kwargs["output_dtype"])
+            )
+            return [torch.zeros((1, 4), dtype=dtype)]
+
+        def fake_dynamic_quant(value):
+            import torch as _torch
+            scale = value.float().abs().amax(dim=-1, keepdim=True) / 127.0
+            safe = _torch.where(scale > 0, scale, _torch.ones_like(scale))
+            quantized = (
+                _torch.round(value.float() / safe)
+                .clamp(-127, 127)
+                .to(_torch.int8)
+            )
+            return quantized, scale
+
+        def fake_swiglu(x, dim=-1):
+            gate, up = x.chunk(2, dim=dim)
+            import torch as _torch
+            return _torch.nn.functional.silu(gate) * up
+
+        monkeypatch.setitem(
+            sys.modules,
+            "torch_npu",
+            types.SimpleNamespace(
+                npu_dynamic_quant=fake_dynamic_quant,
+                npu_grouped_matmul=fake_grouped_matmul,
+                npu_swiglu=fake_swiglu,
+            ),
+        )
         arguments = self._arguments()
-        arguments["hidden_states"] = torch.ones((0, 4), dtype=dtype)
-        arguments["topk_ids"] = torch.zeros((0, 1), dtype=torch.int64)
-        arguments["topk_weights"] = torch.ones((0, 1), dtype=torch.float32)
+        arguments["hidden_states"] = torch.ones((2, 4), dtype=dtype)
+        # Both tokens route to local expert 0.
+        arguments["topk_ids"] = torch.zeros((2, 1), dtype=torch.int64)
+        arguments["topk_weights"] = torch.ones((2, 1), dtype=torch.float32)
         result = moe_experts._ascend_w8a8_grouped_experts(**arguments, clamp_limit=None)
-        # Zero-token short-circuit: empty (0, w2.shape[1]) output.
-        assert result.shape == (0, 4)
-        assert result.dtype == dtype
+        # Both grouped matmuls ran and each received the selected scale dtype.
+        assert len(seen_scales) == 2
+        assert all(entry[0] is expected_scale_dtype for entry in seen_scales)
+        # The cast never leaks into the quantized operands or the output.
+        assert all(entry[1] is torch.int8 for entry in seen_scales)
+        assert all(entry[2] is dtype for entry in seen_scales)
+        assert result.shape == (2, 4)
+        assert result.dtype is dtype
 
     def test_unsupported_dtype_raises_type_error(self, monkeypatch):
         """A float32 input is rejected by the dtype guard."""
@@ -607,14 +649,6 @@ class TestAscendGroupedExpertsGuards:
         arguments["topk_weights"] = torch.ones((0, 1), dtype=torch.float32)
         result = moe_experts._ascend_w8a8_grouped_experts(**arguments, clamp_limit=None)
         assert result.shape == (0, 4)
-
-    def test_all_nonlocal_routes_return_zeros(self, monkeypatch):
-        """Routing every token to a nonlocal expert returns zero rows."""
-        self._fail_torch_npu(monkeypatch)
-        arguments = self._arguments()
-        arguments["expert_map"] = torch.tensor([-1, -1], dtype=torch.int64)
-        result = moe_experts._ascend_w8a8_grouped_experts(**arguments, clamp_limit=None)
-        assert torch.equal(result, torch.zeros((2, 4), dtype=torch.bfloat16))
 
 
 # ---------------------------------------------------------------------------

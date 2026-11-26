@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for vllm_fl.ops.fla chunk / fused_recurrent CustomOps.
+"""Contract tests for vllm_fl.ops.fla chunk / fused_recurrent CustomOps.
 
 ``vllm_fl.ops.fla``'s package __init__ imports chunk.py, which needs vllm at
 import time.  Like ``test_fla_utils.py``, the stub vllm graph below only
@@ -185,7 +185,6 @@ def rec_calls(monkeypatch):
 class TestChunkOpForwardNative:
     """ChunkGatedDeltaRuleOp.forward_native contract with a fake kernel."""
 
-    @pytest.mark.supplementary
     def test_defaults_stored(self):
         """Default construction stores the documented defaults."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -193,14 +192,12 @@ class TestChunkOpForwardNative:
         assert op.use_qk_l2norm_in_kernel is False
         assert op.suppress_level == 0
 
-    @pytest.mark.supplementary
     def test_env_suppress_level(self, monkeypatch):
         """GDN_RECOMPUTE_SUPPRESS_LEVEL is read at construction time."""
         monkeypatch.setenv("GDN_RECOMPUTE_SUPPRESS_LEVEL", "3")
         op = chunk_mod.ChunkGatedDeltaRuleOp()
         assert op.suppress_level == 3
 
-    @pytest.mark.supplementary
     def test_forward_native_basic(self, chunk_calls):
         """Defaults flow to the kernel: scale=1/sqrt(K), no cu_seqlens."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -214,7 +211,6 @@ class TestChunkOpForwardNative:
         torch.testing.assert_close(o, q)
         assert final is None
 
-    @pytest.mark.supplementary
     def test_forward_native_explicit_scale_forwarded(self, chunk_calls):
         """An explicit scale is forwarded verbatim to the kernel."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -222,7 +218,6 @@ class TestChunkOpForwardNative:
         op.forward_native(q, k, v, g, beta, scale=0.25)
         assert chunk_calls[0]["scale"] == 0.25
 
-    @pytest.mark.supplementary
     def test_forward_native_float32_rejected(self):
         """float32 inputs are rejected by the documented assertion."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -230,7 +225,6 @@ class TestChunkOpForwardNative:
         with pytest.raises(AssertionError, match="float32"):
             op.forward_native(q, k, v, g, beta)
 
-    @pytest.mark.supplementary
     def test_forward_native_beta_rank_rejected(self):
         """beta must be rank-3 [B, T, H]."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -238,7 +232,6 @@ class TestChunkOpForwardNative:
         with pytest.raises(AssertionError, match="beta"):
             op.forward_native(q, k, v, g, beta[0])
 
-    @pytest.mark.supplementary
     def test_forward_native_headfirst_warns(self, chunk_calls, recwarn):
         """seq_len < num_heads triggers the format-mismatch warning."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -246,7 +239,6 @@ class TestChunkOpForwardNative:
         op.forward_native(q, k, v, g, beta)
         assert any("format mismatch" in str(w.message) for w in recwarn.list)
 
-    @pytest.mark.supplementary
     def test_forward_native_cu_seqlens_batch_must_be_one(self):
         """cu_seqlens with batch > 1 is rejected."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -255,7 +247,6 @@ class TestChunkOpForwardNative:
         with pytest.raises(ValueError, match="batch size is expected to be 1"):
             op.forward_native(q, k, v, g, beta, cu_seqlens=cu)
 
-    @pytest.mark.supplementary
     def test_forward_native_cu_seqlens_state_count_checked(self):
         """initial_state count must match len(cu_seqlens) - 1."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -265,7 +256,6 @@ class TestChunkOpForwardNative:
         with pytest.raises(ValueError, match="initial states"):
             op.forward_native(q, k, v, g, beta, cu_seqlens=cu, initial_state=bad_state)
 
-    @pytest.mark.supplementary
     def test_forward_native_cu_seqlens_valid_state(self, chunk_calls):
         """A valid cu_seqlens/initial_state pair flows to the kernel."""
         op = chunk_mod.ChunkGatedDeltaRuleOp()
@@ -276,7 +266,6 @@ class TestChunkOpForwardNative:
         assert chunk_calls[0]["cu_seqlens"] is cu
         assert chunk_calls[0]["initial_state"] is state
 
-    @pytest.mark.supplementary
     def test_forward_native_l2norm_applied_when_flagged(self, monkeypatch):
         """use_qk_l2norm_in_kernel=True normalizes q and k inside the Function."""
         op = chunk_mod.ChunkGatedDeltaRuleOp(use_qk_l2norm_in_kernel=True)
@@ -313,14 +302,12 @@ class TestChunkOpForwardNative:
 class TestFusedRecurrentOpForwardNative:
     """FusedRecurrentGatedDeltaRuleOp.forward_native contract."""
 
-    @pytest.mark.supplementary
     def test_defaults_stored(self):
         """Default construction stores the documented defaults."""
         op = rec_mod.FusedRecurrentGatedDeltaRuleOp()
         assert op.inplace_final_state is False
         assert op.use_qk_l2norm_in_kernel is False
 
-    @pytest.mark.supplementary
     def test_forward_native_basic(self, rec_calls):
         """Defaults flow to the kernel: scale=1/sqrt(K), beta forwarded."""
         op = rec_mod.FusedRecurrentGatedDeltaRuleOp()
@@ -334,7 +321,6 @@ class TestFusedRecurrentOpForwardNative:
         torch.testing.assert_close(o, q)
         assert final is state or torch.equal(final, state)
 
-    @pytest.mark.supplementary
     def test_forward_native_explicit_scale_positive_required(self):
         """An explicit scale must be positive (asserted contract)."""
         op = rec_mod.FusedRecurrentGatedDeltaRuleOp()
@@ -342,7 +328,6 @@ class TestFusedRecurrentOpForwardNative:
         with pytest.raises(AssertionError, match="positive"):
             op.forward_native(q, k, v, g, beta, scale=-1.0)
 
-    @pytest.mark.supplementary
     def test_forward_native_cu_seqlens_batch_must_be_one(self):
         """cu_seqlens with batch > 1 is rejected."""
         op = rec_mod.FusedRecurrentGatedDeltaRuleOp()
@@ -351,7 +336,6 @@ class TestFusedRecurrentOpForwardNative:
         with pytest.raises(ValueError, match="batch size is expected to be 1"):
             op.forward_native(q, k, v, g, beta, cu_seqlens=cu)
 
-    @pytest.mark.supplementary
     def test_forward_native_beta_none_defaults_to_ones(self, rec_calls):
         """beta=None is replaced by all-ones of q's [B, T, H] shape."""
         op = rec_mod.FusedRecurrentGatedDeltaRuleOp()
@@ -361,7 +345,6 @@ class TestFusedRecurrentOpForwardNative:
         assert sent.shape == (2, 3, 5)
         assert torch.all(sent == 1)
 
-    @pytest.mark.supplementary
     def test_forward_native_g_and_beta_made_contiguous(self, rec_calls):
         """Non-contiguous g/beta tensors are compacted before the kernel."""
         op = rec_mod.FusedRecurrentGatedDeltaRuleOp()
@@ -375,7 +358,6 @@ class TestFusedRecurrentOpForwardNative:
         assert rec_calls[0]["g"].is_contiguous()
         assert rec_calls[0]["beta"].is_contiguous()
 
-    @pytest.mark.supplementary
     def test_forward_native_flags_forwarded(self, rec_calls):
         """inplace_final_state and l2norm flags are forwarded to the kernel."""
         op = rec_mod.FusedRecurrentGatedDeltaRuleOp(
@@ -386,7 +368,6 @@ class TestFusedRecurrentOpForwardNative:
         assert rec_calls[0]["inplace_final_state"] is True
         assert rec_calls[0]["use_qk_l2norm_in_kernel"] is True
 
-    @pytest.mark.supplementary
     def test_forward_native_indices_and_tokens_forwarded(self, rec_calls):
         """ssm_state_indices / num_accepted_tokens pass through unchanged."""
         op = rec_mod.FusedRecurrentGatedDeltaRuleOp()
