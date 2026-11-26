@@ -159,11 +159,17 @@ def register_model():
     """Register FL-specific models not yet upstream."""
     # General plugins are loaded independently in spawned model-inspection and
     # worker processes, so all runtime compatibility hooks must be idempotent.
+    from vllm_fl.patches.fused_swiglu_mlp import patch_vllm_fused_swiglu_mlp
     from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
+    from vllm_fl.patches.scheduler_batching import patch_vllm_scheduler_batching
+    from vllm_fl.patches.topk_topp_sampler import patch_vllm_topk_topp_sampler
 
     apply_qwen3_5_text_patches()
     patch_vllm_moe_sum()
+    patch_vllm_topk_topp_sampler()
+    patch_vllm_fused_swiglu_mlp()
+    patch_vllm_scheduler_batching()
 
     _register_flagcx_connector()
 

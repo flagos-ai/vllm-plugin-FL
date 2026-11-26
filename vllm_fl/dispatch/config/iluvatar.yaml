@@ -29,9 +29,12 @@ strict: false
 #   - vendor:iluvatar : Iluvatar-specific vendor backend
 op_backends:
   # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
+  # attention: the vendor backend carries the GQA-packed prefill / split-KV decode
+  # Triton kernels (prefill-decode split backend); FlagGems' generic selection
+  # (vLLM unified attention) remains the fallback.
   attention_backend:
-    - flagos
     - vendor:iluvatar
+    - flagos
     - reference
   rms_norm:
     - flagos
