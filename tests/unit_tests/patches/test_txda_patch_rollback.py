@@ -360,6 +360,12 @@ def test_v2_compat_rolls_back_sub_installers_and_retry_succeeds(monkeypatch, v2_
     # the rollback, not the alias contents.
     monkeypatch.setattr(v2_runner_compat, "install_cuda_aliases", lambda: None)
     monkeypatch.setattr(v2_runner_compat, "mapped_host_buffers_available", lambda: True)
+    # Importing ``vllm_fl.worker.model_runner`` activates the platform, which
+    # refuses graph capture on a host without TXDA. The installer only needs the
+    # symbol as a stand-in; the graph-capture wiring is covered elsewhere.
+    model_runner_stub = ModuleType("vllm_fl.worker.model_runner")
+    model_runner_stub.graph_capture = object()
+    monkeypatch.setitem(sys.modules, "vllm_fl.worker.model_runner", model_runner_stub)
 
     real_install_bt = block_table_native.install_block_table_native
 
