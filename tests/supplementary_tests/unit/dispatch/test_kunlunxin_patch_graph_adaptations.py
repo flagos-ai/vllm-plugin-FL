@@ -1013,7 +1013,18 @@ class TestNativePiecewiseBoundaries:
             QwenGatedDeltaNetAttention._forward_core = real_core
 
     @pytest.mark.platforms("kunlunxin")
-    def test_boundary_passthrough_when_not_capturing(self):
+    @pytest.mark.parametrize(
+        ("idle_capture_type", "description"),
+        [
+            # no capture at all: BreakableCUDAGraphCapture.current is None
+            (None, "no capture"),
+            # a capture exists but _capturing is False
+            ("idle", "capture not capturing"),
+        ],
+    )
+    def test_boundary_passthrough_when_not_capturing(
+        self, idle_capture_type, description
+    ):
         import vllm.compilation.breakable_cudagraph as real_breakable
 
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
@@ -1036,59 +1047,6 @@ class TestNativePiecewiseBoundaries:
 
         KunlunxinAttentionBackendImpl.forward = fake_forward
         QwenGatedDeltaNetAttention._forward_core = fake_core
-        try:
-            with _ModuleStubs():
-                ns = _load_patch_module()
-                replacements = []
-                ns["patch_native_piecewise_boundaries"](replacements)
-                forward_boundary = next(
-                    r for r in replacements if r[1] == "forward"
-                )[3]
-                core_boundary = next(
-                    r for r in replacements if r[1] == "_forward_core"
-                )[3]
-
-                # no capture at all
-                real_breakable.BreakableCUDAGraphCapture.current = classmethod(
-                    lambda cls: None
-                )
-                q = torch.zeros(2, 4)
-                assert forward_boundary(
-                    object(), layer="L", query=q, key=None, value=None,
-                    kv_cache=None, attn_metadata="META", output="OUT",
-                ) == ("ORIG_FWD", q)
-                assert core_boundary(
-                    object(), q, q, q, q
-                ) == ("ORIG_CORE", q)
-        finally:
-            real_breakable.BreakableCUDAGraphCapture.current = real_current
-            KunlunxinAttentionBackendImpl.forward = real_forward
-            QwenGatedDeltaNetAttention._forward_core = real_core
-
-    @pytest.mark.platforms("kunlunxin")
-    def test_boundary_passthrough_when_capture_not_capturing(self):
-        import vllm.compilation.breakable_cudagraph as real_breakable
-
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
-            KunlunxinAttentionBackendImpl,
-        )
-        from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
-            QwenGatedDeltaNetAttention,
-        )
-
-        real_forward = KunlunxinAttentionBackendImpl.forward
-        real_core = QwenGatedDeltaNetAttention._forward_core
-        real_current = real_breakable.BreakableCUDAGraphCapture.current
-
-        def fake_forward(self, layer, query, key, value, kv_cache, attn_metadata,
-                         k_scale=None, v_scale=None, attn_type=None, output=None):
-            return "ORIG_FWD"
-
-        def fake_core(self, mixed_qkv, b, a, core_attn_out):
-            return "ORIG_CORE"
-
-        KunlunxinAttentionBackendImpl.forward = fake_forward
-        QwenGatedDeltaNetAttention._forward_core = fake_core
 
         class IdleCapture:
             _capturing = False
@@ -1101,14 +1059,26 @@ class TestNativePiecewiseBoundaries:
                 forward_boundary = next(
                     r for r in replacements if r[1] == "forward"
                 )[3]
+                core_boundary = next(
+                    r for r in replacements if r[1] == "_forward_core"
+                )[3]
 
-                real_breakable.BreakableCUDAGraphCapture.current = classmethod(
-                    lambda cls: IdleCapture()
-                )
+                if idle_capture_type is None:
+                    real_breakable.BreakableCUDAGraphCapture.current = (
+                        classmethod(lambda cls: None)
+                    )
+                else:
+                    real_breakable.BreakableCUDAGraphCapture.current = (
+                        classmethod(lambda cls: IdleCapture())
+                    )
+                q = torch.zeros(2, 4)
                 assert forward_boundary(
-                    object(), layer="L", query=torch.zeros(1), key=None,
-                    value=None, kv_cache=None, attn_metadata="META", output="OUT",
-                ) == "ORIG_FWD"
+                    object(), layer="L", query=q, key=None, value=None,
+                    kv_cache=None, attn_metadata="META", output="OUT",
+                ) == ("ORIG_FWD", q)
+                assert core_boundary(
+                    object(), q, q, q, q
+                ) == ("ORIG_CORE", q)
         finally:
             real_breakable.BreakableCUDAGraphCapture.current = real_current
             KunlunxinAttentionBackendImpl.forward = real_forward
@@ -1228,35 +1198,6 @@ class TestNativePiecewiseBoundaries:
             real_breakable.BreakableCUDAGraphCapture.current = real_current
             KunlunxinAttentionBackendImpl.forward = real_forward
             QwenGatedDeltaNetAttention._forward_core = real_core
-
-
-# ---------------------------------------------------------------------------
-# patch_v2_graph_capture: covered in tests/unit_tests; here only the
-# _ModuleStubs-scope variant asserting it stays functional under this suite.
-# ---------------------------------------------------------------------------
-
-
-class TestV2GraphCaptureStillStages:
-    @pytest.mark.platforms("kunlunxin")
-    def test_stages_the_cudagraph_utils_alias(self, monkeypatch):
-        cudagraph_utils = ModuleType("vllm.v1.worker.gpu.cudagraph_utils")
-        cudagraph_utils.graph_capture = "UPSTREAM"
-        monkeypatch.setitem(
-            sys.modules, "vllm.v1.worker.gpu.cudagraph_utils", cudagraph_utils
-        )
-        with _ModuleStubs() as stubs:
-            ns = _load_patch_module()
-            replacements = []
-            ns["patch_v2_graph_capture"](replacements)
-            assert replacements == [
-                (
-                    cudagraph_utils,
-                    "graph_capture",
-                    "UPSTREAM",
-                    stubs.fl_model_runner._device_graph_capture,
-                    True,
-                )
-            ]
 
 
 # ---------------------------------------------------------------------------

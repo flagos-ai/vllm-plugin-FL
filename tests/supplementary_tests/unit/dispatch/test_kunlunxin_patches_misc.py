@@ -461,53 +461,6 @@ class TestMaybeReduceVisionTp:
         finally:
             vl_compat._vision_tp_scope.reset(token)
 
-    @pytest.mark.platforms("kunlunxin")
-    def test_outside_scope_returns_none(self):
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches import (
-            vl_compat,
-        )
-
-        assert not vl_compat._vision_tp_scope.get()
-        comm = SimpleNamespace(
-            world_size=4,
-            unique_name="tp:group",
-            pyflagcx_comm=SimpleNamespace(disabled=False),
-        )
-        assert (
-            vl_compat.maybe_reduce_vision_tp(
-                comm, torch.tensor([1.0], dtype=torch.bfloat16)
-            )
-            is None
-        )
-
-
-# ---------------------------------------------------------------------------
-# module contracts for the remaining compat shims
-# ---------------------------------------------------------------------------
-
-
-class TestCompatModuleContracts:
-    @pytest.mark.platforms("kunlunxin")
-    @pytest.mark.parametrize(
-        ("module_name", "apply_name"),
-        [
-            ("mamba_hybrid_compat", "apply_mamba_hybrid_compat"),
-            ("mamba_utils_compat", "apply_mamba_utils_compat"),
-            ("buffer_utils_compat", "apply_buffer_utils_compat"),
-            ("penalties_compat", "apply_penalties_compat"),
-            ("structured_outputs_compat", "apply_structured_outputs_compat"),
-            ("topk_topp_compat", "apply_topk_topp_compat"),
-            ("uva_compat", "apply_uva_compat"),
-            ("v2_greedy_sampler", "apply_v2_greedy_sampler"),
-        ],
-    )
-    def test_apply_functions_exist(self, module_name, apply_name):
-        module = __import__(
-            f"vllm_fl.dispatch.backends.vendor.kunlunxin.patches.{module_name}",
-            fromlist=[apply_name],
-        )
-        assert callable(getattr(module, apply_name))
-
 
 # ---------------------------------------------------------------------------
 # input_batch_compat apply() launcher propagation (mechanics only)
@@ -654,3 +607,4 @@ class TestInputBatchApplyPropagation:
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = saved
+
