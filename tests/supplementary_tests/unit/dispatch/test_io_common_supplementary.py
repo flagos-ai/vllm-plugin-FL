@@ -218,7 +218,17 @@ class TestStepCallbacks:
             ioc.unregister_step_callback(bad_callback)
 
     def test_unregister_missing_callback_is_noop(self):
-        ioc.unregister_step_callback(lambda *a: None)
+        """Unregistering an unknown callback leaves the registry intact.
+
+        The ValueError from list.remove is swallowed, so the observable
+        contract is that the callback list is unchanged (length AND
+        membership) after the call.
+        """
+        missing = lambda *a: None  # noqa: E731
+        before = list(ioc._step_callbacks)
+        ioc.unregister_step_callback(missing)
+        assert list(ioc._step_callbacks) == before
+        assert len(ioc._step_callbacks) == len(before)
 
 
 class TestParseStepRange:

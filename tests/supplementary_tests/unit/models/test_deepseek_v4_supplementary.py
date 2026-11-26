@@ -157,8 +157,15 @@ def _vllm_config(ratios, layers=None, sliding_window=128, max_model_len=128,
 
 class TestValidateShortContext:
     def test_accepts_all_supported_ratios(self, deepseek_mod):
-        config = _vllm_config([0, 1, 4, 128])
-        deepseek_mod._validate_short_context_attention(config)
+        """Acceptance = the no-raise contract for the pure validator.
+
+        Every ratio entry in the supported set {0, 1, 4, 128} must pass
+        validation without an exception; the paired negative cases below
+        (test_rejects_*) pin each rejection branch with pytest.raises.
+        """
+        deepseek_mod._validate_short_context_attention(
+            _vllm_config([0, 1, 4, 128])
+        )
 
     def test_rejects_unsupported_ratio(self, deepseek_mod):
         for bad in (2, 3, 64):
@@ -188,13 +195,24 @@ class TestValidateShortContext:
             )
 
     def test_c4a_boundary_passes_exactly(self, deepseek_mod):
-        # (128 + 3) // 4 == 32 == index_topk: exactly fits.
+        """Acceptance = the no-raise contract at the exact boundary.
+
+        (128 + 3) // 4 == 32 == index_topk: the "all candidates fit"
+        check passes with zero slack. The off-by-one negative
+        (test_c4a_requires_all_candidates_fit_index_topk, topk=31) pins
+        the rejection side with pytest.raises.
+        """
         deepseek_mod._validate_short_context_attention(
             _vllm_config([4], index_topk=32)
         )
 
     def test_ignores_ratio_4_beyond_hidden_layers(self, deepseek_mod):
-        """A ratio-4 entry past num_hidden_layers must not gate the check."""
+        """Acceptance = the no-raise contract for the truncation rule.
+
+        A ratio-4 entry past num_hidden_layers must not gate the check
+        (only entries within [0, num_hidden_layers) are consulted); no
+        exception is the whole observable behavior.
+        """
         config = _vllm_config([0, 1], layers=2)
         config.model_config.hf_config.compress_ratios = [0, 1, 4, 4]
         deepseek_mod._validate_short_context_attention(config)
@@ -304,7 +322,20 @@ class TestAttentionConstruction:
             _UpstreamBase.__init__ = real_init
 
     def test_init_resolves_positional_vllm_config(self, deepseek_mod):
-        deepseek_mod.DeepseekV4FLAttention(self._config())
+        """A positionally-passed vllm_config is resolved and forwarded.
+
+        The FL ``__init__`` reads ``args[0]`` when the keyword is absent,
+        validates against it, and hands the ORIGINAL argument surface to
+        the upstream base (positional stays positional).
+        """
+        config = self._config()
+        instance = deepseek_mod.DeepseekV4FLAttention(config)
+        # The positional config was resolved for validation and the
+        # original positional surface reached the upstream constructor.
+        assert isinstance(instance, deepseek_mod.DeepseekV4FLAttention)
+        assert instance.init_args == (config,)
+        assert instance.init_kwargs == {}
+        assert instance.init_args[0] is config
 
     def test_init_requires_vllm_config(self, deepseek_mod):
         with pytest.raises(AssertionError):
@@ -720,6 +751,128 @@ class TestPrepareAndAttn:
             deepseek_mod.DeepseekV4FLAttention._prepare_and_attn(
                 attention, "hs", torch.ones(1, 2), torch.ones(1, 2),
                 None, None, None, torch.tensor([3]), torch.zeros(1, 1, 2),
+            )
+
+
+class TestCompressKvBf16:
+    """_compress_kv_bf16: kv/score split, ape additive bias, slot writes.
+
+    The existing pipeline tests mock this function away, so its body
+    (the models area's largest remaining gap) is driven directly here on
+    real CPU tensors against an independent oracle: the packed state
+    written into the compressor's cache is
+    ``cat(kv, score + ape[positions % ratio])`` for the valid slots and
+    nothing else.
+    """
+
+    def _attention(self, deepseek_mod, ratio, head_dim=2, num_blocks=2,
+                   block_size=4, num_tokens=4):
+        overlap = ratio == 4
+        coff = 1 + overlap
+        state_width = coff * head_dim
+        # ape rows are indexed by positions % ratio and added to score.
+        ape = torch.randn(ratio, state_width)
+        state_cache = torch.zeros(
+            num_blocks, block_size, 2 * state_width
+        )
+        compressor = SimpleNamespace(
+            state_cache=SimpleNamespace(
+                prefix="layer.state_cache", kv_cache=state_cache
+            ),
+            ape=ape,
+        )
+        attention = SimpleNamespace(
+            compressor=compressor,
+            compress_ratio=ratio,
+            head_dim=head_dim,
+            prefix="layer",
+        )
+        metadata = {
+            "layer.state_cache": SimpleNamespace(
+                slot_mapping=torch.tensor([0, 1, -1, 3], dtype=torch.int64),
+                block_size=block_size,
+            ),
+            # The compressed (layer-level) metadata: all slots invalid
+            # drives the second half of the function (softmax history
+            # compression) into its early return, so the packed-state
+            # half is the part under test. Reaching further would need
+            # token_to_req_indices/block_table/cos_sin_cache doubles.
+            "layer": SimpleNamespace(
+                slot_mapping=torch.full((num_tokens,), -1, dtype=torch.int64),
+                block_size=block_size,
+            ),
+        }
+        _set_attn_metadata(deepseek_mod, metadata)
+        g = torch.Generator().manual_seed(2026)
+        kv_score = torch.randn(num_tokens, 2 * state_width, generator=g)
+        positions = torch.arange(num_tokens, dtype=torch.int64) * ratio + 1
+        return attention, kv_score, positions, ape, state_cache, block_size
+
+    def test_ratio_4_packs_kv_and_biased_score(self, deepseek_mod):
+        attention, kv_score, positions, ape, state_cache, block_size = (
+            self._attention(deepseek_mod, ratio=4)
+        )
+        deepseek_mod.DeepseekV4FLAttention._compress_kv_bf16(
+            attention, kv_score, positions
+        )
+        # Independent oracle: kv first half, score + ape in the second.
+        state_width = kv_score.shape[-1] // 2
+        kv, score = kv_score.split([state_width, state_width], dim=-1)
+        expected = torch.cat((kv, score + ape[positions.remainder(4)]), -1)
+        slot_mapping = torch.tensor([0, 1, -1, 3])
+        valid = slot_mapping >= 0
+        # Valid slots received the packed rows; the invalid slot (-1)
+        # left its cache row untouched (still zero).
+        rows = state_cache[
+            slot_mapping[valid] // block_size, slot_mapping[valid] % block_size
+        ]
+        torch.testing.assert_close(rows, expected[valid])
+        invalid_row = state_cache[
+            slot_mapping[~valid] // block_size, slot_mapping[~valid] % block_size
+        ]
+        assert torch.count_nonzero(invalid_row) == 0
+
+    def test_ratio_128_single_width_state(self, deepseek_mod):
+        """C128A (no overlap): one head_dim of kv and score per side."""
+        attention, kv_score, positions, ape, state_cache, block_size = (
+            self._attention(deepseek_mod, ratio=128)
+        )
+        deepseek_mod.DeepseekV4FLAttention._compress_kv_bf16(
+            attention, kv_score, positions
+        )
+        state_width = kv_score.shape[-1] // 2
+        kv, score = kv_score.split([state_width, state_width], dim=-1)
+        expected = torch.cat(
+            (kv, score + ape[positions.remainder(128)]), -1
+        )
+        slot_mapping = torch.tensor([0, 1, -1, 3])
+        valid = slot_mapping >= 0
+        rows = state_cache[
+            slot_mapping[valid] // block_size, slot_mapping[valid] % block_size
+        ]
+        torch.testing.assert_close(rows, expected[valid])
+
+    def test_non_dict_metadata_returns_early(self, deepseek_mod):
+        """A non-dict attn_metadata skips the write entirely."""
+        attention, kv_score, positions, ape, state_cache, block_size = (
+            self._attention(deepseek_mod, ratio=4)
+        )
+        deepseek_mod.get_forward_context = lambda: SimpleNamespace(
+            attn_metadata=object()  # not a dict
+        )
+        deepseek_mod.DeepseekV4FLAttention._compress_kv_bf16(
+            attention, kv_score, positions
+        )
+        assert torch.count_nonzero(state_cache) == 0
+
+    def test_missing_compressor_asserts(self, deepseek_mod):
+        attention, kv_score, positions, *_ = self._attention(
+            deepseek_mod, ratio=4
+        )
+        attention.compressor = None
+        with pytest.raises(AssertionError):
+            deepseek_mod.DeepseekV4FLAttention._compress_kv_bf16(
+                attention, kv_score, positions
             )
 
 

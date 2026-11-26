@@ -469,7 +469,8 @@ class TestGetQuantMethod:
         # The upstream int8 MoE oracle consults device backends unavailable
         # on a CPU host. The MoE method module holds the oracle as a direct
         # module attribute, so patch it there.
-        import vllm.model_executor.layers.quantization.compressed_tensors.            compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 as moe_mod
+        import vllm.model_executor.layers.quantization.compressed_tensors.\
+            compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 as moe_mod
 
         experts_layer = self._routed_experts()
         original_select = moe_mod.select_int8_moe_backend

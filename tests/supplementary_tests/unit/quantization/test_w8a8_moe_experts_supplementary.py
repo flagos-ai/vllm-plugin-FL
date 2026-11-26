@@ -235,7 +235,16 @@ class TestValidateW8a8ContractBranches:
         }
 
     def test_happy_path_passes(self):
-        me._validate_w8a8_contract(**self._valid())
+        """Acceptance = the no-raise contract.
+
+        ``_validate_w8a8_contract`` is a pure validator: its happy path
+        has no return value to observe, so passing means "every guard
+        accepted the input". The paired negative tests below
+        (test_rejects_*) each pin one guard with pytest.raises; this
+        positive case pins the whole surface validating cleanly, and the
+        return value must be None (no accidental partial results).
+        """
+        assert me._validate_w8a8_contract(**self._valid()) is None
 
     def test_rejects_non_silu_activation(self):
         args = self._valid()
