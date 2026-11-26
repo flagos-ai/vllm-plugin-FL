@@ -167,6 +167,15 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
 
+        # Load Iluvatar thin-backend runtime hooks (post-grad FX passes, DG-R2-K8V4
+        # KV cache sizing/kernels, fused step-prep, locality block queue, sort-free
+        # sampler, and online quantization hooks) in every worker/engine process.
+        if cls.vendor_name == "iluvatar":
+            try:
+                import vllm_fl.dispatch.backends.vendor.iluvatar.patches  # noqa: F401
+            except Exception as e:
+                logger.warning(f"Failed to import iluvatar patches: {e}")
+
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""

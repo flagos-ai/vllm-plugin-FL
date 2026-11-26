@@ -17,6 +17,11 @@ import torch
 import vllm.envs as envs
 from vllm.compilation.counter import compilation_counter
 from vllm.compilation.monitor import validate_cudagraph_capturing_enabled
+# Support both newer and legacy vLLM module paths for InductorPass.
+try:
+    from vllm.compilation.passes.inductor_pass import InductorPass, get_pass_context
+except ImportError:  # pragma: no cover
+    from vllm.compilation.inductor_pass import InductorPass, get_pass_context  # type: ignore[no-redef]
 from vllm.config import CUDAGraphMode, VllmConfig
 from vllm.distributed.device_communicators.pynccl_allocator import set_graph_pool_id
 from vllm.forward_context import (
@@ -204,10 +209,16 @@ class GraphWrapper:
             except (ImportError, RuntimeError):
                 pass
 
-            # FL-specific: use platform-agnostic graph capture
-            with current_platform.torch_device_fn.graph(
-                graph, pool=self.graph_pool
-            ):
+            # Explicitly bind capture to the active CUDA stream so PyTorch does
+            # not switch capture onto an internal side stream and invalidate
+            # stream ownership of warmup-allocated scratch buffers. Non-CUDA
+            # platforms keep their native `graph(graph, pool=...)` signature.
+            capture_kwargs = {"pool": self.graph_pool}
+            if current_platform.device_type == "cuda":
+                capture_kwargs["stream"] = (
+                    current_platform.torch_device_fn.current_stream()
+                )
+            with current_platform.torch_device_fn.graph(graph, **capture_kwargs):
                 # `output` is managed by pytorch's cudagraph pool
                 output = self.runnable(*args, **kwargs)
                 # Join offloader's copy stream after forward if available
@@ -251,3 +262,73 @@ class GraphWrapper:
             current_platform.torch_device_fn.synchronize()
         entry.graph.replay()
         return entry.output
+
+
+class CompositePostGradPass(InductorPass):
+    """Sequential composition of orthogonal post-grad FX `InductorPass` passes.
+
+    Inherits from vLLM's `InductorPass` so it satisfies `PostGradPassManager`
+    type checks, participates in TorchInductor's persistent cache keying via
+    `uuid()`, and forwards range-specific applicability checks (`compile_range`)
+    to each child pass independently. Passes execute in registration order (for
+    example, `QuantFusionPass` may rewrite attention outputs into
+    `fl_unified_attention_quant` before `RopeKvFusionPass` fuses the upstream
+    RoPE + KV-cache update).
+    """
+
+    def __init__(self, passes: tuple[InductorPass, ...] | list[InductorPass]) -> None:
+        """Validate and store the ordered sequence of child `InductorPass` instances."""
+        self.passes: tuple[InductorPass, ...] = tuple(passes)
+        for p in self.passes:
+            if not isinstance(p, InductorPass):
+                raise TypeError(f"CompositePostGradPass expects InductorPass instances, got {type(p)!r}")
+
+    def uuid(self) -> str:
+        """Return a deterministic cache digest combining composite source and child pass UUIDs."""
+        return InductorPass.hash_dict({
+            "composite": InductorPass.hash_source(self),
+            "passes": [p.uuid() for p in self.passes],
+        })
+
+    def is_applicable_for_range(self, compile_range: Any) -> bool:
+        """Return True if at least one child pass applies to `compile_range`."""
+        return any(p.is_applicable_for_range(compile_range) for p in self.passes)
+
+    def __call__(self, graph: torch.fx.Graph) -> None:
+        """Run each applicable child pass in order on `graph`."""
+        try:
+            compile_range = get_pass_context().compile_range
+        except AssertionError:
+            # Outside an active vLLM PassContext (e.g., standalone unit tests),
+            # treat all passes as applicable.
+            compile_range = None
+        for p in self.passes:
+            if compile_range is None or p.is_applicable_for_range(compile_range):
+                p(graph)
+
+
+def register_post_grad_passes(vllm_config: VllmConfig, *passes: InductorPass) -> None:
+    """Register one or more post-grad FX passes onto `vllm_config.compilation_config`.
+
+    Installs a single `InductorPass` directly or wraps multiple passes in a
+    `CompositePostGradPass` under `inductor_compile_config["post_grad_custom_post_pass"]`.
+    When `VLLM_COMPILE` is paired with a monolithic CUDA Graph mode (i.e., no
+    piecewise CUDA graph splitting is requested) and `splitting_ops` was left
+    unset (`None`), initializes `splitting_ops = []` so vLLM keeps the full
+    model forward in a single FX graph, enabling cross-block fusions across
+    attention and normalization boundaries.
+    """
+    from vllm.config.compilation import CompilationMode
+
+    cc = getattr(vllm_config, "compilation_config", None)
+    if cc is None or cc.mode != CompilationMode.VLLM_COMPILE or not passes:
+        return
+    cc.inductor_compile_config["post_grad_custom_post_pass"] = (
+        passes[0] if len(passes) == 1 else CompositePostGradPass(passes)
+    )
+    if (
+        cc.splitting_ops is None
+        and cc.cudagraph_mode is not None
+        and not cc.cudagraph_mode.has_piecewise_cudagraphs()
+    ):
+        cc.splitting_ops = []

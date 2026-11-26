@@ -5,8 +5,11 @@ from . import pynccl_wrapper
 from . import cuda_wrapper
 from . import utils_patch
 from . import chunk_delta_h
-from . import topk_topp_sampler
 from . import gdn_linear_attn  # noqa: F401 — register MacaGatedDeltaNetAttention
+from .runtime_hooks import install_metax_runtime_hooks
+
+# Idempotently install MetaX C500 compilation, W8A8 loader, step-prep, sampler, and dual-CUDAGraph hooks.
+install_metax_runtime_hooks()
 
 # --------------------------------------------------
 # MetaX C550 does not support third-party Triton kernels (Triton upgrade required).

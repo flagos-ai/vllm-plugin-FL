@@ -1,26 +1,14 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-
-"""
-Reference activation operator implementations using PyTorch.
-"""
+# SPDX-License-Identifier: Apache-2.0
+"""Iluvatar SiLU-and-Mul activation delegating to FlagGems."""
 
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
+from flag_gems.modules.activation import gems_silu_and_mul
 
 
 def silu_and_mul_iluvatar(obj, x: torch.Tensor) -> torch.Tensor:
-    """
-    SiLU activation followed by element-wise multiplication using PyTorch.
-
-    Args:
-        obj: The calling obj (for interface consistency)
-        x: Input tensor of shape [..., 2*d]
-
-    Returns:
-        Output tensor of shape [..., d]
-    """
+    """Split `[..., 2 * d]` gate/up tensor in half and delegate SwiGLU to FlagGems `gems_silu_and_mul`."""
     d = x.shape[-1] // 2
-    x1, x2 = x[..., :d], x[..., d:]
-    return F.silu(x1) * x2
+    return gems_silu_and_mul(x[..., :d], x[..., d:])
