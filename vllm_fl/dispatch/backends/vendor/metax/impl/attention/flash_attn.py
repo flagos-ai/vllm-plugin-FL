@@ -435,8 +435,12 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             decode_block_table_tensor = None
 
         if num_prefills > 0:
-            prefill_max_seq_len = int(
-                common_attn_metadata.seq_lens_cpu[num_decodes:num_reqs].max()
+            prefill_seq_lens_cpu = common_attn_metadata.seq_lens_cpu[
+                num_decodes:num_reqs
+            ]
+            prefill_max_seq_len = int(prefill_seq_lens_cpu.max())
+            prefill_is_contiguous = (
+                int(prefill_seq_lens_cpu.sum()) == num_prefill_tokens
             )
             prefill_query_start_loc = (
                 common_attn_metadata.query_start_loc[num_decodes : num_reqs + 1]
@@ -448,6 +452,7 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             ]
         else:
             prefill_max_seq_len = 0
+            prefill_is_contiguous = False
             prefill_query_start_loc = None
             prefill_seq_lens = None
             prefill_block_table_tensor = None
@@ -600,6 +605,7 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             max_num_splits=max_num_splits,
             causal=causal,
         )
+        attn_metadata._prefill_is_contiguous = prefill_is_contiguous
         return attn_metadata
 
     def use_cascade_attention(self, *args, **kwargs) -> bool:
@@ -797,30 +803,63 @@ class FlashAttentionImpl(AttentionImpl):
                 # ┌------------------------  Metax Modification -------------------------┐
                 # For handling prefill decode split
                 num_decode_tokens = attn_metadata.num_decode_tokens
+                try:
+                    from vllm_fl.dispatch.backends.vendor.metax import metax as _mx_mod
+                    if hasattr(_mx_mod, "_attn_stat"):
+                        _mx_mod._attn_stat("prefill" if attn_metadata.num_prefills > 0 else "decode")
+                except Exception:
+                    pass
                 if attn_metadata.num_prefills > 0:
-                    cu_prefix_kv_lens = torch.tensor(
-                        [0] + attn_metadata.prefill_seq_lens.tolist(),
-                        device=attn_metadata.prefill_seq_lens.device,
-                        dtype=torch.int32,
-                    ).cumsum(dim=0, dtype=torch.int32)
-                    output[num_decode_tokens:num_actual_tokens] = (
-                        flash_attn_varlen_func(
-                            q=query[num_decode_tokens:num_actual_tokens],
-                            k=key_cache,
-                            v=value_cache,
-                            block_table=attn_metadata.prefill_block_table,
-                            cu_seqlens_q=attn_metadata.prefill_query_start_loc,
-                            cu_seqlens_k=cu_prefix_kv_lens,
-                            max_seqlen_q=attn_metadata.max_query_len,
-                            max_seqlen_k=attn_metadata.prefill_max_seq_len,
-                            softmax_scale=self.scale,
-                            causal=attn_metadata.causal,
-                            window_size=self.sliding_window,
-                            alibi_slopes=self.alibi_slopes,
-                            softcap=self.logits_soft_cap,
-                            s_aux=self.sinks,
+                    if (
+                        getattr(attn_metadata, "_prefill_is_contiguous", False)
+                        and key is not None
+                        and value is not None
+                        and not self.kv_cache_dtype.startswith("fp8")
+                    ):
+                        output[num_decode_tokens:num_actual_tokens] = (
+                            flash_attn_varlen_func(
+                                q=query[num_decode_tokens:num_actual_tokens],
+                                k=key[num_decode_tokens:num_actual_tokens],
+                                v=value[num_decode_tokens:num_actual_tokens],
+                                block_table=None,
+                                cu_seqlens_q=attn_metadata.prefill_query_start_loc,
+                                cu_seqlens_k=attn_metadata.prefill_query_start_loc,
+                                max_seqlen_q=attn_metadata.max_query_len,
+                                max_seqlen_k=attn_metadata.prefill_max_seq_len,
+                                softmax_scale=self.scale,
+                                causal=attn_metadata.causal,
+                                window_size=self.sliding_window,
+                                alibi_slopes=self.alibi_slopes,
+                                softcap=self.logits_soft_cap,
+                                s_aux=self.sinks,
+                            )
                         )
-                    )
+                    else:
+                        cu_prefix_kv_lens = getattr(attn_metadata, "_cu_prefix_kv_lens", None)
+                        if cu_prefix_kv_lens is None:
+                            cu_prefix_kv_lens = torch.nn.functional.pad(
+                                attn_metadata.prefill_seq_lens.cumsum(dim=0, dtype=torch.int32),
+                                (1, 0),
+                            )
+                            attn_metadata._cu_prefix_kv_lens = cu_prefix_kv_lens
+                        output[num_decode_tokens:num_actual_tokens] = (
+                            flash_attn_varlen_func(
+                                q=query[num_decode_tokens:num_actual_tokens],
+                                k=key_cache,
+                                v=value_cache,
+                                block_table=attn_metadata.prefill_block_table,
+                                cu_seqlens_q=attn_metadata.prefill_query_start_loc,
+                                cu_seqlens_k=cu_prefix_kv_lens,
+                                max_seqlen_q=attn_metadata.max_query_len,
+                                max_seqlen_k=attn_metadata.prefill_max_seq_len,
+                                softmax_scale=self.scale,
+                                causal=attn_metadata.causal,
+                                window_size=self.sliding_window,
+                                alibi_slopes=self.alibi_slopes,
+                                softcap=self.logits_soft_cap,
+                                s_aux=self.sinks,
+                            )
+                        )
                 if attn_metadata.num_decodes > 0:
                     # Use flash_attn_with_kvcache for normal decoding.
                     decode_query = query[:num_decode_tokens]

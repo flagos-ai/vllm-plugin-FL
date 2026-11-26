@@ -484,3 +484,159 @@ class IluvatarBackend(Backend):
         # triton < 3.3.  The kernel itself uses USE_TD=False at runtime, so
         # the stub is never called.
         return AttentionBackendEnum.TRITON_ATTN.get_path()
+
+
+# _iluvatar_paged_attn_opt_hook
+import logging as _logging
+import os as _os
+if "logger" not in globals():
+    logger = _logging.getLogger(__name__)
+_DECODE_WORKSPACES = {}
+_ATTN_STATS = {"decode": 0, "prefill": 0, "fallback": 0}
+_ATTN_FB = {}
+_ATTN_CALLS = 0
+_ATTN_DUMPED = False
+_OPT_MOD = None
+_ATTN_STATS_ON = _os.environ.get("FL_ATTN_STATS", "0") not in ("0", "false", "False")
+
+
+def _attn_stat(branch, fb_reason=None):
+    if not _ATTN_STATS_ON:
+        return
+    global _ATTN_CALLS
+    _ATTN_STATS[branch] += 1
+    if fb_reason is not None:
+        _ATTN_FB[fb_reason] = _ATTN_FB.get(fb_reason, 0) + 1
+    _ATTN_CALLS += 1
+    if _ATTN_CALLS % 200 == 0:
+        logger.info(
+            "[FL_ATTN_STATS] calls=%d decode=%d prefill=%d fallback=%d fb_reasons=%s sampler=%s",
+            _ATTN_CALLS, _ATTN_STATS["decode"], _ATTN_STATS["prefill"],
+            _ATTN_STATS["fallback"], dict(_ATTN_FB), getattr(_OPT_MOD, "_SAMPLER_STATS", {}),
+        )
+
+
+def patch_triton_unified_attention_for_iluvatar() -> None:
+    """Route MiniCPM5-2B GQA attention to page-aligned BLOCK_Q=8 prefill and split-KV."""
+    try:
+        from . import paged_attn_opt as _opt
+    except Exception as exc:
+        logger.warning("patch_triton_unified_attention_for_iluvatar skipped: %s", exc)
+        return
+
+    if __package__ and __package__.endswith(".metax"):
+        try:
+            import sys as _sys
+            _pkg = _sys.modules.get(__package__)
+            if _pkg is not None and "MacaBackend" in globals():
+                setattr(_pkg, "MacaBackend", globals()["MacaBackend"])
+            import vllm._custom_ops  # noqa: F401
+            import vllm_fl.dispatch.backends.vendor.metax.patches  # noqa: F401
+        except Exception:
+            pass
+
+    globals()["_OPT_MOD"] = _opt
+    _opt.patch_iluvatar_sampler()
+    try:
+        import vllm.v1.attention.ops.triton_unified_attention as _tua
+    except Exception as exc:
+        logger.warning("patch_triton_unified_attention_for_iluvatar skipped: %s", exc)
+        return
+    if getattr(_tua, "_iluvatar_paged_attn_patched", False):
+        return
+
+    _orig_unified = _tua.unified_attention
+
+    def _unified_attention_opt(
+        q, k, v, out, cu_seqlens_q, max_seqlen_q, seqused_k, max_seqlen_k,
+        softmax_scale, causal, window_size, block_table, softcap, *args, **kwargs
+    ):
+        # Forward-compatible shim: vLLM 0.24.0 passes extra keyword args
+        # (use_alibi_sqrt, kv_quant_mode, k/v_scale_cache, chunk_lookback, use_td).
+        # Anything we do not explicitly handle is captured in *args/**kwargs and
+        # forwarded verbatim to the original on the fallback path.
+        def _fallback(reason="?"):
+            _attn_stat("fallback", reason)
+            return _orig_unified(
+                q, k, v, out, cu_seqlens_q, max_seqlen_q, seqused_k, max_seqlen_k,
+                softmax_scale, causal, window_size, block_table, softcap,
+                *args, **kwargs,
+            )
+
+        if _ATTN_STATS_ON and not _ATTN_DUMPED:
+            globals()["_ATTN_DUMPED"] = True
+            try:
+                logger.info(
+                    "[FL_ATTN_KWARGS] mq=%s mk=%s qshape=%s seqused=%s kshape=%s kstride=%s "
+                    "mm_prefix=%s kv_quant=%s q_descale=%s k_descale=%s v_descale=%s "
+                    "k_scale_cache=%s chunk_lookback=%s causal=%s window=%s",
+                    max_seqlen_q, max_seqlen_k, tuple(q.shape), tuple(seqused_k.shape),
+                    tuple(k.shape), tuple(k.stride()), kwargs.get("mm_prefix_range") is not None,
+                    getattr(kwargs.get("kv_quant_mode"), "name", kwargs.get("kv_quant_mode")),
+                    kwargs.get("q_descale") is not None, kwargs.get("k_descale") is not None,
+                    kwargs.get("v_descale") is not None, kwargs.get("k_scale_cache") is not None,
+                    kwargs.get("chunk_lookback"), causal, window_size,
+                )
+            except Exception:
+                pass
+
+        # Only handle the plain causal BF16/FP16/FP32 GQA case. Fall back for
+        # PrefixLM, KV/logits quantization, and chunked-attention lookback, whose
+        # masking/scaling our kernels do not implement.
+        # NOTE: vLLM 0.24.0 ALWAYS passes k_descale/v_descale as (1.0) scale tensors
+        # even for bf16/fp16, so descale non-None is NOT a quantization signal.
+        # Quantization is gated solely by kv_quant_mode (== NONE for unquantized).
+        if kwargs.get("mm_prefix_range") is not None:
+            return _fallback("mm_prefix_range")
+        _km = kwargs.get("kv_quant_mode")
+        if _km is not None and getattr(_km, "name", None) not in (None, "NONE"):
+            return _fallback("kv_quant_mode=%s" % getattr(_km, "name", None))
+        if kwargs.get("k_scale_cache") is not None or kwargs.get("v_scale_cache") is not None:
+            return _fallback("kv_scale_cache")
+        if kwargs.get("chunk_lookback", -1) not in (None, -1):
+            return _fallback("chunk_lookback=%s" % kwargs.get("chunk_lookback"))
+        if not _opt.can_use_specialized_attention(
+            q, k, v, causal=causal, window_size=window_size,
+            alibi_slopes=kwargs.get("alibi_slopes"), softcap=softcap,
+            qq_bias=kwargs.get("qq_bias"), sinks=kwargs.get("sinks"),
+            output_scale=kwargs.get("output_scale"),
+        ):
+            return _fallback("specialized_guard")
+        dev_key = (q.device.type, q.device.index)
+        ws = _DECODE_WORKSPACES.get(dev_key)
+        if ws is None:
+            ws = _opt.SplitKVWorkspace(
+                max_batch=64, q_heads=q.shape[1], max_splits=8, dim=q.shape[2]
+            )
+            _DECODE_WORKSPACES[dev_key] = ws
+        max_k = int(max_seqlen_k) if max_seqlen_k and int(max_seqlen_k) > 1 else 4096
+        if int(max_seqlen_q) <= 1 and q.shape[0] == seqused_k.shape[0]:
+            _attn_stat("decode")
+            splits = _opt.select_num_splits(q.shape[0], max_k, kv_heads=k.shape[2])
+            _opt.launch_split_kv_decode(
+                q, k, v, block_table=block_table, seq_lens=seqused_k,
+                workspace=ws, splits=splits, scale=softmax_scale, out=out,
+            )
+            return
+        _attn_stat("prefill")
+        _opt.launch_paged_prefill(
+            q, k, v, block_table=block_table, seq_lens=seqused_k,
+            cu_seqlens_q=cu_seqlens_q, scale=softmax_scale, out=out,
+            block_q=16, workspace=ws, max_seqlen_k=max_k,
+        )
+
+    _tua.unified_attention = _unified_attention_opt
+    _tua._iluvatar_paged_attn_patched = True
+    try:
+        import vllm.v1.attention.backends.triton_attn as _ta
+        if hasattr(_ta, "unified_attention"):
+            _ta.unified_attention = _unified_attention_opt
+    except Exception:
+        pass
+    logger.info(
+        "Patched unified_attention with Iluvatar BI-V150 page-aligned BLOCK_Q=16 + split-KV (stats=%s).",
+        _ATTN_STATS_ON,
+    )
+
+
+patch_triton_unified_attention_for_iluvatar()
