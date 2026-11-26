@@ -20,7 +20,6 @@ import sys
 import types
 from pathlib import Path
 
-import pytest
 import yaml
 
 from vllm_fl.dispatch.config import utils as config_utils
@@ -34,7 +33,6 @@ from vllm_fl.dispatch.config.utils import (
     load_platform_config,
 )
 
-pytestmark = [pytest.mark.supplementary]
 
 _CONFIG_DIR = Path(config_utils.__file__).parent
 

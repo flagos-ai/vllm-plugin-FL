@@ -4,7 +4,7 @@
 
 The core suite (``tests/unit_tests/dispatch/test_io_dumper.py``) exercises the
 happy-path file dumping with a fixed ``/tmp`` directory.  This module targets
-the gaps that remain uncovered in the supplementary suite only:
+the gaps that ``tests/unit_tests/dispatch/test_io_dumper.py`` leaves uncovered:
 
 * print-side helpers (``_format_inputs``, ``_log_combined``/``_log_outputs_only``,
   ``_push/_pop_print_pairing``) with hand-computed string oracles;
@@ -22,7 +22,12 @@ the gaps that remain uncovered in the supplementary suite only:
 * the exception and summary paths of ``dump_before``/``dump_after``;
 * ``io_common`` leftovers: distributed ``get_rank``, blank layer specs,
   ``_parse_dispatch_table`` line parsing, stack-based matchers, failing tensor
-  stats, list-stat truncation, and YAML parser fallthroughs.
+  stats, list-stat truncation, and YAML parser fallthroughs;
+* the remaining ``io_dumper`` branch corners formerly in the supplementary
+  ``test_io_dumper_config_layers.py``: ``enable_io_dump`` env-var parsing
+  corners, ``dump_after`` early returns, the torch-function summary-only
+  pass-through, background-writer corner branches, ``pause_dispatch_modes``
+  and the ``_reset_state`` handle close.
 
 All file I/O goes through ``tmp_path`` (never a hard-coded ``/tmp``) so the
 tests pass on both Windows and Linux.
@@ -34,14 +39,13 @@ import os
 import sys
 import threading
 import types
+from types import SimpleNamespace
 
 import pytest
 import torch
 
 from vllm_fl.dispatch import io_common, io_dumper as d
 from vllm_fl.dispatch.types import BackendImplKind
-
-pytestmark = [pytest.mark.supplementary]
 
 
 def _drain_module_context():
@@ -55,7 +59,7 @@ def _drain_module_context():
 def _reset_dumper_state(clean_fl_env):
     """Reset every io_dumper/io_common global before and after each test.
 
-    ``clean_fl_env`` (from the supplementary conftest) removes all
+    ``clean_fl_env`` (from the dispatch conftest) removes all
     ``VLLM_FL_*`` env vars and restores them afterwards, which also undoes the
     ``VLLM_FL_IO_DUMP*`` propagation done by ``_set_env_vars``.
     """
@@ -84,7 +88,6 @@ def _reset_dumper_state(clean_fl_env):
 class TestPrintFormatting:
     """Console-print helpers with independent string oracles."""
 
-    @pytest.mark.supplementary
     def test_format_inputs_lists_args_and_kwargs(self):
         """Each positional arg gets an ``arg[i]:`` line; kwargs their key."""
         tensor = torch.tensor([1.0, 2.0])
@@ -98,7 +101,6 @@ class TestPrintFormatting:
         assert lines[2] == "  eps: 1e-06"
         assert len(lines) == 3
 
-    @pytest.mark.supplementary
     def test_format_inputs_skips_leading_module_arg(self):
         """skip_module_arg drops arg[0] only when it is an nn.Module."""
         module = torch.nn.Linear(2, 2)
@@ -115,7 +117,6 @@ class TestPrintFormatting:
         # Without the flag the module line is present.
         assert d._format_inputs((module, tensor, 3), {})[0] == "  arg[0]: Linear(...)"
 
-    @pytest.mark.supplementary
     def test_format_inputs_keeps_non_module_first_arg(self):
         """A non-module arg[0] is kept even with skip_module_arg=True."""
         tensor = torch.tensor([3.0])
@@ -123,7 +124,6 @@ class TestPrintFormatting:
         assert lines[0].startswith("  arg[0]: Tensor(shape=[1]")
         assert lines[1] == "  arg[1]: 7"
 
-    @pytest.mark.supplementary
     def test_log_combined_shape(self, caplog):
         """The combined block has the documented header/footer/section lines."""
         with caplog.at_level(logging.INFO, logger="vllm_fl.dispatch.io_print"):
@@ -144,7 +144,6 @@ class TestPrintFormatting:
         assert lines[7] == "    result: 42"
         assert lines[8] == "-" * 60
 
-    @pytest.mark.supplementary
     def test_log_outputs_only_shape(self, caplog):
         """The outputs-only fallback is a single two-line message."""
         with caplog.at_level(logging.INFO, logger="vllm_fl.dispatch.io_print"):
@@ -156,7 +155,6 @@ class TestPrintFormatting:
             "  result[1]: 2",
         ]
 
-    @pytest.mark.supplementary
     def test_print_pairing_is_lifo_per_op(self):
         """Print pairing entries stack per op name and pop in LIFO order."""
         d._push_print_pairing("op", "first", 1, ["a"], "[t1]")
@@ -168,7 +166,6 @@ class TestPrintFormatting:
         assert d._pop_print_pairing("other") == ("other-label", 3, [], "[t3]")
         assert d._pop_print_pairing("never-pushed") is None
 
-    @pytest.mark.supplementary
     def test_pop_print_pairing_without_stack_returns_none(self):
         """A pristine thread-local yields None instead of raising."""
         old = d._print_pairing
@@ -182,7 +179,6 @@ class TestPrintFormatting:
 class TestPairingStacks:
     """dump_before/dump_after pairing and cleanup."""
 
-    @pytest.mark.supplementary
     def test_push_pop_pairing_defaults_and_lifo(self):
         """label defaults to op_name; entries pop LIFO per op."""
         d._push_pairing("op", 1, 5, "dirA")
@@ -191,7 +187,6 @@ class TestPairingStacks:
         assert d._pop_pairing("op") == (1, 5, "dirA", "op", "", "")
         assert d._pop_pairing("op") is None
 
-    @pytest.mark.supplementary
     def test_pop_pairing_without_stack_returns_none(self):
         """A pristine thread-local yields None instead of raising."""
         old = d._dump_pairing
@@ -201,7 +196,6 @@ class TestPairingStacks:
         finally:
             d._dump_pairing = old
 
-    @pytest.mark.supplementary
     def test_dump_cleanup_pops_both_pairings(self, caplog, tmp_path):
         """dump_cleanup removes stale file and print pairings at once."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_print=True)
@@ -222,7 +216,6 @@ class TestPairingStacks:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_dump_output_without_pairing_warns(self, caplog):
         """_dump_output logs a warning and returns when pairing is absent."""
         with caplog.at_level(logging.WARNING, logger="vllm_fl.dispatch.io_dump"):
@@ -236,13 +229,11 @@ class TestPairingStacks:
 class TestRankGate:
     """_rank_ok and rank filtering."""
 
-    @pytest.mark.supplementary
     def test_no_rank_filter_allows_all(self):
         """A None filter (default) lets any rank through."""
         d._rank_filter = None
         assert d._rank_ok() is True
 
-    @pytest.mark.supplementary
     def test_rank_filter_membership(self, monkeypatch):
         """_rank_ok consults the module-bound get_rank() for membership."""
         d._rank_filter = {0}
@@ -253,7 +244,6 @@ class TestRankGate:
         assert d._rank_ok() is True
         d._rank_filter = None
 
-    @pytest.mark.supplementary
     def test_dump_skipped_on_filtered_rank(self, tmp_path):
         """Nothing is dumped when the current rank is filtered out."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, ranks={5})
@@ -270,7 +260,6 @@ class TestRankGate:
 class TestShouldDumpGates:
     """_should_dump / _should_dump_torch_func / _check_limits composable gates."""
 
-    @pytest.mark.supplementary
     def test_layer_filter_blocks_without_context(self):
         """An active layer filter with no module context rejects the call."""
         d._layer_filter = {"model.layers.0"}
@@ -279,7 +268,6 @@ class TestShouldDumpGates:
         finally:
             d._layer_filter = set()
 
-    @pytest.mark.supplementary
     def test_layer_filter_passes_with_matching_context(self):
         """A matching module-context path satisfies the layer gate."""
         d._layer_filter = {"model.layers.0"}
@@ -298,7 +286,6 @@ class TestShouldDumpGates:
             d._layer_filter = set()
             d._op_filter = set()
 
-    @pytest.mark.supplementary
     def test_module_filter_via_args(self):
         """args[0] nn.Module class name can satisfy the module filter."""
         d._module_filter = {"Linear"}
@@ -309,7 +296,6 @@ class TestShouldDumpGates:
         finally:
             d._module_filter = set()
 
-    @pytest.mark.supplementary
     def test_module_filter_via_context(self):
         """Thread-local module context can satisfy the module filter."""
         d._module_filter = {"Conv2d"}
@@ -321,7 +307,6 @@ class TestShouldDumpGates:
             io_common.pop_module_context()
             d._module_filter = set()
 
-    @pytest.mark.supplementary
     def test_op_filter_membership(self):
         """The op filter gate requires exact op-name membership."""
         d._op_filter = {"opx"}
@@ -331,7 +316,6 @@ class TestShouldDumpGates:
         finally:
             d._op_filter = set()
 
-    @pytest.mark.supplementary
     def test_match_all_short_circuits_filters(self):
         """match_all bypasses module/op filters entirely."""
         d._match_all = True
@@ -341,14 +325,12 @@ class TestShouldDumpGates:
         d._match_all = False
         d._module_filter = set()
 
-    @pytest.mark.supplementary
     def test_no_filters_means_no_dump(self):
         """With no op/module filter configured nothing is dumped."""
         d._op_filter = set()
         d._module_filter = set()
         assert d._should_dump("op", ()) is False
 
-    @pytest.mark.supplementary
     def test_step_range_and_max_calls_limits(self):
         """_check_limits enforces the half-open step range and per-op cap."""
         d._op_filter = {"opx"}
@@ -368,7 +350,6 @@ class TestShouldDumpGates:
         d._max_calls = 0
         d._op_filter = set()
 
-    @pytest.mark.supplementary
     def test_should_dump_torch_func_gates(self):
         """Torch-func gate: enablement, filter set, module context, layers."""
         d._torch_funcs_enabled = True
@@ -406,37 +387,7 @@ class TestShouldDumpGates:
 class TestSerializationHelpers:
     """_serialize_value / _build_data / _extract_tensor_refs / path helpers."""
 
-    @pytest.mark.supplementary
-    def test_serialize_value_branches(self):
-        """Tensors move to CPU; modules become tags; containers recurse."""
-        tensor = torch.ones(2)
-        out = d._serialize_value({"a": tensor, "b": [tensor, None, 3.5]})
-        assert isinstance(out, dict)
-        assert torch.equal(out["a"], tensor)
-        assert torch.equal(out["b"][0], tensor)
-        assert out["b"][1] is None and out["b"][2] == 3.5
-        assert d._serialize_value(torch.nn.Linear(2, 2)) == "<module:Linear>"
-        assert d._serialize_value(object()) == "<object>"
-        assert d._serialize_value((tensor, 1))[1] == 1
-        assert d._serialize_value(True) is True
-        assert d._serialize_value("s") == "s"
 
-    @pytest.mark.supplementary
-    def test_build_data_input_and_output_schemes(self):
-        """Key scheme: arg_N/kwarg_k for inputs, result/result_N for outputs."""
-        tensor = torch.ones(2)
-        module = torch.nn.Linear(2, 2)
-        data = d._build_data((module, 1), {"k": "v"})
-        assert data == {"arg_0": "<module:Linear>", "arg_1": 1, "kwarg_k": "v"}
-
-        out = d._build_data(((tensor, 2),), {}, is_output=True)
-        assert set(out) == {"result_0", "result_1"}
-        assert torch.equal(out["result_0"], tensor)
-        assert out["result_1"] == 2
-        assert d._build_data((5,), {}, is_output=True) == {"result": 5}
-        assert d._build_data((), {}, is_output=True) == {"result": None}
-
-    @pytest.mark.supplementary
     def test_extract_tensor_refs_key_scheme(self):
         """Only tensors are captured, detached, with the same key scheme."""
         tensor = torch.ones(2)
@@ -448,7 +399,6 @@ class TestSerializationHelpers:
         assert torch.equal(refs_out["result_0"], tensor)
         assert d._extract_tensor_refs((5,), {}, is_output=True) == {}
 
-    @pytest.mark.supplementary
     def test_sanitize_path_component(self):
         """Separators and '..' are neutralised; blank becomes _unnamed_."""
         assert d._sanitize_path_component("a/b") == "a_b"
@@ -460,7 +410,6 @@ class TestSerializationHelpers:
         assert d._sanitize_path_component("") == "_unnamed_"
         assert d._sanitize_path_component("...") == "__"
 
-    @pytest.mark.supplementary
     def test_get_op_dir_layout(self):
         """Directory layout is dump_dir/rank_XXXX/step_XXXX/sanitized."""
         d._dump_dir = "DUMP"
@@ -475,7 +424,6 @@ class TestSerializationHelpers:
         finally:
             d._dump_dir = ""
 
-    @pytest.mark.supplementary
     def test_next_call_num_is_per_op_monotonic(self):
         """Counters are independent per op and start at 1."""
         assert d._next_call_num("a") == 1
@@ -487,7 +435,6 @@ class TestSerializationHelpers:
 class TestBackgroundWriter:
     """Executor submission, device events, reorder buffer, flush failures."""
 
-    @pytest.mark.supplementary
     def test_submit_bg_noop_when_disabled(self):
         """_submit_bg drops work while the dumper is disabled."""
         d._enabled = False
@@ -500,7 +447,6 @@ class TestBackgroundWriter:
         assert calls == []
         assert d._pending_futures == []
 
-    @pytest.mark.supplementary
     def test_submit_bg_tracks_future_when_enabled(self):
         """An enabled dumper appends the future for later draining."""
         d._enabled = True
@@ -510,7 +456,6 @@ class TestBackgroundWriter:
         finally:
             d._wait_and_flush()
 
-    @pytest.mark.supplementary
     def test_record_device_event_fake_module(self, monkeypatch):
         """A non-cpu tensor with a torch.<type>.Event module yields an event."""
         recorded = []
@@ -529,7 +474,6 @@ class TestBackgroundWriter:
         assert isinstance(event, FakeEvent)
         assert recorded == ["record"]
 
-    @pytest.mark.supplementary
     def test_record_device_event_cpu_and_missing_attr(self):
         """CPU tensors and device modules without Event give None."""
         assert d._record_device_event({"x": torch.zeros(1)}) is None
@@ -544,7 +488,6 @@ class TestBackgroundWriter:
         finally:
             delattr(torch, "noeventgpu")
 
-    @pytest.mark.supplementary
     def test_record_device_event_constructor_failure(self):
         """A raising Event() constructor degrades to None (never propagates)."""
 
@@ -564,7 +507,6 @@ class TestBackgroundWriter:
         finally:
             delattr(torch, "badgpu")
 
-    @pytest.mark.supplementary
     def test_bg_compute_and_write_reorders_out_of_order_lines(self, tmp_path):
         """Lines are written strictly in call_num order (reorder buffer)."""
         json_path = str(tmp_path / "input.json")
@@ -586,7 +528,6 @@ class TestBackgroundWriter:
         assert first["tensors"]["arg_0"]["min"] == 1.0
         d._close_open_files()
 
-    @pytest.mark.supplementary
     def test_bg_compute_and_write_syncs_device_event(self, tmp_path):
         """A non-None device event is synchronized before writing."""
         synced = []
@@ -601,7 +542,6 @@ class TestBackgroundWriter:
         assert synced == [True]
         d._close_open_files()
 
-    @pytest.mark.supplementary
     def test_bg_save_pt_writes_tensor_file(self, tmp_path):
         """_bg_save_pt serializes inputs to a loadable .pt file."""
         tensor = torch.tensor([1.0, 3.0])
@@ -612,7 +552,6 @@ class TestBackgroundWriter:
         loaded = torch.load(pt_path, weights_only=True)
         assert torch.equal(loaded["arg_0"], tensor)
 
-    @pytest.mark.supplementary
     def test_get_or_open_handle_is_cached_per_path(self, tmp_path):
         """The same json path maps to the same _WipHandle instance."""
         path = str(tmp_path / "a.json")
@@ -622,7 +561,6 @@ class TestBackgroundWriter:
         assert handle1.next_write == 1
         d._close_open_files()
 
-    @pytest.mark.supplementary
     def test_wait_and_flush_logs_failed_future(self, caplog):
         """A failed background task logs the exception and drains cleanly."""
         d._enabled = True
@@ -638,7 +576,6 @@ class TestBackgroundWriter:
         )
         assert d._pending_futures == []
 
-    @pytest.mark.supplementary
     def test_close_open_files_swallows_oserror(self):
         """OSError on flush/close of an open handle is swallowed."""
 
@@ -653,7 +590,6 @@ class TestBackgroundWriter:
         d._close_open_files()  # must not raise
         assert d._open_file_handles == {}
 
-    @pytest.mark.supplementary
     def test_reset_state_closes_handles_and_shuts_down(self):
         """_reset_state closes open handles and drops the executor."""
 
@@ -677,7 +613,6 @@ class TestBackgroundWriter:
 class TestDumpInputOutput:
     """File-dump queueing paths including the exception branch."""
 
-    @pytest.mark.supplementary
     def test_dump_input_and_output_round_trip(self, tmp_path):
         """A full before/after pair writes input/output JSON + summary."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_values=True)
@@ -729,7 +664,6 @@ class TestDumpInputOutput:
         assert summary["rank"] == 0
         assert "rms_norm" in summary["non_flaggems_ops"]
 
-    @pytest.mark.supplementary
     def test_dump_input_makedirs_failure_warns(self, tmp_path, caplog):
         """A dump directory under a regular file degrades to a warning."""
         blocker = tmp_path / "blocker"
@@ -749,7 +683,6 @@ class TestDumpInputOutput:
         finally:
             d._reset_state()
 
-    @pytest.mark.supplementary
     def test_dump_output_unpack_failure_warns(self, tmp_path, caplog):
         """A malformed pairing tuple makes _dump_output warn, not raise."""
         d._enabled = True
@@ -769,7 +702,6 @@ class TestDumpInputOutput:
         finally:
             d._reset_state()
 
-    @pytest.mark.supplementary
     def test_summary_only_mode_records_without_files(self, tmp_path):
         """with_metas=False writes only summary.json, no per-op JSON."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=False)
@@ -783,7 +715,6 @@ class TestDumpInputOutput:
         assert summary["flaggems_ops"] == []
         assert summary["non_flaggems_ops"]  # aten ops recorded
 
-    @pytest.mark.supplementary
     def test_summary_write_oserror_warns(self, tmp_path, caplog):
         """A summary.json target that cannot be written logs a warning."""
         rank_dir = tmp_path / "rank_0000"
@@ -801,7 +732,6 @@ class TestDumpInputOutput:
             d._op_summary.clear()
             d._dump_dir = ""
 
-    @pytest.mark.supplementary
     def test_write_summary_noop_without_dir_or_data(self):
         """No dump dir or empty summary leaves everything untouched."""
         d._dump_dir = ""
@@ -815,7 +745,6 @@ class TestDumpInputOutput:
 class TestSummaryAccumulator:
     """_record_op_summary / _format_dispatch_keys_for_json / _is_flaggems_op."""
 
-    @pytest.mark.supplementary
     def test_format_dispatch_keys(self):
         """Triples render as (key, impl, is_default) inside brackets."""
         assert (
@@ -826,7 +755,6 @@ class TestSummaryAccumulator:
         )
         assert d._format_dispatch_keys_for_json([]) == "[]"
 
-    @pytest.mark.supplementary
     def test_record_op_summary_counts_and_first_keys_stick(self):
         """The first dispatch_keys wins; call_count increments per call."""
         d._record_op_summary("x", [("CUDA", "FlagGems", False)])
@@ -841,7 +769,6 @@ class TestSummaryAccumulator:
         }
         d._op_summary.clear()
 
-    @pytest.mark.supplementary
     def test_is_flaggems_op_dispatch_keys_and_import_failure(self, monkeypatch):
         """FlagGems detection via dispatch keys; manager import failure False."""
         assert d._is_flaggems_op("op", "[(CUDA, FlagGems, False)]") is True
@@ -861,7 +788,6 @@ class TestSummaryAccumulator:
             if saved is not None:
                 monkeypatch.setitem(sys.modules, "vllm_fl.dispatch.manager", saved)
 
-    @pytest.mark.supplementary
     def test_is_flaggems_op_via_manager_snapshot(self):
         """A DEFAULT-kind called impl is classified as a FlagGems op."""
 
@@ -900,7 +826,6 @@ class TestSummaryAccumulator:
 class TestEnableIoDump:
     """Programmatic enable: 3-layer merge, print-only mode, env propagation."""
 
-    @pytest.mark.supplementary
     def test_api_overrides_env(self, tmp_path, monkeypatch):
         """API-layer values win over environment-layer values."""
         monkeypatch.setenv("VLLM_FL_IO_DUMP_MAX_CALLS", "9")
@@ -915,7 +840,6 @@ class TestEnableIoDump:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_yaml_overrides_env(self, tmp_path, monkeypatch):
         """YAML values win over env values; API-unset fields keep them."""
         cfg = tmp_path / "cfg.yaml"
@@ -939,7 +863,6 @@ class TestEnableIoDump:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_print_only_mode_skips_dir(self, monkeypatch):
         """with_print=True and no explicit dir yields a print-only config."""
         monkeypatch.delenv("VLLM_FL_IO_DUMP", raising=False)
@@ -952,7 +875,6 @@ class TestEnableIoDump:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_explicit_env_dir_beats_print_only(self, tmp_path, monkeypatch):
         """An env-provided directory keeps file dumping on despite with_print."""
         monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
@@ -963,7 +885,6 @@ class TestEnableIoDump:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_env_propagation_sets_all_vars(self, tmp_path, monkeypatch):
         """enable_io_dump mirrors the resolved config into env vars."""
         d.enable_io_dump(
@@ -994,7 +915,6 @@ class TestEnableIoDump:
         # disable cleared everything again.
         assert not [k for k in os.environ if k.startswith("VLLM_FL_IO_DUMP")]
 
-    @pytest.mark.supplementary
     def test_set_env_vars_pops_unset_dimensions(self, monkeypatch):
         """Unset dimensions remove their env var rather than blanking it."""
         for key in (
@@ -1026,7 +946,6 @@ class TestEnableIoDump:
             assert key not in os.environ
         assert os.environ["VLLM_FL_IO_DUMP"] == "dir"
 
-    @pytest.mark.supplementary
     def test_disable_resets_state(self, tmp_path):
         """disable_io_dump restores every module global to its default."""
         d.enable_io_dump(dump_dir=str(tmp_path), ops={"x"}, with_metas=True)
@@ -1040,7 +959,6 @@ class TestEnableIoDump:
         assert d._print_enabled is False
         assert d._op_summary == {}
 
-    @pytest.mark.supplementary
     def test_enable_with_layers_expands_specs(self, tmp_path):
         """Layer specs expand to full path prefixes."""
         d.enable_io_dump(dump_dir=str(tmp_path), layers={"0-1", "5"}, with_metas=True)
@@ -1058,14 +976,12 @@ class TestEnableIoDump:
 class TestInitFromEnv:
     """_init_from_env corner branches."""
 
-    @pytest.mark.supplementary
     def test_already_enabled_is_noop(self):
         """When the API path already enabled dumping, env init returns."""
         d._enabled = True
         d._init_from_env()
         assert d._enabled is True
 
-    @pytest.mark.supplementary
     def test_env_zero_resets_and_returns(self, monkeypatch):
         """VLLM_FL_IO_DUMP=0 explicitly disables and resets the state."""
         monkeypatch.setenv("VLLM_FL_IO_DUMP", "0")
@@ -1073,7 +989,6 @@ class TestInitFromEnv:
         assert d._enabled is False
         assert d._dump_dir == ""
 
-    @pytest.mark.supplementary
     def test_no_config_resets_and_returns(self, monkeypatch):
         """No env, no yaml, no print request resets the state."""
         for key in list(os.environ):
@@ -1083,7 +998,6 @@ class TestInitFromEnv:
         d._init_from_env()
         assert d._enabled is False
 
-    @pytest.mark.supplementary
     def test_filter_envs_auto_enable(self, monkeypatch, tmp_path):
         """A step-range env alone auto-enables dumping for all ops."""
         monkeypatch.setenv("VLLM_FL_IO_DUMP_STEP_RANGE", "0-1")
@@ -1098,7 +1012,6 @@ class TestInitFromEnv:
         finally:
             d._reset_state()
 
-    @pytest.mark.supplementary
     def test_makedirs_failure_without_print_disables(self, tmp_path, monkeypatch):
         """An un-creatable dump dir disables dumping unless print is on."""
         blocker = tmp_path / "blocker"
@@ -1108,7 +1021,6 @@ class TestInitFromEnv:
         assert d._enabled is False
         assert d._dump_dir == ""
 
-    @pytest.mark.supplementary
     def test_makedirs_failure_with_print_keeps_print(self, tmp_path, monkeypatch):
         """With print enabled, a bad dump dir degrades to print-only."""
         blocker = tmp_path / "blocker"
@@ -1123,7 +1035,6 @@ class TestInitFromEnv:
         finally:
             d._reset_state()
 
-    @pytest.mark.supplementary
     def test_print_only_env_without_dir(self, monkeypatch):
         """VLLM_FL_IO_DUMP_WITH_PRINT=1 with no dir gives print-only mode."""
         monkeypatch.setenv("VLLM_FL_IO_DUMP_WITH_PRINT", "1")
@@ -1137,7 +1048,6 @@ class TestInitFromEnv:
         finally:
             d._reset_state()
 
-    @pytest.mark.supplementary
     def test_yaml_overlays_env(self, tmp_path, monkeypatch):
         """YAML values override env-layer values in _init_from_env too."""
         cfg = tmp_path / "cfg.yaml"
@@ -1165,7 +1075,6 @@ class TestInitFromEnv:
 class TestStepAdvance:
     """_on_step_advance: counters, summary logging, lazy mode activation."""
 
-    @pytest.mark.supplementary
     def test_step_advance_logs_summaries(self, tmp_path, caplog):
         """Step summaries land on both the io_dump and io_print loggers."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_print=True)
@@ -1197,7 +1106,6 @@ class TestStepAdvance:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_step_advance_clears_call_counters(self, tmp_path):
         """Per-op call counters reset at each step boundary."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
@@ -1208,7 +1116,6 @@ class TestStepAdvance:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_lazy_activation_within_step_range(self, tmp_path):
         """A deferred step_range enters dispatch modes only in range."""
         d.enable_io_dump(dump_dir=str(tmp_path), step_range="2-3", with_metas=True)
@@ -1225,7 +1132,6 @@ class TestStepAdvance:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_advance_io_step_only_when_enabled(self, tmp_path):
         """advance_io_step is a no-op while the dumper is disabled."""
         before = io_common.get_step()
@@ -1238,7 +1144,6 @@ class TestStepAdvance:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_io_dump_step_delegates(self, tmp_path):
         """io_dump_step returns the new step number like advance_step."""
         d.enable_io_dump(dump_dir=str(tmp_path))
@@ -1251,7 +1156,6 @@ class TestStepAdvance:
 class TestModeLifecycle:
     """pause/resume dispatch modes and module hooks."""
 
-    @pytest.mark.supplementary
     def test_pause_and_resume_round_trip(self, tmp_path):
         """Pause exits the modes; resume re-enters while still enabled."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
@@ -1264,7 +1168,6 @@ class TestModeLifecycle:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_resume_after_disable_stays_out(self, tmp_path):
         """resume_dispatch_modes is a no-op once the dumper is disabled."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
@@ -1272,13 +1175,11 @@ class TestModeLifecycle:
         d.resume_dispatch_modes()
         assert not io_common.dispatch_mode_mgr.is_entered("dump")
 
-    @pytest.mark.supplementary
     def test_pause_without_modes_is_noop(self):
         """Pausing when nothing is entered does not raise."""
         d.pause_dispatch_modes()
         assert not io_common.dispatch_mode_mgr.is_entered("dump")
 
-    @pytest.mark.supplementary
     def test_module_hooks_registered_and_removed(self, tmp_path):
         """register_io_module_hooks installs forward hooks when enabled."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
@@ -1327,7 +1228,6 @@ class TestModeLifecycle:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_module_hooks_noop_when_disabled(self):
         """register_io_module_hooks is a no-op while dumping is disabled."""
         model = torch.nn.Sequential(torch.nn.Linear(2, 2))
@@ -1336,7 +1236,6 @@ class TestModeLifecycle:
         assert d._module_hook_handles == []
         assert sum(len(m._forward_pre_hooks) for m in model.modules()) == before
 
-    @pytest.mark.supplementary
     def test_init_io_dump_from_env_gates(self, monkeypatch, tmp_path):
         """init_io_dump_from_env honours the eager gate and env presence."""
         monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
@@ -1351,7 +1250,6 @@ class TestModeLifecycle:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_init_io_dump_from_env_no_vars(self, monkeypatch):
         """Without any VLLM_FL_IO_DUMP* vars nothing happens even in eager."""
         for key in list(os.environ):
@@ -1365,7 +1263,6 @@ class TestModeLifecycle:
 class TestDumpBeforeAfterGates:
     """dump_before / dump_after guard, rank, summary-only and print paths."""
 
-    @pytest.mark.supplementary
     def test_summary_only_records_seen_and_summary(self, tmp_path):
         """with_metas=False still records ops into the summary accumulator."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=False)
@@ -1381,7 +1278,6 @@ class TestDumpBeforeAfterGates:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_dump_after_returns_when_not_with_metas(self, tmp_path, caplog):
         """dump_after without metas does no work at all."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=False)
@@ -1393,7 +1289,6 @@ class TestDumpBeforeAfterGates:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_print_pairing_logs_combined_block(self, tmp_path, caplog):
         """with_print=True emits a combined INPUTS+OUTPUTS block."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_print=True)
@@ -1420,7 +1315,6 @@ class TestDumpBeforeAfterGates:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_print_without_pairing_logs_outputs_only(self, tmp_path, caplog):
         """A print-enabled dump_after with no pairing logs outputs only."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_print=True)
@@ -1439,7 +1333,6 @@ class TestDumpBeforeAfterGates:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_guard_active_blocks_reentry(self, tmp_path):
         """dump_before/dump_after are no-ops while the guard is held."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
@@ -1454,7 +1347,6 @@ class TestDumpBeforeAfterGates:
             d.set_guard(False)
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_module_tag_from_context_in_metadata(self, tmp_path):
         """Module context from hooks lands in the JSON module_tag field."""
 
@@ -1493,7 +1385,6 @@ class TestDumpBeforeAfterGates:
 class TestDispatchModeInterception:
     """End-to-end TorchDispatchMode / TorchFunctionMode interception."""
 
-    @pytest.mark.supplementary
     def test_dispatch_mode_dumps_aten_ops(self, tmp_path):
         """Plain tensor math is captured under rank/step directories."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
@@ -1514,7 +1405,6 @@ class TestDispatchModeInterception:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_dispatch_mode_exception_cleans_pairing(self, tmp_path):
         """A failing aten op propagates and leaves no pairing behind."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
@@ -1526,7 +1416,6 @@ class TestDispatchModeInterception:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_torch_func_mode_intercepts_bare_functions(self, tmp_path):
         """with_torch_funcs=True captures torch.matmul and friends."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_torch_funcs=True)
@@ -1541,7 +1430,6 @@ class TestDispatchModeInterception:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_torch_func_mode_exception_releases_tags(self, tmp_path):
         """A failing torch function propagates and releases func tags."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_torch_funcs=True)
@@ -1553,7 +1441,6 @@ class TestDispatchModeInterception:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_step_range_gates_dispatch_mode(self, tmp_path):
         """Ops outside the step range are not intercepted."""
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, step_range="1-2")
@@ -1565,7 +1452,6 @@ class TestDispatchModeInterception:
         finally:
             d.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_layer_filter_gates_dispatch_mode(self, tmp_path):
         """A layer filter without matching context blocks dispatch dumps."""
         d.enable_io_dump(
@@ -1583,7 +1469,6 @@ class TestDispatchModeInterception:
 class TestIoCommonLeftovers:
     """io_common gaps not exercised by the dumper integration paths."""
 
-    @pytest.mark.supplementary
     def test_get_rank_uses_initialized_process_group(self, monkeypatch):
         """An initialized torch.distributed provides the rank (and caches it)."""
         import torch.distributed as dist
@@ -1597,7 +1482,6 @@ class TestIoCommonLeftovers:
         finally:
             io_common.reset_rank()
 
-    @pytest.mark.supplementary
     def test_expand_layer_specs_skips_blank_entries(self):
         """Blank layer specs are skipped rather than crashing."""
         assert io_common.expand_layer_specs({"", "  ", "0-1"}) == {
@@ -1605,7 +1489,6 @@ class TestIoCommonLeftovers:
             "model.layers.1",
         }
 
-    @pytest.mark.supplementary
     def test_parse_dispatch_table_line_parsing(self, monkeypatch):
         """Kernel lines parse; fallthrough and marker-less lines are skipped."""
         table = (
@@ -1633,7 +1516,6 @@ class TestIoCommonLeftovers:
         # The parsed list is cached under the qualified op name.
         assert io_common._dispatch_table_cache["aten::fake_op"] == entries
 
-    @pytest.mark.supplementary
     def test_parse_dispatch_table_swallows_errors(self, monkeypatch):
         """A raising _dispatch_dump_table yields an empty (cached) list."""
 
@@ -1648,7 +1530,6 @@ class TestIoCommonLeftovers:
         assert io_common._parse_dispatch_table(FakeOp()) == []
         assert io_common._dispatch_table_cache["aten::raising_op"] == []
 
-    @pytest.mark.supplementary
     def test_layer_path_matches_from_stack_with_explicit_ctx(self):
         """Prefix and glob matching work on stack-derived context tuples."""
         ctx = [("Linear", "model.layers.0.self_attn.q_proj"), ("", "skipped")]
@@ -1660,14 +1541,12 @@ class TestIoCommonLeftovers:
         )  # path continues past self_attn (.q_proj)
         assert not io_common.layer_path_matches_from_stack({"model.layers.5"}, ctx)
 
-    @pytest.mark.supplementary
     def test_layer_path_matches_from_stack_empty_path_skipped(self):
         """Context entries without a path are skipped."""
         assert not io_common.layer_path_matches_from_stack(
             {"anything"}, [("Linear", "")]
         )
 
-    @pytest.mark.supplementary
     def test_stack_matchers_derive_context_when_none(self):
         """module_ctx=None derives the context from the live call stack."""
 
@@ -1698,7 +1577,6 @@ class TestIoCommonLeftovers:
         root(torch.zeros(1, 2))
         assert captured == {"prefix": True, "glob": True, "cls": True}
 
-    @pytest.mark.supplementary
     def test_module_context_matches_from_stack(self):
         """Class-name matching on explicit stack context."""
         ctx = [("Linear", "a.b"), ("Conv2d", "c.d")]
@@ -1706,7 +1584,6 @@ class TestIoCommonLeftovers:
         assert io_common.module_context_matches_from_stack({"Conv2d"}, ctx)
         assert not io_common.module_context_matches_from_stack({"LSTM"}, ctx)
 
-    @pytest.mark.supplementary
     def test_tensor_stats_failing_stat_is_skipped(self):
         """A registered stat that raises is dropped, others still computed."""
         tensor = torch.tensor([1.0, 2.0])
@@ -1723,7 +1600,6 @@ class TestIoCommonLeftovers:
         assert stats["min"] == 1.0
         assert stats["max"] == 2.0
 
-    @pytest.mark.supplementary
     def test_format_stat_value_list_and_truncation(self):
         """Lists format inline; long lists are truncated with '...'."""
         assert io_common._format_stat_value([1.0, 2.0]) == "[1, 2]"
@@ -1733,15 +1609,256 @@ class TestIoCommonLeftovers:
         assert io_common._format_stat_value("x") == "'x'"
         assert io_common._format_stat_value(0.5) == "0.5"
 
-    @pytest.mark.supplementary
     def test_parse_string_list_other_types(self):
         """Unsupported YAML types degrade to an empty set."""
         assert io_common._parse_string_list(42) == set()
         assert io_common._parse_string_list({"a", "b"}) == set()
 
-    @pytest.mark.supplementary
     def test_parse_ranks_yaml_other_types(self):
         """Unsupported ranks YAML types degrade to None (all ranks)."""
         assert io_common._parse_ranks_yaml(3.5) is None
         # NOTE: bool is a subclass of int in Python, so True -> {1}.
         assert io_common._parse_ranks_yaml([1, "x", 2]) == {1, 2}
+
+
+# ---------------------------------------------------------------------------
+# Remaining io_dumper branch corners (merged from the former supplementary
+# test_io_dumper_config_layers.py — env-var parsing corners, dump_after
+# early returns, torch-func summary-only pass-through, background-writer
+# corner branches, pause/resume modes and the reset-state handle close).
+# ---------------------------------------------------------------------------
+
+class TestEnableIoDumpEnvCorners:
+    """``enable_io_dump`` layer-1 env parsing corners."""
+
+    def test_env_dir_one_keeps_default(self, tmp_path, monkeypatch):
+        """``VLLM_FL_IO_DUMP=1`` keeps the cwd-based default directory."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", "1")
+        d.enable_io_dump()
+        assert d._dump_dir == os.path.join(str(tmp_path), "io_dump")
+        assert os.path.isdir(d._dump_dir)
+
+    def test_env_dir_explicit_path(self, tmp_path, monkeypatch):
+        """A non-``0``/``1`` env value is used verbatim as dump dir."""
+        target = tmp_path / "envdir"
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(target))
+        d.enable_io_dump()
+        assert d._dump_dir == str(target)
+
+    def test_bad_max_calls_and_bg_workers_kept(self, tmp_path, monkeypatch):
+        """Unparseable ints fall back to their defaults (0 and 8)."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_MAX_CALLS", "not-a-number")
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_BG_WORKERS", "oops")
+        d.enable_io_dump()
+        assert d._max_calls == 0
+        assert d._bg_workers == 8
+
+    def test_bg_workers_clamped_to_one(self, tmp_path, monkeypatch):
+        """A zero bg_workers env value is clamped up to 1."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_BG_WORKERS", "0")
+        d.enable_io_dump(bg_workers=-5)
+        assert d._bg_workers == 1
+
+    def test_env_ops_and_modules_parsed(self, tmp_path, monkeypatch):
+        """Comma-separated env filters are trimmed into sets."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_OPS", " op.a , op.b ,, ")
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_MODULES", " Lin1 , Lin2 ")
+        d.enable_io_dump()
+        assert d._op_filter == {"op.a", "op.b"}
+        assert d._module_filter == {"Lin1", "Lin2"}
+        assert d._match_all is False
+
+    def test_env_ranks_and_step_range(self, tmp_path, monkeypatch):
+        """Rank filter and step range env values are parsed."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_RANK", "0,2")
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_STEP_RANGE", "1-3")
+        d.enable_io_dump()
+        assert d._rank_filter == {0, 2}
+        assert tuple(d._step_range) == (1, 4)
+
+    def test_env_torch_funcs_filter(self, tmp_path, monkeypatch):
+        """``with_torch_funcs`` env accepts an enable plus name filter."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_WITH_TORCH_FUNCS", "sin,cos")
+        d.enable_io_dump()
+        assert d._torch_funcs_enabled is True
+        assert d._torch_func_filter == {"sin", "cos"}
+
+    def test_with_values_and_metas_env(self, tmp_path, monkeypatch):
+        """``with_values``/``with_metas``/``with_print`` truthy env values."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_WITH_VALUES", "true")
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_WITH_METAS", "1")
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_WITH_PRINT", "true")
+        d.enable_io_dump()
+        assert d._with_values is True
+        assert d._with_metas is True
+        assert d._print_enabled is True
+
+    def test_with_print_false_env(self, tmp_path, monkeypatch):
+        """An explicit falsey print env var keeps printing off."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_WITH_PRINT", "false")
+        d.enable_io_dump()
+        assert d._print_enabled is False
+
+    def test_api_empty_dir_becomes_default(self, tmp_path, monkeypatch):
+        """An explicit falsy dump_dir falls back to the cwd default dir."""
+        monkeypatch.delenv("VLLM_FL_IO_DUMP", raising=False)
+        monkeypatch.chdir(tmp_path)
+        d.enable_io_dump(dump_dir="", with_print=True)
+        assert d._dump_dir == os.path.join(str(tmp_path), "io_dump")
+        assert d._print_enabled is True
+
+    def test_layers_env_parsed(self, tmp_path, monkeypatch):
+        """Layer specs from env expand into the layer filter."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_LAYERS", "0-1")
+        d.enable_io_dump()
+        assert d._layer_filter  # non-empty after expansion
+        assert "model.layers.0" in d._layer_filter
+        assert "model.layers.1" in d._layer_filter
+
+    def test_none_ops_resets_to_match_all(self, tmp_path, monkeypatch):
+        """An explicit ops=None API override widens back to match-all."""
+        monkeypatch.setenv("VLLM_FL_IO_DUMP_OPS", "op.a")
+        monkeypatch.setenv("VLLM_FL_IO_DUMP", str(tmp_path))
+        d.enable_io_dump(ops=None)
+        assert d._match_all is True
+        assert d._op_filter == set()
+
+
+class TestDumpAfterCorners:
+    """``dump_after`` early returns and the no-pairing print path."""
+
+    def test_non_matching_op_returns_early(self, tmp_path, monkeypatch, caplog):
+        """An op outside the filter returns before touching pairings."""
+        d.enable_io_dump(
+            dump_dir=str(tmp_path), ops=["other.op"], with_metas=True, with_print=True
+        )
+        with caplog.at_level(logging.WARNING, logger=d.logger.name):
+            d.dump_after("kept.op", (torch.ones(2),), torch.ones(2))
+        assert not os.path.exists(
+            os.path.join(d._dump_dir, "rank_0000", "step_0000", "kept.op")
+        )
+        # The warning belongs to the un-matched early return, not a pairing
+        # miss — nothing was pushed, so no message is expected either way.
+        assert d._pop_pairing("kept.op") is None
+
+    def test_print_without_pairing_logs_outputs_only(self, tmp_path, caplog):
+        """A print-enabled dump_after without pushed pairing logs outputs."""
+        d.enable_io_dump(dump_dir="", with_print=True, with_metas=True, ops=["solo.op"])
+        with caplog.at_level(logging.INFO, logger=d.logger.name):
+            d.dump_after("solo.op", (torch.ones(3),), torch.zeros(3))
+        joined = "\n".join(r.message for r in caplog.records)
+        assert "OUTPUTS" in joined or "outputs" in joined.lower()
+
+
+class TestTorchFuncSummaryOnly:
+    """``_DumpTorchFuncMode`` summary-only pass-through."""
+
+    def test_summary_only_records_seen(self, tmp_path):
+        """with_metas=False records the op in _seen_ops and passes through."""
+        mode_cls = getattr(d, "_DumpTorchFuncMode", None)
+        if mode_cls is None:  # HAS_TORCH_FUNC_MODE off (no torch.overrides)
+            pytest.skip("_DumpTorchFuncMode requires TorchFunctionMode support")
+        d.enable_io_dump(
+            dump_dir=str(tmp_path), with_torch_funcs=True, with_metas=False, ops=None
+        )
+        mode = mode_cls()
+        tensor = torch.arange(4.0)
+        out = mode.__torch_function__(torch.sin, [torch.Tensor], (tensor,), {})
+        assert torch.equal(out, torch.sin(tensor))
+        assert "torch.sin" in io_common._seen_ops
+
+
+class TestBackgroundCorners:
+    """Background-task corner branches."""
+
+    def test_bg_compute_swallows_broken_stats(self, tmp_path):
+        """A tensor whose stats raise is skipped, not fatal."""
+        json_path = str(tmp_path / "input.json")
+        skeleton = {"op_name": "op"}
+
+        class _BrokenTensor:
+            device = SimpleNamespace(type="cpu")
+
+        refs = {"arg_0": _BrokenTensor()}
+        d._bg_compute_and_write(json_path, 1, skeleton, refs, None)
+        data = json.loads((tmp_path / "input.json").read_text(encoding="utf-8"))
+        assert data == {"call_1": {"op_name": "op", "tensors": {}}}
+
+    def test_bg_save_pt_syncs_device_event(self, tmp_path):
+        """_bg_save_pt synchronizes the device event before saving."""
+        synced = []
+
+        class _Event:
+            def synchronize(self):
+                synced.append(True)
+
+        pt_path = str(tmp_path / "call_1_input.pt")
+        d._bg_save_pt(
+            (torch.ones(2),),
+            {},
+            is_output=False,
+            pt_path=pt_path,
+            device_event=_Event(),
+        )
+        assert synced == [True]
+        loaded = torch.load(pt_path, weights_only=False)
+        assert set(loaded) == {"arg_0"}
+        assert torch.equal(loaded["arg_0"], torch.ones(2))
+
+
+class TestPauseResumeModes:
+    """``pause_dispatch_modes`` mode-manager branches."""
+
+    def test_pause_exits_func_mode_only(self, tmp_path):
+        """Pausing with only the torch-function mode entered exits it."""
+        d.enable_io_dump(dump_dir=str(tmp_path), with_torch_funcs=True, with_metas=True)
+        assert d.func_mode_mgr.is_entered("dump")
+        d.pause_dispatch_modes()
+        assert not d.func_mode_mgr.is_entered("dump")
+
+    def test_resume_reenters_when_enabled(self, tmp_path):
+        """Resuming re-enters modes while dumping stays enabled."""
+        d.enable_io_dump(dump_dir=str(tmp_path), with_torch_funcs=True, with_metas=True)
+        d.pause_dispatch_modes()
+        d.resume_dispatch_modes()
+        assert d.dispatch_mode_mgr.is_entered("dump")
+        assert d.func_mode_mgr.is_entered("dump")
+
+    def test_resume_noop_after_disable(self, tmp_path):
+        """Resuming after disable does not re-enter any mode."""
+        d.enable_io_dump(dump_dir=str(tmp_path), with_torch_funcs=True, with_metas=True)
+        d.pause_dispatch_modes()
+        d.disable_io_dump()
+        d.resume_dispatch_modes()
+        assert not d.dispatch_mode_mgr.is_entered("dump")
+
+
+class TestResetStateHandleClose:
+    """``_reset_state`` OSError-swallowing handle close."""
+
+    def test_close_failure_swallowed(self, tmp_path):
+        """A handle whose close() raises OSError is dropped silently."""
+
+        class _BadFH:
+            encoding = "utf-8"
+
+            def flush(self):
+                pass
+
+            def close(self):
+                raise OSError("closed already")
+
+        handle = d._WipHandle(_BadFH())
+        d._open_file_handles[str(tmp_path / "x.json")] = handle
+        d._reset_state()
+        assert d._open_file_handles == {}
+

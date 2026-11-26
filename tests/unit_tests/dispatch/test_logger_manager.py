@@ -30,7 +30,6 @@ def _restore_logger_state():
 class TestGetLogger:
     """get_logger caching and per-logger handler configuration."""
 
-    @pytest.mark.supplementary
     def test_logger_is_cached_per_name(self):
         """Repeated calls return the identical Logger object."""
         first = get_logger("vllm_fl.dispatch.test.cache")
@@ -38,7 +37,6 @@ class TestGetLogger:
         assert first is second
         assert logger_manager._loggers["vllm_fl.dispatch.test.cache"] is first
 
-    @pytest.mark.supplementary
     def test_new_logger_gets_stream_handler_and_no_propagation(self):
         """A fresh logger gets one StreamHandler and propagate=False."""
         logger = get_logger("vllm_fl.dispatch.test.handler")
@@ -48,7 +46,6 @@ class TestGetLogger:
         formatter = logger.handlers[0].formatter
         assert "[%(levelname)s] [%(name)s] %(message)s" in formatter._fmt
 
-    @pytest.mark.supplementary
     def test_existing_handlers_are_not_duplicated(self):
         """A logger that already has handlers keeps them untouched."""
         name = "vllm_fl.dispatch.test.existing"
@@ -62,14 +59,12 @@ class TestGetLogger:
         finally:
             pre.removeHandler(custom)
 
-    @pytest.mark.supplementary
     def test_default_level_read_at_import_time(self, monkeypatch):
         """VLLM_FL_LOG_LEVEL is baked in at import, not read per call."""
         # A later env change must not alter the already-imported default.
         monkeypatch.setenv("VLLM_FL_LOG_LEVEL", "DEBUG")
         assert logger_manager._DEFAULT_LOG_LEVEL == "INFO"
 
-    @pytest.mark.supplementary
     def test_import_reads_env_level(self, monkeypatch):
         """A reload with the env var set applies that level to new loggers."""
         monkeypatch.setenv("VLLM_FL_LOG_LEVEL", "WARNING")
@@ -80,7 +75,6 @@ class TestGetLogger:
         finally:
             importlib.reload(logger_manager)
 
-    @pytest.mark.supplementary
     def test_invalid_env_level_falls_back_to_info(self, monkeypatch):
         """An unparsable VLLM_FL_LOG_LEVEL degrades to INFO after reload."""
         monkeypatch.setenv("VLLM_FL_LOG_LEVEL", "NOT_A_LEVEL")
@@ -95,7 +89,6 @@ class TestGetLogger:
 class TestSetLogLevel:
     """set_log_level for one cached logger or all of them."""
 
-    @pytest.mark.supplementary
     def test_set_level_for_named_logger(self):
         """set_log_level with a name updates only that cached logger."""
         target = get_logger("vllm_fl.dispatch.test.target")
@@ -104,7 +97,6 @@ class TestSetLogLevel:
         assert target.level == logging.ERROR
         assert other.level != logging.ERROR
 
-    @pytest.mark.supplementary
     def test_set_level_for_all_cached_loggers(self):
         """set_log_level without a name updates every cached logger."""
         first = get_logger("vllm_fl.dispatch.test.all1")
@@ -113,21 +105,18 @@ class TestSetLogLevel:
         assert first.level == logging.CRITICAL
         assert second.level == logging.CRITICAL
 
-    @pytest.mark.supplementary
     def test_set_level_is_case_insensitive(self):
         """Lowercase level strings are accepted."""
         logger = get_logger("vllm_fl.dispatch.test.case")
         set_log_level("debug", name="vllm_fl.dispatch.test.case")
         assert logger.level == logging.DEBUG
 
-    @pytest.mark.supplementary
     def test_invalid_level_falls_back_to_info(self):
         """An unknown level string degrades to INFO, not an error."""
         logger = get_logger("vllm_fl.dispatch.test.invalid")
         set_log_level("NO_SUCH_LEVEL", name="vllm_fl.dispatch.test.invalid")
         assert logger.level == logging.INFO
 
-    @pytest.mark.supplementary
     def test_unknown_name_is_ignored(self):
         """Setting a level for an uncached name does not raise."""
         set_log_level("DEBUG", name="vllm_fl.dispatch.test.never-created")

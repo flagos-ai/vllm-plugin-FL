@@ -39,7 +39,6 @@ from vllm_fl.dispatch import discovery, manager as mgr_mod
 from vllm_fl.dispatch.manager import OpManager
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
-pytestmark = [pytest.mark.supplementary]
 
 
 def _make_impl(op_name, impl_id, kind, *, vendor=None, priority=None, available=True):
@@ -69,7 +68,7 @@ def _make_impl(op_name, impl_id, kind, *, vendor=None, priority=None, available=
 def _fresh_manager_state(clean_fl_env, monkeypatch):
     """Give each test a pristine policy/manager state and vllm.platforms stub.
 
-    ``clean_fl_env`` (supplementary conftest) drops every ``VLLM_FL_*`` env
+    ``clean_fl_env`` (dispatch conftest) drops every ``VLLM_FL_*`` env
     var for the test, so ``VLLM_FL_DISPATCH_DEBUG`` never leaks between tests
     and policy defaults apply.  A minimal ``vllm.platforms`` stub is kept in
     place where one is absent so vendor detection inside ``builtin_ops``

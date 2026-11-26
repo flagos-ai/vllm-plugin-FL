@@ -25,7 +25,6 @@ def _fresh_registry():
 class TestRegisterBuiltins:
     """register_builtins populates a fresh registry with reference impls."""
 
-    @pytest.mark.supplementary
     def test_all_implemented_ops_registered(self, _fresh_registry):
         """Every backend attr present is registered with reference metadata."""
         register_builtins(_fresh_registry)
@@ -43,7 +42,6 @@ class TestRegisterBuiltins:
         assert "invoke_fused_moe_triton_kernel" in ops
         assert "gelu_and_mul" in ops
 
-    @pytest.mark.supplementary
     def test_registered_impl_metadata(self, _fresh_registry):
         """Each impl carries the reference impl_id, kind and priority."""
         register_builtins(_fresh_registry)
@@ -54,20 +52,17 @@ class TestRegisterBuiltins:
         assert impl.vendor is None
         assert impl.is_available() is True
 
-    @pytest.mark.supplementary
     def test_grouped_topk_absent_does_not_register(self, _fresh_registry):
         """An op missing from the backend (grouped_topk) is skipped silently."""
         register_builtins(_fresh_registry)
         assert "grouped_topk" not in _fresh_registry.list_operators()
 
-    @pytest.mark.supplementary
     def test_duplicate_registration_raises(self, _fresh_registry):
         """Re-registering the same impl_id is rejected by the registry."""
         register_builtins(_fresh_registry)
         with pytest.raises(ValueError, match="Duplicate impl_id 'reference.torch'"):
             register_builtins(_fresh_registry)
 
-    @pytest.mark.supplementary
     def test_bound_fn_calls_through_and_reports_availability(self):
         """_bind_is_available wraps transparently and exposes the probe."""
         calls = []
@@ -89,7 +84,6 @@ class TestRegisterBuiltins:
 class TestReferenceW8A8MoeExperts:
     """_reference_w8a8_moe_experts activation guard."""
 
-    @pytest.mark.supplementary
     def test_non_silu_activation_rejected(self):
         """Only SwiGLU ('silu') is supported; anything else raises."""
         with pytest.raises(
@@ -99,7 +93,6 @@ class TestReferenceW8A8MoeExperts:
                 activation="gelu", global_num_experts=8, w1=None, w2=None
             )
 
-    @pytest.mark.supplementary
     def test_silu_dispatches_to_native_experts(self, monkeypatch):
         """The silu path forwards kwargs to _native_w8a8_fused_experts."""
         import types

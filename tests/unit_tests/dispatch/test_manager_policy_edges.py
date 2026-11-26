@@ -4,7 +4,7 @@
 
 The core suite (``tests/unit_tests/dispatch/test_manager.py`` /
 ``test_policy.py``) covers the main dispatch-selection flow.  This module
-targets the gaps that remain uncovered in the supplementary suite only:
+targets the gaps that the standard dispatch suite leaves uncovered:
 
 Manager (``vllm_fl/dispatch/manager.py``):
 
@@ -72,8 +72,6 @@ from vllm_fl.dispatch.policy import (
 )
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
-pytestmark = [pytest.mark.supplementary]
-
 
 def _make_impl(
     op_name, impl_id, kind, *, fn=None, vendor=None, priority=None, available=True
@@ -108,7 +106,7 @@ def _make_impl(
 def _fresh_manager_state(clean_fl_env, monkeypatch):
     """Give each test a pristine policy/manager/flagos-record state.
 
-    ``clean_fl_env`` (from the supplementary conftest) deletes all
+    ``clean_fl_env`` (from the dispatch conftest) deletes all
     ``VLLM_FL_*`` env vars for the duration of the test and restores them
     afterwards, so platform/env-derived policies are the built-in defaults.
     """
@@ -139,33 +137,28 @@ def stubbed_vllm_platforms(monkeypatch):
 class TestCanRetryFailedOp:
     """_can_retry_failed_op branch matrix."""
 
-    @pytest.mark.supplementary
     def test_strict_policy_disables_retry(self):
         """A strict policy never retries, regardless of op or platform."""
         with with_strict_mode():
             assert mgr_mod._can_retry_failed_op("rms_norm") is False
             assert mgr_mod._can_retry_failed_op("anything_else") is False
 
-    @pytest.mark.supplementary
     def test_unlisted_ops_always_retry(self):
         """Ops outside (rms_norm, rotary_embedding) retry even on AMD."""
         assert mgr_mod._can_retry_failed_op("silu_and_mul") is True
         assert mgr_mod._can_retry_failed_op("topk_softmax") is True
 
-    @pytest.mark.supplementary
     def test_import_error_falls_back_to_retry(self, monkeypatch):
         """A missing vllm.platforms module keeps retry enabled."""
         monkeypatch.setitem(sys.modules, "vllm.platforms", None)
         assert mgr_mod._can_retry_failed_op("rms_norm") is True
         assert mgr_mod._can_retry_failed_op("rotary_embedding") is True
 
-    @pytest.mark.supplementary
     def test_nvidia_vendor_allows_retry(self, stubbed_vllm_platforms):
         """NVIDIA kernels report errors before mutating inputs."""
         assert mgr_mod._can_retry_failed_op("rms_norm") is True
         assert mgr_mod._can_retry_failed_op("rotary_embedding") is True
 
-    @pytest.mark.supplementary
     def test_amd_vendor_blocks_retry(self, monkeypatch):
         """AMD kernels can mutate inputs before failing — no retry."""
         platforms = types.ModuleType("vllm.platforms")
@@ -178,7 +171,6 @@ class TestCanRetryFailedOp:
 class TestRecordDefaultFlagosOp:
     """_record_default_flagos_op: FileHandler pass-through and guards."""
 
-    @pytest.mark.supplementary
     def test_writes_through_flaggems_owned_filehandler(self, tmp_path):
         """A DEFAULT impl appends a '[DEBUG] vllm_fl.dispatch.ops...' line."""
         oplist = tmp_path / "oplist.txt"
@@ -195,7 +187,6 @@ class TestRecordDefaultFlagosOp:
         content = oplist.read_text(encoding="utf-8")
         assert content == ("[DEBUG] vllm_fl.dispatch.ops.rms_norm: flaggems.default\n")
 
-    @pytest.mark.supplementary
     def test_dedup_by_op_and_impl(self, tmp_path):
         """A repeated (op_name, impl_id) pair writes only once."""
         oplist = tmp_path / "oplist2.txt"
@@ -220,7 +211,6 @@ class TestRecordDefaultFlagosOp:
             "[DEBUG] vllm_fl.dispatch.ops.rms_norm: flaggems.alt",
         ]
 
-    @pytest.mark.supplementary
     def test_closed_handler_exception_is_swallowed(self, tmp_path):
         """I/O failures never propagate (diagnostics must not break runs)."""
         handler = logging.FileHandler(tmp_path / "x.txt", mode="w", encoding="utf-8")
@@ -234,7 +224,6 @@ class TestRecordDefaultFlagosOp:
         finally:
             fg_logger.removeHandler(handler)
 
-    @pytest.mark.supplementary
     def test_non_file_handlers_are_ignored(self, tmp_path, caplog):
         """StreamHandlers and unmarked FileHandlers get no writes."""
         marker = types.SimpleNamespace()
@@ -276,7 +265,6 @@ class TestManagerStateTransitions:
         manager._failed_impls[op] = {impl_id}
         return manager
 
-    @pytest.mark.supplementary
     def test_reset_after_fork_clears_everything(self):
         """_reset_after_fork un-initializes and invalidates all caches."""
         manager = self._primed()
@@ -289,59 +277,10 @@ class TestManagerStateTransitions:
         assert manager._called_ops == {}
         assert manager._failed_impls == {}
 
-    @pytest.mark.supplementary
-    def test_bump_policy_epoch_invalidates_caches(self):
-        """bump_policy_epoch clears dispatch/candidates/failed caches."""
-        manager = self._primed()
-        assert manager.policy_epoch == 3
-        manager.bump_policy_epoch()
-        assert manager.policy_epoch == 4
-        assert manager._dispatch_cache == {}
-        assert manager._candidates_cache == {}
-        assert manager._failed_impls == {}
-
-    @pytest.mark.supplementary
-    def test_clear_failed_impls_all_and_single(self):
-        """clear_failed_impls with no arg clears all; with an op, just that."""
-        manager = self._primed()
-        manager._failed_impls["opB"] = {"x"}
-        manager.clear_failed_impls("opA")
-        assert manager.get_failed_impls() == {"opB": {"x"}}
-        manager.clear_failed_impls()  # None → all
-        assert manager.get_failed_impls() == {}
-        manager.clear_failed_impls("never-had")  # unknown op: no error
-
-    @pytest.mark.supplementary
-    def test_get_failed_impls_scoping_and_copies(self):
-        """Per-op view returns a copy; mutating it does not affect state."""
-        manager = self._primed()
-        manager._failed_impls["opB"] = {"y"}
-        assert manager.get_failed_impls("opA") == {"opA": {"ref.one"}}
-        assert manager.get_failed_impls("missing") == {}
-        view = manager.get_failed_impls()
-        view["opA"].add("mutated")
-        assert manager.get_failed_impls("opA") == {"opA": {"ref.one"}}
-
-    @pytest.mark.supplementary
-    def test_registry_property(self):
-        """registry exposes the underlying registry instance."""
-        manager = OpManager()
-        assert manager.registry is manager._registry
-
-    @pytest.mark.supplementary
-    def test_default_manager_get_and_reset(self):
-        """get_default_manager caches; reset_default_manager clears."""
-        first = mgr_mod.get_default_manager()
-        assert mgr_mod.get_default_manager() is first
-        mgr_mod.reset_default_manager()
-        second = mgr_mod.get_default_manager()
-        assert second is not first
-
 
 class TestEnsureInitialized:
     """ensure_initialized: idempotence, re-init after fork, epoch bump."""
 
-    @pytest.mark.supplementary
     def test_idempotent_when_already_initialized(self, stubbed_vllm_platforms):
         """A second call in the same process is a no-op."""
         manager = OpManager()
@@ -352,7 +291,6 @@ class TestEnsureInitialized:
         assert set(manager._registry.snapshot().impls_by_op) == ops_before
         assert manager.policy_epoch == epoch_before
 
-    @pytest.mark.supplementary
     def test_initializes_and_bumps_epoch(self, stubbed_vllm_platforms):
         """First init registers builtins and bumps the policy epoch."""
         manager = OpManager()
@@ -367,7 +305,6 @@ class TestEnsureInitialized:
         # Every op has at least one implementation registered.
         assert all(impls for impls in snap.values())
 
-    @pytest.mark.supplementary
     def test_reinit_after_fork_reset(self, stubbed_vllm_platforms, caplog):
         """After a fork reset, ensure_initialized re-registers everything."""
         manager = OpManager()
@@ -383,7 +320,6 @@ class TestEnsureInitialized:
 class TestVendorFilters:
     """_matches_vendor_filters and _record_first_use."""
 
-    @pytest.mark.supplementary
     def test_non_vendor_kinds_pass_without_checks(self):
         """DEFAULT/REFERENCE impls skip vendor filtering entirely."""
         manager = OpManager()
@@ -401,7 +337,6 @@ class TestVendorFilters:
             is True
         )
 
-    @pytest.mark.supplementary
     def test_vendor_with_none_vendor_name_rejected(self):
         """A VENDOR impl with vendor=None is filtered out."""
         manager = OpManager()
@@ -410,53 +345,7 @@ class TestVendorFilters:
         object.__setattr__(impl, "vendor", None)  # simulate missing vendor
         assert manager._matches_vendor_filters(impl, policy) is False
 
-    @pytest.mark.supplementary
-    def test_deny_and_allow_lists(self):
-        """Deny removes; allow whitelists; None allow permits all."""
-        manager = OpManager()
-        impl = _make_impl("op", "vendor.cuda", BackendImplKind.VENDOR, vendor="cuda")
-        assert (
-            manager._matches_vendor_filters(
-                impl, SelectionPolicy.from_dict(deny_vendors={"cuda"})
-            )
-            is False
-        )
-        assert (
-            manager._matches_vendor_filters(
-                impl, SelectionPolicy.from_dict(deny_vendors={"ascend"})
-            )
-            is True
-        )
-        assert (
-            manager._matches_vendor_filters(
-                impl,
-                SelectionPolicy.from_dict(allow_vendors={"ascend"}),
-            )
-            is False
-        )
-        assert (
-            manager._matches_vendor_filters(
-                impl, SelectionPolicy.from_dict(allow_vendors={"cuda"})
-            )
-            is True
-        )
 
-    @pytest.mark.supplementary
-    def test_default_order_delegates_to_policy(self):
-        """_default_order forwards to the policy's get_default_order."""
-        manager = OpManager()
-        assert manager._default_order(SelectionPolicy()) == [
-            "flagos",
-            "vendor",
-            "reference",
-        ]
-        assert manager._default_order(SelectionPolicy(prefer=PREFER_VENDOR)) == [
-            "vendor",
-            "flagos",
-            "reference",
-        ]
-
-    @pytest.mark.supplementary
     def test_record_first_use_logs_first_and_switch(self, caplog):
         """First use logs 'using'; a change logs 'switched from'."""
         manager = OpManager()
@@ -480,7 +369,6 @@ class TestVendorFilters:
         assert len(messages) == 2
         assert manager._called_ops["op"] == "ref.two"
 
-    @pytest.mark.supplementary
     def test_record_first_use_marks_failed_impl(self):
         """_mark_failed_impl accumulates impl ids per op."""
         manager = OpManager()
@@ -493,7 +381,6 @@ class TestVendorFilters:
 class TestResolveEdges:
     """_resolve_impl / _compute_candidates / resolve_candidates error paths."""
 
-    @pytest.mark.supplementary
     def test_resolve_impl_strict_raise(self):
         """Strict + no matching candidate raises 'under strict policy'."""
         manager = OpManager()
@@ -514,7 +401,6 @@ class TestResolveEdges:
         finally:
             reset_global_policy()
 
-    @pytest.mark.supplementary
     def test_resolve_impl_no_token_match(self):
         """Candidates exist but none match the per-op order tokens."""
         manager = OpManager()
@@ -533,7 +419,6 @@ class TestResolveEdges:
         finally:
             reset_global_policy()
 
-    @pytest.mark.supplementary
     def test_compute_candidates_unavailable_and_raising(self):
         """Unavailable and raising-probe impls are both dropped."""
         manager = OpManager()
@@ -563,7 +448,6 @@ class TestResolveEdges:
         candidates = manager._compute_candidates("opy", SelectionPolicy())
         assert [c.impl_id for c in candidates] == ["ref.ok"]
 
-    @pytest.mark.supplementary
     def test_compute_candidates_none_available_raises(self):
         """Zero available candidates raises 'No available implementation'."""
         manager = OpManager()
@@ -575,7 +459,6 @@ class TestResolveEdges:
         with pytest.raises(RuntimeError, match="No available implementation"):
             manager._compute_candidates("opz", SelectionPolicy())
 
-    @pytest.mark.supplementary
     def test_resolve_candidates_dedup_and_no_match(self, stubbed_vllm_platforms):
         """resolve_candidates dedups across tokens and raises when empty."""
         manager = OpManager()
@@ -601,7 +484,6 @@ class TestResolveEdges:
         finally:
             reset_global_policy()
 
-    @pytest.mark.supplementary
     def test_resolve_returns_fn_and_selected_impl_id(self):
         """resolve() returns the callable; get_selected_impl_id its id."""
         manager = OpManager()
@@ -627,7 +509,6 @@ class TestCallFallbackFlow:
             manager._registry.register_impl(impl)
         return manager
 
-    @pytest.mark.supplementary
     def test_call_falls_back_and_updates_called_ops(self, caplog):
         """Primary failure warns; fallback succeeds and updates _called_ops."""
 
@@ -653,7 +534,6 @@ class TestCallFallbackFlow:
         assert manager._called_ops["opc"] == "ref.fallback"
         assert manager.get_failed_impls("opc") == {"opc": {"flagos.primary"}}
 
-    @pytest.mark.supplementary
     def test_call_all_fail_raises_with_cause(self, caplog):
         """Every candidate failing raises RuntimeError chained to the last."""
 
@@ -684,7 +564,6 @@ class TestCallFallbackFlow:
         assert isinstance(excinfo.value.__cause__, ValueError)
         assert str(excinfo.value.__cause__) == "two failed"
 
-    @pytest.mark.supplementary
     def test_call_all_previously_failed(self):
         """When every impl already failed before, call raises immediately."""
 
@@ -699,7 +578,6 @@ class TestCallFallbackFlow:
         with pytest.raises(RuntimeError, match="have failed previously"):
             manager.call("ope")
 
-    @pytest.mark.supplementary
     def test_call_strict_raises_original(self):
         """In strict mode the primary's original exception propagates."""
 
@@ -716,7 +594,6 @@ class TestCallFallbackFlow:
         # The fallback was never attempted (and never recorded as failed).
         assert manager.get_failed_impls("opf") == {}
 
-    @pytest.mark.supplementary
     def test_call_success_records_default_flagos_op(self, tmp_path):
         """A successful DEFAULT impl call records into the flagos oplist."""
         handler = logging.FileHandler(tmp_path / "op.txt", mode="w", encoding="utf-8")
@@ -740,13 +617,11 @@ class TestCallFallbackFlow:
 class TestCallWithHooks:
     """_call_with_hooks dump integration and the fn-raise cleanup path."""
 
-    @pytest.mark.supplementary
     def test_hooks_disabled_passthrough(self):
         """Without dumping, _call_with_hooks is a plain fn call."""
         manager = OpManager()
         assert manager._call_with_hooks("op", lambda a, b: a + b, (1, 2), {}) == 3
 
-    @pytest.mark.supplementary
     def test_hooks_with_dump_enabled(self, tmp_path):
         """With dumping on, exec_order/op_tag land in the JSON metadata."""
         from vllm_fl.dispatch import io_common, io_dumper
@@ -785,7 +660,6 @@ class TestCallWithHooks:
         finally:
             io_dumper.disable_io_dump()
 
-    @pytest.mark.supplementary
     def test_hooks_cleanup_pairing_on_fn_raise(self, tmp_path):
         """A raising fn triggers dump_cleanup so no stale pairing remains."""
         from vllm_fl.dispatch import io_dumper
@@ -808,7 +682,6 @@ class TestCallWithHooks:
 class TestSelectionPolicy:
     """SelectionPolicy normalization, orders, vendor gates, fingerprint."""
 
-    @pytest.mark.supplementary
     def test_from_dict_normalizes_and_sorts(self):
         """prefer lowercases; per_op_order becomes a sorted tuple-of-tuples."""
         policy = SelectionPolicy.from_dict(
@@ -825,7 +698,6 @@ class TestSelectionPolicy:
         assert policy.deny_vendors == frozenset({"nvidia"})
         assert policy.allow_vendors == frozenset({"cuda"})
 
-    @pytest.mark.supplementary
     def test_from_dict_empty_collections(self):
         """Empty/None deny/allow collapse to empty frozenset / None."""
         policy = SelectionPolicy.from_dict(deny_vendors=[], allow_vendors=[])
@@ -833,13 +705,11 @@ class TestSelectionPolicy:
         assert policy.allow_vendors is None
         assert policy.per_op_order == ()
 
-    @pytest.mark.supplementary
     def test_invalid_prefer_raises(self):
         """__post_init__ rejects anything outside VALID_PREFER_VALUES."""
         with pytest.raises(ValueError, match="Invalid prefer value: 'bogus'"):
             SelectionPolicy(prefer="bogus")
 
-    @pytest.mark.supplementary
     def test_per_op_order_dict_and_lookup(self):
         """per_op_order_dict copies; get_per_op_order finds or misses."""
         policy = SelectionPolicy.from_dict(
@@ -852,26 +722,6 @@ class TestSelectionPolicy:
         assert policy.get_per_op_order("opA") == ["flagos", "reference"]
         assert policy.get_per_op_order("missing") is None
 
-    @pytest.mark.supplementary
-    def test_get_default_order_all_prefers(self):
-        """Each prefer maps to its documented kind order."""
-        assert SelectionPolicy().get_default_order() == [
-            "flagos",
-            "vendor",
-            "reference",
-        ]
-        assert SelectionPolicy(prefer=PREFER_REFERENCE).get_default_order() == [
-            "reference",
-            "flagos",
-            "vendor",
-        ]
-        assert SelectionPolicy(prefer=PREFER_VENDOR).get_default_order() == [
-            "vendor",
-            "flagos",
-            "reference",
-        ]
-
-    @pytest.mark.supplementary
     def test_is_vendor_allowed_matrix(self):
         """Deny always wins; allow-list gates when present; default allows."""
         policy = SelectionPolicy.from_dict(
@@ -887,7 +737,6 @@ class TestSelectionPolicy:
         assert deny_only.is_vendor_allowed("cuda") is True
         assert deny_only.is_vendor_allowed("npu") is False
 
-    @pytest.mark.supplementary
     def test_fingerprint_sections(self):
         """Fingerprint lists only the non-empty sections, in fixed order."""
         base = SelectionPolicy()
@@ -905,7 +754,6 @@ class TestSelectionPolicy:
         unsorted = SelectionPolicy.from_dict(deny_vendors={"z", "m"})
         assert "deny=m,z" in unsorted.fingerprint()
 
-    @pytest.mark.supplementary
     def test_hash_and_equality(self):
         """Two identically-built policies hash and compare equal."""
         one = SelectionPolicy.from_dict(
@@ -932,7 +780,6 @@ class TestSelectionPolicy:
 class TestPolicyManager:
     """PolicyManager singleton lifecycle and epoch bookkeeping."""
 
-    @pytest.mark.supplementary
     def test_init_reentry_guard(self):
         """Re-calling __init__ on the singleton keeps existing state."""
         manager = PolicyManager.get_instance()
@@ -940,12 +787,10 @@ class TestPolicyManager:
         manager.__init__()  # re-entry guard: no reset
         assert manager.get_policy_epoch() == epoch_before
 
-    @pytest.mark.supplementary
     def test_singleton_identity(self):
         """get_instance always returns the same object."""
         assert PolicyManager.get_instance() is PolicyManager.get_instance()
 
-    @pytest.mark.supplementary
     def test_epoch_bump_increments(self):
         """bump_policy_epoch returns the new value each time."""
         manager = PolicyManager.get_instance()
@@ -955,7 +800,6 @@ class TestPolicyManager:
         assert first == before + 1
         assert second == before + 2
 
-    @pytest.mark.supplementary
     def test_global_policy_set_and_reset(self):
         """set_global_policy returns the old policy; reset falls back to env."""
         manager = PolicyManager.get_instance()
@@ -969,7 +813,6 @@ class TestPolicyManager:
         assert after is not marker
         assert after == env_derived
 
-    @pytest.mark.supplementary
     def test_policy_context_precedence_and_epoch(self):
         """Context policies beat the global one; epochs bump on enter/exit."""
         manager = PolicyManager.get_instance()
@@ -993,20 +836,17 @@ class TestPolicyManager:
 class TestPolicyParsers:
     """_parse_csv_set, _parse_per_op and _parse_op_config oracles."""
 
-    @pytest.mark.supplementary
     def test_parse_csv_set(self):
         """Empty string → empty set; items stripped and de-blanked."""
         assert PolicyManager._parse_csv_set("") == set()
         assert PolicyManager._parse_csv_set(" a , b ,, c ") == {"a", "b", "c"}
 
-    @pytest.mark.supplementary
     def test_parse_per_op(self):
         """Malformed segments (no '=', blank op, empty order) are skipped."""
         parsed = PolicyManager._parse_per_op("op1=a|b|c;op2=x|y;junk;=empty;op3=")
         assert parsed == {"op1": ["a", "b", "c"], "op2": ["x", "y"]}
         assert PolicyManager._parse_per_op("") == {}
 
-    @pytest.mark.supplementary
     def test_parse_op_config_valid(self):
         """Each op maps to a single-element order of the lowercased backend."""
         parsed = PolicyManager._parse_op_config(
@@ -1014,7 +854,6 @@ class TestPolicyParsers:
         )
         assert parsed == {"rms_norm": ["reference"], "silu": ["vendor"]}
 
-    @pytest.mark.supplementary
     def test_parse_op_config_invalid_backend(self):
         """An unknown backend token raises with the offending values."""
         with pytest.raises(ValueError, match="Unsupported backend 'nope' for op 'op'."):
@@ -1024,7 +863,6 @@ class TestPolicyParsers:
 class TestPolicyFromConfig:
     """_policy_from_config parsing branches via tmp_path YAML files."""
 
-    @pytest.mark.supplementary
     def test_missing_file_raises(self):
         """A nonexistent config path raises FileNotFoundError verbatim."""
         with pytest.raises(
@@ -1033,7 +871,6 @@ class TestPolicyFromConfig:
         ):
             PolicyManager.get_instance()._policy_from_config("definitely/missing.yaml")
 
-    @pytest.mark.supplementary
     def test_invalid_yaml_raises_valueerror(self, tmp_path):
         """Unparseable YAML surfaces as ValueError with the path."""
         bad = tmp_path / "bad.yaml"
@@ -1041,7 +878,6 @@ class TestPolicyFromConfig:
         with pytest.raises(ValueError, match="Failed to load config file"):
             policy_from_config(str(bad))
 
-    @pytest.mark.supplementary
     def test_invalid_prefer_falls_back_to_default(self, tmp_path):
         """An unknown prefer string is replaced with 'flagos'."""
         cfg = tmp_path / "cfg.yaml"
@@ -1049,7 +885,6 @@ class TestPolicyFromConfig:
         policy = policy_from_config(str(cfg))
         assert policy.prefer == PREFER_DEFAULT
 
-    @pytest.mark.supplementary
     def test_deny_allow_as_list_and_csv(self, tmp_path):
         """deny/allow accept both YAML lists and csv strings."""
         as_list = tmp_path / "list.yaml"
@@ -1070,7 +905,6 @@ class TestPolicyFromConfig:
         assert policy.deny_vendors == frozenset({"ascend", "npu"})
         assert policy.allow_vendors == frozenset({"cuda", "rocm"})
 
-    @pytest.mark.supplementary
     def test_op_backends_list_and_string(self, tmp_path):
         """op_backends accept YAML lists and 'vendor:cuda|flagos' strings."""
         as_list = tmp_path / "list.yaml"
@@ -1088,7 +922,6 @@ class TestPolicyFromConfig:
             "silu_and_mul": ["vendor:cuda", "flagos"],
         }
 
-    @pytest.mark.supplementary
     def test_empty_and_partial_config(self, tmp_path):
         """An empty file yields defaults; missing sections stay default."""
         empty = tmp_path / "empty.yaml"
@@ -1100,7 +933,6 @@ class TestPolicyFromConfig:
 class TestPolicyFromEnv:
     """_policy_from_env priority: config > env > platform > default."""
 
-    @pytest.mark.supplementary
     def test_config_file_completely_overrides(self, tmp_path, monkeypatch):
         """VLLM_FL_CONFIG wins over every env var set alongside it."""
         cfg = tmp_path / "full.yaml"
@@ -1112,7 +944,6 @@ class TestPolicyFromEnv:
         assert policy.prefer == "reference"
         assert policy.strict is True
 
-    @pytest.mark.supplementary
     def test_platform_config_used_as_base(self, monkeypatch):
         """The platform config feeds prefer/allow/per-op defaults.
 
@@ -1135,7 +966,6 @@ class TestPolicyFromEnv:
         assert "attention_backend" in per_op
         assert "rms_norm" in per_op
 
-    @pytest.mark.supplementary
     def test_invalid_strict_warns_and_defaults(self, monkeypatch, caplog):
         """A non-0/1 VLLM_FL_STRICT warns and falls back to False."""
         monkeypatch.setenv("VLLM_FL_STRICT", "yes")
@@ -1147,7 +977,6 @@ class TestPolicyFromEnv:
             for r in caplog.records
         )
 
-    @pytest.mark.supplementary
     def test_env_vars_override_platform(self, monkeypatch):
         """VLLM_FL_PREFER / DENY / ALLOW / PER_OP beat the platform file."""
         monkeypatch.setenv("VLLM_FL_PREFER", "reference")
@@ -1160,7 +989,6 @@ class TestPolicyFromEnv:
         assert policy.allow_vendors == frozenset({"cuda"})
         assert policy.per_op_order_dict == {"my_op": ["reference", "flagos"]}
 
-    @pytest.mark.supplementary
     def test_defaults_without_any_env(self, monkeypatch):
         """With a clean environment the built-in defaults come back.
 
@@ -1180,7 +1008,6 @@ class TestPolicyFromEnv:
 class TestPolicyContextManagers:
     """Module-level convenience context managers."""
 
-    @pytest.mark.supplementary
     def test_with_strict_mode_toggles(self):
         """with_strict_mode keeps the current prefer and adds strict.
 
@@ -1196,7 +1023,6 @@ class TestPolicyContextManagers:
             assert active.prefer == PREFER_DEFAULT
         assert get_policy().strict is before
 
-    @pytest.mark.supplementary
     def test_with_preference_switches(self):
         """with_preference swaps only the prefer field.
 
@@ -1209,7 +1035,6 @@ class TestPolicyContextManagers:
             assert get_policy().prefer == "reference"
         assert get_policy().prefer == before
 
-    @pytest.mark.supplementary
     def test_with_allowed_vendors_replaces_allowlist(self):
         """with_allowed_vendors replaces the allow set wholesale.
 
@@ -1223,7 +1048,6 @@ class TestPolicyContextManagers:
             assert get_policy().allow_vendors == frozenset({"cuda", "rocm"})
         assert get_policy().allow_vendors == before
 
-    @pytest.mark.supplementary
     def test_with_denied_vendors_unions(self):
         """with_denied_vendors adds to the existing deny set (union).
 
@@ -1236,7 +1060,6 @@ class TestPolicyContextManagers:
             assert get_policy().deny_vendors == frozenset({"npu", "ascend"})
         assert get_policy().deny_vendors == before
 
-    @pytest.mark.supplementary
     def test_contexts_nest_and_restore(self):
         """Nested contexts unwind LIFO back to the base policy."""
         base = get_policy()

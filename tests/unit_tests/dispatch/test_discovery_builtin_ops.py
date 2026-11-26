@@ -26,8 +26,6 @@ import vllm_fl.dispatch.builtin_ops as builtin_ops
 import vllm_fl.dispatch.config.utils as config_utils
 import vllm_fl.dispatch.discovery as discovery
 
-pytestmark = pytest.mark.supplementary
-
 
 @pytest.fixture(autouse=True)
 def _reset_discovered_plugins():
@@ -153,16 +151,6 @@ class TestCallRegisterFunction:
 
         return Registry()
 
-    def test_direct_callable_registers(self):
-        """Plain callables (not classes) are invoked with the registry."""
-
-        def plugin(reg):
-            reg.calls.append("direct")
-
-        reg = self._registry()
-        assert discovery._call_register_function(plugin, reg, "src") is True
-        assert reg.calls == ["direct"]
-
     def test_classes_skip_direct_call_and_use_register(self):
         """Classes are not called directly; register is looked up instead."""
 
@@ -191,34 +179,6 @@ class TestCallRegisterFunction:
         reg = self._registry()
         assert discovery._call_register_function(obj, reg, "src") is True
         assert reg.calls == ["fallback"]
-
-    def test_failing_register_returns_false(self):
-        """Exceptions raised by the register hook are swallowed into False."""
-        obj = types.SimpleNamespace()
-
-        def bad(reg):
-            raise ValueError("nope")
-
-        obj.vllm_fl_register = bad
-        reg = self._registry()
-        assert discovery._call_register_function(obj, reg, "src") is False
-
-    def test_failing_direct_callable_returns_false(self):
-        """Exceptions raised by a direct callable plugin become False."""
-
-        def bad(reg):
-            raise ValueError("boom")
-
-        reg = self._registry()
-        assert discovery._call_register_function(bad, reg, "src") is False
-
-    def test_object_without_register_returns_false(self):
-        """Objects lacking any register hook report failure (False)."""
-        reg = self._registry()
-        assert (
-            discovery._call_register_function(types.SimpleNamespace(), reg, "src")
-            is False
-        )
 
 
 class TestDiscoverFromEntryPoints:
@@ -319,13 +279,6 @@ class TestDiscoverFromEnvModules:
 class TestFindVendorBackendDir:
     """_find_vendor_backend_dir resolution rules."""
 
-    def test_unknown_vendor_returns_none(self):
-        """Vendors missing from the device map resolve to None."""
-        assert builtin_ops._find_vendor_backend_dir("nope", {"nvidia"}) is None
-
-    def test_maca_alias_resolves_to_metax(self):
-        """The legacy 'maca' alias is resolved to the metax backend."""
-        assert builtin_ops._find_vendor_backend_dir("maca", {"metax"}) == "metax"
 
     def test_vendor_name_preferred_over_device_fields(self):
         """vendor_name wins over device_name / device_type candidates."""

@@ -35,7 +35,6 @@ import torch
 
 from vllm_fl.dispatch.backends.reference import ReferenceBackend
 
-pytestmark = pytest.mark.supplementary
 
 
 @pytest.fixture

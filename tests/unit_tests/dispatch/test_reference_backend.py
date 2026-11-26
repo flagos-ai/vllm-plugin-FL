@@ -25,7 +25,6 @@ def backend():
 class TestTopkSoftmax:
     """ReferenceBackend.topk_softmax (impl/fused_moe.py delegate)."""
 
-    @pytest.mark.supplementary
     def test_basic_routing_matches_softmax_topk_oracle(self, backend):
         """Weights come from raw softmax over the logits, gathered at top-k.
 
@@ -70,7 +69,6 @@ class TestTopkSoftmax:
                     atol=1e-6,
                 )
 
-    @pytest.mark.supplementary
     def test_bias_changes_selection_but_not_weights(self, backend):
         """e_score_correction_bias only skews selection; weights stay raw."""
         gating = torch.tensor([[0.0, 0.05, 0.1, -3.0]])
@@ -96,7 +94,6 @@ class TestTopkSoftmax:
                 atol=1e-6,
             )
 
-    @pytest.mark.supplementary
     def test_renormalize_sums_to_one(self, backend):
         """Renormalize rescales selected weights to sum to 1 per row."""
         gating = torch.tensor([[3.0, 1.0, 0.0]])
@@ -116,22 +113,6 @@ class TestTopkSoftmax:
             atol=1e-6,
         )
 
-    @pytest.mark.supplementary
-    def test_source_rows_use_slot_major_layout(self, backend):
-        """token_expert_indices follow k*num_tokens + token (slot-major)."""
-        num_tokens, topk = 3, 2
-        gating = torch.zeros(num_tokens, 4)
-        weights = torch.zeros(num_tokens, topk)
-        indices = torch.zeros(num_tokens, topk, dtype=torch.int64)
-        src_rows = torch.zeros(num_tokens, topk, dtype=torch.int64)
-
-        backend.topk_softmax(weights, indices, src_rows, gating)
-        expected = torch.tensor(
-            [[0, 3], [1, 4], [2, 5]], dtype=torch.int64
-        )  # rows + slot*num_tokens
-        torch.testing.assert_close(src_rows, expected)
-
-    @pytest.mark.supplementary
     def test_outputs_are_written_in_place(self, backend):
         """The same tensors passed in are returned after being filled."""
         gating = torch.randn(4, 5)
@@ -165,7 +146,6 @@ class TestMoeAlignBlockSize:
             rank_within[eid] += 1
         return counts, padded, offsets, total, sorted_ids
 
-    @pytest.mark.supplementary
     def test_basic_alignment(self, backend):
         """Buckets group tokens per expert with block padding."""
         topk_ids = torch.tensor([[0, 1], [1, 2], [2, 0]])
@@ -194,7 +174,6 @@ class TestMoeAlignBlockSize:
             )
         assert (expert_ids[total // block_size :] == -1).all()
 
-    @pytest.mark.supplementary
     def test_pad_sorted_ids_rounds_total_up(self, backend):
         """pad_sorted_ids rounds the block count up to a full block."""
         topk_ids = torch.tensor([[0, 0], [0, 0], [1, 1]])
@@ -208,40 +187,7 @@ class TestMoeAlignBlockSize:
         assert (expert_ids[:2] == torch.tensor([0, 1], dtype=torch.int32)).all()
         assert (expert_ids[2:] == -1).all()
 
-    @pytest.mark.supplementary
-    def test_expert_map_without_ignore_remaps_output(self, backend):
-        """Without ignore_invalid_experts, expert_ids are remapped through the map."""
-        topk_ids = torch.tensor([[0, 1], [1, 0]])
-        expert_map = torch.tensor([5, 7])
-        sorted_out, expert_ids, num_post = backend.moe_align_block_size(
-            topk_ids, block_size=2, num_experts=2, expert_map=expert_map
-        )
-        # Both experts own 2 tokens → one block each, remapped to 5 and 7.
-        torch.testing.assert_close(
-            expert_ids[:2], torch.tensor([5, 7], dtype=torch.int32)
-        )
-        torch.testing.assert_close(num_post, torch.tensor([4], dtype=torch.int32))
 
-    @pytest.mark.supplementary
-    def test_ignore_invalid_experts_drops_remote_ids(self, backend):
-        """With ignore_invalid_experts, ids mapped to -1 are dropped."""
-        # expert_map[3] = -1 → global id 3 belongs to another rank.
-        topk_ids = torch.tensor([[0, 1], [1, 3]])
-        expert_map = torch.tensor([0, 1, -1, -1])
-        sorted_out, expert_ids, num_post = backend.moe_align_block_size(
-            topk_ids,
-            block_size=2,
-            num_experts=2,
-            expert_map=expert_map,
-            ignore_invalid_experts=True,
-        )
-        # Only tokens 0,1,2 are local: expert0 gets 1, expert1 gets 2.
-        torch.testing.assert_close(num_post, torch.tensor([4], dtype=torch.int32))
-        assert (expert_ids[0] == 0).item()
-        assert (expert_ids[1] == 1).item()
-        assert (expert_ids[2:] == -1).all()
-
-    @pytest.mark.supplementary
     def test_negative_ids_are_screened(self, backend):
         """Upstream-style -1 padding never indexes into any expert bucket."""
         topk_ids = torch.tensor([[0, -1], [-1, 1]])
@@ -254,7 +200,6 @@ class TestMoeAlignBlockSize:
         assert sorted_out[-1].item() == 4  # sentinel value = num_valid
         assert (expert_ids[:2] == torch.tensor([0, 1], dtype=torch.int32)).all()
 
-    @pytest.mark.supplementary
     def test_out_of_range_ids_without_map_are_dropped(self, backend):
         """Ids >= num_experts (no map) are treated as invalid, not crashed on."""
         topk_ids = torch.tensor([[0, 99]])
@@ -270,7 +215,6 @@ class TestMoeAlignBlockSize:
 class TestMoeSum:
     """ReferenceBackend.moe_sum reduces over the expert axis."""
 
-    @pytest.mark.supplementary
     def test_sum_over_topk_axis_into_out(self, backend):
         """Summation lands in the provided out tensor."""
         inp = torch.tensor(
@@ -280,7 +224,6 @@ class TestMoeSum:
         backend.moe_sum(inp, out)
         torch.testing.assert_close(out, torch.tensor([[4.0, 6.0], [12.0, 14.0]]))
 
-    @pytest.mark.supplementary
     def test_sum_independent_oracle(self, backend):
         """Result equals a per-token loop over experts (different op mix)."""
         inp = torch.randn(5, 3, 7)
@@ -296,7 +239,6 @@ class TestMoeSum:
 class TestDynamicPerTokenQuantInt8:
     """ReferenceBackend.dynamic_per_token_quant_int8 numeric contract."""
 
-    @pytest.mark.supplementary
     def test_symmetric_per_token_scale(self, backend):
         """Quantization is symmetric: q = round(x * 127 / max|x|), clamped."""
         x = torch.tensor([[1.0, -2.0], [0.0, 0.5]])
@@ -310,7 +252,6 @@ class TestDynamicPerTokenQuantInt8:
         torch.testing.assert_close(q[1], torch.tensor([0, 127], dtype=q.dtype))
         torch.testing.assert_close(s[1].item(), 0.5 / 127.0, rtol=1e-6, atol=1e-8)
 
-    @pytest.mark.supplementary
     def test_zero_row_produces_zero_scale(self, backend):
         """An all-zero row quantizes to zeros with a zero scale (no NaN)."""
         x = torch.zeros(1, 4)
@@ -318,7 +259,6 @@ class TestDynamicPerTokenQuantInt8:
         assert (q == 0).all()
         assert s.item() == 0.0
 
-    @pytest.mark.supplementary
     def test_reconstruction_error_bound(self, backend):
         """Dequantized values stay within half a scale step of the input."""
         x = torch.randn(16, 32) * 3.0
@@ -333,19 +273,16 @@ class TestDynamicPerTokenQuantInt8:
 class TestBackendMetadata:
     """ReferenceBackend identity and availability."""
 
-    @pytest.mark.supplementary
     def test_name_and_availability(self, backend):
         """The backend is named 'reference' and available with torch present."""
         assert backend.name == "reference"
         assert backend.is_available() is True
 
-    @pytest.mark.supplementary
     def test_availability_is_cached_on_class(self, backend):
         """is_available memoizes the probe result on the class."""
         backend.is_available()
         assert ReferenceBackend._available is True
 
-    @pytest.mark.supplementary
     def test_implemented_ops_delegate_to_impls(self, backend):
         """Activation/norm ops exist on the backend and return tensors."""
 

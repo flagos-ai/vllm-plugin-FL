@@ -3,10 +3,14 @@
 """CPU numeric tests for reference backend impl helpers.
 
 These tests cover ``vllm_fl/dispatch/backends/reference/impl/*`` directly:
-rotary embedding (both layouts plus every validation error), RMS norm flag
-combinations, and activation ``approximate`` handling.  All expectations are
-computed with independent oracles that spell the math out differently from
-the implementation.
+rotary embedding (both layouts plus every validation error), the RMS norm
+bf16 round-trip, and activation ``approximate`` handling.  All expectations
+are computed with independent oracles that spell the math out differently
+from the implementation.
+
+The basic/residual/variance-size/weight-flag RMS norm paths and the 4D
+rotary layouts are covered by ``tests/unit_tests/ops/test_numerical.py``
+and are deliberately not duplicated here.
 """
 
 import math
@@ -73,7 +77,6 @@ def _interleaved_oracle(x, cos_sel, sin_sel):
 class TestRotaryEmbedding:
     """rotary_embedding_torch numeric contract for NeoX and interleaved."""
 
-    @pytest.mark.supplementary
     @pytest.mark.parametrize("interleaved", [False, True])
     def test_3d_inputs_match_style_oracle(self, interleaved):
         """3D [seq, heads, dim] inputs match the layout-matching oracle."""
@@ -98,44 +101,7 @@ class TestRotaryEmbedding:
             k_out, oracle(k, cos_sel, sin_sel), rtol=1e-5, atol=1e-6
         )
 
-    @pytest.mark.supplementary
-    def test_4d_shared_positions_broadcast(self):
-        """4D with 1D positions applies the same rotation to every batch."""
-        batch, heads, seq, head_dim = 2, 3, 5, 6
-        torch.manual_seed(1)
-        q = torch.randn(batch, heads, seq, head_dim)
-        k = torch.randn(batch, heads, seq, head_dim)
-        pos = torch.arange(seq)
-        cos, sin = _rotary_cache(head_dim, seq)
 
-        q_out, k_out = rotary_embedding_torch(_RotaryObj(), q, k, cos, sin, pos)
-        cos_sel = cos[pos].unsqueeze(0).unsqueeze(0)
-        sin_sel = sin[pos].unsqueeze(0).unsqueeze(0)
-        torch.testing.assert_close(
-            q_out, _neox_oracle(q, cos_sel, sin_sel), rtol=1e-5, atol=1e-6
-        )
-        torch.testing.assert_close(
-            k_out, _neox_oracle(k, cos_sel, sin_sel), rtol=1e-5, atol=1e-6
-        )
-
-    @pytest.mark.supplementary
-    def test_4d_batched_positions(self):
-        """4D with [batch, seq] positions rotates each batch independently."""
-        batch, heads, seq, head_dim = 2, 2, 4, 6
-        torch.manual_seed(2)
-        q = torch.randn(batch, heads, seq, head_dim)
-        k = torch.randn(batch, heads, seq, head_dim)
-        pos = torch.tensor([[0, 1, 2, 3], [3, 2, 1, 0]])
-        cos, sin = _rotary_cache(head_dim, seq)
-
-        q_out, _ = rotary_embedding_torch(_RotaryObj(), q, k, cos, sin, pos)
-        cos_sel = cos[pos].unsqueeze(1)
-        sin_sel = sin[pos].unsqueeze(1)
-        torch.testing.assert_close(
-            q_out, _neox_oracle(q, cos_sel, sin_sel), rtol=1e-5, atol=1e-6
-        )
-
-    @pytest.mark.supplementary
     def test_full_width_cache_needs_no_expansion(self):
         """A cache already head_dim wide is used as-is (no cat/repeat)."""
         seq, heads, head_dim = 3, 1, 8
@@ -157,7 +123,6 @@ class TestRotaryEmbedding:
         expected = q * cos_sel + rot * sin_sel
         torch.testing.assert_close(q_out, expected, rtol=1e-5, atol=1e-6)
 
-    @pytest.mark.supplementary
     def test_interleaved_uses_adjacent_coordinate_pairs(self):
         """Hand-computed check: interleaved rotation swaps (even, odd) pairs."""
         # head_dim=2 with a width-1 cache: repeat_interleave gives c=[1,1].
@@ -182,7 +147,6 @@ class TestRotaryEmbedding:
             q_out2, torch.tensor([[[-2.0, 1.0]]]), rtol=1e-6, atol=1e-7
         )
 
-    @pytest.mark.supplementary
     def test_neox_uses_half_offset_pairs(self):
         """Hand-computed check: NeoX rotation pairs (i, i+d/2)."""
         # head_dim=2, width-1 cache duplicated to [c, c] by the impl.
@@ -198,7 +162,6 @@ class TestRotaryEmbedding:
             q_out, torch.tensor([[[-4.0, 3.0]]]), rtol=1e-6, atol=1e-7
         )
 
-    @pytest.mark.supplementary
     def test_cos_sin_promoted_to_query_dtype(self):
         """Float64 cos/sin still produce float32 outputs for float32 inputs."""
         seq, head_dim = 2, 4
@@ -211,7 +174,6 @@ class TestRotaryEmbedding:
         )
         assert q_out.dtype == torch.float32 and k_out.dtype == torch.float32
 
-    @pytest.mark.supplementary
     @pytest.mark.parametrize(
         ("mutate", "message"),
         [
@@ -269,7 +231,6 @@ class TestRotaryEmbedding:
         with pytest.raises(ValueError, match=message):
             rotary_embedding_torch(_RotaryObj(), q2, k2, c2, s2, p2)
 
-    @pytest.mark.supplementary
     def test_4d_bad_position_shape_raises(self):
         """4D inputs with mis-shaped positions are rejected."""
         q = torch.randn(2, 1, 3, 8)
@@ -279,7 +240,6 @@ class TestRotaryEmbedding:
         with pytest.raises(ValueError, match="position_ids"):
             rotary_embedding_torch(_RotaryObj(), q, k, cos, sin, pos)
 
-    @pytest.mark.supplementary
     def test_4d_mismatched_batch_raises(self):
         """4D query/key with different batch sizes are rejected."""
         q = torch.randn(2, 1, 3, 8)
@@ -293,78 +253,7 @@ class TestRotaryEmbedding:
 class TestRmsNorm:
     """rms_norm_torch flag combinations with independent oracles."""
 
-    @pytest.mark.supplementary
-    def test_basic_norm_matches_manual_oracle(self):
-        """Output = x / rms(x) * weight computed in float32."""
-        x = torch.tensor([[3.0, -4.0], [0.0, 0.0]])
-        weight = torch.tensor([2.0, 0.5])
-        obj = _NormObj(weight)
 
-        out = rms_norm_torch(obj, x)
-        for row in range(2):
-            vals = x[row].tolist()
-            ms = sum(v * v for v in vals) / len(vals)
-            denom = math.sqrt(ms + 1e-6)
-            for col in range(2):
-                expected = vals[col] / denom * weight[col].item()
-                torch.testing.assert_close(
-                    out[row, col].item(), expected, rtol=1e-5, atol=1e-6
-                )
-
-    @pytest.mark.supplementary
-    def test_residual_add_and_return(self):
-        """With a residual, x+residual is normalized and returned as residual."""
-        x = torch.tensor([[1.0, 2.0]])
-        residual = torch.tensor([[0.5, -0.5]])
-        weight = torch.ones(2)
-        obj = _NormObj(weight)
-
-        out, new_residual = rms_norm_torch(obj, x, residual)
-        torch.testing.assert_close(new_residual, x + residual)
-        combined = x + residual
-        ms = combined.square().mean()
-        expected = combined * torch.rsqrt(ms + 1e-6) * weight
-        torch.testing.assert_close(out, expected, rtol=1e-5, atol=1e-6)
-
-    @pytest.mark.supplementary
-    def test_variance_size_override_limits_stats(self):
-        """variance_size_override computes stats over a leading slice only."""
-        x = torch.tensor([[2.0, 2.0, 100.0, 100.0]])
-        weight = torch.ones(4)
-        obj = _NormObj(weight, variance_size_override=2)
-
-        out = rms_norm_torch(obj, x)
-        # Variance over the first 2 coords (both 2.0) → x/sqrt(4+eps).
-        expected = x / math.sqrt(4.0 + 1e-6)
-        torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-5)
-
-    @pytest.mark.supplementary
-    def test_pass_weight_false_skips_weight(self):
-        """pass_weight=False returns the unweighted normalized tensor."""
-        x = torch.tensor([[3.0, -4.0]])
-        weight = torch.tensor([100.0, 100.0])
-        obj = _NormObj(weight, pass_weight=False)
-
-        out = rms_norm_torch(obj, x)
-        ms = x.square().mean()
-        expected = x * torch.rsqrt(ms + 1e-6)
-        torch.testing.assert_close(out, expected, rtol=1e-5, atol=1e-6)
-
-    @pytest.mark.supplementary
-    def test_pass_weight_add_false_skips_weight_with_residual(self):
-        """pass_weight_add=False skips weighting on the residual path."""
-        x = torch.tensor([[1.0, 1.0]])
-        residual = torch.tensor([[1.0, 1.0]])
-        weight = torch.tensor([10.0, 10.0])
-        obj = _NormObj(weight, pass_weight_add=False)
-
-        out, new_residual = rms_norm_torch(obj, x, residual)
-        torch.testing.assert_close(new_residual, torch.tensor([[2.0, 2.0]]))
-        combined = torch.tensor([[2.0, 2.0]])
-        expected = combined * torch.rsqrt(combined.square().mean() + 1e-6)
-        torch.testing.assert_close(out, expected, rtol=1e-5, atol=1e-6)
-
-    @pytest.mark.supplementary
     def test_bfloat16_roundtrip(self):
         """bf16 inputs return bf16 outputs computed via float32 internally."""
         x = torch.randn(3, 8, dtype=torch.bfloat16)
@@ -384,7 +273,6 @@ class TestRmsNorm:
 class TestActivations:
     """silu_and_mul_torch / gelu_and_mul_torch contracts."""
 
-    @pytest.mark.supplementary
     def test_silu_and_mul_split_and_multiply(self):
         """First half passes SiLU, second half multiplies element-wise."""
         x = torch.tensor([[1.0, 2.0, -1.0, 0.5]])
@@ -395,7 +283,6 @@ class TestActivations:
             out, torch.tensor([[silu_1 * -1.0, silu_2 * 0.5]]), rtol=1e-5, atol=1e-6
         )
 
-    @pytest.mark.supplementary
     def test_gelu_approximate_none_and_tanh(self):
         """approximate is read from obj; none/tanh produce different values."""
         # head_dim=4: first half [0.7, 1.3] activates, second half multiplies.
@@ -437,7 +324,6 @@ class TestActivations:
         # The two approximations genuinely differ at this point.
         assert not torch.equal(out_none, out_tanh)
 
-    @pytest.mark.supplementary
     def test_gelu_default_approximate_when_obj_lacks_attr(self):
         """An obj without `approximate` (or None) defaults to 'none'."""
         x = torch.tensor([[0.5, 1.0, 0.25, -0.75]])
@@ -454,7 +340,6 @@ class TestActivations:
         out_bare = gelu_and_mul_torch(Bare(), x)
         torch.testing.assert_close(out, out_bare)
 
-    @pytest.mark.supplementary
     def test_activations_handle_3d_inputs(self):
         """Both activations work on arbitrary leading dimensions."""
         x = torch.randn(2, 3, 10)

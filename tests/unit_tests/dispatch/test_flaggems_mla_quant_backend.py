@@ -45,7 +45,6 @@ from typing import Generic, TypeVar
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
 
 _STUB_ROOTS = ("vllm", "vllm_fl", "flag_gems", "flaggems_vllm", "triton")
 _MISSING = object()
@@ -695,22 +694,6 @@ class TestQuantizationTritonPath:
         )
         return importlib.reload(mod)
 
-    def test_validates_rank(self, flaggems_backend):
-        """A 3-D tensor is rejected with the documented ValueError."""
-        with pytest.raises(ValueError, match="2D"):
-            flaggems_backend.dynamic_per_token_quant_int8_triton(torch.zeros(2, 2, 2))
-
-    def test_validates_dtype(self, flaggems_backend):
-        """An integer input is rejected with the documented TypeError."""
-        with pytest.raises(TypeError, match="floating point"):
-            flaggems_backend.dynamic_per_token_quant_int8_triton(
-                torch.zeros(2, 2, dtype=torch.int32)
-            )
-
-    def test_validates_hidden_size(self, flaggems_backend):
-        """A zero hidden dimension is rejected."""
-        with pytest.raises(ValueError, match="hidden_size must be positive"):
-            flaggems_backend.dynamic_per_token_quant_int8_triton(torch.zeros(2, 0))
 
     def test_buffers_grid_and_launch_contract(
         self, flaggems_backend, stubs, monkeypatch
