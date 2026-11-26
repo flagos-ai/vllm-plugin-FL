@@ -1,13 +1,16 @@
 # Copyright 2025 BAAI. All rights reserved.
 """Supplementary coverage for IluvatarCommunicatorFL.
 
-Two areas the core communicator tests do not reach:
+Three areas the core communicator tests do not reach:
 
 * ``__init__`` with a mocked ``DeviceCommunicatorBase.__init__`` (the
   pattern from tests/unit_tests/distributed/test_communicator.py — world_size
   is forced to 1 so pyflagcx stays None): the eleven CUDA fields must be
   disabled/None and the instance must satisfy the CudaCommunicator
   isinstance contract vLLM 0.32 graph_capture relies on.
+* ``__init__`` guard branches: a present-but-disabled pyflagcx_comm must
+  raise RuntimeError chained to the FlagCX init error (L40-43), and a
+  healthy FlagCX comm takes the active-info log branch (L45-49).
 * ``all_reduce`` vision fp32 upcast: inside the vision-forward context,
   bf16/fp16 inputs are upcast to fp32 before the base collective and cast
   back afterwards; fp32 passes through; outside the context nothing is
@@ -17,6 +20,8 @@ CPU-only. Vendor-gated to the iluvatar platform.
 """
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -141,30 +146,111 @@ class TestInit:
         comm = IluvatarCommunicatorFL(cpu_group=object())
         assert isinstance(comm, CudaCommunicator)
 
-    def test_disabled_flagcx_raises_runtime_error(self, mocked_base_init):
-        """A present-but-disabled pyflagcx_comm must fail loudly at init."""
+    def test_disabled_flagcx_raises_runtime_error(self, monkeypatch):
+        """A present-but-disabled pyflagcx_comm must fail loudly at init.
+
+        The world_size=1 base mock above keeps pyflagcx_comm None, so the
+        guard never runs. Here the base mock reports world_size=2 and the
+        ``PyFlagcxCommunicator`` constructor symbol in CommunicatorFL is
+        replaced with a factory producing a *disabled* instance — exactly
+        what the real class leaves behind when the FlagCX C library fails
+        to initialize. The real ``CommunicatorFL.__init__`` and the real
+        ``IluvatarCommunicatorFL.__init__`` then both execute, and the
+        vendor guard (communicator.py L40-43) is the code under test.
+        """
+        import vllm_fl.distributed.communicator as comm_fl
+        from vllm.distributed.device_communicators.base_device_communicator import (
+            DeviceCommunicatorBase,
+        )
+
         from vllm_fl.dispatch.backends.vendor.iluvatar.communicator import (
             IluvatarCommunicatorFL,
         )
 
-        comm = IluvatarCommunicatorFL.__new__(IluvatarCommunicatorFL)
-        # Simulate CommunicatorFL.__init__ having installed a disabled
-        # pyflagcx_comm: the __init__ guard reads these two attributes.
         init_error = RuntimeError("flagcx init boom")
-        object.__setattr__(
-            comm,
-            "pyflagcx_comm",
-            type(
-                "Disabled",
-                (),
-                {"disabled": True, "init_error": init_error},
-            )(),
+        seen_kwargs = {}
+
+        def fake_flagcx(group, device):
+            seen_kwargs["group"] = group
+            seen_kwargs["device"] = device
+            return SimpleNamespace(disabled=True, init_error=init_error)
+
+        def fake_base_init(
+            self,
+            cpu_group,
+            device=None,
+            device_group=None,
+            unique_name="",
+            global_ranks=None,
+            global_world_size=None,
+            use_all2all=False,
+        ):
+            self.cpu_group = cpu_group
+            self.device = device
+            self.device_group = device_group
+            self.world_size = 2
+            self.use_all2all = use_all2all
+            self.all2all_backend = "allgather_reducescatter"
+            self.all2all_manager = None
+
+        monkeypatch.setattr(DeviceCommunicatorBase, "__init__", fake_base_init)
+        monkeypatch.setattr(comm_fl, "PyFlagcxCommunicator", fake_flagcx)
+
+        cpu_group, device = object(), torch.device("cuda")
+        with pytest.raises(RuntimeError, match="failed to initialize") as exc_info:
+            IluvatarCommunicatorFL(cpu_group=cpu_group, device=device)
+        # chained to the original FlagCX failure
+        assert exc_info.value.__cause__ is init_error
+        assert seen_kwargs["group"] is cpu_group
+        assert seen_kwargs["device"] is device
+
+    def test_active_flagcx_logs_and_constructs(self, monkeypatch, caplog):
+        """A healthy FlagCX comm takes the active-info branch (L45-49)."""
+        import logging
+
+        import vllm_fl.distributed.communicator as comm_fl
+        from vllm.distributed.device_communicators.base_device_communicator import (
+            DeviceCommunicatorBase,
         )
-        # Re-run only the post-super() guard logic by replicating the check
-        # through __init__ is not possible without re-initializing the base;
-        # instead assert the guard condition directly mirrors the source.
-        assert comm.pyflagcx_comm is not None and comm.pyflagcx_comm.disabled
-        assert comm.pyflagcx_comm.init_error is init_error
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.communicator import (
+            IluvatarCommunicatorFL,
+        )
+
+        def fake_flagcx(group, device):
+            return SimpleNamespace(disabled=False, init_error=None)
+
+        def fake_base_init(
+            self,
+            cpu_group,
+            device=None,
+            device_group=None,
+            unique_name="",
+            global_ranks=None,
+            global_world_size=None,
+            use_all2all=False,
+        ):
+            self.cpu_group = cpu_group
+            self.device = device
+            self.device_group = device_group
+            self.world_size = 2
+            self.use_all2all = use_all2all
+            self.all2all_backend = "allgather_reducescatter"
+            self.all2all_manager = None
+
+        monkeypatch.setattr(DeviceCommunicatorBase, "__init__", fake_base_init)
+        monkeypatch.setattr(comm_fl, "PyFlagcxCommunicator", fake_flagcx)
+        with caplog.at_level(logging.INFO, logger="vllm_fl"):
+            comm = IluvatarCommunicatorFL(
+                cpu_group=object(), device=torch.device("cuda")
+            )
+        assert comm.pyflagcx_comm is not None
+        assert not comm.pyflagcx_comm.disabled
+        assert any(
+            "FlagCX device communicator active" in r.message for r in caplog.records
+        ), "the active FlagCX branch must announce itself"
+        # the CUDA-contract fields are still disabled after the active path
+        assert comm.pynccl_comm is None and comm.ca_comm is None
 
 
 class TestAllReduceVisionUpcast:

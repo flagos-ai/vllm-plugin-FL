@@ -3,9 +3,9 @@
 
 ``vllm_fl/dispatch/backends/vendor/iluvatar/worker/model_runner_v2.py`` (0/6)
 delegates everything to ``patch_v2_uva`` + the upstream GPUModelRunner
-constructor; ``worker/worker.py``'s ``IluvatarWorkerFL`` (0/133 at file level)
-applies the in-worker vendor patches in ``init_device`` and installs the
-pipeline transport. Both need a real CUDA device to construct buffers on.
+constructor; ``worker/worker.py``'s ``IluvatarWorkerFL`` applies the in-worker
+vendor patches in ``init_device`` and installs the pipeline transport. Both
+need a real CUDA device to construct buffers on.
 
 ``GPUModelRunner.__init__`` with a minimal VllmConfig allocates the persistent
 input buffers — exactly the allocation the UVA patch redirects to explicit
@@ -17,14 +17,17 @@ H2D copies on CoreX. Constructing it once on the BI-V150 pins:
 * the runner is a real ``GPUModelRunner`` (MRO) holding device-resident
   buffers (``input_buffers.input_ids`` / ``positions`` on cuda) that stay
   zero-initialized until a step runs;
-* the class binds upstream V2 as its direct base.
+* the class binds upstream V2 as its direct base;
+* ``apply_worker_patches`` (strict inductor/sampler gates) passes on the
+  real flagtree stack and is re-runnable.
 
 The full ``init_device`` (distributed init + model load) is too heavy for a
-supplementary suite, so the pure branches of the patch machinery are covered
-directly: ``apply_worker_patches`` idempotency, the ``patch_v2_uva`` no-op
-for foreign vendors, and ``install_pipeline_transport``'s world-size-1 early
-return. Assertions are structural (the numeric oracle for buffer contents is
-a plain ``torch.count_nonzero``).
+supplementary suite; its ordering and the pure patch machinery branches are
+covered on CPU in ``tests/supplementary_tests/unit/worker/\
+test_iluvatar_worker_fl_surface.py`` and
+``.../dispatch/test_iluvatar_patch_functions.py``. Assertions here are
+structural (the numeric oracle for buffer contents is a plain
+``torch.count_nonzero``).
 """
 
 from __future__ import annotations
@@ -187,7 +190,17 @@ class TestIluvatarGPUModelRunnerV2:
 
 
 class TestIluvatarWorkerFLSurface:
-    """``IluvatarWorkerFL`` structural rows executable without a full engine."""
+    """``IluvatarWorkerFL`` rows executable on the real BI-V150 stack.
+
+    The CPU-reachable surface — init_device ordering against fake patch
+    targets, the apply_worker_patches bundle order/gate, sleep/wake_up
+    scale and buffer round trips, update_config, execute_model PP
+    orchestration — moved to
+    ``tests/supplementary_tests/unit/worker/test_iluvatar_worker_fl_surface.py``
+    (an ungated CPU file). What stays here is the real-platform class
+    boundary and the real in-worker patch effects that only a BI-V150
+    with flagtree triton can prove.
+    """
 
     def test_class_inherits_worker_fl(self):
         from vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker import (
@@ -197,16 +210,14 @@ class TestIluvatarWorkerFLSurface:
 
         assert issubclass(IluvatarWorkerFL, WorkerFL)
 
-    def test_init_device_exists_and_calls_patches(self):
-        """``init_device`` is a plain method on the class surface."""
-        from vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker import (
-            IluvatarWorkerFL,
-        )
+    def test_apply_worker_patches_succeeds_on_real_flagtree(self):
+        """The strict bundle (inductor + sampler gates) passes on the real stack.
 
-        assert callable(IluvatarWorkerFL.init_device)
-
-    def test_apply_worker_patches_idempotent(self):
-        """The worker patch bundle runs twice without raising."""
+        ``apply_worker_patches`` ends with strict=True inductor/sampler
+        patches: on the real BI-V150 with flagtree triton they must find a
+        supported target and unwrap the compiled samplers without raising.
+        Idempotency: a second run goes through the same gates harmlessly.
+        """
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
             apply_worker_patches,
         )
@@ -230,23 +241,3 @@ class TestIluvatarWorkerFLSurface:
         )
         install_pipeline_transport(group)
         assert group.isend_tensor_dict is None, "world_size 1 must not bind methods"
-
-    def test_sleep_saved_kv_scales_attr_absent_before_sleep(self):
-        """The vendor scale-save attributes only appear after sleep()."""
-        from vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker import (
-            IluvatarWorkerFL,
-        )
-
-        worker = object.__new__(IluvatarWorkerFL)
-        assert not hasattr(worker, "_sleep_saved_kv_scales")
-        assert not hasattr(worker, "_sleep_saved_buffers")
-
-    def test_update_config_rejects_unknown_override(self):
-        """``update_config`` validates the allowed override names."""
-        from vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker import (
-            IluvatarWorkerFL,
-        )
-
-        worker = object.__new__(IluvatarWorkerFL)
-        with pytest.raises(ValueError, match="not supported"):
-            worker.update_config({"cache_config": {"block_size": 32}})
