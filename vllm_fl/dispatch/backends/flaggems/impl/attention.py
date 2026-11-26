@@ -1,3 +1,5 @@
+import re
+import os
 # Copyright (c) 2025 BAAI. All rights reserved.
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/v1/attention/backends/flash_attn.py
 # Below is the original copyright:
@@ -154,6 +156,69 @@ class AttentionFLBackend(AttentionBackend):
         if has_sink:
             return "not support sink"
         return None
+
+class IluvatarPagedGQABackend(AttentionFLBackend):
+    """Store both K and V for one head together in each physical page."""
+
+    # The implementation reads from the cache in forward and writes through
+    # do_kv_cache_update. Emit the write, and its dependency, for every layer.
+    forward_includes_kv_cache_update = False
+
+    @staticmethod
+    def get_kv_cache_stride_order(include_num_layers_dimension: bool = False) -> tuple[int, ...]:
+        if include_num_layers_dimension:
+            return (2, 4, 0, 1, 3, 5)
+        # Logical [K/V, page, token, head, dimension].
+        return (1, 3, 0, 2, 4)
+
+
+class IluvatarCM8PagedBackend(IluvatarPagedGQABackend):
+    """4-Way Split-D Centered-Mantissa 8-bit (CM8) KV storage with BF16 per-token/head scales."""
+
+    @staticmethod
+    def get_physical_kv_spec(spec, layer_name: str = ""):
+        from dataclasses import replace
+        from vllm.v1.kv_cache_interface import FullAttentionSpec
+
+        if os.environ.get("VLLM_FL_ILUVATAR_CM8_HYBRID", "0") == "1":
+            match = re.search(r"layers\.(\d+)\.", layer_name)
+            if match and int(match.group(1)) in (0, 1, 2, 39, 40, 41):
+                return spec
+        if (
+            type(spec) is FullAttentionSpec
+            and spec.dtype == torch.bfloat16
+            and spec.num_kv_heads == 2
+            and spec.head_size == spec.head_size_v == 128
+            and spec.block_size == 16
+            and spec.page_size_padded is None
+        ):
+            physical = replace(spec, dtype=torch.uint8, head_size=130, head_size_v=130)
+            assert physical.page_size_bytes == 2 * 16 * 2 * 130
+            return physical
+        return spec
+
+
+class IluvatarK8V4PagedBackend(IluvatarCM8PagedBackend):
+    """Asymmetric K8 (CM8) + V4 (4-bit centered-mantissa) KV storage (6,336 bytes/page)."""
+
+    @staticmethod
+    def get_physical_kv_spec(spec, layer_name: str = ""):
+        from dataclasses import replace
+        from vllm.v1.kv_cache_interface import FullAttentionSpec
+
+        if (
+            type(spec) is FullAttentionSpec
+            and spec.dtype == torch.bfloat16
+            and spec.num_kv_heads == 2
+            and spec.head_size == spec.head_size_v == 128
+            and spec.block_size == 16
+            and spec.page_size_padded is None
+        ):
+            physical = replace(spec, dtype=torch.uint8, head_size=99, head_size_v=99)
+            assert physical.page_size_bytes == 2 * 16 * 2 * 99
+            return physical
+        return spec
+
 
 @dataclass
 class AttentionFLMetadata:
@@ -468,6 +533,29 @@ class AttentionFLImpl(AttentionImpl):
         ### TODO(lms): support quant to int8/int4 each query input and low precision compute
         self.supports_quant_query_input = False
 
+        # Reserve at model construction so the ordinary model-memory measurement
+        # includes this scratch even when graph memory estimation is disabled.
+        # All layers in this worker use the same serialized workspace.
+        import flag_gems
+        if (flag_gems.vendor_name == "iluvatar" and self.num_heads == 16
+                and self.num_kv_heads == 2 and self.head_size == 128):
+            from flag_gems.fused.iluvatar_dense_prefill import reserve_prefill_workspace
+            from flag_gems.runtime.backend._iluvatar.ops.projection import prepare_projection_tiles
+            prepare_projection_tiles(torch.device("cuda", torch.cuda.current_device()))
+            from flag_gems.runtime.backend._iluvatar.ops.row_gather import prepare_row_gathers
+            prepare_row_gathers(torch.device("cuda", torch.cuda.current_device()),
+                                self.num_kv_heads * self.num_queries_per_kv * self.head_size)
+            from flag_gems.fused.iluvatar_hist_sampler import reserve_sampler_workspace
+            reserve_sampler_workspace(torch.device("cuda", torch.cuda.current_device()))
+            reserve_prefill_workspace(torch.device("cuda", torch.cuda.current_device()))
+            from flag_gems.fused.iluvatar_hist_sampler import prepare_bf16_sampling
+            prepare_bf16_sampling(torch.device("cuda", torch.cuda.current_device()))
+            from flag_gems.ops.flash_decode_splitkv import reserve_decode_workspace
+            reserve_decode_workspace(torch.device("cuda", torch.cuda.current_device()),
+                                     self.num_kv_heads, self.num_queries_per_kv, self.head_size)
+            from flag_gems.fused.iluvatar_cm8_kv import reserve_cm8_decode_workspace
+            reserve_cm8_decode_workspace(torch.device("cuda", torch.cuda.current_device()))
+
     def do_kv_cache_update(
         self,
         layer,
@@ -484,6 +572,14 @@ class AttentionFLImpl(AttentionImpl):
         if self.attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
             return
 
+        if kv_cache.dtype == torch.uint8:
+            if kv_cache.shape[-1] == 99:
+                from flag_gems.fused.iluvatar_k8v4_kv import write_k8v4_kv
+                write_k8v4_kv(key, value, kv_cache[0], slot_mapping)
+            else:
+                from flag_gems.fused.iluvatar_cm8_kv import write_cm8_kv
+                write_cm8_kv(key, value, kv_cache[0], slot_mapping)
+            return
         key_cache, value_cache = kv_cache.unbind(0)
         reshape_and_cache_flash(
             key,

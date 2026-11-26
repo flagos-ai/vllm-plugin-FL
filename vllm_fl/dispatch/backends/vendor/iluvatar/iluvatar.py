@@ -232,6 +232,49 @@ def patch_sampler_compile_for_iluvatar() -> None:
     except Exception as e:
         logger.warning('patch_sampler_compile_for_iluvatar (logprobs): %s', e)
 
+    try:
+        import importlib
+        from functools import wraps
+        from flag_gems.fused.iluvatar_tile_sampler import draw_filtered_logits
+
+        module = importlib.import_module("vllm.v1.sample.ops.topk_topp_sampler")
+        cls = module.TopKTopPSampler
+        if not getattr(cls, "_iluvatar_tile_sampler", False):
+            native = cls.forward_native
+
+            @wraps(native)
+            def sample(self, logits, generators, k, p):
+                if (not logits.is_cuda or logits.dtype != torch.float32
+                        or logits.ndim != 2 or logits.stride(1) != 1
+                        or logits.shape[0] == 0 or not 1024 <= logits.shape[1] <= 262144
+                        or self.use_fp64_gumbel
+                        or self.logprobs_mode in ("processed_logits", "processed_logprobs")):
+                    return native(self, logits, generators, k, p)
+
+                # Keep the same full-batch mask, including the backend's tie
+                # convention. All logit processors run upstream of this call.
+                if k is None and p is not None and not generators:
+                    from flag_gems.fused.iluvatar_hist_sampler import sample_top_p
+                    sampled = sample_top_p(logits,p,module.apply_top_k_top_p,module.HAS_TRITON)
+                    if sampled is not None:
+                        return sampled, None
+                filtered = module.apply_top_k_top_p(logits, k, p)
+                if len(generators) < logits.shape[0]:
+                    sampled = draw_filtered_logits(filtered)
+                else:
+                    sampled = torch.empty(logits.shape[0], dtype=torch.int64, device=logits.device)
+                for row, generator in generators.items():
+                    # Preserve the original per-request RNG stream exactly.
+                    probs = filtered[row : row + 1].softmax(dim=-1, dtype=torch.float32)
+                    sampled[row : row + 1].copy_(module.random_sample(probs, {0: generator}, False))
+                return sampled, None
+
+            cls.forward_native = sample
+            cls._iluvatar_tile_sampler = True
+            logger.info("Enabled Iluvatar tiled sampling after native top-k/top-p filtering")
+    except ImportError as exc:
+        logger.warning("Iluvatar tiled sampling unavailable: %s", exc)
+
 patch_sampler_compile_for_iluvatar()
 
 

@@ -7572,6 +7572,9 @@ class ModelRunnerFL(
             if spec := attn_module.get_kv_cache_spec(self.vllm_config):
                 if isinstance(spec, AttentionSpec):
                     backend = attn_module.get_attn_backend()
+                    physical_spec = getattr(backend, "get_physical_kv_spec", None)
+                    if physical_spec is not None:
+                        spec = physical_spec(spec, layer_name)
                     # indexes_kv_by_block_stride() -> get_kv_cache_stride_order()
                     # -> get_kv_cache_layout() needs the current vLLM config.
                     with set_current_vllm_config(self.vllm_config):

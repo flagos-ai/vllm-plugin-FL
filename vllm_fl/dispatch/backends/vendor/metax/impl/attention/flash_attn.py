@@ -69,6 +69,65 @@ from .mla.common import QueryLenSupport
 
 logger = init_logger(__name__)
 
+import os
+
+try:
+    import flash_attn_2_cuda as _maca_fa2_cuda
+except ImportError:
+    _maca_fa2_cuda = None
+
+try:
+    from flag_gems.fused.prepare_maca_prefill_metadata import (
+        prepare_maca_prefill_metadata as _prepare_maca_prefill_metadata,
+    )
+except ImportError:
+    _prepare_maca_prefill_metadata = None
+
+
+try:
+    from flag_gems.fused.metax_compact_prefill import compact as _compact_prefill_kv
+except ImportError:
+    _compact_prefill_kv = None
+
+try:
+    from flag_gems.fused.metax_fused_qkv_rope_cache import (
+        fused_qkv_rope_and_cache as _fused_qkv_rope_and_cache,
+    )
+except ImportError:
+    _fused_qkv_rope_and_cache = None
+
+try:
+    from flag_gems.fused.metax_post_attn_mlp import (
+        qkv_pack_and_rope_cache_forward as _qkv_pack_and_rope_cache_forward,
+    )
+except ImportError:
+    _qkv_pack_and_rope_cache_forward = None
+
+try:
+    from flag_gems.fused.metax_fused_qkv_rope_cache import (
+        fused_qkv_rope_and_cache_i8 as _fused_qkv_rope_and_cache_i8,
+    )
+    from flag_gems.fused.metax_int8_kv_decode import (
+        compact_prefill_kv_i8 as _compact_prefill_kv_i8,
+        int8_kv_flash_decode as _int8_kv_flash_decode,
+        write_i8_kv_cache as _write_i8_kv_cache,
+    )
+except ImportError:
+    _fused_qkv_rope_and_cache_i8 = None
+    _compact_prefill_kv_i8 = None
+    _int8_kv_flash_decode = None
+    _write_i8_kv_cache = None
+
+
+def _prepare_prefill_metadata(seq_lens, query_starts):
+    if _prepare_maca_prefill_metadata is not None:
+        return _prepare_maca_prefill_metadata(seq_lens, query_starts)
+    # Keep a device-side fallback for installations without the new FlagGems op.
+    kv = torch.empty(seq_lens.numel() + 1, dtype=torch.int32, device=seq_lens.device)
+    kv[0] = 0
+    torch.cumsum(seq_lens, 0, dtype=torch.int32, out=kv[1:])
+    return query_starts - query_starts[0], kv
+
 
 @register_backend(AttentionBackendEnum.FLASH_ATTN)
 class MacaFlashAttentionBackend(AttentionBackend):
@@ -237,6 +296,9 @@ class FlashAttentionMetadata:
     prefix_kv_lens: torch.Tensor | None
     suffix_kv_lens: torch.Tensor | None
 
+    # Per-step prefill offsets shared by all layers in this metadata group.
+    prefill_cu_seq_lens: torch.Tensor | None = None
+
     # For GQA DCP
     max_dcp_context_kv_len: int | None = None
     dcp_context_kv_lens: torch.Tensor | None = None
@@ -306,10 +368,23 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
         self.aot_schedule = get_flash_attn_version() == 3
 
         # /------------------------  Metax Modification -------------------------\
-        supports_spec_decode = self.query_len_support != QueryLenSupport.SINGLE_ONLY
-        self._init_reorder_batch_threshold(
-            self.reorder_batch_threshold, supports_spec_decode
+        int8_kv_active = (
+            os.environ.get("FL_C500_INT8_KV", "1") != "0"
+            and _int8_kv_flash_decode is not None
+            and self.block_size == 16
+            and self.num_heads_q == 16
+            and self.num_heads_kv == 2
+            and self.headdim == 128
+            and self.kv_cache_dtype == torch.bfloat16
         )
+        if int8_kv_active:
+            self.reorder_batch_threshold = 1
+            self._init_reorder_batch_threshold(1, False)
+        else:
+            supports_spec_decode = self.query_len_support != QueryLenSupport.SINGLE_ONLY
+            self._init_reorder_batch_threshold(
+                self.reorder_batch_threshold, supports_spec_decode
+            )
 
         # Validate consistency between query_len_support and reorder_batch_threshold
         if self.query_len_support == QueryLenSupport.SINGLE_ONLY:
@@ -434,15 +509,19 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             decode_seq_lens = None
             decode_block_table_tensor = None
 
+        prefill_cu_seq_lens = None
         if num_prefills > 0:
             prefill_max_seq_len = int(
                 common_attn_metadata.seq_lens_cpu[num_decodes:num_reqs].max()
             )
-            prefill_query_start_loc = (
-                common_attn_metadata.query_start_loc[num_decodes : num_reqs + 1]
-                - common_attn_metadata.query_start_loc[num_decodes]
-            )
-            prefill_seq_lens = common_attn_metadata.seq_lens[num_decodes:num_reqs]
+            prefill_query_starts = query_start_loc[num_decodes : num_reqs + 1]
+            prefill_seq_lens = seq_lens[num_decodes:num_reqs]
+            if self.dcp_world_size == 1 and common_prefix_len == 0:
+                prefill_query_start_loc, prefill_cu_seq_lens = _prepare_prefill_metadata(
+                    prefill_seq_lens, prefill_query_starts
+                )
+            else:
+                prefill_query_start_loc = prefill_query_starts - prefill_query_starts[0]
             prefill_block_table_tensor = common_attn_metadata.block_table_tensor[
                 num_decodes:num_reqs
             ]
@@ -585,6 +664,7 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             prefill_max_seq_len=prefill_max_seq_len,
             prefill_seq_lens=prefill_seq_lens,
             prefill_block_table=prefill_block_table_tensor,
+            prefill_cu_seq_lens=prefill_cu_seq_lens,
             # \------------------------- Metax Modification -------------------------/
             block_table=block_table_tensor,
             slot_mapping=slot_mapping,
@@ -603,6 +683,16 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
         return attn_metadata
 
     def use_cascade_attention(self, *args, **kwargs) -> bool:
+        if (
+            os.environ.get("FL_C500_INT8_KV", "1") != "0"
+            and _int8_kv_flash_decode is not None
+            and self.block_size == 16
+            and self.num_heads_q == 16
+            and self.num_heads_kv == 2
+            and self.headdim == 128
+            and self.kv_cache_dtype == torch.bfloat16
+        ):
+            return False
         return use_cascade_attention(*args, **kwargs)
 
 
@@ -665,6 +755,18 @@ class FlashAttentionImpl(AttentionImpl):
                 "heads in the layer"
             )
 
+        self._plain_c500_gqa = (
+            self.attn_type == AttentionType.DECODER
+            and (self.num_heads, self.num_kv_heads, self.head_size) == (16, 2, 128)
+            and tuple(self.sliding_window) == (-1, -1)
+            and self.alibi_slopes is None
+            and self.sinks is None
+            and not self.logits_soft_cap
+            and not self.batch_invariant_enabled
+        )
+        self._c500_rotary_emb = None
+        self._c500_qkv_proj = None
+
     def supports_quant_query_input(self) -> bool:
         return False
 
@@ -679,6 +781,8 @@ class FlashAttentionImpl(AttentionImpl):
         output: torch.Tensor | None = None,
         output_scale: torch.Tensor | None = None,
         output_block_scale: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
+        qkv_pack_scales: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Forward pass with FlashAttention.
 
@@ -735,31 +839,227 @@ class FlashAttentionImpl(AttentionImpl):
         # For decoder and cross-attention, use KV cache as before
         key_cache, value_cache = kv_cache.unbind(0)
 
+        use_int8_kv = (
+            os.environ.get("FL_C500_INT8_KV", "1") != "0"
+            and _int8_kv_flash_decode is not None
+            and _compact_prefill_kv_i8 is not None
+            and _write_i8_kv_cache is not None
+            and _fused_qkv_rope_and_cache_i8 is not None
+            and self._plain_c500_gqa
+            and self.dcp_world_size == 1
+            and not self.kv_cache_dtype.startswith("fp8")
+            and not attn_metadata.use_cascade
+            and key_cache.dtype == value_cache.dtype == torch.bfloat16
+            and key_cache.shape[1:] == value_cache.shape[1:] == (16, 2, 128)
+            and key_cache.stride(1) == 256
+            and key_cache.stride(2) == 128
+            and key_cache.stride(3) == 1
+            and value_cache.stride(1) == 256
+            and value_cache.stride(2) == 128
+            and value_cache.stride(3) == 1
+        )
+
         # key and value may be None in the case of cross attention. They are
         # calculated once based on the output from the encoder and then cached
         # in KV cache.
+        direct_k = None
+        direct_v = None
+        q_i8_buf = None
+        q_sc_buf = None
         if (
             self.kv_sharing_target_layer_name is None
             and key is not None
             and value is not None
         ):
-            # Reshape the input keys and values and store them in the cache.
-            # Skip this if sharing KV cache with an earlier attention layer.
-            # NOTE(woosuk): Here, key and value are padded while slot_mapping is
-            # not padded. However, we don't need to do key[:num_actual_tokens]
-            # and value[:num_actual_tokens] because the reshape_and_cache_flash
-            # op uses the slot_mapping's shape to determine the number of
-            # actual tokens.
-            reshape_and_cache_flash(
-                key,
-                value,
-                key_cache,
-                value_cache,
-                attn_metadata.slot_mapping,
-                self.kv_cache_dtype,
-                layer._k_scale,
-                layer._v_scale,
+            rotary_emb = self._c500_rotary_emb
+            qkv_proj_pack = self._c500_qkv_proj
+            want_q_i8 = (
+                use_int8_kv
+                and attn_metadata.num_decodes > 0
+                and attn_metadata.num_prefills == 0
+                and attn_metadata.num_decode_tokens == attn_metadata.num_decodes
+                and not torch.is_grad_enabled()
+                and "MHA_INPUT_COLLECTION" not in os.environ
+                and output.stride(-1) == 1
+                and output.stride(-2) == 128
+                and attn_metadata.decode_block_table.stride(-1) == 1
+                and attn_metadata.decode_seq_lens.stride(0) == 1
             )
+            if (
+                qkv_pack_scales is not None
+                and positions is not None
+                and rotary_emb is not None
+                and qkv_proj_pack is not None
+                and _qkv_pack_and_rope_cache_forward is not None
+                and self._plain_c500_gqa
+                and not self.kv_cache_dtype.startswith("fp8")
+                and query.dtype == torch.bfloat16
+                and key_cache.dtype == value_cache.dtype == torch.bfloat16
+                and key_cache.shape[1:] == value_cache.shape[1:] == (16, 2, 128)
+                and key_cache.stride(-1) == value_cache.stride(-1) == 1
+                and positions.ndim == 1
+                and positions.shape[0] == query.shape[0]
+            ):
+                cos_sin = rotary_emb._match_cos_sin_cache_dtype(query)
+                use_direct_kv = (
+                    not attn_metadata.use_cascade
+                    and self.dcp_world_size == 1
+                    and attn_metadata.num_prefills == 1
+                    and attn_metadata.num_decode_tokens == 0
+                    and attn_metadata.prefill_max_seq_len == num_actual_tokens
+                    and num_actual_tokens == query.shape[0]
+                    and 384 <= num_actual_tokens <= 4096
+                    and not torch.cuda.is_current_stream_capturing()
+                )
+                w_qkv, c_qkv, s_qkv = qkv_proj_pack
+                if use_direct_kv:
+                    query, direct_k, direct_v = _qkv_pack_and_rope_cache_forward(
+                        query.view(query.shape[0], 2048),
+                        qkv_pack_scales,
+                        w_qkv,
+                        c_qkv,
+                        s_qkv,
+                        positions,
+                        cos_sin,
+                        key_cache,
+                        value_cache,
+                        attn_metadata.slot_mapping,
+                        return_contig_kv=True,
+                        int8_kv=use_int8_kv,
+                    )
+                elif want_q_i8:
+                    query, q_i8_buf, q_sc_buf = _qkv_pack_and_rope_cache_forward(
+                        query.view(query.shape[0], 2048),
+                        qkv_pack_scales,
+                        w_qkv,
+                        c_qkv,
+                        s_qkv,
+                        positions,
+                        cos_sin,
+                        key_cache,
+                        value_cache,
+                        attn_metadata.slot_mapping,
+                        int8_kv=True,
+                        return_q_i8=True,
+                    )
+                else:
+                    query = _qkv_pack_and_rope_cache_forward(
+                        query.view(query.shape[0], 2048),
+                        qkv_pack_scales,
+                        w_qkv,
+                        c_qkv,
+                        s_qkv,
+                        positions,
+                        cos_sin,
+                        key_cache,
+                        value_cache,
+                        attn_metadata.slot_mapping,
+                        int8_kv=use_int8_kv,
+                    )
+            elif (
+                positions is not None
+                and rotary_emb is not None
+                and _fused_qkv_rope_and_cache is not None
+                and self._plain_c500_gqa
+                and not self.kv_cache_dtype.startswith("fp8")
+                and query.dtype in (torch.bfloat16, torch.float16)
+                and query.dtype == key.dtype == value.dtype == key_cache.dtype == value_cache.dtype
+                and query.stride(-1) == key.stride(-1) == value.stride(-1) == 1
+                and query.stride(-2) == key.stride(-2) == value.stride(-2) == 128
+                and key_cache.shape[1:] == value_cache.shape[1:] == (16, 2, 128)
+                and key_cache.stride(-1) == value_cache.stride(-1) == 1
+                and positions.ndim == 1
+                and positions.shape[0] == query.shape[0]
+            ):
+                cos_sin = rotary_emb._match_cos_sin_cache_dtype(query)
+                use_direct_kv = (
+                    not attn_metadata.use_cascade
+                    and self.dcp_world_size == 1
+                    and attn_metadata.num_prefills == 1
+                    and attn_metadata.num_decode_tokens == 0
+                    and attn_metadata.prefill_max_seq_len == num_actual_tokens
+                    and num_actual_tokens == query.shape[0]
+                    and 384 <= num_actual_tokens <= 4096
+                    and not torch.cuda.is_current_stream_capturing()
+                )
+                if use_int8_kv:
+                    if use_direct_kv:
+                        query, direct_k, direct_v = _fused_qkv_rope_and_cache_i8(
+                            query,
+                            key,
+                            value,
+                            positions,
+                            cos_sin,
+                            key_cache,
+                            value_cache,
+                            attn_metadata.slot_mapping,
+                            return_contig_kv=True,
+                        )
+                    elif want_q_i8:
+                        query, q_i8_buf, q_sc_buf = _fused_qkv_rope_and_cache_i8(
+                            query,
+                            key,
+                            value,
+                            positions,
+                            cos_sin,
+                            key_cache,
+                            value_cache,
+                            attn_metadata.slot_mapping,
+                            return_q_i8=True,
+                        )
+                    else:
+                        query = _fused_qkv_rope_and_cache_i8(
+                            query,
+                            key,
+                            value,
+                            positions,
+                            cos_sin,
+                            key_cache,
+                            value_cache,
+                            attn_metadata.slot_mapping,
+                        )
+                elif use_direct_kv:
+                    query, direct_k, direct_v = _fused_qkv_rope_and_cache(
+                        query,
+                        key,
+                        value,
+                        positions,
+                        cos_sin,
+                        key_cache,
+                        value_cache,
+                        attn_metadata.slot_mapping,
+                        return_contig_kv=True,
+                    )
+                else:
+                    query = _fused_qkv_rope_and_cache(
+                        query,
+                        key,
+                        value,
+                        positions,
+                        cos_sin,
+                        key_cache,
+                        value_cache,
+                        attn_metadata.slot_mapping,
+                    )
+            elif use_int8_kv:
+                _write_i8_kv_cache(
+                    key,
+                    value,
+                    key_cache,
+                    value_cache,
+                    attn_metadata.slot_mapping,
+                )
+            else:
+                reshape_and_cache_flash(
+                    key,
+                    value,
+                    key_cache,
+                    value_cache,
+                    attn_metadata.slot_mapping,
+                    self.kv_cache_dtype,
+                    layer._k_scale,
+                    layer._v_scale,
+                )
 
         if self.kv_cache_dtype.startswith("fp8"):
             # queries are quantized in the attention layer
@@ -798,32 +1098,215 @@ class FlashAttentionImpl(AttentionImpl):
                 # For handling prefill decode split
                 num_decode_tokens = attn_metadata.num_decode_tokens
                 if attn_metadata.num_prefills > 0:
-                    cu_prefix_kv_lens = torch.tensor(
-                        [0] + attn_metadata.prefill_seq_lens.tolist(),
-                        device=attn_metadata.prefill_seq_lens.device,
-                        dtype=torch.int32,
-                    ).cumsum(dim=0, dtype=torch.int32)
-                    output[num_decode_tokens:num_actual_tokens] = (
-                        flash_attn_varlen_func(
-                            q=query[num_decode_tokens:num_actual_tokens],
-                            k=key_cache,
-                            v=value_cache,
-                            block_table=attn_metadata.prefill_block_table,
-                            cu_seqlens_q=attn_metadata.prefill_query_start_loc,
-                            cu_seqlens_k=cu_prefix_kv_lens,
-                            max_seqlen_q=attn_metadata.max_query_len,
-                            max_seqlen_k=attn_metadata.prefill_max_seq_len,
-                            softmax_scale=self.scale,
-                            causal=attn_metadata.causal,
-                            window_size=self.sliding_window,
-                            alibi_slopes=self.alibi_slopes,
-                            softcap=self.logits_soft_cap,
-                            s_aux=self.sinks,
+                    cu_prefix_kv_lens = attn_metadata.prefill_cu_seq_lens
+                    if cu_prefix_kv_lens is None:
+                        # Externally constructed metadata may be reused/mutated.
+                        # Do not cache its fallback across calls. The normal builder
+                        # computes step-scoped offsets once before the layer loop.
+                        _, cu_prefix_kv_lens = _prepare_prefill_metadata(
+                            attn_metadata.prefill_seq_lens,
+                            attn_metadata.prefill_query_start_loc,
                         )
-                    )
+                    prefill_q = query[num_decode_tokens:num_actual_tokens]
+                    prefill_out = output[num_decode_tokens:num_actual_tokens]
+                    if (
+                        _maca_fa2_cuda is not None
+                        and not torch.is_grad_enabled()
+                        and "MHA_INPUT_COLLECTION" not in os.environ
+                        and prefill_out.is_contiguous()
+                    ):
+                        q_in = prefill_q if prefill_q.stride(-1) == 1 else prefill_q.contiguous()
+                        k_in = key_cache if key_cache.stride(-1) == 1 else key_cache.contiguous()
+                        v_in = value_cache if value_cache.stride(-1) == 1 else value_cache.contiguous()
+                        prefill_table = attn_metadata.prefill_block_table
+                        min_prefill_q = 384 if attn_metadata.prefill_max_seq_len >= 2048 else 1024
+                        if direct_k is not None and direct_v is not None:
+                            k_in = direct_k
+                            v_in = direct_v
+                            prefill_table = None
+                        elif use_int8_kv:
+                            # Dequantize paged INT8 KV into contiguous BF16 for prefill FA2 (zero host sync!)
+                            max_k_len = attn_metadata.prefill_max_seq_len
+                            total_k_bound = attn_metadata.num_prefills * max_k_len
+                            k_in, v_in = _compact_prefill_kv_i8(
+                                key_cache,
+                                value_cache,
+                                prefill_table,
+                                cu_prefix_kv_lens,
+                                max_k_len,
+                                total_k_bound,
+                            )
+                            prefill_table = None
+                        elif (
+                            _compact_prefill_kv is not None
+                            and self._plain_c500_gqa
+                            and attn_metadata.num_prefills == 1
+                            and min_prefill_q <= prefill_q.shape[0] <= 4096
+                            and prefill_q.dtype in (torch.bfloat16, torch.float16)
+                            and k_in.dtype == v_in.dtype == prefill_q.dtype
+                            and k_in.shape[1:] == v_in.shape[1:] == (16, 2, 128)
+                            and prefill_table.dtype == cu_prefix_kv_lens.dtype == torch.int32
+                            and prefill_table.stride(1) == cu_prefix_kv_lens.stride(0) == 1
+                            and 0 < attn_metadata.prefill_max_seq_len <= 32768
+                            and not torch.cuda.is_current_stream_capturing()
+                        ):
+                            # For one request its maximum sequence length is also
+                            # a bound on the total number of packed K/V tokens.
+                            length = attn_metadata.prefill_max_seq_len
+                            k_in, v_in = _compact_prefill_kv(
+                                k_in, v_in, prefill_table, cu_prefix_kv_lens, length, length
+                            )
+                            prefill_table = None
+                        _maca_fa2_cuda.varlen_fwd(
+                            q_in,
+                            k_in,
+                            v_in,
+                            prefill_out,
+                            attn_metadata.prefill_query_start_loc,
+                            cu_prefix_kv_lens,
+                            None,
+                            None,
+                            prefill_table,
+                            self.alibi_slopes,
+                            attn_metadata.max_query_len,
+                            attn_metadata.prefill_max_seq_len,
+                            0.0,
+                            self.scale,
+                            False,
+                            attn_metadata.causal,
+                            self.sliding_window[0],
+                            self.sliding_window[1],
+                            self.logits_soft_cap,
+                            False,
+                            None,
+                            self.sinks,
+                            False,
+                        )
+                    else:
+                        if use_int8_kv:
+                            if direct_k is not None and direct_v is not None:
+                                fb_k, fb_v, fb_bt = direct_k, direct_v, None
+                            else:
+                                max_k_len = attn_metadata.prefill_max_seq_len
+                                total_k_bound = attn_metadata.num_prefills * max_k_len
+                                fb_k, fb_v = _compact_prefill_kv_i8(
+                                    key_cache,
+                                    value_cache,
+                                    attn_metadata.prefill_block_table,
+                                    cu_prefix_kv_lens,
+                                    max_k_len,
+                                    total_k_bound,
+                                )
+                                fb_bt = None
+                        else:
+                            fb_k, fb_v, fb_bt = key_cache, value_cache, attn_metadata.prefill_block_table
+                        prefill_out.copy_(
+                            flash_attn_varlen_func(
+                                q=prefill_q,
+                                k=fb_k,
+                                v=fb_v,
+                                block_table=fb_bt,
+                                cu_seqlens_q=attn_metadata.prefill_query_start_loc,
+                                cu_seqlens_k=cu_prefix_kv_lens,
+                                max_seqlen_q=attn_metadata.max_query_len,
+                                max_seqlen_k=attn_metadata.prefill_max_seq_len,
+                                softmax_scale=self.scale,
+                                causal=attn_metadata.causal,
+                                window_size=self.sliding_window,
+                                alibi_slopes=self.alibi_slopes,
+                                softcap=self.logits_soft_cap,
+                                s_aux=self.sinks,
+                            )
+                        )
                 if attn_metadata.num_decodes > 0:
-                    # Use flash_attn_with_kvcache for normal decoding.
+                    # Use FlagGems INT8 KV Flash-Decoding when in-place INT8 KV cache is active.
                     decode_query = query[:num_decode_tokens]
+                    if (
+                        use_int8_kv
+                        and num_decode_tokens == attn_metadata.num_decodes
+                        and not torch.is_grad_enabled()
+                        and "MHA_INPUT_COLLECTION" not in os.environ
+                        and decode_query.stride(-1) == output.stride(-1) == 1
+                        and decode_query.stride(-2) == output.stride(-2) == 128
+                        and attn_metadata.decode_block_table.stride(-1) == 1
+                        and attn_metadata.decode_seq_lens.stride(0) == 1
+                    ):
+                        decode_q_i8 = q_i8_buf[:num_decode_tokens] if q_i8_buf is not None else None
+                        decode_q_sc = q_sc_buf[:num_decode_tokens] if q_sc_buf is not None else None
+                        _int8_kv_flash_decode(
+                            decode_query,
+                            key_cache,
+                            value_cache,
+                            attn_metadata.decode_block_table,
+                            attn_metadata.decode_seq_lens,
+                            output[:num_decode_tokens],
+                            self.scale,
+                            q_i8=decode_q_i8,
+                            q_sc=decode_q_sc,
+                            max_seq_len_hint=attn_metadata.decode_max_seq_len,
+                        )
+                        return output
+                    if (
+                        _maca_fa2_cuda is not None
+                        and self._plain_c500_gqa
+                        and 1 <= num_decode_tokens == attn_metadata.num_decodes <= 64
+                        and not torch.is_grad_enabled()
+                        and "MHA_INPUT_COLLECTION" not in os.environ
+                        and query.dtype in (torch.float16, torch.bfloat16)
+                        and query.dtype == key_cache.dtype == value_cache.dtype == output.dtype
+                        and decode_query.stride(-1) == output.stride(-1) == 1
+                        and decode_query.stride(-2) == output.stride(-2) == 128
+                        and key_cache.stride(-1) == value_cache.stride(-1) == 1
+                        and attn_metadata.decode_block_table.stride(-1) == 1
+                        and attn_metadata.decode_seq_lens.stride(0) == 1
+                    ):
+                        # Eight independent queries see the same complete prefix.
+                        # The ABI takes [batch, query, KV head, dim] for both Q and out.
+                        folded_q = decode_query.view(num_decode_tokens, 2, 8, 128).transpose(1, 2)
+                        folded_out = output[:num_decode_tokens].view(num_decode_tokens, 2, 8, 128).transpose(1, 2)
+                        _maca_fa2_cuda.fwd_kvcache(
+                            folded_q, key_cache, value_cache, None, None,
+                            attn_metadata.decode_seq_lens, None, None, None, None,
+                            attn_metadata.decode_block_table, None, folded_out,
+                            self.scale, False, -1, -1, 0.0, True, 0, None,
+                        )
+                        return output
+                    if use_int8_kv:
+                        _, cu_dec_kv = _prepare_prefill_metadata(
+                            attn_metadata.decode_seq_lens,
+                            attn_metadata.decode_query_start_loc,
+                        )
+                        max_dec_k = attn_metadata.decode_max_seq_len
+                        dec_k, dec_v = _compact_prefill_kv_i8(
+                            key_cache,
+                            value_cache,
+                            attn_metadata.decode_block_table,
+                            cu_dec_kv,
+                            max_dec_k,
+                            attn_metadata.num_decodes * max_dec_k,
+                        )
+                        max_dec_q = max(1, num_decode_tokens // max(1, attn_metadata.num_decodes))
+                        output[:num_decode_tokens].copy_(
+                            flash_attn_varlen_func(
+                                q=decode_query if decode_query.is_contiguous() else decode_query.contiguous(),
+                                k=dec_k,
+                                v=dec_v,
+                                block_table=None,
+                                cu_seqlens_q=attn_metadata.decode_query_start_loc,
+                                cu_seqlens_k=cu_dec_kv,
+                                max_seqlen_q=max_dec_q,
+                                max_seqlen_k=max_dec_k,
+                                softmax_scale=self.scale,
+                                causal=True,
+                                window_size=self.sliding_window,
+                                alibi_slopes=self.alibi_slopes,
+                                softcap=self.logits_soft_cap,
+                                s_aux=self.sinks,
+                            )
+                        )
+                        return output
+                    if not decode_query.is_contiguous() and num_decode_tokens != attn_metadata.num_decodes:
+                        decode_query = decode_query.contiguous()
                     decode_query = reshape_query_for_spec_decode(
                         decode_query, attn_metadata.num_decodes
                     )

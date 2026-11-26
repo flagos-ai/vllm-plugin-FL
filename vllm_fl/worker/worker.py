@@ -242,6 +242,10 @@ class WorkerFL(WorkerBase):
         patch_mm_encoder_attention()
 
         register_oot_ops()
+        if getattr(current_platform, "vendor_name", "") == "iluvatar":
+            from vllm_fl.dispatch.backends.vendor.iluvatar.direct_sampling import install_bf16_sampling
+            install_bf16_sampling()
+
 
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
