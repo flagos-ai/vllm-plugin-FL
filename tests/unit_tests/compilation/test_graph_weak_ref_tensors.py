@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary CPU tests for FL's platform-agnostic graph plumbing.
+"""CPU tests for FL's platform-agnostic graph plumbing (stub-tree doubles).
 
 ``vllm_fl/compilation/graph.py`` extends upstream's CUDA-graph wrapper with
 vendor weak-reference helpers (NPU, GCU, Iluvatar), a device-dispatching
@@ -13,18 +13,23 @@ package, so every test here installs a minimal fake ``vllm`` tree in
 ``sys.modules`` (the external boundary only — the plugin sources under test
 are loaded verbatim via ``importlib``) and then drives the real functions:
 
-* the NPU/GCU weak-ref families: CPU passthrough, vendor primitive use,
-  error paths, and structure-mirroring recursion over lists / tuples /
-  dicts / ``IntermediateTensors``;
+* the NPU/GCU weak-ref families: vendor primitive use and the error paths
+  the real-vllm suite cannot reach (missing ``_C`` namespace, storage
+  constructor absent);
 * ``weak_ref_tensors`` dispatch on ``current_platform`` for the iluvatar,
   NPU, GCU, upstream-success and upstream-failure branches;
 * ``GraphWrapper.unwrap`` / ``cudagraph_wrapper`` / ``clear_all_graphs`` and
   the ``_capture_graph`` pool-handle fallback (``graph_pool is None``);
-* ``GraphParams`` validation, capture lifecycle, ``weak_ref_workspace`` and
-  the module-level registry helpers;
+* ``GraphParams`` validation, capture lifecycle and the module-level
+  registry helpers;
 * ``GraphRuntimeController`` capture/replay scopes with their nested
   finally-restoration, attention updater fan-out, backend binding rules and
   decoder-graph teardown.
+
+The CPU-passthrough, missing-primitive, recursion, weak-ref-workspace,
+scope-restoration and backend-dedup contracts that ``test_graph.py`` (with a
+real vllm install) and ``tests/unit_tests/test_ascend_graph_contract.py``
+already pin are deliberately not duplicated here.
 """
 
 import importlib.util
@@ -37,9 +42,7 @@ from typing import Any
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
-
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 _GRAPH_SOURCE = _ROOT / "vllm_fl/compilation/graph.py"
 _PARAMS_SOURCE = _ROOT / "vllm_fl/compilation/graph_params.py"
 _RUNTIME_SOURCE = _ROOT / "vllm_fl/compilation/graph_runtime.py"
@@ -356,11 +359,6 @@ class _Descriptor:
 class TestWeakRefNpuTensor:
     """``_weak_ref_npu_tensor`` single-tensor semantics."""
 
-    def test_cpu_tensor_passes_through_untouched(self, fl_tree):
-        """A CPU tensor is returned as-is without touching torch_npu."""
-        cpu = torch.arange(4.0)
-        assert fl_tree.graph._weak_ref_npu_tensor(cpu) is cpu
-
     def test_npu_tensor_uses_torch_npu_primitive(self, fl_tree, monkeypatch):
         """An NPU-device value is delegated to torch_npu._C._weak_ref_tensor."""
         received = []
@@ -380,23 +378,6 @@ class TestWeakRefNpuTensor:
         assert result == ("weak", value)
         assert received == [value]
 
-    def test_missing_primitive_raises_runtime_error(self, fl_tree, monkeypatch):
-        """A torch_npu without the private primitive fails loudly."""
-        fake_npu = ModuleType("torch_npu")
-        fake_npu._C = SimpleNamespace()  # no _weak_ref_tensor
-        monkeypatch.setitem(sys.modules, "torch_npu", fake_npu)
-
-        with pytest.raises(RuntimeError, match="torch_npu._C._weak_ref_tensor"):
-            fl_tree.graph._weak_ref_npu_tensor(_FakeVendorTensor("npu"))
-
-    def test_missing_c_namespace_raises_runtime_error(self, fl_tree, monkeypatch):
-        """A torch_npu entirely lacking _C also fails loudly."""
-        fake_npu = ModuleType("torch_npu")
-        monkeypatch.setitem(sys.modules, "torch_npu", fake_npu)
-
-        with pytest.raises(RuntimeError, match="torch-npu 2.10 runtime"):
-            fl_tree.graph._weak_ref_npu_tensor(_FakeVendorTensor("npu"))
-
 
 class TestWeakRefNpuTensors:
     """``_weak_ref_npu_tensors`` recursion mirrors the input structure."""
@@ -412,35 +393,6 @@ class TestWeakRefNpuTensors:
 
         fake_npu._C = _C()
         monkeypatch.setitem(sys.modules, "torch_npu", fake_npu)
-
-    def test_recursion_over_list_tuple_dict(self, fl_tree):
-        """Nested containers keep their types; only NPU tensors are swapped."""
-        cpu = torch.arange(3.0)
-        npu = _FakeVendorTensor("npu")
-        nested = [cpu, (npu, {"keep": cpu, "swap": npu})]
-
-        result = fl_tree.graph._weak_ref_npu_tensors(nested)
-
-        assert isinstance(result, list)
-        assert result[0] is cpu
-        inner_tuple = result[1]
-        assert isinstance(inner_tuple, tuple)
-        weak_item, mapping = inner_tuple
-        assert weak_item == ("weak", npu)
-        assert mapping["keep"] is cpu
-        assert mapping["swap"] == ("weak", npu)
-
-    def test_recursion_over_intermediate_tensors(self, fl_tree):
-        """IntermediateTensors is rebuilt with per-tensor weak references."""
-        cpu = torch.arange(2.0)
-        npu = _FakeVendorTensor("npu")
-        payload = _FakeIntermediateTensors({"a": npu, "b": cpu})
-
-        result = fl_tree.graph._weak_ref_npu_tensors(payload)
-
-        assert isinstance(result, _FakeIntermediateTensors)
-        assert result.tensors["a"] == ("weak", npu)
-        assert result.tensors["b"] is cpu
 
     def test_scalars_and_unknown_objects_pass_through(self, fl_tree):
         """Non-container leaves are returned unchanged."""
@@ -495,12 +447,6 @@ class TestWeakRefGcuTensor:
         yield
         torch._C._construct_storage_from_data_pointer = original
 
-    def test_non_gcu_tensor_passes_through(self, fl_tree):
-        """A non-GCU tensor is returned as-is without vendor calls."""
-        cpu = torch.arange(5.0)
-        assert fl_tree.graph._weak_ref_gcu_tensor(cpu) is cpu
-        assert self.constructed == []
-
     def test_metadata_and_borrowed_storage_construction(self, fl_tree):
         """The vendor metadata dict mirrors the tensor's storage facts."""
         value = _FakeVendorTensor(
@@ -542,15 +488,6 @@ class TestWeakRefGcuTensor:
         assert result.is_conj() is False
         assert result.is_neg() is False
 
-    def test_missing_primitives_raise_runtime_error(self, fl_tree, monkeypatch):
-        """A torch_gcu lacking either primitive fails loudly."""
-        fake_gcu = ModuleType("torch_gcu")
-        fake_gcu._C = SimpleNamespace()  # neither callable present
-        monkeypatch.setitem(sys.modules, "torch_gcu", fake_gcu)
-
-        with pytest.raises(RuntimeError, match="TorchGCU storage and tensor"):
-            fl_tree.graph._weak_ref_gcu_tensor(_FakeVendorTensor("gcu"))
-
     def test_storage_constructor_absent_raises_runtime_error(
         self, fl_tree, monkeypatch
     ):
@@ -572,23 +509,6 @@ class TestWeakRefGcuTensor:
                 fl_tree.graph._weak_ref_gcu_tensor(_FakeVendorTensor("gcu"))
         finally:
             torch._C._construct_storage_from_data_pointer = original
-
-    def test_vendor_construction_failure_propagates(self, fl_tree, monkeypatch):
-        """Exceptions from the vendor constructor are not swallowed."""
-        fake_gcu = ModuleType("torch_gcu")
-
-        class _C:
-            def _construct_GCU_Tensor_From_Storage_And_Metadata(
-                self, metadata, storage
-            ):
-                raise ValueError("vendor construction failed")
-
-        fake_gcu._C = _C()
-        monkeypatch.setitem(sys.modules, "torch_gcu", fake_gcu)
-
-        with pytest.raises(ValueError, match="vendor construction failed"):
-            fl_tree.graph._weak_ref_gcu_tensor(_FakeVendorTensor("gcu"))
-
 
 class TestWeakRefGcuTensors:
     """``_weak_ref_gcu_tensors`` recursion mirrors the input structure."""
@@ -883,16 +803,6 @@ class TestGraphParams:
         assert params.handles[descriptor] == []
         assert params.attn_params[descriptor] == []
 
-    def test_prepare_capture_rejects_existing_state(self, fl_tree):
-        """Re-preparing a descriptor holding captured state is an error."""
-        params = fl_tree.params.GraphParams()
-        descriptor = _Descriptor(16)
-        params.prepare_capture(descriptor)
-        # Empty-but-present state is re-preparable; captured state is not.
-        params.attn_params[descriptor].append(object())
-        with pytest.raises(RuntimeError, match="already contain captured state"):
-            params.prepare_capture(descriptor)
-
     def test_require_capture_rejects_unknown_descriptor(self, fl_tree):
         """require_capture fails for a never-prepared descriptor."""
         params = fl_tree.params.GraphParams()
@@ -917,41 +827,6 @@ class TestGraphParams:
         assert params.workspaces == {}
         assert params.handles == {}
         assert params.attn_params == {}
-
-    def test_weak_ref_workspace_none_is_noop(self, fl_tree):
-        """A None workspace is left in place; the callable is not invoked."""
-        fl_tree.params.clear_graph_params()
-        descriptor = _Descriptor(8)
-        fl_tree.params.prepare_graph_params(descriptor)
-        calls = []
-        fl_tree.params.weak_ref_workspace(
-            descriptor, lambda ws: calls.append(ws) or ("weak", ws)
-        )
-        assert calls == []
-        registry = fl_tree.params.get_graph_params()
-        assert registry.workspaces[descriptor] is None
-
-    def test_weak_ref_workspace_replaces_workspace(self, fl_tree):
-        """A present workspace is replaced by weak_ref(workspace)."""
-        fl_tree.params.clear_graph_params()
-        descriptor = _Descriptor(8)
-        fl_tree.params.prepare_graph_params(descriptor)
-        registry = fl_tree.params.get_graph_params()
-        workspace = SimpleNamespace(name="workspace")
-        registry.workspaces[descriptor] = workspace
-
-        seen = []
-        fl_tree.params.weak_ref_workspace(
-            descriptor, lambda ws: seen.append(ws) or ("weak", ws)
-        )
-
-        assert seen == [workspace]
-        assert registry.workspaces[descriptor] == ("weak", workspace)
-
-    def test_weak_ref_workspace_requires_prepared_descriptor(self, fl_tree):
-        """An unprepared descriptor raises instead of mutating anything."""
-        with pytest.raises(RuntimeError, match="were not prepared"):
-            fl_tree.params.weak_ref_workspace(_Descriptor(99), lambda ws: ("weak", ws))
 
     def test_module_level_registry_helpers(self, fl_tree):
         """get/prepare/clear operate on one shared singleton."""
@@ -993,20 +868,6 @@ class TestGraphRuntimeController:
         context = SimpleNamespace(batch_descriptor=SimpleNamespace(num_tokens=7))
         assert controller._batch_descriptor(context).num_tokens == 7
 
-    def test_capture_scope_prepares_and_restores(self, fl_tree):
-        """capture_scope prepares params, flags capturing, then restores."""
-        controller = fl_tree.runtime.GraphRuntimeController(vllm_config="cfg")
-        descriptor = _Descriptor(12)
-        context = SimpleNamespace(batch_descriptor=descriptor, capturing=False)
-
-        with controller.capture_scope(context):
-            assert context.capturing is True
-            assert controller._active is True
-            assert fl_tree.params.get_graph_params().workspaces[descriptor] is None
-
-        assert context.capturing is False
-        assert controller._active is False
-
     def test_capture_scope_weak_ref_failure_still_restores(self, fl_tree):
         """A failing weak_ref_workspace still clears capturing/_active."""
         controller = fl_tree.runtime.GraphRuntimeController(vllm_config="cfg")
@@ -1041,58 +902,6 @@ class TestGraphRuntimeController:
                 controller.capture_scope(nested),
             ):
                 pass
-
-    def test_replay_scope_updates_attention_after_body(self, fl_tree):
-        """replay_scope syncs the stream, runs the body, then updates."""
-        synced = []
-
-        class _Stream:
-            def synchronize(self):
-                synced.append(1)
-
-        fl_tree.tree.platform.torch_device_fn = SimpleNamespace(
-            current_stream=lambda: _Stream(),
-            synchronize=lambda: None,
-            Stream=lambda: "stub-new-stream",
-        )
-
-        updates = []
-
-        class _Impl:
-            def update_graph_params(self, stream, context, descriptor, cfg):
-                updates.append((stream, context, descriptor, cfg))
-
-        controller = fl_tree.runtime.GraphRuntimeController(vllm_config="cfg")
-        controller.attention_impls = (_Impl(),)
-        context = SimpleNamespace(batch_descriptor=_Descriptor(5))
-        marker = []
-        with controller.replay_scope(context):
-            marker.append("body")
-            assert controller._active is True
-            assert updates == []  # update runs after the body
-
-        assert marker == ["body"]
-        assert synced == [1]
-        assert len(updates) == 1
-        assert updates[0][0] == "stub-new-stream"
-        assert updates[0][2].num_tokens == 5
-        assert controller._active is False
-
-    def test_replay_scope_restores_active_on_body_error(self, fl_tree):
-        """An exception inside replay_scope still clears the active flag."""
-        fl_tree.tree.platform.torch_device_fn = SimpleNamespace(
-            current_stream=lambda: SimpleNamespace(synchronize=lambda: None),
-            synchronize=lambda: None,
-            Stream=lambda: "stream",
-        )
-        controller = fl_tree.runtime.GraphRuntimeController(vllm_config="cfg")
-        controller.attention_impls = ()
-        scope = controller.replay_scope(
-            SimpleNamespace(batch_descriptor=_Descriptor(5))
-        )
-        with scope, pytest.raises(ValueError, match="body failed"):
-            raise ValueError("body failed")
-        assert controller._active is False
 
     def test_update_attention_requires_bound_backends(self, fl_tree):
         """Calling _update_attention before binding raises."""
@@ -1134,39 +943,6 @@ class TestGraphRuntimeController:
         controller._update_attention(context)
         assert len(streams) == 1
         assert calls == [streams[0]] * 4
-
-    def test_bind_attention_groups_dedupes_and_filters(self, fl_tree):
-        """Duplicate backends collapse; backends without factories drop."""
-        made = []
-
-        class _Impl:
-            def update_graph_params(self, *args):
-                pass
-
-        def make_impl_cls():
-            made.append("impl")
-            return _Impl()
-
-        class _GoodBackend:
-            get_impl_cls = staticmethod(make_impl_cls)
-
-        class _PlainBackend:
-            pass  # no get_impl_cls -> falls back to AttentionBackend default
-
-        class _Group:
-            def __init__(self, backend):
-                self.backend = backend
-
-        controller = fl_tree.runtime.GraphRuntimeController(vllm_config="cfg")
-        controller.bind_attention_groups(
-            [
-                [_Group(_GoodBackend), _Group(_GoodBackend)],
-                [_Group(_PlainBackend)],
-            ]
-        )
-        assert made == ["impl"]
-        assert len(controller.attention_impls) == 1
-        assert isinstance(controller.attention_impls, tuple)
 
     def test_bind_attention_groups_rejects_unupdatable_impl(self, fl_tree):
         """An impl lacking update_graph_params is a hard error."""

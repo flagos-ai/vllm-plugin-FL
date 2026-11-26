@@ -1,9 +1,9 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Supplementary CPU tests for FlagCX transfer planning and device communicator.
+"""CPU tests for FlagCX transfer planning and the device communicator.
 
-Deepens ``tests/supplementary_tests/unit/distributed/test_flagcx_connector.py``
-and ``test_flagcx_connector_worker.py`` (which must not be modified) with the
-still-uncovered surface of both FlagCX modules:
+Deepens ``test_flagcx_connector.py`` and
+``test_flagcx_connector_worker.py`` (same directory) with the still-uncovered
+surface of both FlagCX modules:
 
 * ``vllm_fl/distributed/kv_transfer/flagcx_connector.py`` — independent-oracle
   grids for the module-level planning helpers (``group_concurrent_contiguous``,
@@ -42,7 +42,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from tests.supplementary_tests.unit.distributed._flagcx_stubs import (
+from tests.unit_tests.distributed._flagcx_stubs import (
     FlagcxStubEnv,
     MambaSpec,
     MLAAttentionSpec,
@@ -52,8 +52,6 @@ from tests.supplementary_tests.unit.distributed._flagcx_stubs import (
     make_kv_cache_config,
 )
 
-pytestmark = pytest.mark.supplementary
-
 pytest.importorskip("msgspec")
 pytest.importorskip("numpy")
 pytest.importorskip("zmq")
@@ -61,7 +59,7 @@ pytest.importorskip("torch")
 
 import torch  # noqa: E402
 
-_SOURCE_ROOT = Path(__file__).resolve().parents[4]
+_SOURCE_ROOT = Path(__file__).resolve().parents[3]
 _CONNECTOR_SOURCE = _SOURCE_ROOT / "vllm_fl/distributed/kv_transfer/flagcx_connector.py"
 _FLAGCX_SOURCE = _SOURCE_ROOT / "vllm_fl/distributed/device_communicators/flagcx.py"
 _COMMUNICATOR_SUBJECT = "_test_flagcx_transfer_plan_communicator"
@@ -180,7 +178,6 @@ def _registered_local_layer(worker):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize(
     ("src", "dst", "exp_src", "exp_dst"),
     [
@@ -214,7 +211,6 @@ def _oracle_split(src, dst, cuts):
     )
 
 
-@pytest.mark.supplementary
 def test_group_concurrent_contiguous_multi_run_oracle(conn_env):
     """Mixed gaps produce alternating grouped/singleton runs, verified by a
     from-scratch run-length loop rather than the implementation's diff."""
@@ -241,7 +237,6 @@ def test_group_concurrent_contiguous_multi_run_oracle(conn_env):
     assert [len(g) for g in src_groups] == [3, 2, 2, 1]
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize(
     ("local", "remote", "expected"),
     [
@@ -268,7 +263,6 @@ def test_get_tp_ratio_oracle_grid(conn_env, local, remote, expected):
     assert conn_env.fc._get_tp_ratio(local, remote) == expected
 
 
-@pytest.mark.supplementary
 def test_get_tp_ratio_all_pairs_up_to_eight(conn_env):
     """Exhaustive grid over TP sizes 1..8: every divisible pair matches the
     oracle and non-divisible pairs raise."""
@@ -288,7 +282,6 @@ def test_get_tp_ratio_all_pairs_up_to_eight(conn_env):
                 assert fc._get_tp_ratio(local, remote) == -(remote // local)
 
 
-@pytest.mark.supplementary
 def test_expand_transfer_regions_oracle_grid(conn_env):
     """Independent oracle: each split entry becomes K at base and V at
     base + kv_block_len; unsplit entries stay single."""
@@ -348,7 +341,6 @@ def test_expand_transfer_regions_oracle_grid(conn_env):
     ] == expected
 
 
-@pytest.mark.supplementary
 def test_expand_transfer_regions_defaults_fill_lists(conn_env):
     """Omitted group_indices default to 0; omitted split list defaults to the
     layout flag for every entry."""
@@ -370,7 +362,6 @@ def test_expand_transfer_regions_defaults_fill_lists(conn_env):
     assert len(unsplit) == 1 and unsplit[0].base_addr == 10
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize(
     (
         "local_rank",
@@ -442,7 +433,6 @@ def test_compute_sender_transfer_plan_oracle(
     assert plan == expected
 
 
-@pytest.mark.supplementary
 def test_compute_sender_transfer_plan_exhaustive_grid(conn_env):
     """Every (local_tp, remote_tp, ranks) combination under 4 matches a
     from-scratch oracle."""
@@ -495,7 +485,6 @@ def test_compute_sender_transfer_plan_exhaustive_grid(conn_env):
                                 assert src_off == (remote_rank % ratio_abs) * remote_len
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize(
     ("block_lens", "offsets", "length", "expected"),
     [
@@ -522,7 +511,6 @@ def test_can_coalesce_oracle(conn_env, block_lens, offsets, length, expected):
     )
 
 
-@pytest.mark.supplementary
 def test_align_transfer_regions_reordered_remote(conn_env):
     """Alignment reorders the remote list to follow the local order of
     (layer_name, occurrence) pairs."""
@@ -551,7 +539,6 @@ def test_align_transfer_regions_reordered_remote(conn_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_facade_scheduler_passthroughs_return_inner_results(conn_env):
     """Each scheduler facade method forwards its arguments and returns the
     scheduler's result unchanged."""
@@ -580,7 +567,6 @@ def test_facade_scheduler_passthroughs_return_inner_results(conn_env):
     assert [entry[0] for entry in sent] == ["gnmt", "usaa", "bcm", "rf", "rf"]
 
 
-@pytest.mark.supplementary
 def test_facade_worker_passthroughs_and_role_guards(conn_env):
     """Worker facade methods forward to the worker; scheduler-role connectors
     have no worker side (stats None, wait_for_layer_load no-op)."""
@@ -626,7 +612,6 @@ def test_facade_worker_passthroughs_and_role_guards(conn_env):
         conn.start_load_kv(object())
 
 
-@pytest.mark.supplementary
 def test_facade_build_prom_metrics(conn_env):
     """build_prom_metrics constructs the FlagCX Prometheus collector."""
     prom = conn_env.fc.FlagCXConnector.build_prom_metrics(
@@ -643,7 +628,6 @@ def test_facade_build_prom_metrics(conn_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_scheduler_truncate_mamba_without_prompt_payload_is_noop(conn_env):
     """A request with neither prompt_token_ids nor prompt_embeds is left
     untouched (no truncation, no guard flag)."""
@@ -672,7 +656,6 @@ def test_scheduler_truncate_mamba_without_prompt_payload_is_noop(conn_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_worker_sync_block_size_adopts_kernel_size(conn_env, monkeypatch):
     """A smaller kernel block size wins: block_size shrinks and the physical
     fan-out is recorded; matching sizes leave both unchanged."""
@@ -692,7 +675,6 @@ def test_worker_sync_block_size_adopts_kernel_size(conn_env, monkeypatch):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_logical_to_kernel_block_ids_expansion(conn_env, monkeypatch):
     """With a 2:1 logical/kernel ratio, attention-group ids expand to the
     interleaved kernel ids while mamba groups stay logical."""
@@ -730,7 +712,6 @@ def test_worker_logical_to_kernel_block_ids_expansion(conn_env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_worker_register_kv_caches_full_attention_blocks_first(conn_env):
     """Registration records region geometry from real tensor strides, dedups
     MRs by storage, registers them with the library and starts the RPC server
@@ -767,7 +748,6 @@ def test_worker_register_kv_caches_full_attention_blocks_first(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_register_kv_caches_producer_starts_sender_thread(conn_env):
     """The producer role skips the RPC server and spawns the (stubbed) sender
     thread, waiting for its ready event."""
@@ -798,7 +778,6 @@ def test_worker_register_kv_caches_producer_starts_sender_thread(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_register_kv_caches_mla_uses_page_size(conn_env):
     """MLA layers take kv_block_len from the spec's page_size_bytes instead
     of halving the block length."""
@@ -830,7 +809,6 @@ def test_worker_register_kv_caches_mla_uses_page_size(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_register_kv_caches_skips_unknown_layer(conn_env):
     """Layers without a KV cache spec are skipped; the unknown layer never
     reaches the parallel region lists."""
@@ -847,7 +825,6 @@ def test_worker_register_kv_caches_skips_unknown_layer(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_register_kv_caches_dedups_shared_storage(conn_env):
     """Two region views over one storage register the MR exactly once."""
     worker = conn_env.make_worker(role="kv_consumer")
@@ -877,7 +854,6 @@ def test_worker_register_kv_caches_dedups_shared_storage(conn_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_worker_get_transfer_regions_splits_blocks_first(conn_env):
     """The worker's region builder splits K/V for blocks-first layouts with
     non-MLA, non-mamba layers and passes the group indices through."""
@@ -898,7 +874,6 @@ def test_worker_get_transfer_regions_splits_blocks_first(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_get_sender_transfer_plan_binds_worker_state(conn_env, monkeypatch):
     """The plan wrapper forwards the worker's rank/size and replication flag."""
     fc = conn_env.fc
@@ -935,7 +910,6 @@ def test_worker_get_sender_transfer_plan_binds_worker_state(conn_env, monkeypatc
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_worker_build_transfer_params_coalesced_contiguous(conn_env):
     """Contiguous aligned block runs coalesce into one descriptor per run:
     src = base + first_block * block_len, size = transfer_len * run length."""
@@ -960,7 +934,6 @@ def test_worker_build_transfer_params_coalesced_contiguous(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_build_transfer_params_non_coalesced_per_block(conn_env):
     """A sharded plan (nonzero destination offset) emits one descriptor per
     block with the offset applied to every destination address."""
@@ -985,7 +958,6 @@ def test_worker_build_transfer_params_non_coalesced_per_block(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_build_transfer_params_mamba_null_blocks_stripped(conn_env):
     """Mamba groups drop NULL_BLOCK_ID placeholders on both sides before
     building descriptors."""
@@ -1009,7 +981,6 @@ def test_worker_build_transfer_params_mamba_null_blocks_stripped(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_build_transfer_params_empty_groups_after_strip_skips(conn_env):
     """When every group empties after the mamba strip the request produces no
     descriptors (the `not any(local_by_group)` guard)."""
@@ -1028,7 +999,6 @@ def test_worker_build_transfer_params_empty_groups_after_strip_skips(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_build_transfer_params_group_out_of_range_skipped(conn_env):
     """A region whose group index exceeds the request's group count is
     skipped without descriptors."""
@@ -1048,7 +1018,6 @@ def test_worker_build_transfer_params_group_out_of_range_skipped(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_build_transfer_params_multiple_requests(conn_env):
     """Two requests each map their own blocks onto the shared regions."""
     fc = conn_env.fc
@@ -1078,7 +1047,6 @@ def test_worker_build_transfer_params_multiple_requests(conn_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_worker_send_kv_to_decode_success_path(conn_env):
     """The full happy path: ready blocks, one coalesced BatchWriteSync,
     stats recorded, finished ids published and the send meta drained."""
@@ -1105,7 +1073,6 @@ def test_worker_send_kv_to_decode_success_path(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_send_kv_to_decode_sizes_empty_skips_write(conn_env):
     """With no descriptors to write the BatchWriteSync boundary stays
     untouched, yet the request still finishes."""
@@ -1124,7 +1091,6 @@ def test_worker_send_kv_to_decode_sizes_empty_skips_write(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_send_kv_to_decode_missing_prefill_id_raises(conn_env):
     """Completing a transfer whose send meta never bound a prefill request id
     raises instead of publishing an empty id."""
@@ -1144,7 +1110,6 @@ def test_worker_send_kv_to_decode_missing_prefill_id_raises(conn_env):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_send_kv_to_decode_non_target_rank_warns(conn_env, caplog):
     """A decode rank outside this producer's handshake targets logs a
     warning but proceeds with the transfer."""
@@ -1173,7 +1138,6 @@ def test_worker_send_kv_to_decode_non_target_rank_warns(conn_env, caplog):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_send_kv_to_decode_length_validation_raises(conn_env):
     """Region-length validation errors surface as RuntimeError after
     alignment succeeds."""
@@ -1249,7 +1213,6 @@ def _zmq():
     return zmq
 
 
-@pytest.mark.supplementary
 def test_worker_sender_thread_loop(conn_env, monkeypatch):
     """One poll cycle: the frontend request is submitted to the executor
     with its identity and the backend status is relayed back; the loop exits
@@ -1294,7 +1257,6 @@ def test_worker_sender_thread_loop(conn_env, monkeypatch):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_sender_thread_error_logged_and_sockets_closed(conn_env, monkeypatch):
     """An unexpected poll error is logged and both sockets still close."""
     fc = conn_env.fc
@@ -1331,7 +1293,6 @@ def test_worker_sender_thread_error_logged_and_sockets_closed(conn_env, monkeypa
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_sender_worker_done_and_error_statuses(conn_env, monkeypatch):
     """The sender worker replies TRANS_DONE after a successful send and
     TRANS_ERROR when either decode or the transfer fails; the status pusher
@@ -1382,7 +1343,6 @@ def test_worker_sender_worker_done_and_error_statuses(conn_env, monkeypatch):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_sender_worker_push_failure_logged(conn_env, monkeypatch, caplog):
     """A failing status push (server shutting down) is logged, not raised."""
     fc = conn_env.fc
@@ -1417,7 +1377,6 @@ def test_worker_sender_worker_push_failure_logged(conn_env, monkeypatch, caplog)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_worker_receive_kv_context_terminated_is_quiet(conn_env, monkeypatch):
     """A ContextTerminated during recv is debug-level quiet: no failed-recv
     stat is recorded (the finally block still finishes the requests)."""
@@ -1449,7 +1408,6 @@ def test_worker_receive_kv_context_terminated_is_quiet(conn_env, monkeypatch):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_receive_kv_generic_exception_records_failure(conn_env, monkeypatch):
     """Any other recv error records a failed recv and returns without
     finishing the request."""
@@ -1480,7 +1438,6 @@ def test_worker_receive_kv_generic_exception_records_failure(conn_env, monkeypat
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_start_load_kv_consumer_schedules_pull(conn_env, monkeypatch):
     """The consumer role schedules the group pull coroutine on its receiver
     loop when there are requests to receive."""
@@ -1517,7 +1474,6 @@ def test_worker_start_load_kv_consumer_schedules_pull(conn_env, monkeypatch):
         worker.shutdown()
 
 
-@pytest.mark.supplementary
 def test_worker_shutdown_joins_sender_thread(conn_env):
     """Shutdown joins the registered sender thread with the documented
     two-second timeout."""
@@ -1698,7 +1654,6 @@ class _TorchProxy:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_load_flagcx_wheel_bindings_returns_six_names(load_communicator, tmp_path):
     """The wheel loader returns the six API objects from the api.py file."""
     module = load_communicator()
@@ -1710,7 +1665,6 @@ def test_load_flagcx_wheel_bindings_returns_six_names(load_communicator, tmp_pat
     assert type(results[4]).__module__ != _COMMUNICATOR_SUBJECT
 
 
-@pytest.mark.supplementary
 def test_load_flagcx_wheel_bindings_incomplete_api(load_communicator, tmp_path):
     """An api.py missing one of the six names raises ImportError and leaves
     no entry behind in sys.modules."""
@@ -1722,7 +1676,6 @@ def test_load_flagcx_wheel_bindings_incomplete_api(load_communicator, tmp_path):
     assert f"{_COMMUNICATOR_SUBJECT}._wheel_api" not in sys.modules
 
 
-@pytest.mark.supplementary
 def test_load_flagcx_wheel_bindings_failure_restores_previous(
     load_communicator, tmp_path
 ):
@@ -1746,7 +1699,6 @@ def test_load_flagcx_wheel_bindings_failure_restores_previous(
     assert api_name not in sys.modules
 
 
-@pytest.mark.supplementary
 def test_load_amd_flagcx_api_executes_and_cleans_up(load_communicator, tmp_path):
     """The AMD loader executes the api module under its private name and
     removes it from sys.modules when execution fails."""
@@ -1765,7 +1717,6 @@ def test_load_amd_flagcx_api_executes_and_cleans_up(load_communicator, tmp_path)
     assert f"{_COMMUNICATOR_SUBJECT}._amd_api" not in sys.modules
 
 
-@pytest.mark.supplementary
 def test_load_kunlunxin_flagcx_api_prefers_wrapper(load_communicator, tmp_path):
     """A directory containing plugin/interservice/flagcx_wrapper.py is used
     directly; an import failure falls back to the flagcx package."""
@@ -1795,7 +1746,6 @@ def test_load_kunlunxin_flagcx_api_prefers_wrapper(load_communicator, tmp_path):
         sys.modules.update(saved)
 
 
-@pytest.mark.supplementary
 def test_load_kunlunxin_flagcx_api_falls_back_to_package(
     load_communicator, monkeypatch
 ):
@@ -1818,7 +1768,6 @@ def test_load_kunlunxin_flagcx_api_falls_back_to_package(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize(
     ("env_vendor", "platform_vendor", "expected"),
     [
@@ -1845,7 +1794,6 @@ def test_is_kunlunxin_detection(
     assert module._is_kunlunxin() is expected
 
 
-@pytest.mark.supplementary
 def test_is_kunlunxin_platform_import_failure_is_false(load_communicator, monkeypatch):
     """A failing vllm.platforms import means 'not kunlunxin'."""
     module = load_communicator()
@@ -1854,7 +1802,6 @@ def test_is_kunlunxin_platform_import_failure_is_false(load_communicator, monkey
     assert module._is_kunlunxin() is False
 
 
-@pytest.mark.supplementary
 def test_kunlunxin_package_dispatch_sets_packaged_library(
     load_communicator, monkeypatch
 ):
@@ -1885,7 +1832,6 @@ def test_kunlunxin_package_dispatch_sets_packaged_library(
     assert module.FLAGCXLibrary is _KxLib
 
 
-@pytest.mark.supplementary
 def test_amd_source_dispatch_loads_pinned_api(load_communicator, monkeypatch, tmp_path):
     """FLAGCX_PATH + torch.version.hip + an AMD platform vendor loads the
     pinned source API from <root>/src/flagcx/api.py."""
@@ -1906,44 +1852,6 @@ def test_amd_source_dispatch_loads_pinned_api(load_communicator, monkeypatch, tm
     sys.modules.pop(f"{_COMMUNICATOR_SUBJECT}._amd_api", None)
 
 
-@pytest.mark.supplementary
-def test_wheel_dispatch_binds_library_path(load_communicator, monkeypatch, tmp_path):
-    """A wheel-layout FLAGCX_PATH loads the direct API and records the .so
-    path for the communicator constructor."""
-    root = _wheel_layout(tmp_path)
-    monkeypatch.setenv("FLAGCX_PATH", str(root))
-    module = load_communicator()
-    assert module._flagcx_available is True
-    assert module._flagcx_wheel_library == str(root / "lib" / "libflagcx.so")
-
-
-@pytest.mark.supplementary
-def test_plain_wrapper_dispatch_appends_to_sys_path(
-    load_communicator, monkeypatch, tmp_path
-):
-    """A source-layout FLAGCX_PATH (no api.py) is appended to sys.path and
-    the wrapper import provides the six names."""
-    source_root = tmp_path / "source-root"
-    source_root.mkdir()
-    monkeypatch.setenv("FLAGCX_PATH", str(source_root))
-    module = load_communicator()
-    assert module._flagcx_available is True
-    assert str(source_root) in sys.path
-    assert module._flagcx_wheel_library is None
-    assert f"{_COMMUNICATOR_SUBJECT}._wheel_api" not in sys.modules
-
-
-@pytest.mark.supplementary
-def test_wrapper_import_failure_marks_unavailable(load_communicator, monkeypatch):
-    """A failing wrapper import is recorded and leaves every name None."""
-    monkeypatch.setitem(sys.modules, "plugin.interservice.flagcx_wrapper", None)
-    module = load_communicator()
-    assert module._flagcx_available is False
-    assert module.FLAGCXLibrary is None
-    assert module._flagcx_import_error is not None
-
-
-@pytest.mark.supplementary
 def test_plain_path_non_import_error_reraises(load_communicator, monkeypatch, tmp_path):
     """An OSError on the plain wrapper path propagates instead of disabling.
 
@@ -1964,7 +1872,6 @@ def test_plain_path_non_import_error_reraises(load_communicator, monkeypatch, tm
         load_communicator()
 
 
-@pytest.mark.supplementary
 def test_is_trace_tensor_variants(load_communicator):
     """None and non-tensors are False; meta and FakeTensors are True; a real
     CPU tensor is False."""
@@ -1985,7 +1892,6 @@ def test_is_trace_tensor_variants(load_communicator):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_init_world_size_one_disables(load_communicator):
     """A single-rank group returns early with the communicator disabled."""
     module = load_communicator()
@@ -2000,7 +1906,6 @@ def test_init_world_size_one_disables(load_communicator):
     assert comm.comm is None
 
 
-@pytest.mark.supplementary
 def test_init_unavailable_library_raises_recorded(load_communicator, monkeypatch):
     """A None FLAGCXLibrary raises ImportError inside the guarded block and
     leaves the communicator disabled with init_error set."""
@@ -2013,7 +1918,6 @@ def test_init_unavailable_library_raises_recorded(load_communicator, monkeypatch
     assert "unavailable" in str(comm.init_error)
 
 
-@pytest.mark.supplementary
 def test_init_library_ctor_failure_disables(load_communicator, monkeypatch):
     """An OSError from the native library constructor disables the
     communicator (non-GPU environments)."""
@@ -2030,7 +1934,6 @@ def test_init_library_ctor_failure_disables(load_communicator, monkeypatch):
     assert isinstance(comm.init_error, OSError)
 
 
-@pytest.mark.supplementary
 def test_init_wheel_library_path_preferred(load_communicator, monkeypatch, tmp_path):
     """With a wheel-loaded module the constructor passes the recorded .so
     path; an explicit library_path wins over both."""
@@ -2055,7 +1958,6 @@ def test_init_wheel_library_path_preferred(load_communicator, monkeypatch, tmp_p
     assert captured == ["explicit/libflagcx.so"]
 
 
-@pytest.mark.supplementary
 def test_init_success_cpu_device_and_warmup(load_communicator, monkeypatch):
     """The full happy path on a CPU device: unique id broadcast via
     broadcast_obj, new-API comm init, warmup all_reduce and synchronize."""
@@ -2102,7 +2004,6 @@ def _patched_cuda_device(monkeypatch):
     yield
 
 
-@pytest.mark.supplementary
 def test_init_legacy_unique_id_and_stateful_group(load_communicator, monkeypatch):
     """A legacy-API library (handler attribute, no devHandle) reads .contents
     from flagcxGetUniqueId and inits the comm through ctypes.pointer; a
@@ -2159,7 +2060,6 @@ def test_init_legacy_unique_id_and_stateful_group(load_communicator, monkeypatch
     assert init_args[0] == 2 and init_args[2] == 1
 
 
-@pytest.mark.supplementary
 def test_init_npu_device_with_wheel_uses_ascend_stream(load_communicator, monkeypatch):
     """An NPU device with a wheel library imports the Ascend all-reduce
     stream patch, uses the NPU device context and NPU current stream."""
@@ -2207,7 +2107,6 @@ def test_init_npu_device_with_wheel_uses_ascend_stream(load_communicator, monkey
     assert lib.flagcxAllReduce.called is False
 
 
-@pytest.mark.supplementary
 def test_init_ptpu_device_uses_plain_device_ctx(load_communicator, monkeypatch):
     """The ptpu branch re-wraps through torch.device and enters the device
     itself as its context manager."""
@@ -2232,7 +2131,6 @@ def test_init_ptpu_device_uses_plain_device_ctx(load_communicator, monkeypatch):
     assert comm.comm == "comm-ptpu"
 
 
-@pytest.mark.supplementary
 def test_init_txda_warmup_failure_destroys_and_raises(load_communicator, monkeypatch):
     """A failing warmup on TXDA destroys the communicator (abort path) and
     re-raises the original error."""
@@ -2280,19 +2178,6 @@ def test_init_txda_warmup_failure_destroys_and_raises(load_communicator, monkeyp
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
-def test_destroy_non_txda_is_noop(load_communicator):
-    """Non-TXDA devices return immediately without touching the library."""
-    module = load_communicator()
-    comm = module.PyFlagcxCommunicator.__new__(module.PyFlagcxCommunicator)
-    comm.device = torch.device("cpu")
-    comm.flagcx = Mock()
-    comm.comm = "handle"
-    comm.destroy()
-    assert comm.comm == "handle"
-
-
-@pytest.mark.supplementary
 def test_destroy_txda_aborts_through_native_thread(load_communicator):
     """TXDA destroy runs flagcxCommAbort in a daemon thread, checks the
     return code, clears the comm handle and is idempotent."""
@@ -2331,38 +2216,6 @@ def test_destroy_txda_aborts_through_native_thread(load_communicator):
     assert abort.call_count == 1
 
 
-@pytest.mark.supplementary
-def test_destroy_txda_abort_failure_logged(load_communicator, caplog):
-    """A failing native abort logs an exception instead of raising; the
-    communicator is still marked torn down."""
-    module = load_communicator()
-
-    def bad_abort(code):
-        raise RuntimeError("native abort failed")
-
-    lib = Mock()
-    lib.lib = {"flagcxCommAbort": bad_abort}
-    lib.FLAGCX_CHECK = Mock()
-
-    comm = module.PyFlagcxCommunicator.__new__(module.PyFlagcxCommunicator)
-    comm.device = _FakeDevice("txda:0")
-    comm._destroy_lock = threading.Lock()
-    comm._destroy_started = False
-    comm._destroy_thread = None
-    comm.flagcx = lib
-    comm.comm = "comm-handle"
-
-    fake_txda = SimpleNamespace(device=lambda device: device)
-    proxy = _TorchProxy(torch)
-    object.__setattr__(proxy, "txda", fake_txda)
-    object.__setattr__(proxy, "device", _FakeDevice)
-    module.torch = proxy
-    module._TXDA_ABORT_TIMEOUT_SECONDS = 0.2
-
-    comm.destroy()  # must not raise
-    assert comm.comm is None
-
-
 # ---------------------------------------------------------------------------
 # flagcx.py: collectives via __new__-constructed communicators
 # ---------------------------------------------------------------------------
@@ -2397,7 +2250,6 @@ def _cpu_communicator(module, device_type="cpu", rank=0):
     return comm
 
 
-@pytest.mark.supplementary
 def test_all_reduce_disabled_returns_none(load_communicator):
     """A disabled communicator returns None without touching the library."""
     module = load_communicator()
@@ -2407,7 +2259,6 @@ def test_all_reduce_disabled_returns_none(load_communicator):
     assert not comm.flagcx.flagcxAllReduce.called
 
 
-@pytest.mark.supplementary
 def test_all_reduce_trace_tensor_short_circuits(load_communicator):
     """Fake/meta inputs never reach the native library: an empty_like is
     returned instead."""
@@ -2419,7 +2270,6 @@ def test_all_reduce_trace_tensor_short_circuits(load_communicator):
     assert not comm.flagcx.adaptor_stream_copy.called
 
 
-@pytest.mark.supplementary
 def test_all_reduce_creates_output_and_uses_current_stream(load_communicator):
     """Without an out tensor one is allocated; without a stream the current
     stream helper is consulted."""
@@ -2436,7 +2286,6 @@ def test_all_reduce_creates_output_and_uses_current_stream(load_communicator):
     assert comm.flagcx.adaptor_stream_free.called
 
 
-@pytest.mark.supplementary
 def test_all_reduce_on_stream_frees_stream_on_error(load_communicator):
     """_all_reduce_on_stream frees the copied stream even when the native
     call raises (finally clause)."""
@@ -2448,7 +2297,6 @@ def test_all_reduce_on_stream_frees_stream_on_error(load_communicator):
     assert comm.flagcx.adaptor_stream_free.called
 
 
-@pytest.mark.supplementary
 def test_all_reduce_submits_through_all_reduce_stream(load_communicator):
     """With an _all_reduce_stream present the collective is submitted
     through it instead of running inline."""
@@ -2464,7 +2312,6 @@ def test_all_reduce_submits_through_all_reduce_stream(load_communicator):
     assert not comm.flagcx.flagcxAllReduce.called
 
 
-@pytest.mark.supplementary
 def test_all_gather_disabled_and_trace(load_communicator):
     """all_gather returns early when disabled or when tracing."""
     module = load_communicator()
@@ -2478,7 +2325,6 @@ def test_all_gather_disabled_and_trace(load_communicator):
     assert not comm.flagcx.flagcxAllGather.called
 
 
-@pytest.mark.supplementary
 def test_all_gather_invokes_library(load_communicator):
     """all_gather passes input/output pointers, numel and the dtype enum to
     the library and frees the copied stream."""
@@ -2491,7 +2337,6 @@ def test_all_gather_invokes_library(load_communicator):
     assert comm.flagcx.adaptor_stream_free.called
 
 
-@pytest.mark.supplementary
 def test_all_gatherv_broadcasts_each_root_slice(load_communicator):
     """all_gatherv wraps per-root broadcasts in group_start/end and slices
     the output at the running offset."""
@@ -2510,7 +2355,6 @@ def test_all_gatherv_broadcasts_each_root_slice(load_communicator):
     assert comm.flagcx.adaptor_stream_free.called
 
 
-@pytest.mark.supplementary
 def test_all_gatherv_shape_mismatch_rejected(load_communicator):
     """output rows must equal sum(sizes)."""
     module = load_communicator()
@@ -2519,7 +2363,6 @@ def test_all_gatherv_shape_mismatch_rejected(load_communicator):
         comm.all_gatherv(torch.zeros(3), torch.zeros(2), [2, 2], stream="s")
 
 
-@pytest.mark.supplementary
 def test_reduce_scatter_invokes_library(load_communicator):
     """reduce_scatter forwards pointers, output numel and both enums."""
     module = load_communicator()
@@ -2530,7 +2373,6 @@ def test_reduce_scatter_invokes_library(load_communicator):
     assert comm.flagcx.adaptor_stream_free.called
 
 
-@pytest.mark.supplementary
 def test_reduce_scatterv_reduces_per_root_chunks(load_communicator):
     """reduce_scatterv reduces each root's input chunk inside a group."""
     module = load_communicator()
@@ -2543,7 +2385,6 @@ def test_reduce_scatterv_reduces_per_root_chunks(load_communicator):
     assert comm.flagcx.adaptor_stream_free.called
 
 
-@pytest.mark.supplementary
 def test_send_recv_invoke_library(load_communicator):
     """send/recv forward the tensor pointer, numel, dtype enum and peer."""
     module = load_communicator()
@@ -2557,7 +2398,6 @@ def test_send_recv_invoke_library(load_communicator):
     assert comm.flagcx.adaptor_stream_free.call_count == 2
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("src_is_root", [True, False])
 def test_broadcast_buffer_selection(load_communicator, src_is_root):
     """The root rank passes the tensor pointer as both sendbuff and
@@ -2574,7 +2414,6 @@ def test_broadcast_buffer_selection(load_communicator, src_is_root):
     assert comm.flagcx.adaptor_stream_free.called
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("device_type", ["cpu", "npu"])
 def test_group_start_end_argument_forms(load_communicator, device_type):
     """NPU (and AMD-source) pass the comm handle; other devices call the
@@ -2591,7 +2430,6 @@ def test_group_start_end_argument_forms(load_communicator, device_type):
         assert comm.flagcx.flagcxGroupEnd.call_args.args == ()
 
 
-@pytest.mark.supplementary
 def test_group_start_end_amd_source_form(load_communicator, monkeypatch):
     """An AMD-source module passes the comm even on non-NPU devices."""
     module = load_communicator()
@@ -2603,7 +2441,6 @@ def test_group_start_end_amd_source_form(load_communicator, monkeypatch):
     assert comm.flagcx.flagcxGroupEnd.call_args.args == ("comm-handle",)
 
 
-@pytest.mark.supplementary
 def test_copy_flagcx_stream_npu_wraps_cuda_stream(load_communicator):
     """On NPU devices the stream is rewrapped as a cuda_stream namespace
     before reaching adaptor_stream_copy."""
@@ -2615,7 +2452,6 @@ def test_copy_flagcx_stream_npu_wraps_cuda_stream(load_communicator):
     assert wrapped.cuda_stream == 777
 
 
-@pytest.mark.supplementary
 def test_copy_flagcx_stream_passthrough_other_devices(load_communicator):
     """Non-NPU devices hand the stream to adaptor_stream_copy unchanged."""
     module = load_communicator()
@@ -2649,7 +2485,6 @@ def _npu_labeled_tensor(module, data):
     return _FakeNpuTensor(data)
 
 
-@pytest.mark.supplementary
 def test_all_gatherv_npu_fills_own_slice(load_communicator):
     """The NPU broadcast copies only count bytes, so the rank's own slice is
     restored with a local copy under the npu stream context."""
@@ -2660,16 +2495,20 @@ def test_all_gatherv_npu_fills_own_slice(load_communicator):
         stream=lambda s: entered.append(s) or contextlib.nullcontext()
     )
     object.__setattr__(module.torch, "npu", fake_npu)
-    inp = _npu_labeled_tensor(module, torch.zeros(1))
+    inp = _npu_labeled_tensor(module, torch.arange(1.0) + 7)
     out = _npu_labeled_tensor(module, torch.zeros(4))
     comm.all_gatherv(out, inp, [1, 3], stream=SimpleNamespace(npu_stream=9))
     assert comm.flagcx.flagcxBroadcast.call_count == 2
     assert comm.flagcx.flagcxGroupStart.call_args.args == ("comm-handle",)
     assert entered  # npu stream context used
-    # Own slice restored by a local copy_: out[0:1] == inp's zeros.
+    # Own slice restored by a local copy_: out[0:1] == inp (the mock broadcast
+    # wrote nothing, so only this copy could have filled the slice).
+    assert torch.equal(
+        out[0:1].as_subclass(torch.Tensor), inp.as_subclass(torch.Tensor)
+    )
+    assert out[1:].as_subclass(torch.Tensor).equal(torch.zeros(3))
 
 
-@pytest.mark.supplementary
 def test_reduce_scatterv_npu_group_forms(load_communicator):
     """reduce_scatterv on NPU uses the comm-carrying group forms."""
     module = load_communicator()

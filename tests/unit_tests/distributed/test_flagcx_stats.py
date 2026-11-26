@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Supplementary CPU tests for ``vllm_fl.distributed.kv_transfer.flagcx_stats``.
+"""CPU tests for ``vllm_fl.distributed.kv_transfer.flagcx_stats``.
 
 Covers the KV transfer stats bookkeeping container (record/clone/reset,
 pickling, reduction/aggregation math) and the Prometheus metrics registration
@@ -12,7 +12,7 @@ import threading
 
 import pytest
 
-from tests.supplementary_tests.unit.distributed._flagcx_stubs import (
+from tests.unit_tests.distributed._flagcx_stubs import (
     FlagcxStubEnv,
 )
 
@@ -49,7 +49,6 @@ def _recorded(flagcx_stats, *, transfers=(), failures=0, failed_recvs=0, expired
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_post_init_resets_when_constructed_without_data(stats_env):
     """A container constructed with no data gets all six empty columns."""
     stats = stats_env.FlagCXKVConnectorStats()
@@ -64,7 +63,6 @@ def test_post_init_resets_when_constructed_without_data(stats_env):
     assert stats.is_empty()
 
 
-@pytest.mark.supplementary
 def test_post_init_keeps_existing_data(stats_env):
     """Pre-seeded data (e.g. from the wire) is not cleared by __post_init__."""
     stats = stats_env.FlagCXKVConnectorStats(data={"num_failed_recvs": [1, 1]})
@@ -72,7 +70,6 @@ def test_post_init_keeps_existing_data(stats_env):
     assert "transfer_duration" not in stats.data  # untouched, no reset
 
 
-@pytest.mark.supplementary
 def test_partial_preseeded_data_keyerrors_is_empty(stats_env):
     """Latent edge: is_empty() assumes the full column set exists, so a
     container built from a partial data dict raises KeyError.  In the real
@@ -84,7 +81,6 @@ def test_partial_preseeded_data_keyerrors_is_empty(stats_env):
         stats.is_empty()
 
 
-@pytest.mark.supplementary
 def test_record_transfer_appends_aligned_columns(stats_env):
     """record_transfer appends one entry to each of its three columns."""
     stats = stats_env.FlagCXKVConnectorStats()
@@ -97,7 +93,6 @@ def test_record_transfer_appends_aligned_columns(stats_env):
     assert not stats.is_empty()
 
 
-@pytest.mark.supplementary
 def test_failure_counters_append_ones(stats_env):
     """Each failure counter appends a 1 so counters can .inc(list_item)."""
     stats = stats_env.FlagCXKVConnectorStats()
@@ -111,7 +106,6 @@ def test_failure_counters_append_ones(stats_env):
     assert not stats.is_empty()
 
 
-@pytest.mark.supplementary
 def test_is_empty_true_only_when_all_counters_drained(stats_env):
     """is_empty requires zero transfers AND zero failure/expiry records."""
     stats = _recorded(stats_env, failed_recvs=1)
@@ -120,7 +114,6 @@ def test_is_empty_true_only_when_all_counters_drained(stats_env):
     assert empty.is_empty()
 
 
-@pytest.mark.supplementary
 def test_clone_and_reset_snapshots_and_clears(stats_env):
     """clone_and_reset copies the columns under the lock and resets in place."""
     stats = _recorded(stats_env, transfers=[(0.1, 512, 1)], failures=1)
@@ -136,7 +129,6 @@ def test_clone_and_reset_snapshots_and_clears(stats_env):
     assert stats.data["transfer_duration"] == []
 
 
-@pytest.mark.supplementary
 def test_concurrent_records_stay_column_aligned(stats_env):
     """Threads recording transfers concurrently keep all columns aligned."""
     stats = stats_env.FlagCXKVConnectorStats()
@@ -157,7 +149,6 @@ def test_concurrent_records_stay_column_aligned(stats_env):
     assert len(stats.data["num_descriptors"]) == total
 
 
-@pytest.mark.supplementary
 def test_pickling_strips_lock_and_rebuilds_it(stats_env):
     """Locks are dropped on pickling; the receiver rebuilds a fresh lock."""
     stats = _recorded(stats_env, transfers=[(0.2, 64, 3)], expired=1)
@@ -172,7 +163,6 @@ def test_pickling_strips_lock_and_rebuilds_it(stats_env):
     assert restored.data["num_failed_recvs"] == [1]
 
 
-@pytest.mark.supplementary
 def test_aggregate_merges_other_into_self(stats_env):
     """aggregate extends self's columns with the other's and returns self."""
     target = _recorded(stats_env, transfers=[(0.1, 100, 1)])
@@ -184,7 +174,6 @@ def test_aggregate_merges_other_into_self(stats_env):
     assert target.data["num_failed_recvs"] == [1]
 
 
-@pytest.mark.supplementary
 def test_aggregate_skips_empty_other(stats_env):
     """An empty other leaves self untouched."""
     target = _recorded(stats_env, transfers=[(0.1, 100, 1)])
@@ -194,7 +183,6 @@ def test_aggregate_skips_empty_other(stats_env):
     assert target.data == before
 
 
-@pytest.mark.supplementary
 def test_reduce_zero_transfers_returns_zeroed_metrics(stats_env):
     """With no successful transfers, reduce reports zeroed success metrics
     while preserving the raw failure counts."""
@@ -213,7 +201,6 @@ def test_reduce_zero_transfers_returns_zeroed_metrics(stats_env):
     }
 
 
-@pytest.mark.supplementary
 def test_reduce_computes_transfer_statistics(stats_env):
     """reduce derives count/latency/size/throughput/descriptor aggregates."""
     # 1 MiB + 3 MiB in 0.5s + 1.5s = 4 MiB over 2s -> 2 MiB/s (source
@@ -231,7 +218,6 @@ def test_reduce_computes_transfer_statistics(stats_env):
     assert reduced["Num failed transfers"] == 0
 
 
-@pytest.mark.supplementary
 def test_reduce_zero_total_time_reports_zero_throughput(stats_env):
     """A zero-duration accumulation reports 0 throughput, not a ZeroDivision."""
     stats = _recorded(stats_env, transfers=[(0.0, 2**20, 1)])
@@ -240,7 +226,6 @@ def test_reduce_zero_total_time_reports_zero_throughput(stats_env):
     assert reduced["Num successful transfers"] == 1
 
 
-@pytest.mark.supplementary
 def test_reduce_p90_rounds_to_milliseconds(stats_env):
     """P90 latency is converted to milliseconds with 3 decimals."""
     stats = _recorded(
@@ -256,7 +241,6 @@ def test_reduce_p90_rounds_to_milliseconds(stats_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_prom_metrics_registers_all_counters_and_histograms(stats_env, monkeypatch):
     """The constructor registers 7 counters and 3 histograms with the
     documented names, each fanned out per engine via create_metric_per_engine."""
@@ -318,7 +302,6 @@ def test_prom_metrics_registers_all_counters_and_histograms(stats_env, monkeypat
     ]
 
 
-@pytest.mark.supplementary
 def test_prom_metrics_observes_counters_and_histograms(stats_env):
     """observe() advances the transfers counter by the transfer_duration
     column length, every other counter by each recorded value, and each
@@ -360,7 +343,6 @@ def test_prom_metrics_observes_counters_and_histograms(stats_env):
     assert {k: v for k, v in metrics.items() if v.values != before[k]} == {}
 
 
-@pytest.mark.supplementary
 def test_prom_metrics_observe_handles_missing_columns(stats_env):
     """observe() tolerates a data dict that only carries some columns."""
     prom = stats_env.FlagCXPromMetrics(

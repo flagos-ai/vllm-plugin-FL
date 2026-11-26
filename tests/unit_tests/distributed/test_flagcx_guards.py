@@ -1,11 +1,13 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for the remaining ``flagcx.py`` communicator lines.
+"""Guard-branch tests for the remaining ``flagcx.py`` communicator lines.
 
-``test_flagcx_transfer_plan.py`` (which must not be modified) already covers
-the API loaders' success paths, the constructor's cpu/npu/ptpu/txda matrix,
+``test_flagcx_transfer_plan.py`` (same directory) already covers the API
+loaders' success paths, the constructor's cpu/npu/ptpu/txda matrix,
 ``destroy`` on TXDA and every collective's main-line library call with an
-explicit stream.  Still uncovered after that file runs:
+explicit stream, and ``test_txda_flagcx_cleanup.py`` /
+``test_txda_flagcx_stream.py`` pin the TXDA destroy lifecycle and the
+per-device stream selection.  Still uncovered after those files run:
 
 * the loader guards for a path ``importlib`` cannot resolve into a spec
   (``_load_flagcx_wheel_bindings`` and ``_load_amd_flagcx_api`` raise), and
@@ -15,9 +17,6 @@ explicit stream.  Still uncovered after that file runs:
 * ``__init__`` with a legacy-API library at rank 0 (the ``.contents``
   unique-id read) and with a ``musa`` device (the ``torch.musa.device``
   context manager);
-* ``destroy`` corner branches: a failing ``thread.start()`` and the
-  timeout-expired warning when the abort thread stays alive;
-* ``_current_stream`` on an AMD-source module (``torch.cuda.current_stream``);
 * the remaining collective guard branches the mainline tests always pass a
   stream around: the disabled early return, the ``stream=None`` resolution
   through ``_current_stream()`` and the trace-tensor early return of
@@ -36,8 +35,6 @@ import ctypes
 import importlib.util
 import logging
 import sys
-import threading
-import time
 import types
 from pathlib import Path
 from types import SimpleNamespace
@@ -46,13 +43,11 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
-
-_SOURCE_ROOT = Path(__file__).resolve().parents[4]
+_SOURCE_ROOT = Path(__file__).resolve().parents[3]
 _FLAGCX_SOURCE = _SOURCE_ROOT / "vllm_fl/distributed/device_communicators/flagcx.py"
 _COMMUNICATOR_SUBJECT = "_test_flagcx_guards_communicator"
 
-# Collectives whose stream=None branch is still uncovered (all_gather's
+# Collectives whose stream=None branch is exercised (all_gather's
 # disabled/trace returns are already covered by the sibling file).
 _STREAM_COLLECTIVES = [
     "all_gather",
@@ -64,7 +59,7 @@ _STREAM_COLLECTIVES = [
     "broadcast",
 ]
 
-# Collectives whose disabled/trace returns are still uncovered.
+# Collectives whose disabled/trace returns are pinned here.
 _GUARDED_COLLECTIVES = _STREAM_COLLECTIVES[1:]
 
 
@@ -212,23 +207,6 @@ def _cpu_communicator(module):
     return comm
 
 
-def _txda_comm(module):
-    """Build a TXDA communicator by ``__new__`` for ``destroy`` tests."""
-    comm = module.PyFlagcxCommunicator.__new__(module.PyFlagcxCommunicator)
-    comm.device = _FakeDevice("txda:0")
-    comm._destroy_lock = threading.Lock()
-    comm._destroy_started = False
-    comm._destroy_thread = None
-    lib = Mock()
-    lib.lib = {"flagcxCommAbort": Mock(return_value=0)}
-    lib.FLAGCX_CHECK = Mock()
-    comm.flagcx = lib
-    comm.comm = "comm-handle"
-    comm.available = True
-    comm.disabled = False
-    return comm
-
-
 def _invoke_collective(name, comm, *, device="cpu", stream="s"):
     """Invoke the named collective with fresh tensors on *device*."""
 
@@ -269,7 +247,6 @@ def _patched_cuda_device(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_wheel_loader_unresolvable_path_raises(load_communicator, tmp_path):
     """A path importlib cannot turn into a spec raises the ImportError."""
     module = load_communicator()
@@ -280,7 +257,6 @@ def test_wheel_loader_unresolvable_path_raises(load_communicator, tmp_path):
     assert f"{_COMMUNICATOR_SUBJECT}._wheel_api" not in sys.modules
 
 
-@pytest.mark.supplementary
 def test_amd_loader_unresolvable_path_raises(load_communicator, tmp_path):
     """The AMD loader raises the same ImportError for an unresolvable path
     and leaves no private sys.modules entry behind."""
@@ -292,7 +268,6 @@ def test_amd_loader_unresolvable_path_raises(load_communicator, tmp_path):
     assert f"{_COMMUNICATOR_SUBJECT}._amd_api" not in sys.modules
 
 
-@pytest.mark.supplementary
 def test_kunlunxin_loader_directory_without_wrapper_falls_back(
     load_communicator, monkeypatch, tmp_path
 ):
@@ -319,7 +294,6 @@ def test_kunlunxin_loader_directory_without_wrapper_falls_back(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_init_rank0_legacy_api_reads_contents(load_communicator, monkeypatch):
     """Rank 0 with a legacy-API library keeps the ``.contents`` object of the
     unique id and inits the comm through ``ctypes.pointer``."""
@@ -357,7 +331,6 @@ def test_init_rank0_legacy_api_reads_contents(load_communicator, monkeypatch):
     assert list(init_args[1].contents.internal) == list(unique.internal)
 
 
-@pytest.mark.supplementary
 def test_init_musa_device_enters_musa_context(load_communicator, monkeypatch):
     """A musa device inits the comm inside the torch.musa.device context."""
     module = load_communicator()
@@ -398,99 +371,10 @@ def test_init_musa_device_enters_musa_context(load_communicator, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# flagcx.py: destroy() corner branches
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.supplementary
-def test_destroy_thread_start_failure_logged(load_communicator, monkeypatch, caplog):
-    """A failing thread.start() logs the exception, tears the state down and
-    returns without joining."""
-    module = load_communicator()
-    comm = _txda_comm(module)
-
-    class _DeadThread:
-        def start(self):
-            raise RuntimeError("cannot start thread")
-
-    monkeypatch.setattr(
-        module, "threading", SimpleNamespace(Thread=lambda *a, **k: _DeadThread())
-    )
-    with caplog.at_level(logging.ERROR, logger=module.logger.name):
-        comm.destroy()  # must not raise
-    assert any(
-        "Could not start TXDA FlagCX communicator abort" in r.message
-        for r in caplog.records
-    )
-    assert comm.available is False
-    assert comm.disabled is True
-    assert comm.comm is None
-
-
-@pytest.mark.supplementary
-def test_destroy_slow_abort_thread_warns(load_communicator, monkeypatch, caplog):
-    """An abort thread still alive after the join timeout logs the warning;
-    the communicator state is torn down regardless."""
-    module = load_communicator()
-    comm = _txda_comm(module)
-
-    done = threading.Event()
-
-    def slow_abort(code):
-        time.sleep(0.6)  # longer than the 0.2s join timeout below
-        done.set()
-
-    comm.flagcx.lib["flagcxCommAbort"] = slow_abort
-    proxy = _TorchProxy(torch)
-    object.__setattr__(proxy, "txda", SimpleNamespace(device=lambda device: device))
-    object.__setattr__(proxy, "device", _FakeDevice)
-    monkeypatch.setattr(module, "torch", proxy)
-    module._TXDA_ABORT_TIMEOUT_SECONDS = 0.2
-
-    with caplog.at_level(logging.WARNING, logger=module.logger.name):
-        comm.destroy()
-    assert any("did not finish within" in r.message for r in caplog.records)
-    assert comm.comm is None
-    assert comm.available is False
-    assert done.wait(timeout=5)  # the daemon thread completed eventually
-
-
-# ---------------------------------------------------------------------------
-# flagcx.py: _current_stream on an AMD-source module
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.supplementary
-def test_current_stream_amd_source_uses_torch_cuda(load_communicator, monkeypatch):
-    """An AMD-source module reads torch.cuda.current_stream for the device,
-    bypassing the (possibly stale) vLLM stream cache."""
-    module = load_communicator()
-    monkeypatch.setattr(module, "_flagcx_amd_source", True)
-    comm = _cpu_communicator(module)
-
-    seen = []
-    cuda_stream = SimpleNamespace(name="amd-cuda-stream")
-
-    def fake_current_stream(device):
-        seen.append(device)
-        return cuda_stream
-
-    proxy = _TorchProxy(torch)
-    object.__setattr__(
-        proxy, "cuda", SimpleNamespace(current_stream=fake_current_stream)
-    )
-    monkeypatch.setattr(module, "torch", proxy)
-
-    assert comm._current_stream() is cuda_stream
-    assert seen == [comm.device]
-
-
-# ---------------------------------------------------------------------------
 # flagcx.py: collective guard branches
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("name", _STREAM_COLLECTIVES)
 def test_collective_without_stream_uses_current_stream(
     name, load_communicator, monkeypatch
@@ -499,16 +383,21 @@ def test_collective_without_stream_uses_current_stream(
     through ``_current_stream()`` and still reaches the library."""
     module = load_communicator()
     comm = _cpu_communicator(module)
-    stream_mock = Mock(return_value=SimpleNamespace())
+    resolved = SimpleNamespace(name="resolved-current-stream")
+    stream_mock = Mock(return_value=resolved)
     monkeypatch.setattr(module, "current_stream", stream_mock)
 
     _invoke_collective(name, comm, stream=None)
 
-    assert stream_mock.called
+    # The stream resolution went through the (stubbed) vLLM helper exactly
+    # once, with no arguments, and the resolved stream object is the one
+    # handed to the native adaptor — not a re-resolved or default stream.
+    stream_mock.assert_called_once_with()
+    copied = [call.args[0] for call in comm.flagcx.adaptor_stream_copy.call_args_list]
+    assert copied == [resolved]
     assert comm.flagcx.mock_calls  # the native library was reached
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("name", _GUARDED_COLLECTIVES)
 def test_collective_disabled_returns_before_library(load_communicator, name):
     """A disabled communicator returns before the device assert and any
@@ -522,7 +411,6 @@ def test_collective_disabled_returns_before_library(load_communicator, name):
     assert comm.flagcx.mock_calls == []
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("name", _GUARDED_COLLECTIVES)
 def test_collective_trace_tensor_returns_before_library(load_communicator, name):
     """Meta (tracing) tensors never reach the native library; the return

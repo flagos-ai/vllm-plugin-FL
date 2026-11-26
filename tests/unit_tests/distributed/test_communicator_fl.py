@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Supplementary CPU tests for the vllm_fl distributed communicator wrappers.
+"""CPU tests for the vllm_fl distributed communicator wrappers (vLLM boundary stubbed).
 
 Deepens ``tests/unit_tests/distributed/test_communicator.py`` (which skips
 without a vllm install) by stubbing the vLLM boundary: all2all manager
@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from tests.supplementary_tests.unit.distributed._flagcx_stubs import _OnceLogger
+from tests.unit_tests.distributed._flagcx_stubs import _OnceLogger
 
 pytest.importorskip("torch")
 
@@ -214,14 +214,12 @@ def _make(env, cls=None, world_size=1, flagcx=None, **kwargs):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_world_size_one_skips_flagcx(comm_env):
     """A single-rank group never builds a FlagCX communicator."""
     comm = _make(comm_env, world_size=1)
     assert comm.pyflagcx_comm is None
 
 
-@pytest.mark.supplementary
 def test_world_size_gt_one_builds_flagcx(comm_env):
     """Multi-rank groups construct PyFlagcxCommunicator on the cpu group."""
     comm = _make(comm_env, world_size=2)
@@ -230,7 +228,6 @@ def test_world_size_gt_one_builds_flagcx(comm_env):
     assert comm_env.created[-1].device is comm.device
 
 
-@pytest.mark.supplementary
 def test_disabled_flagcx_raises_on_npu(comm_env):
     """A disabled FlagCX communicator raises RuntimeError on NPU devices,
     chained from the recorded init error."""
@@ -243,7 +240,6 @@ def test_disabled_flagcx_raises_on_npu(comm_env):
     assert excinfo.value.__cause__ is error
 
 
-@pytest.mark.supplementary
 def test_disabled_flagcx_raises_on_amd(comm_env, monkeypatch):
     """A disabled FlagCX communicator raises on AMD vendor platforms."""
     platforms = ModuleType("vllm.platforms")
@@ -254,7 +250,6 @@ def test_disabled_flagcx_raises_on_amd(comm_env, monkeypatch):
         _make(comm_env, world_size=2, flagcx=flagcx)
 
 
-@pytest.mark.supplementary
 def test_disabled_flagcx_tolerated_on_other_vendors(comm_env):
     """Other platforms tolerate a disabled FlagCX (graceful degradation)."""
     flagcx = comm_env.make_flagcx(disabled=True)
@@ -262,7 +257,6 @@ def test_disabled_flagcx_tolerated_on_other_vendors(comm_env):
     assert comm.pyflagcx_comm is flagcx
 
 
-@pytest.mark.supplementary
 def test_cuda_bridge_sets_disabled_native_stacks(comm_env):
     """The CUDA graph bridge disables every native comm stack so FlagCX
     owns communication alone."""
@@ -288,7 +282,6 @@ def test_cuda_bridge_sets_disabled_native_stacks(comm_env):
     assert comm.aiter_ar_comm is None
 
 
-@pytest.mark.supplementary
 def test_nvidia_communicator_is_cuda_bridge(comm_env):
     """NvidiaCommunicatorFL subclasses the CUDA bridge unchanged."""
     comm = _make(comm_env, cls=comm_env.nvidia_fl.NvidiaCommunicatorFL, world_size=1)
@@ -300,7 +293,6 @@ def test_nvidia_communicator_is_cuda_bridge(comm_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize(
     ("backend", "manager_name"),
     [
@@ -360,7 +352,6 @@ def test_all2all_manager_selection(comm_env, monkeypatch, backend, manager_name)
         expected.assert_called_once_with(comm.cpu_group, tcp_store_group)
 
 
-@pytest.mark.supplementary
 def test_all2all_unknown_backend_rejected(comm_env):
     """An unknown all2all backend raises a descriptive ValueError."""
     comm = comm_env.comm.CommunicatorFL.__new__(comm_env.comm.CommunicatorFL)
@@ -370,7 +361,6 @@ def test_all2all_unknown_backend_rejected(comm_env):
         comm._init_all2all_manager(None)
 
 
-@pytest.mark.supplementary
 def test_all2all_dispatch_and_combine_delegate(comm_env):
     """dispatch/combine/dispatch_router_logits forward every argument to the
     manager unchanged."""
@@ -392,7 +382,6 @@ def test_all2all_dispatch_and_combine_delegate(comm_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_all_reduce_falls_back_to_torch_when_flagcx_returns_none(comm_env, monkeypatch):
     """When FlagCX all_reduce returns None (e.g. during testing), the
     communicator clones and falls back to torch.distributed.all_reduce."""
@@ -412,7 +401,6 @@ def test_all_reduce_falls_back_to_torch_when_flagcx_returns_none(comm_env, monke
     assert calls == [(result, comm.device_group)]
 
 
-@pytest.mark.supplementary
 def test_all_reduce_uses_flagcx_result(comm_env):
     """A non-None FlagCX result is returned as-is."""
     expected = torch.zeros(3)
@@ -422,7 +410,6 @@ def test_all_reduce_uses_flagcx_result(comm_env):
     assert comm.all_reduce(torch.ones(3)) is expected
 
 
-@pytest.mark.supplementary
 def test_all_gather_world_size_one_passthrough(comm_env):
     """A single-rank all_gather returns the input untouched."""
     comm = _make(comm_env, world_size=1)
@@ -430,7 +417,6 @@ def test_all_gather_world_size_one_passthrough(comm_env):
     assert comm.all_gather(tensor, dim=1) is tensor
 
 
-@pytest.mark.supplementary
 def test_all_gather_disabled_flagcx_uses_base(comm_env):
     """A disabled FlagCX communicator falls back to the base class with the
     negative dim already normalized."""
@@ -440,7 +426,6 @@ def test_all_gather_disabled_flagcx_uses_base(comm_env):
     assert comm.all_gather(tensor, dim=-1) == ("base_all_gather", tensor, 1)
 
 
-@pytest.mark.supplementary
 def test_all_gather_reshapes_and_moves_dim(comm_env):
     """The FlagCX all_gather gathers along dim 0 then moves it into place."""
     flagcx = comm_env.make_flagcx()
@@ -462,7 +447,6 @@ def test_all_gather_reshapes_and_moves_dim(comm_env):
     assert result.tolist() == [[1.0, 1.0, 2.0, 2.0], [1.0, 1.0, 2.0, 2.0]]
 
 
-@pytest.mark.supplementary
 def test_broadcast_disabled_flagcx_uses_base(comm_env):
     """A disabled FlagCX falls back to the base broadcast."""
     flagcx = comm_env.make_flagcx(disabled=True)
@@ -471,7 +455,6 @@ def test_broadcast_disabled_flagcx_uses_base(comm_env):
     assert comm.broadcast(tensor, src=0) == ("base_broadcast", tensor, 0)
 
 
-@pytest.mark.supplementary
 def test_broadcast_world_size_one_passthrough(comm_env):
     """A single-rank broadcast returns the tensor."""
     comm = _make(comm_env, world_size=1)
@@ -479,7 +462,6 @@ def test_broadcast_world_size_one_passthrough(comm_env):
     assert comm.broadcast(tensor) is tensor
 
 
-@pytest.mark.supplementary
 def test_send_defaults_to_next_rank_and_uses_flagcx(comm_env):
     """send() defaults dst to (rank+1) % world_size and hands the tensor to
     FlagCX when enabled."""
@@ -495,7 +477,6 @@ def test_send_defaults_to_next_rank_and_uses_flagcx(comm_env):
     assert sent[-1] == (tensor, 0)
 
 
-@pytest.mark.supplementary
 def test_recv_defaults_to_previous_rank(comm_env):
     """recv() defaults src to (rank-1) % world_size and returns the buffer
     FlagCX filled."""
@@ -514,7 +495,6 @@ def test_recv_defaults_to_previous_rank(comm_env):
     assert torch.equal(result, torch.full((3,), 7.0))
 
 
-@pytest.mark.supplementary
 def test_send_recv_fallback_to_torch_when_disabled(comm_env, monkeypatch):
     """With FlagCX disabled, send/recv use torch.distributed with global
     ranks mapped through self.ranks."""
@@ -539,7 +519,6 @@ def test_send_recv_fallback_to_torch_when_disabled(comm_env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_reduce_scatter_splits_and_moves_dim(comm_env):
     """reduce_scatter slices dim 0 into world_size chunks and returns the
     local chunk moved back to the original dim."""
@@ -558,7 +537,6 @@ def test_reduce_scatter_splits_and_moves_dim(comm_env):
     assert torch.equal(result, tensor[:2])
 
 
-@pytest.mark.supplementary
 def test_reduce_scatter_normalizes_negative_dim(comm_env):
     """A negative dim is normalized before slicing (dim -1 of a (4, 2)
     tensor scatters the 2-wide axis into 1-wide local chunks)."""
@@ -578,7 +556,6 @@ def test_reduce_scatter_normalizes_negative_dim(comm_env):
     assert result.shape == (4, 1)
 
 
-@pytest.mark.supplementary
 def test_reduce_scatterv_uses_rank_slice_from_sizes(comm_env):
     """reduce_scatterv with explicit sizes allocates this rank's chunk and
     forwards the sizes vector to the native call."""
@@ -599,7 +576,6 @@ def test_reduce_scatterv_uses_rank_slice_from_sizes(comm_env):
     assert torch.equal(result, torch.full((4, 1), -1.0))
 
 
-@pytest.mark.supplementary
 def test_reduce_scatterv_even_split_without_sizes(comm_env):
     """Without sizes, reduce_scatterv falls back to an even split."""
     flagcx = comm_env.make_flagcx()
@@ -611,7 +587,6 @@ def test_reduce_scatterv_even_split_without_sizes(comm_env):
     assert torch.equal(result, tensor[:3])
 
 
-@pytest.mark.supplementary
 def test_reduce_scatterv_validates_sizes(comm_env):
     """reduce_scatterv asserts the sizes vector length, its total against
     the input length, and the even divisibility when sizes is omitted."""
@@ -626,7 +601,6 @@ def test_reduce_scatterv_validates_sizes(comm_env):
         comm.reduce_scatterv(torch.zeros(3), dim=0, sizes=None)
 
 
-@pytest.mark.supplementary
 def test_all_gatherv_rejects_nonzero_dim(comm_env):
     """all_gatherv only supports dim 0."""
     flagcx = comm_env.make_flagcx()
@@ -635,7 +609,6 @@ def test_all_gatherv_rejects_nonzero_dim(comm_env):
         comm.all_gatherv(torch.zeros(2), dim=1)
 
 
-@pytest.mark.supplementary
 def test_all_gatherv_uniform_sizes_drop_to_all_gather(comm_env):
     """Uniform sizes degrade to plain all_gather."""
     flagcx = comm_env.make_flagcx()
@@ -650,7 +623,6 @@ def test_all_gatherv_uniform_sizes_drop_to_all_gather(comm_env):
     assert torch.equal(result, torch.ones(4, 2))
 
 
-@pytest.mark.supplementary
 def test_all_gatherv_sized_output_layout(comm_env):
     """With per-rank sizes the output is the concatenation in rank order and
     the sizes vector is forwarded to the native call."""
@@ -670,7 +642,6 @@ def test_all_gatherv_sized_output_layout(comm_env):
     assert torch.equal(result, torch.full((5, 1), 9.0))
 
 
-@pytest.mark.supplementary
 def test_all_gatherv_list_input_groups_calls(comm_env):
     """A list of tensors is gathered under group_start/group_end."""
     flagcx = comm_env.make_flagcx()
@@ -685,7 +656,6 @@ def test_all_gatherv_list_input_groups_calls(comm_env):
     assert all(torch.equal(t, torch.ones_like(t)) for t in result)
 
 
-@pytest.mark.supplementary
 def test_all_gatherv_checks_input_shape_against_sizes(comm_env):
     """The local input's dim-0 must equal this rank's size."""
     flagcx = comm_env.make_flagcx()
@@ -700,7 +670,6 @@ def test_all_gatherv_checks_input_shape_against_sizes(comm_env):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.supplementary
 def test_destroy_txda_calls_flagcx_destroy(comm_env):
     """destroy() tears the FlagCX communicator down on txda devices."""
     flagcx = comm_env.make_flagcx()
@@ -712,7 +681,6 @@ def test_destroy_txda_calls_flagcx_destroy(comm_env):
     assert comm.pyflagcx_comm is None
 
 
-@pytest.mark.supplementary
 def test_destroy_other_devices_keep_flagcx(comm_env):
     """Non-txda devices skip the FlagCX destroy but still detach it."""
     flagcx = comm_env.make_flagcx()
@@ -724,7 +692,6 @@ def test_destroy_other_devices_keep_flagcx(comm_env):
     assert comm.pyflagcx_comm is None
 
 
-@pytest.mark.supplementary
 def test_destroy_tears_down_all2all_manager(comm_env):
     """destroy() forwards to the manager's destroy and detaches it."""
     comm = _make(comm_env, world_size=1)
@@ -735,7 +702,6 @@ def test_destroy_tears_down_all2all_manager(comm_env):
     assert comm.all2all_manager is None
 
 
-@pytest.mark.supplementary
 def test_destroy_without_all2all_manager_is_noop(comm_env):
     """destroy() with no manager attached is a safe no-op."""
     comm = _make(comm_env, world_size=1)
@@ -743,7 +709,6 @@ def test_destroy_without_all2all_manager_is_noop(comm_env):
     comm.destroy()  # must not raise
 
 
-@pytest.mark.supplementary
 def test_checkpoint_prepare_and_restore_delegate(comm_env):
     """checkpoint_prepare/checkpoint_restore forward to the manager."""
     comm = _make(comm_env, world_size=1)
