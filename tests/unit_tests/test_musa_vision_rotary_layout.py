@@ -153,6 +153,7 @@ def test_rotary_patch_is_idempotent(rotary_patch):
     assert rotary.forward_native is not original
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("neox", [True, False])
 @pytest.mark.parametrize("fp32", [True, False])
 def test_rotation_supports_dynamo_fullgraph_on_cpu(rotary_patch, neox, fp32):

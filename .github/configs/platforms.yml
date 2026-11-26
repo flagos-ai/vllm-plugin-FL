@@ -95,7 +95,8 @@ platforms:
     exempt_from_global:
       - vllm_fl/dispatch/config/ascend.yaml
   hygon:
-    enabled: true
+    # Re-enable when the Hygon CI image migration is ready.
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/hygon.yaml
       - vllm_fl/dispatch/backends/vendor/hygon/
@@ -148,18 +149,30 @@ platforms:
   thead:
     enabled: true
     trigger_paths:
+      - .github/configs/thead.yml
+      - .github/scripts/thead/
+      - docker/thead/
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
       - tests/platforms/thead.yaml
     exempt_from_global:
+      - .github/configs/thead.yml
+      - .github/scripts/thead/
+      - docker/thead/
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
   iluvatar:
     enabled: true
     trigger_paths:
+      - .github/configs/iluvatar.yml
+      - .github/scripts/iluvatar/
+      - docker/iluvatar/
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/
       - tests/platforms/iluvatar.yaml
     exempt_from_global:
+      - .github/configs/iluvatar.yml
+      - .github/scripts/iluvatar/
+      - docker/iluvatar/
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/

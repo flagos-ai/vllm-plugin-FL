@@ -42,6 +42,9 @@ device_overrides:
 env_defaults:
   GEMS_VENDOR: "iluvatar"
   VLLM_PLUGINS: "fl"
+  # Qwen3.6 emits a <think> block; 64 tokens (the concurrent smoke default)
+  # are consumed by the reasoning preamble before the answer appears.
+  FL_CONCURRENT_MAX_TOKENS: "512"
   VLLM_ENGINE_ITERATION_TIMEOUT_S: "72000"
   VLLM_RPC_TIMEOUT: "72000000"
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "7200"
@@ -92,6 +95,7 @@ bi_v150:
       include: "*"
     benchmark:
       pr:
-        enabled: false
+        enabled: true
+        types: [throughput, latency, serve]
       nightly:
         enabled: false
