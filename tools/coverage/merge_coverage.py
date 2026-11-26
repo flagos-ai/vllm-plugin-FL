@@ -88,14 +88,29 @@ def merge(baseline: dict, supp: dict, scope: dict, commit_sha: str) -> dict:
         num_statements = base_info.get("summary", {}).get(
             "num_statements", len(base_info.get("statements", executed))
         )
+        # Statement lines are not exported by the coverage.py JSON format,
+        # but each source report's per-file `missing_lines` is exact for its
+        # own executed set. The union of both reports' (executed ∪ missing)
+        # therefore reconstructs the statement set for every file present in
+        # either report, and missing = statements − executed is exact again.
+        # (The previous implementation intersected baseline missing_lines
+        # with range(1, num_statements), which under-reports on files whose
+        # physical line count exceeds the statement count.)
+        base_statements = set(base_info.get("executed_lines", []))
+        base_statements |= set(base_info.get("missing_lines", []))
+        supp_statements = set(supp_info.get("executed_lines", []))
+        supp_statements |= set(supp_info.get("missing_lines", []))
+        statements = base_statements | supp_statements
+        if num_statements and len(statements) < num_statements:
+            # A file the supplementary run did not import can still be missing
+            # from the baseline's lists when the baseline itself truncated
+            # them; fall back to the baseline count to keep the denominator.
+            statements |= set(range(1, num_statements + 1)) - executed
         summary = _summary(sorted(executed), num_statements)
         files_out[rel] = {
             "executed_lines": sorted(executed),
             "summary": summary,
-            "missing_lines": sorted(
-                set(base_info.get("missing_lines", []))
-                & set(range(1, num_statements + 1)) - executed
-            ),
+            "missing_lines": sorted(statements - executed),
         }
         total_stmts += num_statements
         total_covered += summary["covered_lines"]
