@@ -25,8 +25,6 @@ import torch
 
 import vllm_fl.patches.worker_symbols_032 as ws
 
-pytestmark = pytest.mark.supplementary
-
 
 class _VllmTree:
     """Install/restore the fake ``vllm`` modules the patch targets."""

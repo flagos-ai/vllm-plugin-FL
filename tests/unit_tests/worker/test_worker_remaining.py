@@ -39,15 +39,13 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-from tests.supplementary_tests.unit.worker.test_worker_fl import (
+from tests.unit_tests.worker.test_worker_fl import (
     _PPGroupStub,
     _RunnerDouble,
     _SleepModeBackendStub,
     make_vllm_config,
     worker_env as _fl_worker_env,
 )
-
-pytestmark = pytest.mark.supplementary
 
 # Reuse the sibling file's environment fixture under its canonical name; the
 # indirection avoids ruff's import-vs-parameter F811 collision with the

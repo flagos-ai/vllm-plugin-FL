@@ -10,8 +10,6 @@ vs. unset) without any GPU or vllm dependency.
 
 import pytest
 
-pytestmark = pytest.mark.supplementary
-
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):

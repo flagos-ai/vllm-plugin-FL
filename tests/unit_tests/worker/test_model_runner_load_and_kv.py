@@ -43,10 +43,7 @@ try:  # pragma: no cover - dual-environment guard
 except ImportError:  # pragma: no cover - Windows machines without vllm
     HAS_VLLM = False
 
-pytestmark = [
-    pytest.mark.supplementary,
-    pytest.mark.skipif(not HAS_VLLM, reason="requires real vllm"),
-]
+pytestmark = pytest.mark.skipif(not HAS_VLLM, reason="requires real vllm")
 
 CPU_DEVICE = "cpu"
 

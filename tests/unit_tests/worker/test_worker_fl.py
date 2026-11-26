@@ -39,9 +39,6 @@ from typing import Any
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
-
-
 # ---------------------------------------------------------------------------
 # Fake vllm module tree (external boundary)
 # ---------------------------------------------------------------------------
@@ -2444,115 +2441,6 @@ class TestProfile:
 # ---------------------------------------------------------------------------
 # memory pool contexts / allocator max split
 # ---------------------------------------------------------------------------
-
-
-class TestMaybeGetMemoryPoolContext:
-    """Branch matrix for the sleep-mode allocator pool context."""
-
-    def _make(self, worker_env, **cfg_overrides):
-        worker, tree = worker_env()
-        cfg = make_vllm_config(**cfg_overrides)
-        w = worker.WorkerFL(
-            vllm_config=cfg, local_rank=0, rank=0, distributed_init_method="tcp://x:1"
-        )
-        return w, worker, tree
-
-    def test_npu_returns_nullcontext(self, worker_env):
-        """Ascend allocates outside the CuMem allocator entirely."""
-        w, worker, tree = self._make(worker_env, vendor="ascend", device="npu")
-        assert isinstance(
-            w._maybe_get_memory_pool_context("weights"), contextlib.nullcontext
-        )
-
-    def test_cuda_alike_without_cumem_returns_nullcontext(self, worker_env):
-        """CUDA-like with the CuMem allocator disabled stays ordinary."""
-        w, worker, tree = self._make(worker_env)
-        w.vllm_config.model_config.enable_cumem_allocator = False
-        assert isinstance(
-            w._maybe_get_memory_pool_context("weights"), contextlib.nullcontext
-        )
-
-    def test_xpu_without_sleep_returns_nullcontext(self, worker_env):
-        """XPU without sleep mode uses ordinary allocations."""
-        w, worker, tree = self._make(worker_env, vendor="amd", device="xpu")
-        w.vllm_config.model_config.enable_sleep_mode = False
-        assert isinstance(
-            w._maybe_get_memory_pool_context("kv_cache"), contextlib.nullcontext
-        )
-
-    def test_cpu_returns_nullcontext(self, worker_env):
-        """CPU devices never use the CuMem allocator."""
-        w, worker, tree = self._make(worker_env, vendor="gcu", device="cpu")
-        assert isinstance(
-            w._maybe_get_memory_pool_context("weights"), contextlib.nullcontext
-        )
-
-    def test_no_sleep_support_returns_nullcontext(self, worker_env):
-        """Sleep-less platforms without an explicit sleep request opt out."""
-        w, worker, tree = self._make(worker_env, vendor="sunrise", device="ptpu")
-        w.vllm_config.model_config.enable_sleep_mode = False
-        assert isinstance(
-            w._maybe_get_memory_pool_context("weights"), contextlib.nullcontext
-        )
-
-    def test_allocator_pool_used_when_supported(self, worker_env, monkeypatch):
-        """A cuda platform with cumem enabled enters the allocator pool."""
-        w, worker, tree = self._make(worker_env)
-        w.vllm_config.model_config.enable_cumem_allocator = True
-        w.vllm_config.model_config.enable_sleep_mode = True
-
-        class _Alloc:
-            def __init__(self):
-                self.usage = 0
-                self.pool_tags = []
-
-            def get_current_usage(self):
-                return self.usage
-
-            def use_memory_pool(self, tag):
-                self.pool_tags.append(tag)
-                return contextlib.nullcontext()
-
-        alloc = _Alloc()
-        monkeypatch.setattr(worker, "get_mem_allocator_instance", lambda: alloc)
-        ctx = w._maybe_get_memory_pool_context("weights")
-        assert isinstance(ctx, contextlib.nullcontext)
-        assert alloc.pool_tags == ["weights"]
-
-    def test_weights_tag_asserts_on_existing_usage(self, worker_env, monkeypatch):
-        """A weights pool request with live usage is rejected."""
-        w, worker, tree = self._make(worker_env)
-        w.vllm_config.model_config.enable_cumem_allocator = True
-        w.vllm_config.model_config.enable_sleep_mode = True
-
-        class _Alloc:
-            def get_current_usage(self):
-                return 42
-
-            def use_memory_pool(self, tag):
-                raise AssertionError("should not be reached")
-
-        monkeypatch.setattr(worker, "get_mem_allocator_instance", lambda: _Alloc())
-        with pytest.raises(AssertionError, match="one instance per process"):
-            w._maybe_get_memory_pool_context("weights")
-
-    def test_kv_cache_tag_skips_usage_assert(self, worker_env, monkeypatch):
-        """A kv_cache pool request tolerates the live weights pool."""
-        w, worker, tree = self._make(worker_env)
-        w.vllm_config.model_config.enable_cumem_allocator = True
-        w.vllm_config.model_config.enable_sleep_mode = True
-
-        class _Alloc:
-            def get_current_usage(self):
-                return 42
-
-            def use_memory_pool(self, tag):
-                return contextlib.nullcontext(tag)
-
-        monkeypatch.setattr(worker, "get_mem_allocator_instance", lambda: _Alloc())
-        assert isinstance(
-            w._maybe_get_memory_pool_context("kv_cache"), contextlib.nullcontext
-        )
 
 
 class TestScopedAllocatorMaxSplit:

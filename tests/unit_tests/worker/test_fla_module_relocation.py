@@ -25,8 +25,6 @@ import pytest
 
 import vllm_fl.patches.fla_module_relocation as rel
 
-pytestmark = pytest.mark.supplementary
-
 _OLD = rel._OLD_PREFIX
 _NEW = rel._NEW_PREFIX
 
@@ -172,7 +170,7 @@ class TestInstallApplies:
 
         assert chunk.MARKER == "new_fla_chunk"
 
-    def test_broken_child_is_skipped_not_fatal(self, fl_sys_path, caplog):
+    def test_broken_child_is_skipped_not_fatal(self, fl_sys_path):
         """A submodule failing to import is skipped without aborting."""
         fl_sys_path()
         rel.install()

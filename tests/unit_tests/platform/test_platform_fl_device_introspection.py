@@ -20,9 +20,7 @@ from typing import Any
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
-
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 _PLATFORM_SOURCE = _ROOT / "vllm_fl" / "platform.py"
 _PLATFORM_MODULE = "supp_platform_fl_introspect_under_test"
 

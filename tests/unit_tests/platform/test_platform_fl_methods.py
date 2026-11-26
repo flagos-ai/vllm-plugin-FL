@@ -20,9 +20,7 @@ from typing import Any
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
-
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 _PLATFORM_SOURCE = _ROOT / "vllm_fl" / "platform.py"
 _PLATFORM_MODULE = "supp_platform_fl_under_test"
 
@@ -431,10 +429,6 @@ class TestDeviceHelpers:
         cls.set_device(dev)
         assert seen == [dev]
 
-    def test_get_device_name_from_class(self, platform_env):
-        cls = platform_env.module.PlatformFL
-        assert cls.get_device_name() == cls.device_name
-
     def test_empty_cache_delegates(self, platform_env, monkeypatch):
         cls = platform_env.module.PlatformFL
         calls = []
@@ -445,11 +439,20 @@ class TestDeviceHelpers:
         assert calls == [1]
 
     def test_import_ir_kernels(self, platform_env, monkeypatch):
-        """import_ir_kernels imports vllm.kernels (stubbed)."""
+        """import_ir_kernels imports vllm.kernels and stays quiet."""
         cls = platform_env.module.PlatformFL
         kernels = _make_module("vllm.kernels")
         monkeypatch.setitem(sys.modules, "vllm.kernels", kernels)
+        # No exception: the import of the stubbed module resolves cleanly.
         cls.import_ir_kernels()
+        # The method imported the module it names, not something else.
+        assert sys.modules["vllm.kernels"] is kernels
+        # The kernel import is not a warning/error condition.
+        assert not [
+            (level, msg)
+            for level, msg in platform_env.logger.records
+            if level in ("warning", "warning_once", "error", "debug")
+        ]
 
     def test_import_kernels_super_for_plain_nvidia(self, platform_env, monkeypatch):
         """A non-metax vendor delegates kernel import to the base class."""

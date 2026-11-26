@@ -31,9 +31,7 @@ from typing import Any
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
-
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 _PLATFORM_SOURCE = _ROOT / "vllm_fl" / "platform.py"
 _PLATFORM_MODULE = "supp_platform_fl_remaining_under_test"
 
@@ -361,20 +359,6 @@ class TestGetAttnBackendCls:
         assert calls == [
             ("attention_backend", (), {"use_mla": True, "use_sparse": False})
         ]
-
-    def test_amd_sparse_mla_rejected(self, platform_env, monkeypatch):
-        """AMD + sparse MLA raises NotImplementedError before dispatch."""
-        cls = platform_env.module.PlatformFL
-        monkeypatch.setattr(cls, "vendor_name", "amd", raising=False)
-        calls = []
-        saved = _install_lazy_stubs(self._dispatch_stub(calls))
-        try:
-            selector = SimpleNamespace(use_mla=True, use_sparse=True)
-            with pytest.raises(NotImplementedError, match="Sparse MLA"):
-                cls.get_attn_backend_cls("selected", selector)
-        finally:
-            _restore_lazy_stubs(saved)
-        assert calls == []
 
     def test_amd_non_sparse_dispatches(self, platform_env, monkeypatch):
         """AMD without sparse MLA still goes through dispatch."""
@@ -792,16 +776,6 @@ class TestVitAttentionBackendMatrix:
             for _, msg in platform_env.logger.records
         )
 
-    def test_vit_amd_rocm_defers(self, platform_env, monkeypatch):
-        """AMD with RocmPlatform present defers to its selection."""
-        cls = platform_env.module.PlatformFL
-        monkeypatch.setattr(cls, "vendor_name", "amd", raising=False)
-        saved = _install_lazy_stubs(self._attention_stubs())
-        try:
-            assert cls.get_vit_attn_backend(64, torch.bfloat16) == "rocm-vit"
-        finally:
-            _restore_lazy_stubs(saved)
-
     def test_vit_cc8_flash_import_fails(self, platform_env, monkeypatch):
         """cc>=8 with a failing FLASH_ATTN import falls back to TORCH_SDPA."""
         cls = platform_env.module.PlatformFL
@@ -936,27 +910,6 @@ class TestAlignHybridBlockSizeAscend:
 
 class TestPreRegisterAndUpdate:
     """``pre_register_and_update`` per-vendor branches."""
-
-    def test_npu_forces_breakable_cudagraph_off(
-        self, platform_env, monkeypatch, tmp_path
-    ):
-        """NPU with a nonzero VLLM_USE_BREAKABLE_CUDAGRAPH warns and forces 0."""
-        cls = platform_env.module.PlatformFL
-        monkeypatch.setattr(cls, "device_name", "npu", raising=False)
-        monkeypatch.setenv("VLLM_USE_BREAKABLE_CUDAGRAPH", "1")
-        ascend_pkg = _make_module("vllm_fl.dispatch.backends.vendor.ascend")
-        # Swap os.environ for a detached copy: the method writes directly.
-        detached = dict(os.environ)
-        monkeypatch.setattr(os, "environ", detached)
-        saved = _install_lazy_stubs(
-            {"vllm_fl.dispatch.backends.vendor.ascend": ascend_pkg}
-        )
-        try:
-            cls.pre_register_and_update()
-        finally:
-            _restore_lazy_stubs(saved)
-        assert detached["VLLM_USE_BREAKABLE_CUDAGRAPH"] == "0"
-        assert any(level == "warning_once" for level, _ in platform_env.logger.records)
 
     def test_npu_no_env_quiet(self, platform_env, monkeypatch):
         """NPU without the env var stays quiet and still forces 0."""

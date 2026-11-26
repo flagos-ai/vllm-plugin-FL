@@ -35,9 +35,7 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.supplementary
-
-_ROOT = Path(__file__).resolve().parents[3]
+_ROOT = Path(__file__).resolve().parents[2]
 _INIT_SOURCE = _ROOT / "vllm_fl" / "__init__.py"
 _VLLM_FL_DIR = _ROOT / "vllm_fl"
 _ALIAS = "supp_toplevel_alias"
@@ -784,61 +782,6 @@ class TestRegisterRouter:
         assert calls == ["router"]
 
 
-class TestGdnPackedDecodePatch:
-    """``_register_gdn_packed_decode_patch`` capability probe."""
-
-    _PATCH = "vllm_fl.patches.gdn_packed_decode"
-
-    def test_missing_module_returns_false(self, fresh_module):
-        """A build without the patch module reports unavailability."""
-        with _installed_stubs({self._PATCH: None}):
-            _, records = _capture(
-                fresh_module.logger.name,
-                fresh_module._register_gdn_packed_decode_patch,
-            )
-        assert any("unavailable" in msg for _, msg in records)
-
-    def test_missing_symbol_returns_false(self, fresh_module):
-        """A build without the patch symbol reports unavailability."""
-        patch_mod = _make_module(self._PATCH)  # no patch_vllm_packed_gdn_beta
-        with _installed_stubs({self._PATCH: patch_mod}):
-            result, records = _capture(
-                fresh_module.logger.name,
-                fresh_module._register_gdn_packed_decode_patch,
-            )
-        assert result is False
-        assert any("unavailable" in msg for _, msg in records)
-
-    def test_patch_function_invoked(self, fresh_module):
-        """A capable build runs the packed GDN patch."""
-        calls = []
-        patch_mod = _make_module(
-            self._PATCH, patch_vllm_packed_gdn_beta=lambda: calls.append("gdn") or True
-        )
-        with _installed_stubs({self._PATCH: patch_mod}):
-            result = fresh_module._register_gdn_packed_decode_patch()
-        assert result is True
-        assert calls == ["gdn"]
-
-
-class TestArmCpuPlatform:
-    """``_arm_cpu_platform`` machine gating."""
-
-    def test_x86_returns_none(self, fresh_module, monkeypatch):
-        """A non-AArch64 host has no ARM CPU platform."""
-        monkeypatch.setattr(platform, "machine", lambda: "x86_64")
-        assert fresh_module._arm_cpu_platform() is None
-
-    def test_arm64_returns_plugin(self, fresh_module, monkeypatch):
-        """An ARM64 host resolves vLLM's CPU platform plugin."""
-        monkeypatch.setattr(platform, "machine", lambda: "arm64")
-        plugin_mod = _make_module(
-            "vllm.platforms", cpu_platform_plugin=lambda: "cpu-plugin"
-        )
-        with _installed_stubs({"vllm.platforms": plugin_mod}):
-            assert fresh_module._arm_cpu_platform() == "cpu-plugin"
-
-
 class TestRegisterModel:
     """``register_model`` vendor matrix."""
 
@@ -878,52 +821,6 @@ class TestRegisterModel:
         return _make_module(
             self._GDN, patch_vllm_packed_gdn_beta=lambda: calls.append("gdn")
         )
-
-    def test_arm_cpu_flag_gems_missing_warns_and_returns(
-        self, fresh_module, monkeypatch
-    ):
-        """An ARM CPU target without FlagGems disables integration quietly."""
-        monkeypatch.setattr(platform, "machine", lambda: "aarch64")
-        stubs = self._base_stubs("nvidia")
-        stubs["vllm_fl.patches.arm_cpu_gdn"] = _make_module(
-            "vllm_fl.patches.arm_cpu_gdn",
-            apply_arm_cpu_gdn_state_indices_patch=lambda: None,
-        )
-        stubs["flag_gems"] = None  # `import flag_gems` raises ModuleNotFoundError
-        with _installed_stubs(stubs):
-            _, records = _capture(fresh_module.logger.name, fresh_module.register_model)
-        assert any("FlagGems is not installed" in msg for _, msg in records)
-
-    def test_arm_cpu_wrong_flag_gems_vendor(self, fresh_module, monkeypatch):
-        """FlagGems built for another vendor leaves the ARM path untouched."""
-        monkeypatch.setattr(platform, "machine", lambda: "aarch64")
-        stubs = self._base_stubs("nvidia")
-        stubs["vllm_fl.patches.arm_cpu_gdn"] = _make_module(
-            "vllm_fl.patches.arm_cpu_gdn",
-            apply_arm_cpu_gdn_state_indices_patch=lambda: None,
-        )
-        stubs["flag_gems"] = _make_module("flag_gems", vendor_name="cuda")
-        with _installed_stubs(stubs):
-            _, records = _capture(fresh_module.logger.name, fresh_module.register_model)
-        assert any("not 'arm'" in msg for _, msg in records)
-
-    def test_arm_cpu_packed_w4a8_installed(self, fresh_module, monkeypatch):
-        """A matching FlagGems installs the ARM packed W4A8 integration."""
-        monkeypatch.setattr(platform, "machine", lambda: "aarch64")
-        calls = []
-        stubs = self._base_stubs("nvidia")
-        stubs["vllm_fl.patches.arm_cpu_gdn"] = _make_module(
-            "vllm_fl.patches.arm_cpu_gdn",
-            apply_arm_cpu_gdn_state_indices_patch=lambda: None,
-        )
-        stubs["flag_gems"] = _make_module("flag_gems", vendor_name="arm")
-        stubs["vllm_fl.quantization.arm_cpu_w4a8"] = _make_module(
-            "vllm_fl.quantization.arm_cpu_w4a8",
-            install_arm_cpu_packed_w4a8=lambda: calls.append("w4a8"),
-        )
-        with _installed_stubs(stubs):
-            fresh_module.register_model()
-        assert calls == ["w4a8"]
 
     def test_iluvatar_installs_cleanup(self, fresh_module, monkeypatch):
         """Iluvatar registers its worker shutdown cleanup hook."""

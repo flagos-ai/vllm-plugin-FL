@@ -1,26 +1,25 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary CPU tests for the NVIDIA worker and platform integration.
+"""CPU tests for the NVIDIA worker IO integration.
 
 ``vllm_fl/worker/nvidia_worker.py`` wraps vLLM v0.32's native GPU worker to
 install FL's IO-dump hooks around the runner's inference-mode-decorated entry
-points; ``vllm_fl/nvidia_platform.py`` subclasses ``CudaPlatform`` to select
-FlagCX and the FL worker class.  Neither module imports on a machine without
-vLLM, so these tests install minimal fake ``vllm`` / ``vllm_fl.worker.runtime``
-graphs (external boundaries only) and load the real sources via
-``importlib``:
+points.  The module does not import on a machine without VLLM, so these tests
+install minimal fake ``vllm`` / ``vllm_fl.worker.runtime`` graphs (external
+boundaries only) and load the real source via ``importlib``:
 
 * ``_install_native_runner_io_methods``: unwrapping the runner methods, the
   managed-IO flag, idempotence and the missing-wrapper error;
 * ``_call_native_worker_with_managed_inference``: delegation and its error;
-* ``NvidiaWorkerFL.__init__`` / ``init_device``: FL runtime bootstrap and
-  QSA-patch ordering, including native-failure propagation;
+* ``NvidiaWorkerFL.__init__``: FL runtime bootstrap argument forwarding;
 * ``_ensure_io_dump_initialized`` plus ``sample_tokens`` / ``execute_model``:
   dump enablement (once), the enabled/disabled branches and
-  ``advance_io_step`` only on non-None outputs;
-* ``NvidiaPlatformFL``: dist-backend refresh both ways, config mutation for
-  FlagCX (custom allreduce off, fused allreduce+RMS off), communicator and
-  custom-allreduce selection, and the FlagGems attention override.
+  ``advance_io_step`` only on non-None outputs.
+
+The ``NvidiaPlatformFL`` vendor-gate surface (dist backend, config mutation,
+communicator selection, FlagGems attention override) and the
+``init_device`` QSA-patch ordering are covered by
+``tests/unit_tests/worker/test_nvidia_worker.py``.
 """
 
 import importlib.util
@@ -32,14 +31,10 @@ from typing import Any
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
-
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 _WORKER_SOURCE = _ROOT / "vllm_fl/worker/nvidia_worker.py"
-_PLATFORM_SOURCE = _ROOT / "vllm_fl/nvidia_platform.py"
 
 _WORKER_MODULE = "vllm_fl.worker.nvidia_worker"
-_PLATFORM_MODULE = "supp_nvidia_platform_under_test"
 
 
 def _io():
@@ -239,17 +234,6 @@ def _make_worker(env, **kwargs: Any) -> Any:
     return env.module.NvidiaWorkerFL(**kwargs)
 
 
-def _qsa_stub(monkeypatch, result):
-    """Install a recording ``vllm_fl.patches.qsa_cache_hint`` boundary."""
-    module = ModuleType("vllm_fl.patches.qsa_cache_hint")
-    calls = []
-    module.patch_qsa_cache_hint = lambda config, device: (
-        calls.append((config, device)) or result
-    )
-    monkeypatch.setitem(sys.modules, "vllm_fl.patches.qsa_cache_hint", module)
-    return calls
-
-
 # ---------------------------------------------------------------------------
 # Runner IO method installation
 # ---------------------------------------------------------------------------
@@ -437,41 +421,6 @@ class TestNvidiaWorkerInit:
         assert worker.device == "cuda:3"
 
 
-class TestInitDevice:
-    """``init_device`` native-then-QSA ordering."""
-
-    def test_native_runs_then_qsa_patch_applied(self, worker_env, monkeypatch):
-        """A successful QSA patch is logged after the native init."""
-        env = worker_env()
-        calls = _qsa_stub(monkeypatch, result=True)
-
-        worker = _make_worker(env, model_config="MC", device="DEV")
-        worker.init_device()
-
-        assert calls == [("MC", "DEV")]
-        assert any("QSA" in message for _, message in env.logger.records)
-
-    def test_qsa_patch_not_applied_is_not_logged(self, worker_env, monkeypatch):
-        """A False QSA result skips the info log."""
-        env = worker_env()
-        _qsa_stub(monkeypatch, result=False)
-
-        worker = _make_worker(env, model_config="MC", device="DEV")
-        worker.init_device()
-        assert not any("QSA" in message for _, message in env.logger.records)
-
-    def test_native_failure_propagates(self, worker_env):
-        """An exception from the native init_device surfaces unchanged."""
-
-        def boom(_self):
-            raise RuntimeError("native init failed")
-
-        env = worker_env(native_init_device=boom)
-        worker = _make_worker(env)
-        with pytest.raises(RuntimeError, match="native init failed"):
-            worker.init_device()
-
-
 class TestEnsureIoDumpInitialized:
     """``_ensure_io_dump_initialized`` once-guard and enablement flow."""
 
@@ -590,229 +539,3 @@ class TestWorkerEntryPoints:
         assert "init" in dumper.method_names()
         assert "hooks" in dumper.method_names()
         assert worker._fl_io_dump_initialized is True
-
-
-# ---------------------------------------------------------------------------
-# NvidiaPlatformFL
-# ---------------------------------------------------------------------------
-
-
-class _PlatformEnv:
-    """Bundle holding the loaded platform module and its parent-call log."""
-
-    def __init__(self, module, parent_calls, parent_log, cuda_platform_cls):
-        self.module = module
-        self.parent_calls = parent_calls
-        self.parent_log = parent_log
-        self.cuda_platform_cls = cuda_platform_cls
-
-
-@pytest.fixture
-def platform_env(fl_sys_modules, monkeypatch):
-    """Load the platform module against a fake vllm platforms graph."""
-    monkeypatch.delenv("FLAGCX_PATH", raising=False)
-    monkeypatch.delenv("VLLM_FL_USE_FLAGGEMS_ATTN", raising=False)
-
-    installed: dict = {}
-    parent_log = _FakeLogger()
-    parent_calls = []
-
-    class _PlatformEnum:
-        CUDA = "cuda"
-
-    class _CudaPlatform:
-        dist_backend = "nccl"
-
-        @classmethod
-        def check_and_update_config(cls, config):
-            parent_calls.append("check_and_update_config")
-
-        @classmethod
-        def get_device_communicator_cls(cls):
-            parent_calls.append("get_device_communicator_cls")
-            return "parent-comm-cls"
-
-        @classmethod
-        def use_custom_allreduce(cls):
-            parent_calls.append("use_custom_allreduce")
-            return True
-
-        @classmethod
-        def get_attn_backend_cls(
-            cls, selected_backend, attn_selector_config, num_heads=None
-        ):
-            parent_calls.append("get_attn_backend_cls")
-            return "parent-attn-cls"
-
-    _put(installed, "vllm")
-    _put(installed, "vllm.logger", init_logger=lambda name: parent_log)
-    _put(installed, "vllm.platforms", PlatformEnum=_PlatformEnum)
-    _put(installed, "vllm.platforms.cuda", CudaPlatform=_CudaPlatform)
-    for name, module in installed.items():
-        monkeypatch.setitem(sys.modules, name, module)
-
-    spec = importlib.util.spec_from_file_location(_PLATFORM_MODULE, _PLATFORM_SOURCE)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[_PLATFORM_MODULE] = module
-    try:
-        spec.loader.exec_module(module)
-    except BaseException:
-        sys.modules.pop(_PLATFORM_MODULE, None)
-        raise
-    yield _PlatformEnv(module, parent_calls, parent_log, _CudaPlatform)
-    sys.modules.pop(_PLATFORM_MODULE, None)
-
-
-class _VllmConfigStub:
-    """Config mirroring the surface ``check_and_update_config`` touches."""
-
-    def __init__(self, fuse_allreduce_rms=True):
-        self.parallel_config = SimpleNamespace()
-        self.compilation_config = SimpleNamespace(
-            pass_config=SimpleNamespace(fuse_allreduce_rms=fuse_allreduce_rms)
-        )
-
-
-class TestNvidiaPlatformDistBackend:
-    """``_refresh_dist_backend`` and the backend selectors."""
-
-    def test_refresh_without_flagcx_restores_parent_backend(self, platform_env):
-        """No FLAGCX_PATH: the class backend matches the parent's."""
-        cls = platform_env.module.NvidiaPlatformFL
-        assert cls._refresh_dist_backend() is False
-        assert cls.dist_backend == platform_env.cuda_platform_cls.dist_backend
-
-    def test_refresh_with_flagcx_selects_flagcx(self, platform_env, monkeypatch):
-        """FLAGCX_PATH set: dist_backend becomes flagcx."""
-        cls = platform_env.module.NvidiaPlatformFL
-        monkeypatch.setenv("FLAGCX_PATH", "/opt/flagcx")
-        assert cls._refresh_dist_backend() is True
-        assert cls.dist_backend == "flagcx"
-
-    def test_communicator_cls_without_flagcx_defers_to_parent(self, platform_env):
-        """Without FlagCX the parent communicator class is returned."""
-        cls = platform_env.module.NvidiaPlatformFL
-        assert cls.get_device_communicator_cls() == "parent-comm-cls"
-        assert "get_device_communicator_cls" in platform_env.parent_calls
-
-    def test_communicator_cls_with_flagcx_returns_fl_path(
-        self, platform_env, monkeypatch
-    ):
-        """With FlagCX the FL communicator module path is returned."""
-        cls = platform_env.module.NvidiaPlatformFL
-        monkeypatch.setenv("FLAGCX_PATH", "/opt/flagcx")
-        assert (
-            cls.get_device_communicator_cls()
-            == "vllm_fl.distributed.nvidia_communicator.NvidiaCommunicatorFL"
-        )
-
-    def test_use_custom_allreduce_without_flagcx_defers_to_parent(self, platform_env):
-        """Without FlagCX the parent answer wins."""
-        cls = platform_env.module.NvidiaPlatformFL
-        assert cls.use_custom_allreduce() is True
-        assert "use_custom_allreduce" in platform_env.parent_calls
-
-    def test_use_custom_allreduce_with_flagcx_returns_false(
-        self, platform_env, monkeypatch
-    ):
-        """With FlagCX custom allreduce is disabled outright."""
-        cls = platform_env.module.NvidiaPlatformFL
-        monkeypatch.setenv("FLAGCX_PATH", "/opt/flagcx")
-        assert cls.use_custom_allreduce() is False
-
-
-class TestNvidiaPlatformCheckAndUpdateConfig:
-    """``check_and_update_config`` FlagCX mutations and worker binding."""
-
-    def test_without_flagcx_calls_parent_and_sets_worker_cls(self, platform_env):
-        """Plain CUDA path: parent hook runs, worker_cls still set to FL."""
-        cls = platform_env.module.NvidiaPlatformFL
-        config = _VllmConfigStub()
-        cls.check_and_update_config(config)
-        assert "check_and_update_config" in platform_env.parent_calls
-        assert (
-            config.parallel_config.worker_cls
-            == "vllm_fl.worker.nvidia_worker.NvidiaWorkerFL"
-        )
-        assert not hasattr(config.parallel_config, "disable_custom_all_reduce")
-        assert config.compilation_config.pass_config.fuse_allreduce_rms is True
-
-    def test_with_flagcx_disables_custom_allreduce_and_fused_rms(
-        self, platform_env, monkeypatch
-    ):
-        """FlagCX forces custom allreduce off and unfuses allreduce+RMS."""
-        cls = platform_env.module.NvidiaPlatformFL
-        monkeypatch.setenv("FLAGCX_PATH", "/opt/flagcx")
-        config = _VllmConfigStub(fuse_allreduce_rms=True)
-        cls.check_and_update_config(config)
-        assert config.parallel_config.disable_custom_all_reduce is True
-        assert config.compilation_config.pass_config.fuse_allreduce_rms is False
-        assert (
-            config.parallel_config.worker_cls
-            == "vllm_fl.worker.nvidia_worker.NvidiaWorkerFL"
-        )
-        assert any(
-            level == "warning_once" for level, _ in platform_env.parent_log.records
-        )
-
-    def test_with_flagcx_and_already_unfused_rms_no_warning(
-        self, platform_env, monkeypatch
-    ):
-        """An already-false fuse_allreduce_rms avoids the warning."""
-        cls = platform_env.module.NvidiaPlatformFL
-        monkeypatch.setenv("FLAGCX_PATH", "/opt/flagcx")
-        config = _VllmConfigStub(fuse_allreduce_rms=False)
-        cls.check_and_update_config(config)
-        assert config.compilation_config.pass_config.fuse_allreduce_rms is False
-        assert not any(
-            level == "warning_once" for level, _ in platform_env.parent_log.records
-        )
-
-
-class TestNvidiaPlatformAttnBackend:
-    """``get_attn_backend_cls`` FlagGems override."""
-
-    def test_default_defers_to_parent(self, platform_env):
-        """Without the env flag the parent selection is used."""
-        cls = platform_env.module.NvidiaPlatformFL
-        selector = SimpleNamespace(use_mla=False, use_sparse=False)
-        assert cls.get_attn_backend_cls("selected", selector) == "parent-attn-cls"
-        assert "get_attn_backend_cls" in platform_env.parent_calls
-
-    @pytest.mark.parametrize("value", ["1", "true", "yes", "TRUE", "Yes"])
-    def test_flaggems_env_overrides_selection(self, platform_env, monkeypatch, value):
-        """Truthy VLLM_FL_USE_FLAGGEMS_ATTN values route through FlagGems."""
-        cls = platform_env.module.NvidiaPlatformFL
-
-        class _FlagGemsBackend:
-            def attention_backend(self, use_mla, use_sparse):
-                return f"flaggems-{use_mla}-{use_sparse}"
-
-        flaggems = ModuleType("vllm_fl.dispatch.backends.flaggems.flaggems")
-        flaggems.FlagGemsBackend = _FlagGemsBackend
-        for name in (
-            "vllm_fl.dispatch",
-            "vllm_fl.dispatch.backends",
-            "vllm_fl.dispatch.backends.flaggems",
-            "vllm_fl.dispatch.backends.flaggems.flaggems",
-        ):
-            monkeypatch.setitem(sys.modules, name, flaggems)
-
-        monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_ATTN", value)
-        selector = SimpleNamespace(use_mla=True, use_sparse=False)
-        assert cls.get_attn_backend_cls("selected", selector) == "flaggems-True-False"
-
-    @pytest.mark.parametrize("value", ["0", "false", "no", "", "off"])
-    def test_falsy_env_defers_to_parent(self, platform_env, monkeypatch, value):
-        """Falsy / absent values keep native selection."""
-        cls = platform_env.module.NvidiaPlatformFL
-        monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_ATTN", value)
-        selector = SimpleNamespace(use_mla=False, use_sparse=False)
-        assert cls.get_attn_backend_cls("selected", selector) == "parent-attn-cls"
-
-    def test_num_heads_forwarded_to_parent(self, platform_env):
-        """The num_heads argument is passed through on the native path."""
-        cls = platform_env.module.NvidiaPlatformFL
-        selector = SimpleNamespace(use_mla=False, use_sparse=False)
-        cls.get_attn_backend_cls("selected", selector, num_heads=64)
-        assert platform_env.parent_calls[-1] == "get_attn_backend_cls"

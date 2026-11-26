@@ -24,8 +24,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytestmark = pytest.mark.supplementary
-
 
 class _VllmStubTree:
     """Install/restore a fake ``vllm`` module tree in ``sys.modules``.

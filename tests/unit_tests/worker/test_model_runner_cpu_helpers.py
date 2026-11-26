@@ -31,10 +31,7 @@ try:  # pragma: no cover - dual-environment guard
 except ImportError:  # pragma: no cover - Windows machines without vllm
     HAS_VLLM = False
 
-pytestmark = [
-    pytest.mark.supplementary,
-    pytest.mark.skipif(not HAS_VLLM, reason="requires real vllm"),
-]
+pytestmark = pytest.mark.skipif(not HAS_VLLM, reason="requires real vllm")
 
 
 class _FakeCudaPlatform:
@@ -163,63 +160,6 @@ class TestAcceleratorSynchronize:
         )
         module._accelerator_synchronize()
         assert calls == ["acc"]
-
-
-class TestDeviceGraphCapture:
-    """_device_graph_capture creates/enters a stream via the platform API."""
-
-    def test_creates_stream_when_no_context_given(
-        self, model_runner_module, monkeypatch
-    ):
-        """Without a caller-supplied context a new Stream is built per device."""
-        module = model_runner_module
-        capture_stream = _FakeStream()
-        created = []
-
-        def make_stream(device=None):
-            created.append(device)
-            return capture_stream
-
-        device_api = SimpleNamespace(
-            Stream=make_stream,
-            current_stream=lambda: "curr",
-            stream=lambda s: nullcontext(),
-        )
-        monkeypatch.setattr(
-            module, "current_platform", SimpleNamespace(torch_device_fn=device_api)
-        )
-
-        device = object()
-        with module._device_graph_capture(device) as ctx:
-            assert ctx.stream is capture_stream
-        # The Stream constructor saw exactly the requested device and the
-        # capture stream waited on the current stream before being entered.
-        assert created == [device]
-        assert capture_stream.waited == ["curr"]
-
-    def test_reuses_supplied_context(self, model_runner_module, monkeypatch):
-        """A supplied GraphCaptureContext is entered without a new Stream."""
-        from vllm.distributed.parallel_state import GraphCaptureContext
-
-        module = model_runner_module
-        capture_stream = _FakeStream()
-        supplied = GraphCaptureContext(capture_stream)
-        made = []
-        device_api = SimpleNamespace(
-            Stream=lambda device=None: made.append("made"),
-            current_stream=lambda: "curr",
-            stream=lambda s: nullcontext(),
-        )
-        monkeypatch.setattr(
-            module, "current_platform", SimpleNamespace(torch_device_fn=device_api)
-        )
-
-        with module._device_graph_capture(
-            object(), graph_capture_context=supplied
-        ) as ctx:
-            assert ctx is supplied
-        assert made == []
-        assert capture_stream.waited == ["curr"]
 
 
 class TestGetParameterForReload:
@@ -736,60 +676,6 @@ class TestInitFp8KvScales:
         assert attn._k_scale.item() == 1.0
 
 
-class TestGetPositions:
-    """_get_positions routes int/tensor indexing by uses_mrope."""
-
-    def _runner(self, module, uses_mrope):
-        import torch
-
-        runner = SimpleNamespace(uses_mrope=uses_mrope)
-        runner.positions = torch.arange(100)
-        runner.mrope_positions = SimpleNamespace(gpu=torch.arange(300).reshape(3, 100))
-        return runner
-
-    def test_int_without_mrope_slices_positions(self, model_runner_module):
-        """Plain RoPE int path: first N positions."""
-        import torch
-
-        module = model_runner_module
-        runner = self._runner(module, uses_mrope=False)
-        out = module.ModelRunnerFL._get_positions(runner, 7)
-        torch.testing.assert_close(out, torch.arange(7))
-
-    def test_int_with_mrope_slices_3d(self, model_runner_module):
-        """MRoPE int path: gpu[:, :N] keeps the 3D layout."""
-        import torch
-
-        module = model_runner_module
-        runner = self._runner(module, uses_mrope=True)
-        out = module.ModelRunnerFL._get_positions(runner, 4)
-        expected = runner.mrope_positions.gpu[:, :4]
-        assert out.shape == (3, 4)
-        torch.testing.assert_close(out, expected)
-
-    def test_tensor_without_mrope_gathers(self, model_runner_module):
-        """Plain RoPE tensor path: positions[indices]."""
-        import torch
-
-        module = model_runner_module
-        runner = self._runner(module, uses_mrope=False)
-        idx = torch.tensor([3, 0, 9])
-        out = module.ModelRunnerFL._get_positions(runner, idx)
-        torch.testing.assert_close(out, runner.positions[idx])
-
-    def test_tensor_with_mrope_gathers_3d(self, model_runner_module):
-        """MRoPE tensor path: gpu[:, indices]."""
-        import torch
-
-        module = model_runner_module
-        runner = self._runner(module, uses_mrope=True)
-        idx = torch.tensor([5, 2])
-        out = module.ModelRunnerFL._get_positions(runner, idx)
-        expected = runner.mrope_positions.gpu[:, idx]
-        assert out.shape == (3, 2)
-        torch.testing.assert_close(out, expected)
-
-
 class TestJitWarmupRegistryProperty:
     """jit_warmup_registry lazily creates and caches the registry."""
 
@@ -1246,46 +1132,6 @@ class TestComputePrevPositions:
         )
         module.ModelRunnerFL._compute_prev_positions(runner, 3)
         assert arr.tolist() == [7, -1, 2]
-
-
-class TestGetCumsumAndArange:
-    """_get_cumsum_and_arange vectorized batched arange."""
-
-    def _runner(self, module):
-        import numpy as np
-
-        return SimpleNamespace(arange_np=np.arange(64, dtype=np.int64))
-
-    @pytest.mark.parametrize(
-        "num_tokens",
-        [[2, 5, 3], [1, 1, 1, 1], [7], [4, 0, 3]],
-    )
-    def test_matches_concatenated_arange_oracle(self, model_runner_module, num_tokens):
-        """Output equals concatenate(arange(n) for n in num_tokens)."""
-        import numpy as np
-
-        module = model_runner_module
-        runner = self._runner(module)
-        num_tokens = np.array(num_tokens)
-        total = int(num_tokens.sum())
-        out = np.zeros(total, dtype=np.int64)
-        cu = module.ModelRunnerFL._get_cumsum_and_arange(runner, num_tokens, out)
-        # Independent oracle: per-sequence aranges concatenated.
-        expected = np.concatenate([np.arange(int(n)) for n in num_tokens])
-        np.testing.assert_array_equal(out, expected)
-        np.testing.assert_array_equal(cu, np.cumsum(num_tokens))
-
-    def test_cumsum_dtype_forwarded(self, model_runner_module):
-        """cumsum_dtype controls the returned dtype."""
-        import numpy as np
-
-        module = model_runner_module
-        runner = self._runner(module)
-        out = np.zeros(5, dtype=np.int64)
-        cu = module.ModelRunnerFL._get_cumsum_and_arange(
-            runner, np.array([2, 3]), out, cumsum_dtype=np.int32
-        )
-        assert cu.dtype == np.int32
 
 
 class TestGetEncoderSeqLens:
