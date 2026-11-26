@@ -468,6 +468,23 @@ def patch_torch_compile_off_for_txda():
     ):
         return None
 
+    # Unlike the other steps this one only touches ``torch``, so it has no
+    # implicit ``import torch_txda`` guard. Require the TXDA platform
+    # explicitly: ``torch.compile`` is process-global, and neutering it on a
+    # CUDA/NPU host would silently break every other backend's Dynamo tests
+    # that share the process (``test_musa_gems_compile`` and friends).
+    #
+    # ``FL_TEST_PLATFORM`` is the variable ``tests/run.py`` exports from
+    # ``--platform``. It lets a TXDA host run another platform's test selection
+    # without this step leaking into their ``torch.compile`` assertions.
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "txda":
+        return None
+    test_platform = os.environ.get("FL_TEST_PLATFORM", "").strip().lower()
+    if test_platform and test_platform != "txda":
+        return None
+
     if getattr(torch, "_fl_txda_compile_disabled", False):
         return None
 

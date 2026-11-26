@@ -134,6 +134,9 @@ def build(cap=2, mode=Mode.FULL):
         torch=SimpleNamespace(Tensor=FakeTensor, musa=native),
         envs=SimpleNamespace(VLLM_LOGGING_LEVEL="INFO"),
         current_platform=SimpleNamespace(
+            # ``GraphWrapper._capture_graph`` branches on the device type for
+            # the TXDA-only warmup; these controls exercise the MUSA path.
+            device_type="musa",
             get_global_graph_pool=lambda: None,
             graph_pool_handle=object,
             torch_device_fn=SimpleNamespace(graph=capture),
