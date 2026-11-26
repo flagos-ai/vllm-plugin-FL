@@ -675,6 +675,10 @@ def test_graph_factory_uses_only_native_classes(contract, device):
         musa=SimpleNamespace(MUSAGraph=native_graph),
         gcu=SimpleNamespace(GCUGraph=native_graph),
         ptpu=SimpleNamespace(PTPUGraph=native_graph),
+        # TXDA exposes its graph through torch.txda rather than torch.cuda, so
+        # the factory branch needs the namespace even on a host without the
+        # runtime: the test only inspects the selected attribute.
+        txda=SimpleNamespace(TXDAGraph=native_graph),
     )
     exec(
         compile(ast.Module(body=[factory], type_ignores=[]), str(source), "exec"),
@@ -703,7 +707,10 @@ def test_graph_factory_uses_only_native_classes(contract, device):
             namespace,
         )
         assert namespace["MUSAGraphWrapper"]._graph_type is native_graph
-    assert namespace["Graph"].graph is (None if device == "txda" else native_graph)
+    # Every supported device now resolves to a native graph class. TXDA used to
+    # be the exception (``graph = None`` rejected it outright); it captures
+    # through ``torch.txda.TXDAGraph`` since cudagraph support landed.
+    assert namespace["Graph"].graph is native_graph
     assert contract.admission_budget.snapshot()["live"] == 0
 
 

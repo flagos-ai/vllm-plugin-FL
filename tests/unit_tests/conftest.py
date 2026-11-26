@@ -15,6 +15,43 @@ import pytest
 import torch
 
 # =============================================================================
+# Platform gating for TXDA-only contract tests
+# =============================================================================
+
+
+# The TXDA backend has no CI platform entry: every vendor job runs the whole
+# ``tests/unit_tests`` tree on hardware that has no ``torch_txda``. Its tests
+# assert vendor-level contracts (registrations, patch rollback, capture-safe
+# rewrites) and import TXDA modules at module scope, so on another platform
+# they fail during collection instead of merely being inapplicable.
+#
+# Skip them unless the run is on TXDA. ``--platform`` comes from
+# ``tests/run.py``; an unset value means a developer ran pytest directly, in
+# which case the tests run normally so local TXDA work is unaffected.
+def _is_txda_test(nodeid: str) -> bool:
+    """True for test modules whose filename marks them as TXDA-only."""
+    return "test_txda_" in nodeid.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _is_txda_platform(config) -> bool:
+    platform = (config.getoption("--platform", default="") or "").lower()
+    if not platform:
+        return True  # direct pytest run: let the tests decide
+    return platform == "txda"
+
+
+def pytest_collection_modifyitems(config, items):
+    if _is_txda_platform(config):
+        return
+    skip_marker = pytest.mark.skip(
+        reason="TXDA-only contract test; the active CI platform has no torch_txda"
+    )
+    for item in items:
+        if _is_txda_test(item.nodeid):
+            item.add_marker(skip_marker)
+
+
+# =============================================================================
 # Environment Detection Helpers
 # =============================================================================
 
