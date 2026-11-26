@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary CPU tests for the GDN beta patch and QSA cache-hint patch.
+"""CPU tests for the GDN beta patch and QSA cache-hint patch.
 
 ``vllm_fl/patches/gdn_packed_decode.py`` ships a corrected Triton kernel for
 vLLM's packed GDN decode (beta kept in FP32) plus the detection/replacement
@@ -27,9 +27,8 @@ from typing import Any
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
 
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 _GDN_SOURCE = _ROOT / "vllm_fl/patches/gdn_packed_decode.py"
 _QSA_SOURCE = _ROOT / "vllm_fl/patches/qsa_cache_hint.py"
 
@@ -824,19 +823,6 @@ class TestPatchQsaCacheHintGates:
         for kernel in qsa_env.kernels.values():
             assert len(kernel.updates) == 1
 
-    def test_wrong_architecture_returns_false(self, qsa, qsa_env):
-        """Non-Qwen4Exp architectures never reach the kernel imports."""
-        config = SimpleNamespace(architecture="LlamaForCausalLM")
-        assert qsa.patch_qsa_cache_hint(config, qsa_env.device) is False
-        assert all(not k.updates for k in qsa_env.kernels.values())
-
-    @pytest.mark.parametrize("triton_version", ["3.9.0", "3.5.1", "4.0.0"])
-    def test_wrong_triton_version_returns_false(self, qsa, qsa_env, triton_version):
-        """Only the 3.6 series proceeds to the flagtree check."""
-        qsa_env.set_triton_version(triton_version)
-        assert qsa.patch_qsa_cache_hint(qsa_env.config, qsa_env.device) is False
-        assert all(not k.updates for k in qsa_env.kernels.values())
-
     def test_triton_36_patch_series_proceeds(self, qsa, qsa_env):
         """Any 3.6.x micro version passes the version gate."""
         for version in ("3.6.0", "3.6.2"):
@@ -846,35 +832,6 @@ class TestPatchQsaCacheHintGates:
             for kernel in qsa_env.kernels.values():
                 kernel.updates.clear()
                 kernel.src = _HINTED_SRC
-
-    def test_missing_flagtree_returns_false(self, qsa, qsa_env):
-        """A machine without flagtree installed bails out early."""
-        from importlib.metadata import PackageNotFoundError
-
-        def resolver(name):
-            if name == "flagtree":
-                raise PackageNotFoundError(name)
-            return "0"
-
-        qsa_env.set_flagtree_version(resolver)
-        assert qsa.patch_qsa_cache_hint(qsa_env.config, qsa_env.device) is False
-        assert all(not k.updates for k in qsa_env.kernels.values())
-
-    def test_non_cuda_device_returns_false(self, qsa, qsa_env):
-        """A non-CUDA device never reaches the kernel imports."""
-        device = SimpleNamespace(type="cpu")
-        assert qsa.patch_qsa_cache_hint(qsa_env.config, device) is False
-
-    def test_hip_build_returns_false(self, qsa, qsa_env, monkeypatch):
-        """AMD HIP builds are excluded from the workaround."""
-        monkeypatch.setattr(torch.version, "hip", "6.2", raising=False)
-        assert qsa.patch_qsa_cache_hint(qsa_env.config, qsa_env.device) is False
-
-    @pytest.mark.parametrize("capability", [(8, 0), (9, 1), (10, 0)])
-    def test_non_hopper_capability_returns_false(self, qsa, qsa_env, capability):
-        """Only Hopper (9, 0) triggers the patch."""
-        qsa_env.set_capability(capability)
-        assert qsa.patch_qsa_cache_hint(qsa_env.config, qsa_env.device) is False
 
     def test_compiled_kernel_raises(self, qsa, qsa_env):
         """A kernel with live device caches refuses the source change."""

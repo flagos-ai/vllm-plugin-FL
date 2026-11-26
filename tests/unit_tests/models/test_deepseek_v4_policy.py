@@ -6,10 +6,8 @@
 import needs ``vllm.forward_context``, the upstream ``vllm.models.deepseek_v4``
 classes, ``vllm.platforms.current_platform`` and (on npu) the
 ``flaggems_vllm`` HC-head kernel — none installed on CPU-only machines.
-``test_deepseek_v4_contracts.py`` in this directory covers the pure-torch
-cache helpers and source-pinned contracts; this module goes further and
-loads the *real* production source under stubbed external modules so the
-actual Python branches execute:
+This module loads the *real* production source under stubbed external
+modules so the actual Python branches execute:
 
 * ``_validate_short_context_attention`` — every rejection branch plus the
   valid-config passes, with expectations derived by hand;
@@ -38,10 +36,9 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/models/deepseek_v4.py"
+_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/models/deepseek_v4.py"
 _MODULE_NAME = "supp_deepseek_v4_under_test"
 
-pytestmark = pytest.mark.supplementary
 
 
 class _UpstreamBase:
@@ -299,8 +296,7 @@ def test_validate_ignores_ratio_4_when_beyond_hidden_layers(deepseek_mod):
 def test_cache_helpers_reject_non_page_shaped_cache(deepseek_mod):
     """Both helpers require a 3D [blocks, block_size, ...] page layout.
 
-    ``test_deepseek_v4_contracts.py`` drives AST-extracted copies of the
-    helpers; these cases execute them inside the loaded module so the
+    These cases execute the helpers inside the loaded module so the
     live lines run. Independent oracle: ndim != 3 or shape[1] != block
     size must raise before any indexing happens.
     """
@@ -335,6 +331,35 @@ def test_cache_helpers_round_trip_through_non_contiguous_pages(deepseek_mod):
     expected[1, 1] = rows[1]
     expected[2, 1] = rows[2]
     assert torch.equal(cache, expected)
+
+
+def test_store_then_read_round_trips_through_scrambled_slot_order(deepseek_mod):
+    """Store and read logical rows through non-contiguous page assignment.
+
+    Ported from the retired supplementary ``test_deepseek_v4_contracts.py``
+    (its only variant not otherwise covered): the slot list deliberately
+    maps to (page, offset) pairs in non-ascending order, so the page/offset
+    split cannot shortcut via sorted or contiguous assumptions.
+    """
+    num_blocks = 3
+    block_size = 2
+    cache = torch.zeros((num_blocks, block_size, 5), dtype=torch.float32)
+    width = cache.shape[-1]
+    # Scrambled logical order: slot i maps to (page, offset) pairs that are
+    # deliberately not in ascending order.
+    targets = [(2, block_size - 1), (0, 0), (1, min(block_size - 1, 1))]
+    slots = torch.tensor([page * block_size + offset for page, offset in targets])
+    rows = torch.arange(3 * width, dtype=torch.float32).reshape(3, width) + 1.0
+
+    deepseek_mod._store_cache_rows(cache, slots, rows, block_size)
+
+    read_back = deepseek_mod._cache_rows(cache, slots, block_size)
+    torch.testing.assert_close(read_back, rows, rtol=0, atol=0)
+    # Nothing leaked into rows we did not write.
+    expected_cache = torch.zeros_like(cache)
+    for (page, offset), row in zip(targets, rows):
+        expected_cache[page, offset] = row
+    torch.testing.assert_close(cache, expected_cache, rtol=0, atol=0)
 
 
 def test_store_cache_rows_casts_to_cache_dtype(deepseek_mod):

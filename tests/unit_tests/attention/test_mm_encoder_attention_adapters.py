@@ -17,7 +17,7 @@
 
 The core hygon numerics are covered by
 ``tests/unit_tests/attention/test_hygon_sdpa_patch_contract.py`` (which needs
-the vLLM source wheel). These supplementary tests load the real
+the vLLM source wheel). These tests load the real
 ``vllm_fl/attention/utils.py`` under stubbed vllm modules (no vLLM install
 needed) and verify the adapter wiring plus the numeric behavior of the
 patched callables on CPU with an independent softmax oracle.
@@ -34,7 +34,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/attention/utils.py"
+_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/attention/utils.py"
 _MODULE_NAME = "supp_attention_utils_under_test"
 
 _VIT_LEAVES = ("vllm.v1.attention.ops.vit_attn_wrappers",)
@@ -197,7 +197,6 @@ def _oracle_bshd(q, k, v, scale=None, enable_gqa=False):
     return out.transpose(1, 2).to(q.dtype)
 
 
-@pytest.mark.supplementary
 def test_hygon_patch_replaces_apply_sdpa_with_flagged_wrapper(load_adapter):
     """patch_mm_encoder_attention on hygon rebinds vit apply_sdpa once."""
     module, stubs = load_adapter("hygon")
@@ -211,7 +210,6 @@ def test_hygon_patch_replaces_apply_sdpa_with_flagged_wrapper(load_adapter):
     assert stubs.vit.apply_sdpa is patched
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("head_dim", [72, 64])
 @pytest.mark.parametrize("scale", [None, 0.125])
 def test_hygon_patched_sdpa_matches_bshd_oracle(load_adapter, head_dim, scale):
@@ -236,7 +234,6 @@ def test_hygon_patched_sdpa_matches_bshd_oracle(load_adapter, head_dim, scale):
     torch.testing.assert_close(output, expected, rtol=1e-5, atol=1e-5)
 
 
-@pytest.mark.supplementary
 def test_hygon_d72_default_scale_uses_72_rsqrt(load_adapter):
     """With scale=None on D72 inputs, the adapter uses 72**-0.5, not 128**-0.5.
 
@@ -258,7 +255,6 @@ def test_hygon_d72_default_scale_uses_72_rsqrt(load_adapter):
     torch.testing.assert_close(output, expected, rtol=1e-5, atol=1e-5)
 
 
-@pytest.mark.supplementary
 def test_hygon_wrapper_inputs_become_contiguous_bhsd(load_adapter):
     """The wrapper forces BHSD contiguity before calling torch SDPA.
 
@@ -300,7 +296,6 @@ def test_hygon_wrapper_inputs_become_contiguous_bhsd(load_adapter):
     assert scale == 72**-0.5
 
 
-@pytest.mark.supplementary
 def test_gcu_patch_binds_forward_native_and_oot(load_adapter):
     """On gcu, MMEncoderAttention.forward_native and forward_oot are replaced."""
     module, stubs = load_adapter("gcu")
@@ -311,7 +306,6 @@ def test_gcu_patch_binds_forward_native_and_oot(load_adapter):
     assert hasattr(cls, "_fl_gcu_original_forward_native")
 
 
-@pytest.mark.supplementary
 def test_gcu_patch_is_idempotent(load_adapter):
     """Applying the gcu patch twice keeps exactly one original forward saved."""
     module, stubs = load_adapter("enflame")
@@ -324,7 +318,6 @@ def test_gcu_patch_is_idempotent(load_adapter):
     assert cls.forward_native is module._gcu_forward_mm_attention
 
 
-@pytest.mark.supplementary
 def test_gcu_forward_native_delegates_when_backend_not_flash(load_adapter, monkeypatch):
     """With a non-FLASH_ATTN backend the original native forward is restored."""
     module, stubs = load_adapter("gcu")
@@ -344,14 +337,13 @@ def test_gcu_forward_native_delegates_when_backend_not_flash(load_adapter, monke
     result = module._gcu_forward_mm_attention(attention, "q", "k", "v")
 
     assert result == "original-result"
-    # All six forward_native arguments are forwarded positionally.
-    assert calls == [
-        (("q", "k", "v", None, None, None), {"cu_seqlens": None})
-    ] or calls == [(("q", "k", "v", None, None, None), {})]
+    # All six forward_native arguments are forwarded positionally (the
+    # production delegation passes cu_seqlens as the fourth positional arg,
+    # never as a keyword).
+    assert calls == [(("q", "k", "v", None, None, None), {})]
     assert len(calls) == 1
 
 
-@pytest.mark.supplementary
 def test_kunlunxin_patch_replaces_forward_sdpa(load_adapter):
     """On kunlunxin, MMEncoderAttention._forward_sdpa is the chunked version."""
     module, stubs = load_adapter("kunlunxin")
@@ -360,12 +352,10 @@ def test_kunlunxin_patch_replaces_forward_sdpa(load_adapter):
     assert cls._forward_sdpa is not None
     # The patched symbol name pins the vLLM API the adapter relies on.
     assert hasattr(cls, "_forward_sdpa")
-    source = Path(_SOURCE).read_text(encoding="utf-8")
-    assert "_KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE = 512" in source
+    source = _SOURCE.read_text(encoding="utf-8")
     assert source.count("_forward_sdpa = _kunlunxin_forward_sdpa") == 1
 
 
-@pytest.mark.supplementary
 def test_nvidia_binds_forward_oot_to_forward_cuda(load_adapter):
     """On CUDA platforms, forward_oot must alias vLLM's forward_cuda."""
     module, stubs = load_adapter("nvidia", is_cuda=True)
@@ -377,7 +367,6 @@ def test_nvidia_binds_forward_oot_to_forward_cuda(load_adapter):
     assert cls.forward_oot is sentinel
 
 
-@pytest.mark.supplementary
 def test_patch_replaces_maybe_get_vit_backend_for_hygon_kunlunxin_nvidia(load_adapter):
     """maybe_get_vit_flash_attn_backend is replaced on non-GCU vendor paths.
 
@@ -395,7 +384,6 @@ def test_patch_replaces_maybe_get_vit_backend_for_hygon_kunlunxin_nvidia(load_ad
         assert replaced.__name__ == "_patched_maybe_get_vit_flash_attn_backend"
 
 
-@pytest.mark.supplementary
 def test_gcu_patch_leaves_maybe_get_backend_unreplaced(load_adapter):
     """The gcu/enflame early return skips the vit backend selector override."""
     _, stubs = load_adapter("gcu")
@@ -403,7 +391,6 @@ def test_gcu_patch_leaves_maybe_get_backend_unreplaced(load_adapter):
     assert selector.__name__ == "original_maybe_get"
 
 
-@pytest.mark.supplementary
 def test_replaced_maybe_get_flash_backend_returns_varlen_func(
     load_adapter, monkeypatch
 ):

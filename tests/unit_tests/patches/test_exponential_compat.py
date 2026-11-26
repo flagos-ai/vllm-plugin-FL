@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/patches/exponential_compat.py"
+_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/patches/exponential_compat.py"
 _MODULE_NAME = "supp_exponential_compat_under_test"
 
 
@@ -71,7 +71,6 @@ def vendor_kernel(monkeypatch):
     return holder
 
 
-@pytest.mark.supplementary
 def test_generator_path_matches_seeded_oracle(compat):
     """With a generator, the shim delegates to aten and matches -log(U)/lambd."""
     assert compat.apply_exponential_compat() is True
@@ -91,7 +90,6 @@ def test_generator_path_matches_seeded_oracle(compat):
     torch.testing.assert_close(drawn, expected, rtol=1e-12, atol=1e-12)
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("lambd", [1.0, 2.0, 0.5])
 def test_generator_path_respects_lambd(compat, lambd):
     """The lambd argument scales the seeded exponential draw exactly."""
@@ -107,7 +105,6 @@ def test_generator_path_respects_lambd(compat, lambd):
     torch.testing.assert_close(drawn, expected, rtol=1e-12, atol=1e-12)
 
 
-@pytest.mark.supplementary
 def test_generator_kwarg_only_accepted_form(compat):
     """The generator is passed as a keyword, matching vLLM's TopKTopP usage."""
     compat.apply_exponential_compat()
@@ -135,7 +132,6 @@ def test_generator_kwarg_only_accepted_form(compat):
         torch.ops.aten.exponential_ = original
 
 
-@pytest.mark.supplementary
 def test_vendor_kernel_falls_back_without_generator(
     compat, vendor_kernel, monkeypatch, caplog
 ):
@@ -151,7 +147,6 @@ def test_vendor_kernel_falls_back_without_generator(
     assert compat._warned is True
 
 
-@pytest.mark.supplementary
 def test_vendor_fallback_warns_only_once(compat, vendor_kernel, caplog):
     """The fallback warning is emitted once per module, not per call."""
     compat.apply_exponential_compat()
@@ -166,7 +161,6 @@ def test_vendor_fallback_warns_only_once(compat, vendor_kernel, caplog):
     assert len(warnings) == 1, "the vendor-kernel warning must fire exactly once"
 
 
-@pytest.mark.supplementary
 def test_no_generator_call_skips_aten_generator_branch(compat, vendor_kernel):
     """Without a generator the shim calls aten directly (no try/except path)."""
     compat.apply_exponential_compat()
@@ -178,7 +172,6 @@ def test_no_generator_call_skips_aten_generator_branch(compat, vendor_kernel):
     assert compat._warned is False, "no warning without a generator argument"
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("shape", [(1,), (5,), (2, 3), (4, 1, 2)])
 def test_shim_preserves_shape_dtype_and_device(compat, shape):
     """The shim is a transparent in-place wrapper: shape/dtype/device stable."""
@@ -196,7 +189,6 @@ def test_shim_preserves_shape_dtype_and_device(compat, shape):
     assert torch.all(torch.isfinite(result))
 
 
-@pytest.mark.supplementary
 def test_install_restores_between_module_instances(compat):
     """Each fixture-loaded module instance installs exactly once.
 

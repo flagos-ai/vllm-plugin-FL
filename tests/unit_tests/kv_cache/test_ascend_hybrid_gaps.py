@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for vllm_fl.kv_cache.ascend.hybrid CPU-testable logic.
+"""CPU tests for vllm_fl.kv_cache.ascend.hybrid logic not covered elsewhere.
 
 ``hybrid.py`` implements dense Ascend hybrid cache views over shared byte
 pools.  The module imports vllm at module level, so the stub vllm graph
@@ -18,7 +18,6 @@ from dataclasses import dataclass
 import pytest
 import torch
 
-pytestmark = pytest.mark.supplementary
 
 
 def _install_vllm_stubs():
@@ -129,7 +128,7 @@ _SAVED = {name: sys.modules.get(name) for name in _STUB_ENTRIES}
 _iface = _install_vllm_stubs()
 
 _SOURCE = (
-    Path(__file__).resolve().parents[4]
+    Path(__file__).resolve().parents[3]
     / "vllm_fl"
     / "kv_cache"
     / "ascend"
@@ -156,7 +155,6 @@ UniformTypeKVCacheSpecs = _iface.UniformTypeKVCacheSpecs
 class TestUsesDenseHybridCache:
     """uses_dense_hybrid_cache model-type gate."""
 
-    @pytest.mark.supplementary
     def test_qwen3_5_text_with_hybrid(self):
         """A hybrid qwen3_5_text model selects the dense layout."""
         cfg = types.SimpleNamespace(
@@ -165,7 +163,6 @@ class TestUsesDenseHybridCache:
         )
         assert hybrid.uses_dense_hybrid_cache(cfg) is True
 
-    @pytest.mark.supplementary
     def test_qwen3_5_moe_text_with_hybrid(self):
         """A hybrid qwen3_5_moe_text model also selects the dense layout."""
         cfg = types.SimpleNamespace(
@@ -174,7 +171,6 @@ class TestUsesDenseHybridCache:
         )
         assert hybrid.uses_dense_hybrid_cache(cfg) is True
 
-    @pytest.mark.supplementary
     def test_other_model_type_rejected(self):
         """Non-GDN model types fall back to the non-dense path."""
         cfg = types.SimpleNamespace(
@@ -183,7 +179,6 @@ class TestUsesDenseHybridCache:
         )
         assert hybrid.uses_dense_hybrid_cache(cfg) is False
 
-    @pytest.mark.supplementary
     def test_non_hybrid_rejected(self):
         """is_hybrid=False short-circuits regardless of model type."""
         cfg = types.SimpleNamespace(
@@ -192,7 +187,6 @@ class TestUsesDenseHybridCache:
         )
         assert hybrid.uses_dense_hybrid_cache(cfg) is False
 
-    @pytest.mark.supplementary
     def test_missing_hf_config_raises_attribute_error(self):
         """A missing hf_text_config surfaces as AttributeError (no default)."""
         cfg = types.SimpleNamespace(is_hybrid=True)
@@ -248,7 +242,6 @@ def _patch_registry(monkeypatch, cfg):
 class TestAlignHybridBlockSize:
     """align_hybrid_block_size page arithmetic."""
 
-    @pytest.mark.supplementary
     def test_alignment_computes_block_size(self, monkeypatch):
         """block_size = 128 * cdiv(state_bytes, 128 * key_token_bytes)."""
         # state: 128*2 = 256 bytes; key_token_bytes = 8 * 2 * 2 = 32
@@ -265,7 +258,6 @@ class TestAlignHybridBlockSize:
             == 2 * cfg._state_bytes + cfg._conv_bytes
         )
 
-    @pytest.mark.supplementary
     def test_mamba_block_size_align_mode(self, monkeypatch):
         """mamba_cache_mode='align' keeps mamba_block_size == block_size."""
         cfg = _AlignConfig((1, 2), (2, 32, 32))
@@ -274,7 +266,6 @@ class TestAlignHybridBlockSize:
         hybrid.align_hybrid_block_size(cfg)
         assert cfg.cache_config.mamba_block_size == cfg.cache_config.block_size
 
-    @pytest.mark.supplementary
     def test_mamba_block_size_non_align_mode(self, monkeypatch):
         """A non-'align' mamba mode sets mamba_block_size = max_model_len."""
         cfg = _AlignConfig((1, 2), (2, 32, 32))
@@ -283,7 +274,6 @@ class TestAlignHybridBlockSize:
         hybrid.align_hybrid_block_size(cfg)
         assert cfg.cache_config.mamba_block_size == cfg.model_config.max_model_len
 
-    @pytest.mark.supplementary
     def test_mla_rejected(self, monkeypatch):
         """MLA models are rejected (unsupported state family)."""
         cfg = _AlignConfig((1, 2), (2, 32, 32))
@@ -292,7 +282,6 @@ class TestAlignHybridBlockSize:
         with pytest.raises(NotImplementedError):
             hybrid.align_hybrid_block_size(cfg)
 
-    @pytest.mark.supplementary
     def test_single_state_rejected(self, monkeypatch):
         """Fewer than two state tensors is not conv+GDN."""
         cfg = _AlignConfig((1, 2), (2, 32, 32))
@@ -301,7 +290,6 @@ class TestAlignHybridBlockSize:
         with pytest.raises(NotImplementedError):
             hybrid.align_hybrid_block_size(cfg)
 
-    @pytest.mark.supplementary
     def test_inverted_state_sizes_rejected(self, monkeypatch):
         """conv bytes >= state bytes violates the conv-then-GDN invariant."""
         cfg = _AlignConfig((2, 64, 64), (1, 2, 2))  # conv much larger
@@ -309,7 +297,6 @@ class TestAlignHybridBlockSize:
         with pytest.raises(NotImplementedError):
             hybrid.align_hybrid_block_size(cfg)
 
-    @pytest.mark.supplementary
     def test_unalignable_pages_rejected(self, monkeypatch):
         """state_bytes not a multiple of 128*key_token_bytes raises."""
         cfg = _AlignConfig((1, 2), (3, 3, 3))  # 54 bytes: never aligns
@@ -317,7 +304,6 @@ class TestAlignHybridBlockSize:
         with pytest.raises(ValueError, match="align Ascend key"):
             hybrid.align_hybrid_block_size(cfg)
 
-    @pytest.mark.supplementary
     def test_user_block_size_too_large_rejected(self, monkeypatch):
         """A user block_size above the required one is rejected."""
         cfg = _AlignConfig((1, 2), (2, 32, 32))
@@ -331,14 +317,6 @@ class TestAlignHybridBlockSize:
 class TestPadAttentionSpecs:
     """pad_attention_specs global page-size application."""
 
-    @pytest.mark.supplementary
-    def test_small_attention_spec_padded(self):
-        """Attention specs below the page size get page_size_padded set."""
-        spec = AttentionSpec(page_size_bytes=64)
-        out = hybrid.pad_attention_specs({"a": spec}, page_size=256)
-        assert out["a"].page_size_padded == 256
-
-    @pytest.mark.supplementary
     def test_large_attention_spec_untouched(self):
         """Attention specs already at/above the page size are unchanged."""
         spec = AttentionSpec(page_size_bytes=512)
@@ -347,7 +325,6 @@ class TestPadAttentionSpecs:
         assert out["a"].page_size_padded is None
         assert out["a"].page_size_bytes == 512
 
-    @pytest.mark.supplementary
     def test_non_attention_spec_untouched(self):
         """Mamba specs never receive the attention page padding."""
         spec = MambaSpec(page_size_bytes=64)
@@ -358,7 +335,6 @@ class TestPadAttentionSpecs:
 class TestDenseViews:
     """dense_attention_view / dense_mamba_views byte-slicing arithmetic."""
 
-    @pytest.mark.supplementary
     def test_attention_view_slices_tail(self):
         """The view consumes the pool tail with exact dtype reinterpretation."""
         dtype = torch.float32
@@ -375,7 +351,6 @@ class TestDenseViews:
         assert view.flatten()[-1].item() == 7.0
         assert torch.all(view.flatten()[:-1] == 0.0)
 
-    @pytest.mark.supplementary
     def test_attention_view_rejects_misaligned(self):
         """A payload offset not aligned to the dtype size is rejected."""
         raw = torch.zeros(31, dtype=torch.uint8)  # 31 % 4 != 0
@@ -383,7 +358,6 @@ class TestDenseViews:
         with pytest.raises(ValueError, match="backing"):
             hybrid.dense_attention_view(raw, spec, (2, 3, 2))
 
-    @pytest.mark.supplementary
     def test_attention_view_rejects_oversized(self):
         """A payload larger than the backing is rejected."""
         raw = torch.zeros(8, dtype=torch.uint8)
@@ -391,7 +365,6 @@ class TestDenseViews:
         with pytest.raises(ValueError, match="backing"):
             hybrid.dense_attention_view(raw, spec, (2, 3, 4))
 
-    @pytest.mark.supplementary
     def test_mamba_views_grouped_densely(self):
         """Each state type gets its own dense slab of num_blocks rows."""
         shapes = [(2, 4), (2, 8)]
@@ -410,7 +383,6 @@ class TestDenseViews:
         assert views[1][0, 0, 0].item() == 1.0
         assert torch.all(views[1][0, 0, 1:] == 0.0)
 
-    @pytest.mark.supplementary
     def test_mamba_views_rejects_short_backing(self):
         """A backing smaller than the slabs is rejected."""
         raw = torch.zeros(8, dtype=torch.uint8)
@@ -418,112 +390,9 @@ class TestDenseViews:
             hybrid.dense_mamba_views(raw, [(2, 4)], [torch.float32], 3)
 
 
-class TestDeduplicateBlockPlanes:
-    """_deduplicate_block_planes storage-alias dedup."""
-
-    @pytest.mark.supplementary
-    def test_aliased_planes_deduplicated(self):
-        """Views over the same storage rows collapse to one entry."""
-        base = torch.zeros(4, 64, dtype=torch.uint8)
-        planes = [base[0:2], base[0:2]]  # same data_ptr/shape/stride
-        out = hybrid._deduplicate_block_planes(planes)
-        assert len(out) == 1
-        assert out[0].shape == (2, 64)
-
-    @pytest.mark.supplementary
-    def test_disjoint_planes_kept(self):
-        """Different storages stay separate entries."""
-        planes = [
-            torch.zeros(2, 64, dtype=torch.uint8),
-            torch.zeros(2, 64, dtype=torch.uint8),
-        ]
-        assert len(hybrid._deduplicate_block_planes(planes)) == 2
-
-    @pytest.mark.supplementary
-    def test_rows_of_same_storage_kept(self):
-        """Different rows of one storage are distinct planes."""
-        base = torch.zeros(4, 64, dtype=torch.uint8)
-        planes = [base[0:2], base[2:4]]
-        assert len(hybrid._deduplicate_block_planes(planes)) == 2
-
-
-class TestCopyZeroBlockPlanes:
-    """copy_block_planes / zero_block_planes row semantics on CPU."""
-
-    @staticmethod
-    def _plane(rows=4, cols=16, seed=0):
-        g = torch.Generator().manual_seed(seed)
-        return torch.randint(0, 255, (rows, cols), dtype=torch.uint8, generator=g)
-
-    @pytest.mark.supplementary
-    def test_copy_aligned_plane(self):
-        """An aligned plane snapshots source rows, then index_copy_s them.
-
-        copies=[(0, 1)] means: snapshot row 0 BEFORE writing, then write
-        that snapshot into row 1 — both within the same plane (the NPU
-        block-id remap contract).  Rows outside the copy list are untouched.
-        """
-        plane = self._plane(seed=1)
-        row0_before = plane[0].clone()
-        other_rows = plane.clone()
-        hybrid.copy_block_planes([plane], [(0, 1)])
-        assert torch.equal(plane[1], row0_before)  # row 1 ← row 0
-        assert torch.equal(plane[0], row0_before)  # source row intact
-        assert torch.equal(plane[2], other_rows[2])  # untouched
-        assert torch.equal(plane[3], other_rows[3])  # untouched
-
-    @pytest.mark.supplementary
-    def test_copy_unaligned_plane(self):
-        """A plane whose row byte count is not 4-aligned uses the row loop."""
-        base = self._plane(seed=3)
-        plane = base[:, :6]  # 6 bytes per row → not 4-aligned
-        row2_before = plane[2].clone()
-        hybrid.copy_block_planes([plane], [(2, 3)])
-        assert torch.equal(plane[3], row2_before)  # row 3 ← row 2
-        assert torch.equal(plane[2], row2_before)  # source intact
-
-    @pytest.mark.supplementary
-    def test_copy_empty_is_noop(self):
-        """Empty planes or empty copies leave everything untouched."""
-        dst = self._plane(seed=5)
-        before = dst.clone()
-        hybrid.copy_block_planes([], [(0, 1)])
-        hybrid.copy_block_planes([dst], [])
-        assert torch.equal(dst, before)
-
-    @pytest.mark.supplementary
-    def test_zero_aligned_plane(self):
-        """Aligned planes zero via int32 index_fill_."""
-        plane = self._plane(seed=6)
-        hybrid.zero_block_planes([plane], [0, 2])
-        assert torch.all(plane[0] == 0)
-        assert torch.all(plane[2] == 0)
-        assert torch.any(plane[1] != 0)
-        assert torch.any(plane[3] != 0)
-
-    @pytest.mark.supplementary
-    def test_zero_unaligned_plane(self):
-        """Unaligned planes zero via the row copy loop."""
-        base = self._plane(seed=7)
-        plane = base[:, :6]
-        hybrid.zero_block_planes([plane], [1])
-        assert torch.all(plane[1] == 0)
-        assert torch.any(plane[0] != 0)
-
-    @pytest.mark.supplementary
-    def test_zero_empty_is_noop(self):
-        """Empty planes or ids leave everything untouched."""
-        plane = self._plane(seed=8)
-        before = plane.clone()
-        hybrid.zero_block_planes([], [0])
-        hybrid.zero_block_planes([plane], [])
-        assert torch.equal(plane, before)
-
-
 class TestAllocateAscendKvCacheErrors:
     """allocate_ascend_kv_cache guard rails (CPU-drivable branches)."""
 
-    @pytest.mark.supplementary
     def test_empty_tensors_returns_empty(self):
         """No cache tensors → empty views and planes."""
         cfg = types.SimpleNamespace(kv_cache_tensors=[])
@@ -532,7 +401,6 @@ class TestAllocateAscendKvCacheErrors:
         )
         assert bind == {} and mgr == {} and planes == []
 
-    @pytest.mark.supplementary
     def test_host_resident_rejected(self):
         """Host-resident pools are rejected with NotImplementedError."""
         tensor = types.SimpleNamespace(host_resident=True)

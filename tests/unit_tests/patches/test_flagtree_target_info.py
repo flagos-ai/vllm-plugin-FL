@@ -28,7 +28,7 @@ from types import ModuleType
 import pytest
 
 _SOURCE = (
-    Path(__file__).resolve().parents[4] / "vllm_fl/patches/flagtree_target_info.py"
+    Path(__file__).resolve().parents[3] / "vllm_fl/patches/flagtree_target_info.py"
 )
 _MODULE_NAME = "supp_flagtree_target_info_under_test"
 
@@ -138,7 +138,6 @@ def fake_target_info(monkeypatch):
             real_parent.target_info = saved_attr
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize(
     "arch,expected_true",
     [
@@ -182,7 +181,6 @@ def test_predicate_truth_table_per_arch(
         )
 
 
-@pytest.mark.supplementary
 def test_non_hip_target_disables_every_predicate(flagtree, fake_target_info):
     """A CUDA/CPU target makes every added predicate False even on gfx names."""
     fake_target_info.arch = "gfx942"
@@ -201,7 +199,6 @@ def test_non_hip_target_disables_every_predicate(flagtree, fake_target_info):
         assert getattr(fake_target_info, name)() is False, name
 
 
-@pytest.mark.supplementary
 def test_existing_attributes_are_left_alone(flagtree, fake_target_info):
     """Predicates FlagTree already exports are never overwritten."""
 
@@ -219,7 +216,6 @@ def test_existing_attributes_are_left_alone(flagtree, fake_target_info):
     assert fake_target_info.is_hip_cdna() is True
 
 
-@pytest.mark.supplementary
 def test_added_predicates_are_decorated_as_constexpr(flagtree, fake_target_info):
     """When FlagTree offers constexpr_function, added predicates get wrapped."""
     fake_target_info.arch = "gfx908"
@@ -238,7 +234,6 @@ def test_added_predicates_are_decorated_as_constexpr(flagtree, fake_target_info)
     }
 
 
-@pytest.mark.supplementary
 def test_broken_constexpr_decorator_falls_back_to_plain(flagtree, fake_target_info):
     """A constexpr_function that raises must not break the patch."""
 
@@ -253,7 +248,6 @@ def test_broken_constexpr_decorator_falls_back_to_plain(flagtree, fake_target_in
     assert fake_target_info.is_hip_gfx1250() is False
 
 
-@pytest.mark.supplementary
 def test_unimportable_triton_reports_false(flagtree, monkeypatch):
     """When triton.language.target_info cannot import, apply returns False."""
     monkeypatch.setitem(sys.modules, "triton.language.target_info", None)
@@ -262,7 +256,6 @@ def test_unimportable_triton_reports_false(flagtree, monkeypatch):
     assert any(level == "debug" for level, _ in flagtree.logger.records)
 
 
-@pytest.mark.supplementary
 def test_current_target_failure_yields_empty_arch(flagtree, fake_target_info):
     """A raising current_target makes predicates False instead of crashing."""
 
@@ -276,7 +269,6 @@ def test_current_target_failure_yields_empty_arch(flagtree, fake_target_info):
         assert getattr(fake_target_info, name)() is False, name
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("target_value", [None, object()])
 def test_non_string_arch_is_treated_as_empty(flagtree, fake_target_info, target_value):
     """A target without a string ``arch`` attribute must not crash predicates."""
@@ -291,7 +283,6 @@ def test_non_string_arch_is_treated_as_empty(flagtree, fake_target_info, target_
     assert fake_target_info.is_hip_gfx11() is False
 
 
-@pytest.mark.supplementary
 def test_apply_is_cached_and_logs_added_names(flagtree, fake_target_info):
     """Repeat calls return the cached result; the first call logs the adds."""
     fake_target_info.arch = "gfx908"
@@ -306,7 +297,6 @@ def test_apply_is_cached_and_logs_added_names(flagtree, fake_target_info):
     assert "is_hip_gfx1250" in infos[0]
 
 
-@pytest.mark.supplementary
 def test_real_triton_import_path(monkeypatch):
     """Against the real installed triton, apply adds the missing names.
 

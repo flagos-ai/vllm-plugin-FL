@@ -41,7 +41,6 @@ class FakeTritonKernel:
         return "custom-attr-value"
 
 
-@pytest.mark.supplementary
 def test_getitem_launch_applies_overrides():
     """kernel[grid](...) forwards to the wrapped kernel with overrides merged."""
     kernel = FakeTritonKernel()
@@ -55,7 +54,6 @@ def test_getitem_launch_applies_overrides():
     ]
 
 
-@pytest.mark.supplementary
 def test_overrides_win_over_caller_kwargs():
     """A conflicting caller kwarg is replaced by the proxy override."""
     kernel = FakeTritonKernel()
@@ -66,7 +64,6 @@ def test_overrides_win_over_caller_kwargs():
     assert kernel.launches == [("grid", (), {"BLOCK_N": 1024, "other": 3})]
 
 
-@pytest.mark.supplementary
 def test_attribute_access_is_transparent():
     """Non-launch attributes and methods resolve on the wrapped kernel."""
     kernel = FakeTritonKernel()
@@ -77,7 +74,6 @@ def test_attribute_access_is_transparent():
     assert proxy.launches is kernel.launches
 
 
-@pytest.mark.supplementary
 def test_launch_overrides_property_returns_a_copy():
     """Mutating the returned dict must not affect the live overrides."""
     kernel = FakeTritonKernel()
@@ -90,14 +86,12 @@ def test_launch_overrides_property_returns_a_copy():
     assert proxy.launch_overrides == {"BLOCK_N": 512}
 
 
-@pytest.mark.supplementary
 def test_empty_overrides_are_rejected():
     """Constructing without overrides is a hard error, not a silent no-op."""
     with pytest.raises(ValueError, match="At least one kernel launch override"):
         KernelLaunchMetaProxy(FakeTritonKernel(), {})
 
 
-@pytest.mark.supplementary
 def test_patch_applies_proxy_once():
     """patch_kernel_launch_meta wraps the module attribute exactly once."""
     module = SimpleNamespace(kernel=FakeTritonKernel())
@@ -111,7 +105,6 @@ def test_patch_applies_proxy_once():
     assert module.kernel is first
 
 
-@pytest.mark.supplementary
 def test_patch_rejects_conflicting_second_application():
     """Different overrides on an already-patched kernel raise RuntimeError."""
     module = SimpleNamespace(kernel=FakeTritonKernel())
@@ -125,7 +118,6 @@ def test_patch_rejects_conflicting_second_application():
     assert module.kernel._kernel.launches == [("g", (), {"num_warps": 8})]
 
 
-@pytest.mark.supplementary
 def test_end_to_end_module_patch_launch_flow():
     """The full GCU-style flow: patch a module's kernel, launch, check args."""
     module = SimpleNamespace(_causal_conv1d_fwd_kernel=FakeTritonKernel())

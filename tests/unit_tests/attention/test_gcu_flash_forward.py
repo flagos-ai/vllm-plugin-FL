@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Supplementary tests for the remaining ``vllm_fl/attention/utils.py`` lines.
+"""CPU tests for the remaining ``vllm_fl/attention/utils.py`` lines.
 
 ``test_mm_encoder_attention_adapters.py`` (which must not be modified) covers
 the adapter wiring: the hygon SDPA patch numerics, the gcu forward delegation
@@ -31,10 +31,9 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/attention/utils.py"
+_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/attention/utils.py"
 _MODULE_NAME = "supp_gcu_flash_forward_under_test"
 
-pytestmark = pytest.mark.supplementary
 
 
 def _leaf(modules, name):

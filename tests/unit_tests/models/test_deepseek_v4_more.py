@@ -31,6 +31,14 @@ hand-derived numeric oracles so the real production lines run on CPU:
 The final tests run only where a real vLLM install exists (the WSL run);
 they construct the layer through the real upstream constructor and check a
 full ``forward`` against a from-scratch reference.
+
+Why this file exists alongside ``tests/unit_tests/models/test_deepseek_v4.py``:
+the unit-tree version is gated by ``pytest.importorskip("torch_npu")``, so on
+any CI host without an Ascend runtime it collects zero tests. This file needs
+no torch_npu (the stub-graph loader stands in for vllm/flaggems_vllm), so its
+method-body tests are the only coverage of the real ``forward``/``forward_mqa``
+lines on NPU-less machines; the two ported real-vLLM tests at the end (skipped
+where vLLM is absent) extend that to the real upstream constructor.
 """
 
 import contextlib
@@ -42,10 +50,9 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/models/deepseek_v4.py"
+_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/models/deepseek_v4.py"
 _MODULE_NAME = "supp_deepseek_v4_more_under_test"
 
-pytestmark = pytest.mark.supplementary
 
 
 class _UpstreamBase:

@@ -26,7 +26,7 @@ from types import ModuleType
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/attention/utils.py"
+_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/attention/utils.py"
 _MODULE_NAME = "supp_kunlunxin_chunked_under_test"
 
 # The production chunk size; patched down inside these tests.
@@ -110,7 +110,6 @@ class FakeEncoder:
         return query, key, value
 
 
-@pytest.mark.supplementary
 @pytest.mark.parametrize("chunk", [1, 2, 3])
 def test_chunked_sdpa_exact_across_chunk_boundaries(chunked, chunk):
     """Chunked SDPA matches the oracle exactly for several chunk sizes.
@@ -134,7 +133,6 @@ def test_chunked_sdpa_exact_across_chunk_boundaries(chunked, chunk):
     torch.testing.assert_close(output, expected, rtol=1e-5, atol=1e-5)
 
 
-@pytest.mark.supplementary
 def test_chunked_sdpa_single_chunk_matches_full_compute(chunked):
     """With a chunk larger than S the result equals a single SDPA call."""
     chunked._KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE = 64
@@ -154,7 +152,6 @@ def test_chunked_sdpa_single_chunk_matches_full_compute(chunked):
     )
 
 
-@pytest.mark.supplementary
 def test_forward_sdpa_packed_varlen_segments_match_oracle(chunked):
     """_forward_sdpa with cu_seqlens handles independent segments exactly.
 
@@ -192,7 +189,6 @@ def test_forward_sdpa_packed_varlen_segments_match_oracle(chunked):
         start = end
 
 
-@pytest.mark.supplementary
 def test_forward_sdpa_batched_path_reshapes_packed_output(chunked):
     """Without cu_seqlens the batched path computes per-batch attention.
 
@@ -213,7 +209,6 @@ def test_forward_sdpa_batched_path_reshapes_packed_output(chunked):
     torch.testing.assert_close(output, expected, rtol=1e-5, atol=1e-5)
 
 
-@pytest.mark.supplementary
 def test_forward_sdpa_reshapes_3d_input_to_packed_2d(chunked):
     """A 3D [B, S, H*D] input returns a packed [B, S, H*D] output."""
     chunked._KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE = 4
@@ -233,7 +228,6 @@ def test_forward_sdpa_reshapes_3d_input_to_packed_2d(chunked):
     torch.testing.assert_close(output, expected, rtol=1e-5, atol=1e-5)
 
 
-@pytest.mark.supplementary
 def test_production_chunk_constant_is_512():
     """Pin the production chunk size; the memory bound depends on it."""
     source = _SOURCE.read_text(encoding="utf-8")

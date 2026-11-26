@@ -40,12 +40,11 @@ import pytest
 import torch
 
 _SOURCE = (
-    Path(__file__).resolve().parents[4]
+    Path(__file__).resolve().parents[3]
     / "vllm_fl/dispatch/backends/flaggems/impl/attention.py"
 )
 _MODULE_NAME = "supp_flaggems_attention_under_test"
 
-pytestmark = pytest.mark.supplementary
 
 _HEAD_SIZE = 64
 _NUM_HEADS = 8
