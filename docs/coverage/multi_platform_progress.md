@@ -155,3 +155,48 @@ runner commands executed:
   UTC avoids nightly (18:00 UTC daily), weekly (Sunday 18:00 UTC), and the
   nvidia supplementary workflow's Sunday 06:00 UTC window. No PR trigger;
   daily PR CI untouched.
+
+## Audit-driven refactor (2026-11-26, per the 2026-11-25 review meeting)
+
+An eight-report audit (4 vendor + common-infra + upstream-research + coverage-audit
++ modules-common) drove a quality-first refactor pass. Key corrections and their
+landings:
+
+### Gate re-verification (measurement-environment closure)
+
+The original four-gate green run used the measurement recipe
+(`GEMS_VENDOR=<platform>`, thead gate on the kunlunxin flag_gems shim, no
+`VLLM_TARGET_DEVICE` export → the vllm_fl plugin loads as out-of-tree platform).
+Re-run with that exact recipe on 2026-11-26 re-confirmed:
+
+kunlunxin 1354 / hygon 1163 / iluvatar 1254 / thead 1176 passed — 0 failed, 0
+error. The recipe (and its environment semantics) is now stated in the PR
+description; running the same tree with `VLLM_TARGET_DEVICE=cpu` instead forces
+CpuPlatform and fails 12 tests that rely on the OOT-plugin path — the gate numbers
+are valid **under the stated recipe only**.
+
+### Coverage-number corrections
+
+* baseline for the final combined data is **35.36%** (kunlunxin scope), not the
+  33.3% interim figure the earlier PR text paired with 69.9% (33.3% was the
+  mid-wave measurement at 62.7%); the honest pair is 35.36% → 69.93%.
+* dual-caliber reporting added: scope caliber (69.93/69.25/67.98/69.20%) and
+  full-tree caliber (46.99/44.27/45.09/44.92%).
+* worker-area hardware attribution corrected: ~1000–1200 hardware-bound lines +
+  ~1300 CPU-testable helper lines (previously "~1500 hardware-only").
+* merge_coverage.py `missing_lines` repaired (was `range(1, N)` proxy; model_runner
+  reported 766 missing vs true 2090) — commit 16999db7.
+* thead "tested-but-not-counted" documented: real-PPU cases exist whose coverage
+  data is not in the combined JSON (see hardware_matrix.md).
+
+### Test-quality actions (per audit decisions)
+
+* placeholder/dead tests removed (permanently-skipping FlagCX e2e class,
+  callable-only existence group, pseudo-test constructing its own subject);
+* weak assertions rewritten (tautological flag check, hasattr-only entry
+  contract, implicit no-raise smokes given explicit assertions);
+* #799-overlap files resolved to vendor-only increments (see PR description
+  ownership table);
+* missing CPU-testable vendor surfaces added (kunlunxin platform defaults +
+  patch orchestration; hygon dispatch-config contract; iluvatar patch-function
+  bodies + worker surface; thead capability contracts + dispatch config).
