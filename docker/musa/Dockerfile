@@ -41,8 +41,18 @@ ENV PYTHONPATH=/opt/flagtree
 
 # Install FlagGems-vLLM and vLLM (constrained to keep base
 # torch/torch_musa/flagtree/flag-gems intact).
-COPY docker/musa/constraints.txt /opt/fl-ci/constraints.txt
-RUN uv pip install --python /flagos/bin/python --no-cache \
+RUN mkdir -p /opt/fl-ci && printf '%s\n' \
+        'flag-gems==5.4.0' \
+        'flagcx==0.14.1+musa5.3.0' \
+        'flagtree==0.7.0+mthreads3.6' \
+        'numpy==1.26.4' \
+        'torch==2.13.0.post1+musa20261110' \
+        'torch-musa==2.13.0.post1+musa20261110' \
+        'torchaudio==2.11.0.post2+musa20261110' \
+        'torchvision==0.28.0.post1+musa5.3.0' \
+        'triton-musa==3.6.0+musa5.3.0' \
+        > /opt/fl-ci/constraints.txt && \
+    uv pip install --python /flagos/bin/python --no-cache \
         --constraint /opt/fl-ci/constraints.txt \
         --extra-index-url "${FLAGOS_DAILY_INDEX_URL}" \
         # Check hygon before mthreads so uv finds the cp312 xgrammar wheel

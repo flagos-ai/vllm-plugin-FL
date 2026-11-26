@@ -54,8 +54,18 @@ ENV PYTHONPATH=/opt/flagtree:/usr/local/Ascend/cann-9.2.1/python/site-packages:/
 
 # Install FlagGems-vLLM and vLLM (constrained to keep the base
 # torch/torch-npu/FlagGems/FlagTree stack intact).
-COPY docker/ascend/constraints.txt /opt/fl-ci/constraints.txt
-RUN uv pip install --python /flagos/bin/python --no-cache \
+RUN mkdir -p /opt/fl-ci && printf '%s\n' \
+        'cann-shmem==1.6.0' \
+        'flag-gems==5.4.0' \
+        'flagcx==0.14.1+cann9.2.1' \
+        'flagtree==0.7.1a1+ascend3.5' \
+        'numpy==1.26.4' \
+        'torch==2.13.0+cpu' \
+        'torch-npu==2.13.0' \
+        'torchaudio==2.11.0+cpu' \
+        'torchvision==0.28.0+cpu' \
+        > /opt/fl-ci/constraints.txt && \
+    uv pip install --python /flagos/bin/python --no-cache \
         --constraint /opt/fl-ci/constraints.txt \
         --extra-index-url "${FLAGOS_DAILY_INDEX_URL}" \
         --extra-index-url "${FLAGOS_ASCEND_INDEX_URL}" \

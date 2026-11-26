@@ -307,9 +307,6 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
-    # The runtime recipe COPYs docker/ascend/constraints.txt, so build
-    # from the repository root (like hygon/kunlunxin), not docker/ascend/.
-    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
     DOCKERFILE="docker/ascend/Dockerfile"
     # New recipe stages: base -> dev / test; map the legacy ci target.
     if [[ "${TARGET}" == "ci" ]]; then
@@ -412,9 +409,6 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
 elif [[ "${PLATFORM}" == "musa" ]]; then
     PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
     VLLM_VERSION="${MUSA_VLLM_VERSION}"
-    # The plugin's constraints.txt is a COPY input, so the context is the
-    # repository root rather than docker/musa/ (mirrors the hygon branch).
-    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi

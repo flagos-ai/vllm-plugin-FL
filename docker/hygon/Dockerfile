@@ -43,8 +43,19 @@ ENV LD_LIBRARY_PATH="/opt/dtk/dcc/gcvm/lib:/opt/dtk/hip/lib:/opt/dtk/llvm/lib:/o
 ENV PYTHONPATH=/opt/flagtree
 
 # Install FlagGems-vLLM and vLLM (constrained to keep base torch/triton/flagtree intact)
-COPY docker/hygon/constraints.txt /opt/fl-ci/constraints.txt
-RUN uv pip install --python /flagos/bin/python --no-cache \
+RUN mkdir -p /opt/fl-ci && printf '%s\n' \
+        'apex==1.7.0+dtk2610.torch2130.2610221147.gfa848d' \
+        'flag-gems==5.4.0' \
+        'flagcx==0.14.1+dtk2610' \
+        'flagtree==0.7.1a1+hcu3.6' \
+        'flash-attn==2.8.4+dtk2610.torch2130.2610211904.g0f1a5a' \
+        'numpy==1.26.4' \
+        'torch==2.13.0+dtk2610.2610261432.gefb4e1' \
+        'torchaudio==2.11.0+dtk2610.torch2130.2610221109.g1da530' \
+        'torchvision==0.28.0+dtk2610.torch2130.2610212003.gac691b' \
+        'triton==3.7.0+dtk2610.torch2120.2611032029.g56f888' \
+        > /opt/fl-ci/constraints.txt && \
+    uv pip install --python /flagos/bin/python --no-cache \
         --constraint /opt/fl-ci/constraints.txt \
         --extra-index-url "${FLAGOS_DAILY_INDEX_URL}" \
         --extra-index-url "${FLAGOS_HYGON_INDEX_URL}" \
