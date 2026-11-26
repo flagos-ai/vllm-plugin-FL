@@ -176,12 +176,18 @@ class FlagGemsBackend(Backend):
         if use_sparse:
             raise ValueError("use_sparse=True requires use_mla=True.")
 
+        from vllm.platforms import current_platform
+
+        default_use_flaggems_attn = (
+            "1"
+            if getattr(current_platform, "vendor_name", None) == "iluvatar"
+            else "0"
+        )
         use_flaggems_attn = os.environ.get(
-            "VLLM_FL_USE_FLAGGEMS_ATTN", "0"
+            "VLLM_FL_USE_FLAGGEMS_ATTN", default_use_flaggems_attn
         ).lower() in ("1", "true", "yes")
 
         if use_flaggems_attn:
-            print("Using FlagGems attention backend.")
             return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()
