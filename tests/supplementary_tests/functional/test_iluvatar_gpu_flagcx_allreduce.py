@@ -44,11 +44,27 @@ pytestmark = [
     pytest.mark.serial,
 ]
 
+
+def _tol(dtype):
+    """Single source of truth: tests/platforms/iluvatar.yaml tolerance.inference.
+
+    Falls back to the yaml defaults (1e-3 default / 1e-2 bfloat16) when the
+    platform config cannot be loaded (bare pytest without the runner).
+    """
+    try:
+        from tests.utils.platform_config import PlatformConfig
+
+        cfg = PlatformConfig.load("iluvatar")
+        tol = cfg.get_tolerance("inference", dtype)
+        return tol.rtol, tol.atol
+    except Exception:
+        return (1e-3, 1e-3) if dtype == "default" else (1e-2, 1e-2)
+
+
+RTOL_DEFAULT, ATOL_DEFAULT = _tol("default")
+RTOL_BF16, ATOL_BF16 = _tol("bfloat16")
+
 # tests/platforms/iluvatar.yaml tolerance.inference
-RTOL_DEFAULT = 1e-3
-ATOL_DEFAULT = 1e-3
-RTOL_BF16 = 1e-2
-ATOL_BF16 = 1e-2
 
 WORLD_SIZE = 2
 SECRET = uuid.uuid4().hex
