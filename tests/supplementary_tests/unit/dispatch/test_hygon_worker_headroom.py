@@ -123,6 +123,37 @@ def test_headroom_is_the_smaller_of_request_and_device_budget(
     query.assert_called_once_with()
 
 
+def test_huge_device_is_clamped_to_the_requested_4_gib(monkeypatch):
+    # A 100 GiB DCU reports int(100 GiB * 0.3) = 32 GiB as its budget cap,
+    # far above the requested 4 GiB: the request clamps the reservation, so
+    # one huge card does not lock 30% of the budget away from the KV cache.
+    query = _stub_platform(monkeypatch, 100 * GIB)
+
+    headroom = hygon_worker.cudagraph_memory_headroom(
+        _config(CUDAGraphMode.PIECEWISE)
+    )
+
+    assert headroom == 4294967296  # 4 GiB exactly, not 32 GiB
+    assert isinstance(headroom, int)
+    query.assert_called_once_with()
+
+
+def test_six_gib_device_cap_wins_at_1_8_gib(monkeypatch):
+    # A 6 GiB DCU reports int(6 GiB * 0.3) = 1932735283 bytes (~1.8 GiB):
+    # below the requested 4 GiB, so the device budget cap wins and the
+    # small card keeps 70% of its memory for the KV cache.
+    query = _stub_platform(monkeypatch, 6 * GIB)
+
+    headroom = hygon_worker.cudagraph_memory_headroom(
+        _config(CUDAGraphMode.PIECEWISE)
+    )
+
+    assert headroom == int(6 * GIB * 0.3)  # 1932735283 bytes
+    assert headroom == 1932735283
+    assert isinstance(headroom, int)
+    query.assert_called_once_with()
+
+
 def test_log_line_carries_exactly_three_gib_values(monkeypatch):
     _stub_platform(monkeypatch, TOTAL_64_GIB)
 
