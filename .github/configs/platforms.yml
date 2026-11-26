@@ -127,7 +127,8 @@ platforms:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
   musa:
-    enabled: true
+    # Keep disabled until the #802 V2-runner/source fixes land on 0.5.0-dev.
+    enabled: false
     trigger_paths:
       - .github/configs/musa.yml
       - .github/scripts/musa/
