@@ -109,6 +109,28 @@ def bind_kv_cache(
     owners = _collect_owners(forward_context, kv_caches)
     # Validate before any mutation at all.
     _preflight_owners(owners)
+    from vllm.platforms import current_platform
+
+    minimax_binding = (
+        getattr(current_platform, "vendor_name", None) == "ascend"
+        and current_platform.device_type == "npu"
+        and any(getattr(layer, "_fl_minimax_cache_owner", False)
+                for layer in forward_context.values())
+    )
+    if minimax_binding:
+        from vllm.model_executor.models.utils import extract_layer_index
+
+        if runner_kv_caches:
+            raise ValueError("MiniMax caches already bound")
+        for name in sorted(
+            kv_caches, key=lambda name: (extract_layer_index(name, num_attn_module), name)
+        ):
+            runner_kv_caches.append(kv_caches[name])
+        for name, cache in kv_caches.items():
+            forward_context[name].kv_cache = cache
+        for _name, layer, cache in owners:
+            layer.bind_kv_cache(cache)
+        return
     calls_owner_hook = upstream_binds_kv_cache_owners() if owners else True
 
     upstream_bind_kv_cache(
