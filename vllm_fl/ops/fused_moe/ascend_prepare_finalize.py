@@ -45,14 +45,8 @@ class NpuMoEPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
         self.runtime = runtime
         self.num_experts = num_experts
         self._tp = runtime.tp_group
-        if (
-            self._tp.world_size <= 0
-            or not 0 <= self._tp.rank_in_group < self._tp.world_size
-        ):
-            raise ValueError("Invalid physical TP group")
         # Resolve all communicator metadata before graph capture starts.
-        self._mc2 = runtime.mc2_dispatcher(num_experts)
-        self._alltoall = runtime.alltoall_dispatcher(num_experts)
+        self._mc2, self._alltoall = runtime.dispatchers(num_experts)
         self._pending = None
         self._busy = False
         self._failed = False

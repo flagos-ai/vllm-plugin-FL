@@ -5,6 +5,7 @@ import inspect
 
 import torch
 
+from vllm import ir
 from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
 from vllm.models.minimax_m3.common.indexer import (
     MiniMaxM3IndexerBackend,
@@ -27,9 +28,7 @@ def resolve_paged_cache_writer():
 
 def gemma_norm(x, weight, eps):
     # Keep Gemma's 1+w and reduction in FP32 before the final output cast.
-    value = x.float()
-    value = value * torch.rsqrt(value.square().mean(-1, keepdim=True) + eps)
-    return (value * (weight.float() + 1)).to(x.dtype)
+    return ir.ops.rms_norm(x, weight.float() + 1, eps)
 
 
 def partial_neox_rope(x, positions, cos_sin_cache, rotary_dim):
@@ -196,7 +195,9 @@ class MiniMaxM3Kernels:
         # capability check can be completed before the first cache mutation.
         for target, slots, values in plans:
             if target.ndim != 3 or target.shape[1] <= 1:
-                raise ValueError("Expected paged cache with block size greater than one")
+                raise ValueError(
+                    "Expected paged cache with block size greater than one"
+                )
             pages, block, width = target.shape
             if (
                 values.ndim != 2

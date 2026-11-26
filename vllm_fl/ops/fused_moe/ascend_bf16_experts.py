@@ -7,9 +7,7 @@ from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
 )
 
 from .ascend_prepare_finalize import NpuExpertTokensMetadata
-from vllm_fl.dispatch import CachedOp
-
-_grouped_experts = CachedOp("bf16_grouped_experts")
+from vllm_fl.dispatch import resolve_op
 
 
 class AscendBF16DispatchedExperts(mk.FusedMoEExpertsModular):
@@ -24,6 +22,17 @@ class AscendBF16DispatchedExperts(mk.FusedMoEExpertsModular):
             raise NotImplementedError(
                 "Ascend dispatched experts require bias-free unquantized weights"
             )
+        from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe import (
+            validate_grouped_experts_ops,
+        )
+
+        validate_grouped_experts_ops(
+            moe_config.activation.value,
+            quant_config.gemm1_alpha,
+            quant_config.gemm1_beta,
+            quant_config.gemm1_clamp_limit,
+        )
+        self._grouped_experts = resolve_op("bf16_grouped_experts")
 
     @staticmethod
     def activation_format():
@@ -118,7 +127,7 @@ class AscendBF16DispatchedExperts(mk.FusedMoEExpertsModular):
         if output.dtype != expert_tokens_meta.output_dtype:
             raise ValueError("Expert output dtype differs from original hidden states")
         output.copy_(
-            _grouped_experts(
+            self._grouped_experts(
                 hidden_states,
                 w1,
                 w2,

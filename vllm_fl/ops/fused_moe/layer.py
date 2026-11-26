@@ -75,6 +75,7 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
         runtime = get_ep_group().device_communicator.get_moe_runtime(
             get_current_vllm_config(),
             device=layer.w13_weight.device,
+            num_experts=self.moe.num_experts,
         )
         self.moe_kernel = FusedMoEKernel(
             NpuMoEPrepareAndFinalize(runtime, self.moe.num_experts),

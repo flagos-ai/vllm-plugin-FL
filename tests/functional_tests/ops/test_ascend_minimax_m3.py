@@ -321,6 +321,7 @@ def test_gemma_residual_uses_unrounded_sum(with_residual, monkeypatch):
         )
         * (1 + norm.weight.float())
     )
+    x_view, residual_view = x.view_as(x), residual.view_as(residual)
     result = norm(x, residual) if with_residual else norm(x)
     actual = result[0] if with_residual else result
     torch.testing.assert_close(actual, expected.to(x.dtype), atol=0, rtol=0)
@@ -330,7 +331,13 @@ def test_gemma_residual_uses_unrounded_sum(with_residual, monkeypatch):
     assert value.dtype == (torch.float32 if with_residual else x.dtype)
     torch.testing.assert_close(value.float(), expected_sum, atol=0, rtol=0)
     if with_residual:
-        torch.testing.assert_close(result[1], expected_sum.to(x.dtype), atol=0, rtol=0)
+        assert result[0] is x and result[1] is residual
+        torch.testing.assert_close(x_view, expected.to(x.dtype), atol=0, rtol=0)
+        torch.testing.assert_close(
+            residual_view, expected_sum.to(x.dtype), atol=0, rtol=0
+        )
+    else:
+        torch.testing.assert_close(x_view.float(), expected_sum, atol=0, rtol=0)
 
 
 def test_provider_adapts_actual_upstream_implementation_layout():
@@ -410,6 +417,51 @@ def test_biased_sigmoid_router_dispatch():
                 if renormalize:
                     expected_weights /= expected_weights.sum(-1, keepdim=True)
                 torch.testing.assert_close(weights, expected_weights * 2.5)
+
+
+@pytest.mark.parametrize(
+    "router_name", ["FusedTopKBiasRouterFL", "GroupedTopKRouterFL"]
+)
+def test_sqrtsoftplus_routing_preserves_upstream_entry(router_name, monkeypatch):
+    from unittest.mock import Mock
+
+    from vllm.platforms import current_platform
+
+    from vllm_fl.ops.fused_moe import router as routing
+
+    assert (
+        current_platform.vendor_name == "ascend"
+        and current_platform.device_type == "npu"
+    )
+    hidden = torch.zeros(1, 8, device="npu")
+    logits = torch.zeros(1, 4, device="npu")
+    bias = torch.zeros(4, device="npu")
+    ids = torch.tensor([[1, 3]], dtype=torch.int64, device="npu")
+    weights = torch.tensor([[0.25, 0.75]], device="npu")
+    upstream = Mock(return_value=(weights.clone(), ids))
+    monkeypatch.setattr(routing, "fused_topk_bias", upstream)
+    monkeypatch.setattr(routing, "_topk_bias", Mock(side_effect=AssertionError))
+    router = SimpleNamespace(
+        top_k=2,
+        renormalize=True,
+        scoring_func="sqrtsoftplus",
+        e_score_correction_bias=bias,
+        routed_scaling_factor=2.0,
+        num_expert_group=4,
+    )
+    actual_weights, actual_ids = getattr(routing, router_name)._compute_routing(
+        router, hidden, logits, torch.int64
+    )
+    upstream.assert_called_once()
+    args = upstream.call_args.kwargs.copy()
+    assert args.pop("hidden_states") is hidden
+    assert args.pop("gating_output") is logits
+    assert args.pop("e_score_correction_bias").data_ptr() == bias.data_ptr()
+    assert args == dict(
+        topk=2, renormalize=True, scoring_func="sqrtsoftplus", indices_type=torch.int64
+    )
+    assert actual_ids is ids
+    torch.testing.assert_close(actual_weights, weights * 2)
 
 
 def test_new_model_namespace_uses_fl_moe_factory():

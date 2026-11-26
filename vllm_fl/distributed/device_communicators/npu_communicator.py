@@ -24,7 +24,7 @@ class NPUCommunicator(DeviceCommunicatorBase):
 
             self.all2all_manager = AgRsAll2AllManager(self.cpu_group)
 
-    def get_moe_runtime(self, config, *, device):
+    def get_moe_runtime(self, config, *, device, num_experts):
         if not self.is_ep_communicator:
             raise RuntimeError(
                 "MoE runtime must be owned by the active EP communicator"
@@ -35,9 +35,17 @@ class NPUCommunicator(DeviceCommunicatorBase):
             # An OOT coordinator can retain a logical local index while the
             # worker/model uses an assigned visible ordinal. Topology comes
             # from the group, but persistent tensors follow the model device.
-            self.moe_runtime = NpuMoERuntime(self, config, device)
+            runtime = NpuMoERuntime(self, config, device)
+            try:
+                runtime.dispatchers(num_experts)
+            except BaseException:
+                runtime.destroy()
+                raise
+            self.moe_runtime = runtime
         elif self.moe_runtime.device != torch.device(device):
             raise RuntimeError("MoE worker device changed; recreate and recapture")
+        else:
+            self.moe_runtime.dispatchers(num_experts)
         return self.moe_runtime
 
     def destroy(self):

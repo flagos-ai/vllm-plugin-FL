@@ -56,20 +56,33 @@ class NpuMC2Dispatcher:
     component does not manage or validate group recreation.
     """
 
-    def __init__(self, process_group: dist.ProcessGroup, num_experts: int):
-        import torch_npu
+    @staticmethod
+    def resolve_ops():
+        from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe import (
+            require_npu_moe_op,
+        )
 
-        if not all(
-            hasattr(torch_npu, name)
-            for name in (
-                "npu_moe_distribute_dispatch_v2",
-                "npu_moe_distribute_combine_v2",
-            )
-        ):
-            raise RuntimeError("MC2 requires torch_npu dispatch/combine v2")
+        common = (
+            "expert_ids", "group_ep", "ep_world_size", "ep_rank_id", "moe_expert_num",
+            "group_tp", "tp_world_size", "tp_rank_id", "expert_shard_type",
+            "shared_expert_rank_num", "global_bs", "x_active_mask",
+        )
+        return (
+            require_npu_moe_op(
+                "npu_moe_distribute_dispatch_v2", "x", "quant_mode",
+                "expert_token_nums_type", *common,
+            ),
+            require_npu_moe_op(
+                "npu_moe_distribute_combine_v2", "expand_x", "assist_info_for_combine",
+                "ep_send_counts", "expert_scales", "tp_send_counts", "expand_scales",
+                "comm_quant_mode", *common,
+            ),
+        )
+
+    def __init__(self, process_group: dist.ProcessGroup, num_experts: int, *, ops=None):
+        self._dispatch, self._combine = self.resolve_ops() if ops is None else ops
         if not isinstance(num_experts, int) or num_experts <= 0:
             raise ValueError("num_experts must be a positive integer")
-        self._ops = torch_npu
         self._group = process_group
         self._num_experts = num_experts
         self._owner = object()
@@ -126,7 +139,7 @@ class NpuMC2Dispatcher:
         ):
             raise ValueError("MC2 tensors must share a device")
         expanded, _scales, assist, counts, ep_counts, _tp_counts, expand_scales = (
-            self._ops.npu_moe_distribute_dispatch_v2(
+            self._dispatch(
                 x=hidden_states,
                 expert_ids=expert_ids,
                 group_ep=self._communicator,
@@ -180,7 +193,7 @@ class NpuMC2Dispatcher:
             or hidden_states.dtype != handle.output_dtype
         ):
             raise ValueError("MC2 expert output shape/device/dtype must match dispatch")
-        output = self._ops.npu_moe_distribute_combine_v2(
+        output = self._combine(
             expand_x=hidden_states,
             expert_ids=handle.expert_ids,
             assist_info_for_combine=handle.assist_info,
@@ -231,9 +244,22 @@ class NpuAllToAllDispatcher:
     IDs must be global and valid, and weights finite. No handle is cached.
     """
 
-    def __init__(self, process_group: dist.ProcessGroup, num_experts: int):
-        import torch_npu
+    @staticmethod
+    def resolve_ops():
+        from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe import (
+            require_npu_moe_op,
+        )
 
+        return (
+            require_npu_moe_op("npu_moe_token_permute", "tokens", "indices", "num_out_tokens"),
+            require_npu_moe_op(
+                "npu_moe_token_unpermute", "permuted_tokens", "sorted_indices",
+                "probs", "restore_shape",
+            ),
+        )
+
+    def __init__(self, process_group: dist.ProcessGroup, num_experts: int, *, ops=None):
+        self._permute, self._unpermute = self.resolve_ops() if ops is None else ops
         if not isinstance(num_experts, int) or num_experts <= 0:
             raise ValueError("num_experts must be a positive integer")
         if str(dist.get_backend(process_group)).lower() != "hccl":
@@ -242,14 +268,13 @@ class NpuAllToAllDispatcher:
         self._world_size = dist.get_world_size(process_group)
         if self._rank < 0 or self._world_size <= 1 or num_experts % self._world_size:
             raise ValueError("AllToAll requires membership and equal expert shards")
-        self._ops = torch_npu
         self._group = process_group
         self._num_experts = num_experts
         self._local_experts = num_experts // self._world_size
         self._owner = object()
 
     def _check_eager(self) -> None:
-        capturing = getattr(self._ops.npu, "is_current_stream_capturing", None)
+        capturing = getattr(torch.npu, "is_current_stream_capturing", None)
         if capturing is not None and capturing():
             raise RuntimeError(
                 "Dynamic AllToAll supports eager prefill, not graph capture"
@@ -333,7 +358,7 @@ class NpuAllToAllDispatcher:
         output_splits = tuple(received_counts.sum(1).cpu().tolist())
         counts = received_counts.sum(0).to(torch.int64)
         if hidden_states.shape[0]:
-            permuted, inverse_local = self._ops.npu_moe_token_permute(
+            permuted, inverse_local = self._permute(
                 tokens=hidden_states,
                 indices=expert_ids,
                 num_out_tokens=expert_ids.numel(),
@@ -351,7 +376,7 @@ class NpuAllToAllDispatcher:
                 % self._local_experts,
                 received_counts.reshape(-1),
             )
-            received, inverse_global = self._ops.npu_moe_token_permute(
+            received, inverse_global = self._permute(
                 received, indices
             )
         handle = _AllToAllCombineHandle(
@@ -387,7 +412,7 @@ class NpuAllToAllDispatcher:
                 "AllToAll expert output shape/device/dtype must match dispatch"
             )
         if handle.inverse_global is not None:
-            hidden_states = self._ops.npu_moe_token_unpermute(
+            hidden_states = self._unpermute(
                 hidden_states, handle.inverse_global
             )
         source_rows = self._exchange(
@@ -395,7 +420,7 @@ class NpuAllToAllDispatcher:
         )
         if handle.inverse_local is None:
             return source_rows.new_empty(handle.original_shape)
-        output = self._ops.npu_moe_token_unpermute(
+        output = self._unpermute(
             permuted_tokens=source_rows,
             sorted_indices=handle.inverse_local.to(torch.int32),
             probs=handle.expert_weights,

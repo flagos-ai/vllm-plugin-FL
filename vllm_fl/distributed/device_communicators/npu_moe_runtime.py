@@ -48,10 +48,11 @@ class NpuMoERuntime:
         if self.device.type != "npu" or self.device.index != torch.npu.current_device():
             raise ValueError("MoE buffers require the active worker's NPU device")
         self._group = None
-        self._mc2 = {}
-        self._alltoall = {}
+        self._dispatchers = {}
         self._closed = False
         tp = self.tp_group.world_size
+        if tp <= 0 or not 0 <= self.tp_group.rank_in_group < tp:
+            raise ValueError("Invalid physical TP group")
         options = config.additional_config or {}
         if options.get("enable_fused_mc2", 0) not in (0, False):
             raise NotImplementedError(
@@ -72,6 +73,8 @@ class NpuMoERuntime:
         self.mc2_tokens_capacity = min((capacity + tp - 1) // tp, 512) * tp
         mask_rows = max(max_batched, self.mc2_tokens_capacity)
         mask_rows = (mask_rows + tp - 1) // tp * tp
+        self._mc2_ops = NpuMC2Dispatcher.resolve_ops()
+        self._alltoall_ops = NpuAllToAllDispatcher.resolve_ops()
         self._mask = torch.zeros(mask_rows, dtype=torch.bool, device=self.device)
         # Do not reuse the ordinary EP collective communicator for MC2.
         # Local synchronization permits independent, non-overlapping PP groups.
@@ -80,26 +83,25 @@ class NpuMoERuntime:
             backend="hccl",
             use_local_synchronization=True,
         )
-        if (
-            dist.get_world_size(self._group) != communicator.world_size
-            or dist.get_rank(self._group) != communicator.rank_in_group
-        ):
+        try:
+            if (
+                dist.get_world_size(self._group) != communicator.world_size
+                or dist.get_rank(self._group) != communicator.rank_in_group
+            ):
+                raise RuntimeError("MoE private group does not match the active EP group")
+        except BaseException:
             self.destroy()
-            raise RuntimeError("MoE private group does not match the active EP group")
+            raise
 
-    def mc2_dispatcher(self, num_experts):
+    def dispatchers(self, num_experts):
+        """Build and cache the dispatcher pair as a single operation."""
         self._check_open()
-        if num_experts not in self._mc2:
-            self._mc2[num_experts] = NpuMC2Dispatcher(self._group, num_experts)
-        return self._mc2[num_experts]
-
-    def alltoall_dispatcher(self, num_experts):
-        self._check_open()
-        if num_experts not in self._alltoall:
-            self._alltoall[num_experts] = NpuAllToAllDispatcher(
-                self._group, num_experts
+        if num_experts not in self._dispatchers:
+            self._dispatchers[num_experts] = (
+                NpuMC2Dispatcher(self._group, num_experts, ops=self._mc2_ops),
+                NpuAllToAllDispatcher(self._group, num_experts, ops=self._alltoall_ops),
             )
-        return self._alltoall[num_experts]
+        return self._dispatchers[num_experts]
 
     def prepare_forward(
         self,
@@ -145,8 +147,7 @@ class NpuMoERuntime:
     def destroy(self):
         if not self._closed:
             self._closed = True
-            self._mc2.clear()
-            self._alltoall.clear()
+            self._dispatchers.clear()
             group, self._group = self._group, None
             if group is not None:
                 dist.destroy_process_group(group)

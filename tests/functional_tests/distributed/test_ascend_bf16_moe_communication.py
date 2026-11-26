@@ -10,6 +10,7 @@ collects the cases and explicitly skips them without a multi-rank launcher.
 import argparse
 import os
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -149,6 +150,76 @@ def communication_group():
 @pytest.mark.parametrize("mode", ("mc2", "alltoall"))
 def test_ascend_bf16_moe_communication(mode, communication_group):
     main(["--mode", mode], group=communication_group)
+
+
+@pytest.mark.gpu
+@pytest.mark.multi_gpu
+@pytest.mark.functional
+@pytest.mark.parametrize("failure", ("missing_op", "wrong_rank", "dispatcher_setup"))
+def test_runtime_initialization_rolls_back(failure, communication_group, monkeypatch):
+    import torch_npu
+
+    import vllm.distributed
+
+    from vllm_fl.distributed.device_communicators.npu_communicator import (
+        NPUCommunicator,
+    )
+    from vllm_fl.distributed.device_communicators.npu_moe import NpuAllToAllDispatcher
+
+    rank = dist.get_rank(communication_group)
+    world = dist.get_world_size(communication_group)
+    monkeypatch.setattr(
+        vllm.distributed,
+        "get_tp_group",
+        lambda: SimpleNamespace(world_size=1, rank_in_group=0),
+    )
+    communicator = SimpleNamespace(
+        is_ep_communicator=True,
+        moe_runtime=None,
+        ranks=list(range(world)),
+        world_size=world,
+        rank_in_group=(rank + 1) % world if failure == "wrong_rank" else rank,
+    )
+    config = SimpleNamespace(
+        parallel_config=SimpleNamespace(use_ubatching=False),
+        scheduler_config=SimpleNamespace(max_num_batched_tokens=16, max_num_seqs=4),
+        compilation_config=SimpleNamespace(cudagraph_capture_sizes=None),
+        additional_config={},
+    )
+    new_group, destroy_group = dist.new_group, dist.destroy_process_group
+    created, destroyed = [], []
+
+    def track_new_group(*args, **kwargs):
+        group = new_group(*args, **kwargs)
+        created.append(group)
+        return group
+
+    def track_destroy_group(group):
+        destroyed.append(group)
+        destroy_group(group)
+
+    monkeypatch.setattr(dist, "new_group", track_new_group)
+    monkeypatch.setattr(dist, "destroy_process_group", track_destroy_group)
+    error = "private group does not match"
+    if failure == "missing_op":
+        monkeypatch.setattr(torch_npu, "npu_moe_token_unpermute", None)
+        error = "compatible torch_npu.npu_moe_token_unpermute"
+    elif failure == "dispatcher_setup":
+
+        def fail_setup(*args, **kwargs):
+            raise RuntimeError("injected second dispatcher failure")
+
+        monkeypatch.setattr(NpuAllToAllDispatcher, "__init__", fail_setup)
+        error = "injected second dispatcher failure"
+
+    device = torch.device("npu", torch_npu.npu.current_device())
+    with pytest.raises(RuntimeError, match=error):
+        NPUCommunicator.get_moe_runtime(
+            communicator, config, device=device, num_experts=2 * world
+        )
+    assert communicator.moe_runtime is None
+    assert len(created) == (0 if failure == "missing_op" else 1)
+    assert destroyed == created
 
 
 if __name__ == "__main__":

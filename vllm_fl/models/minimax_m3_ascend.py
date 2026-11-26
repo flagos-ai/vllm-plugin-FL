@@ -24,7 +24,9 @@ class AscendGemmaRMSNorm(upstream.MiniMAXGemmaRMSNorm):
         # Normalize the FP32 sum; only the returned residual is rounded to BF16.
         value = x.float() + residual.float()
         normalized = gemma_norm(value, self.weight, self.variance_epsilon)
-        return normalized.to(x.dtype), value.to(residual.dtype)
+        x.copy_(normalized)
+        residual.copy_(value)
+        return x, residual
 
 
 def _sparse_forward(

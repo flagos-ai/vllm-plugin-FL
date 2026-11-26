@@ -11,6 +11,38 @@ import torch.nn.functional as F
 import torch_npu
 
 
+def require_npu_moe_op(name, *keywords, positional=0):
+    """Resolve a torch-npu entry point and validate its registered schema."""
+    op = getattr(torch_npu, name, None)
+    packet = getattr(torch.ops.npu, name, None)
+    if callable(op) and packet is not None:
+        for schema in packet._schemas.values():
+            args = schema.arguments
+            if len(args) < positional or any(arg.kwarg_only for arg in args[:positional]):
+                continue
+            remaining = {arg.name: arg for arg in args[positional:]}
+            if remaining.keys() >= set(keywords) and all(
+                arg.has_default_value() or arg.name in keywords
+                for arg in remaining.values()
+            ):
+                return op
+    raise RuntimeError(f"Ascend MoE requires a compatible torch_npu.{name}")
+
+
+def validate_grouped_experts_ops(activation, alpha, beta, limit):
+    _validate_activation(activation, alpha, beta, limit)
+    require_npu_moe_op(
+        "npu_grouped_matmul", "x", "weight", "split_item",
+        "group_list_type", "group_type", "group_list",
+    )
+    if activation == "swigluoai_uninterleave":
+        require_npu_moe_op(
+            "npu_clipped_swiglu", "interleaved", "alpha", "bias", "limit", positional=1
+        )
+    elif activation == "silu":
+        require_npu_moe_op("npu_swiglu", positional=1)
+
+
 def topk_softmax(topk_weights, topk_ids, token_expert_indices, gating_output, renormalize):
     """Tensor reference for FL's softmax router; its scratch output is unused."""
     scores = gating_output.float().softmax(dim=-1)
