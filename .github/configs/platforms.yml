@@ -95,7 +95,8 @@ platforms:
     exempt_from_global:
       - vllm_fl/dispatch/config/ascend.yaml
   hygon:
-    enabled: true
+    # Re-enable when the Hygon CI image migration is ready.
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/hygon.yaml
       - vllm_fl/dispatch/backends/vendor/hygon/
