@@ -17,9 +17,10 @@ CPU platforms. This file covers:
 * ``_prepare_expert_assignment``'s naive path vs moe_align_block_size path;
 * ``TritonExpertsFL.workspace_shapes`` (the NPU max-token reservation and
   the non-NPU passthrough);
-* ``TritonExpertsFL.apply``'s NPU grouped-experts arm, the kunlunxin
-  vendor arm, the CUDA FlagGems arm, and the generic pipeline fallback
-  with stubbed kernels;
+* ``TritonExpertsFL.apply``'s NPU grouped-experts arm and the kunlunxin
+  vendor arm (the CUDA FlagGems arm, the generic two-GEMM pipeline
+  fallback and the vendor routing matrix live in
+  ``test_fused_moe_vendor_backends.py``);
 * ``TritonExpertsFL.moe_sum``.
 
 The hygon platform file (``test_hygon_platform_branches.py``) already

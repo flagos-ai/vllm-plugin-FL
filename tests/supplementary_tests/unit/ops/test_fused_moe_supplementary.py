@@ -140,11 +140,15 @@ def _cpu_compat_shims(monkeypatch):
         num_rows = _ROUTING.get("num_rows")
         expanded = num_rows is not None and A.shape[0] == num_rows
         _INVOKE_COUNT["n"] += 1
-        first_invoke = _INVOKE_COUNT["n"] % 2 == 1
-        # The first GEMM's flag means "apply weight on input" (the router
-        # weight multiplies the OUTPUT row); the second GEMM's flag is the
-        # inverted "mul_routed_weight". Both semantics scale the same row.
-        apply_weight = bool(mul_routed_weight) if not first_invoke             else bool(mul_routed_weight)  # flag arrives as passed
+        # NOTE: this stub applies the routed weight whenever the flag is
+        # True, for either GEMM — it does NOT model the different flag
+        # semantics of the two production call sites (first GEMM
+        # "apply-on-input" folding vs second GEMM output weighting).
+        # Production passing the flag to the wrong GEMM is therefore not
+        # observable through this double alone;
+        # test_apply_router_weight_on_input_two_gemm_flag_contract below
+        # installs a flag-sensitive double to pin that routing.
+        apply_weight = bool(mul_routed_weight)
         flat = C.reshape(-1, C.shape[-1])
         for row, route in _ROUTING.items():
             if row == "num_rows":
@@ -260,6 +264,108 @@ class TestFusedExpertsImpl:
         hs, w1, w2, tw, ti = _moe_inputs()
         with pytest.raises(ValueError, match="Unsupported FusedMoe"):
             ffm.fused_experts_impl(hs, w1, w2, tw, ti, activation="relu")
+
+    def test_apply_router_weight_on_input_two_gemm_flag_contract(self,
+                                                                 monkeypatch):
+        """Pin the first/second GEMM flag routing of fused_experts_impl.
+
+        The CPU stub ``cpu_invoke`` used by the fixture implements both
+        flag branches identically (its comment describes inverted
+        semantics that the code never delivers), so the flag ROUTING of
+        the two production call sites is not observable through it. This
+        test installs a flag-SENSITIVE recording double instead — with
+        ``mul_routed_weight=True`` the routed weight scales the row, with
+        ``False`` it does not — and asserts the production argument
+        combinations on both GEMMs, so swapping the two flags at either
+        call site turns this test red.
+
+        Production must pass the raw ``apply_router_weight_on_input`` to
+        the FIRST GEMM (weight folded into the gate_up row → the s²
+        semantics below) and its negation to the SECOND GEMM (weight on
+        the contribution → the s¹ semantics of the default oracle).
+        """
+        real_impl = ffm.fused_experts_impl
+        routing = {}
+        calls = []
+
+        def routing_wrapper(*args, **kwargs):
+            topk_ids = kwargs.get("topk_ids")
+            if topk_ids is None and len(args) > 4:
+                topk_ids = args[4]
+            routing.clear()
+            top_k = topk_ids.shape[1]
+            for token in range(topk_ids.shape[0]):
+                for slot in range(top_k):
+                    routing[token * top_k + slot] = (
+                        token, slot, int(topk_ids[token, slot])
+                    )
+            routing["num_rows"] = topk_ids.numel()
+            calls.clear()
+            return real_impl(*args, **kwargs)
+
+        def flag_sensitive_invoke(A, B, C, A_scale, B_scale, topk_weights,
+                                  sorted_token_ids, expert_ids,
+                                  num_tokens_post_padded, mul_routed_weight,
+                                  top_k, config, **kwargs):
+            """A-path vs B-path: the flag alone decides whether the
+            routed weight scales the row written here."""
+            num_rows = routing.get("num_rows")
+            expanded = num_rows is not None and A.shape[0] == num_rows
+            calls.append({
+                "flag": bool(mul_routed_weight),
+                "expanded": expanded,
+                "topk_weights_passed": topk_weights is not None,
+            })
+            if A.shape[1] != B.shape[2]:
+                return
+            flat = C.reshape(-1, C.shape[-1])
+            for row, route in routing.items():
+                if row == "num_rows":
+                    continue
+                token, slot, expert = route
+                if row >= flat.shape[0] or expert >= B.shape[0]:
+                    continue
+                a = A[row] if expanded else A[token]
+                if a.shape[0] != B.shape[2]:
+                    continue
+                out = a.float() @ B[expert].float().T
+                if topk_weights is not None and bool(mul_routed_weight):
+                    out = out * topk_weights[token, slot].float()
+                flat[row] = out.to(flat.dtype)
+
+        monkeypatch.setattr(ffm, "fused_experts_impl", routing_wrapper)
+        monkeypatch.setattr(ffm, "_invoke_fused_moe_triton_kernel",
+                            flag_sensitive_invoke)
+
+        hs, w1, w2, tw, ti = _moe_inputs(seed=11)
+
+        # apply_router_weight_on_input=True: the raw flag reaches GEMM1
+        # (raw hidden states, weight folded into the gate_up row), the
+        # inverted flag reaches GEMM2 (expanded rows, unweighted).
+        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti,
+                                      apply_router_weight_on_input=True)
+        assert [c["flag"] for c in calls] == [True, False]
+        assert calls[0]["expanded"] is False
+        assert calls[1]["expanded"] is True
+        assert all(c["topk_weights_passed"] for c in calls)
+        expected = torch.zeros_like(hs)
+        for t in range(hs.shape[0]):
+            for s in range(ti.shape[1]):
+                e = int(ti[t, s])
+                gate_up = hs[t] @ w1[e].T
+                scaled = gate_up * tw[t, s]
+                inter = F.silu(scaled[: scaled.numel() // 2]) * scaled[
+                    scaled.numel() // 2:
+                ]
+                expected[t] += inter @ w2[e].T
+        torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-4)
+
+        # apply_router_weight_on_input=False: the flags flip — GEMM1
+        # unweighted, GEMM2 weights the contribution.
+        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti)
+        assert [c["flag"] for c in calls] == [False, True]
+        torch.testing.assert_close(out, _oracle(hs, w1, w2, tw, ti),
+                                   rtol=1e-4, atol=1e-4)
 
     def test_apply_router_weight_on_input(self):
         """Router weights scale the first GEMM output before activation.
