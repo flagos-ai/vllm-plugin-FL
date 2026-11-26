@@ -17,6 +17,12 @@ tests/unit_tests/worker/test_worker.py's probe pattern).
 (``vllm_fl.compilation.graph`` raises NotImplementedError outside a
 supported accelerator), so the install tests stub all three touched modules
 in ``sys.modules`` (save / install / restore in ``finally``).
+
+The two probe branches already covered by
+``tests/unit_tests/worker/test_worker.py:117-144`` (the is_uva_available
+short-circuit and the RuntimeError-leads-to-False half) were removed; the
+True branch and the warning-text assertions are kept as the incremental
+rows.
 """
 
 from __future__ import annotations
@@ -74,18 +80,13 @@ def probe_recorder(monkeypatch):
 
 
 class TestMappedHostBuffersAvailable:
-    """The pinned-memory mapping probe in mapped_host_buffers_available."""
+    """The pinned-memory mapping probe in mapped_host_buffers_available.
 
-    @pytest.mark.platforms("thead")
-    def test_uva_unavailable_short_circuits_without_probing(
-        self, probe_recorder
-    ):
-        monkeypatch = probe_recorder.monkeypatch
-        monkeypatch.setattr(
-            probe_recorder.platform_utils, "is_uva_available", lambda: False
-        )
-        assert probe_recorder.v2_runner_compat.mapped_host_buffers_available() is False
-        assert probe_recorder.probed == [], "probe must short-circuit on is_uva_available"
+    Only the rows ``tests/unit_tests/worker/test_worker.py:117-144``
+    (``test_mapped_host_buffers_probe_the_cuda_view_op``) does not already
+    cover remain here: the successful-view True branch and the exact warning
+    text on the RuntimeError path.
+    """
 
     @pytest.mark.platforms("thead")
     def test_mapping_works_reports_available(self, probe_recorder):

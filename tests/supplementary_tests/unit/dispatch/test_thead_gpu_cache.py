@@ -1,18 +1,15 @@
 # Copyright 2025 BAAI. All rights reserved.
 
-"""Real-PPU kernel-launch coverage for the T-Head graph-safe cache writer.
+"""Incremental PPU dimensions of the T-Head graph-safe cache writer.
 
-``reshape_and_cache_flash_thead`` validates tensor metadata on the CPU but
-every interesting behaviour after that lives on the device: the Triton kernel
-itself, the ``num_tokens == 0`` early return (which the CPU-only contract
-tests can never reach because the same-device check precedes it), and the
-NHD/HND stride handling through the real Triton compiler on the PPU.
-
-This module runs the real writer on the real PPU against the slot-scatter
-oracle lifted from ``tests/unit_tests/dispatch/test_thead_cache.py``
-(``_expected``), so the coverage lands on lines the CPU suite cannot execute
-(both the ``num_tokens == 0`` early return and the kernel launch tail
-including ``triton.cdiv`` tile computation).
+This file now only carries the dimensions
+``tests/unit_tests/dispatch/test_thead_cache.py`` does not: the ``slot_dtype``
+axis (int32 *and* int64 for both the scatter oracle and the
+``num_tokens == 0`` early return) and the three-tile ``shape (5, 3, 215)``
+masking case with a large out-of-range slot. Cases sharing the exact
+parameter matrix of the unit_tests suite (dtype × cache_dtype × layout ×
+slots_list with int64 slots) were deleted; the shared slot-scatter oracle
+``_expected`` is kept because the incremental rows below still need it.
 
 ``vllm.triton_utils`` resolves ``vllm.platforms.current_platform`` lazily at
 import; the container's ``empty`` wheel lacks ``vllm._C_stable_libtorch``
@@ -109,24 +106,27 @@ def _expected(cache, source, slots):
 
 @gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize(
-    "dtype,cache_dtype", [(torch.float16, "fp16"), (torch.bfloat16, "bf16")]
-)
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("layout", ["NHD", "HND"])
-@pytest.mark.parametrize("slots_list", [[0, -1, 5, -7, 11], [-1, 5, -1]])
-def test_device_scatter_matches_slot_oracle(
-    cache_writer, dtype, cache_dtype, layout, slots_list
+@pytest.mark.parametrize("slot_dtype", [torch.int32, torch.int64])
+def test_scatter_accepts_both_slot_dtypes(
+    cache_writer, dtype, layout, slot_dtype
 ):
-    """The real Triton launch lands every mapped token in its logical slot."""
+    """The Triton launch lands mapped tokens for int32 *and* int64 slots.
+
+    ``tests/unit_tests/dispatch/test_thead_cache.py`` pins the scatter oracle
+    with int64 slots (and int32 only on the all-padding path); this row adds
+    the missing half of the slot-dtype axis on a real launch.
+    """
     key, value = _inputs(dtype)
     key_cache = _cache(layout, dtype, -13)
     # Independent value-cache stride order keeps the two launches distinct.
     value_cache = _cache("HND" if layout == "NHD" else "NHD", dtype, -17)
-    slots = torch.tensor(slots_list, device="cuda", dtype=torch.int64)
+    slots = torch.tensor([0, -1, 5, -7, 11], device="cuda", dtype=slot_dtype)
     expected_key = _expected(key_cache, key, slots)
     expected_value = _expected(value_cache, value, slots)
 
-    _write(cache_writer, key, value, key_cache, value_cache, slots, cache_dtype)
+    _write(cache_writer, key, value, key_cache, value_cache, slots)
     torch.cuda.synchronize()
 
     torch.testing.assert_close(key_cache.cpu(), expected_key, rtol=0, atol=0)
@@ -135,23 +135,21 @@ def test_device_scatter_matches_slot_oracle(
 
 @gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("layout", ["NHD", "HND"])
 @pytest.mark.parametrize("slot_dtype", [torch.int32, torch.int64])
-def test_zero_tokens_early_return_leaves_cache_untouched(
-    cache_writer, dtype, layout, slot_dtype
-):
+def test_zero_tokens_early_return_leaves_cache_untouched(cache_writer, slot_dtype):
     """``num_tokens == 0`` must return before any kernel launch.
 
     The same-device check precedes this branch, so a CPU tensor can never
     reach it — only a real (or emulated) device run covers the early return.
-    Passing invalid NaN payloads proves the kernel never executed.
+    unit_tests covers the empty mapping with int32 slots; this row keeps the
+    slot-dtype axis (int64 included). Passing invalid NaN payloads proves
+    the kernel never executed.
     """
-    key, value = _inputs(dtype)
+    key, value = _inputs(torch.bfloat16)
     key.fill_(float("nan"))
     value.fill_(float("nan"))
-    key_cache = _cache(layout, dtype, 7)
-    value_cache = _cache(layout, dtype, 9)
+    key_cache = _cache("NHD", torch.bfloat16, 7)
+    value_cache = _cache("NHD", torch.bfloat16, 9)
     initial_key = key_cache.cpu().clone()
     initial_value = value_cache.cpu().clone()
 

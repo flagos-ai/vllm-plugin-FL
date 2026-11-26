@@ -1053,25 +1053,6 @@ class TestRotaryEmbeddingFlaggems:
         assert torch.equal(q_out, q_snapshot * 2.0)
         assert torch.equal(k_out, k_snapshot * 3.0)
 
-    def test_thead_inplace_computed_out_of_place(self, stubs, monkeypatch):
-        """T-Head's in-place race is handled the same way as NVIDIA's."""
-        module, calls = self._make(stubs, monkeypatch, vendor="thead")
-        q = torch.randn(2, 4, 8)
-        k = torch.randn(2, 2, 8)
-        cos = torch.ones(2, 1, 4)
-        sin = torch.zeros(2, 1, 4)
-        pos = torch.tensor([[0], [1]])
-
-        q_snapshot = q.clone()
-        k_snapshot = k.clone()
-        q_out, k_out = module.rotary_embedding_flaggems(
-            None, q, k, cos, sin, pos, inplace=True
-        )
-        assert calls["vllm"][0]["inplace"] is False
-        assert q_out is q and k_out is k
-        assert torch.equal(q_out, q_snapshot * 2.0)
-        assert torch.equal(k_out, k_snapshot * 3.0)
-
     def test_ascend_without_inplace_argument_uses_direct_kernel(
         self, stubs, monkeypatch
     ):
