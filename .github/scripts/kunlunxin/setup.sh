@@ -45,6 +45,18 @@ assert current_platform.vendor_name == "kunlunxin", current_platform
 print(f"Kunlunxin CI uses vLLM {version('vllm')} and {vllm_fl.__file__}")
 PYCODE
 
+# vllm_fl._C registers weak_ref_tensor, which suppresses the empty-wheel op
+# schemas whenever the extension is importable. The extension is validated
+# above; the test run uses the empty-wheel path, so drop the built .so.
+python - <<'PYCODE'
+import importlib.util
+from pathlib import Path
+
+for so in Path("vllm_fl").glob("_C*.so"):
+    so.unlink()
+assert importlib.util.find_spec("vllm_fl._C") is None, "vllm_fl._C is still importable"
+PYCODE
+
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   for name in LD_LIBRARY_PATH FLAGCX_PATH USE_FLAGGEMS VLLM_FL_PREFER; do
     if [[ -n "${!name:-}" ]]; then
