@@ -22,12 +22,11 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-_patched = False
+_PATCH_STATE = {"applied": False}
 
 
 def apply_moe_align_block_size_gcu_patch() -> None:
-    global _patched
-    if _patched:
+    if _PATCH_STATE["applied"]:
         return
     try:
         import vllm._custom_ops as custom_ops
@@ -59,7 +58,7 @@ def apply_moe_align_block_size_gcu_patch() -> None:
             )
 
         custom_ops.moe_align_block_size = moe_align_block_size_compat
-        _patched = True
+        _PATCH_STATE["applied"] = True
         logger.info(
             "Patched vLLM moe_align_block_size for the GCU 7-argument _moe_C schema"
         )

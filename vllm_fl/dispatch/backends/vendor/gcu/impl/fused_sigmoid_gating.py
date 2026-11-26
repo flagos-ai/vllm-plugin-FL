@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 GCU_MAX_GRID_X = 65535
 GCU_MAX_GRID_YZ = 255
 
-_patched = False
+_PATCH_STATE = {"applied": False}
 _IMPORTERS = [
     "vllm.third_party.flash_linear_attention.ops.fused_sigmoid_gating",
     "vllm.third_party.flash_linear_attention.ops",
@@ -255,7 +255,8 @@ def fused_sigmoid_gating_delta_rule_update_gcu(
     use_qk_l2norm_in_kernel: bool = False,
     is_kda: bool = False,
 ):
-    B, T, H, K, V = *k.shape, v.shape[-1]
+    B, T, H, K = k.shape
+    V = v.shape[-1]
     HV = v.shape[2]
     N = B if cu_seqlens is None else len(cu_seqlens) - 1
     BK = triton.next_power_of_2(K)
@@ -338,8 +339,7 @@ def fused_sigmoid_gating_delta_rule_update_gcu(
 
 def apply_fused_sigmoid_gating_gcu_patch() -> None:
     """Rebind the upstream host function (and its importers) to the GCU one."""
-    global _patched
-    if _patched:
+    if _PATCH_STATE["applied"]:
         return
     gcu = getattr(torch, "gcu", None)
     if gcu is None or not gcu.is_available():
@@ -360,7 +360,7 @@ def apply_fused_sigmoid_gating_gcu_patch() -> None:
                 patched_any = True
         if not patched_any:
             return
-        _patched = True
+        _PATCH_STATE["applied"] = True
         logger.info(
             "Patched fused_sigmoid_gating_delta_rule_update for GCU "
             "(2-D flattened grid, grid.x <= %d, grid.y <= %d)",

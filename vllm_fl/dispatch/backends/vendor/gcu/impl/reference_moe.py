@@ -27,7 +27,7 @@ import logging
 import torch
 
 logger = logging.getLogger(__name__)
-_patched = False
+_PATCH_STATE = {"applied": False}
 
 
 def moe_align_block_size_gcu(
@@ -187,8 +187,7 @@ def topk_softmax_gcu(
 
 def apply_reference_moe_gcu_patch() -> None:
     """Install the GCU variants of the reference MoE helpers."""
-    global _patched
-    if _patched:
+    if _PATCH_STATE["applied"]:
         return
     # Imported lazily: these modules pull in vLLM, which must already be usable
     # when the GCU backend initialises.
@@ -201,4 +200,4 @@ def apply_reference_moe_gcu_patch() -> None:
         "Patched reference MoE backend for GCU (int32 routing, chunked counts, "
         "topk weights without gather)"
     )
-    _patched = True
+    _PATCH_STATE["applied"] = True

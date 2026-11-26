@@ -31,6 +31,12 @@ flagos_blacklist:
   # native until the kernel uses int64 offsets; see
   # docs-1121/2026-1121-2350-27b-flaggems-embedding-int32-offset-overflow-localization.md
   - embedding
+  # flaggems_vllm's generic silu_and_mul corrupts the tail rows of a mixed
+  # text+image batch on gcu400 (image requests in mixed_concurrent_8 degrade
+  # while text-only / image-only batches pass).  Route it to the reference
+  # activation on GCU; FlagGems' enflame kernel is not used here because it is
+  # much slower on large prefill (512-token request exceeds the gate timeout).
+  - silu_and_mul
   # flaggems_vllm's generic MoE helpers are not enflame-tuned: on GCU the
   # fused-experts kernel plus the block-align/route/sum kernels are much slower
   # than the reference path (a cold-start 512-token text request takes ~900s

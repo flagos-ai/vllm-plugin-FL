@@ -264,15 +264,20 @@ except ImportError:  # vLLM >= 0.28 moved it here
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 
 
-def _input_batch_kernel_block_sizes_kwarg(kernel_block_sizes: list[int]) -> dict:
-    """Build the optional ``kernel_block_sizes`` kwarg for ``InputBatch``.
+def _is_gcu_platform() -> bool:
+    """GCU-only compatibility shims must not change other vendors' behavior."""
+    return getattr(current_platform, "vendor_name", "") in ("gcu", "enflame")
 
-    Newer vLLM builds (the vendor 0.30.0 stack used on S60 and upstream builds
-    after the per-group kernel block size change) declare ``kernel_block_sizes``
-    as a required positional parameter, while the vLLM 0.32 builds the plugin
-    was originally rebased onto make it optional. Only pass it when the
-    installed signature accepts it so this code path works on both.
+
+def _input_batch_kernel_block_sizes_kwarg(kernel_block_sizes: list[int]) -> dict:
+    """Build the optional ``kernel_block_sizes`` kwarg for ``InputBatch`` on GCU.
+
+    The vendor 0.30.0 stack used on S60 declares ``kernel_block_sizes`` as a
+    required parameter while vLLM 0.32 makes it optional.  Other vendors keep
+    the upstream call (no extra kwarg) so their runners are unaffected.
     """
+    if not _is_gcu_platform():
+        return {}
     import inspect
 
     parameters = inspect.signature(InputBatch.__init__).parameters
@@ -2753,12 +2758,13 @@ class ModelRunnerFL(
 
             # vLLM >= 0.32 moved the per-layer build calls onto AttentionGroup
             # (build_metadata / build_metadata_for_cudagraph_capture /
-            # map_to_kernel_block_table). The vendor 0.30 build on S60 still
-            # exposes only the builder-level API (build /
-            # build_for_cudagraph_capture) and no kernel-block table mapping.
+            # map_to_kernel_block_table).  The vendor 0.30 build used on S60
+            # still exposes only the builder-level API and no kernel-block
+            # table mapping; fall back there on GCU only, other vendors keep
+            # the upstream calls.
             group_has_build = hasattr(attn_group, "build_metadata")
             if for_cudagraph_capture:
-                if group_has_build:
+                if group_has_build or not _is_gcu_platform():
                     attn_metadata_i = attn_group.build_metadata_for_cudagraph_capture(
                         common_attn_metadata, ubid or 0
                     )
@@ -2770,7 +2776,8 @@ class ModelRunnerFL(
                 cache_key in cached_attn_metadata
                 and builder.supports_update_block_table
             ):
-                if hasattr(attn_group, "map_to_kernel_block_table"):
+                has_block_table = hasattr(attn_group, "map_to_kernel_block_table")
+                if has_block_table or not _is_gcu_platform():
                     block_table = attn_group.map_to_kernel_block_table(
                         common_attn_metadata.block_table_tensor, ubid or 0
                     )
@@ -2782,7 +2789,7 @@ class ModelRunnerFL(
                     common_attn_metadata.slot_mapping,
                 )
             else:
-                if group_has_build:
+                if group_has_build or not _is_gcu_platform():
                     attn_metadata_i = attn_group.build_metadata(
                         common_attn_metadata,
                         ubid or 0,
@@ -7948,20 +7955,25 @@ class ModelRunnerFL(
     ) -> dict[str, torch.Tensor]:
         from contextlib import nullcontext
 
-        # ``bind_kv_cache`` lives in vllm.v1.worker.utils before 0.32 and is
-        # re-exported from gpu_model_runner after it; importing the utils
-        # spelling works on both.
-        from vllm.v1.worker.utils import allocate_kv_cache, bind_kv_cache
+        if _is_gcu_platform():
+            # ``bind_kv_cache`` lives in vllm.v1.worker.utils before 0.32 and is
+            # re-exported from gpu_model_runner after it; importing the utils
+            # spelling works on both.  The vendor 0.30 build used on S60 also
+            # predates the per-kernel-block view of the cache.
+            from vllm.v1.worker.utils import allocate_kv_cache, bind_kv_cache
 
-        try:
-            # vLLM >= 0.32 hands bind_kv_cache a per-kernel-block view of the
-            # cache. The vendor 0.30 build used on S60 predates that and has no
-            # map_kv_caches_to_kernel_blocks / layer_kv_caches parameter.
+            try:
+                from vllm.v1.worker.gpu_model_runner import (
+                    map_kv_caches_to_kernel_blocks,
+                )
+            except ImportError:
+                map_kv_caches_to_kernel_blocks = None
+        else:
             from vllm.v1.worker.gpu_model_runner import (
+                bind_kv_cache,
                 map_kv_caches_to_kernel_blocks,
             )
-        except ImportError:
-            map_kv_caches_to_kernel_blocks = None
+            from vllm.v1.worker.utils import allocate_kv_cache
 
         with kv_cache_allocation_context or nullcontext():
             kv_caches = allocate_kv_cache(
@@ -7984,7 +7996,7 @@ class ModelRunnerFL(
         attn_groups = [g for groups in self.attn_groups for g in groups]
         if self.speculative_config and get_pp_group().is_last_rank:
             attn_groups += getattr(self.drafter, "draft_attn_groups", [])
-        if map_kv_caches_to_kernel_blocks is None:
+        if _is_gcu_platform() and map_kv_caches_to_kernel_blocks is None:
             bind_kv_cache(
                 kv_caches,
                 self.compilation_config.static_forward_context,

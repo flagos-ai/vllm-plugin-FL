@@ -110,6 +110,8 @@ def get_kv_cache_layout() -> str:
         if "HNC" in name:  # LBHNC ~ HND
             return "HND"
     except Exception:
+        # Older/newer vLLM cache configs may not expose the resolved layout;
+        # fall back to the default NHD naming used by this adapter.
         pass
     return "NHD"
 

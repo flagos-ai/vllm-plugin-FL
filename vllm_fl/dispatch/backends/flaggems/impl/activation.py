@@ -39,11 +39,7 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     ):
         return musa_silu_and_mul(x)
 
-    # FlagGems ships an enflame-specialized silu_and_mul (flat kernel) while
-    # flaggems_vllm only has the generic pointwise version, which corrupts the
-    # tail rows of mixed text+image batches on GCU.  Prefer the specialized
-    # FlagGems implementation here; it is also faster on the flat path.
-    from flag_gems import silu_and_mul as gems_silu_and_mul
+    from flaggems_vllm import silu_and_mul as gems_silu_and_mul
 
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]

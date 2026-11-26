@@ -34,7 +34,7 @@ import torch
 logger = logging.getLogger(__name__)
 
 _OP_NAME = "vllm_fl::rms_norm_gated"
-_installed = False
+_INSTALL_STATE = {"installed": False}
 
 
 def _register_op() -> None:
@@ -84,8 +84,7 @@ def _register_op() -> None:
 
 def install_rms_norm_gated_opaque() -> None:
     """Install the opaque gated-RMSNorm wrapper (idempotent, never fatal)."""
-    global _installed
-    if _installed:
+    if _INSTALL_STATE["installed"]:
         return
     # GCU400/L600 does not hit the GCU300 register-allocation failure and keeps
     # Inductor's fused gated-RMSNorm (the L600-verified path).  Only the
@@ -102,7 +101,7 @@ def install_rms_norm_gated_opaque() -> None:
             return
     try:
         _register_op()
-        _installed = True
+        _INSTALL_STATE["installed"] = True
         logger.info(
             "[FL] gated RMSNorm is now an opaque custom op "
             "(GCU300 inductor register-allocation limit)"
