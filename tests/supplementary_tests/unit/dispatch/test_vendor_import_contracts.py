@@ -30,7 +30,14 @@ def _import_vendor_module(platform: str):
 
 
 class TestVendorBackendClass:
-    """Every vendor package re-exports its backend class."""
+    """Every vendor package re-exports its backend class.
+
+    hygon is the exception by design: it ships no backend class and no
+    register_ops.py, so its public surface is the startup patch entry.
+    The hygon contract below asserts that triple explicitly — import,
+    callable entry, and the absent sibling surface — so adding or
+    removing any of those pieces is a visible change here.
+    """
 
     @pytest.mark.platforms("kunlunxin")
     def test_kunlunxin_backend_export(self):
@@ -39,10 +46,39 @@ class TestVendorBackendClass:
 
     @pytest.mark.platforms("hygon")
     def test_hygon_patch_entry_point(self):
-        # hygon's public surface is the patch entry, not a backend class
-        from vllm_fl.dispatch.backends.vendor.hygon import patch
+        # hygon's public surface is the patch entry, not a backend class:
+        # three assertions, matching the sibling vendors' contract strength.
+        import vllm_fl.dispatch.backends.vendor.hygon.patch as hygon_patch
 
-        assert hasattr(patch, "apply_hygon_patches")
+        # 1. The entry point exists and is callable (a bare hasattr cannot
+        #    tell a function from a stale module attribute).
+        assert callable(hygon_patch.apply_hygon_patches)
+        # 2. The package does not (yet) export a backend class, and the
+        #    vendor directory ships no register_ops.py — that absence is why
+        #    the vendor:hygon token in hygon.yaml matches no impl. If
+        #    either appears, this fails and forces a revisit of the yaml's
+        #    dispatch order (see test_hygon_dispatch_config.py).
+        import vllm_fl.dispatch.backends.vendor.hygon as hygon_pkg
+
+        assert not hasattr(hygon_pkg, "HygonBackend")
+        import os
+
+        assert not os.path.isfile(
+            os.path.join(
+                os.path.dirname(hygon_pkg.__file__ or ""), "register_ops.py"
+            )
+        )
+        # 3. The patch entry is the process-level entry the startup hook
+        #    routes to: same object reachable through the documented name.
+        from vllm_fl.dispatch.backends.vendor.hygon.patch import (
+            apply_hygon_patches,
+        )
+
+        assert apply_hygon_patches is hygon_patch.apply_hygon_patches
+        # lru_cache(maxsize=1) wraps it: the once-per-process semantics are
+        # part of the contract (the retry-on-failure docstring relies on
+        # the cache not caching exceptions).
+        assert hasattr(apply_hygon_patches, "cache_clear")
 
     @pytest.mark.platforms("iluvatar")
     def test_iluvatar_backend_export(self):
