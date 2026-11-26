@@ -170,10 +170,20 @@ The original four-gate green run used the measurement recipe
 Re-run with that exact recipe on 2026-11-26 re-confirmed:
 
 kunlunxin 1354 / hygon 1163 / iluvatar 1254 / thead 1176 passed — 0 failed, 0
-error. The recipe (and its environment semantics) is now stated in the PR
-description; running the same tree with `VLLM_TARGET_DEVICE=cpu` instead forces
-CpuPlatform and fails 12 tests that rely on the OOT-plugin path — the gate numbers
-are valid **under the stated recipe only**.
+error, measured at **b5229f19** (pre-refactor tree). The recipe (and its
+environment semantics) is now stated in the PR description; running the same
+tree with `VLLM_TARGET_DEVICE=cpu` instead forces CpuPlatform and fails 12 tests
+that rely on the OOT-plugin path — the gate numbers are valid **under the stated
+recipe only**.
+
+Post-refactor (22 commits, all six audit agents integrated), the same recipe
+re-run on 2026-11-26 gives:
+
+kunlunxin 1236 / hygon 1042 / iluvatar 1206 / thead 1082 passed — 0 failed,
+0 error. Passed counts drop because ~120 duplicate/placeholder tests were
+**deleted** per the audit rulings; skips grew from platform gates (107/door),
+absent accelerators, and missing vendor wheels, each with a stated reason.
+Measurement commit: the integrated head at the time of the run.
 
 ### Coverage-number corrections
 
@@ -200,3 +210,10 @@ are valid **under the stated recipe only**.
 * missing CPU-testable vendor surfaces added (kunlunxin platform defaults +
   patch orchestration; hygon dispatch-config contract; iluvatar patch-function
   bodies + worker surface; thead capability contracts + dispatch config).
+
+### Known remaining gap ownership (post-refactor)
+
+`maybe_randomize_inputs` (`vllm_fl/worker/model_runner.py:6024`, one method,
+~20 statements) lost its only coverage when the duplicate model-runner files were
+removed in this refactor; PR #799's deeper model-runner suites do not cover it
+either. Tracked for #799's model-runner family to pick up.
