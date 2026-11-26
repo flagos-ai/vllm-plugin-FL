@@ -589,3 +589,41 @@ class TestPostUpdateNumComputedTokens:
 
         # row0 routes to req 1: 2 + 3 = 5; row1 routes to req 0: 5 + 2 = 7
         assert num_computed_tokens.tolist() == [7, 5]
+
+
+# ---------------------------------------------------------------------------
+# prepare_pos_seq_lens padding branch (input_batch_compat.py:226)
+# ---------------------------------------------------------------------------
+
+
+class TestPreparePosSeqLensPadding:
+    def test_partial_batch_zeroes_unused_seq_lens_rows(self):
+        """3 active requests in 5 slots: rows 3-4 must be padded to zero.
+
+        The existing full-batch and 5-of-5-slot tests never exercise the
+        padding branch (num_reqs < max_num_reqs with leftovers carrying
+        non-zero sentinel values); this pins the ``seq_lens[num_reqs:] = 0``
+        write the Triton kernel's special last thread block performed.
+        """
+        fn = _make_prepare_pos_seq_lens_torch()
+        idx_mapping = torch.tensor([0, 1, 2], dtype=torch.int64)
+        query_start_loc = torch.tensor([0, 1, 2, 3, 3, 3], dtype=torch.int32)
+        num_computed_tokens = torch.tensor([4, 5, 6, 0, 0], dtype=torch.int64)
+        pos = torch.full((5,), -99, dtype=torch.int64)
+        # the unused rows carry non-zero sentinels: only the padding write
+        # itself can turn them into zero
+        seq_lens = torch.tensor([9, 9, 9, 7, 7], dtype=torch.int64)
+
+        fn(idx_mapping, query_start_loc, num_computed_tokens, pos, seq_lens)
+
+        # active rows: seq_lens[r] = nc + ql
+        assert seq_lens[0].item() == 4 + 1
+        assert seq_lens[1].item() == 5 + 1
+        assert seq_lens[2].item() == 6 + 1
+        # padded rows are zeroed, not left at the 7 sentinels
+        assert seq_lens[3].item() == 0
+        assert seq_lens[4].item() == 0
+        # pos rows for unused slots are untouched by both the loop and
+        # the padding write (padding only rewrites seq_lens)
+        assert pos[3].item() == -99
+        assert pos[4].item() == -99

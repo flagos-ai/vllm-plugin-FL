@@ -608,3 +608,255 @@ class TestInputBatchApplyPropagation:
             else:
                 sys.modules[name] = saved
 
+
+# ---------------------------------------------------------------------------
+# buffer_utils_compat: apply_write empty-content continue (line 50)
+# ---------------------------------------------------------------------------
+
+
+class TestBufferUtilsApplyWriteEmptyContent:
+    def test_empty_content_row_is_skipped_but_others_written(self):
+        """A staged write whose content slice is empty writes nothing.
+
+        The torch loop reads each staged write's content span from the
+        cumulative lengths; an empty span must be skipped (the kernel's
+        ``continue``) without aborting the remaining staged writes.
+        """
+        import torch
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches import (
+            buffer_utils_compat,
+        )
+
+        _make_apply_write_torch = buffer_utils_compat._make_apply_write_torch
+
+        apply_write = _make_apply_write_torch()
+        # gpu rows: 0 untouched, 1 written, 2 written
+        gpu = torch.zeros(3, 4)
+
+        class Staged:
+            pass
+
+        obj = Staged()
+        obj.gpu = gpu
+        obj.dtype = torch.float32
+        obj.device = torch.device("cpu")
+        # three staged writes; the middle one has an EMPTY content span
+        # (cu lens 1 -> 1 -> 5 -> 8: entry 1 contributes nothing)
+        obj._staged_write_indices = [0, 1, 2]
+        obj._staged_write_starts = [0, 0, 0]
+        obj._staged_write_cu_lens = [1, 1, 5, 8]
+        obj._staged_write_contents = [
+            11.0,
+            21.0, 22.0, 23.0, 24.0,
+        ]
+        cleared = []
+        obj.clear_staged_writes = lambda: cleared.append(True)
+
+        apply_write(obj)
+
+        # row 0 written from entry 0; row 1 untouched (empty content);
+        # row 2 written from entry 2
+        assert gpu[0].tolist() == [11.0, 0.0, 0.0, 0.0]
+        assert gpu[1].tolist() == [0.0, 0.0, 0.0, 0.0]
+        assert gpu[2].tolist() == [21.0, 22.0, 23.0, 24.0]
+        assert cleared == [True]
+
+
+# ---------------------------------------------------------------------------
+# mamba_hybrid_compat: all-negative idx_mapping early return (line 60)
+# ---------------------------------------------------------------------------
+
+
+class TestMambaHybridAllNegativeMapping:
+    def test_all_negative_scatter_returns_without_touching_accepted(self):
+        import torch
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches import (
+            mamba_hybrid_compat,
+        )
+
+        _scatter_num_accepted_torch = (
+            mamba_hybrid_compat._scatter_num_accepted_torch
+        )
+
+        num_accepted = torch.tensor([7, 7, 7], dtype=torch.int64)
+        idx_mapping = torch.tensor([-1, -1, -1], dtype=torch.int64)
+        num_sampled = torch.tensor([1, 2, 3], dtype=torch.int64)
+
+        _scatter_num_accepted_torch(idx_mapping, num_sampled, num_accepted)
+
+        # every row is inactive: the early return leaves num_accepted as-is
+        assert num_accepted.tolist() == [7, 7, 7]
+
+    def test_all_negative_fill_returns_without_touching_accepted(self):
+        import torch
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches import (
+            mamba_hybrid_compat,
+        )
+
+        _fill_num_accepted_torch = (
+            mamba_hybrid_compat._fill_num_accepted_torch
+        )
+
+        num_accepted = torch.tensor([9, 9], dtype=torch.int64)
+        idx_mapping = torch.tensor([-1, -1], dtype=torch.int64)
+
+        _fill_num_accepted_torch(idx_mapping, num_accepted, 5)
+
+        assert num_accepted.tolist() == [9, 9]
+
+    def test_partial_negative_mapping_still_writes_valid_rows(self):
+        # contrast: mixed mappings must still write the active rows
+        import torch
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches import (
+            mamba_hybrid_compat,
+        )
+
+        _scatter_num_accepted_torch = (
+            mamba_hybrid_compat._scatter_num_accepted_torch
+        )
+
+        num_accepted = torch.zeros(2, dtype=torch.int64)
+        idx_mapping = torch.tensor([-1, 1], dtype=torch.int64)
+        num_sampled = torch.tensor([3, 0], dtype=torch.int64)
+
+        _scatter_num_accepted_torch(idx_mapping, num_sampled, num_accepted)
+
+        # the inactive row writes nothing; the active one clamps min=1
+        assert num_accepted.tolist() == [0, 1]
+
+
+# ---------------------------------------------------------------------------
+# patch_fla_utils: ensure_fla_compat _patched short-circuit (line 88)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureFlaCompatPatchedShortCircuit:
+    def test_second_call_short_circuits_and_does_not_repatch(self):
+        """After the first call, ``_patched=True`` skips all real work.
+
+        Observable: between the first and second call, torch.xpu's
+        get_device_name is replaced with a fresh working backend and the
+        FLA utils module flags are reset; the short-circuited second call
+        must leave both exactly as they were (no re-wrap, no re-fix).
+        """
+        import torch
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches import (
+            patch_fla_utils as fla_patch_module,
+        )
+
+        saved_patched = fla_patch_module._patched
+        saved_get_device_name = torch.xpu.get_device_name
+        saved_utils = sys.modules.get(fla_patch_module._FLA_UTILS_MOD)
+        try:
+            # first call does the real work
+            fla_patch_module.ensure_fla_compat()
+            assert fla_patch_module._patched is True
+
+            # mutate the surfaces a second call would touch
+            def working_backend(idx=0):
+                return "Intel(R) Arc(TM) A770"
+
+            torch.xpu.get_device_name = working_backend
+            fake_utils = ModuleType(fla_patch_module._FLA_UTILS_MOD)
+            fake_utils.device_platform = "xpu"
+            fake_utils.is_nvidia = False
+            sys.modules[fla_patch_module._FLA_UTILS_MOD] = fake_utils
+
+            # second call: the _patched guard must skip everything
+            fla_patch_module.ensure_fla_compat()
+
+            # the working backend was NOT re-wrapped (still the exact
+            # function object we installed between the calls)
+            assert torch.xpu.get_device_name is working_backend
+            # the flag reset was NOT re-fixed
+            assert fake_utils.device_platform == "xpu"
+            assert fake_utils.is_nvidia is False
+        finally:
+            fla_patch_module._patched = saved_patched
+            torch.xpu.get_device_name = saved_get_device_name
+            if saved_utils is None:
+                sys.modules.pop(fla_patch_module._FLA_UTILS_MOD, None)
+            else:
+                sys.modules[fla_patch_module._FLA_UTILS_MOD] = saved_utils
+
+
+# ---------------------------------------------------------------------------
+# mamba_align_compat: UniformTypeKVCacheSpecs unpacking (line 125)
+# ---------------------------------------------------------------------------
+
+
+class TestMambaAlignUniformSpecsUnpacking:
+    def test_uniform_specs_unpacks_to_the_layer_spec(self):
+        """A UniformTypeKVCacheSpecs group resolves the per-layer spec.
+
+        initialize_from_forward_context reads ``spec.mamba_type`` after
+        unwrapping ``spec.kv_cache_specs[layer_name]``; a group carrying
+        the uniform wrapper must produce the same conv/temporal grouping
+        as a bare spec.
+        """
+        from vllm.v1.kv_cache_interface import UniformTypeKVCacheSpecs
+
+        with _mamba_align_applied() as cls:
+            obj = cls.__new__(cls)
+            obj.is_initialized = False
+
+            conv_state = torch.zeros(2, 4, 6)
+            temporal_state = torch.zeros(2, 8)
+            inner = SimpleNamespace(mamba_type="mamba", dcp_sharded=False)
+            uniform = UniformTypeKVCacheSpecs(
+                block_size=16, kv_cache_specs={"mamba.layer": inner}
+            )
+            kv_cache_config = SimpleNamespace(
+                kv_cache_groups=[
+                    SimpleNamespace(
+                        layer_names=["mamba.layer"],
+                        kv_cache_spec=uniform,
+                    )
+                ]
+            )
+            forward_context = {
+                "mamba.layer": SimpleNamespace(
+                    kv_cache=[conv_state, temporal_state]
+                ),
+            }
+
+            from vllm.model_executor.layers.mamba.mamba_utils import (
+                get_conv_copy_spec,
+                get_temporal_copy_spec,
+            )
+
+            super_called = []
+            self_ref = obj
+
+            def fake_super_init(*args, **kwargs):
+                super_called.append(args)
+                self_ref.mamba_group_ids = [0]
+                self_ref.is_initialized = True
+
+            base = cls.__mro__[1]
+            real_init = base.initialize_from_forward_context
+            base.initialize_from_forward_context = fake_super_init
+            try:
+                obj.initialize_from_forward_context(
+                    kv_cache_config,
+                    forward_context,
+                    {"mamba": (get_conv_copy_spec, get_temporal_copy_spec)},
+                    [torch.tensor([[0, 1, 2]])],
+                )
+            finally:
+                base.initialize_from_forward_context = real_init
+
+            # the uniform wrapper was unpacked to the layer's mamba spec:
+            # the copy-spec funcs resolved and the states were grouped
+            assert len(super_called) == 1
+            groups = obj._kunlunxin_states
+            assert len(groups) == 1
+            torch.testing.assert_close(groups[0].conv_states[0], conv_state)
+            torch.testing.assert_close(
+                groups[0].temporal_states[0], temporal_state
+            )

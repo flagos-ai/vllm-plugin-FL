@@ -456,3 +456,123 @@ class TestFlaUtilsCompat:
             assert torch.xpu.get_device_name(0) == ""
         finally:
             PlatformFL.vendor_name = saved_vendor
+
+
+# ---------------------------------------------------------------------------
+# kv_block_zero_compat: _zero_block_ids_pytorch span semantics (56-76)
+# ---------------------------------------------------------------------------
+
+
+class TestKvBlockZeroPytorch:
+    """The span zeroer itself, driven directly with real cache tensors.
+
+    ``tests/unit_tests/attention/test_kunlunxin_cache.py`` drives the
+    installed ``KVBlockZeroer`` through the patched constructor; these
+    tests call ``_zero_block_ids_pytorch`` directly with hand-built
+    segments so the run-length zeroing (start/end bookkeeping, dedup,
+    out-of-range skipping) is asserted independently of collection.
+    """
+
+    @staticmethod
+    def _zero(segments, block_ids):
+        """Build a zeroer self and invoke the patch function directly."""
+        from types import SimpleNamespace
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches import (
+            kv_block_zero_compat,
+        )
+
+        self = SimpleNamespace(_kunlunxin_kv_segments=segments)
+        kv_block_zero_compat._zero_block_ids_pytorch(self, block_ids)
+
+    def test_contiguous_run_zeroes_one_span(self):
+        import torch
+
+        # 4 manager blocks, cache holds 8 (ratio 2): ids [1, 2] form the
+        # contiguous run rows 2..6
+        kv = torch.ones(8, 3, 4)
+        self._zero([(kv, 2)], [1, 2])
+        # blocks 1-2 span cache rows 2..6 — zeroed in one narrow
+        assert torch.count_nonzero(kv[:2]) == kv[:2].numel()
+        assert torch.count_nonzero(kv[2:6]) == 0
+        assert torch.count_nonzero(kv[6:]) == kv[6:].numel()
+
+    def test_duplicate_and_unsorted_ids_dedupe_into_one_span(self):
+        import torch
+
+        kv = torch.ones(8, 3, 4)
+        self._zero([(kv, 2)], [2, 2, 1, 2, 1])
+        # ids {1, 2} only: rows 2..6 zero, nothing else touched
+        assert torch.count_nonzero(kv[:2]) == kv[:2].numel()
+        assert torch.count_nonzero(kv[2:6]) == 0
+        assert torch.count_nonzero(kv[6:]) == kv[6:].numel()
+
+    def test_gap_between_ids_zeroes_two_disjoint_spans(self):
+        import torch
+
+        kv = torch.ones(12, 3, 4)
+        self._zero([(kv, 2)], [0, 3])
+        # id 0 -> rows 0..2; id 3 -> rows 6..8 (the gap rows 2..6 stay)
+        assert torch.count_nonzero(kv[0:2]) == 0
+        assert torch.count_nonzero(kv[2:6]) == kv[2:6].numel()
+        assert torch.count_nonzero(kv[6:8]) == 0
+        assert torch.count_nonzero(kv[8:]) == kv[8:].numel()
+
+    def test_out_of_range_ids_are_skipped_not_clamped(self):
+        import torch
+
+        kv = torch.ones(8, 3, 4)
+        # id 7 would need rows 14..16 past the 8-row tensor; id 4 needs
+        # rows 8..10 — both must be skipped, id 1 zeroes rows 2..4
+        self._zero([(kv, 2)], [1, 4, 7])
+        assert torch.count_nonzero(kv[:2]) == kv[:2].numel()
+        assert torch.count_nonzero(kv[2:4]) == 0
+        assert torch.count_nonzero(kv[4:]) == kv[4:].numel()
+
+    def test_negative_ids_are_skipped(self):
+        import torch
+
+        kv = torch.ones(4, 3, 4)
+        self._zero([(kv, 1)], [-1, 0])
+        # only block 0 (rows 0..1) is zeroed; -1 is skipped, not wrapped
+        assert torch.count_nonzero(kv[0:1]) == 0
+        assert torch.count_nonzero(kv[1:]) == kv[1:].numel()
+
+    def test_empty_ids_and_empty_segments_return_early(self):
+        import torch
+
+        kv = torch.ones(4, 3, 4)
+        empty_kv = torch.ones(4, 3, 4)
+        # no ids: nothing happens
+        self._zero([(kv, 1)], [])
+        assert torch.count_nonzero(kv) == kv.numel()
+        # no segments: nothing happens even with ids
+        self._zero([], [0, 1])
+        assert torch.count_nonzero(empty_kv) == empty_kv.numel()
+
+    def test_multiple_segments_each_zero_their_own_spans(self):
+        import torch
+
+        # two layers with different block ratios over distinct tensors
+        kv_a = torch.ones(6, 2)
+        kv_b = torch.ones(9, 2)
+        self._zero([(kv_a, 3), (kv_b, 1)], [1])
+        # layer A: ratio 3 -> rows 3..6 zeroed
+        assert torch.count_nonzero(kv_a[:3]) == kv_a[:3].numel()
+        assert torch.count_nonzero(kv_a[3:]) == 0
+        # layer B: ratio 1 -> row 1 only
+        assert torch.count_nonzero(kv_b[0:1]) == kv_b[0:1].numel()
+        assert torch.count_nonzero(kv_b[1:2]) == 0
+        assert torch.count_nonzero(kv_b[2:]) == kv_b[2:].numel()
+
+    def test_aliasing_views_zero_the_shared_storage_once(self):
+        import torch
+
+        # packed overlay: a narrow view and a wide view on one storage
+        storage = torch.ones(8, 4, 32)
+        narrow = storage[:, :2]
+        wide = storage
+        # segments list (kv view, ratio); the zeroer writes through views
+        self._zero([(narrow, 2), (wide, 2)], [2])
+        assert torch.count_nonzero(storage[4:6]) == 0
+        assert torch.count_nonzero(storage[:4]) == storage[:4].numel()

@@ -842,3 +842,200 @@ class TestForwardProfilingPath:
             else:
                 sys.modules["torch_xmlir"] = saved_xml
 
+
+# ---------------------------------------------------------------------------
+# reshape_and_cache_flash rejection paths (attention.py:678-685)
+# ---------------------------------------------------------------------------
+
+
+class TestReshapeAndCacheFlashRejections:
+    """The quantization guards raise before any kernel work."""
+
+    def _key_cache(self, dtype):
+        # (num_blocks, block_size, num_heads, head_size) in BLHD layout
+        return torch.zeros(4, 16, 2, 64, dtype=dtype)
+
+    def test_int8_with_force_sdnn_is_rejected(self):
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            KunlunxinPagedAttention,
+        )
+
+        key = torch.zeros(3, 2, 64, dtype=torch.float16)
+        with pytest.raises(
+            ValueError, match="sdnn do not support quant"
+        ):
+            KunlunxinPagedAttention.reshape_and_cache_flash(
+                key,
+                torch.zeros(3, 2, 64, dtype=torch.float16),
+                self._key_cache(torch.int8),
+                self._key_cache(torch.float16),
+                torch.arange(3),
+                force_sdnn=True,
+            )
+
+    def test_int8_with_none_value_is_rejected(self):
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            KunlunxinPagedAttention,
+        )
+
+        key = torch.zeros(3, 2, 64, dtype=torch.float16)
+        with pytest.raises(
+            ValueError, match="k only do not support quant"
+        ):
+            KunlunxinPagedAttention.reshape_and_cache_flash(
+                key,
+                None,  # K-only mode
+                self._key_cache(torch.int8),
+                None,
+                torch.arange(3),
+            )
+
+    def test_int8_value_cache_is_rejected(self):
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            KunlunxinPagedAttention,
+        )
+
+        key = torch.zeros(3, 2, 64, dtype=torch.float16)
+        with pytest.raises(
+            ValueError, match="k only do not support quant"
+        ):
+            KunlunxinPagedAttention.reshape_and_cache_flash(
+                key,
+                torch.zeros(3, 2, 64, dtype=torch.float16),
+                self._key_cache(torch.int8),
+                None,  # missing value cache
+                torch.arange(3),
+            )
+
+    def test_float16_k_only_passes_the_guard_to_the_kernel(self):
+        # an unquantized K-only write reaches xtorch_ops — stubbed to
+        # record; the guard must not reject it
+        calls = []
+        xmlir = ModuleType("torch_xmlir")
+        impl_name = (
+            "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention"
+        )
+        saved_xml = sys.modules.get("torch_xmlir")
+        saved_impl = sys.modules.get(impl_name)
+        sys.modules["torch_xmlir"] = xmlir
+        sys.modules.pop(impl_name, None)
+        try:
+            with _xtorch_ops_stub(
+                reshape_and_cache_flash=lambda *a, **k: calls.append(k) or 7,
+            ):
+                att_mod = importlib.import_module(impl_name)
+                key = torch.zeros(3, 2, 64, dtype=torch.float16)
+                result = att_mod.KunlunxinPagedAttention.reshape_and_cache_flash(
+                    key,
+                    None,
+                    self._key_cache(torch.float16),
+                    None,
+                    torch.arange(3),
+                    BLHD_LAYOUT=False,
+                )
+                assert result == 7
+                assert len(calls) == 1
+        finally:
+            if saved_impl is None:
+                sys.modules.pop(impl_name, None)
+            else:
+                sys.modules[impl_name] = saved_impl
+            if saved_xml is None:
+                sys.modules.pop("torch_xmlir", None)
+            else:
+                sys.modules["torch_xmlir"] = saved_xml
+
+
+# ---------------------------------------------------------------------------
+# reorder_batch (attention.py:383-415)
+# ---------------------------------------------------------------------------
+
+
+class TestReorderBatch:
+    """Decode/prefill reordering driven with SimpleNamespace batches."""
+
+    def _builder(self):
+        return _make_builder()
+
+    @staticmethod
+    def _input_batch(req_ids, swaps=None):
+        from types import SimpleNamespace
+
+        recorded = swaps if swaps is not None else []
+
+        class SwapRecordingBatch(SimpleNamespace):
+            def swap_states(self, a, b):
+                recorded.append((a, b))
+
+        return SwapRecordingBatch(req_ids=list(req_ids)), recorded
+
+    @staticmethod
+    def _scheduler_output(tokens_per_req):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            num_scheduled_tokens=dict(tokens_per_req)
+        )
+
+    def test_decodes_are_counted_and_threshold_not_crossed(self):
+        builder = self._builder()
+        batch, swaps = self._input_batch(["r0", "r1", "r2"])
+        scheduler = self._scheduler_output({"r0": 1, "r1": 1, "r2": 1})
+
+        modified = builder.reorder_batch(batch, scheduler)
+
+        # 3 single-token requests, no prefills: nothing to swap
+        assert modified is False
+        assert swaps == []
+        assert builder._num_decodes == 3
+        assert builder._num_prefills == 0
+        assert builder._num_decode_tokens == 3
+        assert builder._num_prefill_tokens == 0
+
+    def test_decode_behind_prefills_swaps_states(self):
+        # req order [prefill(5 tokens), decode(1), prefill(7)]: the lone
+        # decode at index 1 sits at num_decodes (1), so the loop swaps it
+        # ahead of the first prefill
+        builder = self._builder()
+        batch, swaps = self._input_batch(["p0", "d0", "p1"])
+        scheduler = self._scheduler_output({"p0": 5, "d0": 1, "p1": 7})
+
+        modified = builder.reorder_batch(batch, scheduler)
+
+        assert modified is True
+        assert swaps == [(0, 1)]
+        assert builder._num_decodes == 1
+        assert builder._num_prefills == 2
+        assert builder._num_decode_tokens == 1
+        assert builder._num_prefill_tokens == 12
+
+    def test_prefill_before_decode_swaps_states(self):
+        # req order [prefill(4 tokens), decode(1), decode(1)]: the
+        # trailing decodes must move ahead of the prefill — swap_states
+        # pairs (prefill[0], decode[num_decodes - 1]) etc.
+        builder = self._builder()
+        batch, swaps = self._input_batch(["p0", "d0", "d1"])
+        scheduler = self._scheduler_output({"p0": 4, "d0": 1, "d1": 1})
+
+        modified = builder.reorder_batch(batch, scheduler)
+
+        assert modified is True
+        # first swap: prefills[0]=0 with decodes[2-1]=2; decodes[2] >= 2 so
+        # the second iteration pairs prefills[1] (none) — loop ends
+        assert swaps == [(0, 2)]
+        assert builder._num_decodes == 2
+        assert builder._num_prefills == 1
+
+    def test_swap_loop_stops_when_decode_index_is_small(self):
+        # [decode, decode, prefill(4)]: the last decode (index 1) is not
+        # >= num_decodes (2), so no swap runs despite prefills existing
+        builder = self._builder()
+        batch, swaps = self._input_batch(["d0", "d1", "p0"])
+        scheduler = self._scheduler_output({"d0": 1, "d1": 1, "p0": 4})
+
+        modified = builder.reorder_batch(batch, scheduler)
+
+        assert modified is False
+        assert swaps == []
+        assert builder._num_decodes == 2
+        assert builder._num_prefills == 1
