@@ -1,20 +1,29 @@
 # Copyright 2025 BAAI. All rights reserved.
 
-"""Real-PPU coverage for the FlagGems TRITON_ATTN dispatch path.
+"""Coverage for the FlagGems TRITON_ATTN dispatch path on the thead platform.
 
-On the thead platform ``FlagGemsBackend.attention_backend`` returns the
-upstream ``TRITON_ATTN`` registry entry by default, and only the
-``VLLM_FL_USE_FLAGGEMS_ATTN=1`` opt-in re-routes to the FlagGems
-``AttentionFLBackend`` (which needs the ``flaggems_vllm`` package — absent
-in this container, so that branch is asserted structurally). The remaining
-real-device surface is the small-shape end-to-end run of the Triton
-attention kernel on the PPU against the SDPA oracle, which the flaggems
-dispatch selection feeds in production.
+Two layers live here:
+
+1. **Backend routing contract (CPU, no accelerator gate).**
+   ``FlagGemsBackend.attention_backend`` routes on the thead platform: the
+   default resolves to the upstream ``TRITON_ATTN`` registry entry and only
+   the ``VLLM_FL_USE_FLAGGEMS_ATTN=1`` opt-in re-routes to the FlagGems
+   ``AttentionFLBackend``. That routing is pure string/env logic, so the
+   routing tests monkeypatch the CUDA availability probe (a detection input,
+   not the logic under test — the same boundary ``test_thead_backend_class``
+   uses for ``TheadBackend.is_available``) and run on any host. This is the
+   audit's fixture-gate fix: these tests were previously skipped on CPU
+   collection hosts, contributing zero coverage of flaggems.py:153-187.
+
+2. **Real-PPU end-to-end row.**
+   The small-shape end-to-end run of the Triton attention kernel against the
+   SDPA oracle still requires the PPU and keeps the module-scoped inert
+   platform fixture.
 
 The ``empty`` vLLM wheel cannot resolve ``vllm.platforms.current_platform``
-lazily (missing ``vllm._C_stable_libtorch``), so the module-level fixtures
-pre-publish an inert thead platform — the same approach the CPU contract
-suite uses — before importing the backend selection code.
+lazily (missing ``vllm._C_stable_libtorch``), so the GPU fixture pre-publishes
+an inert thead platform — the same approach the CPU contract suite uses —
+before importing the backend selection code.
 """
 
 from __future__ import annotations
@@ -28,6 +37,104 @@ import torch
 import torch.nn.functional as F
 
 pytestmark = [pytest.mark.supplementary, pytest.mark.platforms("thead")]
+
+
+def _import_flaggems_backend():
+    """Import FlagGemsBackend; publish an inert platform if resolution raises.
+
+    The routing logic under test never touches ``current_platform`` itself,
+    but the import chain through ``vllm_fl.dispatch.backends.base`` may on
+    empty wheels. Where resolution works naturally this is a no-op.
+    """
+    try:
+        module = importlib.import_module(
+            "vllm_fl.dispatch.backends.flaggems.flaggems"
+        )
+    except Exception:
+        import vllm.platforms as platforms_mod
+
+        if getattr(platforms_mod, "_current_platform", None) is None:
+            try:
+                from vllm.platforms.interface import UnspecifiedPlatform
+            except Exception:  # pragma: no cover - very old vLLM layout
+                UnspecifiedPlatform = object
+
+            class _InertPlatform(UnspecifiedPlatform):
+                device_type = "cuda"
+                vendor_name = "thead"
+                dist_backend = "nccl"
+
+            inert = _InertPlatform()
+            platforms_mod.__dict__["current_platform"] = inert
+            platforms_mod._current_platform = inert
+        module = importlib.import_module(
+            "vllm_fl.dispatch.backends.flaggems.flaggems"
+        )
+    return module.FlagGemsBackend
+
+
+@pytest.fixture()
+def flaggems_backend_cpu(monkeypatch):
+    """FlagGemsBackend with the CUDA detection probe forced available.
+
+    ``attention_backend`` hard-checks ``torch.cuda.is_available()`` before
+    routing (flaggems.py:167-171) because the selected TritonAttentionBackend
+    needs a CUDA device to *run*. The routing *decision* — default
+    TRITON_ATTN, opt-in AttentionFLBackend, disabled variants, MLA refusal —
+    is pure string logic, so the CPU contract stubs only the availability
+    probe. On the real PPU (a CUDA-compatible device) the probe is naturally
+    True and the same branches execute unpatched.
+    """
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    return _import_flaggems_backend()
+
+
+class TestAttentionBackendRouting:
+    """The thead routing of ``attention_backend`` — CPU, no accelerator gate.
+
+    Previously these sat under the module-scoped ``_inert_platform`` fixture,
+    whose CUDA skip blocked them on every CPU collection host; they now test
+    the same production rows (flaggems.py:153-187) anywhere.
+    """
+
+    def test_default_returns_upstream_triton_attn(
+        self, flaggems_backend_cpu, monkeypatch
+    ):
+        from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+        monkeypatch.delenv("VLLM_FL_USE_FLAGGEMS_ATTN", raising=False)
+        expected = AttentionBackendEnum.TRITON_ATTN.get_path()
+        assert expected.startswith("vllm."), "registry entry must be upstream vLLM"
+        assert flaggems_backend_cpu().attention_backend() == expected
+
+    def test_opt_in_returns_flaggems_attentionfl(
+        self, flaggems_backend_cpu, monkeypatch
+    ):
+        monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_ATTN", "1")
+        result = flaggems_backend_cpu().attention_backend()
+        assert result == (
+            "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+        )
+
+    def test_opt_in_disabled_variants_do_not_count(
+        self, flaggems_backend_cpu, monkeypatch
+    ):
+        from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+        for raw in ("0", "false", "no", "off", ""):
+            monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_ATTN", raw)
+            assert flaggems_backend_cpu().attention_backend() == (
+                AttentionBackendEnum.TRITON_ATTN.get_path()
+            ), f"VLLM_FL_USE_FLAGGEMS_ATTN={raw!r} must not opt in"
+
+    def test_mla_raises_not_implemented(self, flaggems_backend_cpu):
+        with pytest.raises(NotImplementedError, match="mla"):
+            flaggems_backend_cpu().attention_backend(use_mla=True)
+
+    def test_sparse_without_mla_raises_value_error(self, flaggems_backend_cpu):
+        """use_sparse alone is rejected before any routing (flaggems.py:176)."""
+        with pytest.raises(ValueError, match="use_sparse"):
+            flaggems_backend_cpu().attention_backend(use_sparse=True)
 
 
 @pytest.fixture(scope="module")
@@ -59,52 +166,9 @@ def _inert_platform():
 
 
 @pytest.fixture(scope="module")
-def flaggems_backend(_inert_platform):
-    """The FlagGems dispatch backend class (import needs the platform)."""
-    module = importlib.import_module(
-        "vllm_fl.dispatch.backends.flaggems.flaggems"
-    )
-    return module.FlagGemsBackend
-
-
-@pytest.fixture(scope="module")
 def triton_attn_backend(_inert_platform):
     """The upstream TritonAttentionBackend that the default path selects."""
     return importlib.import_module("vllm.v1.attention.backends.triton_attn")
-
-
-class TestAttentionBackendSelection:
-    """The thead default resolves to TRITON_ATTN; the opt-in is structural."""
-
-    def test_default_returns_upstream_triton_attn(self, flaggems_backend, monkeypatch):
-        from vllm.v1.attention.backends.registry import AttentionBackendEnum
-
-        monkeypatch.delenv("VLLM_FL_USE_FLAGGEMS_ATTN", raising=False)
-        expected = AttentionBackendEnum.TRITON_ATTN.get_path()
-        assert expected.startswith("vllm."), "registry entry must be upstream vLLM"
-        assert flaggems_backend().attention_backend() == expected
-
-    def test_opt_in_returns_flaggems_attentionfl(self, flaggems_backend, monkeypatch):
-        monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_ATTN", "1")
-        result = flaggems_backend().attention_backend()
-        assert result == (
-            "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
-        )
-
-    def test_opt_in_disabled_variants_do_not_count(
-        self, flaggems_backend, monkeypatch
-    ):
-        from vllm.v1.attention.backends.registry import AttentionBackendEnum
-
-        for raw in ("0", "false", "no", "off", ""):
-            monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_ATTN", raw)
-            assert flaggems_backend().attention_backend() == (
-                AttentionBackendEnum.TRITON_ATTN.get_path()
-            ), f"VLLM_FL_USE_FLAGGEMS_ATTN={raw!r} must not opt in"
-
-    def test_mla_raises_not_implemented(self, flaggems_backend):
-        with pytest.raises(NotImplementedError, match="mla"):
-            flaggems_backend().attention_backend(use_mla=True)
 
 
 def _paged_case():
