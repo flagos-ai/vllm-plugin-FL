@@ -1,6 +1,6 @@
 #!/bin/bash
-# Copyright (c) 2025 BAAI. All rights reserved.
-# Install this checkout without changing the image's native Ascend vLLM/FL runtime.
+# Copyright (c) 2026 BAAI. All rights reserved.
+# Setup script for Ascend CI environment (installs only the checked-out plugin).
 set -euo pipefail
 
 git config --global --add safe.directory "$(pwd)"

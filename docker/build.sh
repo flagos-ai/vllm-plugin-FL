@@ -108,7 +108,7 @@ Build the vllm-plugin-FL Docker image.
 OPTIONS:
     --platform PLATFORM    Platform to build: cuda, ascend, hygon, thead, metax, musa, enflame, kunlunxin, amd (default: ${PLATFORM})
     --target TARGET        Build target: dev, test, ci, release (default: ${TARGET})
-    --image-name NAME      Image repository (default: ${IMAGE_NAME}; Ascend: harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend)
+    --image-name NAME      Image repository (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
     --index-url URL        PyPI index URL (for custom mirrors)
     --extra-index-url URL  Extra PyPI index URL
@@ -307,7 +307,6 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
-    DOCKERFILE="docker/ascend/Dockerfile"
     # New recipe stages: base -> dev / test; map the legacy ci target.
     if [[ "${TARGET}" == "ci" ]]; then
         TARGET="dev"
