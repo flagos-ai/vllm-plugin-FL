@@ -562,6 +562,12 @@ class ModelRunnerFL(
 
         # Async scheduling
         self.use_async_scheduling = self.scheduler_config.async_scheduling
+        # The async output already owns a host copy. Retain its row mapping across
+        # a scheduling gap so a later decode cannot consume the CPU placeholder.
+        self._last_single_token_copy = None
+        self._deferred_samples: dict[str, tuple[int, int, torch.Tensor, torch.Event]] = {}
+        self._pyramid_req_meta: dict[str, tuple[int, tuple[int, int, int]]] = {}
+        self._pyramid_meta_ver: int = 0
 
         # Sampler
         self.sampler = Sampler(
@@ -1184,6 +1190,25 @@ class ModelRunnerFL(
             self.async_output_copy_stream = stream
         return stream
 
+    @staticmethod
+    def _restore_deferred_sample(
+        req_state: CachedRequestState,
+        parked: tuple[int, int, torch.Tensor, torch.Event],
+        scheduler_ids: list[int] | None,
+        num_output_tokens: int,
+    ) -> None:
+        offset, row, host_tokens, ready = parked
+        outputs = req_state.output_token_ids
+        if scheduler_ids is not None:
+            # A scheduler that's a step ahead may only know a prefix of the
+            # outputs. Never take the tail of a list that also includes the prompt.
+            start = req_state.num_prompt_tokens
+            confirmed = scheduler_ids[start : start + num_output_tokens]
+            outputs[:len(confirmed)] = confirmed
+        if offset < min(num_output_tokens, len(outputs)) and outputs[offset] == -1:
+            ready.synchronize()
+            outputs[offset] = int(host_tokens[row, 0])
+
     def _update_states(self, scheduler_output: "SchedulerOutput") -> Callable | None:
         """Update the cached states and the persistent batch with the scheduler
         output.
@@ -1196,6 +1221,9 @@ class ModelRunnerFL(
         """
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
+            self._deferred_samples.pop(req_id, None)
+            if self._pyramid_req_meta.pop(req_id, None) is not None:
+                self._pyramid_meta_ver += 1
             self.requests.pop(req_id, None)
             self.num_prompt_logprobs.pop(req_id, None)
         self.late_interaction_runner.on_requests_finished(
@@ -1238,6 +1266,16 @@ class ModelRunnerFL(
         # consecutive batches contain mostly the same requests. If batches
         # have low request overlap (e.g., alternating between two distinct
         # sets of requests), this optimization becomes very inefficient.
+        if unscheduled_req_ids and self._last_single_token_copy is not None:
+            prev_rows, host_tokens, ready = self._last_single_token_copy
+            for req_id in unscheduled_req_ids:
+                row = prev_rows.get(req_id)
+                if row is not None and req_id in self.requests:
+                    outputs = self.requests[req_id].output_token_ids
+                    if outputs and outputs[-1] == -1:
+                        self._deferred_samples[req_id] = (
+                            len(outputs) - 1, row, host_tokens, ready
+                        )
         for req_id in unscheduled_req_ids:
             self.input_batch.remove_request(req_id)
 
@@ -1254,6 +1292,9 @@ class ModelRunnerFL(
         # Add new requests to the cached states.
         for new_req_data in scheduler_output.scheduled_new_reqs:
             req_id = new_req_data.req_id
+            self._deferred_samples.pop(req_id, None)
+            if self._pyramid_req_meta.pop(req_id, None) is not None:
+                self._pyramid_meta_ver += 1
             if req_id in self.requests:
                 # For streaming case only.
                 req_state = self._update_streaming_request(req_id, new_req_data)
@@ -1445,7 +1486,12 @@ class ModelRunnerFL(
                 # The request was either preempted and resumed later, or was not
                 # scheduled in the previous step and needs to be added again.
 
-                if self.use_async_scheduling and num_output_tokens > 0:
+                parked = self._deferred_samples.pop(req_id, None)
+                if parked is not None:
+                    self._restore_deferred_sample(
+                        req_state, parked, req_data.all_token_ids.get(req_id), num_output_tokens
+                    )
+                elif self.use_async_scheduling and num_output_tokens > 0 and req_id in req_data.all_token_ids:
                     # We must recover the output token ids for resumed requests in the
                     # async scheduling case, so that correct input_ids are obtained.
                     resumed_token_ids = req_data.all_token_ids[req_id]
@@ -1507,6 +1553,7 @@ class ModelRunnerFL(
         self._may_reorder_batch(scheduler_output)
         # Refresh batch metadata with any pending updates.
         self.input_batch.refresh_metadata()
+        self._int4_kv_rows(scheduler_output)
 
         # Incrementally update ngram_gpu tensors after batch is stable
         if is_ngram_gpu:
@@ -1553,6 +1600,89 @@ class ModelRunnerFL(
             return correct_spec_decode_token_counts
         else:
             return None
+
+    def _int4_kv_rows(self, scheduler_output: "SchedulerOutput") -> None:
+        if current_platform.vendor_name == "iluvatar":
+            self._int4_kv_rows_iluvatar(scheduler_output)
+        elif current_platform.vendor_name == "metax":
+            self._int4_kv_rows_metax(scheduler_output)
+
+    def _int4_kv_rows_metax(self, scheduler_output: "SchedulerOutput") -> None:
+        """Per-request slot allocator for C500 sparse decode and pyramid metadata."""
+        if not hasattr(self, "_pyramid_req_meta"):
+            self._pyramid_req_meta = {}
+        for rid in scheduler_output.finished_req_ids:
+            self._pyramid_req_meta.pop(rid, None)
+        for nr in scheduler_output.scheduled_new_reqs:
+            self._pyramid_req_meta.pop(nr.req_id, None)
+
+        st = getattr(self, "_sd_slot_state", None)
+        if st is None:
+            if self.cache_config.cache_dtype != "int8_per_token_head" or current_platform.vendor_name != "metax":
+                self._sd_slot_state = st = {"on": False}
+            else:
+                from vllm_fl.dispatch.backends.vendor.metax.impl.attention import sparse_decode as SD
+                n = max(int(self.scheduler_config.max_num_seqs), 512)
+                sd = SD.get_state(self.device)
+                self._sd_slot_state = st = {"on": True, "sd": sd, "slot": {}, "free": list(range(n - 1, -1, -1))}
+        if not st["on"]:
+            return
+        slot, free = st["slot"], st["free"]
+        reset_slots = []
+        for rid in scheduler_output.finished_req_ids:
+            s = slot.pop(rid, None)
+            if s is not None and s >= 0:
+                free.append(s)
+        for nr in scheduler_output.scheduled_new_reqs:
+            if nr.req_id not in slot:
+                s = free.pop() if free else -1
+                slot[nr.req_id] = s
+                if s >= 0:
+                    reset_slots.append(s)
+        cr = scheduler_output.scheduled_cached_reqs
+        for rid in cr.req_ids:
+            if rid not in slot:
+                s = free.pop() if free else -1
+                slot[rid] = s
+                if s >= 0:
+                    reset_slots.append(s)
+        ids = self.input_batch.req_ids[: self.input_batch.num_reqs]
+        st["sd"].set_rows([slot.get(r, -1) for r in ids], reset_slots)
+
+    def _int4_kv_rows_iluvatar(self, scheduler_output: "SchedulerOutput") -> None:
+        """Per-request hot-window slot allocator for BI-V150 K4V2 KV cache."""
+        st = self.__dict__.get("_i4_state")
+        if st is None:
+            from vllm_fl import kv4_probe
+            if self.cache_config.cache_dtype != "int8_per_token_head" or not kv4_probe.int4_active():
+                self._i4_state = st = {"on": False}
+            else:
+                from vllm_fl.dispatch.backends.vendor.iluvatar import int4_kv
+                self._i4_state = st = {"on": True, "mod": int4_kv, "slot": {}, "free": list(range(int4_kv.SLOTS - 1, -1, -1))}
+        if not st["on"]:
+            return
+        slot, free, reset = st["slot"], st["free"], []
+        for rid in scheduler_output.finished_req_ids:
+            s = slot.pop(rid, None)
+            if s is not None and s >= 0:
+                free.append(s)
+        new_ids = [nr.req_id for nr in scheduler_output.scheduled_new_reqs]
+        cr = scheduler_output.scheduled_cached_reqs
+        new_ids += [rid for rid in cr.req_ids if rid not in slot]
+        for rid in new_ids:
+            if rid not in slot:
+                s = free.pop() if free else -1
+                slot[rid] = s
+                if s >= 0:
+                    reset.append(s)
+        ids = self.input_batch.req_ids[: self.input_batch.num_reqs]
+        slots_tuple = tuple(slot.get(r, -1) for r in ids)
+        if reset or slots_tuple != st.get("last_slots"):
+            st["last_slots"] = slots_tuple
+            st["mod"].set_rows(slots_tuple, reset)
+            if not st.get("e470_set_rows_seen"):
+                st["e470_set_rows_seen"] = True
+                logger.warning("E470 cached pinned int4 set_rows active")
 
     def _update_states_after_model_execute(
         self, output_token_ids: torch.Tensor, scheduler_output: "SchedulerOutput"
@@ -1968,7 +2098,11 @@ class ModelRunnerFL(
 
         # OPTIMIZATION: Start copying the block table first.
         # This way, we can overlap the copy with the following CPU operations.
-        self.input_batch.block_table.commit_block_table(num_reqs)
+        if current_platform.vendor_name == "iluvatar":
+            from vllm_fl.patches.block_table_mirror import commit_runner
+            commit_runner(self, scheduler_output, num_reqs)
+        else:
+            self.input_batch.block_table.commit_block_table(num_reqs)
 
         # Get request indices.
         # E.g., [2, 5, 3] -> [0, 0, 1, 1, 1, 1, 1, 2, 2, 2]
@@ -3835,6 +3969,764 @@ class ModelRunnerFL(
         finally:
             self.prepare_inputs_event.record()
 
+
+    def _sync_pyramid_decode_tables(self, attn_metadata, is_dummy: bool = False, plan=None) -> None:
+        if current_platform.vendor_name == "iluvatar":
+            self._sync_pyramid_decode_tables_iluvatar(attn_metadata, is_dummy=is_dummy, plan=plan)
+        elif current_platform.vendor_name == "metax":
+            self._sync_pyramid_decode_tables_metax(attn_metadata, is_dummy=is_dummy)
+
+    def _sync_pyramid_decode_tables_metax(self, attn_metadata, is_dummy: bool = False) -> None:
+        if current_platform.vendor_name != "metax":
+            return
+        if attn_metadata is None or not isinstance(attn_metadata, dict) or not attn_metadata:
+            return
+        if self.cache_config.cache_dtype != "int8_per_token_head":
+            return
+        if len(self.kv_cache_config.kv_cache_groups) != 1:
+            return
+        md = next(iter(attn_metadata.values()))
+        if not hasattr(md, "seq_lens") or not hasattr(md, "block_table") or md.block_table is None:
+            return
+        _plan = getattr(md, "int8_plan", None)
+        if is_dummy and getattr(md, "max_query_len", 2) > 1:
+            return
+        if not is_dummy and _plan is not None and _plan.n_dec == 0:
+            return
+        from vllm_fl.dispatch.backends.vendor.metax.impl.attention import pyramid_prefill as PP
+        max_reqs = max(int(self.max_num_reqs), 512, int(md.seq_lens.shape[0]))
+        max_blocks = int(md.block_table.shape[1])
+        ds = PP.ensure_decode_state(md.seq_lens.device, max_reqs, max_blocks)
+        if is_dummy:
+            if not getattr(self, "_e470_w8_prequantized", False) and not torch.cuda.is_current_stream_capturing():
+                self._e470_w8_prequantized = True
+                try:
+                    from flag_gems.fused.metax_w8a8 import get_w8_weight
+                    from flag_gems.runtime.backend._metax.ops.mm import _E470_DECODE_W8_CACHE
+                    m = self.get_model()
+                    if hasattr(m, "model") and hasattr(m.model, "layers"):
+                        for _l in m.model.layers:
+                            get_w8_weight(_l.self_attn.qkv_proj)
+                            get_w8_weight(_l.self_attn.o_proj)
+                            wi8, wsc = get_w8_weight(_l.mlp.gate_up_proj)
+                            _E470_DECODE_W8_CACHE[_l.mlp.gate_up_proj.weight.data_ptr()] = (wi8, wsc)
+                            d_wi8, d_wsc = get_w8_weight(_l.mlp.down_proj)
+                            _E470_DECODE_W8_CACHE[_l.mlp.down_proj.weight.data_ptr()] = (d_wi8, d_wsc)
+                    if hasattr(m, "lm_head") and hasattr(m.lm_head, "weight"):
+                        wi8, wsc = get_w8_weight(m.lm_head)
+                        _E470_DECODE_W8_CACHE[m.lm_head.weight.data_ptr()] = (wi8, wsc)
+                        from flag_gems.fused.metax_w8a8 import w8a8_lm_head as _w8a8_lm_head
+                        _orig_compute_logits = m.compute_logits
+                        _lm_logged = [False]
+                        _lp = getattr(m, "logits_processor", None)
+                        _org_vocab = getattr(_lp, "org_vocab_size", wi8.shape[0])
+                        if (
+                            _lp is not None
+                            and getattr(_lp, "scale", 1.0) == 1.0
+                            and getattr(_lp, "soft_cap", None) is None
+                            and getattr(m.lm_head, "bias", None) is None
+                        ):
+                            def _e472_compute_logits(hidden_states, _orig=_orig_compute_logits, _wi8=wi8, _wsc=wsc, _ov=_org_vocab):
+                                if (
+                                    hidden_states.dim() == 2
+                                    and hidden_states.dtype == torch.bfloat16
+                                    and 32 <= hidden_states.shape[0] <= 256
+                                    and hidden_states.shape[1] == 2048
+                                ):
+                                    if not _lm_logged[0]:
+                                        _lm_logged[0] = True
+                                        logger.warning("E472 W8A8 lm_head compute_logits active M=%d", hidden_states.shape[0])
+                                    out = _w8a8_lm_head(hidden_states, _wi8, _wsc)
+                                    return out[:, :_ov] if _ov < out.shape[1] else out
+                                return _orig(hidden_states)
+                            m.compute_logits = _e472_compute_logits
+                    # Bind pure-Triton small ops onto instantiated layers BEFORE CUDA Graph capture
+                    from flag_gems.fused.metax_fast_ops import fast_rms_forward as _fr, fast_silu_and_mul as _fs
+                    from flag_gems.fused.metax_w8a8 import fast_rope_vec as _frope
+                    if hasattr(m, "model") and hasattr(m.model, "layers"):
+                        _bound_n = 0
+                        for _l in m.model.layers:
+                            _rn = _l.input_layernorm
+                            if hasattr(_rn, "_forward_method") and _rn.weight is not None:
+                                _rn._forward_method = lambda x, residual=None, _w=_rn.weight, _e=_rn.variance_epsilon: _fr(x, residual, _w, _e)
+                            _re = _l.self_attn.rotary_emb
+                            if hasattr(_re, "_forward_method") and getattr(_re, "is_neox_style", False) and getattr(_re, "head_size", 0) == 128:
+                                _re.cos_sin_cache = _re.cos_sin_cache.to(md.seq_lens.device)
+                                _cc, _sc = _re.cos_sin_cache.chunk(2, dim=-1)
+                                _re._forward_method = lambda positions, query, key=None, _cc=_cc, _sc=_sc: _frope(query, key, _cc, _sc, positions)
+                            _bound_n += 1
+                        if hasattr(m.model, "norm") and hasattr(m.model.norm, "_forward_method") and m.model.norm.weight is not None:
+                            _mn = m.model.norm
+                            _mn._forward_method = lambda x, residual=None, _w=_mn.weight, _e=_mn.variance_epsilon: _fr(x, residual, _w, _e)
+                        logger.warning("E472 startup bound pure-Triton RMSNorm/RoPE/SiLU onto %d layers for Decode CUDA Graph", _bound_n)
+                    logger.warning("E470 startup W8 weight pre-quantization complete (all 42 layers + lm_head)")
+                except Exception as _e:
+                    logger.warning("E470 startup W8 pre-quant skipped: %s", _e)
+            ds.sync(md.seq_lens, md.block_table, [], [], max_copy_cols=min(max_blocks, 64))
+            from vllm_fl.dispatch.backends.vendor.metax.impl.attention import sparse_decode as SD
+            sd = SD.get_state(md.seq_lens.device)
+            if sd is not None:
+                sd.set_dummy_rows(int(md.seq_lens.shape[0]))
+            return
+        n_reqs = self.input_batch.num_reqs
+        ids = self.input_batch.req_ids[:n_reqs]
+        meta = getattr(self, "_pyramid_req_meta", {})
+        drop_rows = []
+        kept_rows = []
+        for rid in ids:
+            rec = meta.get(rid)
+            if rec is None:
+                drop_rows.append((0, 0, 0))
+                kept_rows.append((0, 0, 0))
+            else:
+                orig_fp, drops = rec
+                drop_rows.append(drops)
+                kept_rows.append(
+                    (orig_fp - drops[0], orig_fp - drops[1], orig_fp - drops[2])
+                )
+        max_seq = int(getattr(md, "max_seq_len", max_blocks * 16))
+        max_copy_cols = min(max_blocks, (max_seq // 16) + 4)
+        sig = (tuple(ids), int(md.seq_lens.shape[0]), getattr(self, "_pyramid_meta_ver", 0))
+        ds.sync(md.seq_lens, md.block_table, drop_rows, kept_rows, max_copy_cols=max_copy_cols, sig=sig)
+
+    def _can_pyramid_prefill_metax(self, attn_metadata, slot_mappings, logits_indices, num_reqs: int) -> bool:
+        if current_platform.vendor_name != "metax":
+            return False
+        if self.cache_config.cache_dtype != "int8_per_token_head":
+            return False
+        if not isinstance(attn_metadata, dict) or not attn_metadata:
+            return False
+        if not isinstance(slot_mappings, dict) or not slot_mappings:
+            return False
+        if logits_indices is None or int(logits_indices.shape[0]) != num_reqs:
+            return False
+        md = next(iter(attn_metadata.values()))
+        plan = getattr(md, "int8_plan", None)
+        if plan is None or not plan.first or plan.n_dec != 0 or plan.row0 != 0 or plan.row1 != num_reqs:
+            return False
+        if type(self.get_model()).__name__ != "LlamaForCausalLM":
+            return False
+        from vllm_fl.dispatch.backends.vendor.metax.impl.attention import pyramid_prefill as PP
+        qsl_cpu = self.query_start_loc.np
+        for i in range(num_reqs):
+            ql = int(qsl_cpu[i + 1] - qsl_cpu[i])
+            if ql < PP.MIN_PROMPT_TOKENS or int(self.input_batch.num_prompt_tokens[i]) != ql:
+                return False
+        return True
+
+    def _run_pyramid_prefill_metax(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        attn_metadata: dict,
+        slot_mappings: dict,
+        logits_indices: torch.Tensor,
+        num_tokens_padded: int,
+        num_reqs: int,
+    ) -> torch.Tensor:
+        import copy as _copy
+        from vllm_fl.dispatch.backends.vendor.metax.impl.attention import int8_kv
+        from vllm_fl.dispatch.backends.vendor.metax.impl.attention import pyramid_prefill as PP
+        from flag_gems.fused.metax_fast_ops import (
+            fast_rms_forward,
+            fast_silu_and_mul,
+        )
+        from flag_gems.fused.metax_w8a8 import (
+            fast_gather_2x_bf16,
+            fast_rope_vec,
+            quant_row_i8,
+            rms_norm_q8,
+            silu_mul_q8,
+            w8a8_linear,
+        )
+
+        device = input_ids.device
+        qsl_cpu = self.query_start_loc.np
+        orig_qlen = [int(qsl_cpu[i + 1] - qsl_cpu[i]) for i in range(num_reqs)]
+        orig_full_pages = [ql // PP.PAGE for ql in orig_qlen]
+        orig_rem = [ql % PP.PAGE for ql in orig_qlen]
+        total_orig = sum(orig_qlen)
+
+        base_md = next(iter(attn_metadata.values()))
+        block_table_gpu = base_md.block_table
+        req_indices = list(range(num_reqs))
+        req_ids = [self.input_batch.req_ids[i] for i in req_indices]
+
+        llama = self.get_model().model
+        hidden_states = llama.embed_input_ids(input_ids[:total_orig])
+        pos_cur = positions[:total_orig]
+        residual = None
+
+        cur_qlen = list(orig_qlen)
+        cur_cu_cpu = [0]
+        for ql in cur_qlen:
+            cur_cu_cpu.append(cur_cu_cpu[-1] + ql)
+
+        drops_per_req = [[0, 0, 0] for _ in range(num_reqs)]
+        stage_ranges = ((0, 11, 0), (11, 20, 1), (20, 28, 2), (28, 42, 3))
+        _prof_cnt = getattr(self, "_e469_prof_cnt", 0)
+        self._e469_prof_cnt = _prof_cnt + 1
+        _do_prof = False
+        _t_marks = []
+        if _do_prof:
+            torch.cuda.synchronize()
+            _t0 = time.perf_counter()
+
+        try:
+            cur_attn_md = attn_metadata
+            cur_slot_map = slot_mappings
+            cur_n_tokens = total_orig
+            h_tail = None
+            r_tail = None
+
+            for s_start, s_end, stage_idx in stage_ranges:
+                if _do_prof:
+                    torch.cuda.synchronize()
+                    _ts = time.perf_counter()
+                last_layer = s_end - 1
+                cap = None
+                if last_layer in PP.PRUNE_LAYERS:
+                    _, target_frac = PP.PRUNE_LAYERS[last_layer]
+                    v_layers = tuple(l_i for l_i in (last_layer - 2, last_layer - 1) if l_i >= s_start)
+                    cap = PP.PrefillCapture(
+                        target_layer=last_layer,
+                        cu_q_cpu=list(cur_cu_cpu),
+                        orig_full_pages=orig_full_pages,
+                        orig_rem=orig_rem,
+                        target_frac=target_frac,
+                        vote_layers=v_layers,
+                    )
+
+                with set_forward_context(
+                    cur_attn_md,
+                    self.vllm_config,
+                    num_tokens=cur_n_tokens,
+                    cudagraph_runtime_mode=CUDAGraphMode.NONE,
+                    slot_mapping=cur_slot_map,
+                    skip_compiled=True,
+                ):
+                    for li in range(s_start, s_end):
+                        l = llama.layers[li]
+                        at = l.self_attn
+                        re = at.rotary_emb
+                        re.cos_sin_cache = re.cos_sin_cache.to(device)
+                        cos_c, sin_c = re.cos_sin_cache.chunk(2, dim=-1)
+
+                        if li == 41 and residual is not None:
+                            h1_i8, h1_sc, residual = rms_norm_q8(
+                                hidden_states, residual, l.input_layernorm.weight, l.input_layernorm.variance_epsilon
+                            )
+                            qkv = w8a8_linear(h1_i8, h1_sc, at.qkv_proj)
+                            q, k, v = qkv.split([at.q_size, at.kv_size, at.kv_size], dim=-1)
+                            q, k = fast_rope_vec(q, k, cos_c, sin_c, pos_cur)
+                            attn_output = at.attn(q, k, v)
+                            tail_rows = torch.tensor(
+                                [cur_cu_cpu[i + 1] - 1 for i in range(num_reqs)],
+                                dtype=torch.long,
+                                device=device,
+                            )
+                            ao_tail = attn_output.index_select(0, tail_rows)
+                            res_tail = residual.index_select(0, tail_rows)
+                            ao_tail, _ = at.o_proj(ao_tail)
+                            h_tail, r_tail = fast_rms_forward(
+                                ao_tail, res_tail, l.post_attention_layernorm.weight, l.post_attention_layernorm.variance_epsilon
+                            )
+                            gu_t, _ = l.mlp.gate_up_proj(h_tail)
+                            h_tail, _ = l.mlp.down_proj(fast_silu_and_mul(gu_t))
+                            PP._once("l41_tail", "E470 L41 tail-only + W8A8 prefill active n_p=%d", num_reqs)
+                            continue
+                        if cap is not None and (li == last_layer or li in cap.vote_layers):
+                            PP.set_active_capture(cap)
+                        try:
+                            if _prof_cnt == 2 and li == 1 and residual is not None:
+                                torch.cuda.synchronize(); _p0 = time.perf_counter()
+                                h1_i8, h1_sc, residual = rms_norm_q8(
+                                    hidden_states, residual, l.input_layernorm.weight, l.input_layernorm.variance_epsilon
+                                )
+                                torch.cuda.synchronize(); _p1 = time.perf_counter()
+                                qkv1 = w8a8_linear(h1_i8, h1_sc, at.qkv_proj)
+                                torch.cuda.synchronize(); _p2 = time.perf_counter()
+                                q1, k1, v1 = qkv1.split([at.q_size, at.kv_size, at.kv_size], dim=-1)
+                                q1, k1 = fast_rope_vec(q1, k1, cos_c, sin_c, pos_cur)
+                                torch.cuda.synchronize(); _p3 = time.perf_counter()
+                                ao1 = at.attn(q1, k1, v1)
+                                torch.cuda.synchronize(); _p4 = time.perf_counter()
+                                ao_i8, ao_sc = quant_row_i8(ao1)
+                                ao1 = w8a8_linear(ao_i8, ao_sc, at.o_proj)
+                                torch.cuda.synchronize(); _p5 = time.perf_counter()
+                                h2_i8, h2_sc, residual = rms_norm_q8(
+                                    ao1, residual, l.post_attention_layernorm.weight, l.post_attention_layernorm.variance_epsilon
+                                )
+                                torch.cuda.synchronize(); _p6 = time.perf_counter()
+                                gu1 = w8a8_linear(h2_i8, h2_sc, l.mlp.gate_up_proj)
+                                torch.cuda.synchronize(); _p7 = time.perf_counter()
+                                act_i8, act_sc = silu_mul_q8(gu1)
+                                torch.cuda.synchronize(); _p8 = time.perf_counter()
+                                hidden_states = w8a8_linear(act_i8, act_sc, l.mlp.down_proj)
+                                torch.cuda.synchronize(); _p9 = time.perf_counter()
+                                logger.warning(
+                                    "E470_L1_BREAKDOWN M=%d norm1q=%.2f qkv=%.2f rope=%.2f attn=%.2f o=%.2f norm2q=%.2f gu=%.2f actq=%.2f dn=%.2f sum=%.2f ms",
+                                    cur_n_tokens,
+                                    (_p1-_p0)*1000, (_p2-_p1)*1000, (_p3-_p2)*1000, (_p4-_p3)*1000,
+                                    (_p5-_p4)*1000, (_p6-_p5)*1000, (_p7-_p6)*1000, (_p8-_p7)*1000,
+                                    (_p9-_p8)*1000, (_p9-_p0)*1000,
+                                )
+                            else:
+                                h1_i8, h1_sc, residual = rms_norm_q8(
+                                    hidden_states, residual, l.input_layernorm.weight, l.input_layernorm.variance_epsilon
+                                )
+                                qkv1 = w8a8_linear(h1_i8, h1_sc, at.qkv_proj)
+                                q1, k1, v1 = qkv1.split([at.q_size, at.kv_size, at.kv_size], dim=-1)
+                                q1, k1 = fast_rope_vec(q1, k1, cos_c, sin_c, pos_cur)
+                                ao1 = at.attn(q1, k1, v1)
+                                if cap is not None and li == last_layer and cap.kept_token_idx is not None:
+                                    # 100% lossless kept-only o_proj + MLP on prune boundary L10/L19/L27
+                                    ao1, residual, pos_cur = fast_gather_2x_bf16(ao1, residual, pos_cur, cap.kept_token_idx)
+                                    PP._once("kept_only_mlp", "E472 lossless kept-only o_proj+MLP active at L%d", li)
+                                ao_i8, ao_sc = quant_row_i8(ao1)
+                                ao1 = w8a8_linear(ao_i8, ao_sc, at.o_proj)
+                                h2_i8, h2_sc, residual = rms_norm_q8(
+                                    ao1, residual, l.post_attention_layernorm.weight, l.post_attention_layernorm.variance_epsilon
+                                )
+                                gu1 = w8a8_linear(h2_i8, h2_sc, l.mlp.gate_up_proj)
+                                act_i8, act_sc = silu_mul_q8(gu1)
+                                hidden_states = w8a8_linear(act_i8, act_sc, l.mlp.down_proj)
+                        finally:
+                            if cap is not None and (li == last_layer or li in cap.vote_layers):
+                                PP.set_active_capture(None)
+
+                if _do_prof:
+                    torch.cuda.synchronize()
+                    _t_marks.append(f"s{stage_idx}({cur_n_tokens})={(time.perf_counter()-_ts)*1000:.1f}ms")
+                if cap is not None:
+                    if _do_prof:
+                        _tc = time.perf_counter()
+                    assert cap.kept_token_idx is not None, f"missing capture at layer {last_layer}"
+                    if hidden_states.shape[0] != cap.kept_token_idx.shape[0]:
+                        hidden_states, residual, pos_cur = fast_gather_2x_bf16(
+                            hidden_states, residual, pos_cur, cap.kept_token_idx
+                        )
+
+                    cur_qlen = cap.new_qlen
+                    cur_cu_cpu = [0]
+                    for ql in cur_qlen:
+                        cur_cu_cpu.append(cur_cu_cpu[-1] + ql)
+                    cur_n_tokens = cur_cu_cpu[-1]
+                    next_stage_idx = stage_idx + 1
+                    for r_i in range(num_reqs):
+                        drops_per_req[r_i][next_stage_idx - 1] = cap.drop_pages[r_i]
+
+                    cu_gpu = torch.tensor(cur_cu_cpu, dtype=torch.int32, device=device)
+                    seq_gpu = torch.tensor(cur_qlen, dtype=torch.int32, device=device)
+                    slot_gpu = PP.build_stage_slot_mapping(
+                        block_table_gpu,
+                        req_indices,
+                        cap.new_full_pages,
+                        orig_full_pages,
+                        orig_rem,
+                    )
+                    max_q = max(cur_qlen)
+                    new_plan = int8_kv.Plan(
+                        cu_k=cu_gpu,
+                        max_k=max_q,
+                        max_q=max_q,
+                        max_pages=0,
+                        n_dec=0,
+                        kw=None,
+                        vw=None,
+                        row0=0,
+                        row1=num_reqs,
+                        t0=0,
+                        t1=cur_n_tokens,
+                        cu_qp=cu_gpu,
+                        cu_kp=cu_gpu,
+                        first=True,
+                    )
+                    new_md_map = {}
+                    for k, md_old in attn_metadata.items():
+                        md_new = _copy.copy(md_old)
+                        md_new.num_actual_tokens = cur_n_tokens
+                        md_new.query_start_loc = cu_gpu
+                        md_new.seq_lens = seq_gpu
+                        md_new.max_query_len = max_q
+                        md_new.max_seq_len = max_q
+                        md_new.int8_plan = new_plan
+                        md_new.int8_tail = None
+                        if hasattr(md_new, "slot_mapping"):
+                            md_new.slot_mapping = slot_gpu
+                        new_md_map[k] = md_new
+                    cur_attn_md = new_md_map
+                    cur_slot_map = {k: slot_gpu for k in slot_mappings}
+                    if _do_prof:
+                        torch.cuda.synchronize()
+                        _t_marks.append(f"comp{stage_idx}={(time.perf_counter()-_tc)*1000:.1f}ms")
+
+            if h_tail is None:
+                tail_rows = torch.tensor(
+                    [cur_cu_cpu[i + 1] - 1 for i in range(num_reqs)], dtype=torch.long, device=device
+                )
+                h_tail = hidden_states.index_select(0, tail_rows)
+                r_tail = residual.index_select(0, tail_rows)
+            norm_tail, _ = llama.norm(h_tail, r_tail)
+
+            if not hasattr(self, "_pyramid_req_meta"):
+                self._pyramid_req_meta = {}
+            for r_i, rid in enumerate(req_ids):
+                self._pyramid_req_meta[rid] = (orig_full_pages[r_i], tuple(drops_per_req[r_i]))
+            self._pyramid_meta_ver = getattr(self, "_pyramid_meta_ver", 0) + 1
+
+            PP._once(
+                "prefill_active",
+                "E469 pyramid3 prefill active n_p=%d orig_tokens=%d final_tokens=%d drops0=%s prefix_caching=%s",
+                num_reqs,
+                total_orig,
+                cur_n_tokens,
+                tuple(drops_per_req[0]),
+                bool(self.cache_config.enable_prefix_caching),
+            )
+
+            if _do_prof:
+                torch.cuda.synchronize()
+                logger.warning(
+                    "E469_PROF #%d n_p=%d orig=%d total=%.1fms [%s]",
+                    _prof_cnt, num_reqs, total_orig, (time.perf_counter() - _t0) * 1000.0, " ".join(_t_marks)
+                )
+            model_output = torch.empty(
+                (num_tokens_padded, norm_tail.shape[-1]),
+                dtype=norm_tail.dtype,
+                device=device,
+            )
+            model_output.index_copy_(0, logits_indices, norm_tail)
+            return model_output
+        finally:
+            PP.set_active_capture(None)
+
+    def _sync_pyramid_decode_tables_iluvatar(self, attn_metadata, is_dummy: bool = False, plan=None) -> None:
+        if attn_metadata is None or not isinstance(attn_metadata, dict) or not attn_metadata:
+            return
+        if self.cache_config.cache_dtype != "int8_per_token_head":
+            return
+        if len(self.kv_cache_config.kv_cache_groups) != 1:
+            return
+        md = next(iter(attn_metadata.values()))
+        if not hasattr(md, "seq_lens") or not hasattr(md, "block_table") or md.block_table is None:
+            return
+        from flag_gems.fused.minicpm import pyramid_prefill as PP
+        has_decode = getattr(md, "max_query_len", 2) <= 1 or (plan is not None and plan.n_decode > 0)
+        if not has_decode:
+            ds_old = PP.get_decode_state()
+            if ds_old is not None:
+                ds_old.active = False
+            return
+        max_reqs = max(int(self.max_num_reqs), 512, int(md.seq_lens.shape[0]))
+        max_blocks = int(md.block_table.shape[1])
+        ds = PP.ensure_decode_state(md.seq_lens.device, max_reqs, max_blocks)
+        n_rows_gpu = int(md.seq_lens.shape[0])
+        if is_dummy:
+            ds.sync(
+                md.seq_lens,
+                md.block_table,
+                [],
+                [],
+                max_copy_cols=min(max_blocks, 64),
+                sig=("dummy", n_rows_gpu),
+            )
+            return
+        max_seq = int(getattr(md, "max_seq_len", max_blocks * 16))
+        max_copy_cols = min(max_blocks, (max_seq // 16) + 4)
+        meta = self._pyramid_req_meta
+        if not meta:
+            sig = ("empty", n_rows_gpu)
+            ds.sync(md.seq_lens, md.block_table, [], [], max_copy_cols=max_copy_cols, sig=sig)
+            return
+        n_reqs = self.input_batch.num_reqs
+        ids = tuple(self.input_batch.req_ids[:n_reqs])
+        sig = (ids, n_rows_gpu, self._pyramid_meta_ver)
+        if sig == ds._last_sig:
+            ds.sync(md.seq_lens, md.block_table, [], [], max_copy_cols=max_copy_cols, sig=sig)
+            return
+        drop_rows = []
+        kept_rows = []
+        for rid in ids:
+            rec = meta.get(rid)
+            if rec is None:
+                drop_rows.append((0, 0, 0))
+                kept_rows.append((0, 0, 0))
+            else:
+                orig_fp, drops = rec
+                drop_rows.append(drops)
+                kept_rows.append(
+                    (orig_fp - drops[0], orig_fp - drops[1], orig_fp - drops[2])
+                )
+        ds.sync(
+            md.seq_lens,
+            md.block_table,
+            drop_rows,
+            kept_rows,
+            max_copy_cols=max_copy_cols,
+            sig=sig,
+        )
+
+    def _can_pyramid_prefill_iluvatar(self, plan, attn_metadata, slot_mappings, last_logits_only: bool) -> bool:
+        from flag_gems.fused.minicpm import pyramid_prefill as PP
+        if plan is None or plan.history_pages != 0 or plan.n_decode != 0 or plan.n_p <= 0:
+            return False
+        if any(
+            ql < PP.MIN_PROMPT_TOKENS or int(self.input_batch.num_prompt_tokens[i]) != ql
+            for i, ql, _ in plan.prefill_desc
+        ):
+            return False
+        if not last_logits_only:
+            return False
+        if self.cache_config.cache_dtype != "int8_per_token_head":
+            return False
+        if type(self.get_model()).__name__ != "LlamaForCausalLM":
+            return False
+        if not isinstance(attn_metadata, dict) or not attn_metadata:
+            return False
+        if not isinstance(slot_mappings, dict) or not slot_mappings:
+            return False
+        if [i for i, _, _ in plan.prefill_desc] != list(range(plan.n_p)):
+            return False
+        return True
+
+    def _run_pyramid_prefill_iluvatar(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        attn_metadata: dict,
+        slot_mappings: dict,
+        logits_indices: torch.Tensor,
+        num_tokens_padded: int,
+        base_plan,
+    ) -> torch.Tensor:
+        import copy as _copy
+        from flag_gems.fused.minicpm import attention as minicpm_attention
+        from flag_gems.fused.minicpm import pyramid_prefill as PP
+        from vllm_fl.dispatch.backends.vendor.iluvatar import fused_layers as fl_mod
+
+        device = input_ids.device
+        n_p = base_plan.n_p
+        orig_qlen = [ql for _, ql, _ in base_plan.prefill_desc]
+        orig_full_pages = [ql // PP.PAGE for ql in orig_qlen]
+        orig_rem = [ql % PP.PAGE for ql in orig_qlen]
+        total_orig = sum(orig_qlen)
+
+        base_md = next(iter(attn_metadata.values()))
+        block_table_gpu = base_md.block_table
+        req_indices = [i for i, _, _ in base_plan.prefill_desc]
+        req_ids = [self.input_batch.req_ids[i] for i in req_indices]
+
+        llama = self.get_model().model
+        hidden_states = llama.embed_input_ids(input_ids[:total_orig])
+        pos_cur = positions[:total_orig]
+        residual = None
+
+        cur_qlen = list(orig_qlen)
+        cur_cu_cpu = [0]
+        for ql in cur_qlen:
+            cur_cu_cpu.append(cur_cu_cpu[-1] + ql)
+
+        drops_per_req = [[0, 0, 0] for _ in range(n_p)]
+        stage_ranges = ((0, 11, 0), (11, 20, 1), (20, 28, 2), (28, 42, 3))
+        saved_plan = minicpm_attention._current_plan
+
+        try:
+            cur_attn_md = attn_metadata
+            cur_slot_map = slot_mappings
+            cur_n_tokens = total_orig
+            cur_plan = base_plan
+            h_tail = None
+            r_tail = None
+
+            for s_start, s_end, stage_idx in stage_ranges:
+                last_layer = s_end - 1
+                cap = None
+                if last_layer in PP.PRUNE_LAYERS:
+                    _, target_frac = PP.PRUNE_LAYERS[last_layer]
+                    v_layers = tuple(l_i for l_i in (last_layer - 2, last_layer - 1) if l_i >= s_start)
+                    cap = PP.PrefillCapture(
+                        target_layer=last_layer,
+                        cu_q_cpu=list(cur_cu_cpu),
+                        orig_full_pages=orig_full_pages,
+                        orig_rem=orig_rem,
+                        target_frac=target_frac,
+                        vote_layers=v_layers,
+                    )
+
+                if stage_idx == 3:
+                    cur_plan.last_logit_only = True
+                    cur_plan.last_logits_rows = cur_plan.cu[1 : n_p + 1] - 1
+
+                already_compacted = False
+                minicpm_attention._current_plan = cur_plan
+                with set_forward_context(
+                    cur_attn_md,
+                    self.vllm_config,
+                    num_tokens=cur_n_tokens,
+                    cudagraph_runtime_mode=CUDAGraphMode.NONE,
+                    slot_mapping=cur_slot_map,
+                    skip_compiled=True,
+                ):
+                    for li in range(s_start, s_end):
+                        if li == 41 and residual is not None and fl_mod._ok_layer(llama.layers[41]):
+                            l41 = llama.layers[41]
+                            at = l41.self_attn
+                            ln1, ln2 = l41.input_layernorm, l41.post_attention_layernorm
+                            qkv, residual = torch.ops.vllm.iluvatar_norm_qkv(
+                                hidden_states, residual, ln1.weight, ln1.variance_epsilon,
+                                at.qkv_proj.weight, at.qkv_proj.w8a8_scale,
+                            )
+                            qr, kr, vr = torch.ops.vllm.iluvatar_rope_rot(
+                                qkv, pos_cur, at.rotary_emb.cos_sin_cache, at.num_heads, at.num_kv_heads,
+                            )
+                            attn_output = at.attn(qr, kr, vr)
+                            tail_rows = torch.tensor(
+                                [cur_cu_cpu[i + 1] - 1 for i in range(n_p)],
+                                dtype=torch.long,
+                                device=device,
+                            )
+                            ao_tail = attn_output.index_select(0, tail_rows)
+                            res_tail = residual.index_select(0, tail_rows)
+                            ao_tail, _ = at.o_proj(ao_tail)
+                            mlp = l41.mlp
+                            h_tail, r_tail = torch.ops.vllm.iluvatar_norm_mlp(
+                                ao_tail, res_tail, ln2.weight, ln2.variance_epsilon,
+                                mlp.gate_up_proj.weight, mlp.gate_up_proj.w8a8_scale,
+                                mlp.down_proj.weight, mlp.down_proj.w8a8_scale,
+                            )
+                            PP._once("l41_tail", "E470 L41 tail-only o_proj+mlp active n_p=%d", n_p)
+                            continue
+                        if (
+                            cap is not None
+                            and li == last_layer
+                            and residual is not None
+                            and fl_mod._ok_layer(llama.layers[li])
+                            and fl_mod._rope_ok(llama.layers[li].self_attn)
+                        ):
+                            ly = llama.layers[li]
+                            at = ly.self_attn
+                            ln1, ln2 = ly.input_layernorm, ly.post_attention_layernorm
+                            qkv, residual = torch.ops.vllm.iluvatar_norm_qkv(
+                                hidden_states, residual, ln1.weight, ln1.variance_epsilon,
+                                at.qkv_proj.weight, at.qkv_proj.w8a8_scale,
+                            )
+                            qr, kr, vr = torch.ops.vllm.iluvatar_rope_rot(
+                                qkv, pos_cur, at.rotary_emb.cos_sin_cache, at.num_heads, at.num_kv_heads,
+                            )
+                            PP.set_active_capture(cap)
+                            try:
+                                attn_output = at.attn(qr, kr, vr)
+                            finally:
+                                PP.set_active_capture(None)
+                            assert cap.kept_token_idx is not None, f"missing capture at layer {last_layer}"
+                            kept_idx = cap.kept_token_idx
+                            ao_kept, res_kept, pos_cur = PP.fast_gather_2x_bf16(
+                                attn_output, residual, pos_cur, kept_idx
+                            )
+                            ao_kept, _ = at.o_proj(ao_kept)
+                            mlp = ly.mlp
+                            hidden_states, residual = torch.ops.vllm.iluvatar_norm_mlp(
+                                ao_kept, res_kept, ln2.weight, ln2.variance_epsilon,
+                                mlp.gate_up_proj.weight, mlp.gate_up_proj.w8a8_scale,
+                                mlp.down_proj.weight, mlp.down_proj.w8a8_scale,
+                            )
+                            already_compacted = True
+                            PP._once(
+                                "prune_kept_mlp",
+                                "E470 prune-layer kept-only o_proj+mlp active layer=%d orig=%d kept=%d",
+                                li,
+                                cur_n_tokens,
+                                int(kept_idx.numel()),
+                            )
+                            continue
+                        if cap is not None and (li == last_layer or li in cap.vote_layers):
+                            PP.set_active_capture(cap)
+                        try:
+                            hidden_states, residual = llama.layers[li](
+                                pos_cur, hidden_states, residual
+                            )
+                        finally:
+                            if cap is not None and (li == last_layer or li in cap.vote_layers):
+                                PP.set_active_capture(None)
+
+                if cap is not None:
+                    assert cap.kept_token_idx is not None, f"missing capture at layer {last_layer}"
+                    if not already_compacted:
+                        kept_idx = cap.kept_token_idx
+                        hidden_states, residual, pos_cur = PP.fast_gather_2x_bf16(
+                            hidden_states, residual, pos_cur, kept_idx
+                        )
+
+                    cur_qlen = cap.new_qlen
+                    cur_cu_cpu = [0]
+                    for ql in cur_qlen:
+                        cur_cu_cpu.append(cur_cu_cpu[-1] + ql)
+                    cur_n_tokens = cur_cu_cpu[-1]
+                    next_stage_idx = stage_idx + 1
+                    for r_i in range(n_p):
+                        drops_per_req[r_i][next_stage_idx - 1] = cap.drop_pages[r_i]
+
+                    cu_gpu = torch.tensor(cur_cu_cpu, dtype=torch.int32, device=device)
+                    seq_gpu = torch.tensor(cur_qlen, dtype=torch.int32, device=device)
+                    slot_gpu = PP.build_stage_slot_mapping(
+                        block_table_gpu,
+                        req_indices,
+                        cap.new_full_pages,
+                        orig_full_pages,
+                        orig_rem,
+                    )
+                    max_q = max(cur_qlen)
+                    new_md_map = {}
+                    for k, md_old in attn_metadata.items():
+                        md_new = _copy.copy(md_old)
+                        md_new.num_actual_tokens = cur_n_tokens
+                        md_new.query_start_loc = cu_gpu
+                        md_new.seq_lens = seq_gpu
+                        md_new.max_query_len = max_q
+                        md_new.max_seq_len = max_q
+                        if hasattr(md_new, "slot_mapping"):
+                            md_new.slot_mapping = slot_gpu
+                        new_md_map[k] = md_new
+                    cur_attn_md = new_md_map
+                    cur_slot_map = {k: slot_gpu for k in slot_mappings}
+                    cur_plan = PP.build_stage_plan(
+                        base_plan, cu_gpu, cur_qlen, next_stage_idx, device
+                    )
+
+            if h_tail is None:
+                tail_rows = torch.tensor(
+                    [cur_cu_cpu[i + 1] - 1 for i in range(n_p)], dtype=torch.long, device=device
+                )
+                h_tail = hidden_states.index_select(0, tail_rows)
+                r_tail = residual.index_select(0, tail_rows)
+            norm_tail, _ = llama.norm(h_tail, r_tail)
+
+            for r_i, rid in enumerate(req_ids):
+                self._pyramid_req_meta[rid] = (orig_full_pages[r_i], tuple(drops_per_req[r_i]))
+            self._pyramid_meta_ver += 1
+
+            PP._once(
+                "prefill_active",
+                "E470 pyramid3 prefill active n_p=%d orig_tokens=%d final_tokens=%d drops0=%s prefix_caching=%s",
+                n_p,
+                total_orig,
+                cur_n_tokens,
+                tuple(drops_per_req[0]),
+                bool(self.cache_config.enable_prefix_caching),
+            )
+
+            model_output = torch.empty(
+                (num_tokens_padded, norm_tail.shape[-1]),
+                dtype=norm_tail.dtype,
+                device=device,
+            )
+            model_output.index_copy_(0, logits_indices, norm_tail)
+            return model_output
+        finally:
+            PP.set_active_capture(None)
+            minicpm_attention._current_plan = saved_plan
+
     def _model_forward(
         self,
         input_ids: torch.Tensor | None = None,
@@ -4380,31 +5272,112 @@ class ModelRunnerFL(
         # When spec decode is enabled, defer connector finalization
         # (wait_for_save + clear metadata) until after draft model runs.
         defer_kv_connector_finalize = self.speculative_config is not None
-        with (
-            set_forward_context(
-                attn_metadata,
-                self.vllm_config,
-                num_tokens=num_tokens_padded,
-                num_tokens_across_dp=num_tokens_across_dp,
-                cudagraph_runtime_mode=cudagraph_mode,
-                batch_descriptor=batch_desc,
-                ubatch_slices=ubatch_slices_padded,
-                slot_mapping=slot_mappings,
-                skip_compiled=has_encoder_input,
-            ),
-            record_function_or_nullcontext("gpu_model_runner: forward"),
-            self.maybe_get_kv_connector_output(
-                scheduler_output,
-                defer_finalize=defer_kv_connector_finalize,
-            ) as kv_connector_output,
-        ):
-            model_output = self._model_forward(
-                input_ids=input_ids,
-                positions=positions,
-                intermediate_tensors=intermediate_tensors,
-                inputs_embeds=inputs_embeds,
-                **model_kwargs,
-            )
+        if current_platform.vendor_name == "metax":
+            self._sync_pyramid_decode_tables_metax(attn_metadata, is_dummy=False)
+            if self._can_pyramid_prefill_metax(attn_metadata, slot_mappings, logits_indices, num_reqs):
+                kv_connector_output = None
+                model_output = self._run_pyramid_prefill_metax(
+                    input_ids=input_ids,
+                    positions=positions,
+                    attn_metadata=attn_metadata,
+                    slot_mappings=slot_mappings,
+                    logits_indices=logits_indices,
+                    num_tokens_padded=num_tokens_padded,
+                    num_reqs=num_reqs,
+                )
+            else:
+                with (
+                    set_forward_context(
+                        attn_metadata,
+                        self.vllm_config,
+                        num_tokens=num_tokens_padded,
+                        num_tokens_across_dp=num_tokens_across_dp,
+                        cudagraph_runtime_mode=cudagraph_mode,
+                        batch_descriptor=batch_desc,
+                        ubatch_slices=ubatch_slices_padded,
+                        slot_mapping=slot_mappings,
+                        skip_compiled=has_encoder_input,
+                    ),
+                    record_function_or_nullcontext("gpu_model_runner: forward"),
+                    self.maybe_get_kv_connector_output(
+                        scheduler_output,
+                        defer_finalize=defer_kv_connector_finalize,
+                    ) as kv_connector_output,
+                ):
+                    model_output = self._model_forward(
+                        input_ids=input_ids,
+                        positions=positions,
+                        intermediate_tensors=intermediate_tensors,
+                        inputs_embeds=inputs_embeds,
+                        **model_kwargs,
+                    )
+        else:
+            with (
+                set_forward_context(
+                    attn_metadata,
+                    self.vllm_config,
+                    num_tokens=num_tokens_padded,
+                    num_tokens_across_dp=num_tokens_across_dp,
+                    cudagraph_runtime_mode=cudagraph_mode,
+                    batch_descriptor=batch_desc,
+                    ubatch_slices=ubatch_slices_padded,
+                    slot_mapping=slot_mappings,
+                    skip_compiled=has_encoder_input,
+                ),
+                record_function_or_nullcontext("gpu_model_runner: forward"),
+                self.maybe_get_kv_connector_output(
+                    scheduler_output,
+                    defer_finalize=defer_kv_connector_finalize,
+                ) as kv_connector_output,
+            ):
+                if current_platform.vendor_name == "iluvatar":
+                    from flag_gems.fused.minicpm import attention as minicpm_attention
+
+                    plan = minicpm_attention._current_plan
+                    last_logits_only = (
+                        plan is not None and plan.n_decode == 0 and num_tokens_padded >= 2048
+                        and plan.n_p == logits_indices.numel() and not self.num_prompt_logprobs
+                        and self.speculative_config is None and not self.is_pooling_model
+                        and not self.use_aux_hidden_state_outputs and not self.broadcast_pp_output
+                        and self.kv_sharing_fast_prefill_logits_indices is None
+                        and ubatch_slices_padded is None and get_pp_group().is_last_rank
+                        and cudagraph_mode == CUDAGraphMode.NONE
+                    )
+                    self._sync_pyramid_decode_tables_iluvatar(attn_metadata, is_dummy=False)
+                    if self._can_pyramid_prefill_iluvatar(plan, attn_metadata, slot_mappings, last_logits_only):
+                        model_output = self._run_pyramid_prefill_iluvatar(
+                            input_ids=input_ids,
+                            positions=positions,
+                            attn_metadata=attn_metadata,
+                            slot_mappings=slot_mappings,
+                            logits_indices=logits_indices,
+                            num_tokens_padded=num_tokens_padded,
+                            base_plan=plan,
+                        )
+                    else:
+                        if last_logits_only:
+                            plan.last_logit_only = True
+                            plan.last_logits_rows = logits_indices
+                        try:
+                            model_output = self._model_forward(
+                                input_ids=input_ids,
+                                positions=positions,
+                                intermediate_tensors=intermediate_tensors,
+                                inputs_embeds=inputs_embeds,
+                                **model_kwargs,
+                            )
+                        finally:
+                            if last_logits_only:
+                                plan.last_logit_only = False
+                                plan.last_logits_rows = None
+                else:
+                    model_output = self._model_forward(
+                        input_ids=input_ids,
+                        positions=positions,
+                        intermediate_tensors=intermediate_tensors,
+                        inputs_embeds=inputs_embeds,
+                        **model_kwargs,
+                    )
 
         with record_function_or_nullcontext("gpu_model_runner: postprocess"):
             if self.use_aux_hidden_state_outputs:
@@ -4433,7 +5406,13 @@ class ModelRunnerFL(
                     )
 
                 sample_hidden_states = hidden_states[logits_indices]
-                logits = self.model.compute_logits(sample_hidden_states)
+                if current_platform.vendor_name == "iluvatar":
+                    from vllm_fl.patches.head_sampling import sampling_logits
+                    logits = sampling_logits(
+                        self, sample_hidden_states, scheduler_output, spec_decode_metadata
+                    )
+                else:
+                    logits = self.model.compute_logits(sample_hidden_states)
             else:
                 # Rare case.
                 assert not self.is_pooling_model
@@ -4763,6 +5742,12 @@ class ModelRunnerFL(
                 async_output.sampled_token_ids_cpu,
                 async_output.async_copy_ready_event,
             )
+            if self.speculative_config is None and self.input_batch.prev_req_id_to_index is not None:
+                self._last_single_token_copy = (
+                    self.input_batch.prev_req_id_to_index,
+                    async_output.sampled_token_ids_cpu,
+                    async_output.async_copy_ready_event,
+                )
 
         return async_output
 
@@ -5412,6 +6397,18 @@ class ModelRunnerFL(
 
         get_offloader().post_init()
 
+        if (
+            not load_dummy_weights
+            and getattr(current_platform, "vendor_name", None) == "iluvatar"
+            and self.parallel_config.tensor_parallel_size == 1
+            and self.parallel_config.pipeline_parallel_size == 1
+            and self.speculative_config is None
+            and self.lora_config is None
+        ):
+            from flag_gems.fused.minicpm._residual_w4 import install_if_supported
+
+            install_if_supported(self.get_model(), self.model_config.model)
+
     def _setup_eagle3_aux_hidden_state_outputs(self) -> None:
         if not self.use_aux_hidden_state_outputs:
             return
@@ -5957,6 +6954,8 @@ class ModelRunnerFL(
                 # remove_request() are visible to the attention metadata
                 # builder. Without this, stale block IDs from finished
                 # requests can corrupt Mamba state.
+                from vllm_fl.patches.block_table_mirror import invalidate_runner
+                invalidate_runner(self)
                 self.input_batch.block_table.commit_block_table(num_reqs_padded)
 
                 pad_attn = cudagraph_runtime_mode == CUDAGraphMode.FULL
@@ -6027,6 +7026,7 @@ class ModelRunnerFL(
                 if num_tokens_across_dp is not None:
                     num_tokens_across_dp[:] = num_tokens_padded
 
+            self._sync_pyramid_decode_tables(attn_metadata, is_dummy=True)
             with (
                 self.maybe_randomize_inputs(input_ids, inputs_embeds),
                 set_forward_context(

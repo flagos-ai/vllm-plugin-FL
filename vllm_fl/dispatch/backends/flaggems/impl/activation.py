@@ -20,6 +20,12 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
+    from vllm.platforms import current_platform
+
+    if getattr(current_platform, "vendor_name", "") == "metax":
+        from flag_gems.fused.metax_fast_ops import fast_silu_and_mul
+
+        return fast_silu_and_mul(x)
     from flag_gems.modules.activation import gems_silu_and_mul
 
     d = x.shape[-1] // 2

@@ -153,3 +153,29 @@ class AsyncSchedulerFL(_AsyncScheduler):
                 "(max_threads=8)."
             )
         super().__init__(*args, **kwargs)
+
+
+def install_prefill_first() -> None:
+    from vllm.v1.core.sched.scheduler import Scheduler
+
+    if getattr(Scheduler.schedule, "_e376_prefill_first", False):
+        return
+    _orig_schedule = Scheduler.schedule
+
+    def _prefill_first_schedule(self, throttle_prefills: bool = False):
+        if not getattr(self, "_e376_logged", False):
+            self._e376_logged = True
+            logger.warning("E376 prefill-first scheduler active")
+        max_seqs = self.scheduler_config.max_num_seqs
+        prefill_reqs = [r for r in self.running if r.num_computed_tokens < r.num_prompt_tokens]
+        decode_reqs = [r for r in self.running if r.num_computed_tokens >= r.num_prompt_tokens]
+        if decode_reqs and (prefill_reqs or (self.waiting and len(self.running) < max_seqs)):
+            self.running = prefill_reqs
+            out = _orig_schedule(self, throttle_prefills=throttle_prefills)
+            self.running = decode_reqs + self.running
+            if out.total_num_scheduled_tokens > 0:
+                return out
+        return _orig_schedule(self, throttle_prefills=throttle_prefills)
+
+    _prefill_first_schedule._e376_prefill_first = True
+    Scheduler.schedule = _prefill_first_schedule

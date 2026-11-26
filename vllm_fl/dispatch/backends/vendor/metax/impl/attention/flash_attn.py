@@ -60,7 +60,9 @@ from vllm.v1.attention.backends.utils import (
     reshape_query_for_spec_decode,  # used for prefill decode split with mtp
 )
 from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
-from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.kv_cache_interface import AttentionSpec, kv_cache_uses_per_token_head_scales
+
+from . import int8_kv
 
 # --------------------------------------------------------------
 # Note: used for prefill decode split with mtp on maca
@@ -68,6 +70,23 @@ from vllm.v1.kv_cache_interface import AttentionSpec
 from .mla.common import QueryLenSupport
 
 logger = init_logger(__name__)
+
+
+_INT8_CHECKED = False
+
+
+def _ensure_int8_checked(device) -> None:
+    """Run the int8 KV kernels once per process on small synthetic batches against an fp32 reference; the cache dtype is
+    already int8, so a failure is an error, not a fallback."""
+    global _INT8_CHECKED
+    if _INT8_CHECKED:
+        return
+    err = int8_kv.self_check(device, flash_attn_varlen_func)
+    if not err <= 3e-2:     # bf16 workspace rounding of the prefill path against the fp32 reference reaches 2e-2 on peaky softmax (E034 attempt 12)
+        raise RuntimeError(f"E034 int8 KV self-check failed (max rel err {err:.3g})")
+    logger.info("E034 int8 KV cache: self-check passed (max rel err %.2e); decode kernel + dequantising varlen prefill", err)
+    _INT8_CHECKED = True
+
 
 
 @register_backend(AttentionBackendEnum.FLASH_ATTN)
@@ -127,6 +146,9 @@ class MacaFlashAttentionBackend(AttentionBackend):
     ) -> tuple[int, ...]:
         if block_size % 16 != 0:
             raise ValueError("Block size must be a multiple of 16.")
+        if kv_cache_uses_per_token_head_scales(cache_dtype_str):
+            # E034: int8 codes + one fp32 scale per (token, head) held in the page itself (read head-contiguous, int8_kv.hc_views)
+            return (num_blocks, 2, block_size, num_kv_heads, head_size + 4)
         return (2, num_blocks, block_size, num_kv_heads, head_size)
 
     @staticmethod
@@ -166,7 +188,7 @@ class MacaFlashAttentionBackend(AttentionBackend):
             return True
         if kv_cache_dtype.startswith("fp8"):
             return flash_attn_supports_fp8()
-        return kv_cache_dtype in ["auto"]
+        return kv_cache_dtype in ["auto", "int8_per_token_head"]
 
     @classmethod
     def supports_sink(cls) -> bool:
@@ -248,6 +270,36 @@ class FlashAttentionMetadata:
 
     causal: bool = True
 
+    # Prefix sums of prefill_seq_lens ([0, l0, l0+l1, ...], int32, on device),
+    # built once per step by the metadata builder so that forward() does not
+    # sync the host once per layer.
+    prefill_cu_seqlens_k: torch.Tensor | None = None
+
+
+_logged_prefill_cu_seqlens_k = False
+
+
+def _prefill_cu_seqlens_k(seq_lens_cpu: torch.Tensor, device) -> torch.Tensor:
+    """[0, cumsum(seq_lens)] as int32 on ``device``, computed on the host.
+
+    Same values as ``torch.tensor([0] + seq_lens.tolist()).cumsum(0)`` but
+    with no device-to-host read: one host-to-device copy per call. The host
+    buffer is pinned so the copy stays asynchronous; PyTorch's caching host
+    allocator keeps it alive until the copy has run.
+    """
+    global _logged_prefill_cu_seqlens_k
+    if not _logged_prefill_cu_seqlens_k:
+        logger.info("Prefill cu_seqlens_k built once per step in the metadata builder")
+        _logged_prefill_cu_seqlens_k = True
+    device = torch.device(device)
+    cu = torch.zeros(
+        seq_lens_cpu.numel() + 1,
+        dtype=torch.int32,
+        pin_memory=device.type != "cpu",
+    )
+    torch.cumsum(seq_lens_cpu.to(torch.int32), dim=0, out=cu[1:])
+    return cu.to(device, non_blocking=True)
+
 
 def _get_sliding_window_configs(
     vllm_config: VllmConfig,
@@ -299,6 +351,7 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
         )
         self.num_heads_kv = self.model_config.get_num_kv_heads(self.parallel_config)
         self.kv_cache_dtype = kv_cache_spec.dtype
+        self._int8_kv = self.cache_config.cache_dtype == "int8_per_token_head"
         self.headdim = self.model_config.get_head_size()
         self.block_size = kv_cache_spec.block_size
 
@@ -446,11 +499,16 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             prefill_block_table_tensor = common_attn_metadata.block_table_tensor[
                 num_decodes:num_reqs
             ]
+            prefill_cu_seqlens_k = _prefill_cu_seqlens_k(
+                common_attn_metadata.seq_lens_cpu[num_decodes:num_reqs],
+                prefill_seq_lens.device,
+            )
         else:
             prefill_max_seq_len = 0
             prefill_query_start_loc = None
             prefill_seq_lens = None
             prefill_block_table_tensor = None
+            prefill_cu_seqlens_k = None
         # \------------------------- Metax Modification -------------------------/
 
         if _bi_mode:
@@ -585,6 +643,7 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             prefill_max_seq_len=prefill_max_seq_len,
             prefill_seq_lens=prefill_seq_lens,
             prefill_block_table=prefill_block_table_tensor,
+            prefill_cu_seqlens_k=prefill_cu_seqlens_k,
             # \------------------------- Metax Modification -------------------------/
             block_table=block_table_tensor,
             slot_mapping=slot_mapping,
@@ -600,9 +659,20 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             max_num_splits=max_num_splits,
             causal=causal,
         )
+        if self._int8_kv and not use_cascade and self.dcp_world_size == 1:
+            attn_metadata.int8_plan = int8_kv.make_plan(
+                common_attn_metadata, self.num_heads_kv, self.headdim, self.device,
+                int8_kv.TAIL_QLEN,
+            )
+            attn_metadata.int8_tail = (
+                int8_kv.make_tail(common_attn_metadata.query_start_loc_cpu, num_reqs, self.device)
+                if max_query_len > int8_kv.VERIFY_QLEN else None
+            )
         return attn_metadata
 
     def use_cascade_attention(self, *args, **kwargs) -> bool:
+        if self._int8_kv:
+            return False
         return use_cascade_attention(*args, **kwargs)
 
 
@@ -650,7 +720,15 @@ class FlashAttentionImpl(AttentionImpl):
         # Cache the batch invariant result for use in forward passes
         self.batch_invariant_enabled = _bi_mode
 
-        if get_kv_quant_mode(self.kv_cache_dtype) != KVQuantMode.NONE and not flash_attn_supports_fp8():
+        self._int8_kv = self.kv_cache_dtype == "int8_per_token_head"
+        self._i8_views = None
+        self._layer_idx = None
+        self._layer_idx_parsed = False
+        if self._int8_kv:
+            if (self.sliding_window != (-1, -1) or alibi_slopes is not None or sinks is not None or self.logits_soft_cap
+                    or head_size != 128 or num_heads != 8 * num_kv_heads or attn_type != AttentionType.DECODER):
+                raise NotImplementedError("int8 KV cache: only GQA 8, head size 128, plain causal decoder attention")
+        elif get_kv_quant_mode(self.kv_cache_dtype) != KVQuantMode.NONE and not flash_attn_supports_fp8():
             raise NotImplementedError(
                 "FlashAttention does not support fp8 kv-cache on this device."
             )
@@ -667,6 +745,47 @@ class FlashAttentionImpl(AttentionImpl):
 
     def supports_quant_query_input(self) -> bool:
         return False
+
+    def _get_layer_idx(self, layer):
+        if not self._layer_idx_parsed:
+            self._layer_idx_parsed = True
+            name = getattr(layer, "layer_name", None) or ""
+            for part in name.split("."):
+                if part.isdigit():
+                    self._layer_idx = int(part)
+                    break
+        return self._layer_idx
+
+    def _forward_int8(self, layer, query, key, value, kv_cache, attn_metadata, output):
+        """E034+E469: int8 per-token-head KV cache + pyramid decode tables + cross-layer sparse decode."""
+        views = self._i8_views
+        if views is None or views.kc.untyped_storage().data_ptr() != kv_cache.untyped_storage().data_ptr():
+            _ensure_int8_checked(query.device)
+            views = self._i8_views = int8_kv.make_views(kv_cache, False)
+        if self.kv_sharing_target_layer_name is None and key is not None and value is not None:
+            int8_kv.write_kv(key, value, views, attn_metadata.slot_mapping)
+        n = attn_metadata.num_actual_tokens
+        li = self._get_layer_idx(layer)
+        seq_use = attn_metadata.seq_lens
+        tbl_use = attn_metadata.block_table
+        _plan = getattr(attn_metadata, "int8_plan", None)
+        if attn_metadata.max_query_len <= 1 or (_plan is not None and _plan.n_dec > 0) or (getattr(attn_metadata, "int8_tail", None) is not None):
+            from . import pyramid_prefill as PP
+            st_idx = PP.stage_of_layer(li)
+            ds = PP.get_decode_state()
+            if (
+                st_idx > 0
+                and ds is not None
+                and ds.active
+                and seq_use.shape[0] <= ds.max_reqs
+                and tbl_use.shape[1] <= ds.max_blocks
+            ):
+                seq_use, tbl_use = ds.get_stage_views(st_idx, seq_use.shape[0], tbl_use.shape[1])
+        int8_kv.attend(query[:n], views, output[:n], attn_metadata.query_start_loc, seq_use,
+                       tbl_use, self.scale, getattr(attn_metadata, "int8_plan", None), flash_attn_varlen_func,
+                       key, value, max_query_len=attn_metadata.max_query_len,
+                       tail=getattr(attn_metadata, "int8_tail", None), layer_idx=li)
+        return output
 
     def forward(
         self,
@@ -705,6 +824,9 @@ class FlashAttentionImpl(AttentionImpl):
         if attn_metadata is None:
             # Profiling run.
             return output.fill_(0)
+
+        if self._int8_kv:
+            return self._forward_int8(layer, query, key, value, kv_cache, attn_metadata, output)
 
         attn_type = self.attn_type
 
@@ -798,11 +920,12 @@ class FlashAttentionImpl(AttentionImpl):
                 # For handling prefill decode split
                 num_decode_tokens = attn_metadata.num_decode_tokens
                 if attn_metadata.num_prefills > 0:
-                    cu_prefix_kv_lens = torch.tensor(
-                        [0] + attn_metadata.prefill_seq_lens.tolist(),
-                        device=attn_metadata.prefill_seq_lens.device,
-                        dtype=torch.int32,
-                    ).cumsum(dim=0, dtype=torch.int32)
+                    cu_prefix_kv_lens = attn_metadata.prefill_cu_seqlens_k
+                    if cu_prefix_kv_lens is None:
+                        cu_prefix_kv_lens = _prefill_cu_seqlens_k(
+                            attn_metadata.prefill_seq_lens.cpu(),
+                            attn_metadata.prefill_seq_lens.device,
+                        )
                     output[num_decode_tokens:num_actual_tokens] = (
                         flash_attn_varlen_func(
                             q=query[num_decode_tokens:num_actual_tokens],
