@@ -37,23 +37,13 @@ def register_builtins(registry) -> None:
     Args:
         registry: Registry to register into
     """
-    # `flaggems_vllm` is optional: FlagGems >= 5.5 upstreamed the vLLM fused
-    # ops into flag_gems.fused and this stack may not ship the standalone
-    # package. Importing it unconditionally here aborted the *entire* FlagGems
-    # backend registration (builtin_ops only logs a warning), which silently
-    # pushed every MoE op to reference.torch.
-    try:
-        import flaggems_vllm
-
-        flaggems_vllm_source = getattr(flaggems_vllm, "__file__", "<unknown>")
-    except ImportError:
-        flaggems_vllm_source = "<not installed; fused ops resolved from flag_gems>"
+    import flaggems_vllm
 
     from .flaggems import FlagGemsBackend
 
     logger.info_once(
         "FlagGems-vllm integration activated: package=%s",
-        flaggems_vllm_source,
+        getattr(flaggems_vllm, "__file__", "<unknown>"),
     )
 
     backend = FlagGemsBackend()

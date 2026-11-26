@@ -7,10 +7,7 @@
 from typing import Optional, Union
 
 import torch
-from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
-
-flash_attn_varlen_func = gems_import("flash_attn_varlen_func")
-flash_mla = gems_import("flash_mla")
+from flaggems_vllm import flash_attn_varlen_func, flash_mla
 
 # from vllm.attention.ops.triton_decode_attention import decode_attention_fwd
 # from vllm.attention.ops.triton_flash_attention import triton_attention

@@ -31,6 +31,15 @@ flagos_blacklist:
   # native until the kernel uses int64 offsets; see
   # docs-1121/2026-1121-2350-27b-flaggems-embedding-int32-offset-overflow-localization.md
   - embedding
+  # flaggems_vllm's generic MoE helpers are not enflame-tuned: on GCU the
+  # fused-experts kernel plus the block-align/route/sum kernels are much slower
+  # than the reference path (a cold-start 512-token text request takes ~900s
+  # and times out) and unreliable for MoE models such as Qwen3.6-35B-A3B.
+  # Keep the vLLM MoE helpers on the reference backend.
+  - invoke_fused_moe_triton_kernel
+  - topk_softmax
+  - moe_align_block_size
+  - moe_sum
   # The in-place wrapper delegates to the implementation op; keep both native.
   - index_put_
   - _index_put_impl_

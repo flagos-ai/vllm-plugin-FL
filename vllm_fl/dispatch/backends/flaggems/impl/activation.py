@@ -39,9 +39,11 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     ):
         return musa_silu_and_mul(x)
 
-    from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
-
-    gems_silu_and_mul = gems_import("silu_and_mul")
+    # FlagGems ships an enflame-specialized silu_and_mul (flat kernel) while
+    # flaggems_vllm only has the generic pointwise version, which corrupts the
+    # tail rows of mixed text+image batches on GCU.  Prefer the specialized
+    # FlagGems implementation here; it is also faster on the flat path.
+    from flag_gems import silu_and_mul as gems_silu_and_mul
 
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]
@@ -59,9 +61,7 @@ def gelu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
-    from vllm_fl.dispatch.backends.flaggems.gems_compat import gems_import
-
-    gelu_and_mul = gems_import("gelu_and_mul")
+    from flaggems_vllm import gelu_and_mul
 
     approximate = getattr(obj, "approximate", "none") if obj is not None else "none"
     d = x.shape[-1] // 2

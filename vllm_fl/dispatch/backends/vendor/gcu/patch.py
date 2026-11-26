@@ -15,6 +15,7 @@ from .impl.mamba_copy import apply_mamba_copy_gcu_patch
 from .impl.sampler import apply_sampler_cpu_detour
 from .impl.reference_moe import apply_reference_moe_gcu_patch
 from .impl.fused_sigmoid_gating import apply_fused_sigmoid_gating_gcu_patch
+from .impl.moe_align_block_size import apply_moe_align_block_size_gcu_patch
 from .impl.norm_gated_compat import install_rms_norm_gated_opaque
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,8 @@ def apply_gcu_patches() -> None:
     # gcu300 Inductor cannot register-allocate the fused gated-RMSNorm kernel;
     # keep it opaque (no-op unless running on gcu300 / env opt-out).
     install_rms_norm_gated_opaque()
+    # vLLM 0.32 passes an 8th scatter_idx arg that the GCU _moe_C lacks.
+    apply_moe_align_block_size_gcu_patch()
     _patches_applied = True
 
 
