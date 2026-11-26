@@ -184,6 +184,22 @@ class FlagGemsBackend(Backend):
             print("Using FlagGems attention backend.")
             return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
 
+        from vllm_fl import device_profiles, envs as fl_envs
+
+        profile = device_profiles.lookup(torch.cuda.current_device()) or {}
+        auto_hybrid = profile.get("switches", {}).get("VLLM_FL_GQA_HYBRID", False)
+        if fl_envs.switch(
+            "VLLM_FL_GQA_HYBRID",
+            auto=auto_hybrid,
+            reason="validated GQA profile",
+        ):
+            from vllm_fl.patches.triton_attention import (
+                patch_triton_attention_softmax,
+            )
+
+            patch_triton_attention_softmax()
+            return "vllm_fl.dispatch.backends.flaggems.impl.gqa_hybrid_attention.HybridAttentionBackend"
+
         return AttentionBackendEnum.TRITON_ATTN.get_path()
 
     def moe_align_block_size(

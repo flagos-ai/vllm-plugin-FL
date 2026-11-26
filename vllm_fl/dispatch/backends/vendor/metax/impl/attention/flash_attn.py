@@ -61,6 +61,13 @@ from vllm.v1.attention.backends.utils import (
 )
 from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm_fl.attention.prefill_cu_kv import (
+    ENV_PREFILL_CU_KV_ONCE,
+    disable_cached_decision,
+    resolve_prefill_cu_kv_once,
+    try_cumulative_kv_lengths_once,
+)
+from vllm_fl.envs import tristate
 
 # --------------------------------------------------------------
 # Note: used for prefill decode split with mtp on maca
@@ -68,6 +75,7 @@ from vllm.v1.kv_cache_interface import AttentionSpec
 from .mla.common import QueryLenSupport
 
 logger = init_logger(__name__)
+_NATIVE_SPARSE_PAGE = 16
 
 
 @register_backend(AttentionBackendEnum.FLASH_ATTN)
@@ -248,6 +256,14 @@ class FlashAttentionMetadata:
 
     causal: bool = True
 
+    # /------------------------  Metax Modification -------------------------\
+    # int32 [num_prefills + 1] cumsum of prefill_seq_lens (None when disabled
+    # or when there is no prefill request).
+    prefill_cu_kv_lens: torch.Tensor | None = None
+    # \------------------------- Metax Modification -------------------------/
+
+    native_sparse_prefill_plan: object | None = None
+
 
 def _get_sliding_window_configs(
     vllm_config: VllmConfig,
@@ -293,6 +309,29 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
         self.parallel_config = vllm_config.parallel_config
         self.cache_config = vllm_config.cache_config
         self.compilation_config = vllm_config.compilation_config
+        from vllm_fl.ops import native_sparse
+
+        self.native_sparse_prefill_plan_buffers = None
+        if native_sparse.is_enabled():
+            from vllm_fl.attention import native_sparse_prefill
+
+            workspace = native_sparse.state().workspace
+            if native_sparse_prefill.is_enabled() and workspace is not None:
+                self.native_sparse_prefill_plan_buffers = (
+                    native_sparse_prefill.make_plan_buffers(
+                        device,
+                        min(
+                            int(workspace.max_seqs),
+                            (
+                                int(vllm_config.scheduler_config.max_num_batched_tokens)
+                                + 63
+                            )
+                            // 64
+                            + 1,
+                        ),
+                        int(workspace.max_pages),
+                    )
+                )
 
         self.num_heads_q = self.model_config.get_num_attention_heads(
             self.parallel_config
@@ -301,6 +340,16 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
         self.kv_cache_dtype = kv_cache_spec.dtype
         self.headdim = self.model_config.get_head_size()
         self.block_size = kv_cache_spec.block_size
+
+        self.prefill_cu_kv_requested = tristate(ENV_PREFILL_CU_KV_ONCE)
+        self.prefill_cu_kv_layer_count = len(layer_names)
+        self.prefill_cu_kv_max_num_seqs = vllm_config.scheduler_config.max_num_seqs
+        self.prefill_cu_kv_once = resolve_prefill_cu_kv_once(
+            self.device,
+            layer_count=self.prefill_cu_kv_layer_count,
+            max_num_seqs=self.prefill_cu_kv_max_num_seqs,
+            requested=self.prefill_cu_kv_requested,
+        ).enabled
 
         self.max_num_splits = 0  # No upper bound on the number of splits.
         self.aot_schedule = get_flash_attn_version() == 3
@@ -383,7 +432,6 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
                 require_uniform=(self.query_len_support != QueryLenSupport.VARLEN),
             )
         )
-
         assert num_decode_tokens + num_prefill_tokens == num_actual_tokens
         assert num_decodes + num_prefills == num_reqs
         # \------------------------- Metax Modification -------------------------/
@@ -434,6 +482,7 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             decode_seq_lens = None
             decode_block_table_tensor = None
 
+        prefill_cu_kv_lens = None
         if num_prefills > 0:
             prefill_max_seq_len = int(
                 common_attn_metadata.seq_lens_cpu[num_decodes:num_reqs].max()
@@ -443,6 +492,19 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
                 - common_attn_metadata.query_start_loc[num_decodes]
             )
             prefill_seq_lens = common_attn_metadata.seq_lens[num_decodes:num_reqs]
+            if self.prefill_cu_kv_once:
+                prefill_cu_kv_lens, fallback_reason = try_cumulative_kv_lengths_once(
+                    prefill_seq_lens
+                )
+                if fallback_reason is not None:
+                    self.prefill_cu_kv_once = False
+                    disable_cached_decision(
+                        self.device,
+                        self.prefill_cu_kv_layer_count,
+                        self.prefill_cu_kv_max_num_seqs,
+                        self.prefill_cu_kv_requested,
+                        fallback_reason,
+                    )
             prefill_block_table_tensor = common_attn_metadata.block_table_tensor[
                 num_decodes:num_reqs
             ]
@@ -554,6 +616,36 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
                 max_seq_len=max_seq_len,
                 causal=causal,
             )
+
+        native_sparse_prefill_plan = None
+        if (
+            self.native_sparse_prefill_plan_buffers is not None
+            and self.cache_config.cache_dtype == "auto"
+            and self.kv_cache_dtype == torch.bfloat16
+            and self.num_heads_q == 16
+            and self.num_heads_kv == 2
+            and self.headdim == 128
+            and self.block_size == _NATIVE_SPARSE_PAGE
+        ):
+            from vllm_fl.ops import native_sparse
+
+            native_sparse_prefill_plan = (
+                self.native_sparse_prefill_plan_buffers.prepare(
+                    req_count=num_reqs,
+                    num_prefills=num_prefills,
+                    num_decodes=num_decodes,
+                    num_decode_tokens=num_decode_tokens,
+                    query_start_loc_cpu=common_attn_metadata.query_start_loc_cpu,
+                    seq_lens_cpu=common_attn_metadata.seq_lens_cpu,
+                    causal=causal,
+                    use_cascade=use_cascade,
+                    dcp_world_size=self.dcp_world_size,
+                    dense_limit=native_sparse.effective_dense_limit(),
+                    block_table_width=int(
+                        common_attn_metadata.block_table_tensor.shape[1]
+                    ),
+                )
+            )
         # For FA3 + full cudagraph
         if self.use_full_cuda_graph and scheduler_metadata is not None:
             n = scheduler_metadata.shape[0]
@@ -585,6 +677,8 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             prefill_max_seq_len=prefill_max_seq_len,
             prefill_seq_lens=prefill_seq_lens,
             prefill_block_table=prefill_block_table_tensor,
+            prefill_cu_kv_lens=prefill_cu_kv_lens,
+            native_sparse_prefill_plan=native_sparse_prefill_plan,
             # \------------------------- Metax Modification -------------------------/
             block_table=block_table_tensor,
             slot_mapping=slot_mapping,
@@ -798,41 +892,116 @@ class FlashAttentionImpl(AttentionImpl):
                 # For handling prefill decode split
                 num_decode_tokens = attn_metadata.num_decode_tokens
                 if attn_metadata.num_prefills > 0:
-                    cu_prefix_kv_lens = torch.tensor(
-                        [0] + attn_metadata.prefill_seq_lens.tolist(),
-                        device=attn_metadata.prefill_seq_lens.device,
-                        dtype=torch.int32,
-                    ).cumsum(dim=0, dtype=torch.int32)
-                    output[num_decode_tokens:num_actual_tokens] = (
-                        flash_attn_varlen_func(
-                            q=query[num_decode_tokens:num_actual_tokens],
-                            k=key_cache,
-                            v=value_cache,
-                            block_table=attn_metadata.prefill_block_table,
-                            cu_seqlens_q=attn_metadata.prefill_query_start_loc,
-                            cu_seqlens_k=cu_prefix_kv_lens,
-                            max_seqlen_q=attn_metadata.max_query_len,
-                            max_seqlen_k=attn_metadata.prefill_max_seq_len,
-                            softmax_scale=self.scale,
-                            causal=attn_metadata.causal,
-                            window_size=self.sliding_window,
-                            alibi_slopes=self.alibi_slopes,
-                            softcap=self.logits_soft_cap,
-                            s_aux=self.sinks,
+                    sparse_prefill_plan = attn_metadata.native_sparse_prefill_plan
+                    sparse_prefill_ran = False
+                    if (
+                        sparse_prefill_plan is not None
+                        and self.kv_sharing_target_layer_name is None
+                        and getattr(self, "_fl_native_sparse_metadata", None)
+                        is not None
+                        and attn_metadata.causal
+                        and not attn_metadata.use_cascade
+                        and self.dcp_world_size == 1
+                        and self.attn_type == AttentionType.DECODER
+                        and not self.batch_invariant_enabled
+                        and self.num_heads == 16
+                        and self.num_kv_heads == 2
+                        and self.head_size == 128
+                        and self.sliding_window == (-1, -1)
+                        and self.alibi_slopes is None
+                        and self.sinks is None
+                        and self.logits_soft_cap in (None, 0.0)
+                        and key is not None
+                        and value is not None
+                        and query.dtype == torch.bfloat16
+                        and key_cache.dtype == torch.bfloat16
+                        and value_cache.dtype == torch.bfloat16
+                    ):
+                        from vllm_fl.attention import native_sparse_prefill
+                        from vllm_fl.ops import native_sparse
+
+                        if (
+                            native_sparse.is_enabled()
+                            and native_sparse_prefill.is_enabled()
+                        ):
+                            kmin, kmax = self._fl_native_sparse_metadata
+                            native_sparse_prefill.run(
+                                sparse_prefill_plan,
+                                query[:num_actual_tokens],
+                                key_cache,
+                                value_cache,
+                                attn_metadata.prefill_block_table[0],
+                                kmin,
+                                kmax,
+                                self._fl_native_sparse_workspace,
+                                output[:num_actual_tokens],
+                                self.scale,
+                            )
+                            sparse_prefill_ran = True
+                    if not sparse_prefill_ran:
+                        cu_prefix_kv_lens = attn_metadata.prefill_cu_kv_lens
+                        if cu_prefix_kv_lens is None:
+                            cu_prefix_kv_lens = torch.tensor(
+                                [0] + attn_metadata.prefill_seq_lens.tolist(),
+                                device=attn_metadata.prefill_seq_lens.device,
+                                dtype=torch.int32,
+                            ).cumsum(dim=0, dtype=torch.int32)
+                        output[num_decode_tokens:num_actual_tokens] = (
+                            flash_attn_varlen_func(
+                                q=query[num_decode_tokens:num_actual_tokens],
+                                k=key_cache,
+                                v=value_cache,
+                                block_table=attn_metadata.prefill_block_table,
+                                cu_seqlens_q=attn_metadata.prefill_query_start_loc,
+                                cu_seqlens_k=cu_prefix_kv_lens,
+                                max_seqlen_q=attn_metadata.max_query_len,
+                                max_seqlen_k=attn_metadata.prefill_max_seq_len,
+                                softmax_scale=self.scale,
+                                causal=attn_metadata.causal,
+                                window_size=self.sliding_window,
+                                alibi_slopes=self.alibi_slopes,
+                                softcap=self.logits_soft_cap,
+                                s_aux=self.sinks,
+                            )
                         )
-                    )
                 if attn_metadata.num_decodes > 0:
                     # Use flash_attn_with_kvcache for normal decoding.
                     decode_query = query[:num_decode_tokens]
                     decode_query = reshape_query_for_spec_decode(
                         decode_query, attn_metadata.num_decodes
                     )
+                    decode_block_table = attn_metadata.decode_block_table
+                    decode_seq_lens = attn_metadata.decode_seq_lens
+                    if (
+                        getattr(self, "_fl_native_sparse_metadata", None) is not None
+                        and num_decode_tokens == attn_metadata.num_decodes
+                        and attn_metadata.causal
+                        and not attn_metadata.use_cascade
+                        and self.sliding_window == (-1, -1)
+                        and self.alibi_slopes is None
+                        and self.sinks is None
+                        and self.logits_soft_cap in (None, 0.0)
+                        and decode_query.dtype == torch.bfloat16
+                        and key_cache.dtype == torch.bfloat16
+                        and value_cache.dtype == torch.bfloat16
+                    ):
+                        from vllm_fl.ops import native_sparse
+
+                        if native_sparse.should_compact_decode(self, attn_metadata):
+                            compacted = native_sparse.compact_decode(
+                                self,
+                                decode_query.view(attn_metadata.num_decodes, 16, 128),
+                                decode_block_table,
+                                decode_seq_lens,
+                            )
+                            if compacted is not None:
+                                decode_block_table, decode_seq_lens = compacted
                     output_unreshape = flash_attn_with_kvcache(
                         q=decode_query,
                         k_cache=key_cache,
                         v_cache=value_cache,
-                        block_table=attn_metadata.decode_block_table,
-                        cache_seqlens=attn_metadata.decode_seq_lens,
+                        block_table=decode_block_table,
+                        cache_seqlens=decode_seq_lens,
                         softmax_scale=self.scale,
                         causal=True,
                         window_size=self.sliding_window,

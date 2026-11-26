@@ -195,6 +195,7 @@ from vllm.v1.kv_cache_interface import (
     KVCacheConfig,
     KVCacheGroupSpec,
     KVCacheSpec,
+    KVQuantMode,
     MambaSpec,
     SlidingWindowSpec,
     UniformTypeKVCacheSpecs,
@@ -483,6 +484,11 @@ class ModelRunnerFL(
         vllm_config: VllmConfig,
         device: torch.device,
     ):
+        self._fl_native_sparse_runner_enabled = False
+        self._fl_native_sparse_metadata_refresher = None
+        self._fl_native_sparse_metadata_planner = None
+        self._fl_kv_int8_sparse_runner_enabled = False
+        self._fl_kv_int8_sparse_accounted_bytes = 0
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -3903,6 +3909,8 @@ class ModelRunnerFL(
         force_has_lora: bool | None = None,
         force_num_active_loras: int | None = None,
         num_encoder_reqs: int = 0,
+        native_sparse_decode_mode: bool | None = None,
+        log_native_sparse_route: bool = False,
     ) -> tuple[
         CUDAGraphMode,
         BatchDescriptor,
@@ -3984,6 +3992,36 @@ class ModelRunnerFL(
                 # Assert to make sure the agreed upon token count is correct otherwise
                 # num_tokens_across_dp will no-longer be valid
                 assert batch_descriptor.num_tokens == num_tokens_padded
+
+        if (
+            self._fl_native_sparse_runner_enabled
+            or self._fl_kv_int8_sparse_runner_enabled
+        ):
+            from vllm_fl.ops import native_sparse
+
+            if native_sparse_decode_mode is not None:
+                batch_descriptor = native_sparse.sparse_decode_batch_descriptor(
+                    batch_descriptor, native_sparse_decode_mode
+                )
+            elif (
+                log_native_sparse_route and uniform_decode and batch_descriptor.uniform
+            ):
+                if self._fl_native_sparse_runner_enabled:
+                    route_provider = native_sparse
+                else:
+                    from vllm_fl.ops import int8_sparse
+
+                    route_provider = int8_sparse
+                max_seq_len = int(self.optimistic_seq_lens_cpu.numpy()[:num_reqs].max())
+                dense_limit = route_provider.effective_dense_limit()
+                sparse_decode = max_seq_len > dense_limit
+                if cudagraph_mode == CUDAGraphMode.FULL and route_provider.is_enabled():
+                    batch_descriptor = native_sparse.route_batch_descriptor(
+                        batch_descriptor, max_seq_len, dense_limit
+                    )
+                route_provider.log_runtime_route_once(
+                    sparse_decode, max_seq_len, dense_limit, cudagraph_mode
+                )
 
         cudagraph_stats = None
         if self.vllm_config.observability_config.cudagraph_metrics:
@@ -4165,6 +4203,10 @@ class ModelRunnerFL(
         ):
             # Update persistent batch states.
             deferred_state_corrections_fn = self._update_states(scheduler_output)
+            if self._fl_native_sparse_runner_enabled:
+                self._reset_native_sparse_metadata_progress(scheduler_output)
+            if self._fl_kv_int8_sparse_runner_enabled:
+                self._reset_int8_sparse_metadata_progress(scheduler_output)
 
             if has_ec_transfer() and not get_ec_transfer().is_consumer:
                 with self.maybe_get_ec_connector_output(
@@ -4210,6 +4252,10 @@ class ModelRunnerFL(
                 scheduler_output,
                 num_scheduled_tokens_np,
             )
+            if self._fl_native_sparse_runner_enabled:
+                self._refresh_native_sparse_metadata(num_scheduled_tokens_np)
+            if self._fl_kv_int8_sparse_runner_enabled:
+                self._refresh_int8_sparse_metadata(num_scheduled_tokens_np)
 
             cascade_attn_prefix_lens = None
             # Disable cascade attention when using microbatching (DBO)
@@ -4234,6 +4280,7 @@ class ModelRunnerFL(
                 max_num_scheduled_tokens=max_num_scheduled_tokens,
                 use_cascade_attn=cascade_attn_prefix_lens is not None,
                 num_encoder_reqs=len(scheduler_output.scheduled_encoder_inputs),
+                log_native_sparse_route=True,
             )
 
             logger.debug(
@@ -5765,6 +5812,7 @@ class ModelRunnerFL(
         is_graph_capturing: bool = False,
         num_active_loras: int = 0,
         profile_seq_lens: int | None = None,
+        native_sparse_decode_mode: bool | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Run a dummy forward pass to warm up/profile run or capture the
@@ -5877,6 +5925,7 @@ class ModelRunnerFL(
                 # `force_num_active_loras` is used for cudagraph capture; because we
                 # need to capture graphs for specific num_active_loras counts
                 force_num_active_loras=num_active_loras,
+                native_sparse_decode_mode=native_sparse_decode_mode,
             )
         )
 
@@ -6458,6 +6507,15 @@ class ModelRunnerFL(
 
     def _cleanup_profiling_kv_cache(self) -> None:
         _accelerator_synchronize()
+        self._fl_native_sparse_metadata_planner = None
+        self._fl_native_sparse_metadata_refresher = None
+        if self._fl_kv_int8_sparse_runner_enabled:
+            from vllm_fl.ops import int8_sparse
+
+            int8_sparse.clear_cache_bindings(
+                self.compilation_config.static_forward_context
+            )
+        self._fl_kv_int8_sparse_runner_enabled = False
         if hasattr(self, "kv_caches") and self.kv_caches:
             for i in range(len(self.kv_caches)):
                 self.kv_caches[i] = None  # type: ignore
@@ -6479,11 +6537,16 @@ class ModelRunnerFL(
                 )
             # Clean up quantized KV cache scale views
             # (int8_per_token_head, fp8_per_token_head)
+            if hasattr(layer, "kv_int8_scales"):
+                layer.kv_int8_scales = None
             if hasattr(layer, "impl"):
-                if hasattr(layer.impl, "_k_scale_cache"):
-                    layer.impl._k_scale_cache = None
-                if hasattr(layer.impl, "_v_scale_cache"):
-                    layer.impl._v_scale_cache = None
+                for name in (
+                    "_fl_native_sparse_metadata",
+                    "_k_scale_cache",
+                    "_v_scale_cache",
+                ):
+                    if hasattr(layer.impl, name):
+                        setattr(layer.impl, name, None)
 
         gc.collect()
         if hasattr(torch.accelerator, "empty_cache"):
@@ -6533,6 +6596,17 @@ class ModelRunnerFL(
             if self.encoder_cudagraph_manager is not None:
                 logger.info("Initialized EncoderCudaGraphManager for vision encoder")
 
+    def _cudagraph_capture_count(
+        self, mode: CUDAGraphMode, descriptors: list[BatchDescriptor]
+    ) -> int:
+        count = len(descriptors)
+        if (
+            self._fl_native_sparse_runner_enabled
+            or self._fl_kv_int8_sparse_runner_enabled
+        ) and mode == CUDAGraphMode.FULL:
+            count += sum(descriptor.uniform for descriptor in descriptors)
+        return count
+
     @managed_inference_mode()
     def profile_cudagraph_memory(self) -> int:
         with set_current_vllm_config(self.vllm_config):
@@ -6545,7 +6619,9 @@ class ModelRunnerFL(
         # is initialized later so it does not keep profiling-only graph state.
         encoder_cudagraph_manager = self._create_encoder_cudagraph_manager()
 
-        decoder_graphs = sum(len(descs) for _, descs in capture_descs)
+        decoder_graphs = sum(
+            self._cudagraph_capture_count(mode, descs) for mode, descs in capture_descs
+        )
         encoder_graphs = (
             encoder_cudagraph_manager.get_num_graphs_to_capture()
             if encoder_cudagraph_manager is not None
@@ -6559,7 +6635,8 @@ class ModelRunnerFL(
 
         graph_groups = [
             *(
-                f"{mode.name}={len(descs)} (largest={descs[0].num_tokens})"
+                f"{mode.name}={self._cudagraph_capture_count(mode, descs)} "
+                f"(largest={descs[0].num_tokens})"
                 for mode, descs in capture_descs
                 if descs
             ),
@@ -6613,21 +6690,49 @@ class ModelRunnerFL(
                         free_after = current_platform.torch_device_fn.mem_get_info()[0]
                         mem_samples.append(mem_before - free_after)
 
-                    first_capture = mem_samples[0]
-                    # Use at least 1 MiB per graph for driver overhead
-                    per_graph = max(mem_samples[1] if len(mem_samples) > 1 else 0, 1 << 20)
-
-                    shared_memory_estimate[mode] = first_capture
-                    per_graph_estimate[mode] = per_graph * (len(descs) - 1)
-
-                    logger.debug(
-                        "Estimated %s CUDA graph memory: "
-                        "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
-                        mode.name,
-                        first_capture / (1 << 20),
-                        len(descs),
-                        per_graph / (1 << 20),
+                    pair_capture = (
+                        (
+                            self._fl_native_sparse_runner_enabled
+                            or self._fl_kv_int8_sparse_runner_enabled
+                        )
+                        and mode == CUDAGraphMode.FULL
+                        and all(descriptor.uniform for descriptor in descs)
                     )
+                    if pair_capture:
+                        from vllm_fl.ops import native_sparse
+
+                        first_capture, per_graph, estimated = (
+                            native_sparse.graph_pair_memory_estimate(
+                                mem_samples, len(descs)
+                            )
+                        )
+                        shared_memory_estimate[mode] = first_capture
+                        per_graph_estimate[mode] = estimated - first_capture
+                        logger.debug(
+                            "Estimated %s CUDA graph-pair memory: "
+                            "%.2f MiB first-pair + (%d-1) × %.2f MiB per-pair",
+                            mode.name,
+                            first_capture / (1 << 20),
+                            len(descs),
+                            per_graph / (1 << 20),
+                        )
+                    else:
+                        first_capture = mem_samples[0]
+                        # Use at least 1 MiB per graph for driver overhead
+                        per_graph = max(
+                            mem_samples[1] if len(mem_samples) > 1 else 0,
+                            1 << 20,
+                        )
+                        shared_memory_estimate[mode] = first_capture
+                        per_graph_estimate[mode] = per_graph * (len(descs) - 1)
+                        logger.debug(
+                            "Estimated %s CUDA graph memory: "
+                            "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
+                            mode.name,
+                            first_capture / (1 << 20),
+                            len(descs),
+                            per_graph / (1 << 20),
+                        )
 
                 if encoder_cudagraph_manager is not None:
                     mem_before = current_platform.torch_device_fn.mem_get_info()[0]
@@ -6750,29 +6855,45 @@ class ModelRunnerFL(
         if num_warmups is None:
             num_warmups = self.compilation_config.cudagraph_num_of_warmups
         force_attention = cudagraph_runtime_mode == CUDAGraphMode.FULL
-        for _ in range(num_warmups):
+        route_modes: tuple[bool | None, ...] = (None,)
+        if (
+            self._fl_native_sparse_runner_enabled
+            or self._fl_kv_int8_sparse_runner_enabled
+        ):
+            from vllm_fl.ops import native_sparse
+
+            # Capture/profiling must explicitly exercise both routes. Dummy
+            # sequence lengths can be one and do not encode the graph key.
+            route_modes = native_sparse.full_decode_capture_modes(
+                True, cudagraph_runtime_mode, desc
+            )
+
+        for native_sparse_decode_mode in route_modes:
+            for _ in range(num_warmups):
+                self._dummy_run(
+                    desc.num_tokens,
+                    cudagraph_runtime_mode=CUDAGraphMode.NONE,
+                    force_attention=force_attention,
+                    uniform_decode=desc.uniform,
+                    allow_microbatching=allow_microbatching,
+                    skip_eplb=True,
+                    remove_lora=False,
+                    num_active_loras=desc.num_active_loras,
+                    profile_seq_lens=profile_seq_lens,
+                    native_sparse_decode_mode=native_sparse_decode_mode,
+                )
             self._dummy_run(
                 desc.num_tokens,
-                cudagraph_runtime_mode=CUDAGraphMode.NONE,
-                force_attention=force_attention,
+                cudagraph_runtime_mode=cudagraph_runtime_mode,
                 uniform_decode=desc.uniform,
                 allow_microbatching=allow_microbatching,
                 skip_eplb=True,
                 remove_lora=False,
                 num_active_loras=desc.num_active_loras,
+                is_graph_capturing=True,
                 profile_seq_lens=profile_seq_lens,
+                native_sparse_decode_mode=native_sparse_decode_mode,
             )
-        self._dummy_run(
-            desc.num_tokens,
-            cudagraph_runtime_mode=cudagraph_runtime_mode,
-            uniform_decode=desc.uniform,
-            allow_microbatching=allow_microbatching,
-            skip_eplb=True,
-            remove_lora=False,
-            num_active_loras=desc.num_active_loras,
-            is_graph_capturing=True,
-            profile_seq_lens=profile_seq_lens,
-        )
 
     def _capture_cudagraphs(
         self,
@@ -7204,6 +7325,40 @@ class ModelRunnerFL(
                     num_blocks = raw_tensor.numel() // kv_cache_spec.page_size_bytes
                 if isinstance(kv_cache_spec, AttentionSpec):
                     has_attn = True
+                    if (
+                        kv_cache_spec.page_size_padded == 17408
+                        and kv_cache_spec.dtype == torch.bfloat16
+                    ):
+                        from vllm_fl.ops import native_sparse
+
+                        if (
+                            native_sparse.is_enabled()
+                            and native_sparse.is_native_backend(attn_backend)
+                        ):
+                            if packing is not None or kernel_block_size != 16:
+                                raise RuntimeError(
+                                    "native sparse padded KV requires unpacked "
+                                    "16-token kernel blocks"
+                                )
+                            kv_cache = native_sparse.padded_view(raw_tensor, num_blocks)
+                            if tuple(kv_cache.shape) != (
+                                2,
+                                num_blocks,
+                                16,
+                                2,
+                                128,
+                            ):
+                                raise RuntimeError(
+                                    "native sparse padded KV view has unexpected shape "
+                                    f"{tuple(kv_cache.shape)}"
+                                )
+                            kv_caches[layer_name] = kv_cache
+                            continue
+                        if native_sparse.is_native_backend(attn_backend):
+                            raise RuntimeError(
+                                "native sparse padded KV spec reached reshape while "
+                                "the startup gate is disabled"
+                            )
                     num_blocks_per_kv_block = (
                         kv_cache_spec.block_size // kernel_block_size
                     )
@@ -7356,7 +7511,146 @@ class ModelRunnerFL(
             self.kv_caches,
             num_attn_module,
         )
+        self._bind_kv_int8_scales(kv_caches)
+        self._bind_native_sparse_metadata(kv_caches)
+        self._bind_int8_sparse_metadata(kv_caches)
         return kv_caches
+
+    def _bind_kv_int8_scales(self, kv_caches: dict[str, torch.Tensor]) -> None:
+        """Create the fp16 scale views once, before any CUDA graph capture."""
+        from vllm_fl.attention import kv_int8
+
+        if not kv_int8.kv_int8_enabled():
+            return
+        ctx = self.compilation_config.static_forward_context
+        count = 0
+        page_strides = set()
+        for layer_name, kv_cache in kv_caches.items():
+            if isinstance(kv_cache, torch.Tensor) and kv_cache.dtype == torch.int8:
+                if not kv_int8.is_int8_layout(kv_cache):
+                    raise RuntimeError(
+                        f"unexpected INT8 KV layout for {layer_name}: "
+                        f"{tuple(kv_cache.shape)} {kv_cache.stride()}"
+                    )
+                kv_int8.scale_view(kv_cache)  # validates the page geometry
+                ctx[layer_name].kv_int8_scales = kv_int8.half_base(kv_cache)
+                page_strides.add(kv_int8.page_stride_bytes(kv_cache))
+                count += 1
+        kv_int8.logger.info(
+            "VLLM_FL_KV_INT8: %d layers use INT8 KV page strides %s bytes per %d tokens",
+            count,
+            ",".join(str(x) for x in sorted(page_strides)),
+            kv_int8.PAGE_TOKENS,
+        )
+
+    def _bind_native_sparse_metadata(self, kv_caches: dict[str, torch.Tensor]) -> None:
+        """Bind per-layer aliases and one cross-layer refresh path before graph capture."""
+        from vllm_fl.ops import native_sparse
+
+        self._fl_native_sparse_runner_enabled = native_sparse.is_enabled()
+        if not self._fl_native_sparse_runner_enabled:
+            return
+        ctx = self.compilation_config.static_forward_context
+        count = 0
+        refresh_caches = []
+        for layer_name, kv_cache in kv_caches.items():
+            if not native_sparse.is_padded_cache(kv_cache):
+                continue
+            layer = ctx.get(layer_name)
+            impl = getattr(layer, "impl", None)
+            if impl is None:
+                raise RuntimeError(
+                    f"native sparse KV layer {layer_name} has no attention implementation"
+                )
+            native_sparse.bind_kv_metadata(kv_cache, impl)
+            refresh_caches.append(kv_cache)
+            count += 1
+        if count == 0:
+            raise RuntimeError("native sparse decode enabled without padded KV layers")
+        from vllm_fl.attention import native_sparse_decode as core
+
+        self._fl_native_sparse_metadata_refresher = core.MultiLayerMetadataRefresher(
+            refresh_caches
+        )
+        self._fl_native_sparse_metadata_planner = native_sparse.MetadataRefreshPlanner(
+            int(refresh_caches[0].shape[1]),
+            native_sparse.effective_dense_limit(),
+            self.device,
+            pin_memory=True,
+        )
+        logger.info("Bound native sparse KV metadata views for %d layers", count)
+
+    def _bind_int8_sparse_metadata(self, kv_caches: dict[str, torch.Tensor]) -> None:
+        """Bind sparse INT8 metadata after cache allocation and before capture."""
+        from vllm_fl.ops import int8_sparse
+
+        self._fl_kv_int8_sparse_runner_enabled = int8_sparse.is_enabled()
+        if not self._fl_kv_int8_sparse_runner_enabled:
+            return
+        try:
+            count = int8_sparse.bind_refresher(
+                kv_caches, self.compilation_config.static_forward_context
+            )
+            if count <= 0:
+                raise RuntimeError("sparse INT8 KV enabled without bound cache layers")
+        except Exception as exc:
+            int8_sparse.clear_cache_bindings(
+                self.compilation_config.static_forward_context
+            )
+            int8_sparse.disable(
+                f"could not bind sparse INT8 KV caches: {type(exc).__name__}: {exc}"
+            )
+            self._fl_kv_int8_sparse_runner_enabled = False
+            if self._fl_kv_int8_sparse_accounted_bytes:
+                self.model_memory_usage -= self._fl_kv_int8_sparse_accounted_bytes
+                self._fl_kv_int8_sparse_accounted_bytes = 0
+            self.vllm_config.additional_config["fl_kv_int8_sparse_enabled"] = False
+            self.vllm_config.additional_config.pop("fl_kv_int8_sparse_hash", None)
+            logger.warning(
+                "Sparse INT8 KV metadata binding failed; using the dense INT8 route",
+                exc_info=True,
+            )
+            return
+        logger.info("Bound sparse INT8 KV metadata views for %d layers", count)
+
+    def _reset_native_sparse_metadata_progress(self, scheduler_output) -> None:
+        planner = self._fl_native_sparse_metadata_planner
+        if planner is not None:
+            planner.reset_for_scheduler(scheduler_output)
+
+    def _refresh_native_sparse_metadata(self, num_scheduled_tokens_np) -> None:
+        planner = self._fl_native_sparse_metadata_planner
+        refresher = self._fl_native_sparse_metadata_refresher
+        if planner is None or refresher is None:
+            return
+        num_reqs = self.input_batch.num_reqs
+        planner.refresh(
+            refresher,
+            self.input_batch.req_ids,
+            self.input_batch.num_computed_tokens_cpu[:num_reqs],
+            num_scheduled_tokens_np,
+            self.input_batch.block_table[0].get_cpu_tensor(),
+        )
+
+    def _reset_int8_sparse_metadata_progress(self, scheduler_output) -> None:
+        if not self._fl_kv_int8_sparse_runner_enabled:
+            return
+        from vllm_fl.ops import int8_sparse
+
+        int8_sparse.reset_metadata_progress(scheduler_output)
+
+    def _refresh_int8_sparse_metadata(self, num_scheduled_tokens_np) -> None:
+        if not self._fl_kv_int8_sparse_runner_enabled:
+            return
+        from vllm_fl.ops import int8_sparse
+
+        num_reqs = self.input_batch.num_reqs
+        int8_sparse.refresh_metadata(
+            self.input_batch.req_ids,
+            self.input_batch.num_computed_tokens_cpu[:num_reqs],
+            num_scheduled_tokens_np,
+            self.input_batch.block_table[0].get_cpu_tensor(),
+        )
 
     def maybe_add_kv_sharing_layers_to_kv_cache_groups(
         self, kv_cache_config: KVCacheConfig
@@ -7553,6 +7847,28 @@ class ModelRunnerFL(
         if has_ec_transfer() and not get_ec_transfer().is_consumer:
             return {}
         kv_cache_spec: dict[str, KVCacheSpec] = {}
+        native_sparse = None
+        native_sparse_candidates: dict[str, tuple[object, object, tuple[int, ...]]] = {}
+        native_sparse_compatible = True
+        int8_sparse = None
+        int8_sparse_candidates: set[str] = set()
+        int8_sparse_compatible = True
+        try:
+            from vllm_fl.ops import native_sparse as _native_sparse
+
+            if _native_sparse.is_enabled():
+                native_sparse = _native_sparse
+        except Exception:
+            native_sparse = None
+        try:
+            from vllm_fl.ops import int8_sparse as _int8_sparse
+
+            if _int8_sparse.is_enabled():
+                int8_sparse = _int8_sparse
+        except Exception:
+            int8_sparse = None
+        if native_sparse is not None and int8_sparse is not None:
+            int8_sparse_compatible = False
         layer_type = cast(type[Any], AttentionLayerBase)
         attn_layers = get_layers_from_vllm_config(self.vllm_config, layer_type)
         for layer_name, attn_module in attn_layers.items():
@@ -7574,12 +7890,122 @@ class ModelRunnerFL(
                     backend = attn_module.get_attn_backend()
                     # indexes_kv_by_block_stride() -> get_kv_cache_stride_order()
                     # -> get_kv_cache_layout() needs the current vLLM config.
+                    layout_order = ()
                     with set_current_vllm_config(self.vllm_config):
                         indexes = backend.indexes_kv_by_block_stride()
+                        if native_sparse is not None or int8_sparse is not None:
+                            try:
+                                layout_order = backend.get_kv_cache_stride_order()
+                            except (AttributeError, NotImplementedError):
+                                layout_order = ()
                     spec = replace(spec, indexes_kv_by_block_stride=indexes)
+                    if int8_sparse is not None:
+                        int8_sparse_candidates.add(layer_name)
+                        int8_sparse_compatible &= int8_sparse.spec_is_supported(
+                            spec, backend, layout_order, attn_module.impl
+                        )
+                    spec = self._maybe_kv_int8_spec(layer_name, spec, backend)
+                    if native_sparse is not None:
+                        native_sparse_candidates[layer_name] = (
+                            spec,
+                            backend,
+                            tuple(layout_order),
+                        )
+                        native_sparse_compatible &= native_sparse.spec_is_supported(
+                            spec, backend, layout_order
+                        )
+                        native_sparse_compatible &= native_sparse.impl_is_supported(
+                            attn_module.impl
+                        )
                 kv_cache_spec[layer_name] = spec
 
+        if int8_sparse is not None:
+            int8_sparse_compatible &= bool(int8_sparse_candidates) and set(
+                int8_sparse_candidates
+            ) == set(kv_cache_spec)
+            if int8_sparse_compatible:
+                from vllm_fl.attention import kv_int8
+
+                for layer_name, spec in tuple(kv_cache_spec.items()):
+                    kv_cache_spec[layer_name] = replace(
+                        spec, page_size_padded=kv_int8.SPARSE_PAGE_BYTES
+                    )
+            else:
+                self._disable_int8_sparse_candidate(
+                    int8_sparse, "unsupported loaded attention/KV spec"
+                )
+
+        if native_sparse is not None:
+            if (
+                native_sparse_compatible
+                and native_sparse_candidates
+                and set(native_sparse_candidates) == set(kv_cache_spec)
+            ):
+                page_size = native_sparse.padded_page_size()
+                for layer_name, spec in tuple(kv_cache_spec.items()):
+                    kv_cache_spec[layer_name] = replace(
+                        spec, page_size_padded=page_size
+                    )
+            else:
+                native_sparse.disable("unsupported loaded attention/KV spec")
+                self.vllm_config.additional_config[
+                    "fl_native_sparse_decode_enabled"
+                ] = False
+                self.vllm_config.additional_config.pop(
+                    "fl_native_sparse_decode_hash", None
+                )
+
         return kv_cache_spec
+
+    def _disable_int8_sparse_candidate(self, int8_sparse, reason: str) -> None:
+        int8_sparse.disable(reason)
+        self._fl_kv_int8_sparse_runner_enabled = False
+        if self._fl_kv_int8_sparse_accounted_bytes:
+            self.model_memory_usage -= self._fl_kv_int8_sparse_accounted_bytes
+            self._fl_kv_int8_sparse_accounted_bytes = 0
+        self.vllm_config.additional_config["fl_kv_int8_sparse_enabled"] = False
+        self.vllm_config.additional_config.pop("fl_kv_int8_sparse_hash", None)
+        logger.warning("Sparse INT8 KV disabled before page allocation: %s", reason)
+
+    def _maybe_kv_int8_spec(self, layer_name, spec, backend):
+        """VLLM_FL_KV_INT8=1: plugin INT8 pages (8192 B data + 128 B fp16 scales)."""
+        from vllm_fl.attention import kv_int8
+
+        if not kv_int8.kv_int8_enabled():
+            return spec
+        from vllm_fl.dispatch.backends.flaggems.impl.gqa_hybrid_attention import (
+            HybridAttentionBackend,
+        )
+
+        if not (
+            isinstance(backend, type) and issubclass(backend, HybridAttentionBackend)
+        ):
+            raise ValueError(
+                "VLLM_FL_KV_INT8=1 requires the hybrid attention backend "
+                f"(VLLM_FL_GQA_HYBRID=1); got {getattr(backend, '__name__', backend)}"
+            )
+        if not (
+            type(spec) is FullAttentionSpec
+            and spec.sliding_window is None
+            and spec.attention_chunk_size is None
+            and not spec.non_causal
+            and spec.kv_quant_mode == KVQuantMode.NONE
+            and spec.dtype == torch.bfloat16
+            and spec.page_size_padded is None
+            and (spec.block_size, spec.num_kv_heads, spec.head_size, spec.head_size_v)
+            == (
+                kv_int8.PAGE_TOKENS,
+                kv_int8.NUM_KV_HEADS,
+                kv_int8.HEAD_DIM,
+                kv_int8.HEAD_DIM,
+            )
+            and self.cache_config.cache_dtype == "auto"
+        ):
+            raise ValueError(
+                "VLLM_FL_KV_INT8=1 supports only BF16 full attention with block 16, "
+                f"2 KV heads and head size 128 (layer {layer_name}: {spec})"
+            )
+        return replace(spec, dtype=torch.int8, page_size_padded=kv_int8.PAGE_BYTES)
 
     def _to_list(self, sampled_token_ids: torch.Tensor) -> list[list[int]]:
         # This is a short term mitigation for issue mentioned in
