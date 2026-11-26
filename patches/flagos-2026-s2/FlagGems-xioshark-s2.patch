@@ -1,0 +1,509 @@
+diff --git a/src/flag_gems/ops/exponential_.py b/src/flag_gems/ops/exponential_.py
+index dd1397b1..ff369934 100644
+--- a/src/flag_gems/ops/exponential_.py
++++ b/src/flag_gems/ops/exponential_.py
+@@ -104,6 +104,7 @@ def transform_exponential_f64(u, inv_lambd, eps_minus):
+         triton.Config({"BLOCK": 512}, num_warps=8, num_stages=3),
+     ],
+     key=["N"],
++    strategy=["align32"],
+ )
+ @triton.jit(do_not_specialize=["philox_seed", "philox_offset", "N"])
+ def fused_exponential_kernel_f32_unroll8(
+@@ -164,6 +165,7 @@ def fused_exponential_kernel_f32_unroll8(
+         triton.Config({"BLOCK": 512}, num_warps=8, num_stages=3),
+     ],
+     key=["N"],
++    strategy=["align32"],
+ )
+ @triton.jit(do_not_specialize=["philox_seed", "philox_offset", "N"])
+ def fused_exponential_kernel_f32(
+@@ -206,6 +208,7 @@ def fused_exponential_kernel_f32(
+         triton.Config({"BLOCK": 512}, num_warps=8, num_stages=3),
+     ],
+     key=["N"],
++    strategy=["align32"],
+ )
+ @triton.jit(do_not_specialize=["philox_seed", "philox_offset", "N"])
+ def fused_exponential_kernel_f32_small(
+@@ -248,6 +251,7 @@ def fused_exponential_kernel_f32_small(
+         triton.Config({"BLOCK": 512}, num_warps=8, num_stages=3),
+     ],
+     key=["N"],
++    strategy=["align32"],
+ )
+ @triton.jit(do_not_specialize=["philox_seed", "philox_offset", "N"])
+ def fused_exponential_kernel_f64(
+diff --git a/src/flag_gems/ops/index.py b/src/flag_gems/ops/index.py
+index 807bd38b..c7958ad0 100644
+--- a/src/flag_gems/ops/index.py
++++ b/src/flag_gems/ops/index.py
+@@ -666,6 +666,33 @@ def _linearized_adjacent_index_configs(inp, indices):
+     return _index_candidate_configs(inp, start_dim, len(tensor_indices), tensor_indices)
+ 
+ 
++import triton
++import triton.language as tl
++
++
++@triton.jit
++def _fast_dim0_index_kernel(
++    inp_ptr,
++    idx_ptr,
++    out_ptr,
++    D0: tl.int64,
++    M: tl.int64,
++    N: tl.int64,
++    BLOCK_N: tl.constexpr,
++):
++    pid_m = tl.program_id(0)
++    pid_n = tl.program_id(1)
++    if pid_m >= M:
++        return
++    raw = tl.load(idx_ptr + pid_m).to(tl.int64)
++    row = tl.where(raw < 0, raw + D0, raw)
++    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    mask_n = offs_n < N
++    valid = (row >= 0) & (row < D0) & mask_n
++    val = tl.load(inp_ptr + row * N + offs_n, mask=valid, other=0)
++    tl.store(out_ptr + pid_m * N + offs_n, val, mask=mask_n)
++
++
+ def _run_linearized_adjacent_index(inp, indices):
+     tensor_index_dims = _tensor_index_dims(indices)
+     start_dim = tensor_index_dims[0]
+@@ -683,6 +710,19 @@ def _run_linearized_adjacent_index(inp, indices):
+ 
+     # The generated kernel assumes contiguous index tensors and contiguous input.
+     tensor_indices = [idx.contiguous() for idx in tensor_indices]
++    if start_dim == 0 and len(tensor_indices) == 1 and inp.is_cuda:
++        idx0 = tensor_indices[0]
++        M = int(idx0.numel())
++        D0 = int(inp.shape[0])
++        N = _volume(inp.shape[1:])
++        block_n = min(2048, max(64, _next_power_of_2(N)))
++        warps = 8 if block_n >= 2048 else 4
++        grid = (M, (N + block_n - 1) // block_n)
++        with runtime.torch_device_fn.device(inp.device):
++            _fast_dim0_index_kernel[grid](
++                inp, idx0, out, D0, M, N, BLOCK_N=block_n, num_warps=warps
++            )
++        return out
+     _linearized_adjacent_index_func(inp, start_dim, tensor_indices, out)
+     return out.contiguous()
+ 
+diff --git a/src/flag_gems/ops/linear.py b/src/flag_gems/ops/linear.py
+index ca679372..93edf057 100644
+--- a/src/flag_gems/ops/linear.py
++++ b/src/flag_gems/ops/linear.py
+@@ -159,6 +159,15 @@ def linear(input, weight, bias=None):
+ 
+     # Ensure weight is contiguous and properly shaped
+     weight = weight.contiguous()
++    if (
++        bias is None
++        and input.is_cuda
++        and input_flat.is_contiguous()
++        and input.dtype in (torch.float16, torch.bfloat16)
++        and weight.dtype is input.dtype
++    ):
++        output = torch.mm(input_flat, weight.t()).view(*batch_dims, N)
++        return output.squeeze(0) if single_1d else output
+ 
+     # Allocate output
+     output = torch.empty((M, N), device=input.device, dtype=input.dtype)
+diff --git a/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py b/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
+index 5fefae2d..31cb567e 100644
+--- a/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
+@@ -51,6 +51,7 @@ def _to_tl_type(ty):
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K"],
++    strategy=["align32", "align32", "align32"],
+     prune_configs_by={
+         "early_config_prune": early_config_prune,
+         "perf_model": estimate_matmul_time,
+@@ -110,16 +111,13 @@ def mm_kernel(
+     else:
+         pid = tl.program_id(0)
+         pid_z = tl.program_id(1)
+-    # grid_m = tl.cdiv(M, BLOCK_M)
++    grid_m = tl.cdiv(M, BLOCK_M)
+     grid_n = tl.cdiv(N, BLOCK_N)
+-    # # re-order program ID for better L2 performance
+-    # width = GROUP_M * grid_n
+-    # group_id = pid // width
+-    # group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
+-    # pid_m = group_id * GROUP_M + (pid % group_size)
+-    # pid_n = (pid % width) // (group_size)
+-    pid_m = pid // grid_n
+-    pid_n = pid % grid_n
++    width = GROUP_M * grid_n
++    group_id = pid // width
++    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
++    pid_m = group_id * GROUP_M + (pid % group_size)
++    pid_n = (pid % width) // group_size
+     # do matrix multiplication
+     if UPGRADE_A_OFFS:
+         rm = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M)).to(tl.int64)
+@@ -203,8 +201,84 @@ def mm_kernel(
+         tl.atomic_add(C, acc, mask=mask)
+ 
+ 
++_MM_FAST_CACHE = {}
++_TRITON_VER = tuple(int(x) for x in triton.__version__.split(".")[:2])
++_PASS_CONST_TO_COMPILED = _TRITON_VER[0] == 3 and 3 <= _TRITON_VER[1] <= 6
++
++
++def _int_spec(x: int) -> int:
++    return 1 if x == 1 else (16 if (x & 15) == 0 else 0)
++
++
++def _select_iluvatar_mm_config(M: int, N: int, K: int):
++    if M >= 256:
++        return (256, 256, 32, 16, 2)
++    if M > 64:
++        return (128, 256, 32, 8, 2)
++    if M > 32:
++        if N >= 4096:
++            return (64, 256, 64, 16, 1)
++        if K >= 4096:
++            return (64, 64, 128, 16, 2)
++        return (64, 64, 128, 16, 1)
++    if M > 16:
++        if N >= 4096:
++            return (32, 256, 64, 8, 1)
++        if K >= 4096:
++            return (32, 64, 128, 8, 2)
++        return (32, 64, 128, 8, 1)
++    if N >= 4096:
++        return (16, 128, 64, 4, 1)
++    if K >= 4096:
++        return (16, 64, 128, 4, 2)
++    return (16, 64, 128, 4, 1)
++
++
+ def _launch_mm(a, b, c, M, N, K):
+     """Launch Triton matmul _kernel; c must be pre-allocated."""
++    if (
++        a.dtype is torch.bfloat16
++        and b.dtype is torch.bfloat16
++        and c.dtype is torch.bfloat16
++        and (K & 127) == 0
++        and K > 0
++        and M > 0
++        and N > 0
++        and M * K < (1 << 31)
++        and K * N < (1 << 31)
++        and M * N < (1 << 31)
++        and ((a.data_ptr() | b.data_ptr() | c.data_ptr()) & 15) == 0
++    ):
++        bm, bn, bk, nw, ns = _select_iluvatar_mm_config(M, N, K)
++        grid_3d = (((M + bm - 1) // bm) * ((N + bn - 1) // bn), 1, 1)
++        sa0, sa1 = a.stride(0), a.stride(1)
++        sb0, sb1 = b.stride(0), b.stride(1)
++        sc0, sc1 = c.stride(0), c.stride(1)
++        cache_key = (
++            a.device.index, bm, bn, bk, nw, ns,
++            _int_spec(M), _int_spec(N), _int_spec(K),
++            _int_spec(sa0), _int_spec(sa1),
++            _int_spec(sb0), _int_spec(sb1),
++            _int_spec(sc0), _int_spec(sc1),
++        )
++        cached = _MM_FAST_CACHE.get(cache_key)
++        with torch_device_fn.device(a.device):
++            if cached is not None:
++                kernel, const_tail = cached
++                kernel[grid_3d](a, b, c, M, N, K, sa0, sa1, sb0, sb1, sc0, sc1, *const_tail)
++                return c
++            const_args = (
++                tl.float32, None, True, bm, bn, bk, 8, 1, True,
++                tl.bfloat16, False, False, False, False,
++            )
++            const_tail = const_args if _PASS_CONST_TO_COMPILED else ()
++            kernel = mm_kernel.jit_function[grid_3d](
++                a, b, c, M, N, K, sa0, sa1, sb0, sb1, sc0, sc1,
++                *const_args, num_warps=nw, num_stages=ns,
++            )
++            _MM_FAST_CACHE[cache_key] = (kernel, const_tail)
++        return c
++
+     ab_dtype = get_higher_dtype(a.dtype, b.dtype)
+     acc_dtype_tl = tl.float32
+     ab_dtype_tl = _to_tl_type(ab_dtype)
+diff --git a/src/flag_gems/runtime/backend/_iluvatar/tune_configs.yaml b/src/flag_gems/runtime/backend/_iluvatar/tune_configs.yaml
+index ae0e1150..9e396ea0 100644
+--- a/src/flag_gems/runtime/backend/_iluvatar/tune_configs.yaml
++++ b/src/flag_gems/runtime/backend/_iluvatar/tune_configs.yaml
+@@ -181,6 +181,7 @@ mm:
+     num_warps: warps
+     num_stages: stages
+   block_m:
++  - 16
+   - 32
+   - 64
+   - 128
+@@ -197,6 +198,7 @@ mm:
+   split_k:
+   - 1
+   warps:
++  - 4
+   - 8
+   - 16
+   stages:
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/mm.py b/src/flag_gems/runtime/backend/_metax/ops/mm.py
+index cd19518e..08ae0e83 100644
+--- a/src/flag_gems/runtime/backend/_metax/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_metax/ops/mm.py
+@@ -1009,7 +1009,71 @@ def general_mm_nn(a, b, c, M, N, K):
+     return c
+ 
+ 
++_RAW_MM_KERNEL_NT = None
++
++
++def _get_raw_mm_kernel_nt():
++    global _RAW_MM_KERNEL_NT
++    if _RAW_MM_KERNEL_NT is None:
++        fn = mm_kernel_nt
++        while not isinstance(fn, triton.runtime.JITFunction) and hasattr(fn, "fn"):
++            fn = fn.fn
++        _RAW_MM_KERNEL_NT = fn
++    return _RAW_MM_KERNEL_NT
++
++
++def _select_c500_mm_nt_config(M: int, N: int, K: int):
++    if M <= 64:
++        if N >= 65536:
++            return 64, 128, 64, 8, 3, 4, "basic"
++        if K >= 6144:
++            return 32, 64, 64, 8, 4, 4, "basic"
++        if N == 2560:
++            return 64, 64, 64, 8, 4, 4, "basic"
++        if N >= 2048:
++            return 64, 128, 64, 8, 2, 8, "basic"
++        return 32, 64, 64, 8, 4, 4, "basic"
++    if M <= 128:
++        return 64, 128, 64, 8, 2, 8, "basic"
++    if M <= 512:
++        return 128, 128, 64, 8, 2, 8, "basic"
++    if M <= 4096 and (N <= 2048 or K >= 6144):
++        return 128, 128, 64, 8, 2, 8, "basic"
++    return 256, 256, 32, 8, 2, 8, "basic"
++
++
+ def general_mm_nt(a, b, c, M, N, K):
++    if (
++        M >= 16
++        and N >= 128
++        and K >= 128
++        and a.dtype in (torch.float16, torch.bfloat16)
++        and a.dtype is b.dtype
++        and a.dtype is c.dtype
++    ):
++        bm, bn, bk, gm, st, nw, pipe = _select_c500_mm_nt_config(M, N, K)
++        grid = (triton.cdiv(M, bm) * triton.cdiv(N, bn),)
++        raw_fn = _get_raw_mm_kernel_nt()
++        with torch_device_fn.device(a.device):
++            raw_fn[grid](
++                a,
++                b,
++                c,
++                M,
++                N,
++                K,
++                BLOCK_M=bm,
++                BLOCK_N=bn,
++                BLOCK_K=bk,
++                GROUP_M=gm,
++                EVEN_M=(M % bm == 0),
++                EVEN_N=(N % bn == 0),
++                EVEN_K=(K % bk == 0),
++                num_stages=st,
++                num_warps=nw,
++                pipeline=pipe,
++            )
++        return c
+     grid = lambda META: (
+         triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+     )
+@@ -1181,6 +1245,8 @@ def mm(a, b):
+         if _gemv_k_parallel_scenario(M, K):
+             return gemv_mm_k_parallel(a, b, c, M, K)
+         return gemv_mm(a, b, c, M, K)
++    if N != 256 and M * N > 65536 and nt_mm_scenario(a, b, c, M, N, K):
++        return general_mm_nt(a, b, c, M, N, K)
+     two_step_split_k = _select_two_step_split_k(M, N, K)
+     if two_step_split_k is not None:
+         return splitk_mm_two_step(a, b, c, M, N, K, two_step_split_k)
+@@ -1211,6 +1277,8 @@ def mm_out(a, b, *, out):
+         if _gemv_k_parallel_scenario(M, K):
+             return gemv_mm_k_parallel(a, b, c, M, K)
+         return gemv_mm(a, b, c, M, K)
++    if N != 256 and M * N > 65536 and nt_mm_scenario(a, b, c, M, N, K):
++        return general_mm_nt(a, b, c, M, N, K)
+     two_step_split_k = _select_two_step_split_k(M, N, K)
+     if two_step_split_k is not None:
+         return splitk_mm_two_step(a, b, out, M, N, K, two_step_split_k)
+diff --git a/src/flag_gems/runtime/backend/_metax/tune_configs.yaml b/src/flag_gems/runtime/backend/_metax/tune_configs.yaml
+index 90f583a6..15e0a0aa 100644
+--- a/src/flag_gems/runtime/backend/_metax/tune_configs.yaml
++++ b/src/flag_gems/runtime/backend/_metax/tune_configs.yaml
+@@ -377,6 +377,22 @@ mm_nt:
+     scenario: ""
+   num_stages: 2
+   num_warps: 8
++- META:
++    BLOCK_M: 128
++    BLOCK_N: 256
++    BLOCK_K: 32
++    pipeline: "basic"
++    scenario: ""
++  num_stages: 3
++  num_warps: 8
++- META:
++    BLOCK_M: 256
++    BLOCK_N: 256
++    BLOCK_K: 32
++    pipeline: "basic"
++    scenario: ""
++  num_stages: 2
++  num_warps: 8
+ mm_splitk:
+ - META:
+     BLOCK_M: 16
+diff --git a/src/flag_gems/runtime/backend/device_finder.py b/src/flag_gems/runtime/backend/device_finder.py
+index 8c9d5731..35745204 100644
+--- a/src/flag_gems/runtime/backend/device_finder.py
++++ b/src/flag_gems/runtime/backend/device_finder.py
+@@ -116,6 +116,10 @@ class DeviceDetector:
+             if key in os.environ:
+                 return str(os.environ.get(key).lower())
+ 
++        if "MACA_PATH" in os.environ or os.path.exists("/opt/maca"):
++            os.environ.setdefault("PYTORCH_NVML_BASED_CUDA_CHECK", "1")
++            return "metax"
++
+         return False
+ 
+     def _get_vendor_from_sys(self):
+diff --git a/src/flag_gems/utils/device_info.py b/src/flag_gems/utils/device_info.py
+index 92a26944..f8128b8f 100644
+--- a/src/flag_gems/utils/device_info.py
++++ b/src/flag_gems/utils/device_info.py
+@@ -26,8 +26,94 @@ class DeviceInfo:
+     sm_count: int
+ 
+ 
++@dataclass(frozen=True)
++class _MetaxLazyDeviceProps:
++    name: str = "MetaX C500"
++    major: int = 8
++    minor: int = 0
++    multi_processor_count: int = 104
++    multiProcessorCount: int = 104
++    L2_cache_size: int = 8388608
++    l2_cache_size: int = 8388608
++    max_shared_memory_per_multiprocessor: int = 65536
++    shared_memory_per_multiprocessor: int = 65536
++    max_shared_memory_per_block: int = 65536
++    shared_memory_per_block: int = 65536
++    warp_size: int = 64
++    total_memory: int = 68719476736
++
++
++def _install_metax_lazy_cuda_guards() -> None:
++    try:
++        import os as _os
++        import torch as _torch
++        import triton as _triton
++        if not ("MACA_PATH" in _os.environ or _os.path.exists("/opt/maca")):
++            return
++        _os.environ.setdefault("PYTORCH_NVML_BASED_CUDA_CHECK", "1")
++        if not getattr(_torch.cuda, "_metax_lazy_query_patched", False):
++            _orig_cd = _torch.cuda.current_device
++            _orig_gdp = _torch.cuda.get_device_properties
++            _orig_gdc = _torch.cuda.get_device_capability
++            _orig_gdn = _torch.cuda.get_device_name
++            _torch.cuda.current_device = (
++                lambda: 0 if not _torch.cuda.is_initialized() else _orig_cd()
++            )
++            _torch.cuda.get_device_properties = (
++                lambda device=None: _MetaxLazyDeviceProps()
++                if not _torch.cuda.is_initialized()
++                else _orig_gdp(device)
++            )
++            _torch.cuda.get_device_capability = (
++                lambda device=None: (8, 0)
++                if not _torch.cuda.is_initialized()
++                else _orig_gdc(device)
++            )
++            _torch.cuda.get_device_name = (
++                lambda device=None: "MetaX C500"
++                if not _torch.cuda.is_initialized()
++                else _orig_gdn(device)
++            )
++            _torch.cuda._metax_lazy_query_patched = True
++        _b = _triton.backends.backends.get("metax")
++        if _b is not None:
++            _drv = _b.driver
++            _mu = _drv.__init__.__globals__.get("MacaUtils")
++            if _mu is not None and not getattr(_mu, "_metax_lazy_patched", False):
++                _orig_mu_init = _mu.__init__
++
++                def _lazy_mu_init(self):
++                    _orig_mu_init(self)
++                    _orig_c_gdp = self.get_device_properties
++
++                    def _lazy_c_gdp(device=0):
++                        if not _torch.cuda.is_initialized():
++                            return {
++                                "max_shared_mem": 65536,
++                                "multiprocessor_count": 104,
++                                "sm_clock_rate": 1600000,
++                                "mem_clock_rate": 1600000,
++                                "mem_bus_width": 4096,
++                                "warpSize": 64,
++                            }
++                        return _orig_c_gdp(device)
++
++                    self.get_device_properties = _lazy_c_gdp
++
++                _mu.__init__ = _lazy_mu_init
++                _mu._metax_lazy_patched = True
++    except Exception:
++        pass
++
++
++_install_metax_lazy_cuda_guards()
++
++
+ @lru_cache(maxsize=1)
+ def get_device_id() -> int:
++    is_init = getattr(torch_device_fn, "is_initialized", None)
++    if callable(is_init) and not is_init():
++        return 0
+     try:
+         return torch_device_fn.current_device()
+     except Exception:
+@@ -39,6 +125,9 @@ def get_device_id() -> int:
+ 
+ @lru_cache(maxsize=1)
+ def get_device_properties():
++    is_init = getattr(torch_device_fn, "is_initialized", None)
++    if callable(is_init) and not is_init():
++        return _MetaxLazyDeviceProps()
+     device_id = get_device_id()
+     try:
+         return torch_device_fn.get_device_properties(device_id)
+@@ -51,6 +140,9 @@ def get_device_properties():
+ 
+ @lru_cache(maxsize=1)
+ def get_device_capability() -> tuple[int, int]:
++    is_init = getattr(torch_device_fn, "is_initialized", None)
++    if callable(is_init) and not is_init():
++        return (8, 0)
+     device_id = get_device_id()
+     try:
+         result = torch_device_fn.get_device_capability(device_id)

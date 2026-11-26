@@ -15,6 +15,9 @@ def _apply_top_k_top_p_no_triton(
 ) -> torch.Tensor:
     if p is None and k is None:
         return logits
+    _fast_fn = getattr(topk_topp_sampler, "_metax_fast_apply_top_k_top_p", None)
+    if _fast_fn is not None:
+        return _fast_fn(logits, k, p)
     return topk_topp_sampler.apply_top_k_top_p_pytorch(logits, k, p)
 
 
