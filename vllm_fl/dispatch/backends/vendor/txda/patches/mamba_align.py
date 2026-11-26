@@ -47,6 +47,9 @@ logger = init_logger(__name__)
 
 _installed = False
 
+# Distinguishes "attribute was absent before patching" from "was None".
+_MISSING = object()
+
 
 def _iter_state_slots(kv_cache_config, forward_context, copy_funcs, group_ids):
     """Yield ``(state, group_local_idx)`` in metadata order.
@@ -123,11 +126,18 @@ def copy_mamba_state_blocks(
             state[dst_blocks] = state[src_blocks]
 
 
-def install_mamba_align_native() -> None:
-    """Replace the V2 align kernels that address memory via loaded pointers."""
+def install_mamba_align_native():
+    """Replace the V2 align kernels that address memory via loaded pointers.
+
+    Returns an ``undo`` callable that restores the replaced class attributes and
+    the install flag, or ``None`` when nothing was changed (already installed, or
+    already patched by a previous attempt). Returning the undo lets the caller
+    roll a partially applied install back instead of leaving two of the four
+    replaced methods behind while ``_fl_txda_native_align`` still claims success.
+    """
     global _installed
     if _installed:
-        return
+        return None
 
     from vllm.model_executor.layers.mamba.mamba_utils import is_conv_state_dim_first
     from vllm.v1.worker import mamba_utils
@@ -268,10 +278,51 @@ def install_mamba_align_native() -> None:
             bias[move],
         )
 
-    ctx_cls.initialize_from_forward_context = initialize_from_forward_context
-    ctx_cls.compute_aligned_state_indices = _aligned_indices
-    ctx_cls.run_fused_precopy = _precopy
-    ctx_cls.run_fused_postprocess_align = _postprocess_align
-    ctx_cls._fl_txda_native_align = True
+    prev = {
+        name: getattr(ctx_cls, name, _MISSING)
+        for name in (
+            "initialize_from_forward_context",
+            "compute_aligned_state_indices",
+            "run_fused_precopy",
+            "run_fused_postprocess_align",
+            "_fl_txda_native_align",
+        )
+    }
+    installed = {
+        "initialize_from_forward_context": initialize_from_forward_context,
+        "compute_aligned_state_indices": _aligned_indices,
+        "run_fused_precopy": _precopy,
+        "run_fused_postprocess_align": _postprocess_align,
+        "_fl_txda_native_align": True,
+    }
+
+    def _undo() -> None:
+        # Best-effort: keep restoring the remaining attributes even if one
+        # restore raises, otherwise a single failure leaves the class in the
+        # half-patched state this undo exists to prevent.
+        for name, old in prev.items():
+            try:
+                if old is _MISSING:
+                    if hasattr(ctx_cls, name):
+                        delattr(ctx_cls, name)
+                else:
+                    setattr(ctx_cls, name, old)
+            except Exception:  # pragma: no cover - defensive
+                logger.warning(
+                    "could not restore %s.%s during install rollback",
+                    ctx_cls.__name__,
+                    name,
+                    exc_info=True,
+                )
+        globals()["_installed"] = False
+
+    try:
+        for name, value in installed.items():
+            setattr(ctx_cls, name, value)
+    except Exception:
+        _undo()
+        raise
+
     logger.info("Installed native TXDA Mamba align state copies")
     _installed = True
+    return _undo

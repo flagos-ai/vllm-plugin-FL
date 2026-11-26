@@ -33,6 +33,9 @@ logger = init_logger(__name__)
 
 _installed = False
 
+# Distinguishes "attribute was absent before patching" from "was None".
+_MISSING = object()
+
 
 def gather_block_tables(
     num_kv_cache_groups,
@@ -168,18 +171,27 @@ def apply_staged_write(
         flat[offset : offset + len(values)] = flat.new_tensor(values)
 
 
-def install_block_table_native() -> None:
-    """Replace the V2 block-table/slot-mapping kernels with native indexing."""
+def install_block_table_native():
+    """Replace the V2 block-table/slot-mapping kernels with native indexing.
+
+    Returns an ``undo`` callable that restores every replaced attribute and the
+    install flag, or ``None`` when nothing was changed. The undo matters because
+    this installer mutates two different classes (``BlockTables`` and the
+    ``buffer_utils`` staged-write types); without it a failure between them left
+    half the class patched while ``_installed`` was already set, so a retry
+    returned early and the staged writes never reached the block table.
+    """
     global _installed
     if _installed:
-        return
+        return None
 
     from vllm.v1.attention.backends.utils import PAD_SLOT_ID
     from vllm.v1.worker.gpu import block_table as bt_mod
+    from vllm.v1.worker.gpu import buffer_utils as bu
 
     cls = bt_mod.BlockTables
     if getattr(cls, "_fl_txda_native_block_tables", False):
-        return
+        return None
 
     def _gather(self, idx_mapping, num_reqs_padded, out=None, out_ptrs=None):
         return gather_block_tables(
@@ -227,17 +239,45 @@ def install_block_table_native() -> None:
         for t in tensors:
             t.apply_write()
 
-    cls.gather_block_tables = _gather
-    cls.compute_slot_mappings = _slot_mappings
-    cls._fl_txda_native_block_tables = True
-
     # ``StagedWriteTensor.apply_write`` / ``FusedStagedWriter.apply`` have the
     # same defect: the staged block ids never reach the block table, so every
     # request keeps an all-zero block table and every token maps to slot 0.
-    from vllm.v1.worker.gpu import buffer_utils as bu
+    targets = (
+        (cls, "gather_block_tables", _gather),
+        (cls, "compute_slot_mappings", _slot_mappings),
+        (cls, "_fl_txda_native_block_tables", True),
+        (bu.StagedWriteTensor, "apply_write", _apply_write),
+        (bu.FusedStagedWriter, "apply", _fused_apply),
+    )
+    prev = [(owner, name, getattr(owner, name, _MISSING)) for owner, name, _ in targets]
 
-    bu.StagedWriteTensor.apply_write = _apply_write
-    bu.FusedStagedWriter.apply = _fused_apply
+    def _undo() -> None:
+        # Best-effort: keep restoring the remaining attributes even if one
+        # restore raises, otherwise a single failure leaves the class in the
+        # half-patched state this undo exists to prevent.
+        for owner, name, old in prev:
+            try:
+                if old is _MISSING:
+                    if hasattr(owner, name):
+                        delattr(owner, name)
+                else:
+                    setattr(owner, name, old)
+            except Exception:  # pragma: no cover - defensive
+                logger.warning(
+                    "could not restore %s.%s during install rollback",
+                    getattr(owner, "__name__", owner),
+                    name,
+                    exc_info=True,
+                )
+        globals()["_installed"] = False
+
+    try:
+        for owner, name, value in targets:
+            setattr(owner, name, value)
+    except Exception:
+        _undo()
+        raise
 
     logger.info("Installed native TXDA block-table gather / slot mapping")
     _installed = True
+    return _undo

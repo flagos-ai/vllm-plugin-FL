@@ -187,15 +187,25 @@ def install_v2_runner_compat() -> None:
     from . import block_table_native, mamba_align
 
     # Snapshot every global a step may replace, so a later failure can restore
-    # them all.
+    # them all. The sub-installers return their own undo, so their class-level
+    # mutations are reverted too -- restoring only the ``_installed`` flags left
+    # half the classes patched and made a retry return early.
     prev_is_uva = buffer_utils.is_uva_available
     prev_graph_capture = cudagraph_utils.graph_capture
-    prev_flags = (mamba_align._installed, block_table_native._installed)
+    _undo_stack: list = []
+    undo = None
 
     def _rollback() -> None:
+        # Reverse order, so a step that depends on an earlier one is undone
+        # first.
+        while _undo_stack:
+            step_undo = _undo_stack.pop()
+            try:
+                step_undo()
+            except Exception:  # pragma: no cover - best-effort restoral
+                logger.warning("V2 runner adaptation undo step failed", exc_info=True)
         buffer_utils.is_uva_available = prev_is_uva
         cudagraph_utils.graph_capture = prev_graph_capture
-        mamba_align._installed, block_table_native._installed = prev_flags
 
     try:
         install_cuda_aliases()
@@ -217,11 +227,15 @@ def install_v2_runner_compat() -> None:
         # The "align" Mamba state kernels address memory through
         # runtime-loaded pointers, which the TXDA Triton backend miscompiles;
         # swap in native tensor copies. See mamba_align.py.
-        mamba_align.install_mamba_align_native()
+        undo = mamba_align.install_mamba_align_native()
+        if undo is not None:
+            _undo_stack.append(undo)
 
         # The per-group block-table gather and the per-token slot mapping have
         # the same defect; without them every token maps to KV slot 0.
-        block_table_native.install_block_table_native()
+        undo = block_table_native.install_block_table_native()
+        if undo is not None:
+            _undo_stack.append(undo)
     except Exception:
         _rollback()
         raise
