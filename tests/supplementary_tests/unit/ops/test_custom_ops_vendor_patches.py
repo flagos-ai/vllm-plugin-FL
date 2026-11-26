@@ -1,18 +1,29 @@
 # Copyright 2025 BAAI. All rights reserved.
-"""Supplementary tests for ``vllm_fl.ops.custom_ops.register_oot_ops``.
+"""PR-#809 vendor-patch increments for ``vllm_fl.ops.custom_ops.register_oot_ops``.
 
-``custom_ops`` and the operator classes it registers (activation /
-layernorm / rotary / fused_moe) import vllm at module level, so the tests
-below install a stub vllm module graph first. Only the external vllm
-boundary is stubbed; ``register_oot_ops`` itself runs unmodified. The
-stubbed ``register_oot`` classmethods record registrations so each test can
-assert exactly which ops were registered, with which names, and that the
-upstream oracle / FusedMoE factory were patched at the right times.
+Coverage boundary (post-refactor): the common registration wiring of
+``register_oot_ops`` (disabled/oracle-only path, env whitelist/blacklist
+precedence, unknown-op warning, parameter whitelist, prefer-enabled
+override, registration name contract, the fused_moe-free OOT_OPS table)
+and the ``_patch_unquantized_moe_oracle`` import-site rewrite are owned
+by PR #799's ``tests/supplementary_tests/unit/ops/test_custom_ops_registration.py``.
+This file keeps only the #809-specific vendor parameterization branches —
+the device_type / vendor dispatch inside the op loop that steers
+``register_oot_ops`` to each vendor's patch module:
 
-The module is loaded once against the stub graph and cached in
-``sys.modules`` under its real name (the graph re-installs the same stubs
-for every test), with a snapshot fixture restoring the pristine
-``sys.modules`` and torch state around the whole file so nothing leaks.
+* npu device_type -> apply_ascend_patches;
+* ptpu device_type -> apply_sunrise_patches;
+* gcu vendor_name -> apply_gcu_patches;
+* kunlunxin vendor_name -> apply_kunlunxin_patches (even when no OOT
+  operator was selected);
+* fused_moe exclusion from registration still patching the oracle.
+
+``custom_ops`` and the operator classes it registers import vllm at
+module level, so the tests below install a stub vllm module graph first.
+Only the external vllm boundary is stubbed; ``register_oot_ops`` itself
+runs unmodified. The stubbed ``register_oot`` classmethods record
+registrations so each test can assert exactly which ops were registered,
+with which names, and that the vendor patch entry points were invoked.
 """
 
 from __future__ import annotations
@@ -355,7 +366,7 @@ def ops_registry(monkeypatch):
     # without a __dict__ (and real C-extension modules lack one too), which
     # raises TypeError from inside register_oot_ops. Neutralize the factory
     # walk for every test here — the oracle/factory patch itself is covered
-    # by TestPatchUnquantizedMoeOracle below.
+    # by #799's TestPatchUnquantizedMoeOracle.
     monkeypatch.setattr(
         custom_ops, "_patch_fused_moe_factory", lambda: None, raising=False
     )
@@ -364,86 +375,8 @@ def ops_registry(monkeypatch):
     _reset_registry(registry)
 
 
-class TestRegisterOotOps:
-    """register_oot_ops whitelist / blacklist / enablement wiring."""
-
-    def test_disabled_patches_oracle_only(self, monkeypatch, ops_registry):
-        """VLLM_FL_OOT_ENABLED=0 patches the oracle and registers nothing."""
-        custom_ops, _ = _ensure_imported()
-        patched = []
-        monkeypatch.setattr(
-            custom_ops, "_patch_unquantized_moe_oracle", lambda: patched.append(True)
-        )
-        monkeypatch.setenv("VLLM_FL_OOT_ENABLED", "0")
-        custom_ops.register_oot_ops()
-        assert patched == [True]
-        assert ops_registry.custom_ops == []
-
-    def test_env_whitelist_restricts_registration(self, monkeypatch, ops_registry):
-        """VLLM_FL_OOT_WHITELIST beats the whitelist parameter and 'all'."""
-        custom_ops, _ = _ensure_imported()
-        monkeypatch.setenv("VLLM_FL_OOT_WHITELIST", "silu_and_mul")
-        custom_ops.register_oot_ops()
-        registered = {name for name, _ in ops_registry.custom_ops}
-        assert registered == {"SiluAndMul"}
-
-    def test_blacklist_excludes_ops(self, monkeypatch, ops_registry):
-        """A blacklisted op is skipped; the others still register."""
-        custom_ops, _ = _ensure_imported()
-        monkeypatch.setenv("VLLM_FL_OOT_BLACKLIST", "rms_norm")
-        custom_ops.register_oot_ops()
-        registered = {name for name, _ in ops_registry.custom_ops}
-        assert registered == {"GeluAndMul", "RotaryEmbedding", "SiluAndMul"}
-
-    def test_unknown_whitelist_op_warns_and_skips(
-        self, monkeypatch, ops_registry, caplog
-    ):
-        """An unknown op name logs a warning instead of raising."""
-        custom_ops, _ = _ensure_imported()
-        monkeypatch.setenv("VLLM_FL_OOT_WHITELIST", "no_such_op")
-        with caplog.at_level("WARNING", logger="vllm_fl.ops.custom_ops"):
-            custom_ops.register_oot_ops()
-        assert ops_registry.custom_ops == []
-        assert any("not found in OOT_OPS" in rec.message for rec in caplog.records)
-
-    def test_parameter_whitelist_registers_subset(self, ops_registry):
-        """A caller-provided whitelist registers only those ops."""
-        custom_ops, _ = _ensure_imported()
-        custom_ops.register_oot_ops(whitelist=["gelu_and_mul"])
-        registered = {name for name, _ in ops_registry.custom_ops}
-        assert registered == {"GeluAndMul"}
-
-    def test_prefer_enabled_zero_disables_registration(
-        self, monkeypatch, ops_registry
-    ):
-        """VLLM_FL_PREFER_ENABLED=0 forces the disabled path."""
-        custom_ops, _ = _ensure_imported()
-        monkeypatch.setattr(custom_ops, "_patch_unquantized_moe_oracle", lambda: None)
-        monkeypatch.setenv("VLLM_FL_PREFER_ENABLED", "0")
-        custom_ops.register_oot_ops()
-        assert ops_registry.custom_ops == []
-
-    def test_registration_name_matches_vllm_contract(self, ops_registry):
-        """Each op registers under the vLLM base-class name in OOT_OPS."""
-        custom_ops, _ = _ensure_imported()
-        custom_ops.register_oot_ops()
-        by_name = dict(ops_registry.custom_ops)
-        assert by_name["SiluAndMul"] is custom_ops.OOT_OPS["silu_and_mul"][0]
-        assert by_name["GeluAndMul"] is custom_ops.OOT_OPS["gelu_and_mul"][0]
-        assert by_name["RMSNorm"] is custom_ops.OOT_OPS["rms_norm"][0]
-        assert by_name["RotaryEmbedding"] is custom_ops.OOT_OPS["rotary_embedding"][0]
-
-    def test_fused_moe_not_in_oot_ops_table(self, ops_registry):
-        """The OOT table deliberately excludes fused_moe (vLLM 0.28 factory)."""
-        custom_ops, _ = _ensure_imported()
-        assert "fused_moe" not in custom_ops.OOT_OPS
-        assert "unquantized_fused_moe_method" not in custom_ops.OOT_OPS
-        assert set(custom_ops.OOT_OPS) == {
-            "silu_and_mul",
-            "gelu_and_mul",
-            "rms_norm",
-            "rotary_embedding",
-        }
+class TestVendorPatchBranches:
+    """register_oot_ops device_type / vendor dispatch to vendor patches."""
 
     def test_fused_moe_not_registered_patches_oracle(
         self, monkeypatch, ops_registry
@@ -576,28 +509,3 @@ class TestRegisterOotOps:
         custom_ops.register_oot_ops()
         assert calls == ["kunlunxin"]
         assert ops_registry.custom_ops == []
-
-
-class TestPatchUnquantizedMoeOracle:
-    """_patch_unquantized_moe_oracle rewires the two upstream import sites."""
-
-    def test_both_modules_patched_to_oot_selector(self, monkeypatch):
-        """The oracle module and the unquantized method module are rewritten."""
-        custom_ops, _ = _ensure_imported()
-        import vllm.model_executor.layers.fused_moe.oracle.unquantized as oracle_mod
-        import vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method as method_mod
-
-        import vllm_fl.ops.fused_moe.fused_moe_utils as moe_utils
-
-        sentinel = object()
-        # _patch_unquantized_moe_oracle imports the selector from
-        # fused_moe_utils, so patch it there (the function, not the module).
-        monkeypatch.setattr(
-            moe_utils,
-            "select_unquantized_moe_backend_oot",
-            sentinel,
-            raising=False,
-        )
-        custom_ops._patch_unquantized_moe_oracle()
-        assert oracle_mod.select_unquantized_moe_backend is sentinel
-        assert method_mod.select_unquantized_moe_backend is sentinel

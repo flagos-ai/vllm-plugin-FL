@@ -16,9 +16,6 @@ import os
 
 import pytest
 
-#: Platforms this suite carries vendor-specific supplementary tests for.
-SUPPORTED_PLATFORMS = ("kunlunxin", "hygon", "iluvatar", "thead")
-
 
 def _active_platform(config) -> str:
     """Resolve the platform this pytest session was started for.
