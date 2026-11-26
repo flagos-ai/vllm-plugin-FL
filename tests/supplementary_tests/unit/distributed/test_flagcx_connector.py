@@ -38,7 +38,6 @@ The native FlagCX library is always a Mock: the data-plane boundary
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 import threading
 import time
@@ -2963,54 +2962,3 @@ class TestWorkerShutdown:
         assert loop.is_running()
         worker.shutdown()
         assert not loop.is_running()
-
-
-# ---------------------------------------------------------------------------
-# Real-hardware cross-rank transfers (auto-skipped on CPU runners).
-#
-# The tests above pin every CPU-testable branch with the FlagCX library
-# replaced by a recording Mock. The flows below genuinely need two ranks and
-# a real libflagcx.so data plane (one-sided RDMA writes through
-# flagcxP2pBatchWriteSync plus the ZMQ side-channel handshake), so they only
-# run on the CI vendor runners with accelerators present. They are marked
-# gpu/multi_gpu per the suite's conventions and are skipped everywhere the
-# accelerator or the real FlagCX wrapper is unavailable.
-# ---------------------------------------------------------------------------
-
-
-class TestRealCrossRankTransfers:
-    """Cross-rank P->D KV transfers against a real FlagCX engine.
-
-    Runs only where an accelerator and the real ``plugin.interservice``
-    FlagCX wrapper (FLAGCX_PATH or the installed flagcx wheel) are both
-    available — the vendor CI runners. Requires 2 devices (one P rank, one
-    D rank) connected by the P2P engine.
-    """
-
-    def _require_real_flagcx(self):
-        pytest.importorskip("torch")
-        if not torch.cuda.is_available():
-            pytest.skip("accelerator required for real FlagCX data-plane test")
-        if torch.cuda.device_count() < 2:
-            pytest.skip("two accelerators required for cross-rank transfer")
-        from vllm_fl.distributed.device_communicators import flagcx as fc_mod
-
-        if fc_mod.FLAGCXLibrary is None and not os.environ.get("FLAGCX_PATH"):
-            pytest.skip("real FlagCX wrapper/library unavailable")
-
-    @pytest.mark.gpu
-    @pytest.mark.multi_gpu
-    @pytest.mark.serial
-    def test_producer_writes_decode_kv_cache_end_to_end(self):
-        """A producer rank registers a KV cache region, a decode rank
-        registers its destination, and the ZMQ metadata handshake plus the
-        one-sided flagcxP2pBatchWriteSync moves the bytes. Runs on the CI
-        vendor runners with real devices; auto-skipped on CPU."""
-        self._require_real_flagcx()
-        # The real two-process orchestration (gloo rendezvous, engine RPC
-        # handshake, batch write, done-reply) is exercised by the vendor
-        # runner pipelines; the CPU suite above pins its bookkeeping.
-        pytest.skip(
-            "cross-rank FlagCX data-plane transfer runs on the CI vendor "
-            "runners with real accelerators and RDMA"
-        )
