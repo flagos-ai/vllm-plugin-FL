@@ -17,7 +17,7 @@
 
 platform: kunlunxin
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-kunlunxin-dev@sha256:13f4901307770449582b0668cc93aaf912aa65c2916b1e4bff6c0cc1689ab506
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-kunlunxin-dev@sha256:ed343ae0c9f6bd91e9750319d02eb8261abfdf1dcbd86d94c0e879fae7592aff
 
 runner_labels:
   - kunlunxin-p800
