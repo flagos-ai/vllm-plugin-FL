@@ -178,9 +178,11 @@ bash .github/scripts/enflame/setup.sh 2>&1 | tee /logs/setup.log
 
 `check.sh` requires at least two visible GCUs and creates a small GCU tensor.
 The image supplies vLLM, flaggems-vllm, the vendor runtime, and test dependencies.
-`setup.sh` reinstalls only the selected plugin checkout with
-`--no-build-isolation --no-deps -e .`, then checks imports and device availability.
-It reuses the image's installed dependencies without reinstalling them.
+`setup.sh` installs `pytest-xdist>=3.0.0,<4` (and its dependencies) from the
+configured public mirror, then reinstalls the selected plugin checkout with
+`--no-build-isolation --no-deps -e .` and checks imports and device availability.
+It preserves the image's runtime dependencies; setup still needs network access
+for the test-tool installation.
 
 Do not resolve runtime dependencies again with a generic `pip install -U`: a
 dependency can overwrite FlagTree's Triton files while leaving its metadata

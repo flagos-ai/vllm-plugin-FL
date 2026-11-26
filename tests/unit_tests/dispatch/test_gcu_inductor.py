@@ -568,7 +568,7 @@ def test_gcu_silu_fullgraph_keeps_provider_outside_dynamo(monkeypatch, shape):
         calls.append(tuple(gate.shape))
         return functional.silu(gate) * up
 
-    monkeypatch.setattr(activation, "_compiled_silu", provider)
+    monkeypatch.setattr(activation, "silu_and_mul", provider)
     compiled = torch.compile(
         lambda inputs: activation.silu_and_mul_gcu(None, inputs),
         backend="eager",
@@ -583,28 +583,27 @@ def test_gcu_silu_fullgraph_keeps_provider_outside_dynamo(monkeypatch, shape):
     assert calls == [tuple(gate.shape)]
 
 
-@pytest.mark.parametrize("limits", [(65536, 65536, 65536), (32, 1, 1)])
-def test_gcu_silu_grid_config_is_private_and_preserves_smaller_limits(limits):
-    from dataclasses import make_dataclass
+@pytest.mark.parametrize("strided", [False, True])
+def test_gcu_silu_forwards_input_views_to_public_provider(monkeypatch, strided):
+    import torch
 
     from vllm_fl.dispatch.backends.vendor.gcu.impl import activation
 
-    config_type = make_dataclass(
-        "Config", ["max_grid_size", "max_tile_size", "prefer_block_pointer"]
-    )
+    inputs = torch.randn(3, 2, 48)
+    if strided:
+        inputs = inputs[..., ::2]
+    expected_gate, expected_up = inputs.chunk(2, dim=-1)
+    result = object()
+    calls = []
 
-    class Kernel:
-        def __init__(self, fx, scalar_fn, config):
-            self.fx, self._scalar_fn, self.config = fx, scalar_fn, config
+    def provider(gate, up):
+        calls.append((gate, up))
+        return result
 
-    original = Kernel(object(), object(), config_type(limits, 512, True))
-    adapted = activation._gcu_pointwise_kernel(original)
-    assert adapted is not original
-    assert adapted.config is not original.config
-    assert original.config.max_grid_size == limits
-    assert adapted.config.max_grid_size == tuple(min(x, 65535) for x in limits)
-    assert adapted.config.max_tile_size == 512
-    assert adapted.config.prefer_block_pointer is False
-    assert original.config.prefer_block_pointer is True
-    assert adapted.fx is original.fx
-    assert adapted._scalar_fn is original._scalar_fn
+    monkeypatch.setattr(activation, "silu_and_mul", provider)
+    assert activation.silu_and_mul_gcu(None, inputs) is result
+    assert len(calls) == 1
+    for actual, expected in zip(calls[0], (expected_gate, expected_up)):
+        torch.testing.assert_close(actual, expected)
+        assert actual.stride() == expected.stride()
+        assert actual.data_ptr() == expected.data_ptr()

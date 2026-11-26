@@ -102,9 +102,10 @@ NumPy 2 with `numpy.dtype size changed`. After these private environment
 upgrades, `vllm serve --help` exits successfully and vendor torch remains
 unchanged. Model serving requires separate hardware validation.
 
-FlagGems 5.4's Python wheel has no native C++ extension bundled. The optional
-`flag-gems-cpp-gcu` package must match the Python package's version and
-source commit; source builds require the TOPS SDK and a C++20 toolchain.
+The recipe installs the FlagGems 5.5.0.dev0 Python wheel; this does not establish
+coverage of the optional native C++ extension. An optional `flag-gems-cpp-gcu`
+installation must match the Python package's version and source commit;
+source builds require the TOPS SDK and a C++20 toolchain.
 Install it only when a required operator path needs it, then test that path
 separately. Python operator/device smoke is independent of C++ coverage.
 
