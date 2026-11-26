@@ -701,6 +701,12 @@ class ModelRunnerFL(
             logprobs_mode=self.model_config.logprobs_mode,
             use_fp64_gumbel=self.model_config.use_fp64_gumbel,
         )
+        if self.device.type == "musa":
+            from vllm_fl.models.cosyvoice3 import configure_sampler
+
+            configure_sampler(
+                vllm_config, current_platform, self.device.index, self.sampler
+            )
 
         self.eplb_state: EplbState | None = None
         self._moe_model: MixtureOfExperts | None = None

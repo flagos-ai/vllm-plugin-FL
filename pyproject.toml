@@ -44,6 +44,9 @@ fl = "vllm_fl:register_model"
 Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"
 
 [project.optional-dependencies]
+cosyvoice3 = [
+    "flaggems_vllm @ git+https://github.com/jdai0/FlagGems-vllm.git@a469b1bb0c60b2e26b34a3a941b19c6c4f62eaa1",
+]
 test = [
     "pytest",
     "pytest-cov",
