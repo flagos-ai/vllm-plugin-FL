@@ -273,11 +273,16 @@ def _install_moe_meta_ondevice() -> None:
     which the grouped GEMM already skips (``if m_size > 0``), so the kernel grid
     is a constant ``num_experts`` and needs no host round-trip.
     """
-    try:
-        from flag_gems.runtime.backend._tsingmicro.tx81.fused import fused_moe
-    except Exception:
+    # The on-device meta builder lives in the module that owns the *public*
+    # ``flaggems_vllm.fused_experts_impl`` symbol. Resolve it from that symbol
+    # (never from FlagGems' private ``runtime.backend._tsingmicro`` path) so the
+    # patch always targets the same implementation the dispatcher calls.
+    from vllm_fl.ops.fused_moe.fused_moe_utils import _public_fused_moe_module
+
+    fused_moe = _public_fused_moe_module()
+    if fused_moe is None:
         logger.warning(
-            "MoE meta patch skipped: TX81 fused_moe unavailable", exc_info=True
+            "MoE meta patch skipped: public fused_experts_impl unavailable"
         )
         return
 

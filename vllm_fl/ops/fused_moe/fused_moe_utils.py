@@ -22,7 +22,6 @@ from vllm.model_executor.layers.fused_moe.utils import (
     _resize_cache,
     moe_kernel_quantize_input,
 )
-import os
 try:
     from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
         FlashinferMoeBackend,
@@ -64,11 +63,32 @@ _moe_sum = CachedOp("moe_sum")
 logger = init_logger(__name__)
 
 
-# FlagGems release whose ``_tsingmicro.tx81`` backend provides the
-# compact-grouped MoE fast path used below. The import is pinned to that
-# private module, so refuse to use it on any other build instead of silently
-# running whatever happens to be importable.
-_TXDA_FUSED_MOE_MIN_VERSION = (5, 5, 0)
+# The compact-grouped MoE fast path is reached only through the *published*
+# FlagGems-vLLM entry point (``flaggems_vllm.fused_experts_impl``); the plugin
+# never imports FlagGems' private ``runtime.backend._tsingmicro`` tree. The gate
+# is capability-based rather than version-based: any provider that exports the
+# symbol is accepted, which keeps the pinned CI provider working even though its
+# ``__version__`` predates the release that renamed the export.
+
+
+def _public_fused_moe_module():
+    """Return the module that owns ``flaggems_vllm.fused_experts_impl``.
+
+    The capture-safe MoE meta patch installs helper hooks on that module; both
+    the call site and the patch resolve the module through this one function so
+    they can never drift onto different implementations.
+    """
+    try:
+        import sys
+
+        import flaggems_vllm
+
+        fn = getattr(flaggems_vllm, "fused_experts_impl", None)
+        if fn is None:
+            return None
+        return sys.modules.get(getattr(fn, "__module__", ""))
+    except Exception:
+        return None
 
 
 def _txda_fused_experts_impl(
@@ -121,31 +141,25 @@ def _txda_fused_experts_impl(
     elif w1_scale is not None or w2_scale is not None:
         return None
 
+    # Capability check, not a version comparison: the published provider has
+    # exported ``fused_experts_impl`` across releases whose ``__version__``
+    # strings differ (the pinned CI provider reports ``0.1.0``), so the presence
+    # of the symbol is the only reliable signal.
     try:
-        import flag_gems
-
-        version = getattr(flag_gems, "__version__", "0")
-        parts = tuple(int(p) for p in version.split("+")[0].split(".")[:3])
+        import flaggems_vllm
     except Exception:
         return None
-    if parts < _TXDA_FUSED_MOE_MIN_VERSION:
-        logger.warning_once(
-            "FlagGems %s is older than the pinned %s that ships the TX81 "
-            "compact-grouped MoE; using the generic MoE path on TXDA.",
-            getattr(flag_gems, "__version__", "?"),
-            ".".join(map(str, _TXDA_FUSED_MOE_MIN_VERSION)),
-        )
-        return None
 
-    try:
-        from flag_gems.runtime.backend._tsingmicro.tx81.fused.fused_moe import (
-            fused_experts_impl,
-        )
-    except ImportError:
+    # Only the published provider API is used: this symbol is re-exported by
+    # ``flaggems_vllm/__init__.py``. Importing FlagGems' private
+    # ``runtime.backend._tsingmicro`` module by path would tie the plugin to an
+    # unreleased internal layout.
+    fused_experts_impl = getattr(flaggems_vllm, "fused_experts_impl", None)
+    if fused_experts_impl is None:
         logger.warning_once(
-            "FlagGems %s does not expose the TX81 compact-grouped MoE; "
-            "using the generic MoE path on TXDA.",
-            getattr(flag_gems, "__version__", "?"),
+            "FlagGems-vLLM %s does not export fused_experts_impl; using the "
+            "generic MoE path on TXDA.",
+            getattr(flaggems_vllm, "__version__", "?"),
         )
         return None
     return fused_experts_impl
@@ -581,12 +595,18 @@ class TritonExpertsFL(TritonExperts):
             )
             if txda_fused_experts_impl is not None:
                 # The on-device meta builder needs the expert count; the weight
-                # shape is not visible to it, so publish it here.
-                from flag_gems.runtime.backend._tsingmicro.tx81.fused import (
-                    fused_moe as _fx_mod,
+                # The on-device meta builder needs the expert count; the weight
+                # shape is not visible to it, so publish it here. The builder
+                # lives in the module that owns the public
+                # ``flaggems_vllm.fused_experts_impl`` symbol; resolve it from
+                # that symbol so the plugin never hardcodes the provider's
+                # internal layout.
+                _fx_mod = _public_fused_moe_module()
+                _publish = (
+                    getattr(_fx_mod, "_fl_txda_set_num_experts", None)
+                    if _fx_mod is not None
+                    else None
                 )
-
-                _publish = getattr(_fx_mod, "_fl_txda_set_num_experts", None)
                 if _publish is not None and global_num_experts > 0:
                     _publish(global_num_experts)
                 # The fused kernel has dedicated clamp/alpha/beta parameters;
@@ -627,34 +647,26 @@ class TritonExpertsFL(TritonExperts):
             # option on TXDA: the generic Triton ``fused_moe_kernel`` uses
             # ``tl.dot``, which this same method documents as producing wrong
             # values here. Reject before any compute instead of running a
-            # known-bad kernel (or the unusable reference fallback).
-            if os.environ.get("VLLM_FL_TXDA_MOE_FALLBACK", "0").lower() in (
-                "1", "true", "on",
-            ):
-                logger.warning_once(
-                    "VLLM_FL_TXDA_MOE_FALLBACK=1: running the generic TXDA MoE "
-                    "path for an unsupported configuration; results may be "
-                    "incorrect."
-                )
-            else:
-                raise ValueError(
-                    "TXDA MoE has no verified kernel for this configuration "
-                    f"(activation={activation.value!r}, "
-                    f"quant={self.quant_config.quant_dtype!r}, "
-                    f"per_channel_quant={self.per_act_token_quant}, "
-                    f"block_shape={self.block_shape}, "
-                    f"apply_router_weight_on_input="
-                    f"{apply_router_weight_on_input}, "
-                    "expert_map="
-                    f"{'yes' if expert_map is not None else 'no'}). "
-                    "The FlagGems TX81 compact-grouped path requires "
-                    "silu-family activation, no expert map, no "
-                    "router-weight-on-input and plain bf16/fp16 or "
-                    "INT8-w8a16 with scales; FlagGems must be >= 5.5.0. "
-                    "Adjust the model/quantization, or set "
-                    "VLLM_FL_TXDA_MOE_FALLBACK=1 to force the generic path "
-                    "at your own risk."
-                )
+            # known-bad kernel (or the unusable reference fallback). There is
+            # deliberately no environment switch to bypass this: the generic
+            # path is known to compute wrong values on TXDA, so forcing it
+            # would turn a clear error into silent corruption.
+            raise ValueError(
+                "TXDA MoE has no verified kernel for this configuration "
+                f"(activation={activation.value!r}, "
+                f"quant={self.quant_config.quant_dtype!r}, "
+                f"per_channel_quant={self.per_act_token_quant}, "
+                f"block_shape={self.block_shape}, "
+                f"apply_router_weight_on_input="
+                f"{apply_router_weight_on_input}, "
+                "expert_map="
+                f"{'yes' if expert_map is not None else 'no'}). "
+                "The FlagGems compact-grouped TXDA path requires "
+                "silu-family activation, no expert map, no "
+                "router-weight-on-input and plain bf16/fp16 or "
+                "INT8-w8a16 with scales. Adjust the model or quantization "
+                "to a supported combination."
+            )
 
         # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
         # adapters can be injected between GEMM1/activation/GEMM2.

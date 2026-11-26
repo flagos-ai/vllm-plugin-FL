@@ -58,15 +58,6 @@ def register_builtins(registry) -> None:
             vendor="txda",
             priority=BackendPriority.VENDOR,
         ),
-        # Fused MoE Triton Kernel — delegates to vLLM upstream
-        OpImpl(
-            op_name="invoke_fused_moe_triton_kernel",
-            impl_id="vendor.txda",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
-            vendor="txda",
-            priority=BackendPriority.VENDOR,
-        ),
         # RMS Norm — pure-torch fallback: the FlagGems Triton kernel exceeds
         # the TXDA shared-memory limit, so impl/normalization.py computes it
         # with native ops.

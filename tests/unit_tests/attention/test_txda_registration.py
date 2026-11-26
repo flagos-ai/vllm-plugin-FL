@@ -50,11 +50,14 @@ def test_backend_import_and_unavailable_registration(txda_modules, monkeypatch):
     monkeypatch.setitem(sys.modules, "torch_txda", None)
     impls = []
     register.register_builtins(SimpleNamespace(register_many=impls.extend))
-    assert len(impls) == 3
+    # Only genuinely TXDA-specific ops are registered as vendor entries. The
+    # MoE Triton kernel is deliberately absent: delegating to the shared
+    # reference implementation under a ``vendor.txda`` alias made it look like a
+    # device capability when it was a duplicate (see the dispatch YAML).
+    assert len(impls) == 2
     op_names = [impl.op_name for impl in impls]
     assert op_names == [
         "attention_backend",
-        "invoke_fused_moe_triton_kernel",
         "rms_norm",
     ]
     assert all(impl.impl_id == "vendor.txda" for impl in impls)
@@ -101,7 +104,6 @@ def test_dispatch_config_routes_txda_kernels():
     assert config["op_backends"]["rms_norm"] == ["vendor"]
     assert config["op_backends"]["invoke_fused_moe_triton_kernel"] == [
         "flagos",
-        "vendor",
         "reference",
     ]
     # The 0.28 flagos_whitelist (add/mul + MoE selectors) was dropped: the
@@ -113,10 +115,8 @@ def test_dispatch_config_routes_txda_kernels():
     assert set(config.get("flagos_blacklist", [])) == {
         "copy",
         "copy_",
-        "cat",
         "stack",
         "hstack",
-        "index_select",
         "index_put",
         "index_put_",
         "index_add",
@@ -126,7 +126,19 @@ def test_dispatch_config_routes_txda_kernels():
         "repeat",
         "tile",
         "flip",
-        "embedding",
         "slice_backward",
         "diagonal_copy",
     }
+    # Ops with no native TXDA kernel must stay on FlagGems: excluding them
+    # falls through to the txda fallback_cpu backend, whose device-to-host copy
+    # synchronizes and breaks graph capture.
+    #   - ``embedding``: the FlagGems kernel reads the index on device.
+    #   - ``index_select``: torch_txda registers no native kernel, and RoPE runs
+    #     ``cos_sin_cache.index_select(0, positions)`` every forward.
+    #   - ``cat``: ATen's composite cat copies through the host; the TXDA
+    #     FlagGems cat stays on device.
+    for native_only_op in ("embedding", "index_select", "cat"):
+        assert native_only_op not in config["flagos_blacklist"], (
+            f"{native_only_op!r} must stay on FlagGems on TXDA: excluding it "
+            "selects a CPU fallback that synchronizes during graph capture"
+        )

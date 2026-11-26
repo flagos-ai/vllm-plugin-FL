@@ -169,7 +169,7 @@ def test_txda_accepts_explicit_upstream_v2_runner(configure_platform):
 @pytest.mark.parametrize("mode", [_CompilationMode.NONE, _CompilationMode.VLLM_COMPILE])
 @pytest.mark.parametrize("tensor_parallel_size", [1, 8])
 @pytest.mark.parametrize("data_parallel_size", [1, 8])
-def test_txda_rejects_all_graph_modes_without_launch_side_effects(
+def test_txda_accepts_graph_modes_but_still_requires_no_compilation(
     configure_platform,
     monkeypatch,
     graph,
@@ -177,6 +177,13 @@ def test_txda_rejects_all_graph_modes_without_launch_side_effects(
     tensor_parallel_size,
     data_parallel_size,
 ):
+    """TXDA supports cudagraphs, but only with compilation disabled.
+
+    The platform no longer rejects a non-NONE ``cudagraph_mode``: FULL and
+    PIECEWISE capture through ``vllm_fl.compilation.graph``. Compilation is
+    still refused because TXDA runs without Inductor, so a configured
+    ``CompilationMode`` cannot be honoured.
+    """
     config = _config(mode, graph, tensor_parallel_size=tensor_parallel_size)
     config.parallel_config.data_parallel_size = data_parallel_size
     config.parallel_config.world_size_across_dp = (
@@ -190,11 +197,14 @@ def test_txda_rejects_all_graph_modes_without_launch_side_effects(
     monkeypatch.delenv("VLLM_USE_BREAKABLE_CUDAGRAPH", raising=False)
     before = dict(os.environ)
 
-    with pytest.raises(ValueError, match="graph mode is not supported") as exc:
+    if mode != _CompilationMode.NONE:
+        with pytest.raises(ValueError, match="compilation must be disabled"):
+            configure_platform(platform, config)
+    else:
         configure_platform(platform, config)
+        # The graph mode survives the platform hook untouched.
+        assert config.compilation_config.cudagraph_mode == graph
 
-    assert "--enforce-eager" in str(exc.value)
-    assert config.compilation_config.cudagraph_mode == graph
     assert dict(os.environ) == before
 
 
@@ -237,9 +247,9 @@ def test_txda_eager_preserves_launch_environment(
 
 @pytest.mark.parametrize(
     "device,vendor,expected",
-    [("txda", "tsingmicro", False), ("cuda", "nvidia", True), ("npu", "ascend", True)],
+    [("txda", "tsingmicro", True), ("cuda", "nvidia", True), ("npu", "ascend", True)],
 )
-def test_txda_reports_no_static_graph_support(device, vendor, expected):
+def test_txda_reports_static_graph_support(device, vendor, expected):
     method = _load_function(
         "vllm_fl/platform.py", "support_static_graph_mode", {}, class_name="PlatformFL"
     )
