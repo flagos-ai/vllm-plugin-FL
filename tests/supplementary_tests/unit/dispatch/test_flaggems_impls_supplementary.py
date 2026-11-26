@@ -15,15 +15,16 @@ drive the CPU-reachable logic:
   against recording ``flash_attn_varlen_func`` doubles, plus the
   ``use_cascade_attention`` decision table and ``cascade_attention``
   argument plumbing;
-* ``impl/quantization.py`` — input validation, buffer/grid sizing, the
-  launch contract and the kernel math of the Triton fallback via a
-  recording kernel double checked against an independent torch oracle;
 * ``impl/rotary.py`` — the vendor-branch matrix (ascend six-arg kernel,
   GCU out-of-place copy-back, nvidia/thead read-write race workaround,
   plain passthrough) against recording kernel doubles;
 * ``impl/normalization.py`` and ``impl/activation.py`` — the delegate
-  contracts against plain-torch kernel doubles;
-* ``impl/mla.py`` — backend metadata and construction rejections.
+  contracts against plain-torch kernel doubles.
+
+The quantization and MLA sections that used to live here moved to PR #799
+(``test_flaggems_mla_quant_backend.py``): every one of those 19 tests is
+name-identical and semantically equivalent there, so this file keeps only
+the #809-specific surfaces above.
 
 The real ``flag_gems`` import on this CI box raises ``RuntimeError`` ("0
 active drivers"), which the ImportError-only handler in
@@ -97,7 +98,6 @@ class _StubState:
     def __init__(self):
         self.vendor_name = "nvidia"
         self.device_type = "cuda"
-        self.scaled_int8_quant_calls = []
         self.flash_attn_calls = []
         self.flash_mla_calls = []
         self.device_ctx = None
@@ -358,7 +358,10 @@ class _VllmStubTree:
 
         # flaggems_vllm: kernel surface imported by the impls. Recording
         # doubles implement plain-torch oracles so the CPU-side
-        # pre/post-processing can be verified.
+        # pre/post-processing can be verified. The MLA kernel stub only
+        # needs to exist because impl/__init__.py imports impl/mla.py at
+        # module level; its behavioral coverage lives in PR #799's
+        # test_flaggems_mla_quant_backend.
         def flash_attn_varlen_func(**kwargs):
             state.flash_attn_calls.append(kwargs)
             out = kwargs.get("out")
@@ -377,35 +380,19 @@ class _VllmStubTree:
             q = args[0]
             return torch.zeros(q.shape[0], q.shape[1], 128, dtype=q.dtype)
 
-        scaled_int8 = self._leaf("flaggems_vllm")
-        scaled_int8.__path__ = []
-        scaled_int8.__file__ = "/fake/flaggems_vllm/__init__.py"
-        scaled_int8.flash_attn_varlen_func = flash_attn_varlen_func
-        scaled_int8.flash_mla = flash_mla
-        scaled_int8.silu_and_mul = None
-        scaled_int8.gelu_and_mul = None
-        scaled_int8.moe_align_block_size_triton = None
-        scaled_int8.topk_softmax = None
-        scaled_int8.invoke_fused_moe_triton_kernel = None
-        scaled_int8.grouped_topk = None
-        scaled_int8.moe_sum = None
-        scaled_int8.apply_rotary_pos_emb = None
-        quant_ops = self._leaf("flaggems_vllm.ops.scaled_int8_quant")
-
-        def scaled_int8_quant(x, scale=None, azp=None, symmetric=False):
-            state.scaled_int8_quant_calls.append(
-                {"x": x, "scale": scale, "azp": azp, "symmetric": symmetric}
-            )
-            # Independent oracle: plain torch per-token symmetric INT8.
-            contiguous = x.contiguous()
-            absmax = contiguous.abs().amax(dim=-1, keepdim=True)
-            safe = torch.where(absmax > 0, absmax, torch.ones_like(absmax))
-            quantized = torch.clamp(
-                torch.round(contiguous * (127.0 / safe)), -128, 127
-            ).to(torch.int8)
-            return quantized, absmax / 127.0, None
-
-        quant_ops.scaled_int8_quant = scaled_int8_quant
+        gems = self._leaf("flaggems_vllm")
+        gems.__path__ = []
+        gems.__file__ = "/fake/flaggems_vllm/__init__.py"
+        gems.flash_attn_varlen_func = flash_attn_varlen_func
+        gems.flash_mla = flash_mla
+        gems.silu_and_mul = None
+        gems.gelu_and_mul = None
+        gems.moe_align_block_size_triton = None
+        gems.topk_softmax = None
+        gems.invoke_fused_moe_triton_kernel = None
+        gems.grouped_topk = None
+        gems.moe_sum = None
+        gems.apply_rotary_pos_emb = None
 
     def install(self, monkeypatch):
         """Install every built module into ``sys.modules``."""
@@ -770,18 +757,43 @@ class TestDoKvCacheUpdate:
     def test_encoder_types_skip(self, stubs):
         module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         AttentionType = stubs.classes.AttentionType
+        # A recording double for the Triton writer plus a poison entry for
+        # the lazy import: if the early return ever stops guarding encoder
+        # layers, the launch lands in the recorder (and the from-import
+        # of the poisoned module would raise ImportError before that).
+        launches = []
+
+        def recording_op(key, value, key_cache, value_cache, slot_mapping,
+                         kv_dtype, k_scale, v_scale):
+            launches.append(
+                {
+                    "key": key, "value": value,
+                    "key_cache": key_cache, "value_cache": value_cache,
+                    "slot_mapping": slot_mapping, "kv_dtype": kv_dtype,
+                }
+            )
+
+        stubs._leaf(
+            "vllm.v1.attention.ops.triton_reshape_and_cache_flash",
+            triton_reshape_and_cache_flash=recording_op,
+        )
         for attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
             impl = module.AttentionFLImpl(
                 num_heads=4, head_size=64, scale=0.1, num_kv_heads=2,
                 alibi_slopes=None, sliding_window=None, kv_cache_dtype="auto",
                 attn_type=attn_type,
             )
+            kv_cache = torch.zeros(2, 2, 8, 128)
+            before = kv_cache.clone()
             # The early return must not touch the cache or import the op.
             impl.do_kv_cache_update(
                 SimpleNamespace(_k_scale=None, _v_scale=None),
-                torch.zeros(1, 2, 8), torch.zeros(1, 2, 8),
-                torch.zeros(2, 2, 8, 16), torch.zeros(1, dtype=torch.int32),
+                torch.randn(4, 2, 64), torch.randn(4, 2, 64),
+                kv_cache, torch.tensor([0, 1, 2, 3], dtype=torch.int32),
             )
+            # No writer launch happened and the cache bytes are intact.
+            assert launches == []
+            assert torch.equal(kv_cache, before)
 
     def test_decoder_writes_via_triton_op(self, stubs):
         module, impl = _make_attention_impl(stubs)
@@ -943,175 +955,6 @@ class TestCascadeAttentionPlumbing:
                 block_table=torch.zeros(1, 4, dtype=torch.int32),
                 common_prefix_len=32, fa_version=2,
             )
-
-
-# ===========================================================================
-# impl/quantization.py
-# ===========================================================================
-
-
-def _oracle_quant(x):
-    """Independent per-token symmetric INT8 oracle (plain torch, float64)."""
-    widened = x.double()
-    absmax = widened.abs().amax(dim=-1, keepdim=True)
-    scale = (absmax / 127.0).float()
-    safe = torch.where(absmax > 0, absmax, torch.ones_like(absmax))
-    quantized = torch.clamp(torch.round(widened * (127.0 / safe)), -128, 127).to(
-        torch.int8
-    )
-    return quantized, scale
-
-
-class TestQuantizationTritonPath:
-    """dynamic_per_token_quant_int8_flaggems_triton full contract."""
-
-    @staticmethod
-    def _install_fake_kernel(monkeypatch, module):
-        """Replace the triton kernel with a recording CPU double."""
-
-        launches = []
-
-        class _KernelDouble:
-            def __getitem__(self, grid):
-                def launch(x, output, scale, hidden_size=None, BLOCK_SIZE=None):
-                    launches.append(
-                        {
-                            "grid": grid,
-                            "x": x,
-                            "output": output,
-                            "scale": scale,
-                            "hidden_size": hidden_size,
-                            "BLOCK_SIZE": BLOCK_SIZE,
-                        }
-                    )
-                    widened = x.double()
-                    absmax = widened.abs().amax(dim=-1, keepdim=True)
-                    safe = torch.where(absmax > 0, absmax, torch.ones_like(absmax))
-                    quantized = torch.clamp(
-                        torch.round(widened * (127.0 / safe)), -128, 127
-                    ).to(torch.int8)
-                    output.copy_(quantized)
-                    scale.copy_(absmax.float() / 127.0)
-
-                return launch
-
-        monkeypatch.setattr(
-            module, "_dynamic_per_token_quant_int8_kernel", _KernelDouble()
-        )
-        return launches
-
-    def _load_module(self, stubs):
-        return _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.quantization"
-        )
-
-    def test_validates_rank(self, stubs):
-        module = self._load_module(stubs)
-        with pytest.raises(ValueError, match="2D"):
-            module.dynamic_per_token_quant_int8_flaggems_triton(
-                torch.zeros(2, 2, 2)
-            )
-
-    def test_validates_dtype(self, stubs):
-        module = self._load_module(stubs)
-        with pytest.raises(TypeError, match="floating point"):
-            module.dynamic_per_token_quant_int8_flaggems_triton(
-                torch.zeros(2, 2, dtype=torch.int32)
-            )
-
-    def test_validates_hidden_size(self, stubs):
-        module = self._load_module(stubs)
-        with pytest.raises(ValueError, match="hidden_size must be positive"):
-            module.dynamic_per_token_quant_int8_flaggems_triton(
-                torch.zeros(2, 0)
-            )
-
-    def test_buffers_grid_and_launch_contract(self, stubs, monkeypatch):
-        module = self._load_module(stubs)
-        launches = self._install_fake_kernel(monkeypatch, module)
-
-        x = torch.tensor([[1.0, -2.0], [0.0, 0.5], [0.6, 0.6]])
-        out, scale = module.dynamic_per_token_quant_int8_flaggems_triton(x)
-
-        assert len(launches) == 1
-        launch = launches[0]
-        # One program per token row.
-        assert launch["grid"] == (3,)
-        # int8 output shaped like the input; float32 [N, 1] scale.
-        assert launch["output"].dtype == torch.int8
-        assert launch["output"].shape == x.shape
-        assert launch["scale"].dtype == torch.float32
-        assert launch["scale"].shape == (3, 1)
-        # hidden_size and BLOCK_SIZE (next power of two) are forwarded.
-        assert launch["hidden_size"] == 2
-        assert launch["BLOCK_SIZE"] == 2
-        # The returned tensors ARE the kernel's buffers (written in place).
-        assert out is launch["output"]
-        assert scale is launch["scale"]
-
-    def test_non_contiguous_input_is_made_contiguous(self, stubs, monkeypatch):
-        module = self._load_module(stubs)
-        launches = self._install_fake_kernel(monkeypatch, module)
-
-        base = torch.arange(8, dtype=torch.float32).reshape(4, 2)
-        x = base.t()  # [2, 4], non-contiguous
-        assert not x.is_contiguous()
-
-        module.dynamic_per_token_quant_int8_flaggems_triton(x)
-        assert launches[0]["x"].is_contiguous()
-        assert launches[0]["x"].shape == x.shape
-
-    def test_values_match_independent_oracle(self, stubs, monkeypatch):
-        module = self._load_module(stubs)
-        self._install_fake_kernel(monkeypatch, module)
-
-        torch.manual_seed(2026)
-        x = torch.randn(7, 6) * 3.0
-        out, scale = module.dynamic_per_token_quant_int8_flaggems_triton(x)
-
-        expected_q, expected_scale = _oracle_quant(x)
-        assert out.dtype == torch.int8
-        torch.testing.assert_close(out, expected_q, rtol=0, atol=0)
-        torch.testing.assert_close(scale, expected_scale, rtol=1e-6, atol=1e-7)
-
-        # Dequantization stays within half a scale step of the input.
-        dequant = out.float() * scale
-        assert ((x - dequant).abs() <= scale + 1e-6).all()
-
-    def test_block_size_rounds_up_to_power_of_two(self, stubs, monkeypatch):
-        module = self._load_module(stubs)
-        launches = self._install_fake_kernel(monkeypatch, module)
-
-        module.dynamic_per_token_quant_int8_flaggems_triton(torch.randn(2, 5))
-        assert launches[0]["BLOCK_SIZE"] == 8
-
-        module.dynamic_per_token_quant_int8_flaggems_triton(torch.randn(2, 16))
-        assert launches[1]["BLOCK_SIZE"] == 16
-
-
-class TestQuantizationVllmPath:
-    """dynamic_per_token_quant_int8_flaggems_vllm delegate contract."""
-
-    def test_forwards_symmetric_dynamic_args(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.quantization"
-        )
-        x = torch.tensor([[1.0, -2.0], [0.0, 0.5]])
-        out, scale = module.dynamic_per_token_quant_int8_flaggems_vllm(x)
-
-        call = stubs.state.scaled_int8_quant_calls[-1]
-        assert call["scale"] is None
-        assert call["azp"] is None
-        assert call["symmetric"] is True
-        # The third return element is dropped: a 2-tuple comes back.
-        assert isinstance(scale, torch.Tensor)
-
-        # Independent oracle on the returned values.
-        absmax = x.abs().amax(dim=-1, keepdim=True)
-        torch.testing.assert_close(scale, absmax / 127.0, rtol=1e-6, atol=1e-7)
-        torch.testing.assert_close(
-            out, torch.tensor([[64, -127], [0, 127]], dtype=torch.int8)
-        )
 
 
 # ===========================================================================
@@ -1432,153 +1275,3 @@ class TestActivationDelegates:
         assert recorded["approximate"] == "none"
 
 
-# ===========================================================================
-# impl/mla.py
-# ===========================================================================
-
-
-_MLA_ARGS = dict(
-    num_heads=8,
-    head_size=128,
-    scale=0.1,
-    num_kv_heads=1,
-    alibi_slopes=None,
-    sliding_window=None,
-    kv_cache_dtype="auto",
-    logits_soft_cap=None,
-    attn_type=None,  # replaced at call time
-    kv_sharing_target_layer_name=None,
-    q_lora_rank=1536,
-    kv_lora_rank=512,
-    qk_nope_head_dim=128,
-    qk_rope_head_dim=64,
-    qk_head_dim=192,
-    v_head_dim=128,
-    kv_b_proj=None,
-)
-
-
-def _make_mla_impl(stubs, **overrides):
-    """Construct a concrete MLAFLImpl under the stubbed boundary."""
-    module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.mla")
-    AttentionType = stubs.classes.AttentionType
-    kwargs = dict(_MLA_ARGS)
-    kwargs["attn_type"] = AttentionType.DECODER
-    kwargs.update(overrides)
-
-    class ConcreteMLA(module.MLAFLImpl):
-        def forward_mqa(self, *args, **kwargs):  # pragma: no cover
-            raise AssertionError("forward_mqa must not run in these tests")
-
-    impl = ConcreteMLA(**kwargs)
-    impl._pad_v = True
-    return module, impl
-
-
-class TestMlaBackend:
-    """MLAFLBackend metadata."""
-
-    def test_get_name_and_impl_cls(self, stubs):
-        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.mla")
-        assert module.MLAFLBackend.get_name() == "MLAFL"
-        assert module.MLAFLBackend.get_impl_cls() is module.MLAFLImpl
-
-    def test_impl_can_return_lse_for_decode(self, stubs):
-        _, impl = _make_mla_impl(stubs)
-        assert impl.can_return_lse_for_decode is True
-
-
-class TestMlaImplInit:
-    """MLAFLImpl.__init__ rejection branches."""
-
-    def test_unsupported_feature_rejected(self, stubs):
-        with pytest.raises(NotImplementedError, match="alibi_slopes"):
-            _make_mla_impl(stubs, alibi_slopes=[0.1])
-
-    def test_non_decoder_attention_type_rejected(self, stubs):
-        with pytest.raises(NotImplementedError, match="Encoder"):
-            _make_mla_impl(stubs, attn_type=stubs.classes.AttentionType.ENCODER)
-
-    def test_fp8_kv_cache_rejected(self, stubs):
-        with pytest.raises(NotImplementedError, match="FP8 KV cache"):
-            _make_mla_impl(stubs, kv_cache_dtype="fp8")
-
-    def test_successful_init_records_kv_cache_dtype(self, stubs):
-        _, impl = _make_mla_impl(stubs)
-        assert impl.kv_cache_dtype == "auto"
-
-
-class TestFlashAttnVarlenDiffHeaddims:
-    """MLAFLImpl._flash_attn_varlen_diff_headdims padding and unpacking."""
-
-    def test_v_padded_to_q_head_dim(self, stubs):
-        _, impl = _make_mla_impl(stubs)
-        q = torch.randn(3, 8, 576)
-        k = torch.randn(3, 1, 576)
-        v = torch.randn(3, 1, 128)
-
-        impl._flash_attn_varlen_diff_headdims(q, k, v)
-
-        call = stubs.state.flash_attn_calls[-1]
-        assert call["q"] is q
-        assert call["k"] is k
-        # v padded from 128 to 576 (q's head dim), zeros in the tail.
-        padded = call["v"]
-        assert padded.shape == (3, 1, 576)
-        torch.testing.assert_close(padded[..., :128], v)
-        assert (padded[..., 128:] == 0).all()
-
-    def test_no_pad_passes_v_through(self, stubs):
-        _, impl = _make_mla_impl(stubs)
-        impl._pad_v = False
-        q = torch.randn(2, 4, 64)
-        k = torch.randn(2, 1, 64)
-        v = torch.randn(2, 1, 64)
-
-        impl._flash_attn_varlen_diff_headdims(q, k, v)
-
-        call = stubs.state.flash_attn_calls[-1]
-        assert call["v"] is v
-
-    def test_scale_and_kwargs_forwarded(self, stubs):
-        _, impl = _make_mla_impl(stubs)
-        q = torch.randn(2, 4, 64)
-        k = torch.randn(2, 1, 64)
-        v = torch.randn(2, 1, 64)
-
-        impl._flash_attn_varlen_diff_headdims(
-            q, k, v, softmax_scale=0.25, causal=True
-        )
-
-        call = stubs.state.flash_attn_calls[-1]
-        assert call["softmax_scale"] == 0.25
-        assert call["causal"] is True
-
-    def test_return_softmax_lse_flag_forwarded_and_tuple_returned(self, stubs):
-        _, impl = _make_mla_impl(stubs)
-        q = torch.randn(5, 4, 64)
-        k = torch.randn(5, 1, 64)
-        v = torch.randn(5, 1, 64)
-
-        out, lse = impl._flash_attn_varlen_diff_headdims(
-            q, k, v, return_softmax_lse=True
-        )
-
-        call = stubs.state.flash_attn_calls[-1]
-        assert call["return_softmax_lse"] is True
-        assert lse is not None
-        assert lse.shape == (5, 4)
-        assert out.shape == q.shape
-
-    def test_default_returns_single_tensor(self, stubs):
-        _, impl = _make_mla_impl(stubs)
-        q = torch.randn(5, 4, 64)
-        k = torch.randn(5, 1, 64)
-        v = torch.randn(5, 1, 64)
-
-        result = impl._flash_attn_varlen_diff_headdims(q, k, v)
-
-        call = stubs.state.flash_attn_calls[-1]
-        assert call["return_softmax_lse"] is False
-        assert isinstance(result, torch.Tensor)
-        assert result.shape == q.shape
