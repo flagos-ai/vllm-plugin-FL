@@ -467,6 +467,12 @@ class WorkerFL(WorkerBase):
         num_ubatches = 2 if self.vllm_config.parallel_config.enable_dbo else 1
         init_workspace_manager(self.device, num_ubatches)
 
+        # Attention backend selection happens while constructing the model
+        # runner, so capability-gated defaults must be resolved first.
+        from vllm_fl.device_profiles import apply_defaults
+
+        apply_defaults(self.device.index, self.vllm_config)
+
         from vllm_fl.worker.model_runner import ModelRunnerFL
 
         # Construct the model runner
@@ -479,16 +485,28 @@ class WorkerFL(WorkerBase):
     # FIXME(youkaichao & ywang96): Use TorchDispatchMode instead of memory pool
     # to hijack tensor allocation.
     def load_model(self, *, load_dummy_weights: bool = False) -> None:
-        ### TODO(lms): support manages a memory pool for device tensors.
+        """Load model weights with capability-gated optional optimizations."""
+        from vllm_fl.optimizations import RuntimeOptimizations
+
         with set_current_vllm_config(self.vllm_config):
+            optimizations = RuntimeOptimizations(
+                self.vllm_config, self.device, self.model_runner
+            )
+            optimizations.prepare(load_dummy_weights=load_dummy_weights)
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
-        # with self._maybe_get_memory_pool_context(tag="weights"):
-        #     self.model_runner.load_model(eep_scale_up=eep_scale_up)
+            optimizations.finalize()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
 
     def reload_weights(self) -> None:
+        from vllm_fl.patches import single_weight_gateup
+
+        if single_weight_gateup.has_converted_layers():
+            raise RuntimeError(
+                "reload_weights is unsupported after single-weight gate/up conversion; "
+                "restart the worker to load new weights"
+            )
         self.model_runner.reload_weights()
 
     @managed_inference_mode()
