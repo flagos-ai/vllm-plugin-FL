@@ -25,8 +25,6 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.supplementary
-
 try:
     import xgrammar as xgr
 except ImportError:  # pragma: no cover - CI image without xgrammar
