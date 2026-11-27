@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 
 RELEASE = "v0.2.0"
 COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
+# Qualified strided KV writer: https://github.com/flagos-ai/FlagGems-vllm/pull/1232.
 SUNRISE_COMMIT = "3b0f3880b2a781699462eacb7dd3e00cc24f2d43"
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
 SOURCE_ARCHIVE = f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"

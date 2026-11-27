@@ -18,7 +18,11 @@ FlagGems-vLLM revision from the table. The baked operator supplies
 `reshape_and_cache_flash_strided` for the Runner V2 combined KV cache.
 Pull the digest-qualified image and start the model directly. The
 [upstream operator PR](https://github.com/flagos-ai/FlagGems-vllm/pull/1232)
-tracks publication of the backport separately.
+merged as `dac60034`. The image retains the qualified `3b0f388` backport;
+no additional provider installation or merge wait is required.
+[FlagCX #715](https://github.com/flagos-ai/FlagCX/issues/715) remains the upstream
+graph-to-eager communication follow-up. The scoped synchronization boundary in
+this plugin does not claim a permanent native-library fix.
 
 ```bash
 SUNRISE_IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-sunrise-release-8905f42@sha256:e0c5ee48b79317fda2dd8d97d1d89f2ddb487db6375a7d13cd58a57f635547e5
