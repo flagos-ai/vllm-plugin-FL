@@ -18,7 +18,7 @@
 platform: ascend
 
 # Docker image for this hardware.
-# FlagOS Runtime 2.3.0 (CANN 9.2.1, Python 3.12) + vLLM 0.32.0+flagos +
+# FlagOS Runtime 2.3.0 (CANN 9.0.0, Python 3.11) + vLLM 0.32.0+flagos +
 # FlagGems-vllm (dev stage).
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-ascend-dev
 
