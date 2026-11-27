@@ -38,6 +38,15 @@ Its preinstalled vLLM is **0.24.0**; pulling the base alone does not install the
 | Default graph mode | `PIECEWISE`; explicit eager / `NONE` is preserved |
 | Execution RPC watchdog | Set `VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800` before starting the service; the upstream 300-second default can expire during C550 cold GEMM tuning |
 
+The image pins `e005571` for the public MoE routing interface from
+[FlagGems-vllm #1233](https://github.com/flagos-ai/FlagGems-vllm/pull/1233),
+merged as `8f79ec9f`. Keep this tested pin; no additional provider installation
+or upstream merge wait is required.
+[FlagCX #730](https://github.com/flagos-ai/FlagCX/issues/730) tracks graph and
+communicator lifetime ordering; the scoped MetaX cleanup is included here.
+[vLLM #64714](https://github.com/vllm-project/vllm/issues/64714) tracks remote
+queue shutdown. These follow-ups do not require an untested upstream revision.
+
 Package fingerprints are SHA256 hashes of sorted `relative_path<TAB>file_sha256<LF>`
 entries, covering module files and distribution native libraries while excluding
 Python bytecode caches. They identify the tested vendor packages when their

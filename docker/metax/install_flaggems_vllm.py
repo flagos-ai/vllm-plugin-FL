@@ -8,6 +8,8 @@ import sys
 from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 
+# Qualified MoE routing source: https://github.com/flagos-ai/FlagGems-vllm/pull/1233.
+# The PR merged; retain this tested pin rather than following upstream main.
 COMMIT = "e00557103e284db5b57168386db60faa051989ef"
 SOURCE = f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"
 SHA256 = "2e19546b78a838c188b2e4e4f12b1a40b395a13fc75f24fbabb7229e63461656"
