@@ -122,6 +122,38 @@ jobs:
             "${DEVICE_ARGS[@]}" \
             --scope unit
 
+      # Platform-applicable coverage caliber (plan 3.2 / tier-1): keep the raw
+      # coverage-{platform}.json untouched (it is still uploaded as an artifact
+      # below) and derive coverage-{platform}-applicable.json, which drops the
+      # other vendors' directories and their exclusive branch lines in the
+      # public hybrid files. kunlunxin switches the FlagCICD upload to this
+      # caliber first for dashboard validation; other platforms keep the raw
+      # full-scope report until the dashboard is verified.
+      - name: Compute platform-applicable coverage
+        id: applicable
+        if: ${{ !cancelled() && hashFiles(format('coverage-{0}.json', inputs.platform)) != '' }}
+        shell: bash
+        run: |
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          python tools/coverage/platform_scope_report.py \
+            --report coverage-${{ inputs.platform }}.json \
+            --platform ${{ inputs.platform }} \
+            --output coverage-${{ inputs.platform }}-applicable.json \
+            --commit-sha "$SOURCE_SHA"
+          # Surface the caliber numbers for dashboard cross-checking.
+          APPLICABLE_TOTALS="$(python - <<'PY'
+          import json
+          with open("coverage-${{ inputs.platform }}-applicable.json", encoding="utf-8") as f:
+              totals = json.load(f)["totals"]
+          print(
+              f"{totals['covered_lines']}/{totals['num_statements']} "
+              f"({totals['percent_covered']}%)"
+          )
+          PY
+          )"
+          echo "applicable-caliber: ${{ inputs.platform }} platform-applicable coverage = $APPLICABLE_TOTALS"
+          echo "Platform-applicable coverage (other vendors' directories + their exclusive branch lines excluded): **$APPLICABLE_TOTALS**" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -129,6 +161,7 @@ jobs:
           name: coverage-${{ inputs.platform }}${{ inputs.device && format('-{0}', inputs.device) || '' }}
           path: |
             coverage-${{ inputs.platform }}.json
+            coverage-${{ inputs.platform }}-applicable.json
             report-${{ inputs.platform }}.json
 
       - name: Upload coverage report to FlagCICD
@@ -137,5 +170,7 @@ jobs:
         with:
           backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
           api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
-          report_path: 'coverage-${{ inputs.platform }}.json'
+          # kunlunxin (validation platform): report the platform-applicable
+          # caliber; everything else keeps the raw full-scope JSON.
+          report_path: ${{ inputs.platform == 'kunlunxin' && format('coverage-{0}-applicable.json', inputs.platform) || format('coverage-{0}.json', inputs.platform) }}
           fail_on_error: 'false'
