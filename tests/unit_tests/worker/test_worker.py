@@ -78,9 +78,11 @@ def has_vllm_worker() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not has_vllm_worker(), reason="vllm_fl.worker.worker is unavailable"
-)
+@pytest.fixture(autouse=True)
+def require_selected_worker(request):
+    # GCU uses the upstream 0.32 worker, independently of the legacy shared one.
+    if not request.node.name.startswith("test_gcu_") and not has_vllm_worker():
+        pytest.skip("vllm_fl.worker.worker is unavailable")
 
 
 @pytest.mark.parametrize("tag", ["weights", "kv_cache"])
@@ -231,6 +233,68 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     PlatformFL.check_and_update_config(vllm_config)
 
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+
+@pytest.mark.parametrize("fail_load", [False, True])
+def test_gcu_v2_dispatch_warmup_follows_successful_model_load(monkeypatch, fail_load):
+    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+
+    import vllm_fl.dispatch as dispatch
+    from vllm_fl.dispatch.backends.vendor.gcu.worker.model_runner_v2 import (
+        GPUModelRunnerFLV2,
+    )
+
+    events = []
+    sentinel = RuntimeError("load failed")
+
+    def load_model(self, *args, **kwargs):
+        events.append(("load", args, kwargs))
+        if fail_load:
+            raise sentinel
+
+    monkeypatch.setattr(GPUModelRunner, "load_model", load_model)
+    monkeypatch.setattr(dispatch, "warmup_cached_ops", lambda: events.append("warmup"))
+    runner = GPUModelRunnerFLV2.__new__(GPUModelRunnerFLV2)
+    if fail_load:
+        with pytest.raises(RuntimeError) as caught:
+            runner.load_model("weights", checkpoint="path")
+        assert caught.value is sentinel
+    else:
+        runner.load_model("weights", checkpoint="path")
+    assert events == [("load", ("weights",), {"checkpoint": "path"})] + (
+        [] if fail_load else ["warmup"]
+    )
+
+
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_gcu_worker_constructs_selected_runner(monkeypatch, use_v2):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    # Importing the shared v0.28 runner imports the graph adapter. On a
+    # CPU-only test host, use PyTorch's always-importable CUDA graph class
+    # for this factory-only contract; no graph or device operation is run.
+    from vllm.platforms import current_platform
+
+    monkeypatch.setattr(current_platform, "device_type", "cuda", raising=False)
+    from vllm_fl.dispatch.backends.vendor.gcu.worker import model_runner_v2
+    from vllm_fl.dispatch.backends.vendor.gcu.worker.worker import WorkerGCU
+    from vllm_fl.worker import model_runner
+
+    factory = Mock(return_value=object())
+    module, name = (
+        (model_runner_v2, "GPUModelRunnerFLV2")
+        if use_v2
+        else (model_runner, "ModelRunnerFL")
+    )
+    monkeypatch.setattr(module, name, factory)
+    config, device = object(), object()
+    worker = SimpleNamespace(
+        use_v2_model_runner=use_v2, vllm_config=config, device=device
+    )
+    result = WorkerGCU._make_model_runner(worker)
+    assert result is factory.return_value
+    factory.assert_called_once_with(config, device)
 
 
 def test_v2_initializes_uva_before_upstream_buffers(monkeypatch):
