@@ -122,6 +122,14 @@ jobs:
             "${DEVICE_ARGS[@]}" \
             --scope unit
 
+      - name: Generate platform-applicable coverage report
+        # Tier-1 statistic: filter the raw full-scope JSON down to
+        # common code + this platform's vendor code. The raw JSON stays
+        # untouched (kept as artifact, used for the tier-2 aggregate).
+        if: hashFiles('tools/coverage/scope_${{ inputs.platform }}.json') != ''
+        run: |
+          python tools/coverage/platform_scope_report.py             --report coverage-${{ inputs.platform }}.json             --scope tools/coverage/scope_${{ inputs.platform }}.json             --output coverage-${{ inputs.platform }}-applicable.json             --commit-sha "${GITHUB_SHA}"
+
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -129,6 +137,7 @@ jobs:
           name: coverage-${{ inputs.platform }}${{ inputs.device && format('-{0}', inputs.device) || '' }}
           path: |
             coverage-${{ inputs.platform }}.json
+            coverage-${{ inputs.platform }}-applicable.json
             report-${{ inputs.platform }}.json
 
       - name: Upload coverage report to FlagCICD
