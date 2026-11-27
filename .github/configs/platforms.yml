@@ -85,7 +85,7 @@ platforms:
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
   # Enablement follows the 0.5.0-dev line's own compatibility matrix.
-  # NVIDIA and Ascend have completed their vLLM 0.32 runtime and CI
+  # NVIDIA, Ascend and MetaX have completed their vLLM 0.32 runtime and CI
   # adaptations; other backends remain disabled until theirs are ready.
   ascend:
     enabled: true
@@ -104,7 +104,7 @@ platforms:
       - vllm_fl/dispatch/config/hygon.yaml
       - vllm_fl/dispatch/backends/vendor/hygon/
   metax:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/

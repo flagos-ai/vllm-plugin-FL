@@ -1,27 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 # 2026 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 
-import vllm
-import vllm.utils.nccl
+# Adapted for vLLM 0.32 from MetaX-MACA/vLLM-metax @ 440ec38e9508.
+
+import importlib
+import os
+import sys
 
 import torch
 
 
+def replace_loaded_vllm_aliases(module_name: str, name: str, replacement) -> None:
+    """Replace the defining export and same-object aliases already imported."""
+    module = importlib.import_module(module_name)
+    original = getattr(module, name)
+    for loaded_name, loaded_module in list(sys.modules.items()):
+        if loaded_name.startswith("vllm.") and loaded_module is not None:
+            if vars(loaded_module).get(name) is original:
+                setattr(loaded_module, name, replacement)
+
+
 def find_mccl_library() -> str:
-    """
-    We either use the library file specified by the `VLLM_NCCL_SO_PATH`
-    environment variable, or we find the library file brought by PyTorch.
-    After importing `torch`, `libnccl.so.2` or `librccl.so.1` can be
-    found by `ctypes` automatically.
-    """
-    so_file = None
-
-    # manually load the nccl library
+    """Find MCCL, honoring the vendor override and the native vLLM override."""
+    so_file = os.getenv("VLLM_MCCL_SO_PATH") or os.getenv("VLLM_NCCL_SO_PATH")
+    if so_file:
+        return so_file
     if torch.version.cuda is not None:
-        so_file = "libmccl.so"
-    else:
-        raise ValueError("MCCL only supports MACA backends.")
-    return so_file
+        return "libmccl.so"
+    raise ValueError("MCCL only supports MACA backends.")
 
 
-vllm.utils.nccl.find_nccl_library = find_mccl_library
+replace_loaded_vllm_aliases("vllm.utils.nccl", "find_nccl_library", find_mccl_library)

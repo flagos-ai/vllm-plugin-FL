@@ -14,6 +14,16 @@ logger = init_logger(__name__)
 def _initialize_fl_runtime(rank: int) -> None:
     """Install FL dispatch hooks before model/operator construction."""
     from vllm_fl.ops.custom_ops import register_oot_ops
+    from vllm.platforms import current_platform
+
+    if getattr(current_platform, "vendor_name", "") == "metax":
+        from vllm_fl.dispatch.backends.vendor.metax.patches import ensure_patches
+
+        # import_kernels() can patch _custom_ops while its module body is
+        # still executing. Its later definitions then replace those wrappers.
+        # At this worker boundary the imports above are complete; restore the
+        # live bindings before any router/model caches a callable.
+        ensure_patches()
 
     # CustomOp caches its selected forward method in __init__, so the
     # multimodal attention patch must run before model construction.

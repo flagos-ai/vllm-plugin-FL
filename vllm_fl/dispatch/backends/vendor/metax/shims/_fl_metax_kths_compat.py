@@ -20,6 +20,8 @@ import importlib.abc as _abc
 import os as _os
 import sys as _sys
 
+from .._compat import legacy_triton_runtime
+
 _TARGET = "vllm.v1.attention.ops.triton_unified_attention"
 _MARK = "_fl_metax_kths_patched"
 _NAMES = ("k_token_head_scales", "v_token_head_scales")
@@ -28,7 +30,7 @@ _FLAG = "USE_PER_TOKEN_HEAD_SCALES"
 
 
 def _enabled():
-    return _os.environ.get("FL_METAX_KTHS_PATCH", "") != "0"
+    return legacy_triton_runtime() and _os.environ.get("FL_METAX_KTHS_PATCH", "") != "0"
 
 
 def _is_flag_if(node):

@@ -1,4 +1,4 @@
-﻿# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: Apache-2.0
 """MetaX boot shim: torch.accelerator APIs missing on torch 2.8.
 
 vLLM 0.28 gpu_worker.py uses torch.accelerator.empty_cache / MemorySnapshot
@@ -10,6 +10,8 @@ Kill switch: FL_METAX_TORCH_ACCEL_PATCH=0.
 import importlib.machinery
 import os
 import sys
+
+from .._compat import legacy_torch_runtime
 
 _TARGET = "torch.accelerator"
 _HOOK = None
@@ -36,7 +38,7 @@ def _noop(*_a, **_k):
 
 def _enabled():
     v = os.environ.get("FL_METAX_TORCH_ACCEL_PATCH", "1").strip().lower()
-    return v not in ("", "0", "false", "no", "off")
+    return legacy_torch_runtime() and v not in ("", "0", "false", "no", "off")
 
 
 def _metax_active():

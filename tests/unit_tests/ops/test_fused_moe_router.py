@@ -8,7 +8,13 @@ import torch.nn.functional as F
 
 def test_fused_topk_zeroes_padded_rows_without_native_moe_kernel(monkeypatch):
     """Padded rows must not reach the experts when ``_moe_C`` is absent."""
+    import vllm.platforms as platforms
+
     import vllm_fl.ops.fused_moe.router as router_mod
+
+    monkeypatch.setattr(
+        platforms, "current_platform", SimpleNamespace(vendor_name="thead")
+    )
 
     def fake_topk(weights, ids, token_expert_indices, gating_output, renormalize):
         weights.fill_(1.0)
@@ -41,7 +47,13 @@ def test_fused_topk_zeroes_padded_rows_without_native_moe_kernel(monkeypatch):
 
 
 def test_fused_topk_prefers_upstream_when_native_kernel_takes_the_mask(monkeypatch):
+    import vllm.platforms as platforms
+
     import vllm_fl.ops.fused_moe.router as router_mod
+
+    monkeypatch.setattr(
+        platforms, "current_platform", SimpleNamespace(vendor_name="thead")
+    )
 
     captured = {}
 

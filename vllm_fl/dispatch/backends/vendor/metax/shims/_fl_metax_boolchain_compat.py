@@ -30,13 +30,15 @@ import importlib.abc as _abc
 import os as _os
 import sys as _sys
 
+from .._compat import legacy_triton_runtime
+
 _TARGET = "triton.compiler.code_generator"
 _MARK = "_fl_metax_boolchain_patched"
 _STUB_MARK = "chained boolean operators"
 
 
 def _enabled():
-    return _os.environ.get("FL_METAX_BOOLCHAIN_PATCH", "") != "0"
+    return legacy_triton_runtime() and _os.environ.get("FL_METAX_BOOLCHAIN_PATCH", "") != "0"
 
 
 def _as_binary(node):
@@ -65,7 +67,7 @@ def _wrap(orig):
 
 def _reapply_sibling():
     try:
-        import _fl_metax_annassign_compat as sib
+        from . import _fl_metax_annassign_compat as sib
         sib.install()
         return sib.status().get("patched")
     except Exception as exc:
