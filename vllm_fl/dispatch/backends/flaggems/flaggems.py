@@ -8,10 +8,9 @@ This backend provides operator implementations using the FlagGems library.
 
 from __future__ import annotations
 
-from typing import Optional, Union
+import os
 
 import torch
-import os
 
 from vllm_fl.dispatch.backends.base import Backend
 
@@ -24,7 +23,7 @@ class FlagGemsBackend(Backend):
     operator implementations.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
@@ -93,8 +92,8 @@ class FlagGemsBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 
@@ -182,7 +181,9 @@ class FlagGemsBackend(Backend):
 
         if use_flaggems_attn:
             print("Using FlagGems attention backend.")
-            return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+            return (
+                "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+            )
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()
 
@@ -191,7 +192,7 @@ class FlagGemsBackend(Backend):
         topk_ids: torch.Tensor,
         block_size: int,
         num_experts: int,
-        expert_map: Optional[torch.Tensor] = None,
+        expert_map: torch.Tensor | None = None,
         pad_sorted_ids: bool = False,
         ignore_invalid_experts: bool = False,
     ):
@@ -283,10 +284,72 @@ class FlagGemsBackend(Backend):
         routed_scaling_factor,
         bias,
         scoring_func=0,
+        is_padding=None,
     ):
         from .impl.fused_moe import grouped_topk_flaggems
 
         return grouped_topk_flaggems(
-            scores, n_group, topk_group, topk,
-            renormalize, routed_scaling_factor, bias, scoring_func,
+            scores,
+            n_group,
+            topk_group,
+            topk,
+            renormalize,
+            routed_scaling_factor,
+            bias,
+            scoring_func,
+            is_padding=is_padding,
         )
+
+    def hy4_flash_engram_gate(self, key, query):
+        from flaggems_vllm import hy4_flash_engram_gate
+
+        return hy4_flash_engram_gate(key, query)
+
+    def hy4_flash_engram_lookup_norm(
+        self, rows, row_scale, gamma, local_hashes, out_dtype
+    ):
+        from flaggems_vllm import hy4_flash_engram_lookup_norm
+
+        return hy4_flash_engram_lookup_norm(
+            rows, row_scale, gamma, local_hashes, out_dtype
+        )
+
+    def hy4_flash_engram_residual(self, hidden, value, gate, gamma, scales, valid_rows):
+        from flaggems_vllm import hy4_flash_engram_residual
+
+        return hy4_flash_engram_residual(hidden, value, gate, gamma, scales, valid_rows)
+
+    def hy4_flash_fwht_quant_fp8(self, vectors):
+        from flaggems_vllm import hy4_flash_fwht_quant_fp8
+
+        return hy4_flash_fwht_quant_fp8(vectors)
+
+    def hy4_flash_gated_pool(self, values, gates, ape, norm_weight, eps):
+        from flaggems_vllm import hy4_flash_gated_pool
+
+        return hy4_flash_gated_pool(values, gates, ape, norm_weight, eps)
+
+    def hy4_flash_rotate_indexer(self, *args, **kwargs):
+        from flaggems_vllm import hy4_flash_rotate_indexer
+
+        return hy4_flash_rotate_indexer(*args, **kwargs)
+
+    def hy4_flash_select_groups(self, *args, **kwargs):
+        from flaggems_vllm import hy4_flash_select_groups
+
+        return hy4_flash_select_groups(*args, **kwargs)
+
+    def hy4_flash_write_pool(self, *args, **kwargs):
+        from flaggems_vllm import hy4_flash_write_pool
+
+        return hy4_flash_write_pool(*args, **kwargs)
+
+    def hy4_flash_gather_groups(self, *args, **kwargs):
+        from flaggems_vllm import hy4_flash_gather_groups
+
+        return hy4_flash_gather_groups(*args, **kwargs)
+
+    def hy4_flash_write_tails(self, *args, **kwargs):
+        from flaggems_vllm import hy4_flash_write_tails
+
+        return hy4_flash_write_tails(*args, **kwargs)

@@ -518,6 +518,24 @@ class OpManager:
 
         return result
 
+    def call_compatible(self, op_name: str, is_compatible, /, *args, **kwargs):
+        """Select a policy-eligible backend for this call before running it.
+
+        Eligibility is evaluated against the unmodified cached candidate order.
+        An unsupported argument does not run, fail, or blacklist a backend,
+        and an execution error is never retried by this entry point.
+        """
+        for impl in self.resolve_candidates(op_name):
+            if is_compatible(impl):
+                self._record_first_use(op_name, impl)
+                result = self._call_with_hooks(op_name, impl.fn, args, kwargs)
+                if impl.kind == BackendImplKind.DEFAULT:
+                    _record_default_flagos_op(op_name, impl)
+                return result
+        raise NotImplementedError(
+            f"No policy-eligible implementation supports this call for op='{op_name}'"
+        )
+
     def call(self, op_name: str, *args, **kwargs):
         """
         Resolve and call an operator implementation with optional fallback support.

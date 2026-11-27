@@ -173,5 +173,28 @@ def register_builtins(registry) -> None:
         ),
     ]
 
+    for name in (
+        "hy4_flash_engram_gate",
+        "hy4_flash_engram_lookup_norm",
+        "hy4_flash_engram_residual",
+        "hy4_flash_fwht_quant_fp8",
+        "hy4_flash_gated_pool",
+        "hy4_flash_rotate_indexer",
+        "hy4_flash_select_groups",
+        "hy4_flash_write_pool",
+        "hy4_flash_gather_groups",
+        "hy4_flash_write_tails",
+    ):
+        impls.append(
+            OpImpl(
+                op_name=name,
+                impl_id="default.flagos",
+                kind=BackendImplKind.DEFAULT,
+                fn=_bind_is_available(getattr(backend, name), is_avail),
+                vendor=None,
+                priority=BackendPriority.DEFAULT,
+            )
+        )
+
     filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
     registry.register_many(filtered)
