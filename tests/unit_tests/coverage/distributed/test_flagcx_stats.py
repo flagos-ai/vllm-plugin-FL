@@ -12,7 +12,7 @@ import threading
 
 import pytest
 
-from tests.unit_tests.distributed._flagcx_stubs import (
+from tests.unit_tests.coverage.distributed._flagcx_stubs import (
     FlagcxStubEnv,
 )
 

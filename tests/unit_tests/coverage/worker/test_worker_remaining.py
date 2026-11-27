@@ -39,7 +39,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-from tests.unit_tests.worker.test_worker_fl import (
+from tests.unit_tests.coverage.worker.test_worker_fl import (
     _PPGroupStub,
     _RunnerDouble,
     _SleepModeBackendStub,

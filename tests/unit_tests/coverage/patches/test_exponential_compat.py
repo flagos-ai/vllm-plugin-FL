@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/patches/exponential_compat.py"
+_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/patches/exponential_compat.py"
 _MODULE_NAME = "supp_exponential_compat_under_test"
 
 

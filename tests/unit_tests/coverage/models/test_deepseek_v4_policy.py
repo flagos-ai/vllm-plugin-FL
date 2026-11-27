@@ -36,7 +36,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/models/deepseek_v4.py"
+_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/models/deepseek_v4.py"
 _MODULE_NAME = "supp_deepseek_v4_under_test"
 
 

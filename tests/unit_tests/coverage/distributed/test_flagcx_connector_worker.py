@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from tests.unit_tests.distributed._flagcx_stubs import (
+from tests.unit_tests.coverage.distributed._flagcx_stubs import (
     FlagcxStubEnv,
     VllmConfigDouble,
     make_kv_cache_config,

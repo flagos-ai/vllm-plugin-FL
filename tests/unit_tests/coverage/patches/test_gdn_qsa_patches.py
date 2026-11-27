@@ -28,7 +28,7 @@ import pytest
 import torch
 
 
-_ROOT = Path(__file__).resolve().parents[3]
+_ROOT = Path(__file__).resolve().parents[4]
 _GDN_SOURCE = _ROOT / "vllm_fl/patches/gdn_packed_decode.py"
 _QSA_SOURCE = _ROOT / "vllm_fl/patches/qsa_cache_hint.py"
 

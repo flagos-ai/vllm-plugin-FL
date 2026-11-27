@@ -20,7 +20,7 @@ by GPU functional tests.
 
 import pytest
 
-from tests.unit_tests.distributed._flagcx_stubs import (
+from tests.unit_tests.coverage.distributed._flagcx_stubs import (
     FlagcxStubEnv,
     VllmConfigDouble,
     make_kv_cache_config,
@@ -551,7 +551,7 @@ def test_scheduler_builds_blocks_per_sw(connector_env):
     enabled (disable_hybrid_kv_cache_manager=False) and a non-full-attention
     group exists."""
     fc = connector_env.fc
-    from tests.unit_tests.distributed._flagcx_stubs import (
+    from tests.unit_tests.coverage.distributed._flagcx_stubs import (
         _FullSpec,
         _Group,
         _SlidingSpec,
@@ -582,7 +582,7 @@ def test_scheduler_get_sw_clipped_blocks(connector_env):
     """Clipping keeps only the trailing blocks_per_sw per group when HMA is
     required; without HMA the ids pass through unchanged (copied)."""
     fc = connector_env.fc
-    from tests.unit_tests.distributed._flagcx_stubs import (
+    from tests.unit_tests.coverage.distributed._flagcx_stubs import (
         _FullSpec,
         _Group,
         _SlidingSpec,

@@ -43,7 +43,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-_SOURCE_ROOT = Path(__file__).resolve().parents[3]
+_SOURCE_ROOT = Path(__file__).resolve().parents[4]
 _FLAGCX_SOURCE = _SOURCE_ROOT / "vllm_fl/distributed/device_communicators/flagcx.py"
 _COMMUNICATOR_SUBJECT = "_test_flagcx_guards_communicator"
 

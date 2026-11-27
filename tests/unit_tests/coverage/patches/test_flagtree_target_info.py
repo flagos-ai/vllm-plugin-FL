@@ -28,7 +28,7 @@ from types import ModuleType
 import pytest
 
 _SOURCE = (
-    Path(__file__).resolve().parents[3] / "vllm_fl/patches/flagtree_target_info.py"
+    Path(__file__).resolve().parents[4] / "vllm_fl/patches/flagtree_target_info.py"
 )
 _MODULE_NAME = "supp_flagtree_target_info_under_test"
 

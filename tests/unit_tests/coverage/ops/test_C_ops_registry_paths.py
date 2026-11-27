@@ -35,7 +35,7 @@ import pytest
 import torch
 
 _REGISTRY_PATH = (
-    Path(__file__).resolve().parents[3] / "vllm_fl" / "ops" / "_C_ops_registry.py"
+    Path(__file__).resolve().parents[4] / "vllm_fl" / "ops" / "_C_ops_registry.py"
 )
 
 

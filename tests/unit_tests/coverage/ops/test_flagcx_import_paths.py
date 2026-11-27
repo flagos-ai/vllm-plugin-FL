@@ -11,7 +11,7 @@
 
 The flagcx connector is re-executed from its source file under a unique
 module name against the shared
-``tests.unit_tests.distributed._flagcx_stubs.FlagcxStubEnv``
+``tests.unit_tests.coverage.distributed._flagcx_stubs.FlagcxStubEnv``
 boundary (the ``test_flagcx_transfer_plan.py`` pattern), so its import-time
 environment handling runs unmodified.
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[3]
+_ROOT = Path(__file__).resolve().parents[4]
 _CONNECTOR_SOURCE = _ROOT / "vllm_fl/distributed/kv_transfer/flagcx_connector.py"
 
 pytest.importorskip("msgspec")
@@ -39,7 +39,7 @@ def load_connector(monkeypatch):
     import-time wrapper import is what the tests vary.  ``sys.path`` is
     snapshotted so the ``FLAGCX_PATH`` append is rolled back afterwards.
     """
-    from tests.unit_tests.distributed._flagcx_stubs import (
+    from tests.unit_tests.coverage.distributed._flagcx_stubs import (
         FlagcxStubEnv,
     )
 

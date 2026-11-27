@@ -31,7 +31,7 @@ from typing import Any
 import pytest
 import torch
 
-_ROOT = Path(__file__).resolve().parents[3]
+_ROOT = Path(__file__).resolve().parents[4]
 _WORKER_SOURCE = _ROOT / "vllm_fl/worker/nvidia_worker.py"
 
 _WORKER_MODULE = "vllm_fl.worker.nvidia_worker"

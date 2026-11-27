@@ -31,7 +31,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/attention/utils.py"
+_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/attention/utils.py"
 _MODULE_NAME = "supp_gcu_flash_forward_under_test"
 
 

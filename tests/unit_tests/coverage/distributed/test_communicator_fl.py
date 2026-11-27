@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from tests.unit_tests.distributed._flagcx_stubs import _OnceLogger
+from tests.unit_tests.coverage.distributed._flagcx_stubs import _OnceLogger
 
 pytest.importorskip("torch")
 

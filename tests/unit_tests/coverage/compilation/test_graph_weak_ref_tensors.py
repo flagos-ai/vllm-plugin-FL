@@ -42,7 +42,7 @@ from typing import Any
 import pytest
 import torch
 
-_ROOT = Path(__file__).resolve().parents[3]
+_ROOT = Path(__file__).resolve().parents[4]
 _GRAPH_SOURCE = _ROOT / "vllm_fl/compilation/graph.py"
 _PARAMS_SOURCE = _ROOT / "vllm_fl/compilation/graph_params.py"
 _RUNTIME_SOURCE = _ROOT / "vllm_fl/compilation/graph_runtime.py"

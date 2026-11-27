@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 import torch
 
-_ROOT = Path(__file__).resolve().parents[3]
+_ROOT = Path(__file__).resolve().parents[4]
 _PLATFORM_SOURCE = _ROOT / "vllm_fl" / "platform.py"
 _PLATFORM_MODULE = "supp_platform_fl_checkcfg_under_test"
 

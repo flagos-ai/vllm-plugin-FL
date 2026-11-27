@@ -40,7 +40,7 @@ import pytest
 import torch
 
 _SOURCE = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[4]
     / "vllm_fl/dispatch/backends/flaggems/impl/attention.py"
 )
 _MODULE_NAME = "supp_flaggems_attention_under_test"

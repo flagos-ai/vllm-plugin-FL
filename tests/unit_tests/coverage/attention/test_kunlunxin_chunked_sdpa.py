@@ -26,7 +26,7 @@ from types import ModuleType
 import pytest
 import torch
 
-_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/attention/utils.py"
+_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/attention/utils.py"
 _MODULE_NAME = "supp_kunlunxin_chunked_under_test"
 
 # The production chunk size; patched down inside these tests.

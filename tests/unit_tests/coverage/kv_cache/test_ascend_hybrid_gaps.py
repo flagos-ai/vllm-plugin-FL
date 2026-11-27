@@ -128,7 +128,7 @@ _SAVED = {name: sys.modules.get(name) for name in _STUB_ENTRIES}
 _iface = _install_vllm_stubs()
 
 _SOURCE = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[4]
     / "vllm_fl"
     / "kv_cache"
     / "ascend"

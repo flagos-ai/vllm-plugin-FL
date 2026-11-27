@@ -34,7 +34,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/attention/utils.py"
+_SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/attention/utils.py"
 _MODULE_NAME = "supp_attention_utils_under_test"
 
 _VIT_LEAVES = ("vllm.v1.attention.ops.vit_attn_wrappers",)
