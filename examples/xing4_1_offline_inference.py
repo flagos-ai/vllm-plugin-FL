@@ -65,7 +65,12 @@ def main() -> None:
     )
 
     conversations = [
-        [{"role": "user", "content": "What is 27 times 27? Answer with the number only."}],
+        [
+            {
+                "role": "user",
+                "content": "What is 27 times 27? Answer with the number only.",
+            }
+        ],
         [{"role": "user", "content": "用一句话介绍你自己。"}],
     ]
 

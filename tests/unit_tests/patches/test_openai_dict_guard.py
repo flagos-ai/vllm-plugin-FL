@@ -15,6 +15,7 @@ Covers the behaviours required by the plugin development standard:
 import importlib
 
 import pytest
+from pydantic import ValidationError
 
 from vllm_fl.patches import openai_dict_guard as guard
 
@@ -99,11 +100,10 @@ def test_non_dict_payload_no_longer_raises_attribute_error(payload):
     guard.install()
     for module_path, class_name, _ in guard._TARGETS:
         cls = _cls(module_path, class_name)
-        with pytest.raises(Exception) as excinfo:
+        # A malformed body must surface as a normal pydantic validation error,
+        # not as an AttributeError from inside the validator.
+        with pytest.raises(ValidationError):
             cls.model_validate(payload)
-        assert not isinstance(
-            excinfo.value, AttributeError
-        ), f"{class_name} still raises AttributeError for {payload!r}"
 
 
 def test_valid_dict_payload_still_accepted():
@@ -127,7 +127,7 @@ def test_upstream_semantic_rejection_preserved():
     )
 
     guard.install()
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ChatCompletionRequest.model_validate(
             {
                 "model": "test",

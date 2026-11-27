@@ -13,9 +13,9 @@ def reset_registration_flag(monkeypatch):
     """Start every test without the Xing4.1 alias or parsers installed."""
     monkeypatch.setattr(xing4_1, "_registered", False)
 
-    from vllm.transformers_utils.config import _CONFIG_REGISTRY
     from vllm.reasoning.abs_reasoning_parsers import ReasoningParserManager
     from vllm.tool_parsers.abstract_tool_parser import ToolParserManager
+    from vllm.transformers_utils.config import _CONFIG_REGISTRY
 
     def _drop(mapping, key):
         if isinstance(mapping, dict):
@@ -97,7 +97,7 @@ def test_register_xing41_support_is_idempotent():
 def test_reasoning_parser_extract_split():
     """Thinking content is separated from the final answer."""
     mod = importlib.import_module("vllm_fl.models.xing4_1.reasoning_parser")
-    parser_cls = getattr(mod, "Xing41ReasoningParser")
+    parser_cls = mod.Xing41ReasoningParser
 
     class _Req:
         chat_template_kwargs = {"enable_thinking": True}
