@@ -1,7 +1,10 @@
 # MUSA deployment
 
-vLLM-Plugin-FL supports vLLM **0.28.0** on Moore Threads MUSA with the V1 model
-runner, native MCCL communication and piecewise MUSA graph capture.
+This guide records the historical vLLM **0.28.0** MUSA stack accepted in
+[#575](https://github.com/flagos-ai/vllm-plugin-FL/pull/575) on `0.4.0-dev`,
+with the V1 model runner, native MCCL and piecewise MUSA graph capture.
+The MUSA CI lane is disabled on `0.5.0-dev`; this recipe does not establish
+vLLM 0.32 acceptance.
 
 ## Runtime requirements
 
@@ -67,8 +70,8 @@ PHYSICAL_DEVICE=0  # Replace with the host card allocated to your job.
 mthreads-gmi
 docker pull "$IMAGE"
 git clone --depth 1 https://github.com/flagos-ai/vllm-plugin-FL.git "$SOURCE_DIR"
-# While this adaptation is under review, select its public PR head instead of main.
-git -C "$SOURCE_DIR" fetch --depth 1 origin pull/575/head
+# Select the qualified historical #575 source for this 0.28 image/provider.
+git -C "$SOURCE_DIR" fetch --depth 1 origin cd0099ffd421c27c5e2a8b585022fca41c8e1c8a
 git -C "$SOURCE_DIR" checkout --detach FETCH_HEAD
 mkdir -p "$MODEL_DIR"
 ```
@@ -140,11 +143,14 @@ env -u VLLM_VENDOR "$PYTHON" -I -B -m pip wheel \
 "$PYTHON" -I -B .github/scripts/install_flaggems_vllm.py
 ```
 
-The last command is **required**: it installs the shared FlagGems-vllm provider
-from the repository's pinned upstream commit
+For the historical checkout above, the last command is **required**: its
+installer supplies the qualified FlagGems-vllm provider from upstream commit
 `f775b37f3066e2935742d26c7592a5dd55499159`, unless that exact source is already
 installed. It checks that the existing runtime package versions remain unchanged.
 This provider is separate from the corrected FlagGems wheel already in the image.
+The current `0.5.0-dev` shared installer defaults to `b5c2c2249319277ccda4d41aa0f65164bd9b2a19`;
+that newer branch pin is separate from this qualified 0.28 image/source pair
+and carries no MUSA vLLM 0.32 acceptance claim.
 Do not install generic PyPI Torch/CUDA packages or replace the image's dependencies.
 
 Check the runtime before loading the model:

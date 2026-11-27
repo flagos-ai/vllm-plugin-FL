@@ -20,6 +20,17 @@ needed to install the plugin from your checkout. The image's Python is in
 `/flagos/bin`. Its base comes from the
 [FlagOS application release](https://flagos-ai.github.io/release-info/application/vllm0.24.0-kunlunxin-xre5.37.1/).
 
+The runtime image includes the `8ae5c22` Python 3.10 backport of
+[FlagGems-vllm #1248](https://github.com/flagos-ai/FlagGems-vllm/pull/1248),
+which remains open. Deployment does not wait for that PR to merge.
+[FlagTree #1700](https://github.com/flagos-ai/FlagTree/issues/1700) and
+[#1701](https://github.com/flagos-ai/FlagTree/issues/1701) track the native-vLLM
+performance-reference blockers; they do not establish a candidate-kernel
+failure or a completed native performance Gate.
+[FlagCX #729](https://github.com/flagos-ai/FlagCX/issues/729) separately tracks
+two-host FULL graph replay, beyond the recorded single-host and two-host eager
+inference results.
+
 ## Pull the runtime image
 
 ```sh

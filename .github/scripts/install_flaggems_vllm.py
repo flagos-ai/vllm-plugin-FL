@@ -16,6 +16,8 @@ SOURCE_ARCHIVE_SHA256 = (
     "1b47e1eb7982acc606e2fc920561d169e2a17fac7c92ff65c5f11cafa6b8b16e"
 )
 if os.environ.get("CI_FLAGGEMS_VLLM_VENDOR") == "kunlunxin":
+    # Python 3.10 backport of https://github.com/flagos-ai/FlagGems-vllm/pull/1248.
+    # The qualified P800 runtime image already contains this provider.
     COMMIT = "8ae5c22f5af6d650216f881c329c4dff20c182e1"
     SOURCE_ARCHIVE = (
         f"https://codeload.github.com/flagos-ai/FlagGems-vllm/tar.gz/{COMMIT}"

@@ -1,6 +1,10 @@
 # Copyright (c) 2026 Kunlunxin, Inc. All rights reserved.
 """Bind vLLM V2 penalties to the Kunlunxin operator provider."""
 
+# Image pin 8ae5c22: https://github.com/flagos-ai/FlagGems-vllm/pull/1248.
+# Native reference blockers: https://github.com/flagos-ai/FlagTree/issues/1700
+# and https://github.com/flagos-ai/FlagTree/issues/1701.
+
 import importlib
 import logging
 

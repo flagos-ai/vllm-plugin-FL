@@ -7,20 +7,29 @@ The `VLLM_TARGET_DEVICE=empty` installation is for other hardware backends.
 
 ## Software stack
 
-| Component | Pinned configuration |
+| Component | Current source configuration |
 |---|---|
-| NVIDIA CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci` |
-| Official base | `vllm/vllm-openai:v0.32.0-cu129` |
-| vLLM | Full official CUDA `0.32.0`; preserve the installed native extensions |
-| FlagGems | Development commit `6fe7709e7717e49cf12bb00346719a0885f505fa` |
-| FlagGems-vllm | Commit `b5c2c2249319277ccda4d41aa0f65164bd9b2a19` (`v0.2.0`; package metadata reports `0.1.0`) |
-| FlagTree | Development commit `317a0249ec25c6756e0aee3a87e8e3c92f154335`; supplies Triton `3.6.0` |
-| Runtime defaults | FlagGems enabled, FlagTune disabled, upstream runner defaults |
+| NVIDIA CI image | `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-cuda-dev` |
+| Build base | `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-nvidia-cuda13.0.3:2.3.0` |
+| vLLM | Full CUDA `0.32.0`; preserve the installed native extensions |
+| Image-baked FlagGems-vllm | `0.3.0.dev20261119` in the current Dockerfile |
+| CI FlagGems-vllm override | Source `b5c2c2249319277ccda4d41aa0f65164bd9b2a19` (`v0.2.0`; package metadata reports `0.1.0`) |
+| FlagGems and FlagTree | Inherited from the selected FlagOS runtime; record installed versions and active compiler paths |
+| Runtime defaults | FlagGems enabled, FlagTune disabled; CI explicitly selects Runner V2 |
 
-Use the image reference selected in [the CUDA CI configuration](../../.github/configs/cuda.yml).
-Record the resolved image digest and plugin commit for each deployment. The
-image records source and wheel provenance in `/opt/fl-ci/provenance.json`.
-These development revisions are fixed rather than floating branch installs.
+The current recipe follows [#785](https://github.com/flagos-ai/vllm-plugin-FL/pull/785)
+and [docker/cuda/Dockerfile](../../docker/cuda/Dockerfile). The
+[NVIDIA CI setup](../../.github/scripts/nvidia/setup.sh) replaces the image-baked
+provider with the qualified `b5c2c224` source after graph-profiling faults were
+observed with the development package. Record the image and the final interpreter
+separately. The earlier development-commit stack in
+[#615](https://github.com/flagos-ai/vllm-plugin-FL/pull/615) is historical validation.
+
+Use the image reference selected in [the NVIDIA CI configuration](../../.github/configs/nvidia.yml).
+Record its resolved digest, plugin commit and installed dependency versions.
+The KV-cache API update in [#737](https://github.com/flagos-ai/vllm-plugin-FL/pull/737)
+adds no new FlagGems, FlagGems-vllm, FlagTree or FlagCX revision requirement.
+Separate upstream test and CI fixes are not runtime prerequisites for this image.
 Do not install a second Triton distribution over FlagTree or replace the
 official vLLM CUDA package with an EMPTY wheel.
 
@@ -32,7 +41,7 @@ remains with FlagGems. See the [provider guide](../flaggems-vllm.md).
 ## Prepare the container
 
 Use Linux, Docker with NVIDIA Container Toolkit, and a driver compatible with
-CUDA 12.9. Check the selected GPUs with `nvidia-smi`. Run long remote setup and
+CUDA 13.0.3. Check the selected GPUs with `nvidia-smi`. Run long remote setup and
 serving commands inside `tmux`.
 
 Prepare a checkout containing the adaptation and complete local checkpoints.
@@ -47,7 +56,7 @@ export REPO_DIR="$PWD"
 export MODELS_DIR=/data/models
 export RUN_DIR=/data/vllm-fl-runs
 mkdir -p "$RUN_DIR"
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci
+export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-cuda-dev
 
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
@@ -67,19 +76,18 @@ before pulling. Install the mounted plugin checkout inside the container:
 ```bash
 export VLLM_PLUGINS=fl
 export USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
-export FL_STACK_PROVENANCE=/opt/fl-ci/provenance.json
+export PYTHONPATH=/opt/triton${PYTHONPATH:+:$PYTHONPATH}
 
-python .github/scripts/install_flaggems_vllm.py
-python -I -B .github/scripts/cuda/stack.py --runtime-only
+python .github/scripts/install_flaggems_vllm.py --source-archive
+python -c 'import torch, triton, vllm; print(torch.__version__, triton.__version__, vllm.__version__)'
 env -u VLLM_VENDOR python -m pip install \
   --break-system-packages --no-build-isolation --no-deps -e .
-python -I -B .github/scripts/cuda/stack.py
+python -c 'import vllm_fl; from vllm import _C; print(vllm_fl.__file__, _C.__file__)'
 ```
 
 The plugin uses the official vLLM CUDA extensions and installs its Python
-integration without building `vllm_fl._C`. The stack checks verify the native
-vLLM package, pinned FL dependencies, active Triton provider and plugin
-installation. Avoid
+integration without building `vllm_fl._C`. Record the native vLLM package,
+final provider revision, active Triton and plugin import paths. Avoid
 running from an upstream vLLM source checkout or shadowing its installed package
 through `PYTHONPATH`.
 
@@ -152,22 +160,17 @@ answer against the supplied media.
 
 ## Build and CI
 
-Build the native CUDA CI image from the repository root when needed:
+Build the current CUDA development image from the repository root when needed:
 
 ```bash
-bash docker/build.sh --platform cuda --target ci \
-  --image-name vllm-fl-local --image-tag v0.32.0-cuda-ci
+docker build --target dev -f docker/cuda/Dockerfile -t vllm-fl-local:v0.32.0-cuda-dev .
 ```
 
-[Dockerfile.ci](../../docker/cuda/Dockerfile.ci) retains the official vLLM CUDA
-installation and installs the fixed FlagGems, FlagTree and FlagGems-vllm sources.
-The build records provenance and checks the runtime. Install the plugin checkout
-and run the full stack check after starting the resulting image.
-
-CI [setup.sh](../../.github/scripts/cuda/setup.sh) verifies the provider and
-runtime pins, installs the plugin with `--no-deps`, then checks the stack and audio
-dependencies. Audio checks require access to the official vLLM audio fixtures
-or a populated `VLLM_ASSETS_CACHE`.
+[Dockerfile](../../docker/cuda/Dockerfile) retains the full native vLLM CUDA
+package and inherits the FlagOS runtime. CI
+[setup.sh](../../.github/scripts/nvidia/setup.sh) installs the provider source
+override and this checkout with its test dependencies. The older `Dockerfile.ci`
+recipe is separate from the image currently selected by `nvidia.yml`.
 
 NVIDIA is the enabled backend for this adaptation. Existing CI runners execute
 unit and model tests using the selected image; their labels, model mounts and
@@ -176,8 +179,8 @@ above do not add automatic CI jobs. See the [test guide](../../tests/README.md).
 
 ## Troubleshooting
 
-- **Missing vLLM CUDA extension:** restore the full official CUDA image and run
-  the stack check. An EMPTY wheel is not a supported NVIDIA installation.
+- **Missing vLLM CUDA extension:** restore the selected full-CUDA runtime and
+  verify the native extension import. An EMPTY wheel is not supported on NVIDIA.
 - **Wrong dependency/provider:** restore the pinned image or rebuild its recipe;
   keep FlagGems enabled and the matching NVIDIA dispatch policy installed.
 - **Incorrect model output:** retain prompts, generated token IDs, worker logs,
