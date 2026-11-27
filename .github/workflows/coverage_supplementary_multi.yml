@@ -22,6 +22,12 @@
 #   3. combined            (statement-level union, same scope)
 #   4. per-area reports    (tools/coverage/area_report.py)
 #   5. delta report        (tools/coverage/delta_report.py)
+# plus, on a plain ubuntu runner, the plan's multi-platform aggregate:
+#   6. aggregate           (union of executed lines across all reporting
+#                           platforms over the full vllm_fl denominator,
+#                           tools/coverage/aggregate_coverage.py) — produced
+#                           even when a platform leg fails, then explicitly
+#                           marked incomplete in meta.missing_platforms.
 #
 # Deliberately independent of the PR pipeline: workflow_dispatch + a
 # Saturday 06:00 UTC schedule that avoids the nightly (18:00 UTC daily),
@@ -262,3 +268,113 @@ jobs:
             coverage-env.json
             test-results-*.json
             test-results-*.xml
+
+  # ----------------------------------------------------------------------
+  # Multi-platform aggregate (plan section 3.3): union of executed lines
+  # across every platform that reported, over the full vllm_fl statement
+  # denominator. Runs on a plain ubuntu runner (JSON artifacts only, no
+  # device needed). `if: always()` so a single failed/skipped platform leg
+  # still yields an aggregate — explicitly marked incomplete via the tool's
+  # --expected-platforms check rather than silently dropped.
+  # ----------------------------------------------------------------------
+  aggregate:
+    name: Multi-platform aggregate
+    needs: coverage
+    if: always() && needs.coverage.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (tools + workflow config)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || '0.5.0-dev' }}
+          sparse-checkout: |
+            tools/coverage
+
+      - name: Resolve frozen revision
+        id: rev
+        run: |
+          BRANCH="${{ inputs.branch || '0.5.0-dev' }}"
+          SHA="$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)"
+          if [ -z "$SHA" ]; then SHA="$GITHUB_SHA"; fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Frozen revision: $SHA"
+
+      - name: Download per-platform coverage artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-supplementary-multi-*
+          path: platforms
+          merge-multiple: false
+
+      - name: Build aggregate inputs
+        id: inputs
+        run: |
+          # The workflow's per-platform job writes coverage-<platform>.json
+          # (core baseline, unit + functional appended). The aggregate
+          # caliber is the plan's union over per-platform reports; use each
+          # platform's full core-baseline report.
+          mkdir -p agg-inputs
+          FOUND=""
+          for P in kunlunxin hygon iluvatar thead; do
+            SRC=""
+            for CAND in \
+              "platforms/coverage-supplementary-multi-$P/coverage-$P.json" \
+              "platforms/coverage-supplementary-multi-$P/coverage-$P-core.json"; do
+              if [ -f "$CAND" ]; then SRC="$CAND"; break; fi
+            done
+            if [ -n "$SRC" ]; then
+              cp "$SRC" "agg-inputs/coverage-$P.json"
+              FOUND="$FOUND $P"
+            else
+              echo "no report artifact for platform '$P' (leg failed or skipped)"
+            fi
+          done
+          echo "found=$FOUND" >> "$GITHUB_OUTPUT"
+          echo "Platforms with reports:$FOUND"
+          ls -la agg-inputs/
+
+      - name: Aggregate (union across platforms)
+        run: |
+          SHA=${{ steps.rev.outputs.sha }}
+          ARGS=""
+          FOUND=${{ steps.inputs.outputs.found }}
+          for P in $FOUND; do
+            ARGS="$ARGS agg-inputs/coverage-$P.json"
+          done
+          if [ -z "$ARGS" ]; then
+            echo "no per-platform reports available at all; nothing to aggregate" >&2
+            exit 1
+          fi
+          python tools/coverage/aggregate_coverage.py \
+            --inputs $ARGS \
+            --platforms "$(echo $FOUND | tr ' ' ',')" \
+            --expected-platforms kunlunxin,hygon,iluvatar,thead \
+            --commit-sha "$SHA" \
+            --output coverage-aggregate.json \
+            --summary-md coverage-aggregate.md
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Multi-platform aggregate coverage"
+            echo
+            echo "Frozen revision: \`${{ steps.rev.outputs.sha }}\`"
+            echo
+            cat coverage-aggregate.md 2>/dev/null || echo "_aggregate missing_"
+            echo
+            echo "Per-platform leg results: ${{ join(needs.coverage.result, ' ') }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload aggregate artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-supplementary-multi-aggregate
+          retention-days: 90
+          path: |
+            coverage-aggregate.json
+            coverage-aggregate.md
