@@ -35,7 +35,7 @@ from typing import Any
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[3]
 _INIT_SOURCE = _ROOT / "vllm_fl" / "__init__.py"
 _VLLM_FL_DIR = _ROOT / "vllm_fl"
 _ALIAS = "supp_toplevel_alias"
