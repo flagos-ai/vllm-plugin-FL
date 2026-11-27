@@ -57,11 +57,25 @@ class AscendBackend(Backend):
 
         return gdn_prefill(*args, **kwargs)
 
+    def minimax_m3_kernels(self):
+        from .impl.minimax_m3 import MiniMaxM3Kernels
+
+        return MiniMaxM3Kernels
+
+    def bf16_grouped_experts(self, *args, **kwargs):
+        from .impl.fused_moe import bf16_grouped_experts
+        return bf16_grouped_experts(*args, **kwargs)
+
     def fused_experts(self, *args, **kwargs):
         """Stable expert-call seam; implementation owns routing and math."""
         from .impl.fused_moe import fused_experts_impl
 
         return fused_experts_impl(*args, **kwargs)
+
+    def topk_bias(self, *args, **kwargs):
+        from .impl.fused_moe import topk_bias
+
+        return topk_bias(*args, **kwargs)
 
     def topk_softmax(
         self, topk_weights, topk_ids, token_expert_indices, gating_output,

@@ -44,6 +44,11 @@ class ReferenceBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def minimax_m3_sparse_attention(self, *args, **kwargs):
+        from .impl.minimax_m3_sparse_attention import minimax_m3_sparse_attn
+
+        return minimax_m3_sparse_attn(*args, **kwargs)
+
     def dynamic_per_token_quant_int8(
         self,
         x: torch.Tensor,
