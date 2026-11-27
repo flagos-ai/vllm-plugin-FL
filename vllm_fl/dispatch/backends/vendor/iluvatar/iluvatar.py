@@ -207,6 +207,29 @@ patch_triton_language_for_iluvatar()
 patch_triton_perf_model_for_iluvatar()
 
 
+def patch_unified_attention_for_iluvatar() -> None:
+    """Install the BI-V150 unified-attention kernel over vLLM's.
+
+    Thin forwarder so the call site stays next to the other Iluvatar runtime
+    patches; the kernel copy and the launch-parameter choice live in
+    ``kernels/unified_attention_iluvatar.py`` (that file documents both the
+    corex ``exp(-inf)`` miscompilation it works around and the measured
+    speedups).  Vendor-gated inside the callee and idempotent.  Raises on
+    failure: vLLM's own kernel gives wrong prefill attention on this device.
+
+    Call it from ``WorkerFL.init_device`` -- it must run in the process that
+    owns the model, before ``load_model`` and before CUDA-graph capture.  It is
+    deliberately *not* a module-level patch: this module is imported from
+    ``PlatformFL.pre_register_and_update`` while the platform is still being
+    resolved, and the kernel module touches ``current_platform`` at import.
+    """
+    from .kernels.unified_attention_iluvatar import (
+        patch_unified_attention_for_iluvatar as _install,
+    )
+
+    _install()
+
+
 def patch_sampler_compile_for_iluvatar() -> None:
     # Disable torch.compile on vllm sampler ops for Iluvatar.
     # flagtree triton only supports Iluvatar backend, not cuda target.
@@ -233,6 +256,179 @@ def patch_sampler_compile_for_iluvatar() -> None:
         logger.warning('patch_sampler_compile_for_iluvatar (logprobs): %s', e)
 
 patch_sampler_compile_for_iluvatar()
+
+
+# Per-device byte budget for the top-k/top-p kernel's per-program scratch.
+# The kernel keeps one vocab-sized fp32 scratch row per program
+# (``BUFFER + pid * VOCAB_SIZE``), so this is what bounds how many programs
+# the policy below is willing to ask for.  32 MiB is ~0.1% of BI-V150's
+# 32 GiB; ``enable_topp_scratch_policy`` below keeps it off the KV-cache
+# budget.  At a 130k vocabulary it allows 64 concurrent rows.
+_ILUVATAR_SAMPLER_SCRATCH_BYTES = 32 << 20
+
+# The policy is armed only once the KV cache exists -- see
+# ``enable_topp_scratch_policy``.
+_ILUVATAR_TOPP_ARMED = False
+
+
+def enable_topp_scratch_policy() -> None:
+    """Arm the NUM_PROGRAMS policy, to be called after KV-cache allocation.
+
+    vLLM sizes the KV cache from the *peak* torch allocation of the memory
+    profiling run (``allocated_bytes.all.peak``), and that run ends in a dummy
+    sampler pass.  So whatever scratch the top-p kernel caches during
+    profiling is subtracted from the KV cache, and then it is still there at
+    serve time: the buffer is paid for twice.  Letting the policy raise the
+    program count from 16 to 64 during profiling grew that retained buffer
+    from 8 to 33 MiB and cost 976 KV tokens (523,008 -> 522,032).  A 16k
+    request holds 1,088 pages, so the capacity ceiling fell from 30.04 to
+    29.99 requests and steady-state 16k concurrency dropped from 30 to 29 --
+    which ate most of the sampler speed-up on that case.
+
+    Keeping the policy disarmed until after ``initialize_from_config`` makes
+    the profiling run allocate exactly the buffer vLLM would have
+    (num_compute_units = 16, i.e. 8 MiB), so the KV cache is sized as if the
+    policy did not exist, and the 33 MiB buffer is then allocated from the
+    headroom that is left *after* the KV cache -- 32 GiB total against a 0.85
+    utilisation target leaves GiBs of it.  ``reset_buffer_cache()`` drops the
+    profile-time buffer first so the two never coexist.
+    """
+    global _ILUVATAR_TOPP_ARMED
+    if _ILUVATAR_TOPP_ARMED:
+        return
+    try:
+        import importlib
+
+        _ttt = importlib.import_module('vllm.v1.sample.ops.topk_topp_triton')
+        _ttt.reset_buffer_cache()
+    except Exception as e:  # noqa: BLE001
+        logger.warning('enable_topp_scratch_policy (reset): %s', e)
+    _ILUVATAR_TOPP_ARMED = True
+    logger.info(
+        'enable_topp_scratch_policy: top-p scratch policy armed after '
+        'KV-cache allocation (%d MiB charged to post-KV headroom)',
+        _ILUVATAR_SAMPLER_SCRATCH_BYTES >> 20,
+    )
+
+
+def patch_topp_launch_for_iluvatar() -> None:
+    """Pick NUM_PROGRAMS for vLLM's Triton top-k/top-p kernel on BI-V150.
+
+    vLLM launches ``_topk_topp_kernel`` with
+    ``NUM_PROGRAMS = min(num_compute_units(dev), batch)`` and the kernel folds
+    the leftover rows into each program (``for row_id in tl.range(pid,
+    BATCH_SIZE, num_programs)``).  That policy assumes a device with many more
+    compute units than there are sampled rows.  BI-V150 reports 16 compute
+    units, so a 64-row sampling batch is serialised 4 rows deep per program
+    and a 31-row batch 2 deep.
+
+    The kernel is not occupancy-bound: a row is a handful of streaming passes
+    over its own logits row, each program owns a private scratch row
+    (``BUFFER + pid * VOCAB_SIZE``) and nothing is shared or reduced between
+    rows, so one program per row is both legal and much faster.  Measured on
+    BI-V150 with vocab 130560: B=64 3688 -> 1065 us (x3.46), B=31 1868 -> 1008
+    us (x1.85), output bit-identical (``torch.equal``) and identical kept-token
+    counts, because only the program count changes.
+
+    Policy -- keyed on runtime facts only (sampling batch size, the device's
+    compute-unit count, the vocabulary size):
+
+        rows  = scratch budget / (vocab_size * 4 bytes)
+        procs = min(batch, max(num_compute_units, rows))
+
+    i.e. one program per row up to what the scratch budget allows, never
+    fewer programs than vLLM would have used.  It is expressed by raising the
+    "compute units" that ``apply_top_k_top_p_triton`` sizes its launch and its
+    scratch buffer from, so vLLM's own kernel, buffer cache and launch code
+    stay in charge; nothing about the kernel body changes.
+
+    Safe to call repeatedly and from any process; it has no effect on other
+    vendors.  A thread-local carries the per-call budget so the override is
+    scoped to the sampler call and every other caller of
+    ``num_compute_units`` keeps the real value.
+    """
+    try:
+        import functools
+        import importlib
+        import threading
+
+        _ttt = importlib.import_module('vllm.v1.sample.ops.topk_topp_triton')
+        if getattr(_ttt, '_iluvatar_launch_patched', False):
+            return
+
+        _real_num_compute_units = _ttt.num_compute_units
+        _state = threading.local()
+
+        def _num_compute_units_iluvatar(*args, **kwargs):
+            real = _real_num_compute_units(*args, **kwargs)
+            want = getattr(_state, 'procs', None)
+            if want is None:
+                return real
+            return max(real, want)
+
+        _orig_apply = _ttt.apply_top_k_top_p_triton
+
+        @functools.wraps(_orig_apply)
+        def _apply_top_k_top_p_triton_iluvatar(logits, k, p, *args, **kwargs):
+            procs = None
+            try:
+                if _ILUVATAR_TOPP_ARMED and logits.ndim == 2 \
+                        and logits.shape[0] > 0:
+                    batch, vocab = logits.shape
+                    row_bytes = max(1, vocab * logits.element_size())
+                    rows = max(1, _ILUVATAR_SAMPLER_SCRATCH_BYTES // row_bytes)
+                    procs = min(int(batch), int(rows))
+            except Exception:  # noqa: BLE001 - never break sampling
+                procs = None
+            _state.procs = procs
+            try:
+                return _orig_apply(logits, k, p, *args, **kwargs)
+            finally:
+                _state.procs = None
+
+        _ttt.num_compute_units = _num_compute_units_iluvatar
+        _ttt.apply_top_k_top_p_triton = _apply_top_k_top_p_triton_iluvatar
+        try:
+            _tts = importlib.import_module('vllm.v1.sample.ops.topk_topp_sampler')
+            if getattr(_tts, 'apply_top_k_top_p_triton', None) is _orig_apply:
+                _tts.apply_top_k_top_p_triton = _apply_top_k_top_p_triton_iluvatar
+        except Exception as e:  # noqa: BLE001
+            logger.warning('patch_topp_launch_for_iluvatar (rebind): %s', e)
+        _ttt._iluvatar_launch_patched = True
+        logger.info(
+            'patch_topp_launch_for_iluvatar: top-p NUM_PROGRAMS = '
+            'min(batch, max(compute_units, %d MiB / (vocab * 4)))',
+            _ILUVATAR_SAMPLER_SCRATCH_BYTES >> 20,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning('patch_topp_launch_for_iluvatar: %s', e)
+
+
+patch_topp_launch_for_iluvatar()
+
+
+def install_il_sampler() -> None:
+    """R9/T9: the eager sampler + logits chain outside the CUDA graph.
+
+    Three pieces of that chain measured above their bandwidth floor on
+    BI-V150 -- the temperature divide (FlagGems' rank-2 broadcast kernel at
+    189 GB/s against a 537 GB/s floor), the top-p kernel's launch shape
+    (num_warps never set, so Triton's default 4), and the four-pass sampling
+    tail (softmax -> exponential_ -> div_ -> argmax, which the Gumbel-max
+    identity collapses to one pass for the same q and the same token).
+    See kernels/il_sampler.py for the full measurement table.
+
+    Must run before any Sampler/TopKTopPSampler is constructed, because
+    TopKTopPSampler.__init__ binds self.forward to a class attribute.
+    """
+    try:
+        from vllm_fl.dispatch.backends.vendor.iluvatar.kernels import il_sampler
+        il_sampler.install()
+    except Exception as e:  # noqa: BLE001 - never break sampling
+        logger.warning('install_il_sampler: %s', e)
+
+
+install_il_sampler()
 
 
 def patch_torch_inductor_for_iluvatar() -> None:

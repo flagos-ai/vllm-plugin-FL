@@ -1,0 +1,4638 @@
+diff --git a/src/flag_gems/fused/DSA/__init__.py b/src/flag_gems/fused/DSA/__init__.py
+new file mode 100644
+index 00000000..9937b3e9
+--- /dev/null
++++ b/src/flag_gems/fused/DSA/__init__.py
+@@ -0,0 +1,4 @@
++# Package marker so setuptools find_packages() installs flag_gems.fused.DSA.
++# flag_gems/fused/__init__.py imports bin_topk / sparse_mla from this subpackage
++# at import time; without this file `pip install .` (find_packages, non-editable)
++# drops the DSA directory and `import flag_gems` fails with ModuleNotFoundError.
+diff --git a/src/flag_gems/fused/__init__.py b/src/flag_gems/fused/__init__.py
+index 764aea78..eba15e9b 100644
+--- a/src/flag_gems/fused/__init__.py
++++ b/src/flag_gems/fused/__init__.py
+@@ -109,6 +109,8 @@ from flag_gems.fused.stage_deepseek_v4_mega_moe_inputs import (
+ from flag_gems.fused.swiglu import dswiglu, swiglu
+ from flag_gems.fused.top_k_per_row_decode import top_k_per_row_decode
+ from flag_gems.fused.top_k_per_row_prefill import top_k_per_row_prefill
++from flag_gems.fused.top_p_mask import top_p_mask_
++from flag_gems.fused.top_p_sample import top_p_sample
+ from flag_gems.fused.topk_softmax import topk_softmax
+ from flag_gems.fused.topk_softplus_sqrt import topk_softplus_sqrt
+ from flag_gems.fused.unpack_seq import unpack_seq_triton
+@@ -190,6 +192,8 @@ __all__ = [
+     "swiglu",
+     "top_k_per_row_decode",
+     "top_k_per_row_prefill",
++    "top_p_mask_",
++    "top_p_sample",
+     "topk_softmax",
+     "topk_softplus_sqrt",
+     "triton_sparse_mla_fwd_interface",
+diff --git a/src/flag_gems/fused/top_p_mask.py b/src/flag_gems/fused/top_p_mask.py
+new file mode 100644
+index 00000000..d16a6439
+--- /dev/null
++++ b/src/flag_gems/fused/top_p_mask.py
+@@ -0,0 +1,187 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# Sort-free top-p (nucleus) masking.
++#
++# The reference implementation sorts every row of the vocabulary, takes a
++# cumulative softmax and masks the low tail. For large vocabularies the full
++# sort dominates a decode step. Here the cut-off is found without sorting:
++#
++#   keep x  <=>  mass(y > x) < p          (mass = softmax probability)
++#
++# which is the sort/cumsum rule restated per element (the reference keeps a
++# token iff the probability strictly above it in sorted order is < p). The
++# smallest kept value is located by searching over an order-preserving int32
++# encoding of fp32: every pass evaluates NUM_CAND thresholds at once, shrinking
++# the search interval NUM_CAND-fold, so 32 bits are resolved in a fixed number
++# of passes. Only for/where/sum/max are used (no scans, no data-dependent
++# loops), so the kernels also compile on vendor Triton forks.
++#
++# Each row is split over SPLIT programs. Every pass writes per-program partial
++# sums; the next pass first replays the search from all earlier partials (in a
++# fixed order, so every program of a row derives the same interval) instead of
++# needing a grid-wide barrier.
++#
++# The only difference from the sort-based reference is at an exact tie on the
++# boundary value: all tokens equal to the boundary value are kept, while the
++# reference keeps an arbitrary subset of them (sort order of ties is
++# unspecified).
++
++import torch
++import triton
++import triton.language as tl
++
++_NEG_INF_KEY = tl.constexpr(-2139095041)  # _ordered_key(-inf)
++
++
++@triton.jit
++def _ordered_key(x):
++    # Monotone map fp32 -> int32: integer order equals float order.
++    bits = x.to(tl.int32, bitcast=True)
++    return tl.where(bits >= 0, bits, bits ^ 0x7FFFFFFF)
++
++
++@triton.jit
++def _row_stats(stats_ptr, row, SPLIT: tl.constexpr):
++    # Combine per-program (max, sum of exp(x - local max)) into the row's max and sum.
++    split = tl.arange(0, SPLIT)
++    local_max = tl.load(stats_ptr + (row * SPLIT + split) * 2)
++    local_sum = tl.load(stats_ptr + (row * SPLIT + split) * 2 + 1)
++    row_max = tl.max(local_max, axis=0)
++    scale = tl.where(local_max == float("-inf"), 0.0, tl.exp(local_max - row_max))
++    return row_max, tl.sum(local_sum * scale, axis=0)
++
++
++@triton.jit
++def _replay_search(mass_ptr, row, num_rows, row_max, target, num_done,
++                   SPLIT: tl.constexpr, NUM_CAND: tl.constexpr):
++    # Recompute the search interval after `num_done` passes from the stored partial masses.
++    # Invariant: key `lo` does not qualify (mass above -inf is the whole row),
++    # key `hi` qualifies (nothing lies above the row max).
++    lo = tl.full([], _NEG_INF_KEY, tl.int64)
++    hi = _ordered_key(row_max).to(tl.int64)
++    steps = tl.arange(1, NUM_CAND + 1).to(tl.int64)
++    offs = tl.arange(0, SPLIT)[:, None] * NUM_CAND + tl.arange(0, NUM_CAND)[None, :]
++    for k in range(0, num_done):
++        cand = lo + ((hi - lo) * steps) // NUM_CAND
++        part = tl.load(mass_ptr + ((k * num_rows + row) * SPLIT) * NUM_CAND + offs)
++        ok = tl.sum(part, axis=0) < target
++        hi = tl.minimum(hi, tl.min(tl.where(ok, cand, hi), axis=0))
++        lo = tl.maximum(lo, tl.max(tl.where(ok, lo, cand), axis=0))
++    return lo, hi
++
++
++@triton.jit
++def _stats_kernel(logits_ptr, stats_ptr, stride_row, vocab_size, chunk,
++                  SPLIT: tl.constexpr, BLOCK: tl.constexpr):
++    row = tl.program_id(0)
++    sid = tl.program_id(1)
++    row_ptr = logits_ptr + row.to(tl.int64) * stride_row
++    begin = sid * chunk
++    end = tl.minimum(begin + chunk, vocab_size)
++    offs = tl.arange(0, BLOCK)
++    max_acc = tl.full([BLOCK], float("-inf"), tl.float32)
++    for start in range(begin, end, BLOCK):
++        idx = start + offs
++        x = tl.load(row_ptr + idx, mask=idx < end, other=float("-inf"))
++        max_acc = tl.maximum(max_acc, x.to(tl.float32))
++    local_max = tl.max(max_acc, axis=0)
++    sum_acc = tl.zeros([BLOCK], tl.float32)
++    for start in range(begin, end, BLOCK):
++        idx = start + offs
++        x = tl.load(row_ptr + idx, mask=idx < end, other=float("-inf")).to(tl.float32)
++        sum_acc += tl.where(x == float("-inf"), 0.0, tl.exp(x - local_max))
++    tl.store(stats_ptr + (row * SPLIT + sid) * 2, local_max)
++    tl.store(stats_ptr + (row * SPLIT + sid) * 2 + 1, tl.sum(sum_acc, axis=0))
++
++
++@triton.jit
++def _search_pass_kernel(logits_ptr, p_ptr, stats_ptr, mass_ptr, stride_row, vocab_size,
++                        chunk, num_rows, pass_idx,
++                        SPLIT: tl.constexpr, NUM_CAND: tl.constexpr, BLOCK: tl.constexpr,
++                        SEARCH_BLOCK: tl.constexpr):
++    row = tl.program_id(0)
++    sid = tl.program_id(1)
++    row_ptr = logits_ptr + row.to(tl.int64) * stride_row
++    row_max, row_sum = _row_stats(stats_ptr, row, SPLIT)
++    target = tl.load(p_ptr + row).to(tl.float32) * row_sum
++    lo, hi = _replay_search(mass_ptr, row, num_rows, row_max, target, pass_idx, SPLIT, NUM_CAND)
++    steps = tl.arange(1, NUM_CAND + 1).to(tl.int64)
++    cand = (lo + ((hi - lo) * steps) // NUM_CAND).to(tl.int32)
++
++    begin = sid * chunk
++    end = tl.minimum(begin + chunk, vocab_size)
++    offs = tl.arange(0, SEARCH_BLOCK)
++    # Accumulate element-wise in a register tile and reduce across threads once at the end.
++    acc = tl.zeros([SEARCH_BLOCK, NUM_CAND], tl.float32)
++    for start in range(begin, end, SEARCH_BLOCK):
++        idx = start + offs
++        x = tl.load(row_ptr + idx, mask=idx < end, other=float("-inf")).to(tl.float32)
++        e = tl.where(x == float("-inf"), 0.0, tl.exp(x - row_max))
++        above = _ordered_key(x)[:, None] > cand[None, :]
++        acc += tl.where(above, e[:, None], 0.0)
++    out = mass_ptr + ((pass_idx * num_rows + row) * SPLIT + sid) * NUM_CAND
++    tl.store(out + tl.arange(0, NUM_CAND), tl.sum(acc, axis=0))
++
++
++@triton.jit
++def _apply_mask_kernel(logits_ptr, p_ptr, stats_ptr, mass_ptr, stride_row, vocab_size,
++                       chunk, num_rows, num_passes,
++                       SPLIT: tl.constexpr, NUM_CAND: tl.constexpr, BLOCK: tl.constexpr):
++    row = tl.program_id(0)
++    sid = tl.program_id(1)
++    row_ptr = logits_ptr + row.to(tl.int64) * stride_row
++    p = tl.load(p_ptr + row).to(tl.float32)
++    row_max, row_sum = _row_stats(stats_ptr, row, SPLIT)
++    _, hi = _replay_search(mass_ptr, row, num_rows, row_max, p * row_sum, num_passes, SPLIT, NUM_CAND)
++    cutoff = hi.to(tl.int32)
++    apply = p < 1.0  # rows with p >= 1 are left untouched
++
++    begin = sid * chunk
++    end = tl.minimum(begin + chunk, vocab_size)
++    offs = tl.arange(0, BLOCK)
++    for start in range(begin, end, BLOCK):
++        idx = start + offs
++        in_range = idx < end
++        x = tl.load(row_ptr + idx, mask=in_range, other=float("-inf"))
++        drop = (_ordered_key(x.to(tl.float32)) < cutoff) & in_range & apply
++        tl.store(row_ptr + idx, tl.full([BLOCK], float("-inf"), x.dtype), mask=drop)
++
++
++def top_p_mask_(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
++    """In-place top-p mask: set logits outside each row's nucleus to -inf.
++
++    Args:
++        logits: [batch, vocab] floating tensor, rows contiguous.
++        p: [batch] top-p values in (0, 1]; rows with p >= 1 are left unchanged.
++    """
++    assert logits.dim() == 2 and logits.stride(1) == 1
++    batch, vocab_size = logits.shape
++    if batch == 0:
++        return logits
++    split, num_cand, block = 16, 16, 1024
++    num_passes = 9  # ceil(32 bits / log2(16)) + 1: the last pass resolves the remainder exactly
++    chunk = triton.cdiv(triton.cdiv(vocab_size, split), block) * block
++    p = p.to(device=logits.device, dtype=torch.float32).contiguous()
++    stats = torch.empty((batch, split, 2), device=logits.device, dtype=torch.float32)
++    mass = torch.empty((num_passes, batch, split, num_cand), device=logits.device, dtype=torch.float32)
++    grid = (batch, split)
++    common = dict(SPLIT=split, BLOCK=block, num_warps=4)
++    _stats_kernel[grid](logits, stats, logits.stride(0), vocab_size, chunk, **common)
++    for pass_idx in range(num_passes):
++        _search_pass_kernel[grid](logits, p, stats, mass, logits.stride(0), vocab_size, chunk,
++                                  batch, pass_idx, NUM_CAND=num_cand, SEARCH_BLOCK=256, **common)
++    _apply_mask_kernel[grid](logits, p, stats, mass, logits.stride(0), vocab_size, chunk,
++                             batch, num_passes, NUM_CAND=num_cand, **common)
++    return logits
+diff --git a/src/flag_gems/fused/top_p_sample.py b/src/flag_gems/fused/top_p_sample.py
+new file mode 100644
+index 00000000..bba68d22
+--- /dev/null
++++ b/src/flag_gems/fused/top_p_sample.py
+@@ -0,0 +1,543 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# Fused temperature + top-p + random sampling, without sorting, without a
++# top-p mask and without materialising fp32 logits or probabilities.
++#
++# The native sampler path (vLLM forward_native with top_p_mask_) is
++#
++#     x = logits.float() / T                      to_copy, div_
++#     x[outside the nucleus] = -inf               top-p mask
++#     probs = softmax(x)                          softmax
++#     q ~ Exp(1) iid;  token = argmax(probs / q)  exponential_, div_, argmax
++#
++# and streams the [B, V] fp32 logits ~15 times.  Since softmax normalisation
++# does not move an argmax, the token is the argmax over the nucleus of the
++# score  s_i = x_i - ln(q_i).  The nucleus rule is the one of top_p_mask_
++# (the sort/cumsum reference restated per element):
++#
++#     keep i  <=>  sum_{j: x_j > x_i} exp(x_j - max) < p * sum_j exp(x_j - max)
++#
++# Here the token is sampled first and nucleus membership is checked after:
++#
++#   1. _scan_kernel  (B x SPLIT, one read): per-chunk max / sum exp, greedy
++#      argmax, and per lane the best and second-best score (Philox noise is
++#      generated in registers, never stored).  Each program reports its KL
++#      best lane winners and a bound U on every other score of its chunk.
++#   2. _merge_kernel (B): row max and sum, the row's KR best candidates and
++#      U_row = max(all chunk bounds, best dropped candidate).  Candidates that
++#      score above U_row are "certified": they are exactly the row's best
++#      scores, in order (ties broken towards the smaller column, like argmax).
++#   3. _mass_kernel  (B x SPLIT, one read): for each certified candidate c the
++#      mass sum_{x_j > x_c} exp(x_j - max).
++#   4. _final_kernel (B): the first certified candidate inside the nucleus is
++#      the answer (every higher score belongs to a token outside it).  If no
++#      certified candidate is inside (probability <= (1 - p)^depth, depth is
++#      typically KR = 8, i.e. ~4e-11 at p = 0.95), the row's program runs the
++#      exact top_p_mask_ search over its row and takes the argmax of the score
++#      over the nucleus, regenerating the same noise.  Rows with T < eps return
++#      the greedy argmax of the raw logits, like Sampler.sample.
++#
++# The output is the same function of (logits, T, p, q) as the reference; only
++# the source of q differs: counter-based Philox seeded from the default
++# generator (as exponential_ does), so the result is equal in distribution.
++# The noise for column j of row r comes from the 64-bit counter offset +
++# (r * n_tiles + j // TILE) * LANES + j % LANES, word (j % TILE) // LANES.
++#
++# Only for/where/sum/max/min/philox are used (no sort, scan, atomics or
++# intra-kernel global-memory round trips), as in top_p_mask_.
++
++import torch
++import triton
++import triton.language as tl
++
++from flag_gems.runtime import torch_device_fn
++from flag_gems.utils.random_utils import (
++    philox_backend_seed_offset,
++    uint_to_uniform_float,
++)
++
++_LANES = 256  # lanes per program; one Philox call yields 4 words per lane
++_TILE = 4 * _LANES  # columns per Philox call
++_KL = 4  # candidates reported per chunk
++_KR = 8  # candidates kept per row (certified prefix taken from these)
++_NC = 16  # thresholds per pass of the exact fallback search
++_NPASS = 9  # ceil(32 / log2(16)) + 1 passes resolve any 32-bit key interval
++_NUM_WARPS = 4
++_SAMPLING_EPS = 1e-5  # vllm.v1.sample.sampler._SAMPLING_EPS
++_INT_MAX = tl.constexpr(2147483647)
++_NEG_INF_KEY = tl.constexpr(-2139095041)  # _key(-inf)
++
++
++@triton.jit
++def _key(x):
++    # Monotone map fp32 -> int32: integer order equals float order.
++    bits = x.to(tl.int32, bitcast=True)
++    return tl.where(bits >= 0, bits, bits ^ 0x7FFFFFFF)
++
++
++@triton.jit
++def _philox_offset(offset_lo, offset_hi):
++    # The 64-bit Philox offset from its two 32-bit halves (int32 views; see
++    # _offset_halves): passed as one Python int, the offset would be typed i64
++    # instead of i32 once it passes 2^31 and recompile the kernels mid-serving.
++    lo = offset_lo.to(tl.int64) & 0xFFFFFFFF
++    return (offset_hi.to(tl.int64) << 32) | lo
++
++
++@triton.jit
++def _philox_counter(c0_base, c1_base, ctr):
++    # The 64-bit Philox counter (c0, c1) = offset + ctr: the low word carries
++    # into the high word (offset + ctr crosses 2^32 every ~2K steps at batch 64).
++    c0 = c0_base + ctr.to(tl.uint32)
++    c1 = c1_base + (c0 < c0_base).to(tl.uint32)  # unsigned compare: carry out
++    return c0, c1
++
++
++@triton.jit
++def _exp_noise(r):
++    # Exp(1) sample from a Philox word, as FlagGems' fp32 exponential_, except
++    # that the words 0 and 0xFFFFFFFF (u == 0) give u = 2^-32 instead of
++    # q = +inf: the smallest non-zero u is 2^-31, so no other word changes.  An
++    # infinite q would give its token the score -inf and could leave a
++    # one-token nucleus without any finite score.
++    u = tl.maximum(uint_to_uniform_float(r), 2.3283064365386963e-10)
++    log_u = tl.where(
++        u >= 0.9999999403953552,
++        -5.960464477539063e-08,
++        tl.math.log2(u) * 0.6931471805599453,
++    )
++    return -log_u
++
++
++@triton.jit
++def _row_temp(temp_ptr, row, HAS_TEMP: tl.constexpr):
++    if HAS_TEMP:
++        t = tl.load(temp_ptr + row).to(tl.float32)
++        greedy = t < 1e-5
++        t = tl.where(greedy, 1.0, t)
++    else:
++        t = tl.full([], 1.0, tl.float32)
++        greedy = t < 0.0
++    return t, greedy
++
++
++@triton.jit
++def _scan_block(row_ptr, q_row_ptr, col, vocab, t, r, gx, gi, w, w2, wi, wx,
++                NOISE_FROM_PTR: tl.constexpr):
++    valid = col < vocab
++    raw = tl.load(row_ptr + col, mask=valid, other=float("-inf")).to(tl.float32)
++    x = raw / t
++    take = raw > gx  # strict: first occurrence of the max within the lane
++    gx = tl.where(take, raw, gx)
++    gi = tl.where(take, col, gi)
++    if NOISE_FROM_PTR:
++        q = tl.load(q_row_ptr + col, mask=valid, other=1.0)
++    else:
++        q = _exp_noise(r)
++    s = x - tl.log(q)
++    better = s > w
++    w2 = tl.where(better, w, tl.maximum(w2, s))
++    wi = tl.where(better, col, wi)
++    wx = tl.where(better, x, wx)
++    w = tl.where(better, s, w)
++    return x, gx, gi, w, w2, wi, wx
++
++
++@triton.jit(do_not_specialize=["tiles_per_prog", "philox_seed", "offset_lo", "offset_hi"])
++def _scan_kernel(logits_ptr, stride_row, temp_ptr, q_ptr, vocab, n_tiles, tiles_per_prog,
++                 philox_seed, offset_lo, offset_hi, fstat_ptr, istat_ptr, cs_ptr, ci_ptr, cx_ptr,
++                 HAS_TEMP: tl.constexpr, NOISE_FROM_PTR: tl.constexpr,
++                 LANES: tl.constexpr, KL: tl.constexpr):
++    row = tl.program_id(0)
++    sid = tl.program_id(1)
++    nsplit = tl.num_programs(1)
++    row_ptr = logits_ptr + row.to(tl.int64) * stride_row
++    q_row_ptr = q_ptr + row.to(tl.int64) * vocab
++    t, greedy = _row_temp(temp_ptr, row, HAS_TEMP)
++    seed = philox_seed.to(tl.int64)
++    offset = _philox_offset(offset_lo, offset_hi)
++    c0_base = (offset & 0xFFFFFFFF).to(tl.uint32)
++    c1 = ((offset >> 32) & 0xFFFFFFFF).to(tl.uint32)
++
++    lanes = tl.arange(0, LANES)
++    m = tl.full([LANES], float("-inf"), tl.float32)
++    s = tl.zeros([LANES], tl.float32)
++    gx = tl.full([LANES], float("-inf"), tl.float32)
++    gi = tl.full([LANES], _INT_MAX, tl.int32)
++    w = tl.full([LANES], float("-inf"), tl.float32)
++    w2 = tl.full([LANES], float("-inf"), tl.float32)
++    wi = tl.full([LANES], -1, tl.int32)
++    wx = tl.full([LANES], float("-inf"), tl.float32)
++
++    t_begin = sid * tiles_per_prog
++    t_end = tl.minimum(t_begin + tiles_per_prog, n_tiles)
++    for tile in range(t_begin, t_end):
++        ctr = (row * n_tiles + tile) * LANES + lanes
++        c0, c1r = _philox_counter(c0_base, c1, ctr)
++        zero = c0 * 0
++        r0, r1, r2, r3 = tl.philox(seed, c0, c1r, zero, zero)
++        col = tile * (4 * LANES) + lanes
++        x0, gx, gi, w, w2, wi, wx = _scan_block(row_ptr, q_row_ptr, col, vocab, t, r0,
++                                                gx, gi, w, w2, wi, wx, NOISE_FROM_PTR)
++        x1, gx, gi, w, w2, wi, wx = _scan_block(row_ptr, q_row_ptr, col + LANES, vocab, t, r1,
++                                                gx, gi, w, w2, wi, wx, NOISE_FROM_PTR)
++        x2, gx, gi, w, w2, wi, wx = _scan_block(row_ptr, q_row_ptr, col + 2 * LANES, vocab, t, r2,
++                                                gx, gi, w, w2, wi, wx, NOISE_FROM_PTR)
++        x3, gx, gi, w, w2, wi, wx = _scan_block(row_ptr, q_row_ptr, col + 3 * LANES, vocab, t, r3,
++                                                gx, gi, w, w2, wi, wx, NOISE_FROM_PTR)
++        # Online softmax statistics, one rescale per tile.
++        m_new = tl.maximum(m, tl.maximum(tl.maximum(x0, x1), tl.maximum(x2, x3)))
++        m_ref = tl.where(m_new == float("-inf"), 0.0, m_new)
++        s = (s * tl.exp(m - m_ref) + tl.exp(x0 - m_ref) + tl.exp(x1 - m_ref)
++             + tl.exp(x2 - m_ref) + tl.exp(x3 - m_ref))
++        m = m_new
++
++    chunk_max = tl.max(m, axis=0)
++    max_ref = tl.where(chunk_max == float("-inf"), 0.0, chunk_max)
++    chunk_sum = tl.sum(s * tl.exp(m - max_ref), axis=0)
++    g_max = tl.max(gx, axis=0)
++    g_idx = tl.min(tl.where(gx == g_max, gi, _INT_MAX), axis=0)
++
++    # The KL best lane winners, best first; ties go to the smaller column.
++    out = (row * nsplit + sid) * KL
++    picked = lanes < 0
++    rest = w
++    for k in tl.static_range(KL):
++        best = tl.max(rest, axis=0)
++        best_col = tl.min(tl.where(rest == best, wi, _INT_MAX), axis=0)
++        hit = (rest == best) & (wi == best_col)
++        best_x = tl.max(tl.where(hit, wx, float("-inf")), axis=0)
++        tl.store(cs_ptr + out + k, best)
++        tl.store(ci_ptr + out + k, tl.where(best > float("-inf"), best_col, -1))
++        tl.store(cx_ptr + out + k, best_x)
++        picked = picked | hit
++        rest = tl.where(hit, float("-inf"), rest)
++    # Every other score of the chunk is <= its lane's best (lanes not picked)
++    # or <= its lane's second best (picked lanes).
++    bound = tl.max(tl.where(picked, w2, rest), axis=0)
++
++    st = (row * nsplit + sid) * 4
++    tl.store(fstat_ptr + st, chunk_max)
++    tl.store(fstat_ptr + st + 1, chunk_sum)
++    tl.store(fstat_ptr + st + 2, g_max)
++    tl.store(fstat_ptr + st + 3, bound)
++    tl.store(istat_ptr + row * nsplit + sid, g_idx)
++
++
++@triton.jit(do_not_specialize=["nsplit"])
++def _merge_kernel(fstat_ptr, istat_ptr, cs_ptr, ci_ptr, cx_ptr, p_ptr, rowf_ptr, rowi_ptr,
++                  rcs_ptr, rcx_ptr, rci_ptr, nsplit,
++                  HAS_P: tl.constexpr, SPLIT_P2: tl.constexpr, KL: tl.constexpr,
++                  KR: tl.constexpr):
++    row = tl.program_id(0)
++    sp = tl.arange(0, SPLIT_P2)
++    smask = sp < nsplit
++    st = (row * nsplit + sp) * 4
++    pm = tl.load(fstat_ptr + st, mask=smask, other=float("-inf"))
++    ps = tl.load(fstat_ptr + st + 1, mask=smask, other=0.0)
++    pg = tl.load(fstat_ptr + st + 2, mask=smask, other=float("-inf"))
++    pu = tl.load(fstat_ptr + st + 3, mask=smask, other=float("-inf"))
++    pgi = tl.load(istat_ptr + row * nsplit + sp, mask=smask, other=_INT_MAX)
++    row_max = tl.max(pm, axis=0)
++    max_ref = tl.where(row_max == float("-inf"), 0.0, row_max)
++    row_sum = tl.sum(tl.where(pm > float("-inf"), ps * tl.exp(pm - max_ref), 0.0), axis=0)
++    g_max = tl.max(pg, axis=0)
++    g_idx = tl.min(tl.where(pg == g_max, pgi, _INT_MAX), axis=0)
++
++    cand = tl.arange(0, SPLIT_P2 * KL)
++    cmask = cand < nsplit * KL
++    coff = row * nsplit * KL + cand
++    sc = tl.load(cs_ptr + coff, mask=cmask, other=float("-inf"))
++    cc = tl.load(ci_ptr + coff, mask=cmask, other=_INT_MAX)
++    cx = tl.load(cx_ptr + coff, mask=cmask, other=float("-inf"))
++    kk = tl.arange(0, KR)
++    top_s = tl.full([KR], float("-inf"), tl.float32)
++    top_c = tl.full([KR], -1, tl.int32)
++    top_x = tl.full([KR], float("-inf"), tl.float32)
++    for k in tl.static_range(KR):
++        best = tl.max(sc, axis=0)
++        best_col = tl.min(tl.where(sc == best, cc, _INT_MAX), axis=0)
++        hit = (sc == best) & (cc == best_col)
++        best_x = tl.max(tl.where(hit, cx, float("-inf")), axis=0)
++        top_s = tl.where(kk == k, best, top_s)
++        top_c = tl.where(kk == k, best_col, top_c)
++        top_x = tl.where(kk == k, best_x, top_x)
++        sc = tl.where(hit, float("-inf"), sc)
++    bound = tl.maximum(tl.max(pu, axis=0), tl.max(sc, axis=0))
++    certified = (top_s > bound) & (top_c >= 0)  # a prefix: top_s is non-increasing
++    depth = tl.sum(certified.to(tl.int32), axis=0)
++    if HAS_P:
++        p = tl.load(p_ptr + row).to(tl.float32)
++    else:
++        p = 1.0
++    tl.store(rowf_ptr + row * 4, row_max)
++    tl.store(rowf_ptr + row * 4 + 1, row_sum)
++    tl.store(rowf_ptr + row * 4 + 2, p * row_sum)
++    tl.store(rowf_ptr + row * 4 + 3, bound)
++    tl.store(rowi_ptr + row * 2, g_idx)
++    tl.store(rowi_ptr + row * 2 + 1, depth)
++    tl.store(rcs_ptr + row * KR + kk, top_s)
++    tl.store(rcx_ptr + row * KR + kk, tl.where(certified, top_x, float("inf")))
++    tl.store(rci_ptr + row * KR + kk, top_c)
++
++
++@triton.jit(do_not_specialize=["tiles_per_prog"])
++def _mass_kernel(logits_ptr, stride_row, temp_ptr, vocab, n_tiles, tiles_per_prog,
++                 rowf_ptr, rcx_ptr, part_ptr,
++                 HAS_TEMP: tl.constexpr, LANES: tl.constexpr, KR: tl.constexpr):
++    row = tl.program_id(0)
++    sid = tl.program_id(1)
++    nsplit = tl.num_programs(1)
++    row_ptr = logits_ptr + row.to(tl.int64) * stride_row
++    t, greedy = _row_temp(temp_ptr, row, HAS_TEMP)
++    row_max = tl.load(rowf_ptr + row * 4)
++    max_ref = tl.where(row_max == float("-inf"), 0.0, row_max)
++    kk = tl.arange(0, KR)
++    cx = tl.load(rcx_ptr + row * KR + kk)  # +inf for uncertified slots
++    lanes = tl.arange(0, LANES)
++    acc = tl.zeros([LANES, KR], tl.float32)
++    t_begin = sid * tiles_per_prog
++    t_end = tl.minimum(t_begin + tiles_per_prog, n_tiles)
++    for tile in range(t_begin, t_end):
++        for c in tl.static_range(4):
++            col = tile * (4 * LANES) + c * LANES + lanes
++            raw = tl.load(row_ptr + col, mask=col < vocab, other=float("-inf"))
++            x = raw.to(tl.float32) / t
++            e = tl.exp(x - max_ref)
++            acc += tl.where(x[:, None] > cx[None, :], e[:, None], 0.0)
++    tl.store(part_ptr + (row * nsplit + sid) * KR + kk, tl.sum(acc, axis=0))
++
++
++@triton.jit
++def _exact_row(row_ptr, q_row_ptr, row, vocab, n_tiles, t, row_max, target, p, g_idx,
++               seed, c0_base, c1,
++               NOISE_FROM_PTR: tl.constexpr, LANES: tl.constexpr, NC: tl.constexpr,
++               NPASS: tl.constexpr):
++    # top_p_mask_'s search for the smallest qualifying key, on one row, then the
++    # argmax of the score over the nucleus.  Invariant: key lo does not
++    # qualify, key hi does (nothing lies above the row max).  If no nucleus
++    # token has a score above -inf (injected q = +inf), the row's greedy
++    # argmax g_idx -- always inside the nucleus -- is returned, never INT_MAX.
++    lanes = tl.arange(0, LANES)
++    max_ref = tl.where(row_max == float("-inf"), 0.0, row_max)
++    lo = tl.full([], _NEG_INF_KEY, tl.int64)
++    hi = _key(row_max).to(tl.int64)
++    steps = tl.arange(1, NC + 1).to(tl.int64)
++    for _pass in range(0, NPASS):
++        cand = lo + ((hi - lo) * steps) // NC
++        cand32 = cand.to(tl.int32)
++        acc = tl.zeros([LANES, NC], tl.float32)
++        for tile in range(0, n_tiles):
++            for c in tl.static_range(4):
++                col = tile * (4 * LANES) + c * LANES + lanes
++                raw = tl.load(row_ptr + col, mask=col < vocab, other=float("-inf"))
++                x = raw.to(tl.float32) / t
++                e = tl.exp(x - max_ref)
++                acc += tl.where(_key(x)[:, None] > cand32[None, :], e[:, None], 0.0)
++        ok = tl.sum(acc, axis=0) < target
++        hi = tl.minimum(hi, tl.min(tl.where(ok, cand, hi), axis=0))
++        lo = tl.maximum(lo, tl.max(tl.where(ok, lo, cand), axis=0))
++    cutoff = tl.where(p >= 1.0, _NEG_INF_KEY, hi.to(tl.int32))
++
++    best = tl.full([LANES], float("-inf"), tl.float32)
++    best_col = tl.full([LANES], _INT_MAX, tl.int32)
++    for tile in range(0, n_tiles):
++        ctr = (row * n_tiles + tile) * LANES + lanes
++        c0, c1r = _philox_counter(c0_base, c1, ctr)
++        zero = c0 * 0
++        r0, r1, r2, r3 = tl.philox(seed, c0, c1r, zero, zero)
++        for c in tl.static_range(4):
++            if c == 0:
++                r = r0
++            elif c == 1:
++                r = r1
++            elif c == 2:
++                r = r2
++            else:
++                r = r3
++            col = tile * (4 * LANES) + c * LANES + lanes
++            valid = col < vocab
++            raw = tl.load(row_ptr + col, mask=valid, other=float("-inf"))
++            x = raw.to(tl.float32) / t
++            if NOISE_FROM_PTR:
++                q = tl.load(q_row_ptr + col, mask=valid, other=1.0)
++            else:
++                q = _exp_noise(r)
++            s = x - tl.log(q)
++            s = tl.where(valid & (_key(x) >= cutoff), s, float("-inf"))
++            better = s > best
++            best = tl.where(better, s, best)
++            best_col = tl.where(better, col, best_col)
++    top = tl.max(best, axis=0)
++    pick = tl.min(tl.where(best == top, best_col, _INT_MAX), axis=0)
++    return tl.where(pick == _INT_MAX, g_idx, pick)
++
++
++@triton.jit(do_not_specialize=["philox_seed", "offset_lo", "offset_hi", "nsplit"])
++def _final_kernel(logits_ptr, stride_row, temp_ptr, p_ptr, q_ptr, vocab, n_tiles,
++                  philox_seed, offset_lo, offset_hi, rowf_ptr, rowi_ptr, rci_ptr, part_ptr,
++                  out_ptr, flag_ptr, nsplit,
++                  HAS_TEMP: tl.constexpr, HAS_P: tl.constexpr, NOISE_FROM_PTR: tl.constexpr,
++                  SPLIT_P2: tl.constexpr, LANES: tl.constexpr, KR: tl.constexpr,
++                  NC: tl.constexpr, NPASS: tl.constexpr, FORCE_FALLBACK: tl.constexpr):
++    row = tl.program_id(0)
++    t, greedy = _row_temp(temp_ptr, row, HAS_TEMP)
++    if HAS_P:
++        p = tl.load(p_ptr + row).to(tl.float32)
++    else:
++        p = tl.full([], 1.0, tl.float32)
++    row_max = tl.load(rowf_ptr + row * 4)
++    target = tl.load(rowf_ptr + row * 4 + 2)
++    g_idx = tl.load(rowi_ptr + row * 2)
++    depth = tl.load(rowi_ptr + row * 2 + 1)
++
++    sp = tl.arange(0, SPLIT_P2)
++    kk = tl.arange(0, KR)
++    part = tl.load(part_ptr + (row * nsplit + sp)[:, None] * KR + kk[None, :],
++                   mask=(sp < nsplit)[:, None], other=0.0)
++    mass_above = tl.sum(part, axis=0)
++    limit = tl.where(p >= 1.0, float("inf"), target)  # p >= 1: every token is inside
++    inside = (kk < depth) & (mass_above < limit)
++    first = tl.min(tl.where(inside, kk, KR), axis=0)
++    cols = tl.load(rci_ptr + row * KR + kk)
++    pick = tl.max(tl.where(kk == first, cols, -1), axis=0)
++
++    if FORCE_FALLBACK:  # testing: run the exact path on every sampled row
++        need = (first >= 0) & (greedy == 0)
++    else:
++        need = (first >= KR) & (greedy == 0)
++    result = tl.where(greedy, g_idx, pick)
++    seed = philox_seed.to(tl.int64)
++    offset = _philox_offset(offset_lo, offset_hi)
++    c0_base = (offset & 0xFFFFFFFF).to(tl.uint32)
++    c1 = ((offset >> 32) & 0xFFFFFFFF).to(tl.uint32)
++    row_ptr = logits_ptr + row.to(tl.int64) * stride_row
++    q_row_ptr = q_ptr + row.to(tl.int64) * vocab
++    for _once in range(0, need.to(tl.int32)):  # 0/1-trip loop instead of `if need`
++        result = _exact_row(row_ptr, q_row_ptr, row, vocab, n_tiles, t, row_max, target, p,
++                            g_idx, seed, c0_base, c1, NOISE_FROM_PTR, LANES, NC, NPASS)
++    tl.store(out_ptr + row, result)
++    tl.store(flag_ptr + row, need.to(tl.int32))
++
++
++def _offset_halves(offset):
++    # The low and high 32-bit words of a Philox offset as signed int32 values,
++    # so the kernels always see two i32 arguments whatever the offset (a Python
++    # int argument is typed i32 or i64 by value: one more compile at 2^31).
++    def as_i32(word):
++        word &= 0xFFFFFFFF
++        return word - (1 << 32) if word >= (1 << 31) else word
++
++    return as_i32(offset), as_i32(offset >> 32)
++
++
++def _tiles_per_prog(batch, n_tiles):
++    # ~1K programs per streaming kernel, 4 to 16 tiles each.  Measured on MetaX
++    # C500 (V = 130560, 128 tiles per row, GPU us per call):
++    #   B=1 4 (81), B=8 4 (110), B=16 4 (134), B=32 4 (181), B=48 8 (234),
++    #   B=64 8 (278; 354 with 2 tiles), B=128 16 (460)
++    # i.e. the fastest or within 3% of the fastest tiles-per-program at every B.
++    # The result is a runtime argument (do_not_specialize): no extra compiles.
++    want = triton.cdiv(batch * n_tiles, 1024)
++    return min(16, max(4, triton.next_power_of_2(want)))
++
++
++def top_p_sample(logits, temperature=None, top_p=None, *, out=None, generator=None,
++                 noise=None, force_fallback=False, tiles_per_prog=None,
++                 return_fallback_flags=False):
++    """Sample one token per row from softmax(logits / T) restricted to the top-p nucleus.
++
++    Equivalent in distribution to vLLM's native path (logits.float(), div_ by
++    the temperature, top-p mask, softmax, exponential_ noise, argmax).  Rows
++    whose temperature is below 1e-5 return the argmax of the raw logits.
++
++    Args:
++        logits: [batch, vocab] bf16/fp16/fp32, rows contiguous (stride(1) == 1).
++        temperature: [batch] tensor or None (= 1.0).
++        top_p: [batch] tensor of values in (0, 1], or None (= 1.0, no nucleus cut).
++        out: optional int32 [batch] output.
++        generator: torch.Generator for the Philox state (default generator if None).
++        noise: TESTING ONLY. [batch, vocab] fp32 Exp(1) samples used instead of Philox.
++        force_fallback: TESTING ONLY. Run the exact fallback on every sampled row.
++        tiles_per_prog: override of the chunking heuristic (benchmarks).
++        return_fallback_flags: also return the int32 [batch] per-row fallback flags.
++
++    Returns:
++        int32 [batch] token ids (and the flags if requested).
++    """
++    assert logits.dim() == 2 and logits.stride(1) == 1
++    batch, vocab = logits.shape
++    dev = logits.device
++    if out is None:
++        out = torch.empty(batch, device=dev, dtype=torch.int32)
++    flags = torch.empty(batch, device=dev, dtype=torch.int32)
++    if batch == 0:
++        return (out, flags) if return_fallback_flags else out
++    n_tiles = triton.cdiv(vocab, _TILE)
++    assert batch * n_tiles * _LANES < 2**31
++    tpp = tiles_per_prog or _tiles_per_prog(batch, n_tiles)
++    nsplit = triton.cdiv(n_tiles, tpp)
++    # Sized for the vocabulary, not the batch: one compiled variant per vocab size
++    # whatever the batch (chunk counts are runtime, not specialised).
++    split_p2 = triton.next_power_of_2(n_tiles)
++
++    has_temp = temperature is not None
++    has_p = top_p is not None
++    temp = (temperature.to(device=dev, dtype=torch.float32).contiguous()
++            if has_temp else logits)
++    p = top_p.to(device=dev, dtype=torch.float32).contiguous() if has_p else logits
++    from_ptr = noise is not None
++    if from_ptr:
++        assert noise.shape == logits.shape and noise.dtype == torch.float32
++        noise = noise.contiguous()
++        seed, offset = 0, 0
++    else:
++        seed, offset = philox_backend_seed_offset(batch * n_tiles * _LANES, generator=generator)
++    off_lo, off_hi = _offset_halves(offset)
++    q = noise if from_ptr else logits
++
++    n_chunk = batch * nsplit
++    f32 = torch.empty(n_chunk * (4 + 2 * _KL + _KR) + batch * (4 + 2 * _KR),
++                      device=dev, dtype=torch.float32)
++    i32 = torch.empty(n_chunk * (1 + _KL) + batch * (2 + _KR), device=dev, dtype=torch.int32)
++    fstat, f32 = f32[:n_chunk * 4], f32[n_chunk * 4:]
++    cs, f32 = f32[:n_chunk * _KL], f32[n_chunk * _KL:]
++    cx, f32 = f32[:n_chunk * _KL], f32[n_chunk * _KL:]
++    part, f32 = f32[:n_chunk * _KR], f32[n_chunk * _KR:]
++    rowf, f32 = f32[:batch * 4], f32[batch * 4:]
++    rcs, rcx = f32[:batch * _KR], f32[batch * _KR:]
++    istat, i32 = i32[:n_chunk], i32[n_chunk:]
++    ci, i32 = i32[:n_chunk * _KL], i32[n_chunk * _KL:]
++    rowi, rci = i32[:batch * 2], i32[batch * 2:]
++
++    stride = logits.stride(0)
++    grid = (batch, nsplit)
++    with torch_device_fn.device(dev):
++        _scan_kernel[grid](logits, stride, temp, q, vocab, n_tiles, tpp, seed, off_lo, off_hi,
++                           fstat, istat, cs, ci, cx,
++                           HAS_TEMP=has_temp, NOISE_FROM_PTR=from_ptr, LANES=_LANES,
++                           KL=_KL, num_warps=_NUM_WARPS)
++        _merge_kernel[(batch,)](fstat, istat, cs, ci, cx, p, rowf, rowi, rcs, rcx, rci, nsplit,
++                                HAS_P=has_p, SPLIT_P2=split_p2, KL=_KL, KR=_KR,
++                                num_warps=_NUM_WARPS)
++        _mass_kernel[grid](logits, stride, temp, vocab, n_tiles, tpp, rowf, rcx, part,
++                           HAS_TEMP=has_temp, LANES=_LANES, KR=_KR, num_warps=_NUM_WARPS)
++        _final_kernel[(batch,)](logits, stride, temp, p, q, vocab, n_tiles, seed, off_lo, off_hi,
++                                rowf, rowi, rci, part, out, flags, nsplit,
++                                HAS_TEMP=has_temp, HAS_P=has_p, NOISE_FROM_PTR=from_ptr,
++                                SPLIT_P2=split_p2, LANES=_LANES, KR=_KR, NC=_NC,
++                                NPASS=_NPASS, FORCE_FALLBACK=bool(force_fallback),
++                                num_warps=_NUM_WARPS)
++    return (out, flags) if return_fallback_flags else out
+diff --git a/src/flag_gems/ops/index.py b/src/flag_gems/ops/index.py
+index 807bd38b..8da7fb10 100644
+--- a/src/flag_gems/ops/index.py
++++ b/src/flag_gems/ops/index.py
+@@ -76,12 +76,26 @@ def _shape_bucket(index_len, suffix_size):
+     return (_bucket(index_len, index_step), _bucket(suffix_size, suffix_step))
+ 
+ 
++def _index_len_bucket(index_len):
++    """Bucket of an index length for the adjacent-index code cache.
++
++    Powers of two up to 32, then the 32/131072-element steps of
++    _shape_bucket, so the <=16 / <=128 / <=256 thresholds of
++    _index_candidate_configs never split a bucket.
++    """
++    index_len = int(index_len)
++    if index_len <= 32:
++        return _next_power_of_2(index_len)
++    return _shape_bucket(index_len, 1)[0]
++
++
+ def _index_candidate_configs(
+-    inp, start_dim, indices_len, tensor_indices, suffix_size=None
++    inp, start_dim, indices_len, tensor_indices, suffix_size=None, index_len=None
+ ):
+     """Select adjacent-index candidates from backend YAML configs."""
+ 
+-    index_len = int(tensor_indices[0].numel())
++    if index_len is None:
++        index_len = int(tensor_indices[0].numel())
+     if suffix_size is None:
+         suffix_size = _volume(inp.shape[start_dim + indices_len :])
+ 
+@@ -410,21 +424,20 @@ _index_func = IndexFunction()
+ 
+ 
+ def generate_index_linearized_kernel(
+-    inp_shape,
+-    start_dim,
++    suffix_size,
+     indices_len,
+     configs,
+     kernel_name: str,
+     code: IndentedBuffer,
+ ):
+-    """Generate a kernel for contiguous input with adjacent tensor indices."""
++    """Generate a kernel for contiguous input with adjacent tensor indices.
+ 
+-    indexed_dims = [int(dim) for dim in inp_shape[start_dim : start_dim + indices_len]]
+-    indexed_volume = _volume(indexed_dims)
+-    indexed_strides = [
+-        _volume(indexed_dims[pos + 1 :]) for pos in range(len(indexed_dims))
+-    ]
+-    suffix_size = _volume(inp_shape[start_dim + indices_len :])
++    Only the suffix size (the contiguous row copied per index) is baked into
++    the source.  The sizes of the indexed dimensions (D*), their row-major
++    strides (S*) and their volume (V) are runtime arguments, so one generated
++    kernel serves every leading shape; baking them in made every new token or
++    request count generate, compile and autotune a new kernel while serving.
++    """
+ 
+     code.writeline("@libentry()")
+     code.writeline("@libtuner(")
+@@ -440,10 +453,11 @@ def generate_index_linearized_kernel(
+     with code.indent():
+         args = ["input_ptr,"]
+         args += [f"indices{i}_ptr," for i in range(indices_len)]
++        args += ["out_ptr,", "M,", "N,"]
++        args += [f"D{i}," for i in range(indices_len)]
++        args += [f"S{i}," for i in range(indices_len)]
+         args += [
+-            "out_ptr,",
+-            "M,",
+-            "N,",
++            "V,",
+             "BLOCK_SIZE0: tl.constexpr,",
+             "BLOCK_SIZE1: tl.constexpr,",
+         ]
+@@ -451,7 +465,7 @@ def generate_index_linearized_kernel(
+     code.writeline("):")
+ 
+     with code.indent():
+-        code.writeline("pid_p = tl.program_id(axis=0)")
++        code.writeline("pid_p = tl.program_id(axis=0).to(tl.int64)")
+         code.writeline("pid_m = tl.program_id(axis=1)")
+         code.writeline("pid_n = tl.program_id(axis=2)")
+         code.newline()
+@@ -465,26 +479,23 @@ def generate_index_linearized_kernel(
+         code.writeline("index_mask = index_offsets < M")
+         code.newline()
+ 
+-        for i, dim in enumerate(indexed_dims):
++        for i in range(indices_len):
+             code.writeline(
+                 f"raw{i} = tl.load(indices{i}_ptr + index_offsets, mask=index_mask, other=0)"
++                ".to(tl.int64)"
+             )
+-            code.writeline(f"idx{i} = tl.where(raw{i} < 0, raw{i} + {dim}, raw{i})")
++            code.writeline(f"idx{i} = tl.where(raw{i} < 0, raw{i} + D{i}, raw{i})")
+         code.newline()
+ 
+-        linear_terms = [f"idx{i} * {indexed_strides[i]}" for i in range(indices_len)]
+-        valid_terms = [
+-            f"(idx{i} >= 0) & (idx{i} < {indexed_dims[i]})" for i in range(indices_len)
+-        ]
++        linear_terms = [f"idx{i} * S{i}" for i in range(indices_len)]
++        valid_terms = [f"(idx{i} >= 0) & (idx{i} < D{i})" for i in range(indices_len)]
+         code.writeline(f"linear_index = {' + '.join(linear_terms)}")
+         code.writeline(f"valid_index = {' & '.join(valid_terms)}")
+         code.newline()
+ 
+         code.writeline("src_offsets = (")
+         with code.indent():
+-            code.writeline(
+-                f"(pid_p * {indexed_volume} + linear_index[:, None]) * {suffix_size}"
+-            )
++            code.writeline(f"(pid_p * V + linear_index[:, None]) * {suffix_size}")
+             code.writeline("+ suffix_offsets[None, :]")
+         code.writeline(")")
+         code.writeline("out_offsets = (")
+@@ -507,21 +518,29 @@ def generate_index_linearized_kernel(
+ 
+ 
+ def generate_index_linearized_wrapper(
+-    inp_shape,
+-    start_dim,
+     indices_len,
+     wrapper_name: str,
+     kernel_name: str,
+     code: IndentedBuffer,
+ ):
+-    prefix_size = _volume(inp_shape[:start_dim])
+-    suffix_size = _volume(inp_shape[start_dim + indices_len :])
+-
+     code.writeline(f"def {wrapper_name}(input, start_dim, indices, out):")
+     with code.indent():
++        code.writeline("shape = input.shape")
+         code.writeline("M = indices[0].numel()")
+-        code.writeline(f"P = {prefix_size}")
+-        code.writeline(f"N = {suffix_size}")
++        code.writeline("P = 1")
++        code.writeline("for dim in shape[:start_dim]:")
++        with code.indent():
++            code.writeline("P *= dim")
++        code.writeline("N = 1")
++        code.writeline(f"for dim in shape[start_dim + {indices_len}:]:")
++        with code.indent():
++            code.writeline("N *= dim")
++        for i in range(indices_len):
++            code.writeline(f"D{i} = shape[start_dim + {i}]")
++        code.writeline(f"S{indices_len - 1} = 1")
++        for i in range(indices_len - 2, -1, -1):
++            code.writeline(f"S{i} = S{i + 1} * D{i + 1}")
++        code.writeline("V = D0 * S0")
+         code.newline()
+         # Match the kernel axes: prefix, flattened index elements, suffix.
+         code.writeline("grid = lambda meta: (")
+@@ -536,6 +555,9 @@ def generate_index_linearized_wrapper(
+             args = ["input,"]
+             args += [f"indices[{i}]," for i in range(indices_len)]
+             args += ["out,", "M,", "N,"]
++            args += [f"D{i}," for i in range(indices_len)]
++            args += [f"S{i}," for i in range(indices_len)]
++            args += ["V,"]
+             code.writelines(args)
+         code.writeline(")")
+         code.writeline("return input")
+@@ -553,22 +575,32 @@ def generate_linearized_code(
+     inp = inputs[0]
+     start_dim = int(inputs[1])
+     tensor_indices = inputs[2]
++    index_len_bucket = int(inputs[3])
+     indices_len = len(tensor_indices)
+     if indices_len == 0:
+         raise ValueError("At least one non-None index tensor is required")
+-    configs = _index_candidate_configs(inp, start_dim, indices_len, tensor_indices)
++    suffix_size = _volume(inp.shape[start_dim + indices_len :])
++    # Pick the candidates for the bucket, not for the first length that
++    # reached it, so every length of a bucket runs the same kernel.
++    configs = _index_candidate_configs(
++        inp,
++        start_dim,
++        indices_len,
++        tensor_indices,
++        suffix_size=suffix_size,
++        index_len=index_len_bucket,
++    ) or _index_candidate_configs(
++        inp, start_dim, indices_len, tensor_indices, suffix_size=suffix_size
++    )
+     code = generate_imports(code)
+     generate_index_linearized_kernel(
+-        tuple(inp.shape),
+-        start_dim,
++        suffix_size,
+         indices_len,
+         configs,
+         kernel_name,
+         code,
+     )
+     generate_index_linearized_wrapper(
+-        tuple(inp.shape),
+-        start_dim,
+         indices_len,
+         wrapper_name,
+         kernel_name,
+@@ -588,13 +620,13 @@ class LinearizedAdjacentIndexFunction:
+         inp, start_dim, tensor_indices, out = args
+         full_args = (inp, start_dim, tensor_indices)
+ 
+-        key = self.arg_key(*full_args)
++        key, index_len_bucket = self.arg_key(*full_args)
+         if key in self.overloads:
+             overload = self.overloads[key]
+         else:
+             code = IndentedBuffer()
+             code = generate_linearized_code(
+-                full_args,
++                full_args + (index_len_bucket,),
+                 "_index_linearized_wrapper",
+                 "_index_linearized_jit_function",
+                 code,
+@@ -617,18 +649,26 @@ class LinearizedAdjacentIndexFunction:
+         return overload(*args)
+ 
+     def arg_key(self, *args, **kwargs):
++        """Cache key and index-length bucket of one call.
++
++        The generated kernel depends only on the start dim, the number of
++        index tensors, the dtype, the suffix size it bakes in and the
++        index-length bucket its candidate configs are picked for -- not on
++        the sizes of the leading or indexed dimensions, which it takes at
++        runtime.
++        """
+         inp, start_dim, tensor_indices = args[0], int(args[1]), args[2]
+-        inp_shape = "_".join(str(int(dim)) for dim in inp.shape)
+         indices_len = len(tensor_indices)
+         index_len = int(tensor_indices[0].numel()) if tensor_indices else 0
+         suffix_size = _volume(inp.shape[start_dim + indices_len :])
+-        index_bucket, suffix_bucket = _shape_bucket(index_len, suffix_size)
+-        return (
+-            f"inp_shape_{inp_shape}_start_dim_{start_dim}_"
++        index_len_bucket = _index_len_bucket(index_len)
++        key = (
++            f"start_dim_{start_dim}_"
+             f"indices_len_{indices_len}_"
+             f"dtype_{str(inp.dtype).replace('.', '_')}_"
+-            f"m_{index_bucket}_n_{suffix_bucket}"
++            f"m_{index_len_bucket}_suffix_{suffix_size}"
+         )
++        return key, index_len_bucket
+ 
+ 
+ _linearized_adjacent_index_func = LinearizedAdjacentIndexFunction()
+diff --git a/src/flag_gems/ops/mul.py b/src/flag_gems/ops/mul.py
+index 1b1457e6..3ad0e33b 100644
+--- a/src/flag_gems/ops/mul.py
++++ b/src/flag_gems/ops/mul.py
+@@ -411,6 +411,59 @@ def _needs_runtime_meta_for_constexpr_tuple():
+         return False
+ 
+ 
++# ---------------------------------------------------------------------------
++# CUDA-graph-safe meta tensors for the runtime-meta kernels
++# ---------------------------------------------------------------------------
++# The generic (arbitrary-rank, arbitrary-stride) kernels below need the output shape and
++# the three stride tuples on the device, and on Triton frontends whose tl.tuple cannot be
++# indexed they have to arrive as a tensor rather than as constexprs. Building that tensor
++# with torch.tensor(..., device=...) once per call is a host->device copy, which is
++# illegal while a CUDA-graph capture is active ("operation would make the legacy stream
++# depend on a capturing blocking stream"), and would be WRONG even where it is legal: the
++# fresh allocation is freed when the call returns, so a captured graph would replay the
++# kernel against memory that has since been handed to something else.
++#
++# So the values are interned: one tensor per (device, dtype, values), built on the first
++# call with that layout and reused -- and kept alive -- for the rest of the process. The
++# values are part of the key, so a cache hit is always bit-identical to a fresh build.
++# Inside a capture a miss cannot be served at all, so it raises a plain Python error
++# BEFORE any device call: a CUDA error raised during capture is sticky and takes the
++# process with it, while this one can be caught and routed to another implementation.
++_META_CACHE = {}
++_META_CACHE_MAX = 4096
++
++
++def _is_capturing(device) -> bool:
++    probe = getattr(torch_device_fn, "is_current_stream_capturing", None)
++    if probe is None:
++        return False
++    try:
++        return bool(probe())
++    except Exception:  # noqa: BLE001
++        return False
++
++
++def _runtime_meta(values, device, dtype=torch.int64):
++    """Device tensor holding `values`, interned per (device, dtype, values)."""
++    values = tuple(int(v) for v in values)
++    key = (device.type, device.index, dtype, values)
++    meta = _META_CACHE.get(key)
++    if meta is not None:
++        return meta
++    if _is_capturing(device):
++        raise RuntimeError(
++            "flag_gems: the generic broadcast kernel needs a new shape/stride meta "
++            f"tensor ({values}) while a CUDA-graph capture is active; building it would "
++            "copy from the host and abort the capture. Run this shape once outside the "
++            "capture (a warm-up iteration), or call an implementation that takes its "
++            "layout as constexprs."
++        )
++    meta = torch.tensor(values, device=device, dtype=dtype)
++    if len(_META_CACHE) < _META_CACHE_MAX:
++        _META_CACHE[key] = meta
++    return meta
++
++
+ def _broadcast_shape(a_t, b_t):
+     return tuple(torch.broadcast_shapes(tuple(a_t.shape), tuple(b_t.shape)))
+ 
+@@ -544,10 +597,8 @@ def _launch_generic(a_t, b_t, output, out_shape, a_stride, b_stride, out_stride,
+     out_stride = out_stride or (0,)
+     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+     if _needs_runtime_meta_for_constexpr_tuple():
+-        meta = torch.tensor(
+-            shape + a_stride + b_stride + out_stride,
+-            device=output.device,
+-            dtype=torch.int64,
++        meta = _runtime_meta(
++            shape + a_stride + b_stride + out_stride, output.device
+         )
+         with torch_device_fn.device(output.device):
+             mul_generic_nd_runtime_meta_kernel[grid](
+@@ -679,7 +730,7 @@ def _launch_complex_generic(
+     out_i_stride = out_i_stride or (0,)
+     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+     if _needs_runtime_meta_for_constexpr_tuple():
+-        meta = torch.tensor(
++        meta = _runtime_meta(
+             shape
+             + strides[0]
+             + strides[1]
+@@ -687,8 +738,7 @@ def _launch_complex_generic(
+             + strides[3]
+             + out_r_stride
+             + out_i_stride,
+-            device=output.device,
+-            dtype=torch.int64,
++            output.device,
+         )
+         with torch_device_fn.device(output.device):
+             mul_complex_generic_nd_runtime_meta_kernel[grid](
+diff --git a/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py b/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
+index 5fefae2d..dcddb397 100644
+--- a/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_iluvatar/ops/mm.py
+@@ -14,6 +14,7 @@
+ 
+ import logging
+ import math
++import os
+ 
+ import torch
+ import triton
+@@ -47,13 +48,50 @@ def _to_tl_type(ty):
+     return getattr(tl, str(ty).split(".")[-1])
+ 
+ 
++def _mm_tune_m_bucket(m):
++    """Bucket the GEMM M dimension for the libtuner config-cache key.
++
++    Under FULL_DECODE_ONLY every mixed (chunked-prefill) step runs eagerly
++    with the exact scheduled token count as M (1..max_num_batched_tokens), so
++    an exact-M key starts a new autotune sweep for almost every new step
++    size.  M only changes the number of row tiles, so a config tuned for the
++    upper end of a bucket is reused for the whole bucket.
++
++    Buckets: powers of two up to 16, then four buckets per octave rounded up
++    (16, 20, 24, 28, 32, 40, ..., 1792, 2048, 2560, ...).  Each bucket value
++    maps to itself, so tuning at the bucket value fills the cache row that
++    the whole bucket uses (decode M=64 and full-budget M=2048 keep their
++    exact-M configs).
++
++    Only the config-cache key and the perf-model pruning see the bucket.  The
++    launch grid uses the exact M, A rows are loaded with ``rm % M`` and C is
++    always stored with the ``rm < M`` mask, so any config is correct for any
++    M.  The autotune space keeps split_k == 1 (tune_configs.yaml), so the
++    atomic_add path is not reachable.
++    """
++    m = int(m)
++    if m <= 16:
++        return m if m <= 1 else 1 << (m - 1).bit_length()
++    step = 1 << ((m - 1).bit_length() - 3)
++    return -(-m // step) * step
++
++
++def _estimate_matmul_time_m_bucket(*args, **kwargs):
++    # Rank candidates for the bucket, not for the first M that reached it, so
++    # every M of a bucket benchmarks the same top_k configs.
++    if "M" in kwargs:
++        kwargs["M"] = _mm_tune_m_bucket(kwargs["M"])
++    return estimate_matmul_time(*args, **kwargs)
++
++
+ @libentry()
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K"],
++    strategy=[_mm_tune_m_bucket, "default", "default"],
+     prune_configs_by={
+         "early_config_prune": early_config_prune,
+-        "perf_model": estimate_matmul_time,
++        "perf_model": _estimate_matmul_time_m_bucket,
+         "top_k": 15,
+     },
+     warmup=5,
+@@ -203,8 +241,203 @@ def mm_kernel(
+         tl.atomic_add(C, acc, mask=mask)
+ 
+ 
++@triton.jit
++def _mm_pinned_tile_ids(
++    pid, grid_m, grid_n, GROUP_M: tl.constexpr, SWIZZLE: tl.constexpr
++):
++    """Map the 1-D program id to (pid_m, pid_n).
++
++    SWIZZLE 0: row-major, the order of mm_kernel (pid_m = pid // grid_n).
++    SWIZZLE 1: GROUP_M grouped order (GROUP_M consecutive M tiles share the
++               same B columns while they are L2 resident).
++    SWIZZLE 2: column-major (pid_n = pid // grid_m): consecutive CTAs walk M
++               and share one B tile.
++    """
++    if SWIZZLE == 1:
++        num_pid_in_group = GROUP_M * grid_n
++        group_id = pid // num_pid_in_group
++        first_pid_m = group_id * GROUP_M
++        group_size_m = tl.minimum(grid_m - first_pid_m, GROUP_M)
++        pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
++        pid_n = (pid % num_pid_in_group) // group_size_m
++    elif SWIZZLE == 2:
++        pid_m = pid % grid_m
++        pid_n = pid // grid_m
++    else:
++        pid_m = pid // grid_n
++        pid_n = pid % grid_n
++    return pid_m, pid_n
++
++
++@libentry()
++@triton.jit
++def mm_kernel_pinned(
++    A,
++    B,
++    C,
++    M,
++    N,
++    K,
++    stride_am,
++    stride_ak,
++    stride_bk,
++    stride_bn,
++    stride_cm,
++    stride_cn,
++    ACC_DTYPE: tl.constexpr,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    GROUP_M: tl.constexpr,
++    SWIZZLE: tl.constexpr,
++    EVEN_K: tl.constexpr,
++    I64_OFFS: tl.constexpr,
++):
++    """mm_kernel's body (SPLIT_K == 1) with a selectable program-id order.
++
++    Launched only with a config from the ``mm_pinned`` table, never
++    autotuned.  As in mm_kernel, A rows and B columns are wrapped with
++    ``% M`` / ``% N`` so the K loop needs no row/column mask, and C is stored
++    under ``(rm < M) & (rn < N)``: a config is correct for every M, which is
++    what makes one config per M bucket legal.
++    """
++    pid = tl.program_id(0)
++    grid_m = tl.cdiv(M, BLOCK_M)
++    grid_n = tl.cdiv(N, BLOCK_N)
++    pid_m, pid_n = _mm_pinned_tile_ids(pid, grid_m, grid_n, GROUP_M, SWIZZLE)
++
++    if I64_OFFS:
++        rm = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M)).to(tl.int64)
++        rn = (pid_n * BLOCK_N + tl.arange(0, BLOCK_N)).to(tl.int64)
++    else:
++        rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++        rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
++    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
++    rk = tl.arange(0, BLOCK_K)
++
++    Ap = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak)
++    Bp = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn)
++    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_DTYPE)
++
++    if EVEN_K:
++        for _ in range(0, tl.cdiv(K, BLOCK_K)):
++            a = tl.load(Ap)
++            b = tl.load(Bp)
++            acc = tl.dot(a, b, acc, out_dtype=ACC_DTYPE)
++            Ap += BLOCK_K * stride_ak
++            Bp += BLOCK_K * stride_bk
++    else:
++        loop_num = tl.cdiv(K, BLOCK_K) - 1
++        for _ in range(0, loop_num):
++            a = tl.load(Ap)
++            b = tl.load(Bp)
++            acc = tl.dot(a, b, acc, out_dtype=ACC_DTYPE)
++            Ap += BLOCK_K * stride_ak
++            Bp += BLOCK_K * stride_bk
++        _0 = tl.zeros((1, 1), dtype=C.dtype.element_ty)
++        k_remaining = K - loop_num * BLOCK_K
++        a = tl.load(Ap, mask=rk[None, :] < k_remaining, other=_0)
++        b = tl.load(Bp, mask=rk[:, None] < k_remaining, other=_0)
++        acc = tl.dot(a, b, acc, out_dtype=ACC_DTYPE)
++
++    acc = acc.to(C.dtype.element_ty)
++    Cp = C + (rm[:, None] * stride_cm + rn[None, :] * stride_cn)
++    mask = (rm < M)[:, None] & (rn < N)[None, :]
++    tl.store(Cp, acc, mask=mask)
++
++
++_MM_PINNED_TILE_KEYS = ("BLOCK_M", "BLOCK_N", "BLOCK_K", "GROUP_M", "SWIZZLE")
++
++
++def _load_mm_pinned_table():
++    """Read the ``mm_pinned`` entries of tune_configs.yaml.
++
++    Each entry pins one config of mm_kernel_pinned for one (N, K, M bucket),
++    where the bucket is ``_mm_tune_m_bucket(M)``.  The table only holds the
++    buckets that were measured on BI-V150 to beat the autotuned mm_kernel;
++    every other (N, K, M) keeps the libtuner path.  Setting
++    FLAGGEMS_ILUVATAR_MM_PINNED=0 disables the table.
++    """
++    if os.environ.get("FLAGGEMS_ILUVATAR_MM_PINNED", "1") == "0":
++        return {}
++    table = {}
++    launch_of_tile = {}
++    for cfg in runtime.get_tuned_config("mm_pinned"):
++        meta = dict(cfg.kwargs)
++        try:
++            key = (int(meta.pop("N")), int(meta.pop("K")), int(meta.pop("M_BUCKET")))
++            meta.setdefault("GROUP_M", 8)
++            meta.setdefault("SWIZZLE", 0)
++            meta = {k: int(meta[k]) for k in _MM_PINNED_TILE_KEYS}
++        except (KeyError, TypeError, ValueError):
++            logger.warning("GEMS_ILUVATAR MM: ignoring malformed mm_pinned %s", cfg)
++            continue
++        launch = (int(cfg.num_warps), int(cfg.num_stages))
++        tile = tuple(meta[k] for k in _MM_PINNED_TILE_KEYS)
++        # libentry caches compiled kernels by constexpr values only, so one
++        # tile must always launch with the same num_warps / num_stages.
++        if (
++            key[2] != _mm_tune_m_bucket(key[2])
++            or key in table
++            or launch_of_tile.setdefault(tile, launch) != launch
++        ):
++            logger.warning("GEMS_ILUVATAR MM: ignoring conflicting mm_pinned %s", cfg)
++            continue
++        table[key] = (meta, launch[0], launch[1])
++    return table
++
++
++_MM_PINNED = _load_mm_pinned_table()
++
++
++def _mm_pinned_lookup(a, b, c, M, N, K):
++    """Pinned config for this call, or None to keep the autotuned mm_kernel.
++
++    Only the measured case is pinned: bf16, A and C row-major, B K-contiguous
++    (B is the transposed weight view that F.linear passes, stride (1, K)).
++    """
++    if not _MM_PINNED:
++        return None
++    if not (a.dtype == b.dtype == c.dtype == torch.bfloat16):
++        return None
++    if a.stride(1) != 1 or b.stride(0) != 1 or c.stride(1) != 1:
++        return None
++    return _MM_PINNED.get((N, K, _mm_tune_m_bucket(M)))
++
++
++def _launch_mm_pinned(a, b, c, M, N, K, pin):
++    meta, num_warps, num_stages = pin
++    grid = (triton.cdiv(M, meta["BLOCK_M"]) * triton.cdiv(N, meta["BLOCK_N"]),)
++    with torch_device_fn.device(a.device):
++        mm_kernel_pinned[grid](
++            a,
++            b,
++            c,
++            M,
++            N,
++            K,
++            a.stride(0),
++            a.stride(1),
++            b.stride(0),
++            b.stride(1),
++            c.stride(0),
++            c.stride(1),
++            ACC_DTYPE=tl.float32,
++            EVEN_K=K % meta["BLOCK_K"] == 0,
++            I64_OFFS=max(M * K, K * N, M * N).bit_length() > 31,
++            num_warps=num_warps,
++            num_stages=num_stages,
++            **meta,
++        )
++    return c
++
++
+ def _launch_mm(a, b, c, M, N, K):
+     """Launch Triton matmul _kernel; c must be pre-allocated."""
++    pin = _mm_pinned_lookup(a, b, c, M, N, K)
++    if pin is not None:
++        return _launch_mm_pinned(a, b, c, M, N, K, pin)
+     ab_dtype = get_higher_dtype(a.dtype, b.dtype)
+     acc_dtype_tl = tl.float32
+     ab_dtype_tl = _to_tl_type(ab_dtype)
+diff --git a/src/flag_gems/runtime/backend/_iluvatar/tune_configs.yaml b/src/flag_gems/runtime/backend/_iluvatar/tune_configs.yaml
+index ae0e1150..8861f376 100644
+--- a/src/flag_gems/runtime/backend/_iluvatar/tune_configs.yaml
++++ b/src/flag_gems/runtime/backend/_iluvatar/tune_configs.yaml
+@@ -202,6 +202,234 @@ mm:
+   stages:
+   - 1
+   - 2
++# Pinned mm_kernel_pinned configs per (N, K, M bucket) for the MiniCPM5-2B
++# dense layers (bf16; A row-major, B = weight.T).  The bucket is
++# _mm_tune_m_bucket(M) in ops/mm.py; buckets that are not listed keep the
++# autotuned mm_kernel.  Measured on BI-V150 (16 SMs) against the autotuned
++# mm_kernel at the listed M (L2 flushed, median of 15-30 reps).
++# SWIZZLE: 0 row-major, 1 GROUP_M grouped, 2 column-major program order.
++mm_pinned:
++# qkv_proj  N=2560 K=2048
++#   M=2048/1985: 0.282 ms vs 0.309 ms autotuned (x1.10)
++- META: {N: 2560, K: 2048, M_BUCKET: 2048, BLOCK_M: 128, BLOCK_N: 128, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 8
++  num_stages: 2
++#   M=1792: 0.273 ms vs 0.303 ms autotuned (x1.11)
++- META: {N: 2560, K: 2048, M_BUCKET: 1792, BLOCK_M: 128, BLOCK_N: 128, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 8
++  num_stages: 2
++#   M=1536: 0.207 ms vs 0.244 ms autotuned (x1.18)
++- META: {N: 2560, K: 2048, M_BUCKET: 1536, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M=1280: 0.207 ms vs 0.268 ms autotuned (x1.30)
++- META: {N: 2560, K: 2048, M_BUCKET: 1280, BLOCK_M: 128, BLOCK_N: 128, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 8
++  num_stages: 2
++#   M=1024: 0.167 ms vs 0.208 ms autotuned (x1.24)
++- META: {N: 2560, K: 2048, M_BUCKET: 1024, BLOCK_M: 128, BLOCK_N: 128, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 8
++  num_stages: 2
++#   M=768: 0.120 ms vs 0.173 ms autotuned (x1.45)
++- META: {N: 2560, K: 2048, M_BUCKET: 768, BLOCK_M: 128, BLOCK_N: 128, BLOCK_K: 32, GROUP_M: 4, SWIZZLE: 1}
++  num_warps: 8
++  num_stages: 2
++# o_proj  N=2048 K=2048
++#   M=2048/1985: 0.198 ms vs 0.247 ms autotuned (x1.25)
++- META: {N: 2048, K: 2048, M_BUCKET: 2048, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M=1792: 0.198 ms vs 0.231 ms autotuned (x1.17)
++- META: {N: 2048, K: 2048, M_BUCKET: 1792, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M=1536: 0.174 ms vs 0.229 ms autotuned (x1.32)
++- META: {N: 2048, K: 2048, M_BUCKET: 1536, BLOCK_M: 128, BLOCK_N: 128, BLOCK_K: 32, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M=1280: 0.197 ms vs 0.202 ms autotuned (x1.03)
++- META: {N: 2048, K: 2048, M_BUCKET: 1280, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M=1024: 0.103 ms vs 0.175 ms autotuned (x1.69)
++- META: {N: 2048, K: 2048, M_BUCKET: 1024, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M=768: 0.102 ms vs 0.179 ms autotuned (x1.76)
++- META: {N: 2048, K: 2048, M_BUCKET: 768, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M=512: 0.084 ms vs 0.093 ms autotuned (x1.11)
++- META: {N: 2048, K: 2048, M_BUCKET: 512, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++# gate_up_proj  N=12288 K=2048
++#   M=2048/1985: 1.170 ms vs 1.402 ms autotuned (x1.20)
++- META: {N: 12288, K: 2048, M_BUCKET: 2048, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, GROUP_M: 4, SWIZZLE: 1}
++  num_warps: 16
++  num_stages: 2
++#   M=1792: 1.059 ms vs 1.252 ms autotuned (x1.18)
++- META: {N: 12288, K: 2048, M_BUCKET: 1792, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 16
++  num_stages: 2
++#   M=1536: 0.876 ms vs 1.047 ms autotuned (x1.19)
++- META: {N: 12288, K: 2048, M_BUCKET: 1536, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 16
++  num_stages: 2
++#   M=1280: 0.767 ms vs 0.900 ms autotuned (x1.17)
++- META: {N: 12288, K: 2048, M_BUCKET: 1280, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 16
++  num_stages: 2
++#   M=1024: 0.580 ms vs 0.694 ms autotuned (x1.20)
++- META: {N: 12288, K: 2048, M_BUCKET: 1024, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 16
++  num_stages: 2
++#   M=768: 0.484 ms vs 0.551 ms autotuned (x1.14)
++- META: {N: 12288, K: 2048, M_BUCKET: 768, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, SWIZZLE: 2}
++  num_warps: 16
++  num_stages: 2
++#   M=512: 0.330 ms vs 0.431 ms autotuned (x1.31)
++- META: {N: 12288, K: 2048, M_BUCKET: 512, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, GROUP_M: 8, SWIZZLE: 1}
++  num_warps: 16
++  num_stages: 2
++# down_proj  N=2048 K=6144
++#   M=2048/1985: 0.555 ms vs 0.727 ms autotuned (x1.31)
++- META: {N: 2048, K: 6144, M_BUCKET: 2048, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, GROUP_M: 4, SWIZZLE: 1}
++  num_warps: 16
++  num_stages: 2
++#   M=1792: 0.554 ms vs 0.690 ms autotuned (x1.25)
++- META: {N: 2048, K: 6144, M_BUCKET: 1792, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, GROUP_M: 4, SWIZZLE: 1}
++  num_warps: 16
++  num_stages: 2
++#   M=1536: 0.485 ms vs 0.710 ms autotuned (x1.46)
++- META: {N: 2048, K: 6144, M_BUCKET: 1536, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M=1280: 0.552 ms vs 0.624 ms autotuned (x1.13)
++- META: {N: 2048, K: 6144, M_BUCKET: 1280, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, GROUP_M: 4, SWIZZLE: 1}
++  num_warps: 16
++  num_stages: 2
++#   M=1024: 0.280 ms vs 0.564 ms autotuned (x2.01)
++- META: {N: 2048, K: 6144, M_BUCKET: 1024, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, GROUP_M: 4, SWIZZLE: 1}
++  num_warps: 16
++  num_stages: 2
++#   M=768: 0.281 ms vs 0.586 ms autotuned (x2.09)
++- META: {N: 2048, K: 6144, M_BUCKET: 768, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, GROUP_M: 4, SWIZZLE: 1}
++  num_warps: 16
++  num_stages: 2
++#   M=512: 0.210 ms vs 0.271 ms autotuned (x1.29)
++- META: {N: 2048, K: 6144, M_BUCKET: 512, BLOCK_M: 256, BLOCK_N: 256, BLOCK_K: 32, GROUP_M: 4, SWIZZLE: 1}
++  num_warps: 16
++  num_stages: 2
++#
++# --- decode-step M buckets (M <= 64) ------------------------------------
++# One row of tokens per running sequence, so these are pure weight-streaming
++# GEMMs: the only thing that matters is reading the N*K weight slab once at
++# full HBM rate.  The autotuned mm_kernel picks prefill-shaped tiles here
++# (BLOCK_M 128-256 over an M of 8-64), which read B once but leave most of
++# each tile idle; for down_proj at M<=16 it is 1.9x off.  These tiles use
++# BLOCK_M = 32 (buckets 8-32) or 64 (buckets 40-64) so one M tile covers the
++# whole batch, with BLOCK_N / BLOCK_K sized to keep >= 2 CTA waves on the 16
++# SMs and >= 8 KiB of B in flight per load.
++# Each number below is us per call, median of a CUDA-graph replay of 42
++# launches with 42 distinct weights (per-call synchronize() timing is invalid
++# at this size on BI-V150), vs the autotuned mm_kernel in the same process.
++# gate_up_proj (N=12288) is NOT pinned for these buckets: it already streams
++# at 541-566 GB/s against a ~550 GB/s ceiling and every candidate tile lost.
++# down_proj is pinned only at the two buckets where the autotuned tile is far
++# off; at buckets 20-64 it is already at 449-518 GB/s and the tiles tie.
++#
++# qkv_proj  N=2560 K=2048  (10.0 MiB of weights)
++#   M bucket 8:  25.6 us vs 39.8 autotuned (x1.55)
++- META: {N: 2560, K: 2048, M_BUCKET: 8, BLOCK_M: 32, BLOCK_N: 32, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 4
++  num_stages: 2
++#   M bucket 16: 25.7 us vs 45.2 autotuned (x1.76)
++- META: {N: 2560, K: 2048, M_BUCKET: 16, BLOCK_M: 32, BLOCK_N: 32, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 4
++  num_stages: 2
++#   M bucket 20: 25.9 us vs 29.1 autotuned (x1.12)
++- META: {N: 2560, K: 2048, M_BUCKET: 20, BLOCK_M: 32, BLOCK_N: 32, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 4
++  num_stages: 2
++#   M bucket 24: 25.7 us vs 29.1 autotuned (x1.13)
++- META: {N: 2560, K: 2048, M_BUCKET: 24, BLOCK_M: 32, BLOCK_N: 32, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 4
++  num_stages: 2
++#   M bucket 28: 25.8 us vs 29.0 autotuned (x1.13)
++- META: {N: 2560, K: 2048, M_BUCKET: 28, BLOCK_M: 32, BLOCK_N: 32, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 4
++  num_stages: 2
++#   M bucket 32 (16k case decodes at 29-31 rows): 25.7 us vs 29.1 (x1.13)
++- META: {N: 2560, K: 2048, M_BUCKET: 32, BLOCK_M: 32, BLOCK_N: 32, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 4
++  num_stages: 2
++#   M bucket 40: 29.6 us vs 34.7 autotuned (x1.17)
++- META: {N: 2560, K: 2048, M_BUCKET: 40, BLOCK_M: 64, BLOCK_N: 64, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 48: 29.4 us vs 34.6 autotuned (x1.18)
++- META: {N: 2560, K: 2048, M_BUCKET: 48, BLOCK_M: 64, BLOCK_N: 64, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 56: 29.6 us vs 34.6 autotuned (x1.17)
++- META: {N: 2560, K: 2048, M_BUCKET: 56, BLOCK_M: 64, BLOCK_N: 64, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 64 (4k case decodes at 62-64 rows): 29.6 us vs 34.7 (x1.17)
++- META: {N: 2560, K: 2048, M_BUCKET: 64, BLOCK_M: 64, BLOCK_N: 64, BLOCK_K: 64, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++# o_proj  N=2048 K=2048  (8.0 MiB of weights)
++#   M bucket 8:  19.0 us vs 34.6 autotuned (x1.82)
++- META: {N: 2048, K: 2048, M_BUCKET: 8, BLOCK_M: 32, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 16: 19.2 us vs 32.5 autotuned (x1.69)
++- META: {N: 2048, K: 2048, M_BUCKET: 16, BLOCK_M: 32, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 20: 18.9 us vs 25.1 autotuned (x1.33)
++- META: {N: 2048, K: 2048, M_BUCKET: 20, BLOCK_M: 32, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 24: 19.1 us vs 25.1 autotuned (x1.32)
++- META: {N: 2048, K: 2048, M_BUCKET: 24, BLOCK_M: 32, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 28: 19.3 us vs 25.1 autotuned (x1.30)
++- META: {N: 2048, K: 2048, M_BUCKET: 28, BLOCK_M: 32, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 32: 19.3 us vs 25.0 autotuned (x1.30)
++- META: {N: 2048, K: 2048, M_BUCKET: 32, BLOCK_M: 32, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 40: 20.2 us vs 26.2 autotuned (x1.29)
++- META: {N: 2048, K: 2048, M_BUCKET: 40, BLOCK_M: 64, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M bucket 48: 20.5 us vs 26.2 autotuned (x1.28)
++- META: {N: 2048, K: 2048, M_BUCKET: 48, BLOCK_M: 64, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M bucket 56: 20.5 us vs 26.3 autotuned (x1.28)
++- META: {N: 2048, K: 2048, M_BUCKET: 56, BLOCK_M: 64, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++#   M bucket 64: 20.2 us vs 26.2 autotuned (x1.30)
++- META: {N: 2048, K: 2048, M_BUCKET: 64, BLOCK_M: 64, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 16
++  num_stages: 2
++# down_proj  N=2048 K=6144  (24.0 MiB of weights)
++#   M bucket 8:  48.1 us vs 89.3 autotuned (x1.86)
++- META: {N: 2048, K: 6144, M_BUCKET: 8, BLOCK_M: 32, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
++#   M bucket 16: 48.6 us vs 92.9 autotuned (x1.91)
++- META: {N: 2048, K: 6144, M_BUCKET: 16, BLOCK_M: 32, BLOCK_N: 64, BLOCK_K: 128, SWIZZLE: 0}
++  num_warps: 8
++  num_stages: 2
+ linear:
+ - META:
+     BLOCK_M: 256
+diff --git a/src/flag_gems/runtime/backend/_metax/native/__init__.py b/src/flag_gems/runtime/backend/_metax/native/__init__.py
+new file mode 100644
+index 00000000..e74eb06a
+--- /dev/null
++++ b/src/flag_gems/runtime/backend/_metax/native/__init__.py
+@@ -0,0 +1,3 @@
++# Copyright 2026 FlagOS Contributors
++# SPDX-License-Identifier: Apache-2.0
++# Native (MACA C++) kernels of the MetaX backend, built on first use with mxcc.
+diff --git a/src/flag_gems/runtime/backend/_metax/native/k5_gemm.py b/src/flag_gems/runtime/backend/_metax/native/k5_gemm.py
+new file mode 100644
+index 00000000..c977dda8
+--- /dev/null
++++ b/src/flag_gems/runtime/backend/_metax/native/k5_gemm.py
+@@ -0,0 +1,221 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# Native MACA C++ NT GEMM ("k5") for MetaX C500: C[M, N] = A[M, K] @ W[N, K]^T
++# in bf16 with fp32 accumulation, our own kernels written with the MACA MMA /
++# async-copy builtins (source: k5_src.py, generated from
++# work/R6/K5-mx-gemm4/native).  Two designs, chosen per (N, K, M bucket) by
++# the pinned NT table in ../ops/mm.py:
++#   T: 256 x 64*NTW x 64 tiles, one 64 KiB shared buffer, 4 inner stages
++#   H: 256 x 64*NTW x 32 tiles, two 32 KiB shared buffers
++# Variant names "T4e1" = design T, NTW=4 (BN=256), epilogue 1 (shared-memory
++# staged stores).
++#
++# The source is compiled once per (source hash, mxcc version) with
++# $MACA_PATH/mxgpu_llvm/bin/mxcc into <FlagGems cache>/native and loaded with
++# ctypes; launches go to torch's current stream.  Any problem (no mxcc,
++# compile or load error, FLAGGEMS_METAX_NATIVE_GEMM=0) disables the native path
++# and run_segments() returns False, so the caller keeps its Triton kernels.
++# `python3 <site-packages>/flag_gems/runtime/backend/_metax/native/k5_gemm.py`
++# builds the library ahead of time (CPU only, does not import flag_gems).
++
++import ctypes
++import fcntl
++import hashlib
++import logging
++import os
++import subprocess
++import sys
++import tempfile
++import threading
++
++try:
++    from . import k5_src
++except ImportError:  # run as a script (ahead-of-time build without importing flag_gems)
++    import k5_src
++
++logger = logging.getLogger(__name__)
++
++_DEFINES = ("-DK5_BUILD_T", "-DK5_BUILD_H") + tuple(getattr(k5_src, "EXTRA_DEFINES", ()))
++_ARCH = ("--offload-arch=xcore1000",)
++_DESIGNS = {"T": 1, "H": 2}
++_DESIGN_BK = {1: 64, 2: 32}
++_lock = threading.Lock()
++_state = {"lib": None, "tried": False, "error": None}
++
++
++def variant_id(name):
++    """'T4e1' -> 141"""
++    d, ntw, epi = _DESIGNS[name[0]], int(name[1]), int(name[3])
++    assert name[2] == "e" and len(name) == 4 and ntw in (2, 3, 4) and epi in (0, 1), name
++    return d * 100 + ntw * 10 + epi
++
++
++def variant_bn(v):
++    return 64 * ((v // 10) % 10)
++
++
++def variant_bk(v):
++    return _DESIGN_BK[v // 100]
++
++
++def _mxcc():
++    maca = os.environ.get("MACA_PATH", "/opt/maca")
++    path = os.path.join(maca, "mxgpu_llvm", "bin", "mxcc")
++    return (path, maca) if os.path.exists(path) else (None, maca)
++
++
++def _cache_root():
++    # same root as flag_gems.utils.code_cache.cache_dir(), without importing flag_gems
++    root = os.environ.get("FLAGGEMS_CACHE_DIR") or os.path.join(os.path.expanduser("~"), ".flaggems")
++    d = os.path.join(root, "native")
++    os.makedirs(d, exist_ok=True)
++    return d
++
++
++def library_path():
++    mxcc, _ = _mxcc()
++    if mxcc is None:
++        return None
++    ver = subprocess.run([mxcc, "--version"], capture_output=True, text=True, timeout=60).stdout
++    h = hashlib.sha256(
++        (k5_src.K5_GEMM_CU + k5_src.K5T_SCHEDULE_INC + " ".join(_DEFINES + _ARCH) + ver).encode()
++    ).hexdigest()[:16]
++    return os.path.join(_cache_root(), f"libk5_{h}.so")
++
++
++def build(force=False):
++    """Compile the library if it is not cached (CPU only).  Returns its path."""
++    mxcc, maca = _mxcc()
++    if mxcc is None:
++        raise RuntimeError(f"mxcc not found under {maca}")
++    so = library_path()
++    with open(so + ".lock", "w") as lk:
++        fcntl.flock(lk, fcntl.LOCK_EX)
++        if os.path.exists(so) and not force:
++            return so
++        with tempfile.TemporaryDirectory(dir=os.path.dirname(so)) as tmp:
++            with open(os.path.join(tmp, "k5_gemm.cu"), "w") as f:
++                f.write(k5_src.K5_GEMM_CU)
++            with open(os.path.join(tmp, "k5t_schedule.inc"), "w") as f:
++                f.write(k5_src.K5T_SCHEDULE_INC)
++            out = os.path.join(tmp, "libk5.so")
++            cmd = [mxcc, "-x", "maca", "-O3", "-std=c++17", "-fPIC", "-shared", *_ARCH,
++                   f"-I{tmp}", *_DEFINES, os.path.join(tmp, "k5_gemm.cu"), "-o", out,
++                   f"--maca-path={maca}"]
++            p = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
++            if p.returncode != 0 or not os.path.exists(out):
++                raise RuntimeError(f"mxcc failed ({p.returncode}): {(p.stdout + p.stderr)[-2000:]}")
++            os.replace(out, so)
++    return so
++
++
++class _Lib:
++    def __init__(self, path):
++        lib = ctypes.CDLL(path)
++        c_int, c_vp = ctypes.c_int, ctypes.c_void_p
++        lib.k5_gemm.argtypes = [c_int, c_vp, c_vp, c_vp] + [c_int] * 8 + [c_vp]
++        lib.k5_gemm.restype = c_int
++        lib.k5_variants.argtypes = [ctypes.POINTER(c_int), c_int]
++        lib.k5_variants.restype = c_int
++        buf = (c_int * 64)()
++        n = lib.k5_variants(buf, 64)
++        self.variants = {buf[i] for i in range(n)}
++        self.lib = lib
++        self.path = path
++
++
++def lib():
++    """The loaded library, or None if the native path is unavailable."""
++    if _state["tried"]:
++        return _state["lib"]
++    with _lock:
++        if not _state["tried"]:
++            try:
++                if os.environ.get("FLAGGEMS_METAX_NATIVE_GEMM", "1") == "0":
++                    raise RuntimeError("disabled by FLAGGEMS_METAX_NATIVE_GEMM=0")
++                _state["lib"] = _Lib(build())
++                logger.info("metax native GEMM: loaded %s", _state["lib"].path)
++            except Exception as e:  # noqa: BLE001  (fall back to the Triton kernels)
++                _state["error"] = repr(e)
++                logger.warning("metax native GEMM unavailable, using Triton: %s", e)
++            _state["tried"] = True
++    return _state["lib"]
++
++
++def eligible(a, w, c, v, col0, n_end):
++    """Whether the native variant v can compute c[:, col0:n_end] = a @ w[:n_end]^T."""
++    import torch
++
++    if a.dtype != torch.bfloat16 or w.dtype != torch.bfloat16 or c.dtype != torch.bfloat16:
++        return False
++    if a.dim() != 2 or w.dim() != 2 or c.dim() != 2:
++        return False
++    if a.stride(1) != 1 or w.stride(1) != 1 or c.stride(1) != 1:
++        return False
++    M, K = a.shape
++    if M < 1 or w.shape[1] != K or K % variant_bk(v):
++        return False
++    if a.stride(0) % 8 or w.stride(0) % 8 or c.stride(0) % 8 or col0 % 8 or n_end % 8 or n_end <= col0:
++        return False
++    if any(t.data_ptr() % 16 for t in (a, w, c)):
++        return False
++    if M * a.stride(0) >= 2**31 or n_end * w.stride(0) >= 2**31 or M * c.stride(0) >= 2**31:
++        return False
++    return c.shape[0] >= M and c.shape[1] >= n_end and w.shape[0] >= n_end
++
++
++def plan_segments(M, N, main, tail=None, aps=104, bm=256):
++    """[(col0, n_end, variant)]: the columns the main tile covers in whole
++    waves over the APs, then the rest with the tail tile if it fits in one
++    wave (as mm_slab.plan_segments)."""
++    if tail is None:
++        return [(0, N, main)]
++    mbn = variant_bn(main)
++    mt = -(-M // bm)
++    total = mt * (-(-N // mbn))
++    waves = total // aps
++    if waves == 0 or total % aps == 0:
++        return [(0, N, main)]
++    cols = (waves * aps // mt) * mbn
++    if cols <= 0 or cols >= N:
++        return [(0, N, main)]
++    if mt * (-(-(N - cols) // variant_bn(tail))) > aps:
++        return [(0, N, main)]
++    return [(0, cols, main), (cols, N, tail)]
++
++
++def run_segments(a, w, c, segs, group_m=8):
++    """Launch the segments on torch's current stream.  False (nothing
++    launched) if the library is unavailable or any segment is ineligible."""
++    L = lib()
++    if L is None:
++        return False
++    for col0, n_end, v in segs:
++        if v not in L.variants or not eligible(a, w, c, v, col0, n_end):
++            return False
++    import torch
++
++    stream = ctypes.c_void_p(torch.cuda.current_stream(a.device).cuda_stream)
++    M, K = a.shape
++    for col0, n_end, v in segs:
++        rc = L.lib.k5_gemm(v, a.data_ptr(), w.data_ptr(), c.data_ptr(), M, K, a.stride(0), w.stride(0),
++                           c.stride(0), col0, n_end, group_m, stream)
++        if rc:
++            raise RuntimeError(f"k5_gemm(variant {v}) failed with {rc}")
++    return True
++
++
++if __name__ == "__main__":
++    print(build(force="--force" in sys.argv))
+diff --git a/src/flag_gems/runtime/backend/_metax/native/k5_src.py b/src/flag_gems/runtime/backend/_metax/native/k5_src.py
+new file mode 100644
+index 00000000..ca2bb348
+--- /dev/null
++++ b/src/flag_gems/runtime/backend/_metax/native/k5_src.py
+@@ -0,0 +1,788 @@
++# Copyright 2026 FlagOS Contributors
++# SPDX-License-Identifier: Apache-2.0
++# GENERATED from work/R6/K5-mx-gemm4/native (k5_gemm.cu, k5t_schedule.inc) by
++# integrate/gen_k5_src.py -- edit the sources there, not this file.
++# The K5 native MACA C++ NT GEMM kernels (see k5_gemm.py).
++
++SOURCE_HASH = "d1b330fb303da135"
++EXTRA_DEFINES = ()
++
++K5_GEMM_CU = r'''// Copyright 2026 FlagOS Contributors
++// SPDX-License-Identifier: Apache-2.0
++//
++// K5: native MACA C++ NT GEMM for MetaX C500 (xcore1000, 104 APs, wave 64,
++// 64 KiB shared memory per AP):  C[M, N] = A[M, K] @ W[N, K]^T,  bf16 in,
++// fp32 accumulate, bf16 out.  W is the nn.Linear weight (rows K-contiguous),
++// i.e. the B = W.t() operand of FlagGems' mm_kernel_nt.
++//
++// Our own kernels, built from the MACA compiler builtins (no vendor library
++// kernel is instantiated):
++//   __builtin_mxc_mma_16x16x16bf16   one 16x16x16 MMA per wave
++//   __builtin_mxc_ldg_b128_bsm       128-bit global -> shared async copy; the
++//                                    shared address is a WAVE-UNIFORM base,
++//                                    lane l writes base + 16*l
++//   __builtin_mxc_arrive(64 + n)     wait until <= n async global ops pending
++//   __builtin_mxc_arrive(4096)       wait for this wave's shared-memory ops
++//   __builtin_mxc_barrier_inst()     block barrier
++//
++// MMA fragment convention (derived from the vendor's hand-written mainloops,
++// verified on the GPU by k5_probe_mma):  for mma(x, y, c) lane L supplies
++// X[L%16][4*(L/16)+t] and Y[L%16][4*(L/16)+t] (t = 0..3, two u32 = 4 bf16),
++// and returns D[4*(L/16)+e][L%16], e = 0..3, with D = X * Y^T + c.  We call
++// mma(b_frag, a_frag, acc), so lane L holds C[row L%16][cols 4*(L/16)+e] of
++// the 16x16 tile -- 4 consecutive output columns.  Any bijection of k is
++// allowed as long as A and B fragments use the same one.
++//
++// Kernels (512 threads = 8 waves as [2 along M, 4 along N]; wave tile
++// 128 x 16*NTW... spread as m-tiles {64s + 32wm + 16i} x n-tiles {64s + 16wn}):
++//   k5t  BM=256, BN=64*NTW, BK=64, ONE shared buffer (A 32 KiB + B 8*NTW KiB),
++//        4 inner stages (k5_schedule.py / k5t_schedule.inc): the next k-tile
++//        streams into the sub-blocks already copied to registers.
++//   k5h  BM=256, BN=64*NTW, BK=32, two shared buffers (2 x 32 KiB), one
++//        barrier per k-step, async copies of step k+1 during step k.
++// EPI=0 stores 8 bytes per lane straight from the accumulators, EPI=1 stages
++// 64-row slices through shared memory and writes full 16-byte row chunks.
++//
++// Build flags: -DK5_BUILD_T / -DK5_BUILD_H select the kernels (one .so each,
++// so a compile problem in one design does not hide the other), -DK5_PLAIN=1
++// replaces the async copy / arrive / barrier builtins with plain loads,
++// shared stores and __syncthreads() (slow, for diagnosis), -DK5_NO_ATTRS
++// drops the mcFuncGetAttributes query, -DK5_MMA_SWAP=1 swaps the MMA operands
++// (only if the probe shows the transposed lane convention).
++
++#if defined(K5_SYNTAX_CHECK)
++#include "k5_syntax_shim.h"  // host-compiler syntax check only (test_k5_offline.py)
++#else
++#include <mc_runtime.h>
++#endif
++#include <stdint.h>
++
++// kernel launch; the kernel (a template-id with commas) goes last
++#if defined(K5_SYNTAX_CHECK)
++#define K5_LAUNCH(grid, block, smem, stream, ...) __VA_ARGS__
++#else
++#define K5_LAUNCH(grid, block, smem, stream, ...) __VA_ARGS__<<<grid, block, smem, stream>>>
++#endif
++
++#ifndef __NATIVE_VECTOR__
++#define __NATIVE_VECTOR__(n, T) T __attribute__((ext_vector_type(n)))
++#endif
++
++#ifndef K5_PLAIN
++#define K5_PLAIN 0
++#endif
++
++typedef __NATIVE_VECTOR__(4, int) k5_v4i;
++typedef __NATIVE_VECTOR__(4, uint32_t) k5_v4u;
++typedef __NATIVE_VECTOR__(2, uint32_t) k5_v2u;
++typedef __NATIVE_VECTOR__(4, float) k5_v4f;
++typedef uint16_t k5_bf16;
++
++#define K5_DEV static __device__ __forceinline__
++
++extern __shared__ __attribute__((aligned(16))) unsigned char k5_smem[];
++
++#if K5_PLAIN
++#define K5_BSM128(dst_wave_base, gsrc)                                                       \
++  do {                                                                                       \
++    *(k5_v4i*)((unsigned char*)(dst_wave_base) + ((threadIdx.x & 63) << 4)) =                \
++        *(const k5_v4i*)(gsrc);                                                              \
++  } while (0)
++#define K5_WAIT_GVM(n) do { } while (0)
++#define K5_BARRIER() __syncthreads()
++#define K5_UNIFORM(x) (x)
++#else
++#define K5_BSM128(dst_wave_base, gsrc)                                                       \
++  __builtin_mxc_ldg_b128_bsm((k5_v4i*)(dst_wave_base), (k5_v4i*)(gsrc), 0, -1, true, true,   \
++                             false, true)
++#define K5_WAIT_GVM(n) __builtin_mxc_arrive(64 + (n))
++#define K5_BARRIER()                                                                         \
++  do {                                                                                       \
++    asm volatile("" ::: "memory");                                                           \
++    __builtin_mxc_arrive(4096);                                                              \
++    __builtin_mxc_barrier_inst();                                                            \
++    asm volatile("" ::: "memory");                                                           \
++  } while (0)
++#define K5_UNIFORM(x) __builtin_mxc_readfirstlane(x)
++#endif
++
++K5_DEV k5_v4f k5_zero() {
++  k5_v4f z = {0.f, 0.f, 0.f, 0.f};
++  return z;
++}
++
++#define K5_MMA_RAW(acc, x, y) (acc) = __builtin_mxc_mma_16x16x16bf16((x), (y), (acc))
++// K5_MMA(acc, b_frag, a_frag) must leave lane L holding C[L%16][4*(L/16)+e].
++// With the convention above that is mma(b, a); -DK5_MMA_SWAP=1 builds the
++// kernels for the transposed convention (out = D[L%16][4*(L/16)+e]), where it
++// is mma(a, b).  k5_probe_mma (raw builtin) tells which one the GPU has.
++#ifndef K5_MMA_SWAP
++#define K5_MMA_SWAP 0
++#endif
++#if K5_MMA_SWAP
++#define K5_MMA(acc, x, y) K5_MMA_RAW(acc, y, x)
++#else
++#define K5_MMA(acc, x, y) K5_MMA_RAW(acc, x, y)
++#endif
++
++K5_DEV uint32_t k5_f2bf(float f) {
++  uint32_t u = __builtin_bit_cast(uint32_t, f);
++  return (u + 0x7fffu + ((u >> 16) & 1u)) >> 16;  // round to nearest even
++}
++
++K5_DEV k5_v2u k5_pack4(k5_v4f a) {
++  k5_v2u r;
++  r.x = k5_f2bf(a.x) | (k5_f2bf(a.y) << 16);
++  r.y = k5_f2bf(a.z) | (k5_f2bf(a.w) << 16);
++  return r;
++}
++
++// grouped tile order (as Triton's GROUP_M): GROUP_M row tiles per column sweep
++K5_DEV void k5_tile_coords(int pid, int grid_m, int grid_n, int group_m, int& pm, int& pn) {
++  const int width = group_m * grid_n;
++  const int group_id = pid / width;
++  const int first_m = group_id * group_m;
++  const int rem = grid_m - first_m;
++  const int gsz = rem < group_m ? rem : group_m;
++  const int r = pid - group_id * width;
++  pm = first_m + r % gsz;
++  pn = r / gsz;
++}
++
++// accumulator tile (sa, i, sb) of wave (wm, wn): rows 64*sa + 32*wm + 16*i +
++// (lane & 15), columns 64*sb + 16*wn + 4*(lane >> 4) + e  (both kernels)
++template <int NTW, int EPI>
++K5_DEV void k5_epilogue(k5_v4f (&acc)[4][2][NTW], k5_bf16* __restrict__ C, int M, int ldc,
++                        int m0, int n0, int n_end, int tid, int wm, int wn) {
++  constexpr int BN = 64 * NTW;
++  const int lane = tid & 63;
++  const int r16 = lane & 15, g = lane >> 4;
++  if constexpr (EPI == 0) {
++#pragma unroll
++    for (int sa = 0; sa < 4; ++sa)
++#pragma unroll
++      for (int i = 0; i < 2; ++i)
++#pragma unroll
++        for (int sb = 0; sb < NTW; ++sb) {
++          const int row = m0 + 64 * sa + 32 * wm + 16 * i + r16;
++          const int col = n0 + 64 * sb + 16 * wn + 4 * g;
++          if (row < M && col < n_end)
++            *(k5_v2u*)(C + (int64_t)row * ldc + col) = k5_pack4(acc[sa][i][sb]);
++        }
++  } else {
++    constexpr int SROW = BN * 2 + 16;  // bytes per staged row (16 B pad)
++    constexpr int CPR = BN / 8;        // 16-byte chunks per row
++    K5_BARRIER();                      // every wave is done with the mainloop's shared memory
++#pragma unroll
++    for (int sa = 0; sa < 4; ++sa) {
++#pragma unroll
++      for (int i = 0; i < 2; ++i)
++#pragma unroll
++        for (int sb = 0; sb < NTW; ++sb) {
++          const int lr = 32 * wm + 16 * i + r16;
++          const int lc = 64 * sb + 16 * wn + 4 * g;
++          *(k5_v2u*)(k5_smem + lr * SROW + lc * 2) = k5_pack4(acc[sa][i][sb]);
++        }
++      K5_BARRIER();
++#pragma unroll
++      for (int idx = tid; idx < 64 * CPR; idx += 512) {
++        const int lr = idx / CPR, ch = idx - (idx / CPR) * CPR;
++        const int row = m0 + 64 * sa + lr, col = n0 + 8 * ch;
++        if (row < M && col < n_end)
++          *(k5_v4i*)(C + (int64_t)row * ldc + col) = *(const k5_v4i*)(k5_smem + lr * SROW + ch * 16);
++      }
++      K5_BARRIER();
++    }
++  }
++}
++
++#define K5_T(sa, sb)                                                                         \
++  do {                                                                                       \
++    _Pragma("unroll") for (int i_ = 0; i_ < 2; ++i_) {                                       \
++      K5_MMA(acc[sa][i_][sb], fb[sb][0].xy, fa[sa][i_][0].xy);                               \
++      K5_MMA(acc[sa][i_][sb], fb[sb][0].zw, fa[sa][i_][0].zw);                               \
++      K5_MMA(acc[sa][i_][sb], fb[sb][1].xy, fa[sa][i_][1].xy);                               \
++      K5_MMA(acc[sa][i_][sb], fb[sb][1].zw, fa[sa][i_][1].zw);                               \
++    }                                                                                        \
++  } while (0)
++
++#if defined(K5_BUILD_T)
++#include "k5t_schedule.inc"
++
++// ---------------------------------------------------------------------------
++// k5t: 256 x (64*NTW) x 64, one shared buffer, 4 inner stages
++// ---------------------------------------------------------------------------
++#define K5_LDA(s)                                                                            \
++  do {                                                                                       \
++    _Pragma("unroll") for (int i_ = 0; i_ < 2; ++i_) {                                       \
++      fa[s][i_][0] = *(const k5_v4u*)(fa_base + (64 * (s) + 16 * i_) * 128 + lo0);           \
++      fa[s][i_][1] = *(const k5_v4u*)(fa_base + (64 * (s) + 16 * i_) * 128 + lo1);           \
++    }                                                                                        \
++  } while (0)
++#define K5_LDB(s)                                                                            \
++  do {                                                                                       \
++    fb[s][0] = *(const k5_v4u*)(fb_base + 64 * (s) * 128 + lo0);                             \
++    fb[s][1] = *(const k5_v4u*)(fb_base + 64 * (s) * 128 + lo1);                             \
++  } while (0)
++#define K5_BSMA(s, kx) K5_BSM128(sA + (64 * (s) + 8 * wave) * 128, A + aoff[s] + (kx) * 64)
++#define K5_BSMB(s, kx) K5_BSM128(sB + (64 * (s) + 8 * wave) * 128, W + boff[s] + (kx) * 64)
++
++template <int NTW, int EPI>
++__global__ __launch_bounds__(512) void k5t_kernel(const k5_bf16* __restrict__ A,
++                                                  const k5_bf16* __restrict__ W,
++                                                  k5_bf16* __restrict__ C, int M, int K, int lda,
++                                                  int ldw, int ldc, int col0, int n_end,
++                                                  int group_m) {
++  constexpr int BM = 256, BN = 64 * NTW;
++  unsigned char* sA = k5_smem;
++  unsigned char* sB = k5_smem + BM * 128;
++
++  const int tid = threadIdx.x;
++  const int lane = tid & 63;
++  const int wave = K5_UNIFORM(tid >> 6);
++  const int wm = wave >> 2, wn = wave & 3;
++  const int grid_m = (M + BM - 1) / BM;
++  const int grid_n = (n_end - col0 + BN - 1) / BN;
++  int pm, pn;
++  k5_tile_coords(blockIdx.x, grid_m, grid_n, group_m, pm, pn);
++  const int m0 = pm * BM, n0 = col0 + pn * BN;
++  const int KT = K / 64;
++
++  // global -> shared: lane l of wave w copies row 64s + 8w + (l >> 3), the
++  // 16-byte chunk (l & 7) ^ (l >> 3) (so shared chunk p of row r holds the
++  // logical chunk p ^ (r % 8)); rows past the matrix are clamped (masked at
++  // the store)
++  const int lr = lane >> 3, lc = (lane & 7) ^ (lane >> 3);
++  int aoff[4], boff[NTW];
++#pragma unroll
++  for (int s = 0; s < 4; ++s) {
++    int r = m0 + 64 * s + 8 * wave + lr;
++    r = r < M ? r : M - 1;
++    aoff[s] = r * lda + 8 * lc;
++  }
++#pragma unroll
++  for (int s = 0; s < NTW; ++s) {
++    int r = n0 + 64 * s + 8 * wave + lr;
++    r = r < n_end ? r : n_end - 1;
++    boff[s] = r * ldw + 8 * lc;
++  }
++  // shared -> registers: row (lane & 15) of a 16-row tile, logical chunk
++  // 4*c2 + (lane >> 4) (8 k each; halves .xy/.zw are two MMA k-steps)
++  const int r16 = lane & 15, g = lane >> 4, l8 = lane & 7;
++  const int lo0 = r16 * 128 + (((0 | g) ^ l8) << 4);
++  const int lo1 = r16 * 128 + (((4 | g) ^ l8) << 4);
++  const unsigned char* fa_base = sA + (32 * wm) * 128;
++  const unsigned char* fb_base = sB + (16 * wn) * 128;
++
++  k5_v4f acc[4][2][NTW];
++#pragma unroll
++  for (int sa = 0; sa < 4; ++sa)
++#pragma unroll
++    for (int i = 0; i < 2; ++i)
++#pragma unroll
++      for (int sb = 0; sb < NTW; ++sb) acc[sa][i][sb] = k5_zero();
++  k5_v4u fa[4][2][2];
++  k5_v4u fb[NTW][2];
++
++  if constexpr (NTW == 2) {
++    K5T_PRO_NTW2;
++  } else if constexpr (NTW == 3) {
++    K5T_PRO_NTW3;
++  } else {
++    K5T_PRO_NTW4;
++  }
++  for (int kt = 0; kt < KT - 1; ++kt) {
++    if constexpr (NTW == 2) {
++      K5T_BODY_NTW2;
++    } else if constexpr (NTW == 3) {
++      K5T_BODY_NTW3;
++    } else {
++      K5T_BODY_NTW4;
++    }
++  }
++  if constexpr (NTW == 2) {
++    K5T_LAST_NTW2;
++  } else if constexpr (NTW == 3) {
++    K5T_LAST_NTW3;
++  } else {
++    K5T_LAST_NTW4;
++  }
++  k5_epilogue<NTW, EPI>(acc, C, M, ldc, m0, n0, n_end, tid, wm, wn);
++}
++#undef K5_LDA
++#undef K5_LDB
++#undef K5_BSMA
++#undef K5_BSMB
++#endif  // K5_BUILD_T
++
++#if defined(K5_BUILD_H)
++// ---------------------------------------------------------------------------
++// k5h: 256 x (64*NTW) x 32, two shared buffers, one barrier per k-step
++// ---------------------------------------------------------------------------
++template <int NTW, int EPI>
++__global__ __launch_bounds__(512) void k5h_kernel(const k5_bf16* __restrict__ A,
++                                                  const k5_bf16* __restrict__ W,
++                                                  k5_bf16* __restrict__ C, int M, int K, int lda,
++                                                  int ldw, int ldc, int col0, int n_end,
++                                                  int group_m) {
++  constexpr int BM = 256, BN = 64 * NTW, STAGE = 32768;
++  constexpr int NQB = BN / 16;           // 16-row copy groups of B
++  constexpr int NJB = (NQB + 7) / 8;     // copies of B per thread (per wave-uniform q)
++  const int tid = threadIdx.x;
++  const int lane = tid & 63;
++  const int wave = K5_UNIFORM(tid >> 6);
++  const int wm = wave >> 2, wn = wave & 3;
++  const int grid_m = (M + BM - 1) / BM;
++  const int grid_n = (n_end - col0 + BN - 1) / BN;
++  int pm, pn;
++  k5_tile_coords(blockIdx.x, grid_m, grid_n, group_m, pm, pn);
++  const int m0 = pm * BM, n0 = col0 + pn * BN;
++  const int KT = K / 32;
++
++  // 64-byte rows: a wave copies 16 rows; lane l -> row 16q + (l >> 2), shared
++  // chunk p = l & 3 holds logical chunk p ^ ((row >> 1) & 3)
++  const int lr4 = lane >> 2, lc = (lane & 3) ^ ((lane >> 3) & 3);
++  int aoff[2], boff[NJB];
++#pragma unroll
++  for (int j = 0; j < 2; ++j) {
++    int r = m0 + 16 * (wave + 8 * j) + lr4;
++    r = r < M ? r : M - 1;
++    aoff[j] = r * lda + 8 * lc;
++  }
++#pragma unroll
++  for (int j = 0; j < NJB; ++j) {
++    int r = n0 + 16 * (wave + 8 * j) + lr4;
++    r = r < n_end ? r : n_end - 1;
++    boff[j] = r * ldw + 8 * lc;
++  }
++  const int r16 = lane & 15, g = lane >> 4;
++  const int lo = r16 * 64 + ((g ^ ((r16 >> 1) & 3)) << 4);
++
++  k5_v4f acc[4][2][NTW];
++#pragma unroll
++  for (int sa = 0; sa < 4; ++sa)
++#pragma unroll
++    for (int i = 0; i < 2; ++i)
++#pragma unroll
++      for (int sb = 0; sb < NTW; ++sb) acc[sa][i][sb] = k5_zero();
++
++#define K5H_ISSUE(kx, st)                                                                    \
++  do {                                                                                       \
++    unsigned char* sa_ = k5_smem + (st) * STAGE;                                             \
++    unsigned char* sb_ = sa_ + BM * 64;                                                      \
++    _Pragma("unroll") for (int j = 0; j < 2; ++j)                                            \
++      K5_BSM128(sa_ + (wave + 8 * j) * 1024, A + aoff[j] + (kx) * 32);                       \
++    _Pragma("unroll") for (int j = 0; j < NJB; ++j) {                                        \
++      if (wave + 8 * j < NQB) K5_BSM128(sb_ + (wave + 8 * j) * 1024, W + boff[j] + (kx) * 32); \
++    }                                                                                        \
++  } while (0)
++
++  K5H_ISSUE(0, 0);
++  for (int kt = 0; kt < KT; ++kt) {
++    const int st = kt & 1;
++    K5_WAIT_GVM(0);
++    K5_BARRIER();
++    if (kt + 1 < KT) K5H_ISSUE(kt + 1, st ^ 1);
++    const unsigned char* sa_ = k5_smem + st * STAGE;
++    const unsigned char* sb_ = sa_ + BM * 64;
++    k5_v4u fa[4][2], fb[NTW];
++#pragma unroll
++    for (int sa = 0; sa < 4; ++sa)
++#pragma unroll
++      for (int i = 0; i < 2; ++i)
++        fa[sa][i] = *(const k5_v4u*)(sa_ + (64 * sa + 32 * wm + 16 * i) * 64 + lo);
++#pragma unroll
++    for (int sb = 0; sb < NTW; ++sb) fb[sb] = *(const k5_v4u*)(sb_ + (64 * sb + 16 * wn) * 64 + lo);
++#pragma unroll
++    for (int sa = 0; sa < 4; ++sa)
++#pragma unroll
++      for (int i = 0; i < 2; ++i)
++#pragma unroll
++        for (int sb = 0; sb < NTW; ++sb) {
++          K5_MMA(acc[sa][i][sb], fb[sb].xy, fa[sa][i].xy);
++          K5_MMA(acc[sa][i][sb], fb[sb].zw, fa[sa][i].zw);
++        }
++  }
++#undef K5H_ISSUE
++  k5_epilogue<NTW, EPI>(acc, C, M, ldc, m0, n0, n_end, tid, wm, wn);
++}
++#endif  // K5_BUILD_H
++
++// ---------------------------------------------------------------------------
++// probes (layout facts the kernels rely on)
++// ---------------------------------------------------------------------------
++__global__ void k5_probe_mma_kernel(const uint32_t* x, const uint32_t* y, float* out) {
++  const int lane = threadIdx.x & 63;
++  k5_v2u a, b;
++  a.x = x[2 * lane];
++  a.y = x[2 * lane + 1];
++  b.x = y[2 * lane];
++  b.y = y[2 * lane + 1];
++  k5_v4f c = {0.f, 0.f, 0.f, 0.f};
++  K5_MMA_RAW(c, a, b);
++  out[4 * lane + 0] = c.x;
++  out[4 * lane + 1] = c.y;
++  out[4 * lane + 2] = c.z;
++  out[4 * lane + 3] = c.w;
++}
++
++__global__ void k5_probe_bsm_kernel(const k5_v4i* src, k5_v4i* out) {
++  const int lane = threadIdx.x & 63;
++  const int wave = K5_UNIFORM((int)(threadIdx.x >> 6));
++  K5_BSM128(k5_smem + wave * 1024, src + threadIdx.x);
++  K5_WAIT_GVM(0);
++  K5_BARRIER();
++  // read back in a different lane order so a lane cannot see its own write
++  const int j = (threadIdx.x + 64) % blockDim.x;
++  out[threadIdx.x] = ((const k5_v4i*)k5_smem)[j];
++  (void)lane;
++}
++
++// ---------------------------------------------------------------------------
++// host side (C ABI for ctypes)
++// ---------------------------------------------------------------------------
++#define K5_VARIANT(design, ntw, epi) ((design) * 100 + (ntw) * 10 + (epi))
++
++static int k5_attrs_of(const void* kernel, int* out) {
++#if defined(K5_NO_ATTRS)
++  (void)kernel;
++  for (int i = 0; i < 5; ++i) out[i] = -1;
++  return 0;
++#else
++  mcFuncAttributes a;
++  mcError_t e = mcFuncGetAttributes(&a, kernel);
++  out[0] = a.numRegs;
++  out[1] = (int)a.localSizeBytes;
++  out[2] = (int)a.sharedSizeBytes;
++  out[3] = a.maxThreadsPerBlock;
++  out[4] = a.maxDynamicSharedSizeBytes;
++  return (int)e;
++#endif
++}
++
++// one case per compiled variant: argument checks, attribute query or launch
++// (direct triple-chevron launch of the template instance; the dynamic shared
++// memory limit is raised to 64 KiB once, its error state cleared)
++#define K5_CASE(design, KER, ntw, epi, BKv)                                                    \
++  case K5_VARIANT(design, ntw, epi): {                                                         \
++    if (attrs) return k5_attrs_of((const void*)KER<ntw, epi>, attrs);                          \
++    if (K % (BKv)) return -2;                                                                  \
++    static bool smem_attr_set = false;                                                         \
++    if (!smem_attr_set) {                                                                      \
++      (void)mcFuncSetAttribute((const void*)KER<ntw, epi>,                                     \
++                               mcFuncAttributeMaxDynamicSharedMemorySize, 65536);              \
++      (void)mcGetLastError();                                                                  \
++      smem_attr_set = true;                                                                    \
++    }                                                                                          \
++    const int grid = ((M + 255) / 256) * ((n_end - col0 + 64 * (ntw) - 1) / (64 * (ntw)));   \
++    K5_LAUNCH(grid, 512, 65536, (mcStream_t)stream, KER<ntw, epi>)(                            \
++        (const k5_bf16*)A, (const k5_bf16*)W, (k5_bf16*)C, M, K, lda, ldw, ldc, col0, n_end,   \
++        group_m);                                                                              \
++    return (int)mcGetLastError();                                                              \
++  }
++
++static const int k5_variant_list[] = {
++#if defined(K5_BUILD_T)
++    K5_VARIANT(1, 4, 0), K5_VARIANT(1, 4, 1), K5_VARIANT(1, 3, 0), K5_VARIANT(1, 3, 1),
++    K5_VARIANT(1, 2, 0), K5_VARIANT(1, 2, 1),
++#endif
++#if defined(K5_BUILD_H)
++    K5_VARIANT(2, 4, 0), K5_VARIANT(2, 4, 1), K5_VARIANT(2, 3, 1), K5_VARIANT(2, 2, 1),
++#endif
++    -1};
++
++static int k5_dispatch(int variant, const void* A, const void* W, void* C, int M, int K, int lda,
++                       int ldw, int ldc, int col0, int n_end, int group_m, void* stream,
++                       int* attrs) {
++  if (M <= 0 || K <= 0 || n_end <= col0) return -3;
++  switch (variant) {
++#if defined(K5_BUILD_T)
++    K5_CASE(1, k5t_kernel, 4, 0, 64)
++    K5_CASE(1, k5t_kernel, 4, 1, 64)
++    K5_CASE(1, k5t_kernel, 3, 0, 64)
++    K5_CASE(1, k5t_kernel, 3, 1, 64)
++    K5_CASE(1, k5t_kernel, 2, 0, 64)
++    K5_CASE(1, k5t_kernel, 2, 1, 64)
++#endif
++#if defined(K5_BUILD_H)
++    K5_CASE(2, k5h_kernel, 4, 0, 32)
++    K5_CASE(2, k5h_kernel, 4, 1, 32)
++    K5_CASE(2, k5h_kernel, 3, 1, 32)
++    K5_CASE(2, k5h_kernel, 2, 1, 32)
++#endif
++    default:
++      return -1;
++  }
++}
++
++extern "C" {
++
++// C[:, col0:n_end] of C[M, ldc] = A[M, K] (row stride lda) @ W[n_end, K]^T
++// (W row stride ldw).  Returns 0 or an mcError_t / negative argument code.
++int k5_gemm(int variant, const void* A, const void* W, void* C, int M, int K, int lda, int ldw,
++            int ldc, int col0, int n_end, int group_m, void* stream) {
++  return k5_dispatch(variant, A, W, C, M, K, lda, ldw, ldc, col0, n_end, group_m, stream,
++                     nullptr);
++}
++
++// out[5] = numRegs, localSizeBytes (spill), sharedSizeBytes, maxThreadsPerBlock,
++// maxDynamicSharedSizeBytes of the variant's kernel
++int k5_attrs(int variant, int* out) {
++  return k5_dispatch(variant, nullptr, nullptr, nullptr, 256, 64, 64, 64, 64, 0, 64, 8, nullptr,
++                     out);
++}
++
++// compiled variant ids, -1 terminated; returns the count
++int k5_variants(int* out, int cap) {
++  int n = 0;
++  for (; k5_variant_list[n] >= 0 && n < cap; ++n) out[n] = k5_variant_list[n];
++  if (n < cap) out[n] = -1;
++  return n;
++}
++
++int k5_plain(void) { return K5_PLAIN; }
++
++int k5_mma_swap(void) { return K5_MMA_SWAP; }
++
++// x, y: 64 lanes x 2 u32 (4 bf16) each; out: 64 lanes x 4 fp32
++int k5_probe_mma(const void* x, const void* y, void* out, void* stream) {
++  K5_LAUNCH(1, 64, 0, (mcStream_t)stream, k5_probe_mma_kernel)((const uint32_t*)x, (const uint32_t*)y,
++                                                                (float*)out);
++  return (int)mcGetLastError();
++}
++
++// src, out: 128 x 16 bytes; 2 waves copy through shared memory with the async copy
++int k5_probe_bsm(const void* src, void* out, void* stream) {
++  K5_LAUNCH(1, 128, 2048, (mcStream_t)stream, k5_probe_bsm_kernel)((const k5_v4i*)src, (k5_v4i*)out);
++  return (int)mcGetLastError();
++}
++
++}  // extern "C"
++'''
++
++K5T_SCHEDULE_INC = r'''// GENERATED by k5_schedule.py --emit; do not edit.  The offline emulator
++// (test_k5_offline.py) checks these exact op lists.
++#pragma once
++#define K5T_PRO_NTW2 do { \
++    K5_BSMA(0, 0); \
++    K5_BSMB(0, 0); \
++    K5_BSMA(1, 0); \
++    K5_BSMB(1, 0); \
++    K5_BSMA(2, 0); \
++    K5_BSMA(3, 0); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_LDA(0); \
++    K5_LDB(0); \
++    K5_WAIT_GVM(2); \
++    K5_BARRIER(); \
++    K5_LDA(1); \
++    K5_LDB(1); \
++  } while (0)
++#define K5T_BODY_NTW2 do { \
++    K5_BSMA(0, (kt + 1)); \
++    K5_BSMB(0, (kt + 1)); \
++    K5_T(0, 0); \
++    K5_WAIT_GVM(3); \
++    K5_BARRIER(); \
++    K5_LDA(2); \
++    K5_BSMA(1, (kt + 1)); \
++    K5_BSMB(1, (kt + 1)); \
++    K5_T(1, 0); \
++    K5_T(0, 1); \
++    K5_T(1, 1); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_LDA(3); \
++    K5_BSMA(2, (kt + 1)); \
++    K5_T(2, 0); \
++    K5_T(2, 1); \
++    K5_WAIT_GVM(3); \
++    K5_BARRIER(); \
++    K5_BSMA(3, (kt + 1)); \
++    K5_T(3, 0); \
++    K5_LDA(0); \
++    K5_LDB(0); \
++    K5_T(3, 1); \
++    K5_WAIT_GVM(2); \
++    K5_BARRIER(); \
++    K5_LDA(1); \
++    K5_LDB(1); \
++  } while (0)
++#define K5T_LAST_NTW2 do { \
++    K5_T(0, 0); \
++    K5_WAIT_GVM(1); \
++    K5_BARRIER(); \
++    K5_LDA(2); \
++    K5_T(1, 0); \
++    K5_T(0, 1); \
++    K5_T(1, 1); \
++    K5_WAIT_GVM(0); \
++    K5_BARRIER(); \
++    K5_LDA(3); \
++    K5_T(2, 0); \
++    K5_T(2, 1); \
++    K5_T(3, 0); \
++    K5_T(3, 1); \
++  } while (0)
++#define K5T_PRO_NTW3 do { \
++    K5_BSMA(0, 0); \
++    K5_BSMB(0, 0); \
++    K5_BSMA(1, 0); \
++    K5_BSMB(1, 0); \
++    K5_BSMA(2, 0); \
++    K5_BSMB(2, 0); \
++    K5_BSMA(3, 0); \
++    K5_WAIT_GVM(5); \
++    K5_BARRIER(); \
++    K5_LDA(0); \
++    K5_LDB(0); \
++    K5_WAIT_GVM(3); \
++    K5_BARRIER(); \
++    K5_LDA(1); \
++    K5_LDB(1); \
++  } while (0)
++#define K5T_BODY_NTW3 do { \
++    K5_BSMA(0, (kt + 1)); \
++    K5_BSMB(0, (kt + 1)); \
++    K5_T(0, 0); \
++    K5_WAIT_GVM(3); \
++    K5_BARRIER(); \
++    K5_LDA(2); \
++    K5_LDB(2); \
++    K5_BSMA(1, (kt + 1)); \
++    K5_BSMB(1, (kt + 1)); \
++    K5_T(1, 0); \
++    K5_T(0, 1); \
++    K5_T(1, 1); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_LDA(3); \
++    K5_BSMA(2, (kt + 1)); \
++    K5_BSMB(2, (kt + 1)); \
++    K5_T(2, 0); \
++    K5_T(2, 1); \
++    K5_T(0, 2); \
++    K5_T(1, 2); \
++    K5_T(2, 2); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_BSMA(3, (kt + 1)); \
++    K5_T(3, 0); \
++    K5_LDA(0); \
++    K5_LDB(0); \
++    K5_T(3, 1); \
++    K5_WAIT_GVM(3); \
++    K5_BARRIER(); \
++    K5_LDA(1); \
++    K5_LDB(1); \
++    K5_T(3, 2); \
++  } while (0)
++#define K5T_LAST_NTW3 do { \
++    K5_T(0, 0); \
++    K5_WAIT_GVM(1); \
++    K5_BARRIER(); \
++    K5_LDA(2); \
++    K5_LDB(2); \
++    K5_T(1, 0); \
++    K5_T(0, 1); \
++    K5_T(1, 1); \
++    K5_WAIT_GVM(0); \
++    K5_BARRIER(); \
++    K5_LDA(3); \
++    K5_T(2, 0); \
++    K5_T(2, 1); \
++    K5_T(0, 2); \
++    K5_T(1, 2); \
++    K5_T(2, 2); \
++    K5_T(3, 0); \
++    K5_T(3, 1); \
++    K5_T(3, 2); \
++  } while (0)
++#define K5T_PRO_NTW4 do { \
++    K5_BSMA(0, 0); \
++    K5_BSMB(0, 0); \
++    K5_BSMA(1, 0); \
++    K5_BSMB(1, 0); \
++    K5_BSMA(2, 0); \
++    K5_BSMB(2, 0); \
++    K5_BSMA(3, 0); \
++    K5_BSMB(3, 0); \
++    K5_WAIT_GVM(6); \
++    K5_BARRIER(); \
++    K5_LDA(0); \
++    K5_LDB(0); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_LDA(1); \
++    K5_LDB(1); \
++  } while (0)
++#define K5T_BODY_NTW4 do { \
++    K5_BSMA(0, (kt + 1)); \
++    K5_BSMB(0, (kt + 1)); \
++    K5_T(0, 0); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_LDA(2); \
++    K5_LDB(2); \
++    K5_BSMA(1, (kt + 1)); \
++    K5_BSMB(1, (kt + 1)); \
++    K5_T(1, 0); \
++    K5_T(0, 1); \
++    K5_T(1, 1); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_LDA(3); \
++    K5_LDB(3); \
++    K5_BSMA(2, (kt + 1)); \
++    K5_BSMB(2, (kt + 1)); \
++    K5_T(2, 0); \
++    K5_T(2, 1); \
++    K5_T(0, 2); \
++    K5_T(1, 2); \
++    K5_T(2, 2); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_BSMA(3, (kt + 1)); \
++    K5_BSMB(3, (kt + 1)); \
++    K5_T(3, 0); \
++    K5_T(0, 3); \
++    K5_LDA(0); \
++    K5_LDB(0); \
++    K5_T(3, 1); \
++    K5_T(1, 3); \
++    K5_WAIT_GVM(4); \
++    K5_BARRIER(); \
++    K5_LDA(1); \
++    K5_LDB(1); \
++    K5_T(3, 2); \
++    K5_T(2, 3); \
++    K5_T(3, 3); \
++  } while (0)
++#define K5T_LAST_NTW4 do { \
++    K5_T(0, 0); \
++    K5_WAIT_GVM(2); \
++    K5_BARRIER(); \
++    K5_LDA(2); \
++    K5_LDB(2); \
++    K5_T(1, 0); \
++    K5_T(0, 1); \
++    K5_T(1, 1); \
++    K5_WAIT_GVM(0); \
++    K5_BARRIER(); \
++    K5_LDA(3); \
++    K5_LDB(3); \
++    K5_T(2, 0); \
++    K5_T(2, 1); \
++    K5_T(0, 2); \
++    K5_T(1, 2); \
++    K5_T(2, 2); \
++    K5_T(3, 0); \
++    K5_T(3, 1); \
++    K5_T(3, 2); \
++    K5_T(0, 3); \
++    K5_T(1, 3); \
++    K5_T(2, 3); \
++    K5_T(3, 3); \
++  } while (0)
++'''
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/__init__.py b/src/flag_gems/runtime/backend/_metax/ops/__init__.py
+index f3f3f4dd..397a38c4 100644
+--- a/src/flag_gems/runtime/backend/_metax/ops/__init__.py
++++ b/src/flag_gems/runtime/backend/_metax/ops/__init__.py
+@@ -28,6 +28,7 @@ from .kthvalue import kthvalue
+ from .layernorm import layer_norm, layer_norm_backward
+ from .lgamma_ import lgamma, lgamma_
+ from .linalg_svdvals import linalg_svdvals
++from .linear import linear
+ from .log_sigmoid_forward import log_sigmoid_forward
+ from .log_softmax import log_softmax, log_softmax_backward
+ from .logical_or import logical_or, logical_or_
+@@ -113,6 +114,7 @@ __all__ = [
+     "lgamma",
+     "lgamma_",
+     "linalg_svdvals",
++    "linear",
+     "log_sigmoid_forward",
+     "log_softmax",
+     "log_softmax_backward",
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/linear.py b/src/flag_gems/runtime/backend/_metax/ops/linear.py
+new file mode 100644
+index 00000000..9ef080dd
+--- /dev/null
++++ b/src/flag_gems/runtime/backend/_metax/ops/linear.py
+@@ -0,0 +1,52 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# MetaX linear: vocabulary projections (lm_head) with a decode-sized batch use
++# the skinny NT GEMM with configs pinned per (N, K) for C500; everything else
++# keeps the generic FlagGems linear kernel.
++
++import logging
++
++import torch
++
++from flag_gems.ops.linear import linear as _generic_linear
++
++from .skinny_mm import lm_head_config, skinny_mm_nt
++
++logger = logging.getLogger(__name__)
++
++
++def linear(input, weight, bias=None):
++    logger.debug("GEMS_METAX LINEAR")
++    if (
++        bias is None
++        and input.dim() >= 2
++        and weight.dim() == 2
++        and input.dtype == weight.dtype
++        and weight.stride(1) == 1
++        and input.shape[-1] == weight.shape[1]
++    ):
++        K = weight.shape[1]
++        N = weight.shape[0]
++        M = input.numel() // K if K else 0
++        cfg = lm_head_config(M, N, K, input.dtype, weight.stride(0)) if M > 0 else None
++        if cfg is not None:
++            x = input.reshape(M, K)
++            # the config assumes row stride K where 32-bit offsets need it
++            if x.stride(1) != 1 or M * x.stride(0) >= 2**31:
++                x = x.contiguous()
++            out = torch.empty((M, N), device=input.device, dtype=input.dtype)
++            skinny_mm_nt(x, weight, out, cfg)
++            return out.view(*input.shape[:-1], N)
++    return _generic_linear(input, weight, bias)
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/mm.py b/src/flag_gems/runtime/backend/_metax/ops/mm.py
+index cd19518e..11b63c19 100644
+--- a/src/flag_gems/runtime/backend/_metax/ops/mm.py
++++ b/src/flag_gems/runtime/backend/_metax/ops/mm.py
+@@ -27,15 +27,49 @@ from flag_gems.utils import libentry, libtuner
+ from flag_gems.utils import triton_lang_extension as ext
+ from flag_gems.utils.device_info import get_l2_cache_size, get_sm_count
+ 
++from ..native import k5_gemm as _k5
++from .mm_slab import launch_plan, launch_slab, slab_config, slab_name
++from .skinny_mm import decode_nt_config, skinny_mm_nt
++
+ logger = logging.getLogger(__name__)
+ EXPAND_CONFIG_FILENAME = os.path.normpath(
+     os.path.join(os.path.dirname(__file__), "..", "mm_metax_expand.yaml")
+ )
+ 
+ 
++def _mm_tune_m_bucket(m):
++    """Bucket the GEMM M dimension for the libtuner config-cache key.
++
++    vLLM runs chunked-prefill (mixed) steps above the largest cudagraph
++    capture size eagerly with the exact scheduled token count as M, so an
++    exact-M key starts a full autotune sweep for almost every new step size.
++    M only changes the number of row tiles, so a config tuned for the upper
++    end of a bucket is reused for the whole bucket.
++
++    Buckets: powers of two up to 16, then four buckets per octave rounded up
++    (16, 20, 24, 28, 32, 40, ..., 1792, 2048, 2560, ...).  Each bucket value
++    maps to itself, so tuning at the bucket value fills the cache row that
++    the whole bucket uses (decode M=64 and full-budget M=2048 keep their
++    exact-M configs).
++
++    Only the config-cache key and the candidate pruning see the bucket.  The
++    launch grid and the EVEN_M heuristic still use the exact M, and every
++    dense kernel here masks rows with ``rm < M`` (loads wrap with ``rm % M``),
++    so any config is correct for any M.
++    """
++    m = int(m)
++    if m <= 16:
++        return m if m <= 1 else 1 << (m - 1).bit_length()
++    step = 1 << ((m - 1).bit_length() - 3)
++    return -(-m // step) * step
++
++
+ def _prune_mm_dense_configs(configs, named_args, transposed_b=False, **kwargs):
+     configs = list(configs)
+-    M = named_args["M"]
++    # Prune with the bucketed M so every M of a bucket benchmarks the same
++    # candidates and the cached choice does not depend on which M came first
++    # (the M >= 1024 rule below would otherwise split the (896, 1024] bucket).
++    M = _mm_tune_m_bucket(named_args["M"])
+     N = named_args["N"]
+     K = named_args["K"]
+     pruned_configs = []
+@@ -94,6 +128,7 @@ _prune_mm_dense_configs_nt = functools.partial(
+ @libtuner(
+     configs=runtime.get_tuned_config("mm"),
+     key=["M", "N", "K", "stride_am", "stride_bk"],
++    strategy=[_mm_tune_m_bucket, "default", "default", "default", "default"],
+     prune_configs_by={"early_config_prune": _prune_mm_dense_configs},
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="mm",
+@@ -249,6 +284,7 @@ def mm_kernel(
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_nn"),
+     key=["M", "N", "K"],
++    strategy=[_mm_tune_m_bucket, "default", "default"],
+     prune_configs_by={"early_config_prune": _prune_mm_dense_configs},
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="mm_nn",
+@@ -330,6 +366,7 @@ def mm_kernel_nn(
+ @libtuner(
+     configs=runtime.get_tuned_config("mm_nt"),
+     key=["M", "N", "K"],
++    strategy=[_mm_tune_m_bucket, "default", "default"],
+     prune_configs_by={"early_config_prune": _prune_mm_dense_configs_nt},
+     flagtune_op_name="mm",
+     flagtune_expand_op_name="mm_nt",
+@@ -1009,7 +1046,523 @@ def general_mm_nn(a, b, c, M, N, K):
+     return c
+ 
+ 
++# --------------------------------------------------------------------------- #
++# Large-M NT GEMMs on MetaX C500: pinned launch configs per (N, K, M bucket)
++# --------------------------------------------------------------------------- #
++# Large-M NT GEMMs are the chunked-prefill (mixed) steps that run outside CUDA
++# graphs.  On the autotuned path they are tuned inside served requests and the
++# shipped candidate list tops out at 128x128 tiles: for MiniCPM5-2B at M=2048
++# the four projections took 1.93 ms per layer autotuned, 1.49 ms with 256x256 /
++# 128x128x64 tiles and the mxcc flags below.  For known (N, K) weight shapes a
++# fixed launch config per M bucket is used instead: the unmodified mm_kernel_nt
++# body or mm_kernel_nt_subdot, with MACA compiler options.  The table at the
++# end of this section is chosen per bucket from timings of every candidate at
++# the top, the bottom and ragged M of the bucket.
++
++
++@triton.jit
++def _subdot_index(off, SIZE: tl.constexpr, LIMIT, EVEN: tl.constexpr):
++    # Row (or column) indices of one sub-tile.  Out-of-range indices wrap with
++    # ``% LIMIT`` so the K loop needs no row/column mask (as in mm_kernel_nt);
++    # the epilogue masks the store.
++    r = off + tl.arange(0, SIZE)
++    if EVEN:
++        idx = tl.max_contiguous(tl.multiple_of(r, SIZE), SIZE)
++    else:
++        idx = tl.max_contiguous(tl.multiple_of(r % LIMIT, SIZE), SIZE)
++    return idx
++
++
++@triton.jit
++def _subdot_a_ptrs(A, off_m, rk, M, K, SIZE: tl.constexpr, EVEN_M: tl.constexpr):
++    ram = _subdot_index(off_m, SIZE, M, EVEN_M)
++    return A + ram[:, None] * K + rk[None, :]
++
++
++@triton.jit
++def _subdot_b_ptrs(B, off_n, rk, N, K, SIZE: tl.constexpr, EVEN_N: tl.constexpr):
++    # B is W.T with stride (1, K): element (k, n) is W[n, k] = B + n * K + k.
++    rbn = _subdot_index(off_n, SIZE, N, EVEN_N)
++    return B + rk[:, None] + rbn[None, :] * K
++
++
++@triton.jit
++def _subdot_load_a(ptrs, rk, k_remaining, EVEN_K: tl.constexpr):
++    if EVEN_K:
++        x = tl.load(ptrs)
++    else:
++        x = tl.load(ptrs, mask=rk[None, :] < k_remaining, other=0.0)
++    return x
++
++
++@triton.jit
++def _subdot_load_b(ptrs, rk, k_remaining, EVEN_K: tl.constexpr):
++    if EVEN_K:
++        x = tl.load(ptrs)
++    else:
++        x = tl.load(ptrs, mask=rk[:, None] < k_remaining, other=0.0)
++    return x
++
++
++@triton.jit
++def _subdot_store(
++    C,
++    acc,
++    off_m,
++    off_n,
++    M,
++    N,
++    SUB_M: tl.constexpr,
++    SUB_N: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
++):
++    rm = off_m + tl.arange(0, SUB_M)
++    rn = off_n + tl.arange(0, SUB_N)
++    c_ptrs = C + rm[:, None] * N + rn[None, :]
++    result = acc.to(C.dtype.element_ty)
++    if EVEN_M and EVEN_N:
++        tl.store(c_ptrs, result)
++    else:
++        tl.store(c_ptrs, result, mask=(rm < M)[:, None] & (rn < N)[None, :])
++
++
++# NT GEMM (A [M, K] row-major, B = W.T with stride (1, K), C [M, N] row-major)
++# whose BLOCK_M x BLOCK_N output tile is computed as NSUB (1-3) same-shape
++# sub-dots that share one operand per k-step:
++#   SPLIT_N=True:  SUB_M = BLOCK_M, BLOCK_N = NSUB * SUB_N; the A tile is loaded
++#                  once and multiplied with NSUB column slabs of B.
++#   SPLIT_N=False: BLOCK_M = NSUB * SUB_M, SUB_N = BLOCK_N; the B tile is loaded
++#                  once and multiplied with NSUB row slabs of A.
++# All sub-dots have the same shape, so the shared operand's dot-operand
++# fragment stays in registers across them, and NSUB=3 gives the
++# non-power-of-two tiles (256x192, 384x128) that fill the 104 APs of the C500
++# better than 256x256 / 128x128 at the N=2048 projections.  Same GROUP_M
++# swizzle, wrap-around loads and masked epilogue as mm_kernel_nt.
++@triton.heuristics(runtime.get_heuristic_config("mm"))
++@triton.heuristics(
++    {
++        "EVEN_M": lambda args: args["M"] % args["BLOCK_M"] == 0,
++        "EVEN_N": lambda args: args["N"] % args["BLOCK_N"] == 0,
++    }
++)
++@triton.jit
++def mm_kernel_nt_subdot(
++    A,
++    B,
++    C,
++    M,
++    N,
++    K,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    SUB_M: tl.constexpr,
++    SUB_N: tl.constexpr,
++    NSUB: tl.constexpr,
++    SPLIT_N: tl.constexpr,
++    GROUP_M: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
++    EVEN_K: tl.constexpr,
++):
++    pid = tl.program_id(0)
++    grid_m = tl.cdiv(M, BLOCK_M)
++    grid_n = tl.cdiv(N, BLOCK_N)
++
++    width = GROUP_M * grid_n
++    group_id = pid // width
++    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
++    pid_m = group_id * GROUP_M + pid % group_size
++    pid_n = pid % width // group_size
++    off_m = pid_m * BLOCK_M
++    off_n = pid_n * BLOCK_N
++
++    rk = tl.arange(0, BLOCK_K)
++    # s_ptrs: the shared operand; p*_ptrs: the NSUB split slabs.
++    if SPLIT_N:
++        s_ptrs = _subdot_a_ptrs(A, off_m, rk, M, K, SUB_M, EVEN_M)
++        p0_ptrs = _subdot_b_ptrs(B, off_n, rk, N, K, SUB_N, EVEN_N)
++        if NSUB > 1:
++            p1_ptrs = _subdot_b_ptrs(B, off_n + SUB_N, rk, N, K, SUB_N, EVEN_N)
++        if NSUB > 2:
++            p2_ptrs = _subdot_b_ptrs(B, off_n + 2 * SUB_N, rk, N, K, SUB_N, EVEN_N)
++    else:
++        s_ptrs = _subdot_b_ptrs(B, off_n, rk, N, K, SUB_N, EVEN_N)
++        p0_ptrs = _subdot_a_ptrs(A, off_m, rk, M, K, SUB_M, EVEN_M)
++        if NSUB > 1:
++            p1_ptrs = _subdot_a_ptrs(A, off_m + SUB_M, rk, M, K, SUB_M, EVEN_M)
++        if NSUB > 2:
++            p2_ptrs = _subdot_a_ptrs(A, off_m + 2 * SUB_M, rk, M, K, SUB_M, EVEN_M)
++
++    acc0 = tl.zeros((SUB_M, SUB_N), dtype=tl.float32)
++    if NSUB > 1:
++        acc1 = tl.zeros((SUB_M, SUB_N), dtype=tl.float32)
++    if NSUB > 2:
++        acc2 = tl.zeros((SUB_M, SUB_N), dtype=tl.float32)
++
++    for k in range(0, tl.cdiv(K, BLOCK_K)):
++        k_remaining = K - k * BLOCK_K
++        if SPLIT_N:
++            s = _subdot_load_a(s_ptrs, rk, k_remaining, EVEN_K)
++            p0 = _subdot_load_b(p0_ptrs, rk, k_remaining, EVEN_K)
++            acc0 = tl.dot(s, p0, acc0, out_dtype=tl.float32)
++            if NSUB > 1:
++                p1 = _subdot_load_b(p1_ptrs, rk, k_remaining, EVEN_K)
++                acc1 = tl.dot(s, p1, acc1, out_dtype=tl.float32)
++            if NSUB > 2:
++                p2 = _subdot_load_b(p2_ptrs, rk, k_remaining, EVEN_K)
++                acc2 = tl.dot(s, p2, acc2, out_dtype=tl.float32)
++        else:
++            s = _subdot_load_b(s_ptrs, rk, k_remaining, EVEN_K)
++            p0 = _subdot_load_a(p0_ptrs, rk, k_remaining, EVEN_K)
++            acc0 = tl.dot(p0, s, acc0, out_dtype=tl.float32)
++            if NSUB > 1:
++                p1 = _subdot_load_a(p1_ptrs, rk, k_remaining, EVEN_K)
++                acc1 = tl.dot(p1, s, acc1, out_dtype=tl.float32)
++            if NSUB > 2:
++                p2 = _subdot_load_a(p2_ptrs, rk, k_remaining, EVEN_K)
++                acc2 = tl.dot(p2, s, acc2, out_dtype=tl.float32)
++        # both operands are contiguous along K
++        s_ptrs += BLOCK_K
++        p0_ptrs += BLOCK_K
++        if NSUB > 1:
++            p1_ptrs += BLOCK_K
++        if NSUB > 2:
++            p2_ptrs += BLOCK_K
++
++    if SPLIT_N:
++        _subdot_store(C, acc0, off_m, off_n, M, N, SUB_M, SUB_N, EVEN_M, EVEN_N)
++        if NSUB > 1:
++            _subdot_store(
++                C, acc1, off_m, off_n + SUB_N, M, N, SUB_M, SUB_N, EVEN_M, EVEN_N
++            )
++        if NSUB > 2:
++            _subdot_store(
++                C, acc2, off_m, off_n + 2 * SUB_N, M, N, SUB_M, SUB_N, EVEN_M, EVEN_N
++            )
++    else:
++        _subdot_store(C, acc0, off_m, off_n, M, N, SUB_M, SUB_N, EVEN_M, EVEN_N)
++        if NSUB > 1:
++            _subdot_store(
++                C, acc1, off_m + SUB_M, off_n, M, N, SUB_M, SUB_N, EVEN_M, EVEN_N
++            )
++        if NSUB > 2:
++            _subdot_store(
++                C, acc2, off_m + 2 * SUB_M, off_n, M, N, SUB_M, SUB_N, EVEN_M, EVEN_N
++            )
++
++
++# mxcc flag strings passed as the MACAOptions ``extra_options`` launch kwarg,
++# which replaces the backend's default -mllvm string for that compile
++# (triton/backends/metax/compiler.py).  For pipeline="basic" the default is
++# regpressure=false, vectorize-slp, sched-mma-maxnum=3, mma-unroll-count=stages.
++#   regp:    that default with register-pressure-aware scheduling turned on.
++#   cpsched: the scheduler flags the backend uses for its cp.async pipeline
++#            (register-pressure-aware scheduling, no load sinking, post-RA
++#            scheduling) applied to the register-buffered basic pipeline.
++# Both get -metaxgpu-mma-unroll-count=<num_stages> appended, as the default does.
++_MXCC_FLAGS = {
++    "default": None,
++    "regp": (
++        " -mllvm -metaxgpu-sched-regpressure=true -mllvm -metaxgpu-vectorize-slp=true "
++        "-mllvm -metaxgpu-sched-mma-maxnum=3 "
++    ),
++    "cpsched": (
++        " -mllvm -metaxgpu-sched-regpressure=true -mllvm -metaxgpu-sinkload=false "
++        "-mllvm -metaxgpu-vectorize-slp=true -mllvm -metaxgpu-igroup "
++        "-mllvm -metaxgpu-aggressive-4g-addr-opt=true "
++        "-mllvm -metaxgpu-shl-add-combine=false "
++        "-mllvm -misched-postra=true -mllvm -enable-post-misched=true "
++    ),
++}
++
++
++def _nt_variant(
++    block_m,
++    block_n,
++    block_k,
++    num_warps,
++    num_stages,
++    group_m=8,
++    flags="default",
++    nsub=1,
++    split_n=False,
++):
++    """Return ``(name, launch kwargs)`` of one pinned NT GEMM config.
++
++    ``nsub > 1`` selects mm_kernel_nt_subdot (``split_n``: the sub-dots split
++    BLOCK_N and share the A tile, else they split BLOCK_M and share the B
++    tile); ``nsub == 1`` launches the mm_kernel_nt body.
++    """
++    launch = dict(BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k, GROUP_M=group_m)
++    name = f"{block_m}x{block_n}x{block_k}"
++    if nsub > 1:
++        assert nsub <= 3, nsub
++        if split_n:
++            sub_m, sub_n = block_m, block_n // nsub
++        else:
++            sub_m, sub_n = block_m // nsub, block_n
++        assert sub_m * sub_n * nsub == block_m * block_n, (block_m, block_n, nsub)
++        assert sub_m & (sub_m - 1) == 0 and sub_n & (sub_n - 1) == 0, (sub_m, sub_n)
++        launch.update(SUB_M=sub_m, SUB_N=sub_n, NSUB=nsub, SPLIT_N=bool(split_n))
++        name += f"_{nsub}x{'N' if split_n else 'M'}"
++    name += f"_w{num_warps}s{num_stages}g{group_m}"
++    launch.update(num_warps=num_warps, num_stages=num_stages, pipeline="basic")
++    if flags != "default":
++        launch["extra_options"] = _mxcc_options(flags, num_stages)
++        name += f"_{flags}"
++    return name, launch
++
++
++def _mxcc_options(flags, num_stages):
++    if flags == "default":
++        return None
++    return _MXCC_FLAGS[flags] + f" -mllvm -metaxgpu-mma-unroll-count={num_stages} "
++
++
++def _slab_variant(
++    other,
++    slabs,
++    block_k,
++    num_warps,
++    num_stages,
++    split_n=True,
++    group_m=8,
++    flags="default",
++    glu=False,
++    scenario=None,
++):
++    """``(name, launch config)`` of one mm_slab_nt_kernel tile (mm_slab.py):
++    a power-of-two side ``other`` times the sum of ``slabs`` (split_n: slabs
++    along N sharing the A tile, else along M sharing the B tile)."""
++    cfg = slab_config(
++        other,
++        slabs,
++        block_k=block_k,
++        split_n=split_n,
++        glu=glu,
++        group_m=group_m,
++        num_warps=num_warps,
++        num_stages=num_stages,
++        pipeline="basic",
++        extra_options=_mxcc_options(flags, num_stages),
++        scenario=scenario,
++    )
++    return slab_name(cfg, flags), cfg
++
++
++def _plan_variant(main, tail):
++    """A GEMM as two column segments (mm_slab.plan_segments): the columns the
++    ``main`` slab tile covers in whole waves, then the rest with ``tail``."""
++    (main_name, main_cfg), (tail_name, tail_cfg) = main, tail
++    assert "S0" in main_cfg and "S0" in tail_cfg, "plan segments must be slab tiles"
++    return f"plan[{main_name}|{tail_name}]", {"plan": {"main": main_cfg, "tail": tail_cfg}}
++
++
++def _native_variant(main, tail=None, group_m=8, fallback=None):
++    """A GEMM on the native MACA C++ kernels (../native/k5_gemm.py): the
++    ``main`` variant (e.g. "T4e1") on the columns it covers in whole waves,
++    the ``tail`` variant on the rest (k5_gemm.plan_segments).  ``fallback`` is
++    the _NT_VARIANTS name of the Triton config run instead when the native
++    library is unavailable or the operands are not eligible."""
++    name = f"k5[{main}" + (f"|{tail}" if tail else "") + "]" + (f"g{group_m}" if group_m != 8 else "")
++    launch = {
++        "native": {
++            "main": _k5.variant_id(main),
++            "tail": _k5.variant_id(tail) if tail else None,
++            "group_m": group_m,
++        },
++        "fallback": fallback,
++    }
++    if fallback:
++        name += f"/{fallback}"
++    return name, launch
++
++
++# --- pinned NT table: begin ---
++_NT_VARIANTS = dict(
++    (
++        _nt_variant(128, 128, 64, 8, 4, flags="cpsched"),
++        _slab_variant(128, (128, 32), 32, 8, 2),
++        _nt_variant(128, 256, 32, 16, 2),
++        _nt_variant(256, 128, 32, 16, 2, flags="regp"),
++        _slab_variant(256, (128, 32), 32, 8, 2),
++        _nt_variant(256, 192, 32, 8, 2, nsub=3, split_n=True),
++        _nt_variant(256, 256, 32, 8, 2, group_m=4, flags="cpsched"),
++        _slab_variant(256, (32, 128), 32, 8, 2),
++        _nt_variant(256, 256, 32, 8, 2, flags="regp"),
++        _nt_variant(256, 256, 32, 8, 2, flags="cpsched"),
++        _plan_variant(
++            _slab_variant(256, (256,), 32, 8, 2, flags="regp"),
++            _slab_variant(256, (64, 64, 64), 32, 8, 2),
++        ),
++        # native MACA C++ kernels (../native/k5_gemm.py), Triton fallback after the slash
++        _native_variant("T2e1", fallback="slab128x160x32_N128+32_w8s2g8"),
++        _native_variant("T2e1", fallback="128x256x32_w16s2g8"),
++        _native_variant("T2e1", fallback="256x128x32_w16s2g8_regp"),
++        _native_variant("T3e1", group_m=16, fallback="slab256x160x32_N128+32_w8s2g8"),
++        _native_variant("T3e1", fallback="256x192x32_3xN_w8s2g8"),
++        _native_variant("T4e1", group_m=16, fallback="256x256x32_w8s2g4_cpsched"),
++        _native_variant("T3e1", group_m=16, fallback="slab256x160x32_N32+128_w8s2g8"),
++        _native_variant("T3e1", group_m=16, fallback="256x192x32_3xN_w8s2g8"),
++        _native_variant("T4e1", group_m=4, fallback="256x256x32_w8s2g8_regp"),
++        _native_variant("T4e1", "T2e1", fallback="256x256x32_w8s2g8_cpsched"),
++        _native_variant(
++            "T4e1",
++            "T2e1",
++            fallback="plan[slab256x256x32_N256_w8s2g8_regp|slab256x192x32_N64+64+64_w8s2g8]",
++        ),
++        _native_variant("T4e1", group_m=16, fallback="256x256x32_w8s2g8_cpsched"),
++        _native_variant(
++            "T4e1",
++            "T3e1",
++            fallback="plan[slab256x256x32_N256_w8s2g8_regp|slab256x192x32_N64+64+64_w8s2g8]",
++        ),
++        _native_variant("T3e1", fallback="slab256x160x32_N32+128_w8s2g8"),
++    )
++)
++# (N, K) -> {M bucket (_mm_tune_m_bucket): variant name}.  M buckets that are
++# not listed keep the autotuned mm_kernel_nt.  The slab / plan entries
++# (mm_slab.py) won interleaved timing on a C500 (104 APs) against the earlier
++# nt / sub-dot entries: 256x160 and 128x160 slab tiles fill the 104 APs for
++# the N=2048/2560 GEMMs, gate_up runs whole waves of 256x256 + a 256x192 tail.
++_NT_PINNED_TABLE = {
++    (2560, 2048): {  # qkv_proj
++        640: "128x128x64_w8s4g8_cpsched",
++        768: "k5[T2e1]/slab128x160x32_N128+32_w8s2g8",
++        896: "k5[T2e1]/128x256x32_w16s2g8",
++        1024: "k5[T2e1]/128x256x32_w16s2g8",
++        1280: "k5[T2e1]/256x128x32_w16s2g8_regp",
++        1536: "k5[T3e1]g16/slab256x160x32_N128+32_w8s2g8",
++        1792: "k5[T3e1]/256x192x32_3xN_w8s2g8",
++        2048: "k5[T4e1]g16/256x256x32_w8s2g4_cpsched",
++    },
++    (2048, 2048): {  # o_proj
++        640: "128x128x64_w8s4g8_cpsched",
++        768: "128x128x64_w8s4g8_cpsched",
++        896: "k5[T2e1]/slab128x160x32_N128+32_w8s2g8",
++        1024: "k5[T2e1]/slab128x160x32_N128+32_w8s2g8",
++        1280: "k5[T2e1]/128x256x32_w16s2g8",
++        1536: "k5[T2e1]/128x256x32_w16s2g8",
++        1792: "k5[T3e1]g16/slab256x160x32_N32+128_w8s2g8",
++        2048: "k5[T3e1]g16/slab256x160x32_N32+128_w8s2g8",
++    },
++    (12288, 2048): {  # gate_up_proj
++        640: "k5[T3e1]g16/256x192x32_3xN_w8s2g8",
++        768: "k5[T3e1]/256x192x32_3xN_w8s2g8",
++        896: "k5[T4e1]g4/256x256x32_w8s2g8_regp",
++        1024: "k5[T4e1|T2e1]/256x256x32_w8s2g8_cpsched",
++        1280: "k5[T4e1|T2e1]/plan[slab256x256x32_N256_w8s2g8_regp|slab256x192x32_N64+64+64_w8s2g8]",
++        1536: "k5[T4e1]g16/256x256x32_w8s2g8_cpsched",
++        1792: "k5[T4e1|T2e1]/plan[slab256x256x32_N256_w8s2g8_regp|slab256x192x32_N64+64+64_w8s2g8]",
++        2048: "k5[T4e1|T3e1]/plan[slab256x256x32_N256_w8s2g8_regp|slab256x192x32_N64+64+64_w8s2g8]",
++    },
++    (2048, 6144): {  # down_proj
++        640: "128x128x64_w8s4g8_cpsched",
++        768: "128x128x64_w8s4g8_cpsched",
++        896: "k5[T2e1]/slab128x160x32_N128+32_w8s2g8",
++        1024: "k5[T2e1]/slab128x160x32_N128+32_w8s2g8",
++        1280: "k5[T2e1]/128x256x32_w16s2g8",
++        1536: "k5[T2e1]/128x256x32_w16s2g8",
++        1792: "k5[T3e1]g16/slab256x160x32_N32+128_w8s2g8",
++        2048: "k5[T3e1]/slab256x160x32_N32+128_w8s2g8",
++    },
++}
++# (I, K) of a merged [gate; up] weight [2I, K] -> {M bucket: GLU slab variant}
++# for mm_glu_nt (gate_up GEMM + SiLU-and-mul in one kernel).  M buckets that
++# are not listed run mm + silu_and_mul.
++_GLU_PINNED_TABLE = {}
++# --- pinned NT table: end ---
++
++
++def _check_pinned_nt_table():
++    for (n, k), per_bucket in _NT_PINNED_TABLE.items():
++        for bucket, name in per_bucket.items():
++            assert _mm_tune_m_bucket(bucket) == bucket, (n, k, bucket)
++            assert name in _NT_VARIANTS, (n, k, bucket, name)
++            launch = _NT_VARIANTS[name]
++            if "native" in launch:
++                fb = launch["fallback"]
++                assert fb is None or (fb in _NT_VARIANTS and "native" not in _NT_VARIANTS[fb]), (name, fb)
++                continue
++            glu = launch.get("GLU") or any(
++                part["GLU"] for part in launch.get("plan", {}).values() if part
++            )
++            assert not glu, (n, k, bucket, name)
++    for (i, k), per_bucket in _GLU_PINNED_TABLE.items():
++        for bucket, name in per_bucket.items():
++            assert _mm_tune_m_bucket(bucket) == bucket, (i, k, bucket)
++            launch = _NT_VARIANTS[name]
++            parts = [launch] if "plan" not in launch else [p for p in launch["plan"].values() if p]
++            assert all(p.get("GLU") for p in parts), (i, k, bucket, name)
++
++
++_check_pinned_nt_table()
++
++
++def _pinned_nt_config(a, b, c, M, N, K):
++    per_bucket = _NT_PINNED_TABLE.get((N, K))
++    if per_bucket is None:
++        return None
++    if a.dtype not in (torch.bfloat16, torch.float16):
++        return None
++    if b.dtype != a.dtype or c.dtype != a.dtype:
++        return None
++    name = per_bucket.get(_mm_tune_m_bucket(M))
++    return None if name is None else _NT_VARIANTS[name]
++
++
++# Kernel bodies for the pinned path: mm_kernel_nt without its libtuner
++# (EVEN_* heuristics included) and the sub-dot kernel.
++_NT_PINNED_BODIES = {"nt": mm_kernel_nt.fn.fn, "subdot": mm_kernel_nt_subdot}
++_nt_pinned_entries = {}
++
++
++def _nt_pinned_entry(launch):
++    # LibEntry caches compiled kernels by kernel arguments only (tile sizes,
++    # GROUP_M, ... and the exact M, N, K), not by launch options (num_warps,
++    # num_stages, pipeline, extra_options), so every distinct option set gets
++    # its own LibEntry.  M must stay a specialized argument: EVEN_M is derived
++    # from it and baked into the cached kernel.
++    kind = "subdot" if "NSUB" in launch else "nt"
++    body = _NT_PINNED_BODIES[kind]
++    options = tuple(
++        sorted((k, v) for k, v in launch.items() if k not in body.arg_names)
++    )
++    entry = _nt_pinned_entries.get((kind, options))
++    if entry is None:
++        entry = _nt_pinned_entries.setdefault((kind, options), libentry()(body))
++    return entry
++
++
++def _launch_pinned_nt(a, b, c, M, N, K, launch):
++    """Run one pinned config; None if it is a native entry whose kernel cannot
++    run here and that has no Triton fallback (the caller then autotunes)."""
++    if "native" in launch:
++        nat = launch["native"]
++        segs = _k5.plan_segments(M, N, nat["main"], nat["tail"], get_sm_count())
++        # b is the NT operand W.t() of the [N, K] weight
++        if _k5.run_segments(a, b.t(), c, segs, nat["group_m"]):
++            return c
++        fb = launch["fallback"]
++        if fb is None:
++            return None
++        launch = _NT_VARIANTS[fb]
++    if "plan" in launch:
++        return launch_plan(a, b, c, M, N, K, launch["plan"])
++    if "S0" in launch:
++        return launch_slab(a, b, c, M, N, K, launch)
++    grid = (triton.cdiv(M, launch["BLOCK_M"]) * triton.cdiv(N, launch["BLOCK_N"]),)
++    with torch_device_fn.device(a.device):
++        _nt_pinned_entry(launch)[grid](a, b, c, M, N, K, **launch)
++    return c
++
++
+ def general_mm_nt(a, b, c, M, N, K):
++    launch = _pinned_nt_config(a, b, c, M, N, K)
++    if launch is not None and _launch_pinned_nt(a, b, c, M, N, K, launch) is not None:
++        return c
+     grid = lambda META: (
+         triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+     )
+@@ -1026,6 +1579,50 @@ def general_mm_nt(a, b, c, M, N, K):
+     return c
+ 
+ 
++def _pinned_glu_config(x, w, out, M, I, K):
++    per_bucket = _GLU_PINNED_TABLE.get((I, K))
++    if per_bucket is None or x.dtype not in (torch.bfloat16, torch.float16):
++        return None
++    if w.dtype != x.dtype or out.dtype != x.dtype:
++        return None
++    if x.stride(1) != 1 or x.stride(0) != K or not w.is_contiguous():
++        return None
++    if out.stride(1) != 1 or out.stride(0) != I:
++        return None
++    if M * K >= 2**31 or 2 * I * K >= 2**31 or M * I >= 2**31:
++        return None
++    name = per_bucket.get(_mm_tune_m_bucket(M))
++    return None if name is None else _NT_VARIANTS[name]
++
++
++def mm_glu_nt(x, w, out=None):
++    """``silu(x @ gate.T) * (x @ up.T)`` for the merged MLP weight
++    ``w = [gate; up]`` of shape [2I, K] (x: [M, K]) -> [M, I].
++
++    Pinned (I, K, M bucket) shapes run one slab GEMM kernel with the SiLU-and-
++    mul epilogue (mm_slab.py, GLU mode): no [M, 2I] intermediate in memory and
++    no separate activation kernel.  Other shapes run this module's mm and
++    FlagGems' silu_and_mul.  gate/up are rounded to the input dtype before the
++    activation, as in the unfused sequence.
++    """
++    logger.debug("GEMS_METAX MM_GLU_NT")
++    assert x.dim() == 2 and w.dim() == 2 and x.shape[1] == w.shape[1], (x.shape, w.shape)
++    assert w.shape[0] % 2 == 0, w.shape
++    M, K = x.shape
++    I = w.shape[0] // 2
++    if out is None:
++        out = torch.empty((M, I), device=x.device, dtype=x.dtype)
++    launch = _pinned_glu_config(x, w, out, M, I, K) if M > 0 else None
++    if launch is None:
++        from flag_gems.fused.silu_and_mul import silu_and_mul_out
++
++        gate_up = mm(x, w.t())
++        return silu_and_mul_out(gate_up[:, :I], gate_up[:, I:], out)
++    if "plan" in launch:
++        return launch_plan(x, w, out, M, I, K, launch["plan"], half=I)
++    return launch_slab(x, w, out, M, I, K, launch, half=I)
++
++
+ @functools.lru_cache(maxsize=1)
+ def _dense_output_tile_candidates():
+     tile_candidates = set()
+@@ -1177,6 +1774,10 @@ def mm(a, b):
+     # allocates output
+     c_dtype = get_higher_dtype(a.dtype, b.dtype)
+     c = torch.empty((M, N), device=device, dtype=c_dtype)
++    # decode-sized NT GEMMs (inside the FULL decode CUDA graph): pinned split-K skinny kernel
++    skinny = decode_nt_config(a, b, c, M, N, K)
++    if skinny is not None:
++        return skinny_mm_nt(a, b.t(), c, skinny)
+     if N == 1:
+         if _gemv_k_parallel_scenario(M, K):
+             return gemv_mm_k_parallel(a, b, c, M, K)
+@@ -1207,6 +1808,9 @@ def mm_out(a, b, *, out):
+     _, N = b.shape
+     # allocates output
+     c = out
++    skinny = decode_nt_config(a, b, c, M, N, K)
++    if skinny is not None:
++        return skinny_mm_nt(a, b.t(), c, skinny)
+     if N == 1:
+         if _gemv_k_parallel_scenario(M, K):
+             return gemv_mm_k_parallel(a, b, c, M, K)
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/mm_slab.py b/src/flag_gems/runtime/backend/_metax/ops/mm_slab.py
+new file mode 100644
+index 00000000..4d2b1b67
+--- /dev/null
++++ b/src/flag_gems/runtime/backend/_metax/ops/mm_slab.py
+@@ -0,0 +1,466 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# Slab NT GEMM for MetaX C500: C[M, N] = A[M, K] @ W[N, K]^T (W given as the
++# B = W.t() view of an NT ``mm`` operand, stride (1, K)).
++#
++# The C500 has 104 APs and room for one 256x256 (or 256x192) bf16 tile per AP
++# (64 KiB shared memory).  At the chunked-prefill size M=2048 the N=2048
++# projections (o_proj, down_proj) give 64 tiles of 256x256 or 88 of 256x192,
++# i.e. 62% / 82% of the APs for the whole kernel; N=2560 (qkv) gives 80
++# tiles; gate_up (N=12288) 384 tiles = 3.69 waves.  Triton tensors are powers
++# of two, so the output tile here is a power-of-two side times a SUM of up to
++# four power-of-two "slabs" (each its own tl.dot sharing the other operand):
++#   SPLIT_N=True:  BLOCK_M x (S0+S1+S2+S3), the A tile is loaded once per k-step
++#   SPLIT_N=False: (S0+S1+S2+S3) x BLOCK_N, the B tile is loaded once per k-step
++# which gives 256x160 (104 tiles for N=2048 at M=2048), 256x208 / 208x256
++# (104 / 100 tiles for qkv), 256x224, 128x160, ...
++#
++# Extra modes of the same kernel:
++#   * column segments (COL0, N_END): the launch covers output columns
++#     [COL0, N_END) only, so one GEMM can run as two launches with different
++#     tiles -- full waves of the big tile, then the remaining columns with a
++#     smaller tile that fills one wave (gate_up: 3 waves of 256x256 + 96 tiles
++#     of 256x192 instead of 4 waves with a 72-tile tail).
++#   * GLU (fused SiLU-and-mul epilogue): W is the merged [gate; up] weight of
++#     shape [2*I, K]; slab pairs (S0 gate, S1 up) and (S2 gate, S3 up) read the
++#     gate rows j and the up rows HALF + j of the same output columns, and the
++#     epilogue writes silu(gate) * up into C[M, I].  gate/up are rounded to the
++#     input dtype first, exactly like the unfused gate_up GEMM output, so only
++#     the GEMM summation order differs from GEMM + silu_and_mul.
++#   * packed B (PBN > 0): W stored tile-major as [N/PBN][K/BLOCK_K][PBN][BLOCK_K]
++#     (see pack_weight), so the PBN rows of one k-step are one contiguous
++#     block and every 16-lane group reads full 128-byte lines (unpacked rows
++#     are BLOCK_K*2 = 64 bytes apart-segments at BLOCK_K=32).
++#
++# Rows/columns past M/N wrap around (``% M`` / ``% N``) so the K loop needs no
++# row masks (as in mm_kernel_nt); the epilogue masks the store.
++
++import math
++
++import triton
++import triton.language as tl
++
++from flag_gems.runtime import torch_device_fn
++from flag_gems.utils import libentry
++from flag_gems.utils.device_info import get_sm_count
++
++
++@triton.jit
++def _slab_rows(off, SIZE: tl.constexpr, LIMIT, EVEN: tl.constexpr):
++    # Row (or column) indices of one slab; past the end they wrap (% LIMIT) so
++    # the K loop needs no mask.  No contiguity hints: these index the strided
++    # dimension of A/W, the vectorised one is K.
++    r = off + tl.arange(0, SIZE)
++    if EVEN:
++        idx = r
++    else:
++        idx = r % LIMIT
++    return idx
++
++
++@triton.jit
++def _a_ptrs(A, rows, rk, K):
++    return A + rows[:, None] * K + rk[None, :]
++
++
++@triton.jit
++def _b_ptrs(B, rows, rk, K, BLOCK_K: tl.constexpr, PBN: tl.constexpr):
++    # B tile [BLOCK_K, SIZE]: element (k, j) is W[rows[j], k]
++    if PBN == 0:
++        p = B + rk[:, None] + rows[None, :] * K
++    else:
++        p = B + rk[:, None] + ((rows // PBN) * (PBN * K) + (rows % PBN) * BLOCK_K)[None, :]
++    return p
++
++
++@triton.jit
++def _b_next(ptrs, BLOCK_K: tl.constexpr, PBN: tl.constexpr):
++    if PBN == 0:
++        ptrs += BLOCK_K
++    else:
++        ptrs += PBN * BLOCK_K
++    return ptrs
++
++
++@triton.jit
++def _load_a(ptrs, rk, k_remaining, EVEN_K: tl.constexpr):
++    if EVEN_K:
++        x = tl.load(ptrs)
++    else:
++        x = tl.load(ptrs, mask=rk[None, :] < k_remaining, other=0.0)
++    return x
++
++
++@triton.jit
++def _load_b(ptrs, rk, k_remaining, EVEN_K: tl.constexpr):
++    if EVEN_K:
++        x = tl.load(ptrs)
++    else:
++        x = tl.load(ptrs, mask=rk[:, None] < k_remaining, other=0.0)
++    return x
++
++
++@triton.jit
++def _store(C, val, rm, rn, M, N_ROW, N_END, EVEN_M: tl.constexpr, EVEN_N: tl.constexpr):
++    c_ptrs = C + rm[:, None] * N_ROW + rn[None, :]
++    if EVEN_M and EVEN_N:
++        tl.store(c_ptrs, val)
++    else:
++        tl.store(c_ptrs, val, mask=(rm < M)[:, None] & (rn < N_END)[None, :])
++
++
++@triton.jit
++def _silu_mul(g_acc, u_acc, C):
++    # gate/up rounded like the unfused GEMM output, SiLU in fp32
++    g = g_acc.to(C.dtype.element_ty).to(tl.float32)
++    u = u_acc.to(C.dtype.element_ty).to(tl.float32)
++    return (g / (1.0 + tl.exp(-g)) * u).to(C.dtype.element_ty)
++
++
++@triton.jit
++def mm_slab_nt_kernel(
++    A,
++    B,
++    C,
++    M,
++    N,
++    K,
++    COL0,
++    N_END,
++    HALF,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    S0: tl.constexpr,
++    S1: tl.constexpr,
++    S2: tl.constexpr,
++    S3: tl.constexpr,
++    SPLIT_N: tl.constexpr,
++    GLU: tl.constexpr,
++    PBN: tl.constexpr,
++    GROUP_M: tl.constexpr,
++    EVEN_M: tl.constexpr,
++    EVEN_N: tl.constexpr,
++    EVEN_K: tl.constexpr,
++):
++    # N: output width (= rows of W, or I for GLU); C row stride is N.
++    # This launch computes output columns [COL0, N_END).
++    pid = tl.program_id(0)
++    grid_m = tl.cdiv(M, BLOCK_M)
++    grid_n = tl.cdiv(N_END - COL0, BLOCK_N)
++    width = GROUP_M * grid_n
++    group_id = pid // width
++    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
++    pid_m = group_id * GROUP_M + pid % group_size
++    pid_n = pid % width // group_size
++    off_m = pid_m * BLOCK_M
++    off_n = COL0 + pid_n * BLOCK_N
++    rk = tl.arange(0, BLOCK_K)
++
++    if SPLIT_N:
++        # ---- slabs along N share the A tile ----
++        a_ptrs = _a_ptrs(A, _slab_rows(off_m, BLOCK_M, M, EVEN_M), rk, K)
++        if GLU:
++            n0 = off_n
++            n1 = off_n
++            n2 = off_n + S0
++            n3 = off_n + S0
++        else:
++            n0 = off_n
++            n1 = off_n + S0
++            n2 = off_n + S0 + S1
++            n3 = off_n + S0 + S1 + S2
++        b0 = _b_ptrs(B, _slab_rows(n0, S0, N, EVEN_N), rk, K, BLOCK_K, PBN)
++        acc0 = tl.zeros((BLOCK_M, S0), dtype=tl.float32)
++        if S1 > 0:
++            r1 = _slab_rows(n1, S1, N, EVEN_N)
++            if GLU:
++                r1 += HALF
++            b1 = _b_ptrs(B, r1, rk, K, BLOCK_K, PBN)
++            acc1 = tl.zeros((BLOCK_M, S1), dtype=tl.float32)
++        if S2 > 0:
++            b2 = _b_ptrs(B, _slab_rows(n2, S2, N, EVEN_N), rk, K, BLOCK_K, PBN)
++            acc2 = tl.zeros((BLOCK_M, S2), dtype=tl.float32)
++        if S3 > 0:
++            r3 = _slab_rows(n3, S3, N, EVEN_N)
++            if GLU:
++                r3 += HALF
++            b3 = _b_ptrs(B, r3, rk, K, BLOCK_K, PBN)
++            acc3 = tl.zeros((BLOCK_M, S3), dtype=tl.float32)
++
++        for k in range(0, tl.cdiv(K, BLOCK_K)):
++            k_remaining = K - k * BLOCK_K
++            a = _load_a(a_ptrs, rk, k_remaining, EVEN_K)
++            x0 = _load_b(b0, rk, k_remaining, EVEN_K)
++            acc0 = tl.dot(a, x0, acc0, out_dtype=tl.float32)
++            if S1 > 0:
++                x1 = _load_b(b1, rk, k_remaining, EVEN_K)
++                acc1 = tl.dot(a, x1, acc1, out_dtype=tl.float32)
++            if S2 > 0:
++                x2 = _load_b(b2, rk, k_remaining, EVEN_K)
++                acc2 = tl.dot(a, x2, acc2, out_dtype=tl.float32)
++            if S3 > 0:
++                x3 = _load_b(b3, rk, k_remaining, EVEN_K)
++                acc3 = tl.dot(a, x3, acc3, out_dtype=tl.float32)
++            a_ptrs += BLOCK_K
++            b0 = _b_next(b0, BLOCK_K, PBN)
++            if S1 > 0:
++                b1 = _b_next(b1, BLOCK_K, PBN)
++            if S2 > 0:
++                b2 = _b_next(b2, BLOCK_K, PBN)
++            if S3 > 0:
++                b3 = _b_next(b3, BLOCK_K, PBN)
++
++        rm = off_m + tl.arange(0, BLOCK_M)
++        if GLU:
++            _store(C, _silu_mul(acc0, acc1, C), rm, n0 + tl.arange(0, S0), M, N, N_END, EVEN_M, EVEN_N)
++            if S2 > 0:
++                _store(C, _silu_mul(acc2, acc3, C), rm, n2 + tl.arange(0, S2), M, N, N_END, EVEN_M, EVEN_N)
++        else:
++            _store(C, acc0.to(C.dtype.element_ty), rm, n0 + tl.arange(0, S0), M, N, N_END, EVEN_M, EVEN_N)
++            if S1 > 0:
++                _store(C, acc1.to(C.dtype.element_ty), rm, n1 + tl.arange(0, S1), M, N, N_END, EVEN_M, EVEN_N)
++            if S2 > 0:
++                _store(C, acc2.to(C.dtype.element_ty), rm, n2 + tl.arange(0, S2), M, N, N_END, EVEN_M, EVEN_N)
++            if S3 > 0:
++                _store(C, acc3.to(C.dtype.element_ty), rm, n3 + tl.arange(0, S3), M, N, N_END, EVEN_M, EVEN_N)
++    else:
++        # ---- slabs along M share the B tile ----
++        bp = _b_ptrs(B, _slab_rows(off_n, BLOCK_N, N, EVEN_N), rk, K, BLOCK_K, PBN)
++        m0 = off_m
++        m1 = off_m + S0
++        m2 = off_m + S0 + S1
++        m3 = off_m + S0 + S1 + S2
++        a0 = _a_ptrs(A, _slab_rows(m0, S0, M, EVEN_M), rk, K)
++        acc0 = tl.zeros((S0, BLOCK_N), dtype=tl.float32)
++        if S1 > 0:
++            a1 = _a_ptrs(A, _slab_rows(m1, S1, M, EVEN_M), rk, K)
++            acc1 = tl.zeros((S1, BLOCK_N), dtype=tl.float32)
++        if S2 > 0:
++            a2 = _a_ptrs(A, _slab_rows(m2, S2, M, EVEN_M), rk, K)
++            acc2 = tl.zeros((S2, BLOCK_N), dtype=tl.float32)
++        if S3 > 0:
++            a3 = _a_ptrs(A, _slab_rows(m3, S3, M, EVEN_M), rk, K)
++            acc3 = tl.zeros((S3, BLOCK_N), dtype=tl.float32)
++
++        for k in range(0, tl.cdiv(K, BLOCK_K)):
++            k_remaining = K - k * BLOCK_K
++            b = _load_b(bp, rk, k_remaining, EVEN_K)
++            y0 = _load_a(a0, rk, k_remaining, EVEN_K)
++            acc0 = tl.dot(y0, b, acc0, out_dtype=tl.float32)
++            if S1 > 0:
++                y1 = _load_a(a1, rk, k_remaining, EVEN_K)
++                acc1 = tl.dot(y1, b, acc1, out_dtype=tl.float32)
++            if S2 > 0:
++                y2 = _load_a(a2, rk, k_remaining, EVEN_K)
++                acc2 = tl.dot(y2, b, acc2, out_dtype=tl.float32)
++            if S3 > 0:
++                y3 = _load_a(a3, rk, k_remaining, EVEN_K)
++                acc3 = tl.dot(y3, b, acc3, out_dtype=tl.float32)
++            bp = _b_next(bp, BLOCK_K, PBN)
++            a0 += BLOCK_K
++            if S1 > 0:
++                a1 += BLOCK_K
++            if S2 > 0:
++                a2 += BLOCK_K
++            if S3 > 0:
++                a3 += BLOCK_K
++
++        rn = off_n + tl.arange(0, BLOCK_N)
++        _store(C, acc0.to(C.dtype.element_ty), m0 + tl.arange(0, S0), rn, M, N, N_END, EVEN_M, EVEN_N)
++        if S1 > 0:
++            _store(C, acc1.to(C.dtype.element_ty), m1 + tl.arange(0, S1), rn, M, N, N_END, EVEN_M, EVEN_N)
++        if S2 > 0:
++            _store(C, acc2.to(C.dtype.element_ty), m2 + tl.arange(0, S2), rn, M, N, N_END, EVEN_M, EVEN_N)
++        if S3 > 0:
++            _store(C, acc3.to(C.dtype.element_ty), m3 + tl.arange(0, S3), rn, M, N, N_END, EVEN_M, EVEN_N)
++
++
++# --------------------------------------------------------------------------- #
++# host side
++# --------------------------------------------------------------------------- #
++_LAUNCH_KEYS = ("num_warps", "num_stages", "pipeline", "scenario", "extra_options", "pipeline_load_num")
++_TILE_KEYS = ("BLOCK_M", "BLOCK_N", "BLOCK_K", "S0", "S1", "S2", "S3", "SPLIT_N", "GLU", "PBN", "GROUP_M")
++
++
++def _pow2(x):
++    return x > 0 and x & (x - 1) == 0
++
++
++def slab_config(
++    other,
++    slabs,
++    block_k=32,
++    split_n=True,
++    glu=False,
++    pbn=0,
++    group_m=8,
++    num_warps=8,
++    num_stages=2,
++    pipeline="basic",
++    extra_options=None,
++    scenario=None,
++):
++    """Launch config (a dict) of one slab tile.
++
++    ``other`` is the power-of-two side (BLOCK_M for split_n, else BLOCK_N);
++    ``slabs`` are 1-4 power-of-two slab sizes >= 16 along the split side.
++    GLU: slabs = (gate, up) or (gate, up, gate2, up2) with equal pairs; the
++    output tile is BLOCK_M x (S0 + S2).
++    """
++    slabs = tuple(int(s) for s in slabs)
++    assert 1 <= len(slabs) <= 4 and all(_pow2(s) and s >= 16 for s in slabs), slabs
++    assert _pow2(other) and other >= 16 and _pow2(block_k) and block_k >= 16, (other, block_k)
++    s = slabs + (0,) * (4 - len(slabs))
++    if glu:
++        assert split_n and len(slabs) in (2, 4) and s[0] == s[1] and s[2] == s[3], slabs
++        span = s[0] + s[2]
++    else:
++        span = sum(s)
++    bm, bn = (other, span) if split_n else (span, other)
++    cfg = dict(
++        BLOCK_M=bm, BLOCK_N=bn, BLOCK_K=block_k, S0=s[0], S1=s[1], S2=s[2], S3=s[3],
++        SPLIT_N=bool(split_n), GLU=bool(glu), PBN=int(pbn), GROUP_M=group_m,
++        num_warps=num_warps, num_stages=num_stages, pipeline=pipeline,
++    )
++    if extra_options:
++        cfg["extra_options"] = extra_options
++    if scenario:
++        cfg["scenario"] = scenario
++    return cfg
++
++
++def slab_name(cfg, flags=None):
++    sl = "+".join(str(cfg[f"S{i}"]) for i in range(4) if cfg[f"S{i}"])
++    name = f"slab{cfg['BLOCK_M']}x{cfg['BLOCK_N']}x{cfg['BLOCK_K']}_{'N' if cfg['SPLIT_N'] else 'M'}{sl}"
++    name += f"_w{cfg['num_warps']}s{cfg['num_stages']}g{cfg['GROUP_M']}"
++    if cfg.get("pipeline", "basic") != "basic":
++        name += f"_{cfg['pipeline'] or 'none'}"
++    if cfg.get("scenario"):
++        name += "_sc-" + cfg["scenario"].replace(";", "+")
++    if flags and flags != "default":
++        name += f"_{flags}"
++    if cfg["PBN"]:
++        name += f"_p{cfg['PBN']}"
++    if cfg["GLU"]:
++        name += "_glu"
++    return name
++
++
++def acc_regs_per_thread(cfg):
++    return cfg["BLOCK_M"] * cfg["BLOCK_N"] * (2 if cfg["GLU"] else 1) // (64 * cfg["num_warps"])
++
++
++_entries = {}
++
++
++def _entry(cfg):
++    # LibEntry caches by kernel arguments only, not launch options, so each
++    # distinct option set gets its own LibEntry (as _nt_pinned_entry in mm.py).
++    options = tuple(sorted((k, cfg[k]) for k in _LAUNCH_KEYS if k in cfg))
++    e = _entries.get(options)
++    if e is None:
++        e = _entries.setdefault(options, libentry()(mm_slab_nt_kernel))
++    return e
++
++
++def slab_ok(cfg, M, N, K, n_rows=None):
++    """Whether cfg can run this GEMM (packed B needs whole PBN row blocks and
++    BLOCK_K | K; GLU needs an even weight)."""
++    if M < 1 or N < 1 or K < 1:
++        return False
++    if cfg["PBN"]:
++        rows = n_rows if n_rows is not None else (2 * N if cfg["GLU"] else N)
++        if K % cfg["BLOCK_K"] or rows % cfg["PBN"]:
++            return False
++    return True
++
++
++def launch_slab(a, b, c, M, N, K, cfg, col0=0, n_end=None, half=0, return_kernel=False):
++    """c[:, col0:n_end] of c[M, N] = a[M, K] @ W^T (GLU: silu/mul of the gate
++    and up halves, half = I).  ``b`` is any tensor whose data pointer is W
++    (the NT operand b = W.t(), W itself, or a packed W).  return_kernel:
++    return (c, compiled kernel) -- for register/shared-memory reports."""
++    n_end = N if n_end is None else n_end
++    assert 0 <= col0 < n_end <= N, (col0, n_end, N)
++    bm, bn, bk = cfg["BLOCK_M"], cfg["BLOCK_N"], cfg["BLOCK_K"]
++    width = n_end - col0
++    grid = (triton.cdiv(M, bm) * triton.cdiv(width, bn),)
++    tile = {k: cfg[k] for k in _TILE_KEYS}
++    with torch_device_fn.device(a.device):
++        ret = _entry(cfg)[grid](
++            a, b, c, M, N, K, col0, n_end, half,
++            EVEN_M=M % bm == 0, EVEN_N=width % bn == 0, EVEN_K=K % bk == 0,
++            **tile, **{k: cfg[k] for k in _LAUNCH_KEYS if k in cfg},
++        )
++    if return_kernel:
++        return c, (ret[0] if isinstance(ret, tuple) else ret)
++    return c
++
++
++# --------------------------------------------------------------------------- #
++# launch plans: a GEMM as up to two column segments with different tiles
++# --------------------------------------------------------------------------- #
++def plan_segments(M, N, main, tail=None, aps=None):
++    """[(col0, n_end, cfg), ...] for one GEMM.
++
++    With a ``tail`` config: the columns that the main tile covers in whole
++    waves over the APs run with ``main``, the rest with ``tail`` -- only if
++    that rest fits in one wave of the tail tile, else ``main`` alone."""
++    if tail is None:
++        return [(0, N, main)]
++    aps = aps or get_sm_count()
++    mt = triton.cdiv(M, main["BLOCK_M"])
++    total = mt * triton.cdiv(N, main["BLOCK_N"])
++    waves = total // aps
++    if waves == 0 or total % aps == 0:
++        return [(0, N, main)]
++    cols = (waves * aps // mt) * main["BLOCK_N"]
++    if cols <= 0 or cols >= N:
++        return [(0, N, main)]
++    tail_tiles = triton.cdiv(M, tail["BLOCK_M"]) * triton.cdiv(N - cols, tail["BLOCK_N"])
++    if tail_tiles > aps:
++        return [(0, N, main)]
++    return [(0, cols, main), (cols, N, tail)]
++
++
++def launch_plan(a, b, c, M, N, K, plan, half=0):
++    """plan = {"main": cfg, "tail": cfg or None}."""
++    for col0, n_end, cfg in plan_segments(M, N, plan["main"], plan.get("tail")):
++        launch_slab(a, b, c, M, N, K, cfg, col0, n_end, half)
++    return c
++
++
++# --------------------------------------------------------------------------- #
++# packed weights
++# --------------------------------------------------------------------------- #
++def pack_weight(w, pbn, pbk):
++    """W[N, K] -> the same elements stored as [N/pbn][K/pbk][pbn][pbk] (a
++    contiguous [N, K]-shaped tensor; the kernels with PBN=pbn and
++    BLOCK_K=pbk read it).  Returns a new tensor."""
++    n, k = w.shape
++    assert n % pbn == 0 and k % pbk == 0, (n, k, pbn, pbk)
++    return w.reshape(n // pbn, pbn, k // pbk, pbk).permute(0, 2, 1, 3).contiguous().view(n, k)
++
++
++def unpack_weight(wp, pbn, pbk):
++    n, k = wp.shape
++    return wp.reshape(n // pbn, k // pbk, pbn, pbk).permute(0, 2, 1, 3).contiguous().view(n, k)
++
++
++def wave_util(M, N, cfg, aps=None):
++    aps = aps or get_sm_count()
++    t = triton.cdiv(M, cfg["BLOCK_M"]) * triton.cdiv(N, cfg["BLOCK_N"])
++    return t, t / (math.ceil(t / aps) * aps)
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/mx_glue.py b/src/flag_gems/runtime/backend/_metax/ops/mx_glue.py
+new file mode 100644
+index 00000000..79dd474d
+--- /dev/null
++++ b/src/flag_gems/runtime/backend/_metax/ops/mx_glue.py
+@@ -0,0 +1,520 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# Glue kernels of a Llama-style decoder layer for MetaX C500 (R6/G1).
++#
++# Between the four projection GEMMs of a layer vLLM runs small memory-bound
++# kernels: residual add + RMSNorm (twice), SiLU-and-mul, RoPE on q and on k,
++# and the KV-cache write.  Profiled on the served MiniCPM5-2B (42 layers,
++# hidden 2048, 16 q / 2 kv heads of 128, intermediate 6144), per layer:
++#
++#   kernel (origin)                     M=2048 mixed step   M=64 FULL-graph decode
++#   add+RMSNorm  (Inductor, 2 kernels)     30 + 46 us           5.1 + 5.2 us
++#   SiLU*mul     (Inductor)                62 us                4.1 us
++#   RoPE q / k   (Inductor "cat")          25 + 6.8 us          4.4 + 4.3 us
++#   KV write     (vendor reshape_and_cache) 19.6 us             4.5 us
++#
++# i.e. 7.2 ms of a 90 ms mixed step and 1.2 ms (+ launch gaps) of an 18 ms
++# decode step.  The Inductor reductions loop twice over the row (0.8-0.9 TB/s),
++# its RoPE kernel loads six values per output element (0.64 TB/s), the vendor
++# KV write runs one 256-thread block per token (0.2 TB/s at 2048 tokens).
++#
++# This module:
++#   add_rms_norm   residual add + RMSNorm in one pass, the row held in
++#                  registers (functional: new y and new residual).
++#   rope_kv_cache  neox RoPE of q and k + the KV-cache write in ONE kernel
++#                  (rotated q goes to a new buffer, rotated k and raw v
++#                  straight into the paged cache).  Replaces 2 Inductor
++#                  kernels and the vendor cache kernel.
++#   silu_mul       SiLU(gate) * up of a [M, 2I] GEMM output.
++#   gate_up_silu   gate_up GEMM + SiLU-and-mul: a GLU-epilogue GEMM for the
++#                  decode sizes pinned in _GLU_DECODE_CONFIGS (one kernel, no
++#                  [M, 2I] intermediate), else the deployed mm_out + silu_mul.
++#
++# Numerics follow the deployed (Inductor-compiled) graph: fp32 math on bf16
++# inputs, one rounding per stored tensor.  The rotated q/k and the cache
++# contents are bitwise the Inductor RoPE + vendor copy; add_rms_norm rounds
++# the residual it returns (vLLM's eager semantics, the Inductor graph keeps the
++# first of two chained sums in fp32), so y may differ by 1 bf16 ulp.
++#
++# Launch configs are pinned per size class (no autotuning inside served
++# requests or CUDA-graph capture).  The tables between the markers are
++# rewritten by work/R6/G1-mx-glue/bench_g1.py --emit.
++
++import logging
++
++import torch
++import triton
++import triton.language as tl
++
++from flag_gems.runtime import torch_device_fn
++from flag_gems.utils import libentry
++
++logger = logging.getLogger(__name__)
++
++_LAUNCH_KEYS = ("num_warps", "num_stages", "pipeline", "scenario", "extra_options")
++
++
++# --------------------------------------------------------------------------- #
++# kernels
++# --------------------------------------------------------------------------- #
++@triton.jit
++def add_rms_norm_kernel(
++    X,
++    R,
++    W,
++    Y,
++    RO,
++    M,
++    N,
++    stride_x,
++    stride_r,
++    stride_y,
++    stride_ro,
++    eps,
++    BLOCK_R: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++):
++    # s = x + r (fp32); RO = bf16(s); Y = bf16(s * rsqrt(mean(s^2) + eps) * w)
++    pid = tl.program_id(0)
++    rows = pid * BLOCK_R + tl.arange(0, BLOCK_R)
++    cols = tl.arange(0, BLOCK_N)
++    cmask = cols < N
++    mask = (rows < M)[:, None] & cmask[None, :]
++    x = tl.load(X + rows[:, None] * stride_x + cols[None, :], mask=mask, other=0.0).to(tl.float32)
++    r = tl.load(R + rows[:, None] * stride_r + cols[None, :], mask=mask, other=0.0).to(tl.float32)
++    s = x + r
++    tl.store(RO + rows[:, None] * stride_ro + cols[None, :], s.to(RO.dtype.element_ty), mask=mask)
++    var = tl.sum(s * s, axis=1) / N
++    rstd = tl.math.rsqrt(var + eps)
++    w = tl.load(W + cols, mask=cmask, other=0.0).to(tl.float32)
++    y = s * rstd[:, None] * w[None, :]
++    tl.store(Y + rows[:, None] * stride_y + cols[None, :], y.to(Y.dtype.element_ty), mask=mask)
++
++
++@triton.jit
++def _rope_store(SRC, DST, t, src_t, src_h, dst_t, dst_h, h, d, cos, sin, mask, HALF: tl.constexpr):
++    # neox: out[:HALF] = x1*cos - x2*sin, out[HALF:] = x2*cos + x1*sin (fp32, one rounding)
++    src = SRC + t[:, None] * src_t + h * src_h + d[None, :]
++    x1 = tl.load(src, mask=mask, other=0.0).to(tl.float32)
++    x2 = tl.load(src + HALF, mask=mask, other=0.0).to(tl.float32)
++    o1 = x1 * cos - x2 * sin
++    o2 = x2 * cos + x1 * sin
++    dst = DST + t[:, None] * dst_t + h * dst_h + d[None, :]
++    tl.store(dst, o1.to(DST.dtype.element_ty), mask=mask)
++    tl.store(dst + HALF, o2.to(DST.dtype.element_ty), mask=mask)
++
++
++@triton.jit
++def rope_kv_cache_kernel(
++    Q,
++    K,
++    V,
++    POS,
++    CS,
++    QO,
++    KC,
++    VC,
++    SLOT,
++    T,
++    n_pos,
++    n_slots,
++    max_pos,
++    sq_t,
++    sq_h,
++    sk_t,
++    sk_h,
++    sv_t,
++    sv_h,
++    sqo_t,
++    sqo_h,
++    cs_t,
++    kc_b,
++    kc_s,
++    kc_h,
++    vc_b,
++    vc_s,
++    vc_h,
++    block_size,
++    HK: tl.constexpr,
++    HALF: tl.constexpr,
++    BLOCK_T: tl.constexpr,
++    HPG: tl.constexpr,
++    NQG: tl.constexpr,
++    WRITE_KV: tl.constexpr,
++):
++    # grid (cdiv(T, BLOCK_T), NQG + 1): program (i, g < NQG) rotates q heads
++    # [g*HPG, (g+1)*HPG) of BLOCK_T tokens into QO; program (i, NQG) rotates the
++    # HK k heads and copies the HK v heads of the same tokens into the paged
++    # cache (slot < 0 or token >= n_slots: no write, like reshape_and_cache).
++    pid_t = tl.program_id(0)
++    g = tl.program_id(1)
++    t = pid_t * BLOCK_T + tl.arange(0, BLOCK_T)
++    tmask = t < T
++    d = tl.arange(0, HALF)
++    mask = tmask[:, None]
++    pos = tl.load(POS + t, mask=tmask & (t < n_pos), other=0)  # rows past n_pos: position 0
++    pos = tl.minimum(tl.maximum(pos, 0), max_pos - 1)
++    cs = CS + pos[:, None] * cs_t + d[None, :]
++    cos = tl.load(cs, mask=mask, other=0.0).to(tl.float32)
++    sin = tl.load(cs + HALF, mask=mask, other=0.0).to(tl.float32)
++    if g < NQG:
++        for hh in tl.static_range(HPG):
++            _rope_store(Q, QO, t, sq_t, sq_h, sqo_t, sqo_h, g * HPG + hh, d, cos, sin, mask, HALF)
++    elif WRITE_KV:
++        kv_t = tmask & (t < n_slots)
++        slot = tl.load(SLOT + t, mask=kv_t, other=-1).to(tl.int64)
++        smask = (kv_t & (slot >= 0))[:, None]
++        blk = slot // block_size
++        off = slot - blk * block_size
++        kdst = blk * kc_b + off * kc_s
++        vdst = blk * vc_b + off * vc_s
++        for h in tl.static_range(HK):
++            ksrc = K + t[:, None] * sk_t + h * sk_h + d[None, :]
++            k1 = tl.load(ksrc, mask=smask, other=0.0).to(tl.float32)
++            k2 = tl.load(ksrc + HALF, mask=smask, other=0.0).to(tl.float32)
++            kp = KC + kdst[:, None] + h * kc_h + d[None, :]
++            tl.store(kp, (k1 * cos - k2 * sin).to(KC.dtype.element_ty), mask=smask)
++            tl.store(kp + HALF, (k2 * cos + k1 * sin).to(KC.dtype.element_ty), mask=smask)
++            vsrc = V + t[:, None] * sv_t + h * sv_h + d[None, :]
++            vp = VC + vdst[:, None] + h * vc_h + d[None, :]
++            tl.store(vp, tl.load(vsrc, mask=smask, other=0.0), mask=smask)
++            tl.store(vp + HALF, tl.load(vsrc + HALF, mask=smask, other=0.0), mask=smask)
++    else:
++        # rotate k in place of a separate output (KC = k output [T, HK, 2*HALF])
++        for h in tl.static_range(HK):
++            _rope_store(K, KC, t, sk_t, sk_h, kc_b, kc_h, h, d, cos, sin, mask, HALF)
++
++
++@triton.jit
++def silu_mul_kernel(X, Y, M, I, stride_x, stride_y, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
++    # Y[m, i] = silu(X[m, i]) * X[m, I + i], as the Inductor kernel: (g * sigmoid(g)) * u
++    pid_n = tl.program_id(0)
++    pid_m = tl.program_id(1)
++    rows = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    cols = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    mask = (rows < M)[:, None] & (cols < I)[None, :]
++    src = X + rows[:, None] * stride_x + cols[None, :]
++    g = tl.load(src, mask=mask, other=0.0).to(tl.float32)
++    u = tl.load(src + I, mask=mask, other=0.0).to(tl.float32)
++    y = g * tl.sigmoid(g) * u
++    tl.store(Y + rows[:, None] * stride_y + cols[None, :], y.to(Y.dtype.element_ty), mask=mask)
++
++
++@triton.jit
++def glu_skinny_kernel(
++    A,
++    W,
++    C,
++    M,
++    I,
++    K,
++    stride_am,
++    stride_wn,
++    stride_cm,
++    BLOCK_M: tl.constexpr,
++    BLOCK_N: tl.constexpr,
++    BLOCK_K: tl.constexpr,
++    EVEN_N: tl.constexpr,
++):
++    # C[M, I] = silu(A @ Wg^T) * (A @ Wu^T), W = [Wg; Wu] of shape [2I, K].
++    # Small M: the whole M in one tile, every program streams BLOCK_N gate rows
++    # and the matching BLOCK_N up rows once.  gate/up are rounded to the output
++    # dtype before the activation, like the unfused GEMM output.
++    pid_n = tl.program_id(0)
++    pid_m = tl.program_id(1)
++    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    ram = rm % M  # rows past M re-read valid ones, the store drops them
++    if EVEN_N:
++        rwn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_N), BLOCK_N)
++    else:
++        rwn = rn % I
++    rk = tl.arange(0, BLOCK_K)
++    a_ptrs = A + ram[:, None] * stride_am + rk[None, :]
++    g_ptrs = W + rwn[None, :] * stride_wn + rk[:, None]
++    u_ptrs = g_ptrs + I * stride_wn
++    acc_g = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    acc_u = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    for _ in range(0, K, BLOCK_K):
++        a = tl.load(a_ptrs)
++        wg = tl.load(g_ptrs)
++        wu = tl.load(u_ptrs)
++        acc_g = tl.dot(a, wg, acc_g, out_dtype=tl.float32, allow_tf32=False)
++        acc_u = tl.dot(a, wu, acc_u, out_dtype=tl.float32, allow_tf32=False)
++        a_ptrs += BLOCK_K
++        g_ptrs += BLOCK_K
++        u_ptrs += BLOCK_K
++    g = acc_g.to(C.dtype.element_ty).to(tl.float32)
++    u = acc_u.to(C.dtype.element_ty).to(tl.float32)
++    y = g * tl.sigmoid(g) * u
++    mask = (rm < M)[:, None] & (rn < I)[None, :]
++    tl.store(C + rm[:, None] * stride_cm + rn[None, :], y.to(C.dtype.element_ty), mask=mask)
++
++
++# --------------------------------------------------------------------------- #
++# pinned launch configs: (max size, cfg) lists sorted by size, first match wins
++# --------------------------------------------------------------------------- #
++# --- pinned glue tables: begin ---
++# generated by work/R6/G1-mx-glue/bench_g1.py on 2026-10-24 12:07:54 (C500)
++# add_rms_norm: rows -> BLOCK_R rows per program (the row of N <= BLOCK_N in registers)
++_NORM_CONFIGS = [
++    (256, {"BLOCK_R": 1, "num_warps": 4}),
++    (1 << 30, {"BLOCK_R": 1, "num_warps": 2}),
++]
++# rope_kv_cache: tokens -> BLOCK_T tokens x HPG q heads per program
++_ROPE_CONFIGS = [
++    (256, {"BLOCK_T": 2, "HPG": 4, "num_warps": 1}),
++    (1 << 30, {"BLOCK_T": 4, "HPG": 8, "num_warps": 2}),
++]
++# silu_mul: rows -> [BLOCK_M, BLOCK_N] tile
++_SILU_CONFIGS = [
++    (256, {"BLOCK_M": 2, "BLOCK_N": 1024, "num_warps": 4}),
++    (1 << 30, {"BLOCK_M": 4, "BLOCK_N": 512, "num_warps": 4}),
++]
++# gate_up_silu: (I, K) -> [(max M, GLU GEMM cfg)].  Sizes not listed run the
++# deployed mm_out + silu_mul (two kernels).  A cfg with "S0" is an mm_slab
++# GLU tile, else a glu_skinny_kernel tile.
++_GLU_DECODE_CONFIGS = {}
++# --- pinned glue tables: end ---
++
++
++def _pick(table, n):
++    for max_n, cfg in table:
++        if n <= max_n:
++            return cfg
++    return table[-1][1]
++
++
++_entries = {}
++
++
++def _entry(kernel, cfg):
++    # LibEntry caches compiled kernels by kernel arguments only, not by launch
++    # options, so every distinct option set gets its own LibEntry.
++    options = tuple(sorted((k, cfg[k]) for k in _LAUNCH_KEYS if cfg.get(k) is not None))
++    key = (kernel.fn.__name__ if hasattr(kernel, "fn") else kernel.__name__, options)
++    e = _entries.get(key)
++    if e is None:
++        e = _entries.setdefault(key, libentry()(kernel))
++    return e
++
++
++def _launch_kwargs(cfg):
++    return {k: cfg[k] for k in _LAUNCH_KEYS if cfg.get(k) is not None}
++
++
++def _rows(x):
++    """x viewed as [rows, last dim] without a copy (unit stride in the last dim)."""
++    n = x.shape[-1]
++    if x.dim() == 2:
++        return x
++    return x.reshape(-1, n)
++
++
++# --------------------------------------------------------------------------- #
++# host functions
++# --------------------------------------------------------------------------- #
++def add_rms_norm(x, residual, weight, eps, out=None, residual_out=None, cfg=None):
++    """(y, s) with s = x + residual and y = RMSNorm(s) * weight; functional.
++
++    x, residual: [..., N] (unit stride in the last dim, rows may be strided),
++    weight: [N].  s is rounded to the input dtype (the new residual); y is
++    computed from the fp32 sum.
++    """
++    N = x.shape[-1]
++    assert residual.shape == x.shape and weight.shape == (N,), (x.shape, residual.shape, weight.shape)
++    assert x.stride(-1) == 1 and residual.stride(-1) == 1 and weight.stride(0) == 1
++    x2, r2 = _rows(x), _rows(residual)
++    M = x2.shape[0]
++    if out is None:
++        out = torch.empty(x.shape, dtype=x.dtype, device=x.device)
++    if residual_out is None:
++        residual_out = torch.empty(x.shape, dtype=x.dtype, device=x.device)
++    y2, ro2 = _rows(out), _rows(residual_out)
++    if M == 0:
++        return out, residual_out
++    block_n = triton.next_power_of_2(N)
++    cfg = cfg or _pick(_NORM_CONFIGS, M)
++    br = cfg["BLOCK_R"]
++    assert M * max(x2.stride(0), r2.stride(0), y2.stride(0), ro2.stride(0)) < 2**31
++    grid = (triton.cdiv(M, br),)
++    with torch_device_fn.device(x.device):
++        _entry(add_rms_norm_kernel, cfg)[grid](
++            x2, r2, weight, y2, ro2, M, N,
++            x2.stride(0), r2.stride(0), y2.stride(0), ro2.stride(0), float(eps),
++            BLOCK_R=br, BLOCK_N=block_n, **_launch_kwargs(cfg),
++        )
++    return out, residual_out
++
++
++def rope_kv_cache(
++    q,
++    k,
++    v,
++    positions,
++    cos_sin_cache,
++    key_cache=None,
++    value_cache=None,
++    slot_mapping=None,
++    q_out=None,
++    k_out=None,
++    cfg=None,
++):
++    """Neox RoPE of q and k (rotary_dim = head_size) fused with the KV write.
++
++    q: [T, Hq, D] (or [T, Hq*D]), k / v: [T, Hk, D] -- any row stride, unit
++    stride in D (e.g. views of the qkv GEMM output).  positions: [n] int
++    (rows t >= n, i.e. padding, rotate with position 0),
++    cos_sin_cache: [max_pos, D] (cos | sin halves), same dtype as q.
++    With key_cache / value_cache ([num_blocks, block_size, Hk, D], NHD) and
++    slot_mapping ([n_slots] int, -1 = skip): rotated k and raw v go to the
++    cache for tokens t < n_slots, and the function returns the rotated q
++    ([T, Hq, D], new buffer unless q_out).  Without a cache it returns
++    (q_rot, k_rot).
++    """
++    T = q.shape[0]
++    D = cos_sin_cache.shape[-1]
++    half = D // 2
++    q3 = q.view(T, -1, D) if q.dim() == 2 else q
++    k3 = k.view(k.shape[0], -1, D) if k.dim() == 2 else k
++    Hq, Hk = q3.shape[1], k3.shape[1]
++    assert q3.shape[2] == D and k3.shape[2] == D and k3.shape[0] >= T, (q.shape, k.shape, D)
++    assert q3.stride(2) == 1 and k3.stride(2) == 1, "unit stride in head_dim"
++    assert half & (half - 1) == 0, "head_size / 2 must be a power of two"
++    assert positions.dim() == 1, positions.shape
++    assert cos_sin_cache.dtype == q.dtype and cos_sin_cache.stride(1) == 1
++    write_kv = key_cache is not None
++    if q_out is None:
++        q_out = torch.empty((T, Hq, D), dtype=q.dtype, device=q.device)
++    assert q_out.stride(2) == 1
++    if write_kv:
++        v3 = v.view(v.shape[0], -1, D) if v.dim() == 2 else v
++        assert v3.shape[1] == Hk and v3.stride(2) == 1 and v3.shape[0] >= T
++        assert key_cache.dim() == 4 and key_cache.shape[2] == Hk and key_cache.shape[3] == D
++        assert value_cache.shape == key_cache.shape and key_cache.stride(3) == 1 and value_cache.stride(3) == 1
++        assert key_cache.dtype == k.dtype and value_cache.dtype == v.dtype, "unquantised cache only"
++        n_slots = min(slot_mapping.shape[0], T)
++        kc, vc, slots = key_cache, value_cache, slot_mapping
++        kc_s = (kc.stride(0), kc.stride(1), kc.stride(2))
++        vc_s = (vc.stride(0), vc.stride(1), vc.stride(2))
++        block_size = key_cache.shape[1]
++    else:
++        if k_out is None:
++            k_out = torch.empty((T, Hk, D), dtype=k.dtype, device=k.device)
++        v3, kc, vc, slots = k3, k_out, k_out, positions
++        n_slots, block_size = 0, 1
++        kc_s = (k_out.stride(0), 0, k_out.stride(1))  # (token, -, head) strides of k_out
++        vc_s = (0, 0, 0)
++    if T == 0:
++        return q_out if write_kv else (q_out, k_out)
++    cfg = cfg or _pick(_ROPE_CONFIGS, T)
++    hpg = min(cfg["HPG"], Hq)
++    while Hq % hpg:
++        hpg //= 2
++    bt = cfg["BLOCK_T"]
++    grid = (triton.cdiv(T, bt), Hq // hpg + 1)
++    with torch_device_fn.device(q.device):
++        _entry(rope_kv_cache_kernel, cfg)[grid](
++            q3, k3, v3, positions, cos_sin_cache, q_out, kc, vc, slots,
++            T, positions.shape[0], n_slots, cos_sin_cache.shape[0],
++            q3.stride(0), q3.stride(1), k3.stride(0), k3.stride(1), v3.stride(0), v3.stride(1),
++            q_out.stride(0), q_out.stride(1), cos_sin_cache.stride(0),
++            kc_s[0], kc_s[1], kc_s[2], vc_s[0], vc_s[1], vc_s[2], block_size,
++            HK=Hk, HALF=half, BLOCK_T=bt, HPG=hpg, NQG=Hq // hpg, WRITE_KV=write_kv,
++            **_launch_kwargs(cfg),
++        )
++    return q_out if write_kv else (q_out, k_out)
++
++
++def silu_mul(x, out=None, cfg=None):
++    """[M, 2I] -> silu(x[:, :I]) * x[:, I:] ([M, I])."""
++    assert x.dim() == 2 and x.shape[1] % 2 == 0 and x.stride(1) == 1, (x.shape, x.stride())
++    M, I = x.shape[0], x.shape[1] // 2
++    if out is None:
++        out = torch.empty((M, I), dtype=x.dtype, device=x.device)
++    assert out.shape == (M, I) and out.stride(1) == 1
++    if M == 0:
++        return out
++    cfg = dict(cfg or _pick(_SILU_CONFIGS, M))
++    while triton.cdiv(M, cfg["BLOCK_M"]) > 65535:
++        cfg["BLOCK_M"] *= 2
++    grid = (triton.cdiv(I, cfg["BLOCK_N"]), triton.cdiv(M, cfg["BLOCK_M"]))
++    with torch_device_fn.device(x.device):
++        _entry(silu_mul_kernel, cfg)[grid](
++            x, out, M, I, x.stride(0), out.stride(0),
++            BLOCK_M=cfg["BLOCK_M"], BLOCK_N=cfg["BLOCK_N"], **_launch_kwargs(cfg),
++        )
++    return out
++
++
++def glu_skinny(x, w, out, cfg):
++    """out[M, I] = silu(x @ w[:I].T) * (x @ w[I:].T) with one glu_skinny_kernel launch."""
++    M, K = x.shape
++    I = w.shape[0] // 2
++    bm, bn, bk = cfg["BLOCK_M"], cfg["BLOCK_N"], cfg["BLOCK_K"]
++    assert K % bk == 0 and x.stride(1) == 1 and w.stride(1) == 1 and out.stride(1) == 1
++    assert 2 * I * w.stride(0) < 2**31 and M * x.stride(0) < 2**31
++    grid = (triton.cdiv(I, bn), triton.cdiv(M, bm))
++    with torch_device_fn.device(x.device):
++        _entry(glu_skinny_kernel, cfg)[grid](
++            x, w, out, M, I, K, x.stride(0), w.stride(0), out.stride(0),
++            BLOCK_M=bm, BLOCK_N=bn, BLOCK_K=bk, EVEN_N=I % bn == 0, **_launch_kwargs(cfg),
++        )
++    return out
++
++
++def glu_decode_config(x, w, M, I, K):
++    """Pinned GLU GEMM config for this (I, K, M), or None (-> mm_out + silu_mul)."""
++    table = _GLU_DECODE_CONFIGS.get((I, K))
++    if not table or x.dtype not in (torch.bfloat16, torch.float16) or w.dtype != x.dtype:
++        return None
++    if x.stride(1) != 1 or x.stride(0) != K or not w.is_contiguous():
++        return None
++    for max_m, cfg in table:
++        if M <= max_m:
++            if "S0" not in cfg and K % cfg["BLOCK_K"]:
++                return None
++            return cfg
++    return None
++
++
++def gate_up_silu(x, w, out=None, cfg=None):
++    """silu(x @ gate.T) * (x @ up.T) for the merged MLP weight w = [gate; up]
++    ([2I, K], x: [M, K]) -> [M, I].
++
++    Decode sizes pinned in _GLU_DECODE_CONFIGS run one GLU-epilogue GEMM; all
++    other sizes run the deployed GEMM (this backend's mm_out, same kernel
++    selection as the unfused graph) and silu_mul.
++    """
++    assert x.dim() == 2 and w.dim() == 2 and x.shape[1] == w.shape[1] and w.shape[0] % 2 == 0
++    M, K = x.shape
++    I = w.shape[0] // 2
++    if out is None:
++        out = torch.empty((M, I), dtype=x.dtype, device=x.device)
++    if M == 0:
++        return out
++    if cfg is None:
++        cfg = glu_decode_config(x, w, M, I, K)
++    if cfg is not None:
++        if "S0" in cfg:
++            from .mm_slab import launch_slab
++
++            return launch_slab(x, w, out, M, I, K, cfg, half=I)
++        return glu_skinny(x, w, out, cfg)
++    from .mm import mm_out
++
++    gu = torch.empty((M, 2 * I), dtype=x.dtype, device=x.device)
++    mm_out(x, w.t(), out=gu)
++    return silu_mul(gu, out)
+diff --git a/src/flag_gems/runtime/backend/_metax/ops/skinny_mm.py b/src/flag_gems/runtime/backend/_metax/ops/skinny_mm.py
+new file mode 100644
+index 00000000..069f5374
+--- /dev/null
++++ b/src/flag_gems/runtime/backend/_metax/ops/skinny_mm.py
+@@ -0,0 +1,221 @@
++# Copyright 2026 FlagOS Contributors
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# Skinny NT GEMM for MetaX C500: C[M, N] = A[M, K] @ W[N, K]^T with small M
++# (decode batches, the lm_head of every step).
++#
++# With M <= 64 these GEMMs only stream the weight once; they are bound by how
++# many bytes are in flight, not by MMA throughput.  The general mm_kernel_nt
++# launches one program per (M, N) tile -- 64 to 192 programs on 104 APs for the
++# decode shapes of this model -- and reaches 0.3-1.0 TB/s of the ~1.49 TB/s the
++# HBM delivers to readers.  This kernel adds split-K (fp32 partials + one
++# reduce launch, deterministic, CUDA-graph safe) so every AP streams several
++# independent weight slices, and keeps the whole M in one tile so the weight is
++# read exactly once.  Grid order is (N tile, K split, M tile) so neighbouring
++# programs stream neighbouring weight rows.
++#
++# Launch configs are pinned per (N, K, M bucket) from measurements on the
++# device (no autotuning inside served requests or CUDA-graph capture).
++
++import torch
++import triton
++import triton.language as tl
++
++from flag_gems.runtime import torch_device_fn
++
++# MACA backend launch options this module understands (None = backend default).
++_LAUNCH_KEYS = ("num_warps", "num_stages", "pipeline", "scenario", "extra_options")
++_TILE_KEYS = ("BLOCK_M", "BLOCK_N", "BLOCK_K", "SPLIT_K")
++
++
++@triton.jit
++def skinny_mm_nt_kernel(A, W, C, P, M, N, K, stride_am, stride_wn, stride_cm, k_split,
++                        BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
++                        PARTIAL: tl.constexpr, EVEN_N: tl.constexpr):
++    pid_n = tl.program_id(0)
++    pid_k = tl.program_id(1)
++    pid_m = tl.program_id(2)
++    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    # Out-of-range rows/columns re-read valid ones (no load masks); the store drops them.
++    ram = rm % M
++    if EVEN_N:
++        rwn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_N), BLOCK_N)
++    else:
++        rwn = rn % N
++    rk = tl.arange(0, BLOCK_K)
++    k0 = tl.multiple_of(pid_k * k_split, BLOCK_K)
++    a_ptrs = A + ram[:, None] * stride_am + (k0 + rk)[None, :]
++    w_ptrs = W + rwn[None, :] * stride_wn + (k0 + rk)[:, None]
++    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    for _ in range(0, k_split, BLOCK_K):
++        a = tl.load(a_ptrs)
++        w = tl.load(w_ptrs)
++        acc = tl.dot(a, w, acc, out_dtype=tl.float32, allow_tf32=False)
++        a_ptrs += BLOCK_K
++        w_ptrs += BLOCK_K
++    mask = (rm < M)[:, None] & (rn < N)[None, :]
++    if PARTIAL:
++        p_ptrs = P + (pid_k * M + rm)[:, None] * N + rn[None, :]
++        tl.store(p_ptrs, acc, mask=mask)
++    else:
++        c_ptrs = C + rm[:, None] * stride_cm + rn[None, :]
++        tl.store(c_ptrs, acc.to(C.dtype.element_ty), mask=mask)
++
++
++@triton.jit
++def skinny_splitk_reduce_kernel(P, C, M, N, stride_cm, split_k, BLOCK: tl.constexpr):
++    # C[m, n] = sum_s P[s, m, n], fixed summation order (deterministic).
++    pid = tl.program_id(0)
++    offs = pid * BLOCK + tl.arange(0, BLOCK)
++    total = M * N
++    mask = offs < total
++    acc = tl.zeros([BLOCK], tl.float32)
++    for s in range(0, split_k):
++        acc += tl.load(P + s * total + offs, mask=mask, other=0.0)
++    m = offs // N
++    n = offs - m * N
++    tl.store(C + m * stride_cm + n, acc.to(C.dtype.element_ty), mask=mask)
++
++
++def skinny_config_ok(M, N, K, cfg):
++    split = cfg.get("SPLIT_K", 1)
++    bk = cfg["BLOCK_K"]
++    return M >= 1 and N >= 1 and split >= 1 and K % (split * bk) == 0
++
++
++def _launch_kwargs(cfg):
++    return {k: cfg[k] for k in _LAUNCH_KEYS if cfg.get(k) is not None}
++
++
++def skinny_mm_nt(a, w, c, cfg):
++    """c[M, N] = a[M, K] @ w[N, K]^T with a pinned launch config.
++
++    a, w, c need unit stride in their last dimension (w may be any view whose
++    rows are contiguous, e.g. ``b.t()`` of an NT ``mm`` operand); cfg holds
++    BLOCK_M/BLOCK_N/BLOCK_K/SPLIT_K plus MACA launch options.
++    """
++    M, K = a.shape
++    N = w.shape[0]
++    assert w.shape[1] == K and c.shape == (M, N)
++    assert a.stride(1) == 1 and w.stride(1) == 1 and c.stride(1) == 1
++    assert skinny_config_ok(M, N, K, cfg), (M, N, K, cfg)
++    # 32-bit offsets inside the kernels
++    assert N * w.stride(0) < 2**31 and M * a.stride(0) < 2**31 and M * c.stride(0) < 2**31
++    assert cfg.get("SPLIT_K", 1) * M * N < 2**31
++    bm, bn, bk = cfg["BLOCK_M"], cfg["BLOCK_N"], cfg["BLOCK_K"]
++    split = cfg.get("SPLIT_K", 1)
++    grid = (triton.cdiv(N, bn), split, triton.cdiv(M, bm))
++    launch = _launch_kwargs(cfg)
++    with torch_device_fn.device(a.device):
++        if split == 1:
++            skinny_mm_nt_kernel[grid](a, w, c, c, M, N, K, a.stride(0), w.stride(0), c.stride(0),
++                                      K, BLOCK_M=bm, BLOCK_N=bn, BLOCK_K=bk, PARTIAL=False,
++                                      EVEN_N=N % bn == 0, **launch)
++            return c
++        part = torch.empty((split, M, N), device=a.device, dtype=torch.float32)
++        skinny_mm_nt_kernel[grid](a, w, c, part, M, N, K, a.stride(0), w.stride(0), c.stride(0),
++                                  K // split, BLOCK_M=bm, BLOCK_N=bn, BLOCK_K=bk, PARTIAL=True,
++                                  EVEN_N=N % bn == 0, **launch)
++        block = 1024
++        skinny_splitk_reduce_kernel[(triton.cdiv(M * N, block),)](
++            part, c, M, N, c.stride(0), split, BLOCK=block, num_warps=4)
++    return c
++
++
++# ---------------------------------------------------------------------------
++# Pinned configs, measured on MetaX C500 (bench_t6.py / val_t6.py, see
++# work/R4/T6-mx-decode): only winners >= 5% faster than the served path, in a
++# CUDA graph with rotated weights (no L2 reuse).  Each table maps (N, K) -> a
++# list of (max_M, cfg) sorted by max_M; the first entry with M <= max_M is used.
++# The selectors below also refuse every shape / layout skinny_mm_nt cannot
++# address with 32-bit offsets, so the callers fall back instead of asserting.
++# Shapes or M not listed keep the existing path: qkv (2560, 2048), o_proj
++# (2048, 2048) and gate_up (12288, 2048) gained < 5% and stay on mm_kernel_nt.
++# --- pinned skinny tables: begin ---
++# generated by bench_t6.py on 2026-10-23 16:07:39, margin 0.05
++_DECODE_NT_CONFIGS = {
++    # down_proj, us per call served -> pinned: M=16 31.0 -> 30.0, M=32 40.6 -> 30.4,
++    # M=48 51.9 -> 36.8, M=64 60.5 -> 37.5 (max abs err <= 2.8e-3 vs fp32)
++    (2048, 6144): [
++        (32, {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 128, "SPLIT_K": 3,
++              "num_warps": 8, "num_stages": 2, "pipeline": "basic"}),
++        (64, {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 3,
++              "num_warps": 8, "num_stages": 3, "pipeline": "basic"}),
++    ],
++}
++# lm_head (vocabulary projection), us per call generic linear -> pinned:
++# M=1 413 -> 368, M=16 477 -> 398, M=32 544 -> 431, M=64 625 -> 489
++_LM_HEAD_CONFIGS = {
++    (130560, 2048): [
++        (16, {"BLOCK_M": 16, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1,
++              "num_warps": 8, "num_stages": 3, "pipeline": "basic"}),
++        (32, {"BLOCK_M": 32, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1,
++              "num_warps": 8, "num_stages": 3, "pipeline": "basic"}),
++        (64, {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1,
++              "num_warps": 8, "num_stages": 3, "pipeline": "basic"}),
++    ],
++}
++# --- pinned skinny tables: end ---
++
++
++def _pick(table, M):
++    for max_m, cfg in table:
++        if M <= max_m:
++            return cfg
++    return None
++
++
++def _offsets_fit(M, N, a_stride, w_stride, c_stride, cfg):
++    # skinny_mm_nt's kernels index A, W, C and the split-K partials with 32-bit
++    # offsets (its asserts); a shape beyond them takes the generic path.
++    return (N * w_stride < 2**31 and M * a_stride < 2**31 and M * c_stride < 2**31
++            and cfg.get("SPLIT_K", 1) * M * N < 2**31)
++
++
++def decode_nt_config(a, b, c, M, N, K):
++    """Pinned config for an NT mm (b = W.t(), stride (1, K)) of a decode-sized M, or None."""
++    table = _DECODE_NT_CONFIGS.get((N, K))
++    if not table or a.dtype not in (torch.bfloat16, torch.float16):
++        return None
++    if b.dtype != a.dtype or c.dtype != a.dtype:
++        return None
++    if a.stride(1) != 1 or b.stride(0) != 1 or b.stride(1) != K or c.stride(1) != 1:
++        return None
++    if tuple(c.shape) != (M, N):  # mm_out with an out of another shape
++        return None
++    cfg = _pick(table, M)
++    if cfg is None or not skinny_config_ok(M, N, K, cfg):
++        return None
++    if not _offsets_fit(M, N, a.stride(0), K, c.stride(0), cfg):
++        return None
++    return cfg
++
++
++def lm_head_config(M, N, K, dtype, w_stride=None):
++    """Pinned config for out[M, N] = x[M, K] @ W[N, K]^T (vocabulary projection), or None.
++
++    The offset checks take x with row stride K (the caller copies x if
++    M * x.stride(0) >= 2^31) and out as a new contiguous [M, N] tensor;
++    w_stride is W.stride(0) (K if None).
++    """
++    table = _LM_HEAD_CONFIGS.get((N, K))
++    if not table or dtype not in (torch.bfloat16, torch.float16):
++        return None
++    cfg = _pick(table, M)
++    if cfg is None or not skinny_config_ok(M, N, K, cfg):
++        return None
++    if not _offsets_fit(M, N, K, K if w_stride is None else w_stride, N, cfg):
++        return None
++    return cfg

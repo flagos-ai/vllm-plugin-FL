@@ -96,6 +96,12 @@ include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
 "vllm_fl.dispatch.config" = ["*.yaml"]
+# MetaX native decode attention sources, compiled with mxcc by
+# ops/mx_dec_native.py (--build, or on first use)
+"vllm_fl.dispatch.backends.vendor.metax.impl.attention.ops" = ["csrc/*.cuh", "csrc/*.cu"]
+# MetaX native glue sources (add+RMSNorm, RoPE+KV write, SiLU*mul), compiled with mxcc
+# by impl/mx_glue_native.py (--build, or on first use)
+"vllm_fl.dispatch.backends.vendor.metax.impl" = ["csrc/*.cuh", "csrc/*.cu"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
