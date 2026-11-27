@@ -6,7 +6,7 @@ Coverage boundary (post-refactor): the common registration wiring of
 precedence, unknown-op warning, parameter whitelist, prefer-enabled
 override, registration name contract, the fused_moe-free OOT_OPS table)
 and the ``_patch_unquantized_moe_oracle`` import-site rewrite are owned
-by PR #799's ``tests/supplementary_tests/unit/ops/test_custom_ops_registration.py``.
+by PR #799's ``tests/unit_tests/coverage/ops/test_custom_ops_registration.py``.
 This file keeps only the #809-specific vendor parameterization branches —
 the device_type / vendor dispatch inside the op loop that steers
 ``register_oot_ops`` to each vendor's patch module:

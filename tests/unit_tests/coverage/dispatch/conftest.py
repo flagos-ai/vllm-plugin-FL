@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Shared fixtures for supplementary dispatch unit tests.
+"""Shared fixtures for coverage-suite dispatch unit tests.
 
 The dispatch logger manager configures ``vllm_fl.dispatch`` (and per-module
 children such as ``vllm_fl.dispatch.io_dump``) with ``propagate=False`` plus

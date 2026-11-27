@@ -9,7 +9,7 @@ the ``_is_residual_scattered_for_sp`` SP predicate, the
 ``_reshape_attention_kv_cache`` layout matrix (contiguous / packed /
 padded-pages / page-aligned-blocks / permuted) and the
 ``RoutedExperts*`` carriers is owned by PR #799's
-``tests/supplementary_tests/unit/worker/test_worker_symbols_032.py``
+``tests/unit_tests/coverage/worker/test_worker_symbols_032.py``
 (22 same-named tests). On merge, #799's copy moves to this
 ``unit/patches/`` location (matching the module-under-test domain); this
 file then holds only the #809-specific increments that #799 does not

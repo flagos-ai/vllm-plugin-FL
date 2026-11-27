@@ -4,7 +4,7 @@
 ``vllm_fl/dispatch/backends/vendor/iluvatar/communicator.py`` is 0/34 on the
 CPU baseline: constructing the class needs a CUDA device and an initialized
 ``torch.distributed`` group. The CPU supplementary test
-(``tests/supplementary_tests/unit/distributed/test_iluvatar_communicator.py``)
+(``tests/unit_tests/coverage/distributed/test_iluvatar_communicator.py``)
 covers ``__init__`` with the base mocked out; these tests run the *real*
 ``DeviceCommunicatorBase.__init__`` through a single-process gloo group with
 the device bound to the BI-V150 — the exact single-card startup shape:
@@ -20,7 +20,7 @@ the device bound to the BI-V150 — the exact single-card startup shape:
 Executing the collective itself requires a second rank (FlagCX or the
 torch.distributed fallback), which is covered by the multi-process
 functional test
-``tests/supplementary_tests/functional/test_iluvatar_gpu_flagcx_allreduce.py``;
+``tests/functional_tests/coverage/test_iluvatar_gpu_flagcx_allreduce.py``;
 ``CommunicatorFL.all_reduce`` deliberately asserts ``pyflagcx_comm is not
 None`` because in production the GroupCoordinator short-circuits
 ``world_size == 1`` before the device communicator is ever consulted.

@@ -2,7 +2,7 @@
 """Functional 2-process FlagCX all-reduce on the Iluvatar BI-V150.
 
 The single-rank supplementary test
-(``tests/supplementary_tests/unit/dispatch/test_iluvatar_gpu_communicator_allreduce.py``)
+(``tests/unit_tests/coverage/dispatch/test_iluvatar_gpu_communicator_allreduce.py``)
 pins ``IluvatarCommunicatorFL.__init__`` on one card, but the collective
 itself needs a second rank: production TP>1 execution goes
 ``GroupCoordinator.all_reduce`` → ``CommunicatorFL.all_reduce`` →

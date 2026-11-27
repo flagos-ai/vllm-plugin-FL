@@ -5,7 +5,7 @@ Coverage boundary (post-refactor): the common behaviour of
 ``FlagCXKVConnectorStats`` (post-init reset, record paths, clone_and_reset
 snapshots, is_empty transitions, empty-other aggregate, the reduce summary)
 and all of ``FlagCXPromMetrics`` is owned by PR #799's
-``tests/supplementary_tests/unit/distributed/test_flagcx_stats.py``
+``tests/unit_tests/coverage/distributed/test_flagcx_stats.py``
 (which additionally pins concurrent column alignment and P90 millisecond
 rounding). This file keeps only the #809-specific increments that #799
 does not carry:

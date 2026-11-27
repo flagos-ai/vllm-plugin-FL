@@ -23,7 +23,7 @@ H2D copies on CoreX. Constructing it once on the BI-V150 pins:
 
 The full ``init_device`` (distributed init + model load) is too heavy for a
 supplementary suite; its ordering and the pure patch machinery branches are
-covered on CPU in ``tests/supplementary_tests/unit/worker/\
+covered on CPU in ``tests/unit_tests/coverage/worker/\
 test_iluvatar_worker_fl_surface.py`` and
 ``.../dispatch/test_iluvatar_patch_functions.py``. Assertions here are
 structural (the numeric oracle for buffer contents is a plain
@@ -196,7 +196,7 @@ class TestIluvatarWorkerFLSurface:
     targets, the apply_worker_patches bundle order/gate, sleep/wake_up
     scale and buffer round trips, update_config, execute_model PP
     orchestration — moved to
-    ``tests/supplementary_tests/unit/worker/test_iluvatar_worker_fl_surface.py``
+    ``tests/unit_tests/coverage/worker/test_iluvatar_worker_fl_surface.py``
     (an ungated CPU file). What stays here is the real-platform class
     boundary and the real in-worker patch effects that only a BI-V150
     with flagtree triton can prove.

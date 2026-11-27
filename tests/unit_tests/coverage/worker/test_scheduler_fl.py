@@ -5,7 +5,7 @@ Coverage boundary (post-refactor): the common behaviour of
 ``_MTPStructuredOutputManager`` (delegation guards, fast-path dual-row
 fills, terminated-grammar masks, bitmask reuse, -1 sentinel handling,
 ``AsyncSchedulerFL`` wiring) is owned by PR #799's
-``tests/supplementary_tests/unit/worker/test_scheduler_fl.py`` (real
+``tests/unit_tests/coverage/worker/test_scheduler_fl.py`` (real
 xgrammar matchers as the oracle). This file keeps only the #809-specific
 increments that #799 does not carry:
 
