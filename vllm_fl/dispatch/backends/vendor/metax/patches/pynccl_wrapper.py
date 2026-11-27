@@ -19,8 +19,8 @@ from vllm.distributed.device_communicators.pynccl_wrapper import (
     ncclDataType_t,
     ncclRedOp_t,
     ncclResult_t,
-    ncclWindow_t,
     ncclUniqueId,
+    ncclWindow_t,
 )
 
 from .utils_patch import find_mccl_library, replace_loaded_vllm_aliases
@@ -460,12 +460,18 @@ replace_loaded_vllm_aliases(
 # Patch: pynccl uses ctypes to pass tensor pointers to MCCL; TorchDynamo
 # cannot trace ctypes calls. Replace CudaCommunicator.all_reduce with a
 # torch.distributed call which Dynamo can trace natively.
+import torch
 import torch.distributed as dist
+
 from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
+
+_native_all_reduce = CudaCommunicator.all_reduce
 
 
 def _compile_friendly_all_reduce(self, input_):
     """Traceable all-reduce with CudaCommunicator's out-of-place contract."""
+    if not torch.compiler.is_compiling():
+        return _native_all_reduce(self, input_)
     output = input_.clone()
     dist.all_reduce(output, op=dist.ReduceOp.SUM, group=self.device_group)
     return output

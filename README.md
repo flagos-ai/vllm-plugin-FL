@@ -34,6 +34,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
 | DeepSeek-V4-Flash (ModelSlim W8A8, Ascend TP8) | Supported | [Ascend guide](./docker/ascend/README.md) |
+| DeepSeek-V4.1-Flash-1017-W4A8 (MetaX C550) | Eco-Tech W4A8, vision and DSpark, DP8×TP2 / EP16 | [Model guide](./docs/models/deepseek_v41.md) · [Launch example](./examples/deepseek_v41/metax_dp8_serve.sh) |
 
 ### Supported Chips
 

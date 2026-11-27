@@ -32,6 +32,7 @@ from vllm_fl.utils import (
 FLAGGEMS_W8A8_LINEAR_OP = "w8a8_dynamic_per_token_linear"
 
 _dynamic_per_token_quant_int8 = CachedOp("dynamic_per_token_quant_int8")
+_w8a8_scaled_mm = CachedOp("w8a8_scaled_mm")
 
 
 class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
@@ -99,13 +100,11 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        from flag_gems import scaled_mm
-
         weight, weight_scale, _, _, _ = self._get_layer_params(layer)
         original_shape = x.shape
         x_2d = x.reshape(-1, original_shape[-1]).contiguous()
         x_q, x_scale = _dynamic_per_token_quant_int8(x_2d)
-        output = scaled_mm(
+        output = _w8a8_scaled_mm(
             x_q,
             weight,
             x_scale,

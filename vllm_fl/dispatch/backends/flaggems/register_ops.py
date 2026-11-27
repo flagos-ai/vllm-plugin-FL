@@ -44,6 +44,7 @@ def register_builtins(registry) -> None:
     Args:
         registry: Registry to register into
     """
+    import flag_gems
     import flaggems_vllm
 
     from .flaggems import FlagGemsBackend
@@ -55,9 +56,144 @@ def register_builtins(registry) -> None:
 
     backend = FlagGemsBackend()
     is_avail = backend.is_available
+    from .impl.deepseek_v41 import (
+        V41_PUBLIC_OPERATORS,
+        get_public_forwarder,
+        is_v41_public_available,
+    )
+    from .impl.deepseek_v41_linear import (
+        bf16_linear_fp32,
+        grouped_bf16_linear,
+        is_projection_available,
+        mean_hc,
+        silu_and_mul_with_clamp,
+    )
+    from .impl.engram import (
+        engram_embedding_int8,
+        engram_gated_add,
+        engram_ngram_hash,
+        is_engram_available,
+    )
     from .impl.w8a8_moe import w8a8_moe_experts
 
     impls = [
+        *[
+            OpImpl(
+                op_name=name,
+                impl_id="default.flagos",
+                kind=BackendImplKind.DEFAULT,
+                fn=_bind_is_available(getattr(flaggems_vllm, name), is_avail),
+                priority=BackendPriority.DEFAULT,
+                vendor=None,
+            )
+            for name in ("repack_int4_n_to_k", "e8m0_scale_to_bf16")
+        ],
+        OpImpl(
+            op_name="mean_hc",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                mean_hc, functools.partial(is_projection_available, "mean_hc")
+            ),
+            priority=BackendPriority.DEFAULT,
+            vendor=None,
+        ),
+        OpImpl(
+            op_name="grouped_bf16_linear",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                grouped_bf16_linear,
+                functools.partial(is_projection_available, "grouped_bf16_linear"),
+            ),
+            priority=BackendPriority.DEFAULT,
+            vendor=None,
+        ),
+        OpImpl(
+            op_name="w8a8_scaled_mm",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(flag_gems.scaled_mm, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
+            op_name="composite_hadamard_transform",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(flag_gems.composite_hadamard_transform, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        *[
+            OpImpl(
+                op_name=op_name,
+                impl_id="default.flagos",
+                kind=BackendImplKind.DEFAULT,
+                fn=_bind_is_available(
+                    get_public_forwarder(op_name),
+                    functools.partial(is_v41_public_available, op_name),
+                ),
+                priority=BackendPriority.DEFAULT,
+                vendor=None,
+            )
+            for op_name in V41_PUBLIC_OPERATORS
+        ],
+        OpImpl(
+            op_name="bf16_linear_fp32",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                bf16_linear_fp32,
+                functools.partial(is_projection_available, "bf16_linear_fp32"),
+            ),
+            priority=BackendPriority.DEFAULT,
+            vendor=None,
+        ),
+        OpImpl(
+            op_name="silu_and_mul_with_clamp",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                silu_and_mul_with_clamp,
+                functools.partial(is_projection_available, "silu_and_mul_with_clamp"),
+            ),
+            priority=BackendPriority.DEFAULT,
+            vendor=None,
+        ),
+        OpImpl(
+            op_name="engram_ngram_hash",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                engram_ngram_hash,
+                functools.partial(is_engram_available, "engram_ngram_hash"),
+            ),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
+            op_name="engram_embedding_int8",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                engram_embedding_int8,
+                functools.partial(is_engram_available, "engram_embedding_int8"),
+            ),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
+            op_name="engram_gated_add",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                engram_gated_add,
+                functools.partial(is_engram_available, "engram_gated_add"),
+            ),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # Quantization
         OpImpl(
             op_name="dynamic_per_token_quant_int8",
