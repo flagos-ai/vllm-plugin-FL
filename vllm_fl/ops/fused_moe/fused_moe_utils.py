@@ -121,6 +121,18 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.XPU]
     elif current_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
+    elif getattr(current_platform, "vendor_name", "") in ("enflame", "gcu"):
+        # Enflame GCU reports vendor_name="enflame", device_type="gcu" and
+        # answers False to is_cuda()/is_rocm()/is_xpu()/is_cpu(), so without
+        # this branch USE_FLAGGEMS=0 (or VLLM_FL_PREFER=vendor) leaves
+        # _AVAILABLE_BACKENDS unbound and vLLM dies with UnboundLocalError
+        # while building the MoE layers.  The Triton candidates are the
+        # generic ones; the vllm_fl dispatch layer still routes to the
+        # vendor/reference implementation it actually has registered.
+        _AVAILABLE_BACKENDS = [
+            UnquantizedMoeBackend.TRITON,
+            UnquantizedMoeBackend.BATCHED_TRITON,
+        ]
     elif getattr(current_platform, "vendor_name", "") in ("iluvatar", "hygon"):
         # TODO(corex): remove when PlatformFL is_cuda()/is_cuda_alike() is
         # true. CoreX reports device_type=cuda but is_cuda()=False, so

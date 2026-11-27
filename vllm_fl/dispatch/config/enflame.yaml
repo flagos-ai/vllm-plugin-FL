@@ -24,6 +24,28 @@ op_backends:
 
 flagos_blacklist:
   - scaled_dot_product_attention
+  # gcu400 embedding computes the row offset in int32.  When
+  # vocab*hidden*dtype_size > 2^31 (Qwen3.6-27B: 248320*5120*2B = 2.54e9) any
+  # token id above INT32_MAX/(hidden*dtype_size) (209715 for 27B bf16) reads
+  # the wrong embedding row, producing silent garbage output.  Keep torch
+  # native until the kernel uses int64 offsets; see
+  # docs-1121/2026-1121-2350-27b-flaggems-embedding-int32-offset-overflow-localization.md
+  - embedding
+  # flaggems_vllm's generic silu_and_mul corrupts the tail rows of a mixed
+  # text+image batch on gcu400 (image requests in mixed_concurrent_8 degrade
+  # while text-only / image-only batches pass).  Route it to the reference
+  # activation on GCU; FlagGems' enflame kernel is not used here because it is
+  # much slower on large prefill (512-token request exceeds the gate timeout).
+  - silu_and_mul
+  # flaggems_vllm's generic MoE helpers are not enflame-tuned: on GCU the
+  # fused-experts kernel plus the block-align/route/sum kernels are much slower
+  # than the reference path (a cold-start 512-token text request takes ~900s
+  # and times out) and unreliable for MoE models such as Qwen3.6-35B-A3B.
+  # Keep the vLLM MoE helpers on the reference backend.
+  - invoke_fused_moe_triton_kernel
+  - topk_softmax
+  - moe_align_block_size
+  - moe_sum
   # The in-place wrapper delegates to the implementation op; keep both native.
   - index_put_
   - _index_put_impl_

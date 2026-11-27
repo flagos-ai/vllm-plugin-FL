@@ -23,6 +23,7 @@ GCU_MAX_GRID_YZ = 255
 _patched = False
 
 
+
 @triton.jit
 def fused_recurrent_gated_delta_rule_packed_decode_kernel_gcu(
     mixed_qkv,
@@ -225,9 +226,11 @@ def fused_recurrent_gated_delta_rule_packed_decode_gcu(
         )
     # Qwen3.8 GDN uses V=128. Covering V in one tile avoids four duplicate
     # Q/K and scalar loads per value head compared with a 32-element tile.
+    # Tuned on L600 (docs-1123/vllm_triton_kernels_gcu/reports): one V tile,
+    # two warps beat the upstream 32-element tile by ~1.5x.
     BV = min(triton.next_power_of_2(V), 128)
     num_stages = 3
-    num_warps = 1
+    num_warps = 2
 
     stride_mixed_qkv_tok = mixed_qkv.stride(0)
     stride_a_tok = a.stride(0)

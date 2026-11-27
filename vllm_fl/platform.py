@@ -707,6 +707,13 @@ class PlatformFL(Platform):
         # not available.
         if cls.vendor_name in ("gcu", "enflame"):
             parallel_config.disable_custom_all_reduce = True
+            # GCU-specific compilation defaults (hybrid+MoE capture coverage)
+            # live in the vendor backend; nothing here affects other vendors.
+            from vllm_fl.dispatch.backends.vendor.gcu.impl.platform_config import (
+                adjust_compilation_config_for_gcu,
+            )
+
+            adjust_compilation_config_for_gcu(model_config, compilation_config)
 
         if (
             cls.device_type == "musa"

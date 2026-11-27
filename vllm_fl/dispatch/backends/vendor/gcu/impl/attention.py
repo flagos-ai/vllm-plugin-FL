@@ -21,7 +21,7 @@ from vllm.v1.attention.backend import (
 )
 from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.model_executor.layers.attention.attention import Attention
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
+from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 
 
@@ -29,7 +29,7 @@ from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vll
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
-from vllm.model_executor.determinism.batch_invariant import _batch_invariant_MODE as _bi_mode
+from vllm import envs
 from vllm.utils.math_utils import cdiv
 from vllm.v1.attention.backend import (
     AttentionCGSupport,
@@ -38,7 +38,6 @@ from vllm.v1.attention.backend import (
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
-    get_kv_cache_layout,
 )
 from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm.platforms.interface import DeviceCapability
@@ -63,13 +62,68 @@ from vllm_fl.dispatch.backends.vendor.gcu.impl.reshape_and_cache import (
 
 logger = init_logger(__name__)
 
+# Persistent scratch buffer for the de-aliased value cache.
+#
+# vLLM 0.32 stores K and V in one packed cache ([B, H, N, 2*head_size]), so the
+# value view shares its storage with the key view.  Enflame FA3 varlen aborts
+# when both sides alias, so decode copies the value cache into a contiguous
+# temporary.  Allocating that temporary inside the CUDA-graph capture region
+# puts it into vLLM's shared graph memory pool: the block is returned to the
+# pool when the capture ends and a later capture can receive the same address,
+# while replaying the first graph keeps writing the full cache into it.  All
+# full-attention layers run sequentially, so one buffer per (device, dtype,
+# shape) kept alive for the process is enough and removes the capture-time
+# allocation entirely.
+_DEALIAS_SCRATCH: dict[tuple, torch.Tensor] = {}
+
+
+def _dealiased_value_cache(value_cache: torch.Tensor) -> torch.Tensor:
+    key = (value_cache.device.index, value_cache.dtype, tuple(value_cache.shape))
+    target = _DEALIAS_SCRATCH.get(key)
+    if target is None:
+        if torch.gcu.is_current_stream_capturing():
+            raise RuntimeError(
+                "Enflame value-cache scratch must be allocated before CUDA "
+                "graph capture"
+            )
+        target = torch.empty(
+            value_cache.shape, dtype=value_cache.dtype, device=value_cache.device
+        )
+        _DEALIAS_SCRATCH[key] = target
+    target.copy_(value_cache)
+    return target
+
+
+def get_kv_cache_layout() -> str:
+    """Legacy NHD/HND layout helper used by ``get_kv_cache_stride_order``.
+
+    vLLM 0.32 resolves the KV cache layout centrally via
+    ``cache_config.get_resolved_kv_cache_layout()`` and no longer calls the
+    legacy stride-order method; map the resolved enum back to the names this
+    adapter understands, defaulting to NHD.
+    """
+    try:
+        layout = get_current_vllm_config().cache_config.get_resolved_kv_cache_layout()
+        name = getattr(layout, "name", str(layout))
+        if "NHC" in name:  # LBNHC ~ NHD
+            return "NHD"
+        if "HNC" in name:  # LBHNC ~ HND
+            return "HND"
+    except Exception:
+        # Older/newer vLLM cache configs may not expose the resolved layout;
+        # fall back to the default NHD naming used by this adapter.
+        pass
+    return "NHD"
+
 
 class AttentionGCUBackend(AttentionBackend):
     accept_output_buffer: bool = True
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
+    def get_supported_kernel_block_sizes(
+        kv_cache_spec: AttentionSpec | None = None,
+    ) -> list[int | MultipleOf]:
         vllm_config = get_current_vllm_config()
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
@@ -155,10 +209,11 @@ class AttentionGCUBackend(AttentionBackend):
         head_size: int,
         dtype: torch.dtype,
         kv_cache_dtype: CacheDType | None,
-        block_size: int,
+        block_size: int | None,
         use_mla: bool,
         has_sink: bool,
         use_sparse: bool,
+        use_mm_prefix: bool,
         device_capability: DeviceCapability,
     ) -> str | None:
         # Enflame FA kernel supports sinks via s_aux parameter.
@@ -472,7 +527,7 @@ class AttentionGCUImpl(AttentionImpl):
         self.vllm_flash_attn_version = 3
 
         # Cache the batch invariant result for use in forward passes
-        self.batch_invariant_enabled = _bi_mode
+        self.batch_invariant_enabled = envs.VLLM_BATCH_INVARIANT
 
         # FP8 KV cache is declared as supported (see AttentionGCUBackend),
         # but the actual kernel-level descale parameters are always passed.
@@ -550,8 +605,15 @@ class AttentionGCUImpl(AttentionImpl):
                 layer,
             )
 
-        # For decoder and cross-attention, use KV cache as before
-        key_cache, value_cache = kv_cache.unbind(0)
+        # vLLM 0.32 packs K/V into the last dim: [B, H, N, 2*head_size];
+        # older vLLM used [2, B, N, H, head_size].  Keep both paths so the
+        # adapter remains usable on the validated 0.28 line as well.
+        if kv_cache.ndim == 4:
+            key_cache, value_cache = kv_cache.transpose(1, 2).split(
+                self.head_size, dim=-1
+            )
+        else:
+            key_cache, value_cache = kv_cache.unbind(0)
 
         if (
             self.kv_sharing_target_layer_name is None
@@ -570,6 +632,17 @@ class AttentionGCUImpl(AttentionImpl):
             )
 
         if not attn_metadata.use_cascade:
+            # Enflame FA3 varlen aborts/hangs when K and V share the same
+            # packed-cache storage.  Breaking the alias on one side is enough;
+            # only do it for decode (prefill already works and should not pay
+            # the full-cache copy).
+            if (
+                attn_metadata.max_query_len == 1
+                and key_cache.untyped_storage().data_ptr()
+                == value_cache.untyped_storage().data_ptr()
+            ):
+                value_cache = _dealiased_value_cache(value_cache)
+
             cu_seqlens_q = attn_metadata.query_start_loc
             seqused_k = attn_metadata.seq_lens
             max_seqlen_q = attn_metadata.max_query_len
@@ -578,6 +651,10 @@ class AttentionGCUImpl(AttentionImpl):
             scheduler_metadata = attn_metadata.scheduler_metadata
 
             descale_shape = (cu_seqlens_q.shape[0] - 1, self.num_kv_heads)
+
+            # No device sync on the decode path: it is illegal during CUDA-graph
+            # capture, and the FA3 paged-decode hang is fixed by breaking the
+            # packed-cache K/V alias above.
 
             if self.dcp_world_size > 1:
                 self._forward_with_dcp(

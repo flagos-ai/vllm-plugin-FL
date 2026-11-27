@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 GCU_MAX_GRID_X = 65535
 GCU_MAX_GRID_YZ = 255
 _patched = False
+# Pristine upstream launcher captured in apply_* before rebinding; used when
+# N*H fits grid.y so the tuned upstream kernel keeps its performance.
+_upstream_launcher = None
 
 
 @triton.heuristics(
@@ -359,13 +362,26 @@ def chunk_gated_delta_rule_fwd_h_gcu(
     B, T, Hg, K, V = *k.shape, u.shape[-1]
     H = u.shape[-2]
     BT = chunk_size
+    N = B if cu_seqlens is None else len(cu_seqlens) - 1
+    if (
+        _upstream_launcher is not None
+        and N * H <= GCU_MAX_GRID_YZ
+        and chunk_indices is None
+        and chunk_offsets is None
+        and not use_exp2
+    ):
+        return _upstream_launcher(
+            k, w, u, g=g, gk=gk, initial_state=initial_state,
+            output_final_state=output_final_state, chunk_size=chunk_size,
+            save_new_value=save_new_value, cu_seqlens=cu_seqlens,
+        )
 
     if chunk_indices is None and cu_seqlens is not None:
         chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
     if cu_seqlens is None:
-        N, NT, chunk_offsets = B, triton.cdiv(T, BT), None
+        NT, chunk_offsets = triton.cdiv(T, BT), None
     else:
-        N, NT = len(cu_seqlens) - 1, len(chunk_indices)
+        NT = len(chunk_indices)
         if chunk_offsets is None:
             chunk_offsets = prepare_chunk_offsets(cu_seqlens, BT)
     if chunk_offsets is not None:
@@ -421,6 +437,8 @@ def apply_chunk_delta_h_gcu_patch() -> None:
         import vllm.third_party.flash_linear_attention.ops.chunk_delta_h as chunk_delta_h
         import vllm.third_party.flash_linear_attention.ops.kda as kda_mod
 
+        global _upstream_launcher
+        _upstream_launcher = chunk_delta_h.chunk_gated_delta_rule_fwd_h
         # Keep the official kernel ABI; this launcher owns the GCU kernel.
         chunk_delta_h.chunk_gated_delta_rule_fwd_h = (
             chunk_gated_delta_rule_fwd_h_gcu
