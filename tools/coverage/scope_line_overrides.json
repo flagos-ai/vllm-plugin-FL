@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Line-level ownership exceptions for the platform-applicable coverage report (plan 3.2). The platform_scope_report.py AST pass automatically classifies vendor-guard branches in the files below. An entry here REPLACES the AST verdict for that file with an explicit keep-line set (repo-relative file -> applicable line numbers). Only add entries when the AST pass misclassifies; every entry must cite the reason. Direction: for platform P, keep = common lines + P's own vendor branch lines; other vendors' exclusive branch lines are excluded from BOTH numerator and denominator.",
+  "format": {
+    "<repo-relative file>": [42, 43, 44]
+  },
+  "hybrid_files_documented": {
+    "vllm_fl/platform.py": "PlatformFL: vendor_name/device_type dispatch for every vendor; kunlunxin branches at is_cuda_alike fallback, block_size=128, async-scheduling off, native decode graphs (apply_config_platform_defaults + check_and_update_config), use_custom_op_collectives, get_default_ir_op_priority.",
+    "vllm_fl/__init__.py": "vendor init hooks: mthreads/metakunlunxin/hygon/amd patches; nvidia platform selection; musa/gcu device gating for quant_linear and router.",
+    "vllm_fl/worker/worker.py": "WorkerFL: vendor patches dispatch, V2 runner vendor imports (npu/amd/thead/iluvatar), gcu triton cache, kunlunxin USE_RESHAPE_AND_CACHE_FLASH, txda KV budget, hygon cudagraph headroom, musa graph profile logging.",
+    "vllm_fl/worker/model_runner.py": "GPUModelRunnerFL: musa/ascend/kunlunxin graph-capture and warmup branches.",
+    "vllm_fl/ops/fused_moe/fused_moe_utils.py": "Unquantized MoE backend selection: iluvatar/hygon TRITON backend list, ascend npu grouped-moe guard + workspace resize, kunlunxin fused_experts dispatch.",
+    "vllm_fl/compilation/graph.py": "weak_ref_tensors / graph class per device_type; Graph.cuda.CUDAGraph is kunlunxin's own path (device_type cuda is shared with nvidia/iluvatar/hygon and stays).",
+    "vllm_fl/dispatch/builtin_ops.py": "vendor backend directory resolution driven by runtime names, no vendor literal guards — AST pass finds nothing; kept whole.",
+    "vllm_fl/utils.py": "VENDOR_DEVICE_MAP is common data for every vendor; kept whole."
+  },
+  "overrides": {}
+}
