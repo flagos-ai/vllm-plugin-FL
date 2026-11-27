@@ -454,9 +454,12 @@ def test_sqrtsoftplus_routing_preserves_upstream_entry(router_name, monkeypatch)
     )
     upstream.assert_called_once()
     args = upstream.call_args.kwargs.copy()
-    assert args.pop("hidden_states") is hidden
-    assert args.pop("gating_output") is logits
-    assert args.pop("e_score_correction_bias").data_ptr() == bias.data_ptr()
+    routed_hidden = args.pop("hidden_states")
+    routed_logits = args.pop("gating_output")
+    routed_bias = args.pop("e_score_correction_bias")
+    assert routed_hidden is hidden
+    assert routed_logits is logits
+    assert routed_bias.data_ptr() == bias.data_ptr()
     assert args == dict(
         topk=2, renormalize=True, scoring_func="sqrtsoftplus", indices_type=torch.int64
     )
