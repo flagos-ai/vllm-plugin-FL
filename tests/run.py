@@ -21,6 +21,10 @@ Usage::
     # Run only unit tests
     python tests/run.py --platform ascend --device 910b --scope unit
 
+    # Run only supplementary coverage tests (idle-time/weekend runs;
+    # collected from tests/unit_tests/coverage/)
+    python tests/run.py --platform cuda --device a100 --scope supplementary
+
     # Run a specific E2E test case
     python tests/run.py --platform cuda --device a100 \\
         --scope e2e --task inference --model qwen3 --case 4b_tp2
@@ -424,6 +428,7 @@ class TestRunner:
         - ``functional``: component-level GPU tests (ops, compilation, distributed)
         - ``e2e``: end-to-end model tests (including adaptation Gate)
         - ``benchmark``: benchmark tests selected by platform YAML
+        - ``supplementary``: supplementary coverage tests (idle-time runs)
         - ``all``: all of the above
         """
         cases: list[TestCase] = []
@@ -439,6 +444,9 @@ class TestRunner:
 
         if self.scope in ("all", "benchmark"):
             cases.extend(self._discover_benchmark_tests())
+
+        if self.scope == "supplementary":
+            cases.extend(self._discover_supplementary_tests())
 
         return cases
 
@@ -478,6 +486,16 @@ class TestRunner:
         for pattern in unit_filter.exclude:
             extra_args.extend(["--ignore", f"tests/unit_tests/{pattern}"])
 
+        # Isolation contract: the supplementary coverage suite (migrated to
+        # tests/unit_tests/coverage/) is selected by the ``supplementary``
+        # scope's marker expression and must never be collected by the core
+        # unit gate. Ignore the directory only when it exists — the guard
+        # keeps this command byte-identical on pre-migration checkouts
+        # (directory absent) and activates automatically once the migration
+        # lands, so core unit CI keeps running exactly its own tests.
+        if (_REPO_ROOT / test_path / "coverage").is_dir():
+            extra_args.extend(["--ignore", f"{test_path}coverage"])
+
         # Apply include filter (if not wildcard, use -k)
         if unit_filter.include != "*" and isinstance(unit_filter.include, list):
             include_expr = " or ".join(unit_filter.include)
@@ -497,6 +515,8 @@ class TestRunner:
         ]
         for pattern in unit_filter.exclude:
             serial_args.extend(["--ignore", f"tests/unit_tests/{pattern}"])
+        if (_REPO_ROOT / test_path / "coverage").is_dir():
+            serial_args.extend(["--ignore", f"{test_path}coverage"])
         if unit_filter.include != "*" and isinstance(unit_filter.include, list):
             serial_args.extend(["-k", " or ".join(unit_filter.include)])
 
@@ -517,6 +537,86 @@ class TestRunner:
                 pytest_path=test_path,
                 task="unit",
                 extra_args=serial_args,
+            ),
+        ]
+
+    # Root-contract constant: the supplementary coverage suite lives under
+    # this directory (after the migration from tests/supplementary_tests/).
+    # The ``supplementary`` marker selects it via ``-m``; the unit scope
+    # ignores the directory so core unit gates never collect these tests.
+    _SUPPLEMENTARY_DIR = "tests/unit_tests/coverage/"
+
+    def _discover_supplementary_tests(self) -> list[TestCase]:
+        """Build supplementary coverage TestCase descriptors (parallel + serial).
+
+        Mirrors the unit-scope double pass (parallel xdist + serial append),
+        but selects the ``supplementary`` marker instead of excluding
+        ``multi_gpu``/``serial``, collects only ``tests/unit_tests/coverage/``,
+        and isolates coverage data per platform via a dedicated
+        ``COVERAGE_FILE`` so supplementary runs for different platforms
+        sharing one checkout directory can never append into each other's
+        data files.
+
+        The platform YAML ``unit.include/exclude`` filters are intentionally
+        NOT applied here: they gate core unit tests, not supplementary ones.
+
+        Output files keep the supplementary naming contract used by
+        ``tools/coverage/merge_coverage.py`` and the multi-platform CI
+        workflow: ``coverage-<platform>-supp.json``,
+        ``report-<platform>-supp{,-serial}.json``.
+        """
+        cpu_workers = min(os.cpu_count() or 1, 16)
+        platform = self.config.platform
+        coverage_file = f".coverage-{platform}-supp"
+
+        parallel_args = [
+            "--tb=short",
+            "-q",
+            "-n",
+            str(cpu_workers),
+            "-m",
+            "supplementary and not multi_gpu and not serial",
+            "--cov=vllm_fl",
+            "--cov-report=term-missing",
+            f"--cov-report=json:coverage-{platform}-supp.json",
+            "--json-report",
+            f"--json-report-file=report-{platform}-supp.json",
+        ]
+
+        serial_args = [
+            "--tb=short",
+            "-q",
+            "-m",
+            "supplementary and (multi_gpu or serial)",
+            "--cov=vllm_fl",
+            "--cov-append",
+            "--cov-report=term-missing",
+            f"--cov-report=json:coverage-{platform}-supp.json",
+            "--json-report",
+            f"--json-report-file=report-{platform}-supp-serial.json",
+        ]
+
+        print(
+            f"[run] Supplementary tests parallel: {cpu_workers} workers "
+            "(CPU-only, no device pinning); multi_gpu and serial-marked "
+            "tests run serially afterwards"
+        )
+
+        supp_env = {"COVERAGE_FILE": coverage_file}
+        return [
+            TestCase(
+                name=f"supplementary ({platform})",
+                pytest_path=self._SUPPLEMENTARY_DIR,
+                task="unit",
+                extra_args=parallel_args,
+                extra_env=supp_env,
+            ),
+            TestCase(
+                name=f"supplementary-serial ({platform})",
+                pytest_path=self._SUPPLEMENTARY_DIR,
+                task="unit",
+                extra_args=serial_args,
+                extra_env=supp_env,
             ),
         ]
 
@@ -900,9 +1000,15 @@ class TestRunner:
 
         # A platform filter can leave the serial pass empty, in which case
         # pytest exits 5. Vacuous collection is not a failure; real test
-        # failures still exit 1.
+        # failures still exit 1. The same applies to the supplementary
+        # serial pass, which selects ``supplementary and (multi_gpu or
+        # serial)`` and may legitimately collect none.
         passed = proc.returncode == 0 or (
-            proc.returncode == 5 and tc.name.startswith("unit-serial")
+            proc.returncode == 5
+            and (
+                tc.name.startswith("unit-serial")
+                or tc.name.startswith("supplementary-serial")
+            )
         )
         message = "" if passed else f"pytest exited with code {proc.returncode}"
 
@@ -975,11 +1081,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--scope",
-        choices=["all", "unit", "functional", "e2e", "benchmark"],
+        choices=["all", "unit", "functional", "e2e", "benchmark", "supplementary"],
         default="all",
         help="Which test scope to run: unit, functional (ops/compilation/"
-        "distributed), e2e (including adaptation Gate), benchmark, or all "
-        "(default: all)",
+        "distributed), e2e (including adaptation Gate), benchmark, "
+        "supplementary (supplementary coverage tests, idle-time runs), or "
+        "all (default: all)",
     )
     parser.add_argument(
         "--stage",

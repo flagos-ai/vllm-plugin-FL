@@ -14,11 +14,11 @@
 
 # Multi-platform supplementary coverage suite — idle-time execution.
 #
-# Runs tests/supplementary_tests/ on the four vendor runners (kunlunxin,
+# Runs tests/unit_tests/coverage/ on the four vendor runners (kunlunxin,
 # hygon, iluvatar, thead) and produces, per platform, from ONE frozen
 # revision:
 #   1. core baseline       (existing unit + functional scopes)
-#   2. supplementary-only  (tests/supplementary_tests/run.py)
+#   2. supplementary-only  (tests/run.py --scope supplementary)
 #   3. combined            (statement-level union, same scope)
 #   4. per-area reports    (tools/coverage/area_report.py)
 #   5. delta report        (tools/coverage/delta_report.py)
@@ -184,7 +184,7 @@ jobs:
       # Phase 2 — supplementary-only
       # ------------------------------------------------------------------
       - name: Supplementary suite
-        run: python tests/supplementary_tests/run.py --platform ${{ matrix.platform.platform }} --device ${{ matrix.platform.device }}
+        run: python tests/run.py --platform ${{ matrix.platform.platform }} --device ${{ matrix.platform.device }} --scope supplementary
 
       - name: Snapshot supplementary-only report
         run: |
