@@ -320,6 +320,26 @@ class TestModuleImportModes:
         monkeypatch.setenv("FLAGCX_PATH", "/nonexistent/flagcx")
 
         api_restore, api_mod = _install_fake_flagcx_api()
+        # On hosts whose sys.path already exposes a real ``plugin`` package
+        # (the thead CI container appends FLAGCX_PATH=/sgl-workspace/FlagCX
+        # to sys.path at collection time and never removes it), the loader's
+        # first probe ``from plugin.interservice import flagcx_wrapper``
+        # would import the REAL wrapper from disk and the wheel fallback
+        # under test would never run. A fake empty ``plugin`` package with
+        # no ``interservice`` submodule keeps that probe import-failing —
+        # the no-plugin case this test pins — independent of sys.path
+        # pollution left by earlier tests in the session.
+        fake_plugin = types.ModuleType("plugin")
+        fake_plugin.__path__ = []
+        saved_plugin_modules = {
+            name: sys.modules.get(name)
+            for name in ("plugin", "plugin.interservice",
+                         "plugin.interservice.flagcx_wrapper")
+        }
+        sys.modules["plugin"] = fake_plugin
+        for name in ("plugin.interservice",
+                     "plugin.interservice.flagcx_wrapper"):
+            sys.modules.pop(name, None)
         try:
             module = _import_fresh()
             assert module._flagcx_available is True
@@ -327,6 +347,11 @@ class TestModuleImportModes:
             assert module.FLAGCXLibrary is api_mod.FLAGCXLibrary
         finally:
             api_restore()
+            for name, prev in saved_plugin_modules.items():
+                if prev is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = prev
 
     def test_kunlunxin_with_fake_source_wrapper(self, monkeypatch, tmp_path):
         """A source layout (plugin.interservice.flagcx_wrapper) under FLAGCX_PATH."""

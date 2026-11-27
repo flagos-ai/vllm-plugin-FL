@@ -1145,10 +1145,21 @@ class TestNormalizationDelegate:
                             epsilon=epsilon)
             return x
 
-        gems_mod = sys.modules.setdefault(
-            "flag_gems.modules.normalization", ModuleType("flag_gems.modules.normalization")
+        # The production function resolves ``flag_gems.modules.normalization``
+        # from sys.modules at call time. Reusing whatever module happens to be
+        # cached there (``sys.modules.setdefault``) ties the test to whether a
+        # real flag_gems import chain pre-populated the entry and to that
+        # wheel's exact symbol surface — the real 5.5.0-dev wheel in the
+        # thead CI container is lazily imported, so the setdefault created a
+        # bare ModuleType and the subsequent monkeypatch.setattr raised
+        # AttributeError. Installing a self-contained fake module (with the
+        # symbol already present) via setitem makes the contract test
+        # deterministic on every flag_gems version.
+        gems_mod = ModuleType("flag_gems.modules.normalization")
+        gems_mod.gems_rms_forward = fake_gems_rms
+        monkeypatch.setitem(
+            sys.modules, "flag_gems.modules.normalization", gems_mod
         )
-        monkeypatch.setattr(gems_mod, "gems_rms_forward", fake_gems_rms)
 
         class Layer:
             weight = torch.ones(6)
@@ -1173,10 +1184,11 @@ class TestNormalizationDelegate:
             recorded["residual"] = residual
             return x
 
-        gems_mod = sys.modules.setdefault(
-            "flag_gems.modules.normalization", ModuleType("flag_gems.modules.normalization")
+        gems_mod = ModuleType("flag_gems.modules.normalization")
+        gems_mod.gems_rms_forward = fake_gems_rms
+        monkeypatch.setitem(
+            sys.modules, "flag_gems.modules.normalization", gems_mod
         )
-        monkeypatch.setattr(gems_mod, "gems_rms_forward", fake_gems_rms)
 
         class Layer:
             weight = torch.ones(6)

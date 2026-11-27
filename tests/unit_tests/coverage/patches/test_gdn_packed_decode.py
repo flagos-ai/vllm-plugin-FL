@@ -99,6 +99,15 @@ def gdn(monkeypatch):
     ``tl`` attribute getter raises RuntimeError (not AttributeError) the
     scan itself crashes, so ``is_builtin`` is wrapped to treat that as
     "not a builtin" — a no-op pass-through on upstream triton.
+
+    Vendor triton forks (FlagTree on the A100 CI, the thead ZW810E wheel)
+    pass trailing load/store hint positionals (``flagtree_hints``) from
+    their semantic layer that their own ``InterpreterBuilder`` methods do
+    not accept — an internal mismatch inside those wheels. The interpreter
+    ignores cache/eviction hints anyway, so every builder method in the
+    load/store family is wrapped to truncate positional arguments to the
+    method's declared arity. On upstream triton the arities match and the
+    wrappers are pass-throughs.
     """
     monkeypatch.setenv("TRITON_INTERPRET", "1")
     triton = pytest.importorskip("triton")
@@ -113,6 +122,44 @@ def gdn(monkeypatch):
             return False
 
     monkeypatch.setattr(tl.core, "is_builtin", _safe_is_builtin)
+
+    from triton.runtime.interpreter import InterpreterBuilder
+
+    def _truncate_positionals(name):
+        orig = getattr(InterpreterBuilder, name, None)
+        if orig is None:
+            return
+        params = inspect.signature(orig).parameters
+        if any(
+            p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values()
+        ):
+            return
+        n_pos = (
+            sum(
+                p.kind
+                in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                )
+                for p in params.values()
+            )
+            - 1  # exclude self
+        )
+
+        def wrapper(self, *args, **kwargs):
+            return orig(self, *args[:n_pos], **kwargs)
+
+        monkeypatch.setattr(InterpreterBuilder, name, wrapper)
+
+    for name in (
+        "create_load",
+        "create_masked_load",
+        "create_tensor_pointer_load",
+        "create_store",
+        "create_masked_store",
+        "create_tensor_pointer_store",
+    ):
+        _truncate_positionals(name)
 
     replaced: dict = {}
     if not triton.knobs.runtime.interpret or type(tl.sigmoid).__name__ != (
