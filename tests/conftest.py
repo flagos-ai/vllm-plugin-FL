@@ -83,6 +83,18 @@ def pytest_configure(config):
         "flagcx: marks tests as requiring the FlagCX library",
         "functional: marks tests as functional tests",
         "benchmark: marks tests as benchmark smoke tests",
+        # Coverage-suite markers: tests under tests/unit_tests/coverage/ and
+        # tests/functional_tests/coverage/ carry these (moved over from the
+        # former tests/supplementary_tests tree, which registered them
+        # locally; the standard-tree migration requires root registration so
+        # bare pytest runs stay warning-free).
+        "supplementary: coverage-suite test beyond the core suites "
+        "(moved from tests/supplementary_tests, see tests/unit_tests/coverage/)",
+        "platforms(name): gate a test to the listed platforms "
+        "(skip when the session platform is not among them; gate is the "
+        "_platforms_gate step in this conftest's "
+        "pytest_collection_modifyitems)",
+        "area(name): area tag used by the per-area coverage report",
     ]:
         config.addinivalue_line("markers", line)
 
@@ -100,6 +112,54 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_gpu)
         if "multi_gpu" in item.keywords and not multi:
             item.add_marker(skip_multi)
+
+    # Platform gate for the coverage suite (moved up from the former
+    # tests/supplementary_tests/conftest.py hook).
+    _platforms_gate(config, items)
+
+
+def _active_platform(config) -> str:
+    """Resolve the platform this pytest session was started for.
+
+    Priority matches this conftest's ``--platform`` option default: the CLI
+    option (injected by the runners) first, then the ``FL_TEST_PLATFORM``
+    environment variable the runners also export.
+    """
+    value = ""
+    try:
+        value = config.getoption("--platform") or ""
+    except (ValueError, KeyError):
+        # option not registered (bare pytest without the runner)
+        pass
+    return value or os.environ.get("FL_TEST_PLATFORM", "")
+
+
+def _platforms_gate(config, items):
+    """Skip tests gated to platforms other than the one under test.
+
+    Coverage-suite tests (``tests/unit_tests/coverage/``,
+    ``tests/functional_tests/coverage/``) marked with
+    ``pytest.mark.platforms("hygon")`` only run when the session's active
+    platform is one of the listed names. Tests with no ``platforms`` marker
+    are platform-agnostic and always collected; they must not depend on
+    vendor hardware by construction (stub-driven). The gate lives here in
+    the root conftest — same shape as the ``gpu`` hardware skip above — so
+    it applies no matter which tree collected the test, and it replaces
+    the former tests/supplementary_tests/conftest.py hook.
+    """
+    active = _active_platform(config)
+    for item in items:
+        marker = item.get_closest_marker("platforms")
+        if marker is None:
+            continue
+        allowed = marker.args
+        if active not in allowed:
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=f"supplementary platform gate: requires one of "
+                    f"{list(allowed)}, session platform is {active or 'unset'!r}"
+                )
+            )
 
 
 # ---------------------------------------------------------------------------
