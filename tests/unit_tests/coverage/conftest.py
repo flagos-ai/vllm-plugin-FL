@@ -27,11 +27,33 @@ _MISSING = object()
 
 @pytest.fixture(autouse=True)
 def fl_sys_modules():
-    """Snapshot ``sys.modules`` and restore it exactly after the test."""
+    """Snapshot ``sys.modules`` and restore it exactly after the test.
+
+    The torch dispatcher registers custom ops (e.g. vllm::all_reduce) once
+    per interpreter; deleting vllm* modules and letting them re-import would
+    re-run the registration and raise. Real vllm modules that were imported
+    before the snapshot are therefore never evicted — only modules the test
+    ADDED are removed, and a previously-absent entry stays restored-as-absent.
+    On hosts where vllm was never imported the fixture behaves as before.
+    """
+    import torch  # local import: fixture cost on non-torch runs stays zero
+
     saved = {}
     for name in list(sys.modules):
         if name.split(".")[0] in _STUB_ROOTS:
             saved[name] = sys.modules.get(name, _MISSING)
+    # Entries whose saved module is a REAL (non-fabricated) vllm module and
+    # which register dispatcher ops must survive the restore. A module is
+    # treated as real when it carries a __spec__ from the site-packages path.
+    real_vllm = {
+        name
+        for name, module in saved.items()
+        if module is not _MISSING
+        and getattr(module, "__spec__", None) is not None
+        and getattr(module.__spec__, "origin", None)
+        and "site-packages" in str(module.__spec__.origin)
+        and name.split(".")[0] == "vllm"
+    }
     try:
         yield saved
     finally:
@@ -43,6 +65,10 @@ def fl_sys_modules():
             del sys.modules[name]
         for name, module in saved.items():
             if module is _MISSING:
+                if name in real_vllm:
+                    # the real module may have been re-imported over the stub;
+                    # keep whichever instance is loaded now rather than evicting
+                    continue
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = module
