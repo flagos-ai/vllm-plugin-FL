@@ -172,6 +172,34 @@ class PlatformFL(Platform):
         """Import IR kernel modules. OOT platforms override to import their own."""
         import vllm.kernels  # noqa: F401
 
+        if cls.vendor_name == "metax":
+            # MetaX: FlagGems-backed fused_add_rms_norm provider (R6/G1)
+            try:
+                from vllm_fl.dispatch.backends.vendor.metax.impl import mx_glue
+
+                if mx_glue.NORM:
+                    mx_glue.register_ir_providers()
+            except Exception as e:
+                logger.warning(f"MetaX glue: IR kernels not registered: {e}")
+
+    @classmethod
+    def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
+        """Platform IR op priorities: MetaX puts its own fused_add_rms_norm
+        provider (one-pass FlagGems kernel) in front of the native lowering,
+        as the CUDA / ROCm platforms do with oink / aiter."""
+        priority = super().get_default_ir_op_priority(vllm_config)
+        if cls.vendor_name != "metax":
+            return priority
+        try:
+            from vllm_fl.dispatch.backends.vendor.metax.impl import mx_glue
+
+            for op_name, providers in mx_glue.ir_priority_overrides().items():
+                rest = [p for p in getattr(priority, op_name) if p not in providers]
+                setattr(priority, op_name, list(providers) + rest)
+        except Exception as e:
+            logger.warning(f"MetaX glue: IR op priority unchanged: {e}")
+        return priority
+
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
         parallel_config = vllm_config.parallel_config

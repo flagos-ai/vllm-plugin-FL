@@ -1255,7 +1255,9 @@ class ModelRunnerFL(
         for new_req_data in scheduler_output.scheduled_new_reqs:
             req_id = new_req_data.req_id
             if req_id in self.requests:
-                # For streaming case only.
+                # Streaming-session update, or (when the scheduler runs the
+                # V2 protocol, see _carried_output_token_ids) a request that
+                # resumes after preemption.
                 req_state = self._update_streaming_request(req_id, new_req_data)
                 reqs_to_add.append(req_state)
                 continue
@@ -1292,7 +1294,8 @@ class ModelRunnerFL(
                 generator=generator,
                 block_ids=new_req_data.block_ids,
                 num_computed_tokens=new_req_data.num_computed_tokens,
-                output_token_ids=[],
+                # [] for a genuinely new request.
+                output_token_ids=self._carried_output_token_ids(new_req_data),
                 lora_request=new_req_data.lora_request,
             )
             self.requests[req_id] = req_state
@@ -1638,14 +1641,55 @@ class ModelRunnerFL(
             req_state.prompt_token_ids, req_state.prompt_embeds
         )
 
-        # Clear `output_token_ids` as previous output tokens are now part of
-        # `prompt_token_ids`.
+        # Streaming update: previous output tokens are now part of
+        # `prompt_token_ids`, so nothing is carried over. Resume after
+        # preemption under the V2 scheduler protocol: restore the tokens that
+        # were generated before the preemption. Update in place so every
+        # reference to this list sees the same contents.
         req_state.output_token_ids.clear()
+        req_state.output_token_ids.extend(
+            self._carried_output_token_ids(new_req_data)
+        )
 
         if self.uses_mrope:
             self._init_mrope_positions(req_state)
 
         return req_state
+
+    @staticmethod
+    def _carried_output_token_ids(new_req_data: NewRequestData) -> list[int]:
+        """Return the generated tokens carried by a `NewRequestData`.
+
+        WorkerFL always builds this V1-style runner. However, vLLM 0.24 turns
+        on `VllmConfig.use_v2_model_runner` by default for LlamaForCausalLM,
+        and the scheduler then speaks the V2 protocol. Under that protocol a
+        request that resumes after a RECOMPUTE preemption is sent again as a
+        *new* request. Its `prompt_token_ids` is still the original prompt.
+        Its `prefill_token_ids` is prompt + every token generated before the
+        preemption. `CachedRequestData.all_token_ids` is left empty
+        (vllm/v1/core/sched/scheduler.py, `schedule()` and
+        `_make_cached_request_data`).
+
+        The scheduler recomputes `prompt + generated` tokens. If those tokens
+        are not restored as `output_token_ids`, `_prepare_inputs` reads stale
+        ids from `InputBatch.token_ids_cpu` for every position at or past the
+        prompt length. The rebuilt KV is then wrong, and so is every token
+        sampled after the resume.
+
+        Under the V1 protocol `prefill_token_ids` is None. For a brand-new
+        request or a streaming update it equals the prompt. In those cases
+        this returns [] and behaviour does not change.
+        """
+        prefill_token_ids = new_req_data.prefill_token_ids
+        if prefill_token_ids is None:
+            return []
+        num_prompt_tokens = length_from_prompt_token_ids_or_embeds(
+            new_req_data.prompt_token_ids, new_req_data.prompt_embeds
+        )
+        # Slicing copies the list. This matters because, with the in-process
+        # executor, `prefill_token_ids` is the scheduler's live
+        # `Request._all_token_ids`, which keeps growing.
+        return prefill_token_ids[num_prompt_tokens:]
 
     def _init_mrope_positions(self, req_state: CachedRequestState):
         model = self.get_model()

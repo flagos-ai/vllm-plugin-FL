@@ -5,6 +5,12 @@ import os
 import logging
 import sys
 
+# MetaX: pick the MACA runtime's command dispatch mode (VLLM_FL_MX_DIRECT_DISPATCH,
+# default off) before anything below can make the process's first MACA call.
+from . import _metax_runtime_env as _mx_runtime_env
+
+_mx_runtime_env.apply()
+
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.

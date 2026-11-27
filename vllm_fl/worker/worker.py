@@ -276,6 +276,13 @@ class WorkerFL(WorkerBase):
                     record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
                 )
 
+        # MetaX: fused Llama glue (RoPE+KV write, GLU MLP), before the model
+        # is built (R6/G1; VLLM_FL_MX_GLUE=0 disables).
+        if getattr(current_platform, "vendor_name", None) == "metax":
+            from vllm_fl.dispatch.backends.vendor.metax.impl import mx_glue
+
+            mx_glue.install(vllm_config)
+
     # def sleep(self, level: int = 1) -> None:
     #     TODO(lms): rewrite CuMemAllocator
     #     from vllm.device_allocator.cumem import CuMemAllocator
@@ -344,17 +351,34 @@ class WorkerFL(WorkerBase):
             try:
                 from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
                     patch_sampler_compile_for_iluvatar,
+                    patch_topp_launch_for_iluvatar,
                     patch_torch_inductor_for_iluvatar,
                 )
                 # Remap inductor GPUTarget cuda->corex so flagtree triton
                 # backend selection works. Must run in every Worker process.
                 patch_torch_inductor_for_iluvatar()
                 patch_sampler_compile_for_iluvatar()
+                # One top-p program per sampled row instead of one per
+                # compute unit (BI-V150 reports 16, so a 64-row batch was
+                # serialised 4 deep). Bit-identical output; see the docstring.
+                patch_topp_launch_for_iluvatar()
             except Exception as _e:
                 import logging as _lg
                 _lg.getLogger(__name__).warning(
                     "iluvatar worker patch failed: %s", _e
                 )
+            # Install the BI-V150 unified-attention kernel (correctness fix for
+            # the corex exp(-inf) miscompilation at TILE_SIZE>=32 plus
+            # BLOCK_M / TILE_SIZE / num_warps / num_stages tuning). Must run
+            # before load_model and before CUDA-graph capture, i.e. here, in
+            # every Worker process. Deliberately outside the try above: a
+            # failure must stop startup instead of falling back to vLLM's
+            # kernel, which gives wrong prefill attention on this device.
+            from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+                patch_unified_attention_for_iluvatar,
+            )
+
+            patch_unified_attention_for_iluvatar()
         # This env var set by Ray causes exceptions with graph building.
         if (
             self.parallel_config.distributed_executor_backend
@@ -692,6 +716,69 @@ class WorkerFL(WorkerBase):
         # else:
         #     context = nullcontext()
         self.model_runner.initialize_kv_cache(kv_cache_config)
+        if getattr(current_platform, "vendor_name", "") == "iluvatar":
+            # The KV cache now exists, so the top-p scratch the policy asks
+            # for is charged to post-KV headroom instead of being subtracted
+            # from the KV cache by the memory-profiling peak.  See
+            # enable_topp_scratch_policy.
+            try:
+                from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+                    enable_topp_scratch_policy,
+                )
+
+                enable_topp_scratch_policy()
+            except Exception as _e:  # noqa: BLE001
+                import logging as _lg
+                _lg.getLogger(__name__).warning(
+                    "enable_topp_scratch_policy failed: %s", _e
+                )
+
+    def _warm_up_flaggems_mm_buckets(self) -> None:
+        """Autotune the FlagGems GEMMs for every M bucket eager steps can hit.
+
+        The Metax and Iluvatar FlagGems mm kernels key their autotune cache on
+        an M bucket (``_mm_tune_m_bucket`` in the vendor ``ops/mm.py``).  Steps
+        that run without a cudagraph -- every mixed step under
+        FULL_DECODE_ONLY, and mixed steps above the largest capture size
+        otherwise -- use the exact scheduled token count as M, so with a cold
+        tuning cache the first served requests would stall on autotuning.  One
+        eager dummy forward per reachable bucket moves that work to startup;
+        with a warm cache each run only costs one forward pass.
+        """
+        if not fl_envs.USE_FLAGGEMS:
+            return
+        try:
+            import importlib
+
+            import flag_gems
+
+            mm_module = importlib.import_module(flag_gems.mm_out.__module__)
+        except Exception:
+            return
+        bucket = getattr(mm_module, "_mm_tune_m_bucket", None)
+        if bucket is None:
+            return
+        max_tokens = self.vllm_config.scheduler_config.max_num_batched_tokens
+        compilation_config = self.vllm_config.compilation_config
+        first_eager = 1
+        if compilation_config.cudagraph_mode.mixed_mode() != CUDAGraphMode.NONE:
+            first_eager = (compilation_config.max_cudagraph_capture_size or 0) + 1
+        if first_eager > max_tokens:
+            return
+        sizes = sorted(
+            {min(bucket(m), max_tokens) for m in range(first_eager, max_tokens + 1)},
+            reverse=True,
+        )
+        logger.info(
+            "Warming up FlagGems mm autotuning for %d M buckets: %s", len(sizes), sizes
+        )
+        for size in sizes:
+            self.model_runner._dummy_run(
+                size,
+                cudagraph_runtime_mode=CUDAGraphMode.NONE,
+                skip_eplb=True,
+                remove_lora=False,
+            )
 
     def compile_or_warm_up_model(self) -> CompilationTimes:
         warmup_sizes = []
@@ -722,6 +809,7 @@ class WorkerFL(WorkerBase):
         for size in sorted(warmup_sizes, reverse=True):
             logger.info("Compile and warming up model for size %d", size)
             self.model_runner._dummy_run(size, skip_eplb=True, remove_lora=False)
+        self._warm_up_flaggems_mm_buckets()
         self.model_runner.maybe_remove_all_loras(self.model_runner.lora_config)
 
         ### NOTE(lms): can add gems kernel pretune here

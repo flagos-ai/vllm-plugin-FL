@@ -171,7 +171,15 @@ def standalone_compile(
 
 import torch._inductor
 
-torch._inductor.standalone_compile = standalone_compile
+# This hotfix is only needed for torch 2.8 (torch2.8+metax), where
+# CompiledArtifact is a concrete class and standalone_compile has the fake_mode
+# bug worked around above.  On torch >= 2.10 CompiledArtifact is an abstract base
+# (its concrete subclasses implement __call__/save) and the upstream issue is
+# resolved, so instantiating it directly raises TypeError -- keep torch's own
+# standalone_compile there instead of replacing it.
+_torch_mm = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
+if _torch_mm < (2, 10):
+    torch._inductor.standalone_compile = standalone_compile
 
 import torch._functorch._aot_autograd.autograd_cache
 
