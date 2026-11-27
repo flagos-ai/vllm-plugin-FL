@@ -25,6 +25,21 @@ _STUB_ROOTS = ("vllm", "vllm_fl", "flag_gems", "torch_npu")
 _MISSING = object()
 
 
+def _pin_real_parallel_state(saved: dict) -> None:
+    """Re-inject the real vllm.distributed.parallel_state after any eviction.
+
+    torch.library registers ops once per interpreter; re-importing the
+    module re-runs ``direct_register_custom_op`` and raises. Import-system
+    reachability of the original object prevents the re-run.
+    """
+    real = saved.get("vllm.distributed.parallel_state")
+    if real is None or real is _MISSING:
+        return
+    if getattr(real, "__spec__", None) is None:
+        return  # fabricated stub — leave it to the test's own restore
+    saved["vllm.distributed.parallel_state"] = real
+
+
 @pytest.fixture(autouse=True)
 def fl_sys_modules():
     """Snapshot ``sys.modules`` and restore it exactly after the test.
@@ -54,9 +69,32 @@ def fl_sys_modules():
         and "site-packages" in str(module.__spec__.origin)
         and name.split(".")[0] == "vllm"
     }
+    # vllm.distributed.parallel_state registers torch dispatcher ops at import
+    # (upstream direct_register_custom_op has no idempotence guard). Once its
+    # real module object exists in this interpreter, a later re-import of the
+    # package re-executes the registration and blows up. Pin it: keep the real
+    # object reachable under its name even after a test replaced it, so the
+    # import system never re-runs the body.
+    _pin_real_parallel_state(saved)
     try:
         yield saved
     finally:
+        # Real vllm modules register torch dispatcher ops at import time
+        # (parallel_state: all_reduce, offloader/prefetch: wait_prefetch,
+        # ...; upstream direct_register_custom_op has no idempotence guard).
+        # Once a real module's body has executed in this interpreter, letting
+        # the import system re-execute it raises "Tried to register an
+        # operator ... multiple times". Modules may have been imported *during*
+        # the test (absent from the setup snapshot), so pin every REAL
+        # site-packages vllm module currently in sys.modules before the
+        # eviction pass — the import system then never re-runs their bodies.
+        for name, module in list(sys.modules.items()):
+            if name.split(".")[0] != "vllm":
+                continue
+            spec = getattr(module, "__spec__", None)
+            origin = getattr(spec, "origin", None) if spec is not None else None
+            if origin and "site-packages" in str(origin) and name not in saved:
+                saved[name] = module
         for name in [
             name
             for name in list(sys.modules)
