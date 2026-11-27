@@ -174,14 +174,23 @@ def test_cache_address_overflow_is_rejected_without_allocating_device_memory(
 
 
 @pytest.mark.parametrize("head_major", [True, False])
-def test_standardized_cache_device_readback(head_major):
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("graph_mode", [False, True])
+def test_standardized_cache_device_readback(monkeypatch, head_major, dtype, graph_mode):
     if not hasattr(torch, "gcu") or not torch.gcu.is_available():
         pytest.skip("Requires real GCU for strided cache kernel")
     args, _ = _inputs(device="gcu")
+    args["key"] = args["key"].to(dtype)
+    args["value"] = args["value"].to(dtype)
+    monkeypatch.setattr(
+        impl, "_strided_cache_kernel", None
+    )  # These layouts must use the public provider, not the local kernel.
     if head_major:
-        cache = torch.full((16, 2, 4, 8), -91.0, device="gcu")
+        cache = torch.full((16, 2, 4, 8), -91.0, device="gcu", dtype=dtype)
     else:
-        cache = torch.full((16, 4, 2, 8), -91.0, device="gcu").transpose(1, 2)
+        cache = torch.full((16, 4, 2, 8), -91.0, device="gcu", dtype=dtype).transpose(
+            1, 2
+        )
     k, v = cache.transpose(1, 2).split(4, dim=-1)
     args.update(key_cache=k, value_cache=v)
     args["slot_mapping"] = torch.tensor(
@@ -194,4 +203,11 @@ def test_standardized_cache_device_readback(head_major):
             expected[block, :, offset, :4] = args["key"][token].cpu()
             expected[block, :, offset, 4:] = args["value"][token].cpu()
     impl.reshape_and_cache_flash(**args)
+    if graph_mode:
+        torch.gcu.synchronize()
+        graph = torch.gcu.GCUGraph()
+        with torch.gcu.graph(graph):
+            impl.reshape_and_cache_flash(**args)
+        cache.fill_(-91.0)
+        graph.replay()
     torch.testing.assert_close(cache.cpu(), expected, rtol=0, atol=0)

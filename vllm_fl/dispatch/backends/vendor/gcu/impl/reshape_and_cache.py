@@ -145,6 +145,38 @@ def reshape_and_cache_flash(
     # all calls compatible with graph capture, including long prefills.
     for start in range(0, num_tokens, _MAX_GRID_X):
         count = min(num_tokens - start, _MAX_GRID_X)
+        if not packed and cache_strides[0] % head_size == 0:
+            # Present contiguous physical head rows to the public provider.
+            # These aliases share storage with the cache; no KV copy is made.
+            part = slots.narrow(0, start, count)
+            physical = (part // block_size) * (cache_strides[0] // head_size)
+            physical = physical + (part % block_size) * (cache_strides[1] // head_size)
+            physical = torch.where(part < 0, -1, physical)
+            for head in range(heads):
+                views = []
+                for cache in (key_cache, value_cache):
+                    offset = cache.storage_offset() + head * cache_strides[2]
+                    rows = (
+                        cache.untyped_storage().nbytes() // cache.element_size()
+                        - offset
+                    ) // head_size
+                    views.append(
+                        cache.as_strided(
+                            (rows, 1, 1, head_size),
+                            (head_size, head_size, head_size, 1),
+                            offset,
+                        )
+                    )
+                _gems_reshape_and_cache_flash(
+                    key.narrow(0, start, count)[:, head : head + 1],
+                    value.narrow(0, start, count)[:, head : head + 1],
+                    *views,
+                    physical,
+                    kv_cache_dtype,
+                    k_scale,
+                    v_scale,
+                )
+            continue
         if not packed:
             _strided_cache_kernel[(count,)](
                 key.narrow(0, start, count),
