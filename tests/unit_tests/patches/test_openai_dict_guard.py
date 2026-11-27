@@ -13,11 +13,21 @@ Covers the behaviours required by the plugin development standard:
 """
 
 import importlib
+import os
 
 import pytest
 from pydantic import ValidationError
 
 from vllm_fl.patches import openai_dict_guard as guard
+
+# The plugin stack these tests import is CUDA-oriented; other vendors run the
+# same unit tree with their own platform mocks, so skip instead of raising.
+_PLATFORM = os.environ.get("FL_TEST_PLATFORM", "nvidia").lower()
+
+pytestmark = pytest.mark.skipif(
+    _PLATFORM != "nvidia",
+    reason=f"targets the NVIDIA platform (FL_TEST_PLATFORM={_PLATFORM})",
+)
 
 
 def _cls(module_path: str, class_name: str):

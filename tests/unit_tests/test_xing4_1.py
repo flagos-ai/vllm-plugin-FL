@@ -2,10 +2,20 @@
 """Tests for Xing4.1-Preview support (config alias and parsers)."""
 
 import importlib
+import os
 
 import pytest
 
 from vllm_fl.models import xing4_1
+
+# The plugin stack these tests import is CUDA-oriented; other vendors run the
+# same unit tree with their own platform mocks, so skip instead of raising.
+_PLATFORM = os.environ.get("FL_TEST_PLATFORM", "nvidia").lower()
+
+pytestmark = pytest.mark.skipif(
+    _PLATFORM != "nvidia",
+    reason=f"targets the NVIDIA platform (FL_TEST_PLATFORM={_PLATFORM})",
+)
 
 
 @pytest.fixture(autouse=True)
