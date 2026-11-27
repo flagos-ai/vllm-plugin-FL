@@ -24,6 +24,15 @@ cover eager execution and `FULL_DECODE_ONLY` with native HCCL.
 | FlagGems-vllm | Ascend V2 sampling backport on source tag `v0.2.0` at [`622f5bf`](https://github.com/flagos-ai/FlagGems-vllm/commit/622f5bf0e476dcdb861e50ea49cc94b0852c2619) |
 | Optional FlagCX | `0.14.1+cann9.0.0.910c` for the C API path below |
 
+The published deployment image includes the `622f5bf` V2 sampling backport of
+[FlagGems-vllm #1234](https://github.com/flagos-ai/FlagGems-vllm/pull/1234).
+That PR remains open; the qualified image requires no additional provider
+installation or upstream merge. The pinned FlagGems runtime retains the scoped
+compatibility paths tracked by [#9122](https://github.com/flagos-ai/FlagGems/issues/9122),
+[#9148](https://github.com/flagos-ai/FlagGems/issues/9148),
+[#9149](https://github.com/flagos-ai/FlagGems/issues/9149), and
+[#9151](https://github.com/flagos-ai/FlagGems/issues/9151).
+
 ### Optional FlagCX device collectives on vLLM 0.32.0
 
 Use a FL wheel built from a checkout with FlagCX wheel-layout support. On

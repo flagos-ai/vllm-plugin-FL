@@ -1,6 +1,9 @@
 # Copyright (c) 2026 Kunlunxin, Inc. All rights reserved.
 """Route the vLLM V2 grammar kernel to the Kunlunxin operator provider."""
 
+# Image-baked provider: https://github.com/flagos-ai/FlagGems-vllm/pull/1248.
+# Native grammar baseline: https://github.com/flagos-ai/FlagTree/issues/1700.
+
 import importlib
 import logging
 

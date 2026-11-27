@@ -2,6 +2,9 @@
 
 """Bind the FlagGems-vLLM Ascend ops to the upstream V2 sampler."""
 
+# Provider contract: https://github.com/flagos-ai/FlagGems-vllm/pull/1234.
+# The qualified image supplies the backport pinned by the Ascend installer.
+
 import importlib
 
 _PENALTIES_MODULE = "vllm.v1.worker.gpu.sample.penalties"
