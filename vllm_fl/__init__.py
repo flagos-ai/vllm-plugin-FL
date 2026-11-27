@@ -253,6 +253,8 @@ def register_model():
     from vllm_fl.models.glm5.runtime import (
         register_glm5_next_support,
     )
+    from vllm_fl.models.xing4_1 import register_xing41_support
+    from vllm_fl.patches.openai_dict_guard import install as install_openai_dict_guard
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
     from vllm_fl.patches.qwen3_8_flash_next import (
         apply_qwen3_8_flash_next_patches,
@@ -263,6 +265,15 @@ def register_model():
     register_glm5_next_support()
     apply_qwen3_5_text_patches()
     apply_qwen3_8_flash_next_patches()
+
+    # Xing4.1-Preview is a DeepSeek-V3.2 style checkpoint whose model_type the
+    # plugin maps onto vLLM's DeepSeek config, plus the xing4_0 parsers.
+    register_xing41_support()
+
+    # vLLM 0.24.0 reads the raw OpenAI payload in several request validators
+    # before checking its type, turning a malformed body into HTTP 500. The
+    # guard is idempotent and leaves dict payloads on the untouched path.
+    install_openai_dict_guard()
 
     from vllm.platforms import current_platform
 
