@@ -15,13 +15,16 @@
 # Enflame S60 hardware configuration.
 platform: enflame
 
-# Canonical vLLM 0.28 dependency image tag, pinned to the verified manifest.
-# The runner, device allocation and mounts follow main's Enflame configuration.
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88
+# Published vLLM 0.32 Enflame image. It supplies the validated vendor
+# runtime; CI installs only the checked-out plugin and test dependencies.
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-enflame-ci@sha256:732e3d505e89203215727189b0820dd601dc426c4b05092259bdabeec7c68b71
 
 # Existing Enflame S60 Actions runner label, matching main.
 runner_labels:
   - enflame-s60
+
+unit_devices:
+  - s60
 
 # Model files are persistent host data and use the same path in the container.
 container_volumes:

@@ -18,11 +18,13 @@ _PARENTS = [
 ]
 
 
-def _setup_fake_qwen3_vl(triton_present: bool, native_present: bool = True):
+def _setup_fake_qwen3_vl(
+    monkeypatch, triton_present: bool, native_present: bool = True
+):
     """Install a fresh fake qwen3_vl and all parent stubs into sys.modules."""
     for p in _PARENTS:
         if p not in sys.modules:
-            sys.modules[p] = types.ModuleType(p)
+            monkeypatch.setitem(sys.modules, p, types.ModuleType(p))
 
     mod = types.ModuleType(_MOD_NAME)
 
@@ -40,22 +42,20 @@ def _setup_fake_qwen3_vl(triton_present: bool, native_present: bool = True):
 
         mod.triton_pos_embed_interpolate = triton_pos_embed_interpolate
 
-    sys.modules[_MOD_NAME] = mod
+    monkeypatch.setitem(sys.modules, _MOD_NAME, mod)
+    monkeypatch.setattr(sys.modules[_PARENTS[-1]], "qwen3_vl", mod, raising=False)
     return mod
 
 
 @pytest.fixture(autouse=True)
-def _fresh_patch_flag():
-    """Remove the patch flag from vl_compat before each test."""
-    import vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat as vc
+def _fresh_patch_flag(monkeypatch):
+    """Isolate fake modules and restore any model imported during collection."""
+    import vllm_fl.dispatch.backends.vendor.kunlunxin.patches.vl_compat  # noqa: F401
 
-    # Remove flag so each test starts with an un-patched state
-    for attr in list(vars(vc).keys()):
-        if attr.startswith("_vllm_fl_kunlunxin_vl"):
-            pass  # We'll reset the qwen3_vl module itself
-    yield
-    # Clean up the installed fake module
-    sys.modules.pop(_MOD_NAME, None)
+    monkeypatch.delitem(sys.modules, _MOD_NAME, raising=False)
+    parent = sys.modules.get(_PARENTS[-1])
+    if parent is not None:
+        monkeypatch.delattr(parent, "qwen3_vl", raising=False)
 
 
 def _get_vc():
@@ -70,27 +70,27 @@ def _get_vc():
     return vc
 
 
-def test_triton_replaced_with_native():
+def test_triton_replaced_with_native(monkeypatch):
     """When Triton is present, triton_pos_embed_interpolate → native."""
     vc = _get_vc()
-    mod = _setup_fake_qwen3_vl(triton_present=True)
+    mod = _setup_fake_qwen3_vl(monkeypatch, triton_present=True)
     vc.apply_vl_compat()
     assert mod.triton_pos_embed_interpolate("x") == "native"
     assert getattr(mod, vc._PATCH_FLAG, False)
 
 
-def test_no_triton_no_error():
+def test_no_triton_no_error(monkeypatch):
     """When Triton is absent the patch marks done without raising."""
     vc = _get_vc()
-    mod = _setup_fake_qwen3_vl(triton_present=False)
+    mod = _setup_fake_qwen3_vl(monkeypatch, triton_present=False)
     vc.apply_vl_compat()
     assert getattr(mod, vc._PATCH_FLAG, False)
 
 
-def test_idempotent():
+def test_idempotent(monkeypatch):
     """Calling apply_vl_compat twice does not raise or undo the patch."""
     vc = _get_vc()
-    mod = _setup_fake_qwen3_vl(triton_present=True)
+    mod = _setup_fake_qwen3_vl(monkeypatch, triton_present=True)
     vc.apply_vl_compat()
     vc.apply_vl_compat()
     assert mod.triton_pos_embed_interpolate("x") == "native"
@@ -99,7 +99,7 @@ def test_idempotent():
 def test_missing_native_fn_no_crash(monkeypatch):
     """A missing native fallback emits a warning without installing the patch."""
     vc = _get_vc()
-    mod = _setup_fake_qwen3_vl(triton_present=True, native_present=False)
+    mod = _setup_fake_qwen3_vl(monkeypatch, triton_present=True, native_present=False)
     original = mod.triton_pos_embed_interpolate
     warning = Mock()
     monkeypatch.setattr(vc.logger, "warning", warning)
@@ -112,11 +112,11 @@ def test_missing_native_fn_no_crash(monkeypatch):
     assert not hasattr(mod, vc._PATCH_FLAG)
 
 
-def test_module_not_installed_no_crash():
+def test_module_not_installed_no_crash(monkeypatch):
     """If qwen3_vl is not installed, apply_vl_compat returns silently."""
     vc = _get_vc()
     # Set to None so the import raises ImportError (Python's behavior with None in sys.modules)
-    sys.modules[_MOD_NAME] = None  # type: ignore[assignment]
+    monkeypatch.setitem(sys.modules, _MOD_NAME, None)
     vc.apply_vl_compat()  # Must not raise
 
 

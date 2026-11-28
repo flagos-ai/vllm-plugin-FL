@@ -389,35 +389,8 @@ class PlatformFL(Platform):
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
         if cls.device_type == "gcu":
-            if vllm_config.use_v2_model_runner:
-                raise ValueError(
-                    "Enflame requires ModelRunnerFL; the upstream V2 runner is "
-                    "not supported on GCU. Set VLLM_USE_V2_MODEL_RUNNER=0."
-                )
-            # The default V1 override takes precedence over upstream's automatic
-            # V2 selection. Reject features that V1 cannot execute faithfully.
-            v2_only_features = []
-            speculative_config = getattr(vllm_config, "speculative_config", None)
-            if speculative_config is not None:
-                if speculative_config.method == "dspark":
-                    v2_only_features.append("DSpark")
-                elif speculative_config.method == "dflash":
-                    if vllm_config._dflash_needs_multi_kv_group():
-                        v2_only_features.append("mixed-KV DFlash")
-                    if vllm_config._is_dflash_candidate_draft():
-                        v2_only_features.append(
-                            "DFlash candidate head (DFlash2/LiLiCorr)"
-                        )
             model_config = getattr(vllm_config, "model_config", None)
-            if model_config is not None and getattr(
-                model_config, "is_diffusion", False
-            ):
-                v2_only_features.append("diffusion")
-            if v2_only_features:
-                raise ValueError(
-                    "Enflame ModelRunnerFL does not support these V2-only features: "
-                    + ", ".join(v2_only_features)
-                )
+            speculative_config = getattr(vllm_config, "speculative_config", None)
             if (
                 getattr(model_config, "is_hybrid", False)
                 and speculative_config is not None
@@ -434,6 +407,13 @@ class PlatformFL(Platform):
                     "speculative decoding for this configuration."
                 )
         if cls.vendor_name in ("gcu", "enflame"):
+            # vLLM may load a compiled artifact before invoking Inductor, so
+            # invalidate its cache as well as Torch's dtype-corrupted artifacts.
+            from vllm_fl.dispatch.backends.vendor.gcu.compilation_config import (
+                configure_codegen_cache,
+            )
+
+            configure_codegen_cache(vllm_config.compilation_config)
             from vllm_fl.attention.utils import patch_mm_encoder_attention
 
             # Install before CustomOp caches even a disabled encoder's native
@@ -514,11 +494,14 @@ class PlatformFL(Platform):
                 # Revalidate after changing MLA/KV-head semantics so DCP and TP
                 # constraints are checked against the dense architecture.
                 model_config.verify_with_parallel_config(parallel_config)
-        parallel_config.worker_cls = (
-            "vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker.IluvatarWorkerFL"
-            if cls.vendor_name == "iluvatar"
-            else "vllm_fl.worker.worker.WorkerFL"
-        )
+        if cls.device_type == "gcu":
+            parallel_config.worker_cls = (
+                "vllm_fl.dispatch.backends.vendor.gcu.worker.worker.WorkerGCU"
+            )
+        elif cls.vendor_name == "iluvatar":
+            parallel_config.worker_cls = "vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker.IluvatarWorkerFL"
+        else:
+            parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         scheduler_config = vllm_config.scheduler_config
         if (
@@ -1092,7 +1075,7 @@ class PlatformFL(Platform):
         # Retain the registered collective routes for TXDA and native MCCL.
         return (
             cls.device_type == "txda"
-            or cls.vendor_name in ("nvidia", "thead", "iluvatar")
+            or cls.vendor_name in ("nvidia", "thead", "iluvatar", "enflame")
             or (cls.device_type == "musa" and cls.dist_backend == "mccl")
             # Keep FlagCX ctypes calls out of Dynamo's tracing.
             or (cls.vendor_name == "amd" and cls.dist_backend == "flagcx")
@@ -1169,8 +1152,8 @@ class PlatformFL(Platform):
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"]
-        # NPU wheels register native IR implementations without vllm_c.
-        if not using_inductor and cls.device_type != "npu":
+        # GCU and NPU wheels register native IR implementations without vllm_c.
+        if not using_inductor and cls.device_type not in {"gcu", "npu"}:
             has_vllm_c = (
                 cls._vllm_c_is_registered_provider()
                 if cls.vendor_name == "amd"

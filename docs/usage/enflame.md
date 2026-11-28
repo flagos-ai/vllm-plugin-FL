@@ -1,24 +1,49 @@
 # Enflame S60 Deployment Guide
 
+The pinned image and deployment instructions below describe the published vLLM 0.32.0 Enflame image.
+For the image build requirements, see the
+[image recipe](../../docker/enflame/README.md).
+
 This guide starts an OpenAI-compatible vLLM service on Enflame S60 GCUs using
 the dependency stack validated by this repository. Use the pinned image and
 install the plugin from the revision you intend to deploy; the image does not
 contain each candidate's plugin changes.
 
-## Validated software stack
+## Published image and expected software stack
 
-| Component | Validated version or configuration |
+| Component | Version or configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci` |
-| Image manifest | `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88` |
+| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-enflame-ci` |
+| Image manifest | `sha256:732e3d505e89203215727189b0820dd601dc426c4b05092259bdabeec7c68b71` |
 | Accelerator / host driver | Enflame S60 / `1.10.6` |
-| vLLM | `0.28.0+empty` (`VLLM_TARGET_DEVICE=empty`) |
+| vLLM | `0.32.0+empty` (`VLLM_TARGET_DEVICE=empty`) |
 | Python | `3.12.8` |
 | PyTorch | `2.11.0+cpu` with `torch-gcu==2.11.0+3.8.20260713` |
 | FlagTree | `0.7.0+enflame3.6`, the Enflame-specific release |
 | Triton GCU | `3.6.0+1.0.20260722`; FlagTree provides the `triton` Python namespace |
-| FlagGems | `5.4.0` |
+| FlagGems | `5.5.0.dev0` |
+| TOPS SDK / TOPS ATen | `3.8.20260714` / `3.8.20260710` |
+| FlagCX / ECCL | `0.13.0` / `3.7.1.2` |
+| Preinstalled FlagGems-vllm | `0.3.0.dev1`; local wheel provenance, public source SHA unverified |
 | OpenAI SDK / pandas | `3.28.0` / `3.0.6` |
+
+The pinned image's package metadata records the following installation sources.
+Wheel hashes identify installed artifacts; they do not identify public source commits.
+
+| Component | Recorded source |
+|---|---|
+| TorchGCU | TOPS SDK bundle wheel; SHA256 `2796fc7c1a5188a5a1462679b61e6f24bf5536fdb21e5573a82a253c0239bd3e` |
+| TOPS SDK / TOPS ATen / ECCL | Vendor Debian package metadata; source commits unavailable |
+| FlagCX | Local `/sgl-workspace/FlagCX` directory; source commit unrecorded |
+| FlagTree / Triton GCU | Installed wheel metadata confirms the versions above; public source commits unrecorded |
+| FlagGems | Local `flag_gems-5.5.0.dev0` wheel; SHA256 `8bbc0a8fbf4840f5ef8fcf70ff86cdab11f0248e86e0db8ed1f7e969bdb6d5be` |
+| FlagGems-vllm | Local `flaggems_vllm-0.3.0.dev1` wheel; SHA256 `8a6ad92b7dc09987f0460362a59fdbed4d6081e3476289e82e52264e8220b1ad` |
+| vLLM | Editable `/workspace/gate-src/vllm` directory; installed version `0.32.0+empty`, source commit unrecorded |
+
+The image retains older vLLM 0.28 OCI labels. Those labels cannot establish the
+source revision of its installed 0.32 packages. The image recipe pins the official
+vLLM source for a new build; the published image's missing source revisions still
+need confirmation from its publisher before a source-reproducible rebuild can be claimed.
 
 The `+cpu` PyTorch version is the vendor package's version string; execution
 uses `torch_gcu` and the `gcu` device. Do not replace it with a generic PyTorch
@@ -58,11 +83,13 @@ tmux new-session -s "enflame-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 ## 2. Prepare the checkout and models
 
 Use a private checkout at the branch, tag, or commit you intend to deploy.
-Keep model weights on the host and mount them read-only. The native test YAMLs
+The example selects the vLLM 0.32 adaptation branch `0.5.0-dev`; before the
+Enflame PR is merged, select its reviewed commit instead of assuming the target
+branch contains the adaptation. Keep model weights on the host and mount them read-only. The native test YAMLs
 expect the following two directories under `/data/models/Qwen` in the container:
 
 ```bash
-git clone --branch 0.4.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git
+git clone --branch 0.5.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git
 cd vllm-plugin-FL
 
 export REPO_DIR="$PWD"
@@ -84,7 +111,7 @@ The digest pins the dependency image even if its tag changes. Authenticate with
 `docker login harbor.baai.ac.cn` only if required by your registry access.
 
 ```bash
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-enflame-ci@sha256:732e3d505e89203215727189b0820dd601dc426c4b05092259bdabeec7c68b71
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 
@@ -150,24 +177,23 @@ bash .github/scripts/enflame/setup.sh 2>&1 | tee /logs/setup.log
 ```
 
 `check.sh` requires at least two visible GCUs and creates a small GCU tensor.
-`setup.sh` verifies package versions and runs both checkout guards:
+The image supplies vLLM, flaggems-vllm, the vendor runtime, and test dependencies.
+`setup.sh` installs `pytest-xdist>=3.0.0,<4` (and its dependencies) from the
+configured public mirror, then reinstalls the selected plugin checkout with
+`--no-build-isolation --no-deps -e .` and checks imports and device availability.
+It preserves the image's runtime dependencies; setup still needs network access
+for the test-tool installation.
 
-- [`verify_compiler.py`](../../docker/enflame/verify_compiler.py) checks the
-  imported Triton origin and FlagTree's recorded release-file hashes.
-- [`verify_index_fill.py`](../../docker/enflame/verify_index_fill.py) checks the
-  supported FlagGems release bytes used by the GCU `index_fill` adapter.
-
-It then installs this checkout with
-`python -m pip install --no-build-isolation --no-deps -e .` and checks imports.
-Do not resolve dependencies again with a generic `pip install -U`: a dependency
-can overwrite FlagTree's Triton files while leaving its package metadata intact.
-The guards detect that corruption; metadata versions alone do not prove that
-the intended compiler is active.
+Do not resolve runtime dependencies again with a generic `pip install -U`: a
+dependency can overwrite FlagTree's Triton files while leaving its metadata
+intact. The checkout's [compiler guard](../../docker/enflame/verify_compiler.py)
+and [index_fill guard](../../docker/enflame/verify_index_fill.py) are available
+for diagnosing the image stack.
 
 ## 5. Start and query the service
 
 Continue inside the container. These examples use the native TP2 model settings
-and the S60 overrides: `max_model_len=8192`, memory utilization `0.94`, and the
+and the S60 overrides: `max_model_len=8192`, memory utilization `0.90`, and the
 GCU collective path. Graph mode omits `--enforce-eager`.
 
 ```bash
@@ -188,12 +214,30 @@ vllm serve "/data/models/Qwen/$MODEL_NAME" \
   --port 8000 \
   --tensor-parallel-size 2 \
   --max-model-len 8192 \
-  --gpu-memory-utilization 0.94 \
+  --gpu-memory-utilization 0.90 \
+  --max-num-seqs 64 \
+  --max-num-batched-tokens 4096 \
+  --compilation-config '{"custom_ops":["none","+SiluAndMul"],"cudagraph_capture_sizes":[1,2,4,8,16,32]}' \
   "${mode_args[@]}" 2>&1 | tee "/logs/$MODEL_NAME-$MODE-server.log"
 ```
 
+These settings match the checked-in S60 inference configurations:
+
+| Setting | Purpose |
+|---|---|
+| `gpu_memory_utilization=0.90` | Sets vLLM's device-memory budget; leaves room for runtime and compilation allocations. |
+| `max_num_seqs=64` | Caps the number of sequences scheduled together. |
+| `max_num_batched_tokens=4096` | Caps tokens processed in one scheduling iteration, including chunked prefill. |
+| `custom_ops=["none","+SiluAndMul"]` | Disables optional custom-op paths globally, then enables `SiluAndMul` for this tested backend configuration. |
+| `cudagraph_capture_sizes=[1,2,4,8,16,32]` | Bounds the graph batch sizes captured during startup; these sizes do not set the sequence limit. |
+
+The observed graph-capture stack for the validated 27B configuration used
+`vllm/v1/worker/gpu/model_runner.py`, the V2 runner path in vLLM 0.32.
+This observation applies to that configuration; record the actual runner for each
+new model or configuration rather than inferring it from an unset environment variable.
+
 Cold-cache compilation and graph capture can take substantial time. The native
-S60 e2e jobs allow 120 minutes. Follow the service log and wait for startup to
+S60 inference jobs allow 120 minutes. Follow the service log and wait for startup to
 finish before sending requests. In a second host terminal, use the host port
 selected above (8000 in this example):
 
@@ -210,58 +254,8 @@ curl --fail http://127.0.0.1:8000/v1/chat/completions \
 ```
 
 Check the returned model name and response, and retain server errors if any.
-An HTTP response is a deployment smoke check; it does not establish full model
-or adaptation Gate coverage. Stop this example server with Ctrl-C in its tmux
+Stop this example server with Ctrl-C in its tmux
 session before using the same devices for another model, mode, or test.
-
-## 6. Run the repository validation
-
-With the example server stopped, run these commands inside the private
-container and retain the generated reports and logs:
-
-```bash
-set -euo pipefail
-cd /workspace/vllm-plugin-FL
-python tests/run.py --platform enflame --device s60 --scope unit \
-  --output-dir /logs/unit 2>&1 | tee /logs/unit-console.log
-python tests/run.py --platform enflame --device s60 --scope functional \
-  --output-dir /logs/functional 2>&1 | tee /logs/functional-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task inference \
-  --model qwen3_6 --case 27b_tp2_eager --output-dir /logs/27b-eager \
-  2>&1 | tee /logs/27b-eager-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task inference \
-  --model qwen3_6 --case 27b_tp2_graph --output-dir /logs/27b-graph \
-  2>&1 | tee /logs/27b-graph-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task serving \
-  --model qwen3_6 --case 35b_a3b_tp2_eager --output-dir /logs/35b-eager \
-  2>&1 | tee /logs/35b-eager-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task serving \
-  --model qwen3_6 --case 35b_a3b_tp2_graph --output-dir /logs/35b-graph \
-  2>&1 | tee /logs/35b-graph-console.log
-```
-
-Each invocation writes to a separate output directory so its JSON/XML reports
-are preserved instead of overwritten by the next run.
-
-These are the cases selected in
-[`tests/platforms/enflame.yaml`](../../tests/platforms/enflame.yaml), with the
-original [Qwen3.6 model YAMLs](../../tests/models/qwen3_6). The 27B inference
-cases check text completion; the 35B serving cases check model listing and
-text/image chat. They do not replace the longer concurrent scenarios in the
-[adaptation Gate](../../tools/adaptation-gate-cases/README.md).
-
-Run each Gate model in both eager and graph modes, preserving the original
-requests and checks. Record the actual plugin commit, model, mode, port, and
-server arguments alongside the raw scenario JSONs. Acceptance requires every
-`summary.passed` and every request's checks to pass, rather than only a pytest
-exit code. The S60 capacity validation for 35B graph used TP2, max length 32768,
-max sequences 256, memory utilization 0.94, and FP32 Mamba state; the 8192-token
-CI smoke settings above do not reproduce that capacity test. Retain FP32 Mamba
-state and the original quality checks when repeating it.
-
-The pinned dependency image has hardware validation history, but it does not
-establish acceptance of an arbitrary plugin checkout. Re-run the relevant tests
-and original Gate for the exact revision you deploy.
 
 ## Limitations and troubleshooting
 
@@ -271,12 +265,15 @@ and original Gate for the exact revision you deploy.
 - **Compiler guard fails:** retain its output and recreate the container from
   the pinned image. Do not bypass the guard or install a generic Triton wheel.
 - **Out of memory:** first check that the selected pair is available and that
-  the S60 `0.94` budget is applied. Changing context length, concurrency,
+  the S60 `0.90` budget is applied. Changing context length, concurrency,
   precision, or tensor parallelism requires separate validation of that new
-  configuration; it is not a passing result for the original Gate.
-- **Runner or speculative-decoding error:** Enflame uses `ModelRunnerFL` for
-  eager and graph execution. Explicit `VLLM_USE_V2_MODEL_RUNNER=1` and V2-only
-  features are unsupported. Hybrid models with speculative decoding and
+  configuration.
+- **Runner or speculative-decoding error:** Enflame does not force the runner environment variable. When unset, vLLM
+  0.32 selects the runner from Triton availability and configuration; eligible
+  configurations can select `GPUModelRunnerFLV2` automatically. Explicit `0`
+  selects the legacy runner and `1` requests V2. Record the actual runner
+  class from startup logs; a V1 result is not evidence for V2.
+  Validate the selected runner and execution mode on hardware. Hybrid models with speculative decoding and
   `mamba_cache_mode=align` are rejected because the fused Mamba state-copy path
   does not yet translate its indirect pointers to GCU addresses. Other
   speculative/cache combinations still need their own hardware validation.
