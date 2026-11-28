@@ -366,7 +366,7 @@ jobs:
             echo
             cat coverage-aggregate.md 2>/dev/null || echo "_aggregate missing_"
             echo
-            echo "Per-platform leg results: ${{ join(needs.coverage.result, ' ') }}"
+            echo "Coverage job result: \`${{ needs.coverage.result }}\` (failed or cancelled legs are the usual cause of an incomplete aggregate)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload aggregate artifact

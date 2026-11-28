@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Coverage tooling
 
 Tools around the coverage.py JSON reports produced by `tests/run.py`
@@ -46,10 +47,89 @@ coverage of the code applicable to one platform. Two filters:
    vendors. On kunlunxin, hygon/iluvatar/thead/nvidia-only branch lines
    leave the report; on thead, kunlunxin-only lines leave. Common lines
    and P's own vendor branches always stay.
+=======
+# vllm-plugin-FL coverage tooling
+
+Reporting-time tools around coverage.py JSON reports for the
+multi-platform supplementary coverage effort
+(kunlunxin / hygon / iluvatar / thead). All tools are stdlib-only and
+consume the JSON output of ``--cov-report=json``.
+
+| tool | purpose |
+|---|---|
+| `merge_coverage.py` | statement-level union of one platform's core baseline + supplementary-only report |
+| `aggregate_coverage.py` | **multi-platform aggregate** — union of executed lines across platforms over the full `vllm_fl` denominator |
+| `area_report.py` | per-area (module prefix) numbers from one report |
+| `delta_report.py` | per-area core → combined deltas |
+| `scope_<platform>.json` | reporting-time scope config per platform (measurement scope never changes) |
+
+## Multi-platform aggregate (`aggregate_coverage.py`)
+
+### Formula
+
+```
+aggregate % = |∪_p executed_lines(p)| / total vllm_fl executable statements
+```
+
+* **Numerator** — the union of every participating platform's executed
+  lines. A statement executed by several platforms counts **once**; the
+  aggregate rewards complementary coverage, not repetition.
+* **Denominator** — the complete `vllm_fl` executable-statement count
+  (25,410 statements at the 0.5.0-dev frozen revision), identical for
+  every input because all platforms measure the same tree.
+
+Per file, the statement set is reconstructed as
+`executed ∪ missing` — the pattern already validated in
+`merge_coverage.py` — so a statement that one platform's report lists as
+missing but another executes is still aggregated correctly, and
+`missing = statements − executed` stays exact in the output.
+
+### Consistency prerequisites
+
+The aggregate is only meaningful when all inputs share:
+
+1. **the same source commit** — the workflow checks out one frozen
+   revision for every platform leg (`fetch-depth: 0`, SHA recorded in
+   `meta.commit_sha`);
+2. **the same coverage configuration** — `pyproject.toml`
+   `[tool.coverage.*]` (measurement scope `source=vllm_fl`, never
+   per-platform);
+3. **the same caliber** — every input must be the same kind of report
+   (e.g. all core baselines, or all combined core+supplementary).
+
+The tool validates per-file `num_statements` across inputs. Under the
+prerequisites above the counts are identical; any file where they differ
+is listed in `meta.inconsistent_files`, the result is marked incomplete,
+and a warning is printed — **it does not fail the run**, because the
+aggregate is a reporting artifact, not a gate.
+
+### Incomplete semantics
+
+`--expected-platforms` names the platforms a complete aggregate should
+have (default `kunlunxin,hygon,iluvatar,thead`). Any expected platform
+without an input report is recorded in `meta.missing_platforms`,
+`meta.complete` is set to `false`, and the tool prints a loud warning:
+
+```
+========================================================================
+[aggregate] WARNING: AGGREGATE RESULT IS INCOMPLETE
+[aggregate] missing platform reports: iluvatar
+[aggregate] the union below is a FLOOR for the plan's aggregate target,
+           not the target number itself
+========================================================================
+```
+
+The (incomplete) aggregate is still produced: in CI, a single failed
+platform leg must not hide the other platforms' numbers. An incomplete
+aggregate is a **floor** — it can only understate the true union, never
+overstate it — so it is safe to display but must not be read as the
+plan's aggregate acceptance number.
+>>>>>>> f1c89a64 (docs(coverage): aggregate README and workflow job-summary fix)
 
 ### Usage
 
 ```bash
+<<<<<<< HEAD
 python tools/coverage/platform_scope_report.py \
     --report coverage-kunlunxin.json \
     --platform kunlunxin \
@@ -147,3 +227,39 @@ After the kunlunxin switch ships in `_unit_test.yml`:
    removing the `inputs.platform == 'kunlunxin'` condition on
    `report_path` in `_unit_test.yml` (the applicable step already runs
    for every platform).
+=======
+python tools/coverage/aggregate_coverage.py \
+    --inputs coverage-kunlunxin.json coverage-hygon.json \
+             coverage-iluvatar.json coverage-thead.json \
+    --platforms kunlunxin,hygon,iluvatar,thead \
+    --expected-platforms kunlunxin,hygon,iluvatar,thead \
+    --commit-sha <sha> \
+    --output coverage-aggregate.json \
+    --summary-md coverage-aggregate.md
+```
+
+* `--platforms` may be omitted when inputs are named
+  `coverage-<platform>(-<tag>).json`; the platform is derived from the
+  file name.
+* `--summary-md` writes a job-summary table: per-platform
+  statements/covered/% plus the aggregate row and the completeness status.
+* The output is a standard coverage.py-shaped JSON (`meta` + `files` +
+  `totals`) with `meta.caliber = "multi-platform-aggregate"`,
+  `meta.participating_platforms`, and the completeness fields described
+  above.
+* The tool self-checks the same invariant as `merge_coverage.py` —
+  every file's `summary.missing_lines == len(missing_lines)` — before
+  writing the output; a violation aborts with exit 3.
+
+### CI integration
+
+`.github/workflows/coverage_supplementary_multi.yml` runs an
+`aggregate` job (`needs: coverage`, `if: always()`, plain
+`ubuntu-latest` — only JSON artifacts are processed, no device). It
+downloads the per-platform artifacts, builds the aggregate inputs,
+runs the tool, and uploads `coverage-aggregate.json` +
+`coverage-aggregate.md` as the `coverage-supplementary-multi-aggregate`
+artifact with the summary table appended to the job summary. Because
+the job runs `if: always()`, a failed or cancelled platform leg still
+yields an aggregate — explicitly marked incomplete.
+>>>>>>> f1c89a64 (docs(coverage): aggregate README and workflow job-summary fix)
