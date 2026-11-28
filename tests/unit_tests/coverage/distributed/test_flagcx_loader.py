@@ -38,6 +38,7 @@ import torch.distributed as dist
 pytestmark = [pytest.mark.supplementary]
 
 _MODULE = "vllm_fl.distributed.device_communicators.flagcx"
+_PARENT = "vllm_fl.distributed.device_communicators"
 
 
 def _import_fresh():
@@ -45,17 +46,47 @@ def _import_fresh():
 
     The supplementary tests need module-level branches (FLAGCX_PATH handling,
     vendor dispatch) to re-execute under controlled sys.modules contents, so
-    the cached entry is popped, a fresh copy executed, and the caller-visible
-    entry restored afterwards.
+    the cached entry is popped, a fresh copy executed, and the pre-test state
+    restored afterwards.
+
+    Two states must be restored together, or a faked fresh copy leaks into
+    the rest of the session:
+
+    * the ``sys.modules`` entry — popping only ``sys.modules`` is not enough:
+    * the parent package's ``flagcx`` attribute — ``importlib`` executes
+      ``setattr(device_communicators, 'flagcx', <fresh copy>)`` and later
+      ``from vllm_fl.distributed.device_communicators import flagcx``
+      resolves through that attribute *without* re-importing, so a fresh copy
+      carrying a test's fake ``FLAGCXLibrary`` (e.g. a RecordingLibrary
+      instance) reaches every later consumer — the real-machine two-rank
+      FlagCX functional test then sees bindings "present" but bogus and its
+      spawned ranks fail to initialize.
+
+    When this is the session's first import of the module (``saved`` is
+    None) both states are returned to "not imported at all", so the next
+    importer re-executes the module cleanly under the real environment.
     """
     import importlib
 
+    parent = sys.modules.get(_PARENT)
     saved = sys.modules.pop(_MODULE, None)
+    saved_attr = getattr(parent, "flagcx", None) if parent is not None else None
     try:
         return importlib.import_module(_MODULE)
     finally:
         if saved is not None:
             sys.modules[_MODULE] = saved
+        else:
+            sys.modules.pop(_MODULE, None)
+        # re-read the parent: the import above may have created it
+        parent = sys.modules.get(_PARENT)
+        if parent is not None:
+            if saved is not None or saved_attr is not None:
+                setattr(parent, "flagcx", saved if saved is not None else saved_attr)
+            else:
+                # first import in the session: leave the package untouched
+                if hasattr(parent, "flagcx"):
+                    delattr(parent, "flagcx")
 
 
 def _install_fake_flagcx_api():
