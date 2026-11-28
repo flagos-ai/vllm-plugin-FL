@@ -77,12 +77,17 @@ def merge(baseline: dict, supp: dict, scope: dict, commit_sha: str) -> dict:
     total_stmts = 0
     total_covered = 0
 
+    # Normalize the supplementary file table once: real-hardware runs record
+    # absolute paths (e.g. /flagos/.../vllm_fl/...) while repo runs record
+    # relative ones, so lookup by raw key silently misses every file.
+    supp_rel_files = {_norm_key(k): v for k, v in supp_files.items()}
+
     for key, base_info in base_files.items():
         rel = _norm_key(key)
         if any(rel.startswith(prefix) for prefix in reporting_exclude):
             continue
 
-        supp_info = supp_files.get(key) or supp_files.get(rel) or {}
+        supp_info = supp_files.get(key) or supp_rel_files.get(rel) or {}
         executed = set(base_info.get("executed_lines", []))
         executed |= set(supp_info.get("executed_lines", []))
         num_statements = base_info.get("summary", {}).get(
