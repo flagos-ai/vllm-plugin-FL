@@ -898,3 +898,79 @@ class TestYamlConfigParsing:
         )
         parsed = io_common.parse_io_config_from_yaml(str(config))["io_dump"]
         assert parsed["with_torch_funcs"] == expected
+
+
+class TestListModelLayers:
+    """list_model_layers module-path discovery incl. depth filtering."""
+
+    def _model(self):
+        import torch.nn as nn
+
+        inner = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
+        outer = nn.Sequential(inner, nn.Linear(4, 4))
+        model = nn.Sequential(nn.Linear(4, 4), outer)
+        return model, inner
+
+    def test_all_paths_with_class_names(self):
+        """Every named module appears as 'name (ClassName)' with the root
+        module skipped."""
+        model, _ = self._model()
+        paths = io_common.list_model_layers(model)
+        assert "0 (Linear)" in paths
+        assert "1.0.0 (Linear)" in paths
+        assert all(" (" in p for p in paths)
+        # The root module itself is skipped.
+        assert not any(p.startswith(" (") for p in paths)
+
+    def test_max_depth_prunes_deep_modules(self):
+        """max_depth keeps only modules at or above the given nesting."""
+        model, _ = self._model()
+        full = io_common.list_model_layers(model)
+        depth1 = io_common.list_model_layers(model, max_depth=1)
+        # Depth-1 names contain no dot after the leading index.
+        assert all("." not in name for name, _ in (p.split(" ") for p in depth1))
+        assert len(depth1) < len(full)
+        assert set(depth1) < set(full)
+
+    def test_empty_model_returns_empty_list(self):
+        """A module with no children produces an empty path list."""
+        import torch.nn as nn
+
+        assert io_common.list_model_layers(nn.Identity()) == []
+
+
+class TestGetRankDistributed:
+    """get_rank's initialized-process-group branch with a real gloo PG.
+
+    torch.distributed is initialized single-process over a FileStore so
+    ``dist.is_initialized()`` is genuinely True and the cached rank comes
+    from ``dist.get_rank()`` — not from env vars (which are cleared).
+    torch's Windows FileStore is unsupported, so this runs where a real
+    single-process gloo PG can start (the Linux CI containers).
+    """
+
+    def test_initialized_process_group_wins_over_env(self, monkeypatch, tmp_path):
+        """With a live default PG the rank is read from dist, not RANK."""
+        import sys
+
+        import torch.distributed as dist
+
+        if sys.platform == "win32":
+            import pytest
+
+            pytest.skip("torch FileStore/gloo single-proc init unsupported on Windows")
+        monkeypatch.delenv("RANK", raising=False)
+        monkeypatch.delenv("LOCAL_RANK", raising=False)
+        io_common.reset_rank()
+        try:
+            store = dist.FileStore(str(tmp_path / "store"), 1)
+            dist.init_process_group("gloo", store=store, rank=0, world_size=1)
+            try:
+                assert io_common.get_rank() == 0
+                # RANK would say 4 if consulted — the PG result is cached.
+                monkeypatch.setenv("RANK", "4")
+                assert io_common.get_rank() == 0
+            finally:
+                dist.destroy_process_group()
+        finally:
+            io_common.reset_rank()
