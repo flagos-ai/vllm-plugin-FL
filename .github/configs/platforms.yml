@@ -120,10 +120,16 @@ platforms:
   metax:
     enabled: false
     trigger_paths:
+      - .github/configs/metax.yml
+      - .github/scripts/metax/
+      - docker/metax/
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
       - tests/platforms/metax.yaml
     exempt_from_global:
+      - .github/configs/metax.yml
+      - .github/scripts/metax/
+      - docker/metax/
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
   musa:

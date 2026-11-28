@@ -18,7 +18,9 @@
 platform: metax
 
 # Docker image for this hardware.
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-metax-ci
+# FlagOS Runtime 2.3.0 (MACA 3.8.1.3, Python 3.12) + vLLM 0.32.0+flagos +
+# FlagGems-vllm (dev stage).
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.32.0-metax-dev
 
 # Runner labels for this hardware.
 # Keep this aligned with the MetaX C550 runner label.
@@ -36,5 +38,9 @@ container_options: >-
   --shm-size=64g
   --device /dev/dri:/dev/dri:rwm
   --device /dev/mxcd:/dev/mxcd:rwm
-  --env GEMS_VENDOR=metax
   --env VLLM_PLUGINS=fl
+  --env USE_FLAGGEMS=1
+  --env GEMS_VENDOR=metax
+  --env PYTHONPATH=/opt/flagtree
+  --env HF_ENDPOINT=https://hf-mirror.com
+  --env FL_MODEL_BASE_PATH=/data/models

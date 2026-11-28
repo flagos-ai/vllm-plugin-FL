@@ -31,11 +31,9 @@ UBUNTU_VERSION="${UBUNTU_VERSION:-22.04}"
 VLLM_VERSION="${VLLM_VERSION:-0.19.0}"
 CANN_VERSION="${CANN_VERSION:-8.5.1}"
 CANN_CHIP="${CANN_CHIP:-910b}"
-METAX_BASE_IMAGE="${METAX_BASE_IMAGE:-harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-metax-0.20.0-maca.ai3.7.0.107-torch2.8-py312-ubuntu22.04-amd64}"
-METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
-METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
-METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
-METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
+METAX_BASE_IMAGE="${METAX_BASE_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-metax-maca3.8.1.3:2.3.0}"
+METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.32.0+flagos}"
+METAX_FLAGGEMS_VLLM_VERSION="${METAX_FLAGGEMS_VLLM_VERSION:-0.3.0.dev20261126}"
 AMD_BASE_IMAGE="${AMD_BASE_IMAGE:-docker.io/vllm/vllm-openai-rocm:latest}"
 AMD_FLAGOS_RUNTIME_IMAGE="${AMD_FLAGOS_RUNTIME_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-amd-rocm7.2.4:2.3.0}"
 AMD_VLLM_VERSION="${AMD_VLLM_VERSION:-0.32.0}"
@@ -133,10 +131,9 @@ VERSIONS (override via environment variables):
     FlagGems / FlagTree / Torch / CANN  Retained from ASCEND_BASE_IMAGE; not installed from separate refs
   MetaX:
     METAX_BASE_IMAGE     Base image (default: ${METAX_BASE_IMAGE})
-    METAX_MACA_VERSION   MACA version used in generated image tag (default: ${METAX_MACA_VERSION})
-    METAX_PYTHON_VERSION Python version used in generated image tag (default: ${METAX_PYTHON_VERSION})
-    METAX_PYTHON_TAG     Python tag fragment used in generated image tag (default: ${METAX_PYTHON_TAG})
-    METAX_VLLM_VERSION   vLLM version installed in empty mode (default: ${METAX_VLLM_VERSION})
+    METAX_VLLM_VERSION   vLLM version installed from the flagos index (default: ${METAX_VLLM_VERSION})
+    METAX_FLAGGEMS_VLLM_VERSION
+                         FlagGems-vllm version installed from the flagos index (default: ${METAX_FLAGGEMS_VLLM_VERSION})
   AMD:
     AMD_BASE_IMAGE       AMD ROCm base image, Torch must target gfx1100 (default: ${AMD_BASE_IMAGE})
     AMD_FLAGOS_RUNTIME_IMAGE
@@ -197,8 +194,8 @@ EXAMPLES:
     # Build T-Head PPU CI image from pre-downloaded wheels
     THEAD_WHEELS_DIR=/path/to/wheels ./build.sh --platform thead --target ci
 
-    # Build MetaX CI image
-    ./build.sh --platform metax --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
+    # Build MetaX dev image
+    ./build.sh --platform metax --target dev --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
 
     # Build Moore Threads MUSA dev image
     ./build.sh --platform musa --target dev
@@ -393,17 +390,26 @@ elif [[ "${PLATFORM}" == "thead" ]]; then
         IMAGE_TAG="v${THEAD_VLLM_VERSION}-thead-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "metax" ]]; then
-    PYTHON_VERSION="${METAX_PYTHON_VERSION}"
     VLLM_VERSION="${METAX_VLLM_VERSION}"
+    # New recipe stages: base -> dev / test; map the legacy ci target.
+    if [[ "${TARGET}" == "ci" ]]; then
+        TARGET="dev"
+    fi
+    if [[ "${TARGET}" == "release" ]]; then
+        err "The metax runtime recipe has no release stage; use --target dev or --target test."
+    fi
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
     BUILD_ARGS+=(
-        --build-arg "METAX_BASE_IMAGE=${METAX_BASE_IMAGE}"
+        --build-arg "BUILD_BASE_IMAGE=${METAX_BASE_IMAGE}"
         --build-arg "VLLM_VERSION=${METAX_VLLM_VERSION}"
+        --build-arg "FLAGGEMS_VLLM_VERSION=${METAX_FLAGGEMS_VLLM_VERSION}"
     )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "UV_DEFAULT_INDEX=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "FLAGOS_METAX_INDEX_URL=${EXTRA_INDEX_URL}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="vllm-metax-${METAX_VLLM_VERSION}-maca.ai${METAX_MACA_VERSION}-torch2.8-${METAX_PYTHON_TAG}-ubuntu22.04-amd64-ci-git"
+        IMAGE_TAG="v${VLLM_VERSION%%+*}-metax-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "musa" ]]; then
     PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
@@ -487,9 +493,8 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
     msg "  Vendor stack:   preserved from the pinned base image"
     msg "  Plugin source:  ${PLUGIN_SOURCE_SHA}"
 elif [[ "${PLATFORM}" == "metax" ]]; then
-    msg "  MACA:           ${METAX_MACA_VERSION}"
-    msg "  MetaX Python:   ${METAX_PYTHON_VERSION}"
     msg "  Base image:     ${METAX_BASE_IMAGE}"
+    msg "  Vendor stack:   preserved from the pinned base image"
 elif [[ "${PLATFORM}" == "musa" ]]; then
     msg "  MUSA:           ${MUSA_VERSION}"
     msg "  MUSA base:      ${MUSA_BASE_IMAGE}"
