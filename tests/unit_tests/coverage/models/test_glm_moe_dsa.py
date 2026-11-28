@@ -234,3 +234,29 @@ def test_glm_wrapper_skips_only_top_level_modelslim_rotation_weight(monkeypatch)
         ("my_rot.weight", similarly_named),
         ("rot.bias", unknown_rotation_parameter),
     ]
+
+
+def test_load_weights_consumes_the_lazy_stream_exactly_once(monkeypatch):
+    """load_weights works with generators (the Iterable contract).
+
+    Ported from the supplementary suite: the FL wrapper filters the weight
+    stream through a generator expression before handing it to the upstream
+    loader, so a lazy upstream loader that iterates the stream must observe
+    every item on its first pass and nothing on a second one.
+    """
+
+    def counting_load(self, weights):
+        del self
+        assert list(weights), "the generator must yield items"
+        assert not list(weights), "the generator must be exhausted"
+        return {"ok"}
+
+    monkeypatch.setattr(
+        VllmGlmMoeDsaForCausalLM,
+        "load_weights",
+        counting_load,
+    )
+    model = object.__new__(glm_moe_dsa.GlmMoeDsaForCausalLM)
+
+    weights = iter([("a.b", 1), ("rot.weight", 2), ("c.d", 3)])
+    assert model.load_weights(weights) == {"ok"}
