@@ -2,11 +2,20 @@
 
 """Failure and retry contract of the TXDA runtime-patch installer."""
 
+import os
 import sys
 from types import ModuleType
 
 import pytest
 import torch
+
+# Defense-in-depth alongside the conftest gating: skip the whole module when a
+# CI job pins a non-TXDA platform (``tests/run.py`` exports FL_TEST_PLATFORM
+# from --platform), even if the conftest hook is ever bypassed. An unset value
+# means a direct pytest run on a TXDA host, so the tests still run.
+_platform = os.environ.get("FL_TEST_PLATFORM")
+if _platform and _platform != "txda":
+    pytest.skip("TXDA-only contract test", allow_module_level=True)
 
 from vllm_fl.dispatch.backends.vendor.txda import patch as txda_patch
 

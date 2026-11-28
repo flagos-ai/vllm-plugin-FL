@@ -9,8 +9,18 @@ plain tensor indexing; these tests pin the semantics against small CPU
 tensors so they need neither a device nor vLLM's kernels.
 """
 
+import os
+
 import pytest
 import torch
+
+# Defense-in-depth alongside the conftest gating: skip the whole module when a
+# CI job pins a non-TXDA platform (``tests/run.py`` exports FL_TEST_PLATFORM
+# from --platform), even if the conftest hook is ever bypassed. An unset value
+# means a direct pytest run on a TXDA host, so the tests still run.
+_platform = os.environ.get("FL_TEST_PLATFORM")
+if _platform and _platform != "txda":
+    pytest.skip("TXDA-only contract test", allow_module_level=True)
 
 from vllm_fl.dispatch.backends.vendor.txda.patches.block_table_native import (
     apply_staged_write,

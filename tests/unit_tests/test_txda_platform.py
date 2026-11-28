@@ -14,6 +14,14 @@ from unittest.mock import Mock
 
 import pytest
 
+# Defense-in-depth alongside the conftest gating: when a CI job pins a
+# non-TXDA platform, skip the whole module even if the conftest hook is ever
+# bypassed. ``tests/run.py`` sets ``FL_TEST_PLATFORM`` from ``--platform``; an
+# unset value means a direct pytest run on a TXDA host, so the tests still run.
+_platform = os.environ.get("FL_TEST_PLATFORM")
+if _platform and _platform != "txda":
+    pytest.skip("TXDA-only contract test", allow_module_level=True)
+
 _ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -302,62 +310,65 @@ def test_txda_guard_does_not_disable_other_backends(configure_platform):
     assert config.compilation_config.cudagraph_mode == _GraphMode.PIECEWISE
 
 
-@pytest.fixture
-def txda_memory_budget(monkeypatch):
-    monkeypatch.delenv("VLLM_TXDA_KV_CACHE_SIZE", raising=False)
-    namespace = {
-        "current_platform": SimpleNamespace(device_type="txda"),
-        "managed_inference_mode": lambda: lambda fn: fn,
-        "logger": Mock(),
-        "os": os,
-        "GiB_bytes": 1024**3,
-        "maybe_apply_startup_plan": Mock(
-            side_effect=AssertionError("TXDA must not profile")
-        ),
-    }
-    determine = _load_function(
-        "vllm_fl/worker/worker.py",
-        "determine_available_memory",
-        namespace,
-        class_name="WorkerFL",
+def test_accelerator_memory_info_patch_reports_txda_memory(monkeypatch):
+    """TXDA reports zero through the generic API; the patch must forward.
+
+    ``MemorySnapshot`` reads ``torch.accelerator.get_memory_info``, which
+    returns ``(0, 0)`` on TXDA. ``determine_available_memory`` then aborts with
+    "Initial free memory 0.0 GiB". The platform patch forwards to
+    ``torch.txda.mem_get_info`` instead of skipping profiling.
+    """
+    from vllm_fl.dispatch.backends.vendor.txda import patch as txda_patch
+
+    calls = []
+
+    class _Accelerator:
+        def get_memory_info(self, device=None):
+            calls.append(device)
+            return (0, 0)
+
+    accelerator = _Accelerator()
+    fake_txda = SimpleNamespace(mem_get_info=lambda device=None: (1234, 5678))
+    monkeypatch.setitem(sys.modules, "torch_txda", ModuleType("torch_txda"))
+    monkeypatch.setattr(
+        txda_patch,
+        "torch",
+        SimpleNamespace(accelerator=accelerator, txda=fake_txda),
+        raising=False,
     )
 
-    def budget(explicit=None):
-        worker = SimpleNamespace(
-            cache_config=SimpleNamespace(kv_cache_memory_bytes=explicit)
-        )
-        return determine(worker)
-
-    return budget
-
-
-@pytest.mark.parametrize("legacy", ["1024", "invalid", "0", "-10"])
-def test_txda_explicit_budget_wins_over_legacy_override(
-    txda_memory_budget, monkeypatch, legacy
-):
-    monkeypatch.setenv("VLLM_TXDA_KV_CACHE_SIZE", legacy)
-    assert txda_memory_budget(4096) == 4096
+    undo = txda_patch.patch_accelerator_memory_info_for_txda()
+    try:
+        assert accelerator.get_memory_info("txda:0") == (1234, 5678)
+        # The vendor call sees the same device argument.
+        assert accelerator._fl_txda_memory_info_patched is True
+        # Second install is a no-op.
+        assert txda_patch.patch_accelerator_memory_info_for_txda() is None
+    finally:
+        undo()
+    # The undo restores the original method.
+    assert accelerator.get_memory_info("txda:0") == (0, 0)
 
 
-def test_txda_legacy_budget_and_default_remain_available(
-    txda_memory_budget, monkeypatch
-):
-    assert txda_memory_budget() == 20 * 1024**3
-    monkeypatch.setenv("VLLM_TXDA_KV_CACHE_SIZE", "2097152")
-    assert txda_memory_budget() == 2097152
+def test_memory_info_patch_undo_reverts_flag(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.txda import patch as txda_patch
 
+    class _Accelerator:
+        def get_memory_info(self, device=None):
+            return (0, 0)
 
-@pytest.mark.parametrize("legacy", ["0", "-1", "1.5", "abc", ""])
-def test_txda_rejects_invalid_legacy_budgets(txda_memory_budget, monkeypatch, legacy):
-    monkeypatch.setenv("VLLM_TXDA_KV_CACHE_SIZE", legacy)
-    with pytest.raises(ValueError, match="positive"):
-        txda_memory_budget()
+    accelerator = _Accelerator()
+    fake = SimpleNamespace(
+        accelerator=accelerator,
+        txda=SimpleNamespace(mem_get_info=lambda device=None: (7, 9)),
+    )
+    monkeypatch.setattr(txda_patch, "torch", fake, raising=False)
+    monkeypatch.setitem(sys.modules, "torch_txda", ModuleType("torch_txda"))
 
-
-@pytest.mark.parametrize("explicit", [0, -1])
-def test_txda_rejects_nonpositive_explicit_budgets(txda_memory_budget, explicit):
-    with pytest.raises(ValueError, match="positive"):
-        txda_memory_budget(explicit)
+    undo = txda_patch.patch_accelerator_memory_info_for_txda()
+    assert getattr(accelerator, "_fl_txda_memory_info_patched", False) is True
+    undo()
+    assert getattr(accelerator, "_fl_txda_memory_info_patched", False) is False
 
 
 def test_txda_visibility_and_runtime_device_mapping(monkeypatch):

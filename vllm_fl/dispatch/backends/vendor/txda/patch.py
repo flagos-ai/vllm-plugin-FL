@@ -152,9 +152,8 @@ def patch_cuda_stream_apis_for_txda():
     txda equivalents so those paths work instead of crashing. This mirrors
     musa's patch_cuda_stream_for_musa().
     """
-    import torch_txda  # noqa: F401
-
     import torch.cuda as torch_cuda
+    import torch_txda  # noqa: F401
 
     if getattr(torch_cuda, "_fl_txda_stream_patched", False):
         return None
@@ -547,10 +546,52 @@ def capture_guard_context():
             torch.txda._exchange_device = orig_exchange
 
 
+def patch_accelerator_memory_info_for_txda():
+    """Report real TXDA memory through ``torch.accelerator.get_memory_info``.
+
+    vLLM's ``MemorySnapshot`` (``vllm/utils/mem_utils.py``) reads free/total
+    memory from ``torch.accelerator.get_memory_info(device)``. On TXDA that
+    generic entry point returns ``(0, 0)`` while ``torch.txda.mem_get_info``
+    reports the real numbers, so ``init_snapshot.free_memory`` ends up 0 and
+    ``Worker.determine_available_memory`` aborts with:
+
+        AssertionError: Error in memory profiling. Initial free memory 0.0 GiB,
+        current free memory 0.41 GiB. ...
+
+    The failure is in the reporting layer, not the profiler: forwarding to the
+    vendor call fixes KV-cache sizing without touching the profiling flow.
+    """
+    import torch_txda  # noqa: F401  # registers torch.txda
+
+    accelerator = getattr(torch, "accelerator", None)
+    if accelerator is None or not hasattr(accelerator, "get_memory_info"):
+        return None
+    if getattr(accelerator, "_fl_txda_memory_info_patched", False):
+        return None
+
+    _orig_get_memory_info = accelerator.get_memory_info
+
+    def _get_memory_info_txda(device=None):
+        # ``torch.accelerator`` passes a ``torch.device`` or None; the vendor
+        # call accepts both and resolves None to the current device.
+        return torch.txda.mem_get_info(device)  # type: ignore[arg-type]
+
+    accelerator.get_memory_info = _get_memory_info_txda
+    accelerator._fl_txda_memory_info_patched = True
+    logger.info("Patched torch.accelerator.get_memory_info -> torch.txda for txda")
+
+    def _undo() -> None:
+        accelerator.get_memory_info = _orig_get_memory_info
+        accelerator._fl_txda_memory_info_patched = False
+
+    return _undo
+
+
 _PATCH_STEPS = (
     ("current_stream", patch_current_stream_for_txda),
     ("cuda_stream_apis", patch_cuda_stream_apis_for_txda),
     ("device_guard", patch_noop_device_guard_for_txda),
     ("aux_stream", patch_aux_stream_for_txda),
     ("torch_compile", patch_torch_compile_off_for_txda),
+    ("accelerator_memory_info", patch_accelerator_memory_info_for_txda),
 )

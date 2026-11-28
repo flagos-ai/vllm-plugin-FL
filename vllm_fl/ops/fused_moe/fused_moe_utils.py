@@ -105,6 +105,9 @@ def _txda_fused_experts_impl(
     w2_bias: torch.Tensor | None,
     w1_scale: torch.Tensor | None,
     w2_scale: torch.Tensor | None,
+    clamp_limit: float | None = None,
+    alpha: float | None = None,
+    beta: float | None = None,
 ):
     """Return the TXDA compact-grouped MoE entry point, or ``None``.
 
@@ -139,6 +142,18 @@ def _txda_fused_experts_impl(
         if w1_scale is None or w2_scale is None:
             return None
     elif w1_scale is not None or w2_scale is not None:
+        return None
+
+    # The provider's fused_experts_impl takes no clamp/alpha/beta arguments
+    # (checked against the pinned v0.2.0 signature). ``alpha``/``beta`` default
+    # to 1.0/0.0 and are only meaningful for SwiGLU-style activations, so the
+    # defaults are safe to ignore; a non-default value or any clamp limit would
+    # change the maths, so refuse the fast path instead of dropping them.
+    if clamp_limit is not None:
+        return None
+    if alpha is not None and float(alpha) != 1.0:
+        return None
+    if beta is not None and float(beta) != 0.0:
         return None
 
     # Capability check, not a version comparison: the published provider has
@@ -592,6 +607,9 @@ class TritonExpertsFL(TritonExperts):
                 w2_bias=self.w2_bias,
                 w1_scale=self.w1_scale,
                 w2_scale=self.w2_scale,
+                clamp_limit=self.activation_config.clamp_limit,
+                alpha=self.activation_config.alpha,
+                beta=self.activation_config.beta,
             )
             if txda_fused_experts_impl is not None:
                 # The on-device meta builder needs the expert count; the weight
@@ -609,10 +627,9 @@ class TritonExpertsFL(TritonExperts):
                 )
                 if _publish is not None and global_num_experts > 0:
                     _publish(global_num_experts)
-                # The fused kernel has dedicated clamp/alpha/beta parameters;
-                # the activation config must be forwarded or clamped /
-                # non-default SwiGLU models would silently change their math.
-                activation_config = self.activation_config
+                # clamp/alpha/beta are not part of the provider signature; the
+                # gate above rejects those configurations instead of dropping
+                # them here.
                 output.copy_(
                     txda_fused_experts_impl(
                         hidden_states,
@@ -622,9 +639,6 @@ class TritonExpertsFL(TritonExperts):
                         topk_ids,
                         inplace=False,
                         activation=activation.value,
-                        gemm1_clamp_limit=activation_config.clamp_limit,
-                        gemm1_alpha=activation_config.alpha,
-                        gemm1_beta=activation_config.beta,
                         apply_router_weight_on_input=apply_router_weight_on_input,
                         use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
                         use_int8_w8a8=self.quant_config.use_int8_w8a8,

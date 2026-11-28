@@ -318,6 +318,7 @@ class PyFlagcxCommunicator:
                 self.comm = self.flagcx.flagcxCommInitRank(
                     self.world_size, self.unique_id, self.rank)
 
+            _all_reduce_stream_factory = None
             if self.device.type == "npu" and _flagcx_wheel_library is not None:
                 from vllm_fl.dispatch.backends.vendor.ascend.patches.flagcx import (
                     FlagCXAllReduceStream,
@@ -329,13 +330,21 @@ class PyFlagcxCommunicator:
                 # handle) while preparing a collective, which spins forever.
                 # Submitting on a dedicated stream keeps every collective on a
                 # real handle. See .../vendor/txda/patches/flagcx.py.
+                #
+                # Built inside the warmup's try/except below: the stream and
+                # event allocations happen after flagcxCommInitRank returned a
+                # live handle, so a failure here must reach the same cleanup.
                 from vllm_fl.dispatch.backends.vendor.txda.patches.flagcx import (
                     TXDAFlagCXAllReduceStream,
                 )
 
-                self._all_reduce_stream = TXDAFlagCXAllReduceStream(self.device)
+                _all_reduce_stream_factory = TXDAFlagCXAllReduceStream
 
             try:
+                if _all_reduce_stream_factory is not None:
+                    self._all_reduce_stream = _all_reduce_stream_factory(
+                        self.device
+                    )
                 stream = self._current_stream()
                 # A small all_reduce warms up the selected submission path.
                 data = torch.zeros(1, device=device)

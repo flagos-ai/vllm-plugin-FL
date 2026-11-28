@@ -55,14 +55,37 @@ def install_capture_safe_ops() -> None:
         )
         return
 
-    # ``A < B`` is ``!(A >= B)``. Expressing both rewrites with ``ge``/``gt``
-    # keeps the left operand first, so tensor-vs-scalar and tensor-vs-tensor
-    # calls both stay valid (those ops do not synchronize on TXDA).
+    def _floating(a: torch.Tensor) -> bool:
+        return a.dtype.is_floating_point or a.dtype.is_complex
+
+    # ``A < B`` for non-NaN operands equals ``B > A``, and ``A <= B`` equals
+    # ``B >= A``. The reversed form is used rather than ``!(A >= B)``: the
+    # negation returns True when either side is NaN (``ge``/``gt`` are False
+    # for NaN), while the original comparison must be False. Swapping operands
+    # keeps the native NaN behaviour and avoids float-only helpers on integer
+    # tensors, where ``isnan`` does not apply.
     def lt(A, B):
-        return torch.logical_not(torch.ge(A, B))
+        if isinstance(B, torch.Tensor):
+            return torch.gt(B, A)
+        if not _floating(A):
+            return torch.gt(torch.full_like(A, B), A)
+        return torch.logical_not(torch.ge(A, B)) & ~torch.isnan(A)
 
     def le(A, B):
-        return torch.logical_not(torch.gt(A, B))
+        if isinstance(B, torch.Tensor):
+            return torch.ge(B, A)
+        if not _floating(A):
+            return torch.ge(torch.full_like(A, B), A)
+        return torch.logical_not(torch.gt(A, B)) & ~torch.isnan(A)
+
+    # ``*_out`` overloads must write into the caller's buffer.
+    def lt_out(A, B, *, out):
+        out.copy_(lt(A, B))
+        return out
+
+    def le_out(A, B, *, out):
+        out.copy_(le(A, B))
+        return out
 
     # Re-register into the same IMPL library FlagGems enabled, which overrides
     # the kernels it installed for this dispatch key.
@@ -70,10 +93,12 @@ def install_capture_safe_ops() -> None:
     for op, fn in (
         ("aten::lt.Tensor", lt),
         ("aten::lt.Scalar", lt),
-        ("aten::lt.Scalar_out", lt),
         ("aten::le.Tensor", le),
         ("aten::le.Scalar", le),
-        ("aten::le.Scalar_out", le),
+        ("aten::lt.Tensor_out", lt_out),
+        ("aten::lt.Scalar_out", lt_out),
+        ("aten::le.Tensor_out", le_out),
+        ("aten::le.Scalar_out", le_out),
     ):
         try:
             aten_lib.impl(op, fn, "PrivateUse1")
@@ -105,36 +130,44 @@ def install_capture_safe_ops() -> None:
 
 
 def _masked_fill_impl(mask, inp, value):
-    """Capture-safe ``masked_fill``: ``inp*(1-m) + m*value``.
+    """Capture-safe ``masked_fill`` built from ``where``.
 
     ``torch.masked_fill`` / ``masked_fill_`` fall back to the ATen CPU kernel
     on TXDA, which copies the tensor to host and synchronizes, aborting graph
     capture. vLLM's vocab-parallel embedding calls it on every forward to zero
     the out-of-shard rows.
 
-    The rewrite uses only elementwise opmath, which captures cleanly, and is
-    exact for every supported value (fill positions get ``inp*0 + 1*value``).
+    ``torch.where`` with a device-resident fill tensor captures cleanly and is
+    an exact replacement. An earlier ``inp*(1-m) + m*value`` form was not: it
+    produced NaN for a ``-inf`` fill (``0 * -inf``), kept NaN values that the
+    mask should overwrite, and promoted integer inputs to float. ``where``
+    keeps the input dtype and the exact original values, and is validated
+    against ``torch.masked_fill`` for int64/int32/float32/bfloat16/bool across
+    scalar, float and ``-inf`` fills.
     """
-    m = mask.expand(inp.shape).to(inp.dtype)
-    return inp * (1 - m) + m * value
+    mask = mask.expand(inp.shape)
+    if isinstance(value, torch.Tensor):
+        fill = value.to(dtype=inp.dtype, device=inp.device).expand(inp.shape)
+    else:
+        fill = torch.full_like(inp, value)
+    return torch.where(mask, fill, inp)
 
 
-def _masked_fill_inplace_impl(mask, inp, value):
-    inp.copy_(_masked_fill_impl(mask, inp, value))
-    return inp
+def _masked_fill_inplace_impl(mask, inp, value, out=None):
+    target = inp if out is None else out
+    target.copy_(_masked_fill_impl(mask, inp, value))
+    return target
 
 
 def _install_masked_fill(aten_lib) -> None:
     def masked_fill(inp, mask, value):
-        return _masked_fill_impl(mask, inp, _scalar(value))
+        return _masked_fill_impl(mask, inp, value)
 
     def masked_fill_(inp, mask, value):
-        return _masked_fill_inplace_impl(mask, inp, _scalar(value))
+        return _masked_fill_inplace_impl(mask, inp, value)
 
-    def _scalar(value):
-        if isinstance(value, torch.Tensor):
-            value = value.item()
-        return value
+    def masked_fill_out(inp, mask, value, *, out):
+        return _masked_fill_inplace_impl(mask, inp, value, out=out)
 
     installed = 0
     for op, fn in (
@@ -142,6 +175,8 @@ def _install_masked_fill(aten_lib) -> None:
         ("aten::masked_fill.Tensor", masked_fill),
         ("aten::masked_fill_.Scalar", masked_fill_),
         ("aten::masked_fill_.Tensor", masked_fill_),
+        ("aten::masked_fill.Scalar_out", masked_fill_out),
+        ("aten::masked_fill.Tensor_out", masked_fill_out),
     ):
         try:
             aten_lib.impl(op, fn, "PrivateUse1")
@@ -150,7 +185,7 @@ def _install_masked_fill(aten_lib) -> None:
             continue
     if installed:
         logger.info(
-            "Installed capture-safe TXDA masked_fill (mul/add form; %d ops)",
+            "Installed capture-safe TXDA masked_fill (where form; %d ops)",
             installed,
         )
 
@@ -165,21 +200,45 @@ def _install_pow_square(aten_lib) -> None:
     this the first RMSNorm aborts the capture.
     """
 
+    # Anything that is not the squared case must go to the regular
+    # implementation. Calling ``torch.pow`` here would re-enter this same
+    # PrivateUse1 kernel (it is registered for exactly this overload) and
+    # recurse until RecursionError, so redispatch below the registration
+    # instead. Only exponent 2 is rewritten; every other exponent keeps the
+    # upstream semantics.
+    _fallback = torch._C.DispatchKeySet(
+        torch._C.DispatchKey.CompositeExplicitAutograd
+    )
+
+    def _is_square(exponent) -> bool:
+        return isinstance(exponent, (int, float)) and float(exponent) == 2.0
+
     def pow_tensor_scalar(self, exponent):
-        if isinstance(exponent, (int, float)) and float(exponent) == 2.0:
+        if _is_square(exponent):
             return torch.square(self)
-        return torch.pow(self, exponent)
+        return torch.ops.aten.pow.Tensor_Scalar.redispatch(
+            _fallback, self, exponent
+        )
 
     def pow_tensor_scalar_(self, exponent):
-        if isinstance(exponent, (int, float)) and float(exponent) == 2.0:
+        if _is_square(exponent):
             return self.square_()
-        return torch.pow(self, exponent, out=self)
+        return torch.ops.aten.pow_.Scalar.redispatch(_fallback, self, exponent)
+
+    def pow_tensor_tensor(self, exponent):
+        return torch.ops.aten.pow.Tensor_Tensor.redispatch(
+            _fallback, self, exponent
+        )
+
+    def pow_tensor_tensor_(self, exponent):
+        return torch.ops.aten.pow_.Tensor.redispatch(_fallback, self, exponent)
 
     installed = 0
     for op, fn in (
         ("aten::pow.Tensor_Scalar", pow_tensor_scalar),
-        ("aten::pow_.Tensor", pow_tensor_scalar_),
+        ("aten::pow.Tensor_Tensor", pow_tensor_tensor),
         ("aten::pow_.Scalar", pow_tensor_scalar_),
+        ("aten::pow_.Tensor", pow_tensor_tensor_),
     ):
         try:
             aten_lib.impl(op, fn, "PrivateUse1")
