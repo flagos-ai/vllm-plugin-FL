@@ -232,6 +232,10 @@ def platform_env(monkeypatch):
     utils_stub._env_vendor_name = lambda: "nvidia"
     utils_stub.get_device_control_env_var = lambda vendor: "CUDA_VISIBLE_DEVICES"
     utils_stub.get_device_type = lambda vendor: "cuda"
+    # vllm_fl/__init__.py (re)imports get_op_config from vllm_fl.utils when the
+    # platform module under test pulls the gcu compilation config (upstream #675
+    # enflame S60 added that import chain); the loader resolves the stub tree.
+    utils_stub.get_op_config = lambda: None
 
     stubs = {
         "vllm": vllm_pkg,
@@ -243,6 +247,29 @@ def platform_env(monkeypatch):
         "vllm.config.compilation": compilation_mod,
         "vllm_fl.utils": utils_stub,
     }
+    # upstream #675 (enflame S60): gcu/enflame vendors now import
+    # vllm_fl.dispatch.backends.vendor.gcu.compilation_config (which pulls
+    # vllm.third_party.flash_linear_attention) and a GCU worker module —
+    # stub them so the new branch stays loadable on hosts without the
+    # vendor packages.
+    gcu_compilation_stub = _make_module(
+        "vllm_fl.dispatch.backends.vendor.gcu.compilation_config"
+    )
+    gcu_compilation_stub.configure_codegen_cache = lambda compilation_config: None
+    fla_stub = _make_module("vllm.third_party")
+    fla_fla_stub = _make_module("vllm.third_party.flash_linear_attention")
+    gcu_worker_stub = _make_module(
+        "vllm_fl.dispatch.backends.vendor.gcu.worker.worker"
+    )
+    gcu_worker_stub.WorkerGCU = type("WorkerGCU", (), {})
+    stubs.update(
+        {
+            "vllm_fl.dispatch.backends.vendor.gcu.compilation_config": gcu_compilation_stub,
+            "vllm.third_party": fla_stub,
+            "vllm.third_party.flash_linear_attention": fla_fla_stub,
+            "vllm_fl.dispatch.backends.vendor.gcu.worker.worker": gcu_worker_stub,
+        }
+    )
     for name, mod in stubs.items():
         sys.modules[name] = mod
 

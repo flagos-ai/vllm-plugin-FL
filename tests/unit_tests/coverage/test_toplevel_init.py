@@ -687,10 +687,12 @@ class TestRegister:
         # Stub the functions register() itself calls for non-nvidia vendors.
         fresh_module._patch_custom_ops = lambda: calls.append("custom_ops")
         fresh_module._patch_flash_attn_import = lambda: calls.append("flash_attn")
+        # upstream #675: only mthreads/tsingmicro force the legacy runner via
+        # setdefault; gcu (and other vendors) no longer touch the variable.
         with _installed_stubs(stubs):
             result = fresh_module.register()
         assert calls == ["custom_ops", "flash_attn"]
-        assert env["VLLM_USE_V2_MODEL_RUNNER"] == "0"
+        assert "VLLM_USE_V2_MODEL_RUNNER" not in env
         assert result == "vllm_fl.platform.PlatformFL"
 
 
