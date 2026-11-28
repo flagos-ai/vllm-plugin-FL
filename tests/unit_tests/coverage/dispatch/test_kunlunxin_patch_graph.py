@@ -174,6 +174,22 @@ class _PatchGraph:
             graph_capture=lambda *a, **k: None,
             DEFAULT_STABLE_GRAPH_CAPTURE_FLAGS=None,
         )
+        # The backend registry is a GLOBAL on a real vllm install (the
+        # ascend suite resolves AttentionBackendEnum.CUSTOM afterwards),
+        # so register_backend must never reach the real one here: it is
+        # recorded on this stub and asserted by the tests below.
+        self.registry_calls = []
+        registry = _leaf(
+            m,
+            "vllm.v1.attention.backends.registry",
+            register_backend=lambda enum, path: self.registry_calls.append(
+                (enum, path)
+            ),
+        )
+        registry.AttentionBackendEnum = SimpleNamespace(
+            CUSTOM="CUSTOM",
+            FLASH_ATTN="FLASH_ATTN",
+        )
         _leaf(m, "vllm.v1.attention", register_backend=lambda *a, **k: None)
         _leaf(
             m, "vllm.v1.attention.backends", FlashAttentionBackend=type("FAB", (), {})
@@ -365,3 +381,21 @@ class TestGraphPreflight:
         patched = graph.dispatcher.CudagraphDispatcher.dispatch
         assert patched is not None
         assert hasattr(patched, "__wrapped__") or callable(patched)
+
+
+class TestBackendRegistryIsolation:
+    """The legacy chain's registry registration stays inside the stub."""
+
+    def test_kunlunxin_registered_as_custom_on_stub_only(self, patch_module):
+        """apply_kunlunxin_patches registers the backend path on the
+        (stubbed) vLLM backend registry — the real install's CUSTOM entry
+        is never touched (the ascend suite resolves it afterwards)."""
+        module, graph = patch_module
+        module.apply_kunlunxin_patches()
+        assert graph.registry_calls, "backend registration never ran"
+        enum, path = graph.registry_calls[0]
+        assert enum == "CUSTOM"
+        assert path.endswith(
+            "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention"
+            ".KunlunxinAttentionBackend"
+        )
