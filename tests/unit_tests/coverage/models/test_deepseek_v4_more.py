@@ -54,7 +54,6 @@ _SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/models/deepseek_v4.py"
 _MODULE_NAME = "supp_deepseek_v4_more_under_test"
 
 
-
 class _UpstreamBase:
     """Recording stand-in for upstream DeepseekV4Attention."""
 

@@ -358,7 +358,6 @@ def _replace_cached_op(monkeypatch, module, attr, impl):
     return recorder
 
 
-
 def _fl_enum(name: str):
     """Fetch a MoEActivation member the module under test normalizes.
 
@@ -368,6 +367,7 @@ def _fl_enum(name: str):
     is needed.
     """
     return getattr(_fmu.MoEActivation, name)
+
 
 # ---------------------------------------------------------------------------
 # fused_experts_impl dispatch contracts
@@ -642,9 +642,7 @@ class TestFusedExpertsImplContracts:
         fl_fused.fused_experts_impl(hidden, w1, w2, tw, ti, global_num_experts=17)
         assert recorders["align"][0][2] == 17
 
-    def test_quantized_activation_paths_dispatch_kernel(
-        self, recorders, monkeypatch
-    ):
+    def test_quantized_activation_paths_dispatch_kernel(self, recorders, monkeypatch):
         """fp8 flags flow through to the kernel boundary unchanged.
 
         Both GEMMs must also receive the fp8 / per-channel flags verbatim,
@@ -655,7 +653,9 @@ class TestFusedExpertsImplContracts:
         hidden, w1, w2, tw, ti = self._make_inputs()
         quantized = []
 
-        def fake_quantize_input(A, *, A_scale, quant_dtype, per_act_token_quant, block_shape):
+        def fake_quantize_input(
+            A, *, A_scale, quant_dtype, per_act_token_quant, block_shape
+        ):
             quantized.append(
                 {
                     "quant_dtype": quant_dtype,

@@ -258,9 +258,7 @@ def platform_env(monkeypatch):
     gcu_compilation_stub.configure_codegen_cache = lambda compilation_config: None
     fla_stub = _make_module("vllm.third_party")
     fla_fla_stub = _make_module("vllm.third_party.flash_linear_attention")
-    gcu_worker_stub = _make_module(
-        "vllm_fl.dispatch.backends.vendor.gcu.worker.worker"
-    )
+    gcu_worker_stub = _make_module("vllm_fl.dispatch.backends.vendor.gcu.worker.worker")
     gcu_worker_stub.WorkerGCU = type("WorkerGCU", (), {})
     stubs.update(
         {

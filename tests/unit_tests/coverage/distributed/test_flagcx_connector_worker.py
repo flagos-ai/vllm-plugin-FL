@@ -484,6 +484,7 @@ def test_worker_build_transfer_params_trims_partial_hit_tail(worker_env):
     fc = worker_env.fc
     worker = worker_env.make_worker(role="kv_producer")
     try:
+
         class _Topo:
             local_replicates_kv_cache = False
             is_kv_layout_blocks_first = False

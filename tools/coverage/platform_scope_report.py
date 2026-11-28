@@ -39,7 +39,12 @@ def _rel(path_key: str) -> str:
     return p[idx:] if idx != -1 else p
 
 
-def applicable_report(report: dict, scope: dict, line_ownership: dict | None, commit_sha: str | None = None) -> dict:
+def applicable_report(
+    report: dict,
+    scope: dict,
+    line_ownership: dict | None,
+    commit_sha: str | None = None,
+) -> dict:
     """Filter the raw report down to the platform-applicable code set.
 
     Files are dropped when they live under an excluded vendor prefix.
@@ -54,7 +59,9 @@ def applicable_report(report: dict, scope: dict, line_ownership: dict | None, co
         if rel.startswith(exclude):
             continue
         executed = list(info.get("executed_lines", []))
-        statements = sorted(info.get("executed_lines", []) + info.get("missing_lines", []))
+        statements = sorted(
+            info.get("executed_lines", []) + info.get("missing_lines", [])
+        )
         own = (line_ownership or {}).get(rel)
         if own is not None:
             keep = set(own)
@@ -80,9 +87,13 @@ def applicable_report(report: dict, scope: dict, line_ownership: dict | None, co
     totals = {
         "covered_lines": covered,
         "num_statements": statements,
-        "percent_covered": round(100.0 * covered / statements, 2) if statements else 0.0,
+        "percent_covered": round(100.0 * covered / statements, 2)
+        if statements
+        else 0.0,
     }
-    meta = dict(report.get("meta", {}), applicable_scope=str(scope.get("platform", "nvidia")))
+    meta = dict(
+        report.get("meta", {}), applicable_scope=str(scope.get("platform", "nvidia"))
+    )
     if commit_sha:
         meta["commit_sha"] = commit_sha
     return {
@@ -96,11 +107,18 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", required=True, type=Path)
     ap.add_argument("--scope", required=True, type=Path)
-    ap.add_argument("--line-ownership", type=Path, default=None,
-                    help="optional JSON: {rel_file: [line numbers the platform owns]} for hybrid files")
+    ap.add_argument(
+        "--line-ownership",
+        type=Path,
+        default=None,
+        help="optional JSON: {rel_file: [line numbers the platform owns]} for hybrid files",
+    )
     ap.add_argument("--output", required=True, type=Path)
-    ap.add_argument("--commit-sha", default=None,
-                    help="stamp the measurement commit into the report meta (tier-2 guard)")
+    ap.add_argument(
+        "--commit-sha",
+        default=None,
+        help="stamp the measurement commit into the report meta (tier-2 guard)",
+    )
     args = ap.parse_args()
 
     report = _load(args.report)

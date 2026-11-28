@@ -101,7 +101,6 @@ class TestRotaryEmbedding:
             k_out, oracle(k, cos_sel, sin_sel), rtol=1e-5, atol=1e-6
         )
 
-
     def test_full_width_cache_needs_no_expansion(self):
         """A cache already head_dim wide is used as-is (no cat/repeat)."""
         seq, heads, head_dim = 3, 1, 8
@@ -252,7 +251,6 @@ class TestRotaryEmbedding:
 
 class TestRmsNorm:
     """rms_norm_torch flag combinations with independent oracles."""
-
 
     def test_bfloat16_roundtrip(self):
         """bf16 inputs return bf16 outputs computed via float32 internally."""

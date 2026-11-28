@@ -36,7 +36,6 @@ import torch
 from vllm_fl.dispatch.backends.reference import ReferenceBackend
 
 
-
 @pytest.fixture
 def backend():
     """A fresh ReferenceBackend instance with a cleared availability cache."""

@@ -35,7 +35,6 @@ _SOURCE = Path(__file__).resolve().parents[4] / "vllm_fl/attention/utils.py"
 _MODULE_NAME = "supp_gcu_flash_forward_under_test"
 
 
-
 def _leaf(modules, name):
     """Create (or fetch) a module and its parents inside *modules*."""
     parts = name.split(".")

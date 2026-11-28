@@ -187,7 +187,6 @@ class TestMoeAlignBlockSize:
         assert (expert_ids[:2] == torch.tensor([0, 1], dtype=torch.int32)).all()
         assert (expert_ids[2:] == -1).all()
 
-
     def test_negative_ids_are_screened(self, backend):
         """Upstream-style -1 padding never indexes into any expert bucket."""
         topk_ids = torch.tensor([[0, -1], [-1, 1]])

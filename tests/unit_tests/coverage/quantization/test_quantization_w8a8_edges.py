@@ -40,6 +40,7 @@ from typing import Any
 import pytest
 import torch
 
+
 def _make_module(name: str) -> types.ModuleType:
     module = types.ModuleType(name)
     module.__path__ = []

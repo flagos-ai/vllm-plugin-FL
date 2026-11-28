@@ -31,7 +31,6 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-
 _STUB_ROOTS = ("vllm", "vllm_fl", "flag_gems", "flaggems_vllm")
 _MISSING = object()
 

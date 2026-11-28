@@ -279,7 +279,6 @@ class TestDiscoverFromEnvModules:
 class TestFindVendorBackendDir:
     """_find_vendor_backend_dir resolution rules."""
 
-
     def test_vendor_name_preferred_over_device_fields(self):
         """vendor_name wins over device_name / device_type candidates."""
         assert (

@@ -898,4 +898,3 @@ class TestYamlConfigParsing:
         )
         parsed = io_common.parse_io_config_from_yaml(str(config))["io_dump"]
         assert parsed["with_torch_funcs"] == expected
-

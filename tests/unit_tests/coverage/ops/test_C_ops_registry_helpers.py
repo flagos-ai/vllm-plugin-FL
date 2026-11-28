@@ -178,8 +178,8 @@ class TestOptionalNativeOnlyOps:
                 defined.add(op_name)
         # Every excluded op is backed by a schema entry with that name.
         assert _OPTIONAL_NATIVE_ONLY_OPS
-        assert _OPTIONAL_NATIVE_ONLY_OPS <= defined, (
-            sorted(_OPTIONAL_NATIVE_ONLY_OPS - defined)
+        assert defined >= _OPTIONAL_NATIVE_ONLY_OPS, sorted(
+            _OPTIONAL_NATIVE_ONLY_OPS - defined
         )
 
 

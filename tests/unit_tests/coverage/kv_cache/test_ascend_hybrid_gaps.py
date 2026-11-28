@@ -19,7 +19,6 @@ import pytest
 import torch
 
 
-
 def _install_vllm_stubs():
     """Minimal vllm module graph hybrid.py imports at module level."""
     vllm = types.ModuleType("vllm")

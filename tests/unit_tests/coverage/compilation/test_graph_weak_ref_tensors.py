@@ -510,6 +510,7 @@ class TestWeakRefGcuTensor:
         finally:
             torch._C._construct_storage_from_data_pointer = original
 
+
 class TestWeakRefGcuTensors:
     """``_weak_ref_gcu_tensors`` recursion mirrors the input structure."""
 

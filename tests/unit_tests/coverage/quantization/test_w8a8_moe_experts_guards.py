@@ -35,6 +35,7 @@ from typing import Any
 import pytest
 import torch
 
+
 def _make_module(name: str) -> types.ModuleType:
     module = types.ModuleType(name)
     module.__path__ = []
@@ -576,7 +577,9 @@ class TestAscendGroupedExpertsGuards:
             ),
         ],
     )
-    def test_supported_dtypes_select_scale_dtype(self, monkeypatch, dtype, expected_scale_dtype):
+    def test_supported_dtypes_select_scale_dtype(
+        self, monkeypatch, dtype, expected_scale_dtype
+    ):
         """bf16/fp16 inputs reach the grouped matmul with their own scale dtype.
 
         A recording torch_npu double replaces the failing kernels: with
@@ -595,18 +598,18 @@ class TestAscendGroupedExpertsGuards:
 
         def fake_dynamic_quant(value):
             import torch as _torch
+
             scale = value.float().abs().amax(dim=-1, keepdim=True) / 127.0
             safe = _torch.where(scale > 0, scale, _torch.ones_like(scale))
             quantized = (
-                _torch.round(value.float() / safe)
-                .clamp(-127, 127)
-                .to(_torch.int8)
+                _torch.round(value.float() / safe).clamp(-127, 127).to(_torch.int8)
             )
             return quantized, scale
 
         def fake_swiglu(x, dim=-1):
             gate, up = x.chunk(2, dim=dim)
             import torch as _torch
+
             return _torch.nn.functional.silu(gate) * up
 
         monkeypatch.setitem(

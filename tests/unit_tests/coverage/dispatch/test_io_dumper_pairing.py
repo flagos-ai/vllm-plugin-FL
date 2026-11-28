@@ -387,7 +387,6 @@ class TestShouldDumpGates:
 class TestSerializationHelpers:
     """_serialize_value / _build_data / _extract_tensor_refs / path helpers."""
 
-
     def test_extract_tensor_refs_key_scheme(self):
         """Only tensors are captured, detached, with the same key scheme."""
         tensor = torch.ones(2)
@@ -1628,6 +1627,7 @@ class TestIoCommonLeftovers:
 # corner branches, pause/resume modes and the reset-state handle close).
 # ---------------------------------------------------------------------------
 
+
 class TestEnableIoDumpEnvCorners:
     """``enable_io_dump`` layer-1 env parsing corners."""
 
@@ -1861,4 +1861,3 @@ class TestResetStateHandleClose:
         d._open_file_handles[str(tmp_path / "x.json")] = handle
         d._reset_state()
         assert d._open_file_handles == {}
-

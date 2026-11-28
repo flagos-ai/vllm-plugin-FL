@@ -13,13 +13,10 @@ covered by tests/unit_tests/utils/test_device_control_env_var.py and
 so neither is duplicated here.
 """
 
-
 import json
 import re
 
-
 import pytest
-
 
 from vllm_fl import utils
 from vllm_fl.utils import (
@@ -32,7 +29,6 @@ from vllm_fl.utils import (
     get_op_config,
     is_oot_enabled,
     use_flaggems,
-    use_flaggems_op,
 )
 
 
@@ -63,6 +59,7 @@ def _clean_env(monkeypatch, clean_fl_env):
     saved_config = utils._OP_CONFIG
     yield
     utils._OP_CONFIG = saved_config
+
 
 class TestLoadOpConfigFromEnv:
     """_load_op_config_from_env parsing and error messages (direct calls)."""
@@ -124,6 +121,7 @@ class TestLoadOpConfigFromEnv:
             ValueError, match="VLLM_FL_OP_CONFIG must map strings to strings."
         ):
             utils._load_op_config_from_env()
+
 
 class TestVendorDeviceMap:
     """VENDOR_DEVICE_MAP accessors and their error paths."""
@@ -262,6 +260,7 @@ class TestFlagGemsSelection:
         monkeypatch.setattr(builtins, "__import__", no_flag_gems)
         with pytest.raises(ModuleNotFoundError):
             get_flaggems_all_ops()
+
 
 class TestOotWhitelistBlacklist:
     """OOT whitelist/blacklist resolution used by custom_ops.register_oot_ops."""

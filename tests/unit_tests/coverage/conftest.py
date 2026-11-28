@@ -51,7 +51,6 @@ def fl_sys_modules():
     ADDED are removed, and a previously-absent entry stays restored-as-absent.
     On hosts where vllm was never imported the fixture behaves as before.
     """
-    import torch  # local import: fixture cost on non-torch runs stays zero
 
     saved = {}
     for name in list(sys.modules):

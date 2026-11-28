@@ -345,7 +345,6 @@ class TestVendorFilters:
         object.__setattr__(impl, "vendor", None)  # simulate missing vendor
         assert manager._matches_vendor_filters(impl, policy) is False
 
-
     def test_record_first_use_logs_first_and_switch(self, caplog):
         """First use logs 'using'; a change logs 'switched from'."""
         manager = OpManager()

@@ -45,7 +45,6 @@ from typing import Generic, TypeVar
 import pytest
 import torch
 
-
 _STUB_ROOTS = ("vllm", "vllm_fl", "flag_gems", "flaggems_vllm", "triton")
 _MISSING = object()
 
@@ -693,7 +692,6 @@ class TestQuantizationTritonPath:
             "vllm_fl.dispatch.backends.flaggems.impl.quantization"
         )
         return importlib.reload(mod)
-
 
     def test_buffers_grid_and_launch_contract(
         self, flaggems_backend, stubs, monkeypatch

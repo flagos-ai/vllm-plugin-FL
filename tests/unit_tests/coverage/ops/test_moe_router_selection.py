@@ -363,6 +363,7 @@ def _replace_cached_op(monkeypatch, module, attr, impl):
     monkeypatch.setattr(module, attr, recorder, raising=False)
     return recorder
 
+
 # ---------------------------------------------------------------------------
 # _sqrtsoftplus_topk
 # ---------------------------------------------------------------------------

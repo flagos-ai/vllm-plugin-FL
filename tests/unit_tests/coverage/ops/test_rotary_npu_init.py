@@ -32,6 +32,7 @@ import torch
 AMD_GRAPH_OPS_MODULE = "vllm_fl.dispatch.backends.vendor.amd.graph_ops"
 ASCEND_ROTARY_MODULE = "vllm_fl.dispatch.backends.vendor.ascend.impl.rotary"
 
+
 def _make_module(name, **attrs):
     """Create a plain module with the given attributes attached."""
     module = types.ModuleType(name)
@@ -123,7 +124,6 @@ def ops_modules(monkeypatch):
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = module
-
 
 
 class TestRotaryEmbeddingNpuInit:

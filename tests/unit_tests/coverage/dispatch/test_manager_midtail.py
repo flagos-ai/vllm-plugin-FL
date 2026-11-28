@@ -40,7 +40,6 @@ from vllm_fl.dispatch.manager import OpManager
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
-
 def _make_impl(op_name, impl_id, kind, *, vendor=None, priority=None, available=True):
     """Build an OpImpl whose availability probe reports *available*."""
     if priority is None:

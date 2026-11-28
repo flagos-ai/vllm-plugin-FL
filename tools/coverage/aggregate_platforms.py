@@ -40,7 +40,9 @@ def _rel(path_key: str) -> str:
     return p[idx:] if idx != -1 else p
 
 
-def aggregate(reports: dict[str, dict], allow_mismatch: bool, expect_commit: str | None = None) -> dict:
+def aggregate(
+    reports: dict[str, dict], allow_mismatch: bool, expect_commit: str | None = None
+) -> dict:
     executed: dict[str, set] = {}
     statements: dict[str, int] = {}
     commits = {}
@@ -63,7 +65,8 @@ def aggregate(reports: dict[str, dict], allow_mismatch: bool, expect_commit: str
     mixed = len(shas) > 1
     if mixed and not allow_mismatch:
         raise SystemExit(
-            "refusing to mix source commits: " + ", ".join(f"{k}={v}" for k, v in commits.items())
+            "refusing to mix source commits: "
+            + ", ".join(f"{k}={v}" for k, v in commits.items())
         )
 
     files = {
@@ -95,16 +98,29 @@ def aggregate(reports: dict[str, dict], allow_mismatch: bool, expect_commit: str
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reports", required=True, nargs="+", type=Path)
-    ap.add_argument("--names", nargs="+", default=None,
-                    help="platform names for --reports (same order); defaults to file stems")
+    ap.add_argument(
+        "--names",
+        nargs="+",
+        default=None,
+        help="platform names for --reports (same order); defaults to file stems",
+    )
     ap.add_argument("--output", required=True, type=Path)
-    ap.add_argument("--allow-mismatch", action="store_true",
-                    help="aggregate anyway, marking the result as commit-mixed")
-    ap.add_argument("--expect-commit", default=None,
-                    help="require every report to have been stamped with this SHA (see --commit-sha of the runners)")
+    ap.add_argument(
+        "--allow-mismatch",
+        action="store_true",
+        help="aggregate anyway, marking the result as commit-mixed",
+    )
+    ap.add_argument(
+        "--expect-commit",
+        default=None,
+        help="require every report to have been stamped with this SHA (see --commit-sha of the runners)",
+    )
     args = ap.parse_args()
 
-    names = args.names or [p.stem.replace("coverage-", "").replace("-combined", "").replace("-final5", "") for p in args.reports]
+    names = args.names or [
+        p.stem.replace("coverage-", "").replace("-combined", "").replace("-final5", "")
+        for p in args.reports
+    ]
     reports = {n: _load(p) for n, p in zip(names, args.reports)}
 
     out = aggregate(reports, args.allow_mismatch, expect_commit=args.expect_commit)
