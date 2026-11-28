@@ -2312,3 +2312,105 @@ class TestGetSpecDecodeDraftProbabilities:
             runner, SimpleNamespace(num_draft_tokens=[0])
         )
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _get_draft_token_ids_cpu (the consumer of the async D2H draft copy).
+# ---------------------------------------------------------------------------
+
+
+class TestGetDraftTokenIdsCpu:
+    """Reading draft token ids back for the next scheduling step."""
+
+    def _runner(self, patched_module, spec_tokens=2):
+        original_cls = patched_module.SuffixDecodingProposer
+        patched_module.SuffixDecodingProposer = _FakeSuffixProposer
+        try:
+            config = _make_vllm_config(
+                speculative_config=_make_spec_config(
+                    "suffix", num_speculative_tokens=spec_tokens
+                )
+            )
+            runner = _build_runner(patched_module, config)
+        finally:
+            patched_module.SuffixDecodingProposer = original_cls
+        return runner
+
+    def test_list_valued_drafts_returned_directly(self, patched_module):
+        """A list-valued _draft_token_ids (CPU drafter) is returned as-is
+        together with the batch's request ids."""
+        runner = self._runner(patched_module)
+        runner._draft_token_ids = [[1, 2], [3, 4]]
+        runner.input_batch = SimpleNamespace(req_ids=["ra", "rb"])
+        drafts, req_ids = patched_module.ModelRunnerFL._get_draft_token_ids_cpu(runner)
+        assert drafts == [[1, 2], [3, 4]]
+        assert list(req_ids) == ["ra", "rb"]
+
+    def test_tensor_with_no_req_ids_returns_empty_pair(self, patched_module):
+        """A tensor copy that never happened (no req ids) yields empty."""
+        runner = self._runner(patched_module)
+        runner._draft_token_ids = torch.tensor([[7, 8]], dtype=torch.int64)
+        runner._draft_token_req_ids = None
+        drafts, req_ids = patched_module.ModelRunnerFL._get_draft_token_ids_cpu(runner)
+        assert drafts == []
+        assert req_ids == []
+
+    def test_tensor_syncs_event_and_slices_cpu_buffer(self, patched_module):
+        """The recorded D2H event is synchronized and the CPU buffer is
+        sliced to (len(req_ids), num_spec_tokens)."""
+        runner = self._runner(patched_module, spec_tokens=2)
+        runner._draft_token_ids = torch.tensor([[7, 8]], dtype=torch.int64)
+        runner._draft_token_req_ids = ["r1"]
+        runner.draft_token_ids_cpu[:2, :2] = torch.tensor([[11, 12], [21, 22]])
+        event = _FakeEvent()
+        runner.draft_token_ids_event = event
+        drafts, req_ids = patched_module.ModelRunnerFL._get_draft_token_ids_cpu(runner)
+        assert event.synchronized
+        assert drafts == [[11, 12]]
+        assert req_ids == ["r1"]
+
+
+# ---------------------------------------------------------------------------
+# _copy_valid_sampled_token_count / _get_valid_sampled_token_count.
+# ---------------------------------------------------------------------------
+
+
+class TestValidSampledTokenCount:
+    """The valid-sampled-count async D2H copy and its reader."""
+
+    def _runner(self, patched_module):
+        return self._runner_for(patched_module)
+
+    def _runner_for(self, patched_module, async_sched=False):
+        config = _make_vllm_config()
+        config.scheduler_config.async_scheduling = async_sched
+        return _build_runner(patched_module, config)
+
+    def test_none_event_is_a_noop(self, patched_module):
+        """Without the copy machinery (event None) the copy returns early."""
+        runner = self._runner(patched_module)
+        runner.valid_sampled_token_count_event = None
+        runner.input_batch = SimpleNamespace(prev_sampled_token_ids=None)
+        patched_module.ModelRunnerFL._copy_valid_sampled_token_count(
+            runner, torch.tensor([1]), torch.tensor([2])
+        )
+
+    def test_get_without_event_or_prev_returns_empty(self, patched_module):
+        """No event or no previous sampled ids means nothing was copied."""
+        runner = self._runner(patched_module)
+        runner.valid_sampled_token_count_event = None
+        runner.input_batch = SimpleNamespace(prev_sampled_token_ids=None)
+        assert patched_module.ModelRunnerFL._get_valid_sampled_token_count(runner) == []
+
+    def test_get_syncs_event_and_slices_counts(self, patched_module):
+        """With the event recorded the counts are read back per request."""
+        runner = self._runner(patched_module)
+        event = _FakeEvent()
+        runner.valid_sampled_token_count_event = event
+        runner.valid_sampled_token_count_cpu = torch.tensor([3, 1, 4])
+        runner.input_batch = SimpleNamespace(
+            prev_sampled_token_ids=torch.zeros(2, 1, dtype=torch.int64)
+        )
+        counts = patched_module.ModelRunnerFL._get_valid_sampled_token_count(runner)
+        assert counts == [3, 1]
+        assert event.synchronized
