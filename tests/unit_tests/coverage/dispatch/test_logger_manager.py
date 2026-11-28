@@ -98,12 +98,27 @@ class TestSetLogLevel:
         assert other.level != logging.ERROR
 
     def test_set_level_for_all_cached_loggers(self):
-        """set_log_level without a name updates every cached logger."""
+        """set_log_level without a name updates every cached logger.
+
+        The no-name form walks the shared cache, so it also relevels the
+        production loggers (io_dump et al.) cached by earlier imports in
+        this process — which would silence INFO records for later tests
+        (the base suite's step-summary assertion). Snapshot and restore
+        every cached logger's level around the call.
+        """
         first = get_logger("vllm_fl.dispatch.test.all1")
         second = get_logger("vllm_fl.dispatch.test.all2")
-        set_log_level("CRITICAL")
-        assert first.level == logging.CRITICAL
-        assert second.level == logging.CRITICAL
+        saved_levels = {
+            name: lgr.level for name, lgr in logger_manager._loggers.items()
+        }
+        try:
+            set_log_level("CRITICAL")
+            assert first.level == logging.CRITICAL
+            assert second.level == logging.CRITICAL
+        finally:
+            for name, level in saved_levels.items():
+                if name in logger_manager._loggers:
+                    logger_manager._loggers[name].setLevel(level)
 
     def test_set_level_is_case_insensitive(self):
         """Lowercase level strings are accepted."""
