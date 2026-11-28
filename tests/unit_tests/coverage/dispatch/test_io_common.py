@@ -974,3 +974,14 @@ class TestGetRankDistributed:
                 dist.destroy_process_group()
         finally:
             io_common.reset_rank()
+            # Some vendor torch builds leave dist.is_initialized() True after
+            # destroy_process_group (observed on thead's PPU build), which
+            # permanently redirects every later get_rank() on this worker to
+            # the stale PG rank and breaks the base suite's rank-directory
+            # assertions. Force the flag back so the process group truly ends.
+            if dist.is_initialized():
+                dist._world = None  # type: ignore[attr-defined]
+                import torch.distributed.distributed_c10d as c10d
+
+                c10d._world = None
+                c10d._default_pg = None
