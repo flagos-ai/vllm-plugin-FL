@@ -50,6 +50,35 @@ def _initialize_fl_runtime(rank: int) -> None:
         logger.info("[FlagGems] Enable all ops")
         flag_gems.enable(**common)
 
+    _install_txda_flag_gems_fixes()
+
+
+def _install_txda_flag_gems_fixes() -> None:
+    """Apply TXDA-specific FlagGems fixes that must hold in *every* mode.
+
+    These live here rather than in the capture-safe graph patches because they
+    are not capture-specific: eager serving hits them too. The most important
+    is FlagGems' ``new_zeros`` scratch allocation, which falls back to
+    ``torch.empty(..., device="cuda")`` for any non-CUDA, non-pinned tensor. On
+    TXDA (a ``PrivateUse1`` build with no CUDA) that raises
+
+        AssertionError: Torch not compiled with CUDA enabled
+
+    during FLA's chunked GDN kernel warmup, which every Qwen3.5 layer runs on
+    the prefill path -- so eager mode logged one failure per layer and left the
+    GDN kernels untuned ("First inference may OOM due to autotuner").
+    """
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "txda":
+        return
+
+    from vllm_fl.dispatch.backends.vendor.txda.patches.capture_safe_ops import (
+        _install_new_zeros_device,
+    )
+
+    _install_new_zeros_device()
+
 
 def _enable_except(flag_gems, blacklist: list[str], common: dict) -> None:
     """Enable every FlagGems op except *blacklist*.

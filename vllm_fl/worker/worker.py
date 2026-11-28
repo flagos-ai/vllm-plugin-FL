@@ -577,6 +577,14 @@ class WorkerFL(WorkerBase):
                     )
 
                     install_v2_runner_compat()
+                elif getattr(current_platform, "device_type", "") == "txda":
+                    # TXDA adaptations for the upstream V2 runner; see
+                    # vllm_fl/dispatch/backends/vendor/txda/patches/.
+                    from vllm_fl.dispatch.backends.vendor.txda.patches import (
+                        v2_runner_compat as txda_v2_runner_compat,
+                    )
+
+                    txda_v2_runner_compat.install_v2_runner_compat()
                 elif getattr(current_platform, "vendor_name", "") == "thead":
                     # Platform-side adaptations for the upstream V2 runner; see
                     # vllm_fl/dispatch/backends/vendor/thead/patches/.
@@ -738,8 +746,16 @@ class WorkerFL(WorkerBase):
         # torch.cuda handle the live capture path already uses on ROCm.
         # XPU stays excluded (see #39977).
         cudagraph_memory_estimate = 0
+        # ``is_cuda_alike`` already covers CUDA and ROCm; keeps MUSA, Metax and
+        # the other graph-capable vendors that relied on it. TXDA and Kunlunxin
+        # run graphs off the accelerator stream but still need the budget, so
+        # they are added to the original condition rather than replacing it.
         if (
-            current_platform.is_cuda_alike()
+            (
+                current_platform.is_cuda_alike()
+                or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+                or current_platform.device_type == "txda"
+            )
             and self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         ):
             cudagraph_memory_estimate = self.model_runner.profile_cudagraph_memory()
@@ -916,7 +932,15 @@ class WorkerFL(WorkerBase):
         return {(pp_rank, tp_rank): metadata}
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
-        return self.model_runner.get_kv_cache_spec()
+        # The upstream V2 path calls this outside any config context, but the
+        # TXDA attention backend resolves its supported kernel block sizes
+        # through get_current_vllm_config(). Enter the context there so the V2
+        # runner sees the configuration this worker was built with; every
+        # other backend keeps the upstream call unchanged.
+        if current_platform.device_type != "txda":
+            return self.model_runner.get_kv_cache_spec()
+        with set_current_vllm_config(self.vllm_config):
+            return self.model_runner.get_kv_cache_spec()
 
     def get_supported_kv_cache_layouts(self) -> list[str]:
         # This RPC is outside WorkerWrapperBase's init/load contexts. Ascend

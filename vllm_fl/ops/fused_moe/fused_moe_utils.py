@@ -22,7 +22,6 @@ from vllm.model_executor.layers.fused_moe.utils import (
     _resize_cache,
     moe_kernel_quantize_input,
 )
-import os
 try:
     from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
         FlashinferMoeBackend,
@@ -62,6 +61,123 @@ _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
 _moe_sum = CachedOp("moe_sum")
 
 logger = init_logger(__name__)
+
+
+# The compact-grouped MoE fast path is reached only through the *published*
+# FlagGems-vLLM entry point (``flaggems_vllm.fused_experts_impl``); the plugin
+# never imports FlagGems' private ``runtime.backend._tsingmicro`` tree. The gate
+# is capability-based rather than version-based: any provider that exports the
+# symbol is accepted, which keeps the pinned CI provider working even though its
+# ``__version__`` predates the release that renamed the export.
+
+
+def _public_fused_moe_module():
+    """Return the module that owns ``flaggems_vllm.fused_experts_impl``.
+
+    The capture-safe MoE meta patch installs helper hooks on that module; both
+    the call site and the patch resolve the module through this one function so
+    they can never drift onto different implementations.
+    """
+    try:
+        import sys
+
+        import flaggems_vllm
+
+        fn = getattr(flaggems_vllm, "fused_experts_impl", None)
+        if fn is None:
+            return None
+        return sys.modules.get(getattr(fn, "__module__", ""))
+    except Exception:
+        return None
+
+
+def _txda_fused_experts_impl(
+    *,
+    activation: str,
+    quant_config: Any,
+    per_channel_quant: bool,
+    apply_router_weight_on_input: bool,
+    expert_map: torch.Tensor | None,
+    a1_scale: torch.Tensor | None,
+    a2_scale: torch.Tensor | None,
+    block_shape: list[int] | None,
+    w1_bias: torch.Tensor | None,
+    w2_bias: torch.Tensor | None,
+    w1_scale: torch.Tensor | None,
+    w2_scale: torch.Tensor | None,
+    clamp_limit: float | None = None,
+    alpha: float | None = None,
+    beta: float | None = None,
+):
+    """Return the TXDA compact-grouped MoE entry point, or ``None``.
+
+    Deciding before any compute keeps this a capability check: the generic
+    dispatch path (or an error) is chosen up front instead of falling back
+    after a half-applied kernel.
+
+    The predicates mirror ``flag_gems``' own ``_use_compact_grouped_moe``:
+    only plain bf16/fp16 (or INT8-w8a16 with scales) plus silu-family
+    activations take the compact-grouped GEMM. Everything else returns
+    ``None`` so the caller uses the generic implementation.
+    """
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "txda":
+        return None
+    if not activation.startswith(("silu", "swiglu")):
+        return None
+    if apply_router_weight_on_input or expert_map is not None:
+        return None
+    if quant_config.use_fp8_w8a8 or quant_config.use_int8_w8a8:
+        return None
+    if quant_config.use_int4_w4a16:
+        return None
+    if block_shape is not None or a1_scale is not None or a2_scale is not None:
+        return None
+    if w1_bias is not None or w2_bias is not None:
+        return None
+    if per_channel_quant:
+        return None
+    if quant_config.use_int8_w8a16:
+        if w1_scale is None or w2_scale is None:
+            return None
+    elif w1_scale is not None or w2_scale is not None:
+        return None
+
+    # The provider's fused_experts_impl takes no clamp/alpha/beta arguments
+    # (checked against the pinned v0.2.0 signature). ``alpha``/``beta`` default
+    # to 1.0/0.0 and are only meaningful for SwiGLU-style activations, so the
+    # defaults are safe to ignore; a non-default value or any clamp limit would
+    # change the maths, so refuse the fast path instead of dropping them.
+    if clamp_limit is not None:
+        return None
+    if alpha is not None and float(alpha) != 1.0:
+        return None
+    if beta is not None and float(beta) != 0.0:
+        return None
+
+    # Capability check, not a version comparison: the published provider has
+    # exported ``fused_experts_impl`` across releases whose ``__version__``
+    # strings differ (the pinned CI provider reports ``0.1.0``), so the presence
+    # of the symbol is the only reliable signal.
+    try:
+        import flaggems_vllm
+    except Exception:
+        return None
+
+    # Only the published provider API is used: this symbol is re-exported by
+    # ``flaggems_vllm/__init__.py``. Importing FlagGems' private
+    # ``runtime.backend._tsingmicro`` module by path would tie the plugin to an
+    # unreleased internal layout.
+    fused_experts_impl = getattr(flaggems_vllm, "fused_experts_impl", None)
+    if fused_experts_impl is None:
+        logger.warning_once(
+            "FlagGems-vLLM %s does not export fused_experts_impl; using the "
+            "generic MoE path on TXDA.",
+            getattr(flaggems_vllm, "__version__", "?"),
+        )
+        return None
+    return fused_experts_impl
 
 
 def _should_use_fl_triton_experts() -> bool:
@@ -342,9 +458,17 @@ class TritonExpertsFL(TritonExperts):
             expert_tokens_meta,
             activation,
         )
-        if current_platform.device_type == "npu":
+        if current_platform.device_type in ("npu", "txda"):
             # Reserve prefill capacity before capture fixes workspace
             # addresses and locks the shared workspace against growth.
+            # ``model_runner.capture_model`` calls ``lock_workspace()`` after
+            # capturing, so the workspace is frozen at ``M`` from the decode
+            # (capture) batch. A larger prefill batch — e.g. 16 concurrent
+            # requests x ~20 prompt tokens with ``--max-num-batched-tokens
+            # 512`` — then trips "Workspace is locked but allocation ...
+            # requires X MB, current size is Y MB". Sizing by the configured
+            # per-step token budget keeps every batch shape within the frozen
+            # buffer. TXDA shares the NPU constraint, so it opts in here too.
             max_tokens = max(M, self.moe_config.max_num_tokens)
             workspace13 = (max_tokens, *workspace13[1:])
             workspace2 = (max_tokens, *workspace2[1:])
@@ -463,6 +587,100 @@ class TritonExpertsFL(TritonExperts):
                 )
             )
             return
+
+        # TXDA fast path: a single fused FlagGems call using the TX81-native
+        # compact-grouped MoE. The generic Triton fused_moe_kernel (tl.dot)
+        # produces wrong values on TXDA, so the dispatch reference fallback is
+        # unusable; this routes through FlagGems' TX81 fused_experts_impl,
+        # which selects _moe_compact_grouped_gemm for bf16+silu.
+        if self._lora_context is None and current_platform.device_type == "txda":
+            txda_fused_experts_impl = _txda_fused_experts_impl(
+                activation=activation.value,
+                quant_config=self.quant_config,
+                per_channel_quant=self.per_act_token_quant,
+                apply_router_weight_on_input=apply_router_weight_on_input,
+                expert_map=expert_map,
+                a1_scale=a1q_scale,
+                a2_scale=a2_scale,
+                block_shape=self.block_shape,
+                w1_bias=self.w1_bias,
+                w2_bias=self.w2_bias,
+                w1_scale=self.w1_scale,
+                w2_scale=self.w2_scale,
+                clamp_limit=self.activation_config.clamp_limit,
+                alpha=self.activation_config.alpha,
+                beta=self.activation_config.beta,
+            )
+            if txda_fused_experts_impl is not None:
+                # The on-device meta builder needs the expert count; the weight
+                # The on-device meta builder needs the expert count; the weight
+                # shape is not visible to it, so publish it here. The builder
+                # lives in the module that owns the public
+                # ``flaggems_vllm.fused_experts_impl`` symbol; resolve it from
+                # that symbol so the plugin never hardcodes the provider's
+                # internal layout.
+                _fx_mod = _public_fused_moe_module()
+                _publish = (
+                    getattr(_fx_mod, "_fl_txda_set_num_experts", None)
+                    if _fx_mod is not None
+                    else None
+                )
+                if _publish is not None and global_num_experts > 0:
+                    _publish(global_num_experts)
+                # clamp/alpha/beta are not part of the provider signature; the
+                # gate above rejects those configurations instead of dropping
+                # them here.
+                output.copy_(
+                    txda_fused_experts_impl(
+                        hidden_states,
+                        w1,
+                        w2,
+                        topk_weights,
+                        topk_ids,
+                        inplace=False,
+                        activation=activation.value,
+                        apply_router_weight_on_input=apply_router_weight_on_input,
+                        use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                        use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                        use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                        use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                        per_channel_quant=self.per_act_token_quant,
+                        global_num_experts=global_num_experts,
+                        expert_map=expert_map,
+                        w1_scale=self.w1_scale,
+                        w2_scale=self.w2_scale,
+                        a1_scale=a1q_scale,
+                        a2_scale=a2_scale,
+                        block_shape=self.block_shape,
+                        w1_bias=self.w1_bias,
+                        w2_bias=self.w2_bias,
+                    )
+                )
+                return
+            # The gate rejected this configuration. Falling through is not an
+            # option on TXDA: the generic Triton ``fused_moe_kernel`` uses
+            # ``tl.dot``, which this same method documents as producing wrong
+            # values here. Reject before any compute instead of running a
+            # known-bad kernel (or the unusable reference fallback). There is
+            # deliberately no environment switch to bypass this: the generic
+            # path is known to compute wrong values on TXDA, so forcing it
+            # would turn a clear error into silent corruption.
+            raise ValueError(
+                "TXDA MoE has no verified kernel for this configuration "
+                f"(activation={activation.value!r}, "
+                f"quant={self.quant_config.quant_dtype!r}, "
+                f"per_channel_quant={self.per_act_token_quant}, "
+                f"block_shape={self.block_shape}, "
+                f"apply_router_weight_on_input="
+                f"{apply_router_weight_on_input}, "
+                "expert_map="
+                f"{'yes' if expert_map is not None else 'no'}). "
+                "The FlagGems compact-grouped TXDA path requires "
+                "silu-family activation, no expert map, no "
+                "router-weight-on-input and plain bf16/fp16 or "
+                "INT8-w8a16 with scales. Adjust the model or quantization "
+                "to a supported combination."
+            )
 
         # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
         # adapters can be injected between GEMM1/activation/GEMM2.

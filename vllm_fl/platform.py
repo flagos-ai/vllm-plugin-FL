@@ -132,7 +132,9 @@ class PlatformFL(Platform):
     # backend there: the traced graph is kept and only Inductor codegen is
     # dropped.
     simple_compile_backend: str = (
-        "eager" if device_type == "npu" or vendor_name == "amd" else "inductor"
+        "eager"
+        if device_type == "npu" or vendor_name == "amd" or device_type == "txda"
+        else "inductor"
     )
     device_control_env_var: str = (
         "ASCEND_RT_VISIBLE_DEVICES"
@@ -302,6 +304,22 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
 
+        if cls.device_type == "txda":
+            # Torch-level patches only (stream handling, device guard).
+            # Model-level patches live in vendor/txda/register_ops.py to avoid
+            # circular imports while `import vllm` is still in progress.
+            #
+            # The installer rolls every patch back on failure, so surfacing the
+            # error is the safe behaviour: continuing without the patches
+            # produces wrong results (a stale current_stream silently drops
+            # collectives out of graph capture), which is worse than failing
+            # to start.
+            from vllm_fl.dispatch.backends.vendor.txda.patch import (
+                apply_txda_patches,
+            )
+
+            apply_txda_patches()
+
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""
@@ -402,11 +420,11 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        if cls.device_type in {"musa", "txda"} and vllm_config.use_v2_model_runner:
-            platform_name = {
-                "musa": "MUSA",
-                "txda": "Tsingmicro TXDA",
-            }[cls.device_type]
+        # MUSA still requires ModelRunnerFL. Ascend adapted V2 upstream and
+        # TXDA installs its own adaptations (vendor/txda/patches/
+        # v2_runner_compat.py), so neither is rejected here.
+        if cls.device_type == "musa" and vllm_config.use_v2_model_runner:
+            platform_name = "MUSA"
             raise ValueError(
                 f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
@@ -563,10 +581,6 @@ class PlatformFL(Platform):
             compilation_config.inductor_compile_config["benchmark_combo_kernel"] = False
 
         if cls.device_type == "txda":
-            if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
-                raise ValueError(
-                    "Tsingmicro TXDA graph mode is not supported. Use --enforce-eager."
-                )
             if compilation_config.mode != CompilationMode.NONE:
                 raise ValueError(
                     "Tsingmicro TXDA supports eager execution only; compilation "
@@ -908,6 +922,7 @@ class PlatformFL(Platform):
             "enflame",
             "kunlunxin",
             "amd",
+            "tsingmicro",
         ]
 
     @classmethod

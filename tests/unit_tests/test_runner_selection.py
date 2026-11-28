@@ -149,7 +149,6 @@ def test_hygon_preserves_upstream_runner_selection(monkeypatch, requested):
     "device_type,vendor,error_pattern",
     [
         ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
-        ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
     ],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(

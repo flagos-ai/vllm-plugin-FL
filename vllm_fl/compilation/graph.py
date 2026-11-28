@@ -162,7 +162,7 @@ def weak_ref_tensors(value: Any) -> Any:
 
 
 def _graph_capture_stream() -> Any:
-    if current_platform.device_type in ("musa", "npu", "gcu"):
+    if current_platform.device_type in ("musa", "npu", "gcu", "txda"):
         # Native accelerator contexts do not update vLLM's CUDA stream cache.
         # Read the active accelerator side stream directly during capture.
         return current_platform.torch_device_fn.current_stream()
@@ -182,7 +182,7 @@ class Graph:
     elif current_platform.device_type == "ptpu":
         graph = torch.ptpu.PTPUGraph
     elif current_platform.device_type == "txda":
-        graph = None
+        graph = torch.txda.TXDAGraph
     else:
         raise NotImplementedError("not support graph")
 
@@ -341,6 +341,32 @@ class GraphWrapper:
         # validate that cudagraph capturing is legal at this point.
         validate_cudagraph_capturing_enabled()
 
+        # FL-specific (txda only): TXDA needs one eager warmup iteration
+        # before capture so flaggems/triton kernels are compiled and their
+        # runtime modules are loaded outside the capture stream; a first
+        # launch during capture is rejected by the runtime
+        # (txLaunchKernel err=0x47000003).
+        #
+        # The capture-safe operator rewrites must be installed *before* that
+        # warmup: they add device work the unpatched path never executes (e.g.
+        # ``split_ba`` allocates a scalar ``torch.zeros`` and adds it to
+        # materialise a strided view). If those kernels are first compiled
+        # inside the capture, the tuner's device sync invalidates the stream:
+        #
+        #   [libentry] config BLOCK_SIZE: ... failed to compile:
+        #   TXDA error: (txDeviceSynchronize()) = Operation not permitted
+        #   while the stream is capturing.
+        #
+        # Installing first makes the warmup exercise the same call graph the
+        # capture records, so every kernel is compiled/tuned eagerly.
+        if current_platform.device_type == "txda":
+            from vllm_fl.dispatch.backends.vendor.txda.patches.capture_safe_ops import (
+                install_capture_safe_ops,
+            )
+
+            install_capture_safe_ops()
+            self.runnable(*args, **kwargs)
+
         input_addresses = [x.data_ptr() for x in args if isinstance(x, torch.Tensor)]
         entry.input_addresses = input_addresses
         capture_inputs = self._capture_inputs(entry, args, kwargs)
@@ -374,6 +400,29 @@ class GraphWrapper:
 
                 get_offloader().sync_prev_onload()
 
+            # FL-specific (txda only): torch_txda's ExchangeDevice ->
+            # txSetDevice resets the current stream to the device default
+            # stream, and flaggems wraps every triton kernel launch in a
+            # device guard — without neutralizing it during capture, kernels
+            # are diverted to the default stream and the capture is
+            # corrupted. The default "global" capture_error_mode also makes
+            # the tsingmicro triton launcher reject kernel launches
+            # (txLaunchKernel err=0x47000003); "relaxed" captures and
+            # replays correctly. Other platforms take the exact previous
+            # capture path.
+            capture_ctx = nullcontext()
+            capture_kwargs: dict[str, Any] = {}
+            if current_platform.device_type == "txda":
+                from vllm_fl.dispatch.backends.vendor.txda.patch import (
+                    capture_guard_context,
+                )
+
+                capture_ctx = capture_guard_context()
+                capture_kwargs["capture_error_mode"] = "relaxed"
+                # The capture-safe operator rewrites were already installed
+                # before the eager warmup at the top of this method, so the
+                # warmup compiled their kernels outside the capture stream.
+
             # FL-specific: use platform-agnostic graph capture while
             # preserving the explicit stream used by vLLM v0.28.0.
             capture_scope = (
@@ -383,10 +432,12 @@ class GraphWrapper:
             )
             with (
                 capture_scope,
+                capture_ctx,
                 current_platform.torch_device_fn.graph(
                     graph,
                     pool=self.graph_pool,
                     stream=_graph_capture_stream(),
+                    **capture_kwargs,
                 ),
             ):
                 output = self.runnable(*args, **kwargs)

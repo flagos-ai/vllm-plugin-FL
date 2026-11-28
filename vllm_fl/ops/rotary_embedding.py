@@ -34,6 +34,9 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         self._use_amd_graph_ops = (
             getattr(current_platform, "vendor_name", None) == "amd"
         )
+        # Cached for the same reason as the AMD flag: a module-global lookup
+        # inside forward_oot breaks Dynamo tracing.
+        self._use_native_rotary = current_platform.device_type == "txda"
         if current_platform.device_type == "npu":
             from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
                 initialize_rotary_embedding_ascend,
@@ -51,6 +54,12 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         # calls RotaryEmbedding with key=None for cross-layer KV sharing, so
         # preserve the upstream native path for that supported input.
         if key is None:
+            return self.forward_native(positions, query, key)
+
+        # TXDA: prefer the upstream PyTorch-native RoPE path (matches
+        # tsingmicro.md "rotary uses reference implementations"). The native
+        # ApplyRotaryEmb path is the simpler, audited code path.
+        if getattr(self, "_use_native_rotary", False):
             return self.forward_native(positions, query, key)
 
         cos_sin_cache = self._match_cos_sin_cache_dtype(query)

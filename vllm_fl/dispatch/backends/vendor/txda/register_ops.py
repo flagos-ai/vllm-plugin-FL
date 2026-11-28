@@ -1,10 +1,10 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-# Ported from the vLLM 0.24 TXDA enablement (537284eb, #460) for vLLM 0.28.
 
 """
-Txda (tsingmicro) backend operator registrations.
+TXDA backend operator registrations.
 
-This module registers the VENDOR (txda) implementations.
+This module registers all vendor (TXDA) implementations and applies the
+txda model-level patches.
 """
 
 from __future__ import annotations
@@ -12,9 +12,17 @@ from __future__ import annotations
 import functools
 import logging
 
-from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
+from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
 
 logger = logging.getLogger(__name__)
+
+# Apply the txda model-level patches at backend registration time. This
+# module is imported by the dispatch system (builtin_ops), which runs only
+# after vllm is fully imported — the patchs modules import
+# vllm.model_executor / vllm._custom_ops and would hit circular imports if
+# pulled in earlier (e.g. from the package __init__, which PlatformFL's
+# import_kernels() touches via patch.py).
+from .impl import patchs  # noqa: F401,E402 — apply Txda patches
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -30,7 +38,7 @@ def _bind_is_available(fn, is_available_fn):
 
 def register_builtins(registry) -> None:
     """
-    Register all Txda (VENDOR) operator implementations.
+    Register all TXDA (VENDOR) operator implementations.
 
     Args:
         registry: Registry to register into
@@ -47,6 +55,17 @@ def register_builtins(registry) -> None:
             impl_id="vendor.txda",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.attention_backend, is_avail),
+            vendor="txda",
+            priority=BackendPriority.VENDOR,
+        ),
+        # RMS Norm — pure-torch fallback: the FlagGems Triton kernel exceeds
+        # the TXDA shared-memory limit, so impl/normalization.py computes it
+        # with native ops.
+        OpImpl(
+            op_name="rms_norm",
+            impl_id="vendor.txda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.rms_norm, is_avail),
             vendor="txda",
             priority=BackendPriority.VENDOR,
         ),

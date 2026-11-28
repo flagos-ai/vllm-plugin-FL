@@ -1,33 +1,92 @@
-# vLLM-FL Dispatch Configuration for TSINGMICRO (TX8110 / TSM Runtime)
-# Ported from the vLLM 0.24 TXDA enablement (537284eb, #460) for vLLM 0.28.
+# vLLM-FL Dispatch Configuration for Tsingmicro TXDA (TX8110)
+# Continues the vLLM 0.24 TXDA enablement (537284eb, #460) and the 0.28
+# adaptation (#642), for vLLM 0.32 with flag_gems 5.5.0.dev0 /
+# flaggems_vllm 0.3.0.dev1 / triton 3.7.1.
+
+# Preferred default backend type: flagos, vendor, reference
 prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
 strict: false
 
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flagos        : Default FlagOS implementation
+#   - reference     : PyTorch reference implementation
+#   - vendor        : Any available vendor backend (auto-detected)
+#   - vendor:txda   : Txda-specific vendor backend
 op_backends:
-  # TX8110 FlagGems attention produces incorrect values without raising.
-  # Select SDPA directly; exception fallback cannot detect incorrect numerics.
+  # attention_backend: prioritize vendor.  The txda vendor backend returns
+  # AttentionFLBackend, whose forward calls flag_gems.flash_attn_varlen_func
+  # (the FlagGems tsingmicro attention kernel).  The flagos default instead
+  # returns vLLM's stock TritonAttentionBackend, which runs
+  # triton_unified_attention.unified_attention and never reaches the
+  # tsingmicro implementation.
   attention_backend:
     - vendor
-  # FlagGems normalization and rotary also produce incorrect values on TX8110.
-  rms_norm:
-    - reference
-  rotary_embedding:
-    - reference
-  silu_and_mul:
+    - flagos
     - reference
 
-# The reference runtime has failed multi-request inference with broad ATen
-# replacement. Limit generic registration to the audited add/mul kernels.
-# Copies, reductions, GEMM and CPU-generator exponential_ stay native.
-# The additional names enable required plugin MoE dispatch implementations;
-# they do not add generic ATen registrations in the reference FlagGems build.
-flagos_whitelist:
-  - add
-  - mul
-  - topk_softmax
-  - moe_align_block_size
-  - invoke_fused_moe_triton_kernel
-  - moe_sum
+  # invoke_fused_moe_triton_kernel: FlagGems first, then the shared PyTorch
+  # reference. There is no TXDA vendor entry: its only job was to delegate to
+  # the same upstream kernel the reference backend already exposes, which made
+  # it a duplicate alias rather than a device capability.
+  invoke_fused_moe_triton_kernel:
+    - flagos
+    - reference
+
+  # rms_norm: the FlagGems Triton kernel cannot run on TXDA (it exceeds the
+  # shared-memory limit), so it must not be tried first: with strict: false
+  # the dispatcher would catch the failure *after* a possibly in-place
+  # residual update and replay it against already-mutated inputs. The vendor
+  # entry delegates to the shared reference contract and is the only
+  # implementation selected here; capability is decided before any compute.
+  rms_norm:
+    - vendor
+
+
+# FlagGems ATen-replacement blacklist. GDN (Qwen3.5 linear attention) does a
+# lot of memory-movement ops (copy_/cat/index_select/index_put/...) per layer;
+# with flag_gems.enable() those are all routed through tx81 Triton kernels,
+# which are far slower than TXDA native device copies. Excluding them keeps
+# the compute ops (mm/rms_norm/attention/rotary/moe) on FlagGems while memory
+# movement runs natively.
+flagos_blacklist:
+  - copy
+  - copy_
+  # NOTE: ``cat`` must NOT be excluded. Without a FlagGems kernel, ATen's
+  # composite ``cat`` copies every input to the CPU and back (a D2H that is
+  # fatal under graph capture). The TXDA ``cat`` copies through StridedBuffer
+  # on device instead, which is what capture needs.
+  - stack
+  - hstack
+  # `index_select` must NOT be excluded. torch_txda registers no native
+  # index_select; with FlagGems excluding it, aten::index_select falls through
+  # to the txda `fallback_cpu` backend (self.cpu() -> D2H) which both
+  # synchronizes (fatal under graph capture) and is ~10x slower. The FlagGems
+  # TXDA kernel gathers dim-0 dense rows on device and captures cleanly. RoPE
+  # calls `cos_sin_cache.index_select(0, positions)` on every forward, so
+  # excluding it aborts the capture at the first attention layer.
+  - index_put
+  - index_put_
+  - index_add
+  - index_add_
+  - as_strided_copy
+  - select_scatter
+  - repeat
+  - tile
+  - flip
+  - slice_backward
+  - diagonal_copy
+  # `embedding` is deliberately NOT excluded: the FlagGems TXDA kernel is a
+  # single 16-CTA tile that reads the index on device. Excluding it falls back
+  # to the ATen CPU composite kernel, which copies the weight to host and
+  # synchronizes — fatal under graph capture.
+
 
 oot_blacklist:
   - masked_fill

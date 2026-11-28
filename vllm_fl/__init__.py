@@ -290,6 +290,9 @@ def register():
     if vendor_name in ("mthreads", "tsingmicro"):
         # These backends require the legacy runner. Ascend, Enflame, and GCU
         # preserve upstream runner selection and configure workers separately.
+        # TXDA additionally supports the upstream V2 runner (see
+        # vendor/txda/patches/v2_runner_compat.py): an explicit
+        # VLLM_USE_V2_MODEL_RUNNER=1 wins over this default (setdefault).
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"

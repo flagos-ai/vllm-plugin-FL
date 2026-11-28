@@ -1,24 +1,32 @@
-# Tsingmicro TXDA with vLLM 0.28.0
+# Tsingmicro TXDA with vLLM 0.32.0
 
 This backend targets TX8110/TXDA 81 devices with the vendor `torch_txda`, Triton,
-FlagGems and FlagCX stack. The plugin base is `0.4.0-dev`; install a checkout
-containing the TXDA 0.28 adaptation described here.
+FlagGems and FlagCX stack. The plugin base is `0.5.0-dev`; install a checkout
+containing the TXDA 0.32 adaptation described here.
 
 ## Execution scope
 
-- Use the FL/V1 model runner with `--enforce-eager` at every tensor-parallel
-  size. Graph mode is temporarily unsupported on TXDA.
+- The FL/V1 model runner is the default at every tensor-parallel size. The
+  upstream V2 runner is supported with `VLLM_USE_V2_MODEL_RUNNER=1` and the
+  adaptations in `vendor/txda/patches/`; both are validated with
+  `--enforce-eager`. Graph mode is temporarily unsupported on TXDA.
 - Multi-device execution, including the TP8 examples below, requires a valid
   `FLAGCX_PATH`. Native TCCL remains the single-device fallback.
 - Prefill and decode context parallel sizes must both be 1.
 - Speculative decoding is unsupported because the fused speculative Mamba
   state-copy path is not available on TXDA. Omit `--speculative-config`.
-- Generic FlagGems ATen replacement is limited to add/mul; four additional
-  selectors retain the required MoE implementations. Normalization, rotary and
-  SiLU use reference implementations. This conservative configuration can be
-  slow and does not establish a throughput guarantee.
-- The TXDA SDPA backend uses the paged KV cache with reference attention.
-  MLA and sparse attention are unsupported.
+- Attention runs through the FlagGems TSINGMIC attention kernel
+  (`AttentionFLBackend`, `flag_gems.flash_attn_varlen_func`); MLA uses
+  `MLAFLBackend`. Sparse attention is unsupported.
+- Normalization (`rms_norm`) uses a pure-torch fallback
+  (`vendor/txda/impl/normalization.py`): the FlagGems Triton kernel exceeds
+  the TXDA shared-memory limit.
+- MoE uses the FlagGems TX81-native compact-grouped MoE fast path in
+  `TritonExpertsFL`; the generic Triton `fused_moe_kernel` (tl.dot) produces
+  wrong values on TXDA.
+- Memory-movement ops (copy/cat/index_select/...) are kept on TXDA-native
+  kernels via `flagos_blacklist` in `tsingmicro.yaml`; compute ops
+  (mm/rms_norm/attention/rotary/moe) go through FlagGems.
 - Validation covers Qwen3.6-27B and Qwen3.6-35B-A3B at TP8. The command
   examples below use bounded smoke-test settings, not recommended production
   capacity limits.
@@ -40,13 +48,53 @@ harbor.baai.ac.cn/plugin/tsingmicro001-gems5.4.0-treenone-triton3.6.0-cx0.1.0-pl
 | Triton | 3.6.0.post2026090316+git841474ad |
 | FlagGems | 5.4.0.dev708+gd3a272b8a.d20260825 |
 | FlagCX | 0.1.0, TXDA vendor build |
-| Target vLLM | 0.28.0, empty build |
+| Target vLLM | 0.32.0, empty build |
 
 Keep the image's vendor PyTorch, `torch_txda`, Triton, FlagGems and FlagCX
 packages when installing the target vLLM and plugin. The standard CUDA wheels do
 not provide the TXDA runtime. `flaggems-vllm` is a separate shared operator
 provider required by the current plugin; install it using the repository's
 pinned installer below.
+
+## Validated 0.32 stack
+
+The reference image above ships the 0.24 stack. The TXDA 0.32 adaptation was
+validated against the versions below, which are the versions recorded in the
+validation environment -- not a prebuilt image. Starting from the 0.24 reference
+image reaches this stack only if you also upgrade `FlagGems`; the 0.24 image
+ships `5.4.0.dev708`, and the 0.32 code paths that matter here (the compact
+MoE gate and the capture-safe rewrites) expect `5.5.0` or newer. The
+installation steps under "Install the target software" below call out the extra
+`flag-gems` upgrade that the pinned provider installer does not perform.
+
+| Component | Validated version |
+| --- | --- |
+| vLLM | `0.32.0+empty` (source tag `v0.32.0`) |
+| Triton | `3.7.1+git7ea4b5be` |
+| FlagGems | `5.5.0.dev1+g1c93bb08c` |
+| FlagGems-vLLM | `0.3.0.dev1` |
+| torch | Vendor TXDA build, `2.13.0+cpu` |
+| Model runner | FL/V1 (`VLLM_USE_V2_MODEL_RUNNER=0`) by default; the upstream V2 runner is supported with `VLLM_USE_V2_MODEL_RUNNER=1` |
+
+Two stack properties the code depends on:
+
+- The MoE fast path is reached only through the *published* FlagGems-vLLM entry
+  point `flaggems_vllm.fused_experts_impl`; the plugin does not import FlagGems'
+  private `runtime.backend._tsingmicro` tree. The gate is capability-based: if
+  the provider exports that symbol the fast path is used, otherwise it logs a
+  warning and rejects the configuration before any compute (the generic Triton
+  `tl.dot` kernel produces wrong values on TXDA, so there is no silent fallback).
+- `rms_norm` runs on the reference implementation; the FlagGems Triton kernel
+  cannot run on TXDA (shared-memory limit), so `tsingmicro.yaml` selects the
+  vendor entry before any compute rather than relying on error fallback.
+
+Non-default settings used by the examples below:
+
+- `--kv-cache-memory-bytes`: TXDA cannot profile peak allocation safely, so the
+  KV budget is set explicitly instead of being derived from
+  `--gpu-memory-utilization`.
+- `--max-num-seqs` / `--max-num-batched-tokens`: bounded to keep the smoke tests
+  small; raise them for production capacity.
 
 ## Create an isolated container
 
@@ -80,12 +128,17 @@ Save this as `$task_root/setup.sh` on the host:
 #!/usr/bin/env bash
 set -euo pipefail
 cd /work/task
-git clone --depth 1 --branch v0.28.0 https://github.com/vllm-project/vllm.git vllm-0.28.0
+git clone --depth 1 --branch v0.32.0 https://github.com/vllm-project/vllm.git vllm-0.32.0
 VLLM_TARGET_DEVICE=empty python -m pip install \
-  --no-build-isolation --no-deps ./vllm-0.28.0
-# Align the vLLM 0.28 Python requirements missing from this exact base image.
+  --no-build-isolation --no-deps ./vllm-0.32.0
+# Align the vLLM 0.32 Python requirements missing from this exact base image.
 python -m pip install --no-deps \
   compressed-tensors==0.17.0 llguidance==1.7.6 fastapi==0.136.3
+# The reference image carries FlagGems 5.4.0.dev708; the 0.32 code paths need
+# 5.5.0+. Upgrade it against the image's own torch/Triton before installing the
+# plugin (the pinned provider installer below does NOT touch flag-gems).
+python -m pip install --no-deps --no-build-isolation \
+  "flag-gems @ git+https://github.com/FlagOpen/FlagGems.git@v5.5.0.dev1"
 cd /work/vllm-plugin-FL
 python -m pip install --no-build-isolation --no-deps -e .
 python .github/scripts/install_flaggems_vllm.py
@@ -95,7 +148,7 @@ python -m pip show vllm vllm-plugin-fl torch torch-txda triton flag-gems flaggem
 Launch it on the host:
 
 ```bash
-tmux new-session -d -s txda-028-setup \
+tmux new-session -d -s txda-032-setup \
   "docker exec codex-tsingmicro-028 bash -lc 'bash /work/task/setup.sh' >'$task_root/outputs/setup.log' 2>&1"
 tmux capture-pane -t txda-028-setup -p
 tail -n 80 "$task_root/outputs/setup.log"
@@ -109,6 +162,15 @@ The FlagGems-vllm installer pins release `v0.2.0` at commit
 `b5c2c2249319277ccda4d41aa0f65164bd9b2a19`, installs that package with
 `--no-deps --no-build-isolation`, and checks that the vendor runtime versions
 remain unchanged. It installs missing Python support packages separately.
+
+That installer only covers FlagGems-vLLM. `FlagGems` itself (`flag-gems`) is a
+separate package that the script deliberately leaves untouched, so the install
+above does **not** by itself produce the validated stack: the 0.24 reference
+image carries `5.4.0.dev708`, which the 0.32 code paths reject for the compact
+MoE gate. To reach the versions in the table, upgrade `flag-gems` to
+`5.5.0.dev1` (or a newer 5.5.0 build) against the same torch/Triton the image
+ships, then re-run the plugin install. Verify with
+`python -m pip show flag-gems flaggems-vllm` before launching a server.
 
 ## Optional: build the FlagTree compiler instead of stock Triton
 
@@ -213,6 +275,19 @@ export FL_MODEL_BASE_PATH=/models
 
 The plugin uses `TXDA_VISIBLE_DEVICES` for logical-to-physical device mapping.
 Set the list to the allocated devices before starting the engine.
+
+### TXDA-specific plugin switches
+
+These two variables only affect the TXDA backend; both default to the value the
+validated stack was tested with, so leave them unset unless you are debugging.
+
+| Variable | Default | Effect | When to change it |
+| --- | --- | --- | --- |
+| `VLLM_FL_TXDA_AUX_STREAM` | unset (`0`) | Unset: `aux_stream()` returns `None`, so vLLM's shared-expert/router overlap runs synchronously on the current stream (same as MUSA). Set to `1`: returns a dedicated `torch.txda.Stream`, restoring CUDA-style overlap. | Only on a MoE model after verifying the overlap produces correct output; not covered by the TP8 gate. |
+| `VLLM_FL_TXDA_NOOP_DEVICE_GUARD` | unset (`1`) | `1`: replaces `torch.txda.device` / `_exchange_device` with the skip-if-already-current guard needed for graph capture. `0`: keeps the upstream guard verbatim. | Set `0` only if you hit a cross-device bug; the capture path assumes the default. |
+
+Both are read at worker start; changing them requires a restart. There is no
+inference-time override.
 
 Use `--shutdown-timeout 60` for manual servers and send SIGTERM to the API
 server first. Allow at least 90 seconds for its shutdown before forcing owned

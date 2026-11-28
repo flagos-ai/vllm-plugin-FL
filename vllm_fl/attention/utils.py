@@ -4,6 +4,11 @@ logger = init_logger(__name__)
 
 _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE = 512
 
+# Query-axis tile for the TXDA ViT attention. Bounds the score matrix to
+# CHUNK x seq; 1024 keeps peak memory near 1 GiB at seq=65536 (16 heads,
+# bf16) while still using large GEMMs.
+_TXDA_VIT_ATTENTION_CHUNK = 1024
+
 
 def _patch_hygon_sdpa_contiguous():
     """Use contiguous BHSD inputs and D72 padding for Hygon ViT Torch SDPA."""
@@ -108,6 +113,77 @@ def _gcu_forward_mm_attention(
     return output.reshape(batch_size, q_len, -1) if is_reshaped else output
 
 
+def _txda_forward_sdpa(self, query, key, value, cu_seqlens=None):
+    """Decompose the ViT SDPA into matmul + softmax.
+
+    ``torch.nn.functional.scaled_dot_product_attention`` has no fused kernel on
+    TXDA and falls back to a slow path: one call at the ViT shape
+    (heads=16, head_dim=72, seq=4096) measured ~320 ms, and the Qwen3.5 vision
+    encoder runs 27 such layers per image. The encoder then dominates model
+    profiling and startup appears to hang.
+
+    The ViT head_dim here (72) is not a power of two, which is also why
+    FlagGems' ``flash_attn_varlen_func`` degrades ~70x on it (2724 ms) while
+    staying fast at 64/128. Explicit matmul + softmax uses the pointwise and
+    GEMM kernels that FlagGems implements well and measured 2.9 ms at seq=512
+    and 95 ms at seq=4096 -- a 30-70x improvement, with max|diff| vs SDPA of
+    0.03 on bf16 (within tolerance).
+
+    ``cu_seqlens`` is ignored on purpose. vLLM's own SDPA path
+    (``vit_attn_wrappers.apply_sdpa``) also ignores it and runs a dense
+    attention over the padded batch, so honouring it here would change
+    behaviour relative to the backend being replaced. It is carried only for
+    the FlashAttention/FlashInfer backends.
+    """
+    import torch
+
+    bsz, q_len = query.size()[:2]
+    kv_len = key.size(1)
+    is_reshaped = query.dim() != 4
+
+    # ``view_qkv_to_4d`` returns (batch, seq, heads, head_dim); the matmuls
+    # below need the head axis next to the batch axis.
+    query, key, value = self.view_qkv_to_4d(query, key, value, bsz, q_len, kv_len)
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    scale = self.scale if self.scale is not None else query.shape[-1] ** -0.5
+    if self.num_heads > self.num_kv_heads:
+        # Grouped-query attention: repeat each KV head across its query group.
+        repeat = self.num_heads // self.num_kv_heads
+        key = key.repeat_interleave(repeat, dim=1)
+        value = value.repeat_interleave(repeat, dim=1)
+
+    # Chunk the query axis so the score matrix stays bounded. The ViT runs at
+    # very large sequences during profiling (Qwen3.5's preprocessor reports a
+    # 65536-token image), where a full S x S score tensor would need tens of
+    # GB; chunking keeps peak score memory at CHUNK x S.
+    chunk = _TXDA_VIT_ATTENTION_CHUNK
+    query_len = query.shape[2]
+    if query_len > chunk:
+        key_t = key.transpose(-2, -1)
+        parts = []
+        for start in range(0, query_len, chunk):
+            q_chunk = query[:, :, start : start + chunk, :]
+            scores = torch.matmul(q_chunk, key_t) * scale
+            probs = torch.softmax(scores, dim=-1)
+            parts.append(torch.matmul(probs, value))
+        output = torch.cat(parts, dim=2)
+    else:
+        scores = torch.matmul(query, key.transpose(-2, -1)) * scale
+        probs = torch.softmax(scores, dim=-1)
+        output = torch.matmul(probs, value)
+
+    # The matmuls ran over (batch, heads, seq, head_dim). ``is_reshaped`` means
+    # the caller passed (batch, seq, hidden) and expects that layout back;
+    # a 4D caller passed (batch, seq, heads, head_dim) and expects BSHD too.
+    output = output.transpose(1, 2)
+    if is_reshaped:
+        output = output.reshape(bsz, q_len, -1)
+    return output
+
+
 def patch_mm_encoder_attention():
     """
     Install vendor multimodal encoder attention adapters.
@@ -132,6 +208,17 @@ def patch_mm_encoder_attention():
         # both methods to cover the very first encoder layer as well.
         mm_mod.MMEncoderAttention.forward_native = _gcu_forward_mm_attention
         mm_mod.MMEncoderAttention.forward_oot = _gcu_forward_mm_attention
+        return
+
+    if getattr(current_platform, "device_type", None) == "txda":
+        if not hasattr(mm_mod.MMEncoderAttention, "_fl_txda_original_forward_sdpa"):
+            mm_mod.MMEncoderAttention._fl_txda_original_forward_sdpa = (
+                mm_mod.MMEncoderAttention._forward_sdpa
+            )
+        mm_mod.MMEncoderAttention._forward_sdpa = _txda_forward_sdpa
+        logger.info(
+            "Installed TXDA ViT attention (matmul+softmax instead of SDPA)"
+        )
         return
 
     if getattr(current_platform, "vendor_name", None) == "kunlunxin":

@@ -1474,10 +1474,12 @@ class ModelRunnerFL(
                 sampling_params
                 and sampling_params.sampling_type == SamplingType.RANDOM_SEED
             ):
-                # TXDA random kernels use the runtime's CPU fallback.
-                generator = torch.Generator(
-                    device="cpu" if self.device.type == "txda" else self.device
-                )
+                # NOTE(2026-11-17): must use device=self.device, NOT "cpu".
+                # flag_gems tsingmicro philox_backend_seed_offset expects a
+                # TXDA generator (2×uint64 state); a CPU MT19937 state (632
+                # int64) makes `c0, c1 = state_copy.view(torch.int64)`
+                # unpack-fail.
+                generator = torch.Generator(device=self.device)
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
@@ -3876,14 +3878,22 @@ class ModelRunnerFL(
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
-        # CPU generators (used by TXDA) do not expose Philox offsets. Save
-        # their full state before sampling so a discarded chunked-prefill
-        # sample does not advance the request's seeded random stream.
-        self._cpu_generator_states = {
-            index: generator.get_state()
-            for index, generator in sampling_metadata.generators.items()
-            if generator.device.type == "cpu"
-        }
+        # Save request generator state before sampling so a discarded
+        # chunked-prefill sample does not advance the request's seeded stream.
+        #
+        # Upstream rolls a CUDA generator back by a fixed 4 Philox counters,
+        # matching what its sampling kernel consumes. That constant does not
+        # hold on TXDA: the sampler runs flag_gems' exponential_, which
+        # reserves ``numel + unroll * BLOCK`` counters per call (the vocabulary
+        # size, not a fixed handful). Restoring the exact pre-sampling state is
+        # correct for any consumer, so TXDA takes this path; every other
+        # backend keeps the upstream behaviour.
+        self._generator_states = {}
+        if current_platform.device_type == "txda":
+            self._generator_states = {
+                index: generator.get_state()
+                for index, generator in sampling_metadata.generators.items()
+            }
         # Update output token ids with tokens sampled in last step
         # if async scheduling and required by current sampling params.
         self.input_batch.update_async_output_token_ids()
@@ -3941,11 +3951,17 @@ class ModelRunnerFL(
         )[0]
         for i in discard_sampled_tokens_req_indices:
             gen = self.input_batch.generators.get(int(i))
-            if gen is not None:
-                if gen.device.type == "cpu":
-                    gen.set_state(self._cpu_generator_states[int(i)])
-                else:
-                    gen.set_offset(gen.get_offset() - 4)
+            if gen is None:
+                continue
+            if current_platform.device_type == "txda":
+                # Restore the exact pre-sampling state; see _generator_states.
+                saved = self._generator_states.get(int(i))
+                if saved is not None:
+                    gen.set_state(saved)
+            elif gen.device.type == "cpu":
+                gen.set_state(self._cpu_generator_states[int(i)])
+            else:
+                gen.set_offset(gen.get_offset() - 4)
 
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
@@ -6624,9 +6640,7 @@ class ModelRunnerFL(
                         dummy_metadata,
                         generators={
                             0: torch.Generator(
-                                device="cpu"
-                                if self.device.type == "txda"
-                                else self.device
+                                device=self.device
                             ).manual_seed(0)
                         },
                     ),
