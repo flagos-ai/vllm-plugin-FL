@@ -71,7 +71,9 @@ def _fake_platform(**predicates):
 
 def _parallel_config(**attrs):
     base = dict(
-        dp_size=1, use_ep=False, use_batched_activation_format=False,
+        dp_size=1,
+        use_ep=False,
+        use_batched_activation_format=False,
     )
     base.update(attrs)
     return SimpleNamespace(**base)
@@ -100,13 +102,17 @@ class TestShouldUseFlTritonExperts:
             (True, False, False, True, ["fused_moe"], False),
         ],
     )
-    def test_combinations(self, monkeypatch, is_cuda, is_oot, is_cpu,
-                          flaggems, blacklist, expected):
+    def test_combinations(
+        self, monkeypatch, is_cuda, is_oot, is_cpu, flaggems, blacklist, expected
+    ):
         monkeypatch.setattr(
-            fmu, "current_platform",
-            _fake_platform(is_cuda=lambda: is_cuda,
-                           is_out_of_tree=lambda: is_oot,
-                           is_cpu=lambda: is_cpu),
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cuda=lambda: is_cuda,
+                is_out_of_tree=lambda: is_oot,
+                is_cpu=lambda: is_cpu,
+            ),
         )
         monkeypatch.setattr(fmu, "use_flaggems", lambda: flaggems)
         monkeypatch.setattr(fmu, "get_oot_blacklist", lambda: blacklist)
@@ -117,23 +123,35 @@ class TestGetPriorityBackends:
     """Every arm of the platform priority table."""
 
     def test_rocm_arm(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_rocm=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_rocm=lambda: True,
+            ),
+        )
         backends = fmu._get_priority_backends(_moe_config())
         assert backends == [
-            _backend("AITER"), _backend("TRITON"), _backend("BATCHED_TRITON"),
+            _backend("AITER"),
+            _backend("TRITON"),
+            _backend("BATCHED_TRITON"),
         ]
 
     def test_cuda_plain(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cuda=lambda: True,
-            is_device_capability_family=lambda family: False,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cuda=lambda: True,
+                is_device_capability_family=lambda family: False,
+            ),
+        )
         backends = fmu._get_priority_backends(_moe_config())
         assert backends == [
-            _backend("FLASHINFER_TRTLLM"), _backend("FLASHINFER_CUTLASS"),
-            _backend("TRITON"), _backend("BATCHED_TRITON"),
+            _backend("FLASHINFER_TRTLLM"),
+            _backend("FLASHINFER_CUTLASS"),
+            _backend("TRITON"),
+            _backend("BATCHED_TRITON"),
         ]
 
     def test_cuda_hopper_demotes_flashinfer(self, monkeypatch):
@@ -143,63 +161,94 @@ class TestGetPriorityBackends:
             seen.append(family)
             return True
 
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cuda=lambda: True,
-            is_device_capability_family=family_check,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cuda=lambda: True,
+                is_device_capability_family=family_check,
+            ),
+        )
         backends = fmu._get_priority_backends(_moe_config())
         assert 90 in seen
         assert backends == [
-            _backend("TRITON"), _backend("BATCHED_TRITON"),
-            _backend("FLASHINFER_TRTLLM"), _backend("FLASHINFER_CUTLASS"),
+            _backend("TRITON"),
+            _backend("BATCHED_TRITON"),
+            _backend("FLASHINFER_TRTLLM"),
+            _backend("FLASHINFER_CUTLASS"),
         ]
 
     def test_cuda_dp_gt_one_demotes_cutlass(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cuda=lambda: True,
-            is_device_capability_family=lambda family: False,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cuda=lambda: True,
+                is_device_capability_family=lambda family: False,
+            ),
+        )
         backends = fmu._get_priority_backends(
             _moe_config(moe_parallel_config=SimpleNamespace(dp_size=2))
         )
         assert backends == [
-            _backend("FLASHINFER_TRTLLM"), _backend("TRITON"),
-            _backend("BATCHED_TRITON"), _backend("FLASHINFER_CUTLASS"),
+            _backend("FLASHINFER_TRTLLM"),
+            _backend("TRITON"),
+            _backend("BATCHED_TRITON"),
+            _backend("FLASHINFER_CUTLASS"),
         ]
 
     def test_cuda_swigluoai_demotes_flashinfer(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cuda=lambda: True,
-            is_device_capability_family=lambda family: False,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cuda=lambda: True,
+                is_device_capability_family=lambda family: False,
+            ),
+        )
         backends = fmu._get_priority_backends(
             _moe_config(activation=fmu.MoEActivation.SWIGLUOAI)
         )
         assert backends == [
-            _backend("TRITON"), _backend("BATCHED_TRITON"),
-            _backend("FLASHINFER_TRTLLM"), _backend("FLASHINFER_CUTLASS"),
+            _backend("TRITON"),
+            _backend("BATCHED_TRITON"),
+            _backend("FLASHINFER_TRTLLM"),
+            _backend("FLASHINFER_CUTLASS"),
         ]
 
     def test_xpu_arm(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_xpu=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_xpu=lambda: True,
+            ),
+        )
         assert fmu._get_priority_backends(_moe_config()) == [_backend("XPU")]
 
     def test_cpu_arm(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cpu=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cpu=lambda: True,
+            ),
+        )
         assert fmu._get_priority_backends(_moe_config()) == [_backend("CPU")]
 
     @pytest.mark.parametrize("vendor", ["iluvatar", "hygon"])
     def test_iluvatar_hygon_fallback(self, monkeypatch, vendor):
         """The CoreX/Hygon vendor fallback keeps the Triton pair alive."""
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name=vendor,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name=vendor,
+            ),
+        )
         assert fmu._get_priority_backends(_moe_config()) == [
-            _backend("TRITON"), _backend("BATCHED_TRITON"),
+            _backend("TRITON"),
+            _backend("BATCHED_TRITON"),
         ]
 
     @pytest.mark.parametrize("vendor", ["metax", "ascend", "mthreads"])
@@ -207,17 +256,25 @@ class TestGetPriorityBackends:
         """Vendors outside the iluvatar/hygon fallback and every is_* arm
         leave the list unbound: the UnboundLocalError documents that gap
         (the kunlunxin platform reaches here with FlagGems disabled)."""
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name=vendor,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name=vendor,
+            ),
+        )
         with pytest.raises(UnboundLocalError):
             fmu._get_priority_backends(_moe_config())
 
     def test_unmatched_vendor_raises(self, monkeypatch):
         """A platform matching no arm leaves the list unbound."""
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name="unknown-vendor",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name="unknown-vendor",
+            ),
+        )
         with pytest.raises(UnboundLocalError):
             fmu._get_priority_backends(_moe_config())
 
@@ -240,64 +297,90 @@ class TestSelectUnquantizedMoeBackendOot:
             _backend("BATCHED_TRITON"): [_Kernel],
             _backend("CPU"): [_Kernel],
         }
-        monkeypatch.setattr(fmu, "backend_to_kernel_cls",
-                            lambda backend: mapping.get(backend, []))
+        monkeypatch.setattr(
+            fmu, "backend_to_kernel_cls", lambda backend: mapping.get(backend, [])
+        )
         return created
 
     def test_tpu_fast_path(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_tpu=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_tpu=lambda: True,
+            ),
+        )
         backend, cls = fmu.select_unquantized_moe_backend_oot(_moe_config())
         assert backend == _backend("TPU")
         assert cls is None
 
     def test_npu_fast_path(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            device_type="npu",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                device_type="npu",
+            ),
+        )
         backend, cls = fmu.select_unquantized_moe_backend_oot(_moe_config())
         assert backend == _backend("TRITON")
         assert cls is fmu.TritonExpertsFL
 
     def test_npu_rejects_parallel_or_lora(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            device_type="npu",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                device_type="npu",
+            ),
+        )
         for attrs in (
             dict(is_lora_enabled=True),
             dict(moe_parallel_config=_parallel_config(dp_size=2)),
             dict(moe_parallel_config=_parallel_config(use_ep=True)),
-            dict(moe_parallel_config=_parallel_config(
-                use_batched_activation_format=True)),
+            dict(
+                moe_parallel_config=_parallel_config(use_batched_activation_format=True)
+            ),
         ):
             with pytest.raises(NotImplementedError, match="Ascend grouped MoE"):
                 fmu.select_unquantized_moe_backend_oot(_moe_config(**attrs))
 
     def test_npu_rejects_explicit_backend(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            device_type="npu",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                device_type="npu",
+            ),
+        )
         with pytest.raises(NotImplementedError, match="Unsupported explicit"):
             fmu.select_unquantized_moe_backend_oot(
                 _moe_config(moe_backend="flashinfer_cutlass")
             )
 
     def test_fl_triton_experts_gate(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cuda=lambda: True, is_out_of_tree=lambda: True,
-        ))
-        monkeypatch.setattr(fmu, "_should_use_fl_triton_experts",
-                            lambda: True)
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cuda=lambda: True,
+                is_out_of_tree=lambda: True,
+            ),
+        )
+        monkeypatch.setattr(fmu, "_should_use_fl_triton_experts", lambda: True)
         backend, cls = fmu.select_unquantized_moe_backend_oot(_moe_config())
         assert backend == _backend("TRITON")
         assert cls is fmu.TritonExpertsFL
 
     def test_lora_without_trtllm_support_uses_triton(self, monkeypatch):
         self._kernel_cls_map(monkeypatch)
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cpu=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cpu=lambda: True,
+            ),
+        )
         monkeypatch.setattr(fmu, "_should_use_fl_triton_experts", lambda: False)
         monkeypatch.setattr(fmu, "_trtllm_bf16_lora_supported", lambda c: False)
         backend, cls = fmu.select_unquantized_moe_backend_oot(
@@ -307,13 +390,18 @@ class TestSelectUnquantizedMoeBackendOot:
         assert cls is not None
 
     def test_lora_with_trtllm_support_uses_trtllm(self, monkeypatch):
-        from vllm.model_executor.layers.fused_moe.experts.trtllm_lora_moe \
-            import TrtLlmBf16LoRAExperts
+        from vllm.model_executor.layers.fused_moe.experts.trtllm_lora_moe import (
+            TrtLlmBf16LoRAExperts,
+        )
 
         self._kernel_cls_map(monkeypatch)
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cpu=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cpu=lambda: True,
+            ),
+        )
         monkeypatch.setattr(fmu, "_should_use_fl_triton_experts", lambda: False)
         monkeypatch.setattr(fmu, "_trtllm_bf16_lora_supported", lambda c: True)
         backend, cls = fmu.select_unquantized_moe_backend_oot(
@@ -322,24 +410,28 @@ class TestSelectUnquantizedMoeBackendOot:
         assert backend == _backend("FLASHINFER_TRTLLM")
         assert cls is TrtLlmBf16LoRAExperts
 
-    def test_explicit_backend_maps_and_raises_when_unsupported(
-            self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cpu=lambda: True,
-        ))
+    def test_explicit_backend_maps_and_raises_when_unsupported(self, monkeypatch):
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cpu=lambda: True,
+            ),
+        )
         monkeypatch.setattr(fmu, "_should_use_fl_triton_experts", lambda: False)
         self._kernel_cls_map(monkeypatch, supported=False)
         with pytest.raises(ValueError, match="does not support"):
-            fmu.select_unquantized_moe_backend_oot(
-                _moe_config(moe_backend="triton")
-            )
+            fmu.select_unquantized_moe_backend_oot(_moe_config(moe_backend="triton"))
 
-    def test_explicit_triton_with_batched_format_maps_to_batched(
-            self, monkeypatch):
+    def test_explicit_triton_with_batched_format_maps_to_batched(self, monkeypatch):
         self._kernel_cls_map(monkeypatch)
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cpu=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cpu=lambda: True,
+            ),
+        )
         monkeypatch.setattr(fmu, "_should_use_fl_triton_experts", lambda: False)
         monkeypatch.setattr(
             fmu, "map_unquantized_backend", lambda name: _backend("TRITON")
@@ -351,26 +443,37 @@ class TestSelectUnquantizedMoeBackendOot:
         assert cls is not None
 
     def test_aiter_env_vars_force_aiter(self, monkeypatch):
-        created = self._kernel_cls_map(monkeypatch)
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_rocm=lambda: True,
-        ))
+        self._kernel_cls_map(monkeypatch)
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_rocm=lambda: True,
+            ),
+        )
         monkeypatch.setattr(fmu, "_should_use_fl_triton_experts", lambda: False)
         monkeypatch.setattr(fmu.envs, "is_set", lambda name: True)
-        monkeypatch.setattr(fmu.envs, "VLLM_ROCM_USE_AITER", True,
-                            raising=False)
-        monkeypatch.setattr(fmu.envs, "VLLM_ROCM_USE_AITER_MOE", True,
-                            raising=False)
+        monkeypatch.setattr(fmu.envs, "VLLM_ROCM_USE_AITER", True, raising=False)
+        monkeypatch.setattr(fmu.envs, "VLLM_ROCM_USE_AITER_MOE", True, raising=False)
+        monkeypatch.setattr(fmu.rocm_aiter_ops, "is_rdna_aiter_enabled", lambda: False)
         monkeypatch.setattr(
-            fmu.rocm_aiter_ops, "is_rdna_aiter_enabled", lambda: False
-        )
-        monkeypatch.setattr(
-            fmu, "backend_to_kernel_cls", lambda backend: (
-                [type("K", (), {
-                    "is_supported_config": classmethod(
-                        lambda cls, self, cfg, *a: (True, None)
-                    )})] if backend == _backend("AITER") else []
-            )
+            fmu,
+            "backend_to_kernel_cls",
+            lambda backend: (
+                [
+                    type(
+                        "K",
+                        (),
+                        {
+                            "is_supported_config": classmethod(
+                                lambda cls, self, cfg, *a: (True, None)
+                            )
+                        },
+                    )
+                ]
+                if backend == _backend("AITER")
+                else []
+            ),
         )
         backend, cls = fmu.select_unquantized_moe_backend_oot(_moe_config())
         assert backend == _backend("AITER")
@@ -383,37 +486,47 @@ class TestSelectUnquantizedMoeBackendOot:
             dict(VLLM_ROCM_USE_AITER_MOE=False),
             dict(rdna=True),
         ):
-            monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-                is_rocm=lambda: True,
-            ))
-            monkeypatch.setattr(fmu, "_should_use_fl_triton_experts",
-                                lambda: False)
+            monkeypatch.setattr(
+                fmu,
+                "current_platform",
+                _fake_platform(
+                    is_rocm=lambda: True,
+                ),
+            )
+            monkeypatch.setattr(fmu, "_should_use_fl_triton_experts", lambda: False)
             monkeypatch.setattr(fmu.envs, "is_set", lambda name: True)
-            monkeypatch.setattr(fmu.envs, "VLLM_ROCM_USE_AITER",
-                                skip.get("VLLM_ROCM_USE_AITER", True),
-                                raising=False)
-            monkeypatch.setattr(fmu.envs, "VLLM_ROCM_USE_AITER_MOE",
-                                skip.get("VLLM_ROCM_USE_AITER_MOE", True),
-                                raising=False)
             monkeypatch.setattr(
-                fmu.rocm_aiter_ops, "is_rdna_aiter_enabled",
-                lambda: skip.get("rdna", False),
+                fmu.envs,
+                "VLLM_ROCM_USE_AITER",
+                skip.get("VLLM_ROCM_USE_AITER", True),
+                raising=False,
             )
             monkeypatch.setattr(
-                fmu, "backend_to_kernel_cls", lambda backend: []
+                fmu.envs,
+                "VLLM_ROCM_USE_AITER_MOE",
+                skip.get("VLLM_ROCM_USE_AITER_MOE", True),
+                raising=False,
             )
-            with pytest.raises(NotImplementedError,
-                               match="No Unquantized MoE backend"):
+            monkeypatch.setattr(
+                fmu.rocm_aiter_ops,
+                "is_rdna_aiter_enabled",
+                lambda skip=skip: skip.get("rdna", False),
+            )
+            monkeypatch.setattr(fmu, "backend_to_kernel_cls", lambda backend: [])
+            with pytest.raises(NotImplementedError, match="No Unquantized MoE backend"):
                 fmu.select_unquantized_moe_backend_oot(_moe_config())
 
     def test_no_backend_supports_raises(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cpu=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cpu=lambda: True,
+            ),
+        )
         monkeypatch.setattr(fmu, "_should_use_fl_triton_experts", lambda: False)
         monkeypatch.setattr(fmu, "backend_to_kernel_cls", lambda backend: [])
-        with pytest.raises(NotImplementedError,
-                           match="No Unquantized MoE backend"):
+        with pytest.raises(NotImplementedError, match="No Unquantized MoE backend"):
             fmu.select_unquantized_moe_backend_oot(_moe_config())
 
 
@@ -428,7 +541,12 @@ class TestPrepareExpertAssignment:
         monkeypatch.setattr(fmu, "_moe_align_block_size", fake_align)
         topk_ids = torch.zeros(1, 2, dtype=torch.int64)  # 1*2*4 <= 32 experts
         result = fmu._prepare_expert_assignment(
-            topk_ids, {"BLOCK_SIZE_M": 16}, 1, 2, 32, None,
+            topk_ids,
+            {"BLOCK_SIZE_M": 16},
+            1,
+            2,
+            32,
+            None,
         )
         # Naive: sorted_token_ids is None, ids flattened, numel padded.
         assert result[0] is None
@@ -445,7 +563,12 @@ class TestPrepareExpertAssignment:
         monkeypatch.setattr(fmu, "_moe_align_block_size", fake_align)
         topk_ids = torch.zeros(100, 8, dtype=torch.int64)  # too big for naive
         result = fmu._prepare_expert_assignment(
-            topk_ids, {"BLOCK_SIZE_M": 16}, 100, 8, 32, None,
+            topk_ids,
+            {"BLOCK_SIZE_M": 16},
+            100,
+            8,
+            32,
+            None,
         )
         assert result == ("sorted", "experts", "padded")
         assert called[0][1]["ignore_invalid_experts"] is False
@@ -453,23 +576,39 @@ class TestPrepareExpertAssignment:
     def test_w8a16_block_shape_blocks_naive(self, monkeypatch):
         """int8_w8a16 + a block shape with dim > 0 forces moe_align."""
         called = []
-        monkeypatch.setattr(fmu, "_moe_align_block_size",
-                            lambda *a, **k: called.append(1) or ("s", "e", "p"))
+        monkeypatch.setattr(
+            fmu,
+            "_moe_align_block_size",
+            lambda *a, **k: called.append(1) or ("s", "e", "p"),
+        )
         topk_ids = torch.zeros(1, 2, dtype=torch.int64)
         result = fmu._prepare_expert_assignment(
-            topk_ids, {"BLOCK_SIZE_M": 16}, 1, 2, 32, None,
-            use_int8_w8a16=True, block_shape=[128, 128],
+            topk_ids,
+            {"BLOCK_SIZE_M": 16},
+            1,
+            2,
+            32,
+            None,
+            use_int8_w8a16=True,
+            block_shape=[128, 128],
         )
         assert called == [1]
         assert result == ("s", "e", "p")
 
     def test_expert_map_blocks_naive(self, monkeypatch):
         called = []
-        monkeypatch.setattr(fmu, "_moe_align_block_size",
-                            lambda *a, **k: called.append(1) or ("s", "e", "p"))
+        monkeypatch.setattr(
+            fmu,
+            "_moe_align_block_size",
+            lambda *a, **k: called.append(1) or ("s", "e", "p"),
+        )
         topk_ids = torch.zeros(1, 2, dtype=torch.int64)
         fmu._prepare_expert_assignment(
-            topk_ids, {"BLOCK_SIZE_M": 16}, 1, 2, 32,
+            topk_ids,
+            {"BLOCK_SIZE_M": 16},
+            1,
+            2,
+            32,
             torch.tensor([0, 1]),
         )
         assert called == [1]
@@ -478,36 +617,45 @@ class TestPrepareExpertAssignment:
 class TestTritonExpertsFLWorkspace:
     def _experts(self, moe_config=None):
         experts = object.__new__(fmu.TritonExpertsFL)
-        experts.moe_config = moe_config or SimpleNamespace(
-            max_num_tokens=64
-        )
+        experts.moe_config = moe_config or SimpleNamespace(max_num_tokens=64)
         return experts
 
     def test_workspace_shapes_passthrough_on_cpu(self, monkeypatch):
         """Non-NPU platforms keep the parent shapes untouched."""
-        fmu.TritonExpertsFL.__mro__  # ensure class loaded
+        assert fmu.TritonExpertsFL.__mro__  # ensure class loaded
         experts = self._experts()
         parent = (10, 20, 30), (40, 50, 60), (70, 80, 90)
         monkeypatch.setattr(
-            fmu.TritonExperts, "workspace_shapes",
+            fmu.TritonExperts,
+            "workspace_shapes",
             classmethod(lambda cls, *a, **k: parent),
         )
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            device_type="cpu",
-        ))
-        assert (experts.workspace_shapes(10, 20, 30, 4, 8, 2, None,
-                                          fmu.MoEActivation.SILU)
-                == parent)
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                device_type="cpu",
+            ),
+        )
+        assert (
+            experts.workspace_shapes(10, 20, 30, 4, 8, 2, None, fmu.MoEActivation.SILU)
+            == parent
+        )
 
     def test_workspace_shapes_reserves_npu_prefill(self, monkeypatch):
         parent = (10, 20, 30), (40, 50, 60), (70, 80, 90)
         monkeypatch.setattr(
-            fmu.TritonExperts, "workspace_shapes",
+            fmu.TritonExperts,
+            "workspace_shapes",
             classmethod(lambda cls, *a, **k: parent),
         )
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            device_type="npu",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                device_type="npu",
+            ),
+        )
         experts = self._experts(SimpleNamespace(max_num_tokens=64))
         w13, w2, out = experts.workspace_shapes(
             32, 20, 30, 4, 8, 2, None, fmu.MoEActivation.SILU
@@ -519,12 +667,17 @@ class TestTritonExpertsFLWorkspace:
     def test_workspace_shapes_npu_uses_m_when_larger(self, monkeypatch):
         parent = (10, 20, 30), (40, 50, 60), (70, 80, 90)
         monkeypatch.setattr(
-            fmu.TritonExperts, "workspace_shapes",
+            fmu.TritonExperts,
+            "workspace_shapes",
             classmethod(lambda cls, *a, **k: parent),
         )
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            device_type="npu",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                device_type="npu",
+            ),
+        )
         experts = self._experts(SimpleNamespace(max_num_tokens=4))
         w13, w2, _ = experts.workspace_shapes(
             32, 20, 30, 4, 8, 2, None, fmu.MoEActivation.SILU
@@ -643,17 +796,20 @@ class TestTritonExpertsFLApply:
             return impl
 
         monkeypatch.setattr(fmu, "resolve_op", fake_resolve)
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name="kunlunxin", device_type="cpu",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name="kunlunxin",
+                device_type="cpu",
+            ),
+        )
         experts = self._experts()
         arguments = self._arguments()
         fmu.TritonExpertsFL.apply(experts, **arguments)
         assert captured["inplace"] is False
         assert captured["args"][0] is arguments["hidden_states"]
-        assert torch.equal(
-            arguments["output"], torch.full_like(arguments["output"], 3)
-        )
+        assert torch.equal(arguments["output"], torch.full_like(arguments["output"], 3))
 
     def test_moe_sum_dispatch(self, monkeypatch):
         """moe_sum routes through the moe_sum CachedOp."""
@@ -661,7 +817,8 @@ class TestTritonExpertsFLApply:
 
         calls = []
         monkeypatch.setattr(
-            module, "_moe_sum",
+            module,
+            "_moe_sum",
             lambda inp, out: calls.append((inp, out)),
         )
         experts = self._experts()

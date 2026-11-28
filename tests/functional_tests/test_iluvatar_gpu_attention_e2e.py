@@ -60,7 +60,6 @@ RTOL_DEFAULT, ATOL_DEFAULT = _tol("default")
 RTOL_BF16, ATOL_BF16 = _tol("bfloat16")
 
 
-
 def _impl(head_size=64, attn_type="decoder"):
     """Build the real AttentionFLImpl on the iluvatar platform."""
     from vllm.v1.attention.backend import AttentionType
@@ -93,9 +92,9 @@ def _scales(device):
 
 def _cache(blocks, kv_heads, block_size, head_size, device):
     """Packed vLLM logical [B, H, N, 2*D] cache."""
-    return torch.zeros(
-        blocks, kv_heads, block_size, 2 * head_size, device=device
-    ).to(torch.bfloat16)
+    return torch.zeros(blocks, kv_heads, block_size, 2 * head_size, device=device).to(
+        torch.bfloat16
+    )
 
 
 def _decoder_scenario(head_size, block_size, query_lens, seq_lens, device):
@@ -119,8 +118,7 @@ def _decoder_scenario(head_size, block_size, query_lens, seq_lens, device):
 
     # every token's slot via the page table
     slots = [
-        int(block_table[request][token // block_size]) * block_size
-        + token % block_size
+        int(block_table[request][token // block_size]) * block_size + token % block_size
         for request, length in enumerate(seq_lens)
         for token in range(length)
     ]
@@ -329,7 +327,14 @@ def test_encoder_only_attention_matches_sdpa():
     output = torch.empty_like(queries)
     # encoder attention ignores the cache; pass the tensors themselves
     _forward_with_wheel_guard(
-        impl, scales, queries, keys, values, torch.empty(0, device=device), metadata, output
+        impl,
+        scales,
+        queries,
+        keys,
+        values,
+        torch.empty(0, device=device),
+        metadata,
+        output,
     )
     torch.cuda.synchronize(device)
 
@@ -340,12 +345,14 @@ def test_encoder_only_attention_matches_sdpa():
     for length in query_lens:
         q = queries.float().cpu()[start : start + length].transpose(0, 1)
         k = (
-            keys.float().cpu()[start : start + length]
+            keys.float()
+            .cpu()[start : start + length]
             .transpose(0, 1)
             .repeat_interleave(heads_q // heads_kv, dim=0)
         )
         v = (
-            values.float().cpu()[start : start + length]
+            values.float()
+            .cpu()[start : start + length]
             .transpose(0, 1)
             .repeat_interleave(heads_q // heads_kv, dim=0)
         )
@@ -387,7 +394,6 @@ def test_output_scale_rejected():
     """Fused output quantization is not supported and must raise."""
     if not torch.cuda.is_available():
         pytest.skip("Iluvatar BI-V150 accelerator required")
-    from vllm.v1.attention.backend import AttentionType
 
     from vllm_fl.dispatch.backends.flaggems.impl.attention import AttentionFLImpl
 

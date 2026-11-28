@@ -48,7 +48,6 @@ pytestmark = [pytest.mark.supplementary, pytest.mark.platforms("iluvatar")]
 # the real environment before any test installs a fake triton into
 # sys.modules. Without this, the first test's fake triton would drive the
 # module-level chained-or rewrite at the real vllm helper file.
-import vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar as _prod_module  # noqa: E402
 
 TRITON = "triton"
 TRITON_LANGUAGE = "triton.language"
@@ -158,9 +157,9 @@ class TestPatchTritonLanguage:
 
         with caplog.at_level(logging.WARNING, logger="vllm_fl"):
             patch_triton_language_for_iluvatar()  # must not raise
-        assert any(
-            "triton.language" in r.message for r in caplog.records
-        ), "the failure must be logged"
+        assert any("triton.language" in r.message for r in caplog.records), (
+            "the failure must be logged"
+        )
 
 
 class TestPatchTritonPerfModel:
@@ -227,9 +226,9 @@ class TestPatchTritonPerfModel:
 
         with caplog.at_level(logging.WARNING, logger="vllm_fl"):
             patch_triton_perf_model_for_iluvatar()  # must not raise
-        assert any(
-            "perf model" in r.message for r in caplog.records
-        ), "the failure must be logged"
+        assert any("perf model" in r.message for r in caplog.records), (
+            "the failure must be logged"
+        )
 
 
 class TestPatchTritonChainedOr:
@@ -300,9 +299,7 @@ class TestPatchTritonChainedOr:
         )
         assert HELPERS not in sys.modules, "module must be evicted for reimport"
 
-    def test_pycache_removal_failure_is_non_fatal(
-        self, helpers_dir, monkeypatch
-    ):
+    def test_pycache_removal_failure_is_non_fatal(self, helpers_dir, monkeypatch):
         """A failing __pycache__ removal must not fail the patch (L149-150)."""
         import shutil
 
@@ -356,9 +353,7 @@ class TestPatchTritonChainedOr:
 
         patch_triton_chained_or_for_iluvatar()  # must not raise
 
-    def test_unparsable_version_falls_back_defensively(
-        self, monkeypatch, tmp_path
-    ):
+    def test_unparsable_version_falls_back_defensively(self, monkeypatch, tmp_path):
         """A version string that fails int() must still apply the patch."""
         triton = types.ModuleType(TRITON)
         triton.__version__ = "flagtree-3.2.x+corex"  # int("flagtree") raises
@@ -593,9 +588,9 @@ class TestPatchSamplerCompile:
 
         with caplog.at_level(logging.WARNING, logger="vllm_fl"):
             patch_sampler_compile_for_iluvatar()  # must not raise
-        assert any(
-            "topk_topp" in r.message for r in caplog.records
-        ), "failure must be logged, not silent"
+        assert any("topk_topp" in r.message for r in caplog.records), (
+            "failure must be logged, not silent"
+        )
 
 
 class TestPatchTorchInductor:
@@ -743,9 +738,7 @@ class TestPatchTorchInductor:
             "non-strict fallback must remap to the compatibility target"
         )
 
-    def test_probe_exception_is_swallowed_and_next_probe_wins(
-        self, monkeypatch
-    ):
+    def test_probe_exception_is_swallowed_and_next_probe_wins(self, monkeypatch):
         """A backend whose supports_target raises must not abort the probe."""
         import triton.backends as tb
 
@@ -787,9 +780,7 @@ class TestPatchTorchInductor:
         # Both the sys.modules entry and the parent-package attribute are
         # replaced, because `import a.b.c as x` re-resolves through the
         # parent when the sys.modules entry is not a module.
-        monkeypatch.setitem(
-            sys.modules, "torch._inductor.runtime.triton_heuristics", 5
-        )
+        monkeypatch.setitem(sys.modules, "torch._inductor.runtime.triton_heuristics", 5)
         monkeypatch.setattr(_runtime, "triton_heuristics", 5)
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
             patch_torch_inductor_for_iluvatar,
@@ -806,9 +797,7 @@ class TestPatchTorchInductor:
         import triton.backends as tb
 
         monkeypatch.setattr(tb, "backends", {"iluvatar": _fake_corex_backend()})
-        monkeypatch.setitem(
-            sys.modules, "torch._inductor.runtime.triton_heuristics", 5
-        )
+        monkeypatch.setitem(sys.modules, "torch._inductor.runtime.triton_heuristics", 5)
         monkeypatch.setattr(_runtime, "triton_heuristics", 5)
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
             patch_torch_inductor_for_iluvatar,
@@ -832,9 +821,7 @@ class TestWorkerPatchHelpers:
       ``buffer_utils.is_uva_available`` exactly once.
     """
 
-    def test_release_benchmark_tensors_clears_replay_args_in_finally(
-        self, monkeypatch
-    ):
+    def test_release_benchmark_tensors_clears_replay_args_in_finally(self, monkeypatch):
         from types import SimpleNamespace
 
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
@@ -930,7 +917,6 @@ class TestWorkerPatchHelpers:
 
     def test_patch_v2_uva_replaces_buffer_utils_once(self, monkeypatch):
         import vllm.platforms
-
         from vllm.v1.worker.gpu import buffer_utils
 
         # patch_v2_uva imports current_platform from vllm.platforms inside
@@ -959,7 +945,6 @@ class TestWorkerPatchHelpers:
 
     def test_patch_v2_uva_foreign_vendor_is_noop(self, monkeypatch):
         import vllm.platforms
-
         from vllm.v1.worker.gpu import buffer_utils
 
         monkeypatch.setattr(

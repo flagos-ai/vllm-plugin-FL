@@ -31,7 +31,6 @@ import math
 
 import pytest
 import torch
-import torch.nn.functional as F
 
 pytestmark = [
     pytest.mark.supplementary,
@@ -73,9 +72,7 @@ def _vllm_config(max_model_len=2048):
             max_num_batched_tokens=2048,
             max_model_len=max_model_len,
         ),
-        compilation_config=CompilationConfig(
-            mode=CompilationMode.VLLM_COMPILE
-        ),
+        compilation_config=CompilationConfig(mode=CompilationMode.VLLM_COMPILE),
     )
     with set_current_vllm_config(config):
         yield config
@@ -101,8 +98,15 @@ def _impl(num_heads=8, num_kv_heads=2, head_size=64):
     )
 
 
-def _build_metadata(device, seq_lens, block_table, slot_mapping,
-                    num_prefill_tokens, num_decode_tokens, num_actual_tokens):
+def _build_metadata(
+    device,
+    seq_lens,
+    block_table,
+    slot_mapping,
+    num_prefill_tokens,
+    num_decode_tokens,
+    num_actual_tokens,
+):
     """Build KunlunxinMetadata through the production builder."""
     from vllm.v1.attention.backend import CommonAttentionMetadata
 
@@ -141,16 +145,13 @@ def _build_metadata(device, seq_lens, block_table, slot_mapping,
         seq_lens_cpu_upper_bound=torch.tensor(seq_lens, dtype=torch.int32),
     )
     with _vllm_config() as config:
-        builder = KunlunxinAttentionMetadataBuilder(
-            None, ["layer.0"], config, device
-        )
-        return builder.build(
-            common_prefix_len=0, common_attn_metadata=common
-        )
+        builder = KunlunxinAttentionMetadataBuilder(None, ["layer.0"], config, device)
+        return builder.build(common_prefix_len=0, common_attn_metadata=common)
 
 
-def _sdpa_oracle(query, key_cache, value_cache, block_table,
-                 seq_lens, num_kv_heads, head_size, scale):
+def _sdpa_oracle(
+    query, key_cache, value_cache, block_table, seq_lens, num_kv_heads, head_size, scale
+):
     """Independent fp32 oracle (probe-verified on real P800): gather K/V by
     block table, fold blocks into the token dim, manual softmax attention."""
     outs = []
@@ -196,30 +197,37 @@ class TestKunlunxinAttentionE2E:
         num_reqs = len(seq_lens)
         max_blocks = math.ceil(max(seq_lens) / block_size)
         perm = torch.randperm(num_blocks)
-        block_table = perm[: max_blocks * num_reqs].view(
-            num_reqs, max_blocks
-        )
+        block_table = perm[: max_blocks * num_reqs].view(num_reqs, max_blocks)
         slot_mapping = torch.arange(
             sum(seq_lens) + num_reqs
         )  # will be set per-token below
 
         # logical cache: [num_blocks, 2, num_kv_heads, block_size, head_size]
         kv_cache = torch.zeros(
-            2, num_blocks, num_kv_heads, block_size, head_size,
-            dtype=torch.bfloat16, device=device,
+            2,
+            num_blocks,
+            num_kv_heads,
+            block_size,
+            head_size,
+            dtype=torch.bfloat16,
+            device=device,
         )
-        key_cache, value_cache = (
-            torch.unbind(kv_cache, dim=0)
-        )
+        key_cache, value_cache = torch.unbind(kv_cache, dim=0)
 
         # ---- Step 1: prefill forward over FULL sequences (writes all K/V) ----
         total_tokens = sum(seq_lens)
         query = torch.randn(
-            total_tokens, num_heads, head_size, device=device,
+            total_tokens,
+            num_heads,
+            head_size,
+            device=device,
             dtype=torch.bfloat16,
         )
         k_in = torch.randn(
-            total_tokens, num_kv_heads, head_size, device=device,
+            total_tokens,
+            num_kv_heads,
+            head_size,
+            device=device,
             dtype=torch.bfloat16,
         )
         v_in = torch.randn_like(k_in)
@@ -233,7 +241,10 @@ class TestKunlunxinAttentionE2E:
         slot_mapping = torch.tensor(slots, device=device, dtype=torch.long)
 
         meta = _build_metadata(
-            device, seq_lens, block_table, slot_mapping,
+            device,
+            seq_lens,
+            block_table,
+            slot_mapping,
             num_prefill_tokens=total_tokens,
             num_decode_tokens=0,
             num_actual_tokens=total_tokens,
@@ -244,15 +255,23 @@ class TestKunlunxinAttentionE2E:
         # diag: verify prefill wrote k_in verbatim into cache at slot 0
         _kc0 = key_cache.cpu().reshape(-1, num_kv_heads, head_size)
         _written = _kc0[slots[0]]
-        print(f"[diag-write] slot0 got={_written[0][:3].tolist()} want={k_in[0,0,:3].cpu().tolist()}")
+        print(
+            f"[diag-write] slot0 got={_written[0][:3].tolist()} want={k_in[0, 0, :3].cpu().tolist()}"
+        )
 
         # ---- Step 2: decode forward appends one NEW token per request ----
         d_query = torch.randn(
-            num_reqs, num_heads, head_size, device=device,
+            num_reqs,
+            num_heads,
+            head_size,
+            device=device,
             dtype=torch.bfloat16,
         )
         d_k = torch.randn(
-            num_reqs, num_kv_heads, head_size, device=device,
+            num_reqs,
+            num_kv_heads,
+            head_size,
+            device=device,
             dtype=torch.bfloat16,
         )
         d_v = torch.randn_like(d_k)
@@ -263,16 +282,19 @@ class TestKunlunxinAttentionE2E:
             d_slots.append(page * block_size + seq_len % block_size)
         d_slot_mapping = torch.tensor(d_slots, device=device, dtype=torch.long)
         d_meta = _build_metadata(
-            device, [s + 1 for s in seq_lens], block_table, d_slot_mapping,
+            device,
+            [s + 1 for s in seq_lens],
+            block_table,
+            d_slot_mapping,
             num_prefill_tokens=0,
             num_decode_tokens=num_reqs,
             num_actual_tokens=num_reqs,
         )
-        d_out = impl.forward(
-            layer, d_query, d_k, d_v, kv_cache, d_meta
-        )
+        d_out = impl.forward(layer, d_query, d_k, d_v, kv_cache, d_meta)
         dm = d_meta.decode_metadata
-        print(f"[diag-meta] seq_lens={dm.seq_lens_tensor.tolist()}, max_dec={dm.max_decode_seq_len}, blocks={dm.block_tables.tolist()}")
+        print(
+            f"[diag-meta] seq_lens={dm.seq_lens_tensor.tolist()}, max_dec={dm.max_decode_seq_len}, blocks={dm.block_tables.tolist()}"
+        )
         # ---- Step 3: oracle from the device cache ----
         expected = _sdpa_oracle(
             d_query,
@@ -300,9 +322,13 @@ class TestKunlunxinAttentionE2E:
         )
         err_post = (got.float().cpu() - expected.float()).abs().max().item()
         err_pre = (got.float().cpu() - expected_pre.float()).abs().max().item()
-        print(f"[diag] max-err vs post-write oracle: {err_post:.4f}; vs pre-write: {err_pre:.4f}")
+        print(
+            f"[diag] max-err vs post-write oracle: {err_post:.4f}; vs pre-write: {err_pre:.4f}"
+        )
         torch.testing.assert_close(
-            got.float().cpu(), expected.float(), rtol=RTOL_BF16,
+            got.float().cpu(),
+            expected.float(),
+            rtol=RTOL_BF16,
             atol=ATOL_BF16,
         )
 
@@ -316,11 +342,15 @@ class TestKunlunxinAttentionE2E:
         num_blocks, block_size = 16, 16
         impl = _impl(num_heads, num_kv_heads, head_size)
         seq_lens = [18]  # just over one block: page 1 partially used
-        num_reqs = 1
         block_table = torch.arange(4).view(1, 4)
         kv_cache = torch.zeros(
-            2, num_blocks, num_kv_heads, block_size, head_size,
-            dtype=torch.bfloat16, device=device,
+            2,
+            num_blocks,
+            num_kv_heads,
+            block_size,
+            head_size,
+            dtype=torch.bfloat16,
+            device=device,
         )
         key_cache, value_cache = torch.unbind(kv_cache, dim=0)
         # write all 18 tokens via a prefill pass
@@ -333,14 +363,17 @@ class TestKunlunxinAttentionE2E:
         )
         v_in = torch.randn_like(k_in)
         slots = [
-            int(block_table[0][t // block_size]) * block_size
-            + t % block_size
+            int(block_table[0][t // block_size]) * block_size + t % block_size
             for t in range(q)
         ]
         slot_mapping = torch.tensor(slots, device=device, dtype=torch.long)
         meta = _build_metadata(
-            device, seq_lens, block_table, slot_mapping,
-            num_prefill_tokens=q, num_decode_tokens=0,
+            device,
+            seq_lens,
+            block_table,
+            slot_mapping,
+            num_prefill_tokens=q,
+            num_decode_tokens=0,
             num_actual_tokens=q,
         )
         layer = type("L", (), {})()
@@ -349,7 +382,9 @@ class TestKunlunxinAttentionE2E:
         # diag: verify prefill wrote k_in verbatim into cache at slot 0
         _kc0 = key_cache.cpu().reshape(-1, num_kv_heads, head_size)
         _written = _kc0[slots[0]]
-        print(f"[diag-write] slot0 got={_written[0][:3].tolist()} want={k_in[0,0,:3].cpu().tolist()}")
+        print(
+            f"[diag-write] slot0 got={_written[0][:3].tolist()} want={k_in[0, 0, :3].cpu().tolist()}"
+        )
         # poison the unused region of the last used page
         page = int(block_table[0][q // block_size])
         used = q % block_size
@@ -366,9 +401,12 @@ class TestKunlunxinAttentionE2E:
         d_v = torch.randn_like(d_k)
         d_slots = [page * block_size + used]
         d_meta = _build_metadata(
-            device, [q + 1], block_table,
+            device,
+            [q + 1],
+            block_table,
             torch.tensor(d_slots, device=device, dtype=torch.long),
-            num_prefill_tokens=0, num_decode_tokens=1,
+            num_prefill_tokens=0,
+            num_decode_tokens=1,
             num_actual_tokens=1,
         )
         out = impl.forward(layer, d_query, d_k, d_v, kv_cache, d_meta)

@@ -56,11 +56,7 @@ def registered_impls():
     registry = OpRegistry()
     register_builtins(registry)
     snapshot = registry.snapshot()
-    impls = [
-        impl
-        for impls in snapshot.impls_by_op.values()
-        for impl in impls
-    ]
+    impls = [impl for impls in snapshot.impls_by_op.values() for impl in impls]
     return registry, impls
 
 

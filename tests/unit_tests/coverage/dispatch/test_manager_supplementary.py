@@ -52,8 +52,14 @@ from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 pytestmark = [pytest.mark.supplementary]
 
 
-def _impl(op, impl_id, fn=None, kind=BackendImplKind.REFERENCE,
-          priority=BackendPriority.REFERENCE, vendor=None):
+def _impl(
+    op,
+    impl_id,
+    fn=None,
+    kind=BackendImplKind.REFERENCE,
+    priority=BackendPriority.REFERENCE,
+    vendor=None,
+):
     return OpImpl(
         op_name=op,
         impl_id=impl_id,
@@ -157,9 +163,9 @@ class TestCanRetryFailedOp:
         set_global_policy(SelectionPolicy(strict=False))
         fake_platform = SimpleNamespace(vendor_name="amd")
         monkeypatch.setitem(
-            __import__("sys").modules, "vllm.platforms", SimpleNamespace(
-                current_platform=fake_platform
-            )
+            __import__("sys").modules,
+            "vllm.platforms",
+            SimpleNamespace(current_platform=fake_platform),
         )
         assert _can_retry_failed_op("rms_norm") is False
         assert _can_retry_failed_op("rotary_embedding") is False
@@ -214,13 +220,13 @@ class TestEnsureInitialized:
             fresh_manager.ensure_initialized()  # pid matches -> return
         assert not any("OpManager initialized" in r.message for r in caplog.records)
 
-    def test_debug_listing_printed_when_enabled(self, fresh_manager, caplog,
-                                                monkeypatch):
+    def test_debug_listing_printed_when_enabled(
+        self, fresh_manager, caplog, monkeypatch
+    ):
         import vllm_fl.dispatch.manager as mgr_mod
 
         fresh_manager._registry.register_impl(
-            _impl("dbg_op", "ref.one", kind=BackendImplKind.REFERENCE,
-                  vendor="VND")
+            _impl("dbg_op", "ref.one", kind=BackendImplKind.REFERENCE, vendor="VND")
         )
         fresh_manager._registry.register_impl(_impl("dbg_op", "ref.two"))
         monkeypatch.setattr(mgr_mod, "_DISPATCH_DEBUG", True)
@@ -237,9 +243,7 @@ class TestEnsureInitialized:
 class TestMatchesVendorFilters:
     def test_non_vendor_impl_passes_without_vendor(self, fresh_manager):
         impl = _impl("op", "ref.x", kind=BackendImplKind.REFERENCE)
-        assert fresh_manager._matches_vendor_filters(
-            impl, SelectionPolicy()
-        ) is True
+        assert fresh_manager._matches_vendor_filters(impl, SelectionPolicy()) is True
 
     def test_vendor_impl_without_vendor_rejected(self, fresh_manager):
         # Build the ill-formed impl via a raw dataclass replacement: VENDOR
@@ -248,8 +252,7 @@ class TestMatchesVendorFilters:
         # dance using dataclasses.replace on a hand-filled shell.
         import dataclasses
 
-        well_formed = _impl("op", "vendor.ok", kind=BackendImplKind.VENDOR,
-                           vendor="OK")
+        well_formed = _impl("op", "vendor.ok", kind=BackendImplKind.VENDOR, vendor="OK")
         fields = {
             f.name: getattr(well_formed, f.name)
             for f in dataclasses.fields(well_formed)
@@ -258,9 +261,7 @@ class TestMatchesVendorFilters:
         impl = object.__new__(OpImpl)
         for name, value in fields.items():
             object.__setattr__(impl, name, value)
-        assert fresh_manager._matches_vendor_filters(
-            impl, SelectionPolicy()
-        ) is False
+        assert fresh_manager._matches_vendor_filters(impl, SelectionPolicy()) is False
 
     def test_deny_vendor_rejected(self, fresh_manager):
         impl = _impl("op", "vendor.x", kind=BackendImplKind.VENDOR, vendor="X")
@@ -281,16 +282,23 @@ class TestRecordFirstUse:
         registry.register_impl(_impl("switch_op", "ref.one"))
         registry.register_impl(_impl("switch_op", "ref.two"))
         with caplog.at_level(logging.INFO, logger="vllm_fl.dispatch.manager"):
-            fresh_manager._record_first_use("switch_op", registry.snapshot().impls_by_op["switch_op"][0])
+            fresh_manager._record_first_use(
+                "switch_op", registry.snapshot().impls_by_op["switch_op"][0]
+            )
         assert any("using 'ref.one'" in r.message for r in caplog.records)
         caplog.clear()
         with caplog.at_level(logging.INFO, logger="vllm_fl.dispatch.manager"):
-            fresh_manager._record_first_use("switch_op", registry.snapshot().impls_by_op["switch_op"][1])
-        assert any("switched from 'ref.one' to 'ref.two'" in r.message
-                   for r in caplog.records)
+            fresh_manager._record_first_use(
+                "switch_op", registry.snapshot().impls_by_op["switch_op"][1]
+            )
+        assert any(
+            "switched from 'ref.one' to 'ref.two'" in r.message for r in caplog.records
+        )
         # Repeated recording of the same impl is a no-op.
         caplog.clear()
-        fresh_manager._record_first_use("switch_op", registry.snapshot().impls_by_op["switch_op"][1])
+        fresh_manager._record_first_use(
+            "switch_op", registry.snapshot().impls_by_op["switch_op"][1]
+        )
         assert not caplog.records
 
     def test_default_kind_records_flagos(self, fresh_manager, monkeypatch, caplog):
@@ -338,15 +346,18 @@ class TestResolveErrors:
 
         _never._is_available = lambda: False
         impl = OpImpl(
-            op_name="broken_op", impl_id="ref.never",
-            kind=BackendImplKind.REFERENCE, fn=_never,
+            op_name="broken_op",
+            impl_id="ref.never",
+            kind=BackendImplKind.REFERENCE,
+            fn=_never,
         )
         registry.register_impl(impl)
         with pytest.raises(RuntimeError, match="No available implementation"):
             fresh_manager.resolve("broken_op")
 
-    def test_availability_check_exception_logged_and_skipped(self, fresh_manager,
-                                                             caplog):
+    def test_availability_check_exception_logged_and_skipped(
+        self, fresh_manager, caplog
+    ):
         """An is_available that raises is caught in OpImpl (returns False),
         so resolve falls through to the healthy impl without failing."""
         registry = fresh_manager._registry
@@ -359,8 +370,10 @@ class TestResolveErrors:
 
         _boom._is_available = _exploding
         bad = OpImpl(
-            op_name="explode_op", impl_id="ref.boom",
-            kind=BackendImplKind.REFERENCE, fn=_boom,
+            op_name="explode_op",
+            impl_id="ref.boom",
+            kind=BackendImplKind.REFERENCE,
+            fn=_boom,
         )
         good = _impl("explode_op", "ref.fine")
         registry.register_impl(bad)
@@ -368,6 +381,7 @@ class TestResolveErrors:
         # The failing probe degrades to "not available" (Exception branch).
         assert bad.is_available() is False
         assert fresh_manager.resolve("explode_op") is good.fn
+
         # The manager-level exception branch (availability raising inside
         # _compute_candidates) is exercised with a stubbed instance whose
         # is_available raises directly.
@@ -381,21 +395,16 @@ class TestResolveErrors:
             def is_available(self):
                 raise RuntimeError("probe exploded")
 
-        snap_impls = registry.snapshot().impls_by_op["explode_op"]
-        with caplog.at_level(logging.WARNING,
-                             logger="vllm_fl.dispatch.manager"):
-            from vllm_fl.dispatch.manager import OpManager as _OM
+        registry.snapshot().impls_by_op["explode_op"]
+        with caplog.at_level(logging.WARNING, logger="vllm_fl.dispatch.manager"):
             # Directly drive _compute_candidates with a raising stub.
             stub_registry = OpRegistry()
             stub_registry.register_impl(_impl("explode2", "ref.a"))
             stub_manager = OpManager(registry=stub_registry)
             stub_manager._state.initialized = True
             stub_manager._state.init_pid = os.getpid()
-            real_snapshot = stub_registry.snapshot
             stub_registry.snapshot = lambda: SimpleNamespace(
-                impls_by_op={"explode2": [
-                    _RaisingImpl(_impl("explode2", "ref.a"))
-                ]}
+                impls_by_op={"explode2": [_RaisingImpl(_impl("explode2", "ref.a"))]}
             )
             with pytest.raises(RuntimeError, match="No available implementation"):
                 stub_manager._compute_candidates("explode2", SelectionPolicy())
@@ -411,8 +420,9 @@ class TestResolveErrors:
         fresh_manager._dispatch_cache.clear()
         with caplog.at_level(logging.DEBUG, logger="vllm_fl.dispatch.manager"):
             fresh_manager.resolve("dbg_res")
-        assert any("DISPATCH" in r.message and "dbg_res" in r.message
-                   for r in caplog.records)
+        assert any(
+            "DISPATCH" in r.message and "dbg_res" in r.message for r in caplog.records
+        )
 
 
 class TestResolveCandidates:
@@ -452,6 +462,7 @@ class TestCallWithHooks:
     def test_call_with_dump_enabled(self, fresh_manager, tmp_path):
         io_dumper.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
         try:
+
             def fn(a, b):
                 return a + b
 
@@ -466,6 +477,7 @@ class TestCallWithHooks:
     def test_call_fn_failure_cleans_dump_pairing(self, fresh_manager, tmp_path):
         io_dumper.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
         try:
+
             def fn():
                 raise ValueError("op exploded")
 
@@ -479,14 +491,13 @@ class TestCallWithHooks:
     def test_hook_failures_swallowed(self, fresh_manager, monkeypatch, tmp_path):
         io_dumper.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
         try:
+
             def boom(*args, **kwargs):
                 raise RuntimeError("hook blew up")
 
             monkeypatch.setattr("vllm_fl.dispatch.manager.dump_before", boom)
             monkeypatch.setattr("vllm_fl.dispatch.manager.dump_after", boom)
-            out = fresh_manager._call_with_hooks(
-                "badhook_op", lambda: "value", (), {}
-            )
+            out = fresh_manager._call_with_hooks("badhook_op", lambda: "value", (), {})
             assert out == "value"
         finally:
             io_dumper.disable_io_dump()
@@ -508,6 +519,7 @@ class TestCallFallbackEdges:
             def fn():
                 attempts.append(name)
                 raise RuntimeError(name)
+
             return fn
 
         registry.register_impl(_impl("multi_fail", "ref.one", fn=make_fn("one")))
@@ -523,8 +535,11 @@ class TestCallFallbackEdges:
     def test_fallback_after_failure_succeeds(self, fresh_manager):
         registry = fresh_manager._registry
         registry.register_impl(
-            _impl("fallback_op", "ref.bad", fn=lambda: (_ for _ in ()).throw(
-                RuntimeError("first impl bad")))
+            _impl(
+                "fallback_op",
+                "ref.bad",
+                fn=lambda: (_ for _ in ()).throw(RuntimeError("first impl bad")),
+            )
         )
         registry.register_impl(_impl("fallback_op", "ref.good", fn=lambda: "OK"))
         result = fresh_manager.call("fallback_op")

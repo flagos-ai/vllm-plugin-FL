@@ -32,7 +32,6 @@ from __future__ import annotations
 import pytest
 import torch
 
-import vllm_fl.quantization.arm_cpu_w4a8 as arm_module
 from vllm_fl.quantization.arm_cpu_w4a8 import install_arm_cpu_packed_w4a8
 
 pytestmark = [pytest.mark.supplementary]
@@ -101,8 +100,9 @@ def _patch_real_vllm_w4a8_compat(monkeypatch):
     import vllm.model_executor.kernels.linear as linear_kernels
     import vllm.model_executor.layers.quantization.utils as quant_utils
     import vllm.model_executor.parameter as vllm_parameter
-    from vllm.model_executor.kernels.linear.mixed_precision.dynamic_4bit \
-        import Dynamic4bitLinearKernel
+    from vllm.model_executor.kernels.linear.mixed_precision.dynamic_4bit import (
+        Dynamic4bitLinearKernel,
+    )
 
     real_config = linear_kernels.MPLinearLayerConfig
 
@@ -114,8 +114,14 @@ def _patch_real_vllm_w4a8_compat(monkeypatch):
 
     real_init = Dynamic4bitLinearKernel.__init__
 
-    def init_compat(self, c, w_q_param_name, w_s_param_name,
-                    w_zp_param_name=None, w_gidx_param_name=None):
+    def init_compat(
+        self,
+        c,
+        w_q_param_name,
+        w_s_param_name,
+        w_zp_param_name=None,
+        w_gidx_param_name=None,
+    ):
         real_init(self, c, w_q_param_name, w_s_param_name, w_zp_param_name)
 
     monkeypatch.setattr(Dynamic4bitLinearKernel, "__init__", init_compat)
@@ -129,10 +135,10 @@ def _patch_real_vllm_w4a8_compat(monkeypatch):
         "replace_parameter",
         lambda mod, name, new: setattr(mod, name, new),
     )
-    monkeypatch.setattr(vllm_parameter, "get_tensor_model_parallel_rank",
-                        lambda: 0)
-    monkeypatch.setattr(vllm_parameter,
-                        "get_tensor_model_parallel_world_size", lambda: 1)
+    monkeypatch.setattr(vllm_parameter, "get_tensor_model_parallel_rank", lambda: 0)
+    monkeypatch.setattr(
+        vllm_parameter, "get_tensor_model_parallel_world_size", lambda: 1
+    )
 
 
 @pytest.fixture
@@ -141,12 +147,15 @@ def arm_w4a8(monkeypatch):
     _install_fake_flag_gems(monkeypatch)
     _patch_real_vllm_w4a8_compat(monkeypatch)
 
-    from vllm.model_executor.kernels.linear.mixed_precision.dynamic_4bit \
-        import Dynamic4bitLinearKernel
-    from vllm.model_executor.layers.quantization.compressed_tensors \
-        import compressed_tensors as config_module
-    from vllm.model_executor.layers.quantization.compressed_tensors.schemes \
-        import compressed_tensors_w4a8_int as scheme_module
+    from vllm.model_executor.kernels.linear.mixed_precision.dynamic_4bit import (
+        Dynamic4bitLinearKernel,
+    )
+    from vllm.model_executor.layers.quantization.compressed_tensors import (
+        compressed_tensors as config_module,
+    )
+    from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
+        compressed_tensors_w4a8_int as scheme_module,
+    )
 
     scheme_cls = scheme_module.CompressedTensorsW4A8Int
     config_cls = config_module.CompressedTensorsConfig
@@ -223,8 +232,9 @@ def _packed_parts(n=32, k=256, group_size=128):
     independent of any unpack implementation the module imports.
     """
     g = torch.Generator().manual_seed(0)
-    words = torch.randint(-(2**31), 2**31 - 1, (n, k // 8),
-                           dtype=torch.int32, generator=g)
+    words = torch.randint(
+        -(2**31), 2**31 - 1, (n, k // 8), dtype=torch.int32, generator=g
+    )
     codes = torch.zeros((n, k), dtype=torch.int8)
     word_bytes = words.view(torch.uint8).view(n, k // 8, 4)
     for byte_slot in range(4):
@@ -234,8 +244,7 @@ def _packed_parts(n=32, k=256, group_size=128):
         col_low = torch.arange(0, k, 8) + byte_slot * 2
         codes[:, col_low] = low
         codes[:, col_low + 1] = high
-    scales = torch.rand((n, k // group_size), dtype=torch.float32,
-                        generator=g)
+    scales = torch.rand((n, k // group_size), dtype=torch.float32, generator=g)
     return words, codes, scales
 
 
@@ -380,8 +389,10 @@ class TestCreateWeights:
         )
         with pytest.raises(ValueError, match="not divisible"):
             self._create(
-                scheme, torch.nn.Module(),
-                input_size=130, input_size_per_partition=130,
+                scheme,
+                torch.nn.Module(),
+                input_size=130,
+                input_size_per_partition=130,
             )
 
     def test_unpacked_scheme_uses_original_create(self, arm_w4a8):
@@ -449,8 +460,7 @@ class TestProcessWeightsAfterLoading:
 
         def fake_pack(weight, scales):
             packed_calls.append((weight.clone(), scales.clone()))
-            return torch.zeros(weight.shape[0], weight.shape[1] // 2,
-                               dtype=torch.uint8)
+            return torch.zeros(weight.shape[0], weight.shape[1] // 2, dtype=torch.uint8)
 
         ql = _install_fake_flag_gems(monkeypatch)
         monkeypatch.setattr(ql, "pack_rhs_qsi4c128p", fake_pack)
@@ -496,9 +506,10 @@ class TestProcessWeightsAfterLoading:
         assert kernel.process_weights_after_loading(layer) is None
         assert recorded[0] is layer
         # Nothing was repacked or nullified on the delegation path.
-        assert kernel.w_s_name in layer._parameters or getattr(
-            layer, kernel.w_s_name, "unset"
-        ) != "unset"
+        assert (
+            kernel.w_s_name in layer._parameters
+            or getattr(layer, kernel.w_s_name, "unset") != "unset"
+        )
 
     def test_zero_points_delegates_to_original(self, arm_w4a8):
         recorded = []
@@ -513,16 +524,14 @@ class TestProcessWeightsAfterLoading:
         assert kernel.process_weights_after_loading(layer) is None
         assert recorded[0] is layer
 
-    def test_unpacked_checkpoint_skips_shape_unwrap(self, arm_w4a8,
-                                                    monkeypatch):
+    def test_unpacked_checkpoint_skips_shape_unwrap(self, arm_w4a8, monkeypatch):
         """An int8 [n, k] checkpoint (not packed int32) skips the unpack."""
         ql = _install_fake_flag_gems(monkeypatch)
         packed_calls = []
 
         def fake_pack(weight, scales):
             packed_calls.append(weight.shape)
-            return torch.zeros(weight.shape[0], weight.shape[1] // 2,
-                               dtype=torch.uint8)
+            return torch.zeros(weight.shape[0], weight.shape[1] // 2, dtype=torch.uint8)
 
         monkeypatch.setattr(ql, "pack_rhs_qsi4c128p", fake_pack)
         arm_w4a8["install"]()
@@ -546,9 +555,7 @@ class TestProcessWeightsAfterLoading:
             weight_loader=lambda *args, **kwargs: None,
         )
         # Load the int8 unpacked layout with matching scales.
-        layer.weight_packed.data = torch.randint(
-            -8, 7, (n, k), dtype=torch.int8
-        )
+        layer.weight_packed.data = torch.randint(-8, 7, (n, k), dtype=torch.int8)
         layer.weight_scale.data = torch.rand(n, k // 128).to(torch.bfloat16)
         scheme.kernel.process_weights_after_loading(layer)
         # The [n, k] int8 matrix went straight to the packer.

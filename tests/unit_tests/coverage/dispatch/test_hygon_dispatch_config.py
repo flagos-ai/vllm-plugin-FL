@@ -45,6 +45,7 @@ from types import SimpleNamespace
 import pytest
 
 import vllm.platforms
+
 from vllm_fl.dispatch.builtin_ops import (
     _VENDOR_BACKENDS_DIR,
     _find_vendor_backend_dir,
@@ -256,11 +257,7 @@ class TestVendorHygonTokenFallsThrough:
             candidates = manager.resolve_candidates("rms_norm")
             order = policy.get_per_op_order("rms_norm")
             assert order[1] == "vendor:hygon"
-            matched = [
-                c.impl_id
-                for c in candidates
-                if match_token(c, "vendor:hygon")
-            ]
+            matched = [c.impl_id for c in candidates if match_token(c, "vendor:hygon")]
             assert matched == [], (
                 "vendor:hygon must match nothing while the hygon vendor "
                 "directory has no register_ops.py"
@@ -276,7 +273,9 @@ class TestVendorHygonTokenFallsThrough:
         policy = policy_from_config(str(yaml_path))
         manager = self._manager_with(
             self._impl("silu_and_mul", "default.flagos", BackendImplKind.DEFAULT, 150),
-            self._impl("silu_and_mul", "reference.torch", BackendImplKind.REFERENCE, 50),
+            self._impl(
+                "silu_and_mul", "reference.torch", BackendImplKind.REFERENCE, 50
+            ),
         )
 
         with policy_context(policy):
@@ -297,7 +296,9 @@ class TestVendorHygonTokenFallsThrough:
         yaml_path = get_config_path("hygon")
         policy = policy_from_config(str(yaml_path))
         manager = self._manager_with(
-            self._impl("rotary_embedding", "default.flagos", BackendImplKind.DEFAULT, 150),
+            self._impl(
+                "rotary_embedding", "default.flagos", BackendImplKind.DEFAULT, 150
+            ),
             self._impl(
                 "rotary_embedding",
                 "vendor.hygon",
@@ -305,17 +306,15 @@ class TestVendorHygonTokenFallsThrough:
                 100,
                 vendor="hygon",
             ),
-            self._impl("rotary_embedding", "reference.torch", BackendImplKind.REFERENCE, 50),
+            self._impl(
+                "rotary_embedding", "reference.torch", BackendImplKind.REFERENCE, 50
+            ),
         )
 
         with policy_context(policy):
             # With a live hygon impl the vendor slot matches it...
             candidates = manager.resolve_candidates("rotary_embedding")
-            matched = [
-                c.impl_id
-                for c in candidates
-                if match_token(c, "vendor:hygon")
-            ]
+            matched = [c.impl_id for c in candidates if match_token(c, "vendor:hygon")]
             assert matched == ["vendor.hygon"]
             # ...but flagos is still first in the yaml order, so the
             # DEFAULT impl keeps winning until the order is deliberately

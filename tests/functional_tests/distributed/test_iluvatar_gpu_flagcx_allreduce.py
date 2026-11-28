@@ -31,7 +31,6 @@ parent pytest process reports a clean pass/fail.
 
 from __future__ import annotations
 
-import multiprocessing as mp
 import uuid
 
 import pytest
@@ -172,7 +171,12 @@ def _rank_worker(rank: int, queue, init_file: str):
         import traceback
 
         queue.put(
-            {"rank": rank, "ok": False, "error": f"{exc}", "traceback": traceback.format_exc()}
+            {
+                "rank": rank,
+                "ok": False,
+                "error": f"{exc}",
+                "traceback": traceback.format_exc(),
+            }
         )
     finally:
         if dist.is_initialized():
@@ -218,9 +222,7 @@ def flagcx_results(tmp_path_factory):
             )
         os.environ["FLAGCX_PATH"] = os.path.join(spec_root, "flagcx")
 
-    init_file = str(
-        tmp_path_factory.mktemp("iluvatar_flagcx") / f"init-{SECRET}"
-    )
+    init_file = str(tmp_path_factory.mktemp("iluvatar_flagcx") / f"init-{SECRET}")
     ctx = tmp_mp.get_context("spawn")
     queue = ctx.Queue()
     procs = []

@@ -36,8 +36,15 @@ import vllm_fl.ops.fused_moe.fused_moe as ffm
 pytestmark = [pytest.mark.supplementary]
 
 
-def _oracle(hidden_states, w1, w2, topk_weights, topk_ids, activation="silu",
-            apply_router_weight_on_input=False):
+def _oracle(
+    hidden_states,
+    w1,
+    w2,
+    topk_weights,
+    topk_ids,
+    activation="silu",
+    apply_router_weight_on_input=False,
+):
     """Independent per-token grouped-GEMM oracle."""
     M, K = hidden_states.shape
     out = torch.zeros_like(hidden_states)
@@ -46,13 +53,15 @@ def _oracle(hidden_states, w1, w2, topk_weights, topk_ids, activation="silu",
             e = int(topk_ids[t, s])
             gate_up = hidden_states[t] @ w1[e].T
             if activation == "silu":
-                inter = F.silu(gate_up[: gate_up.numel() // 2]) * gate_up[
-                    gate_up.numel() // 2:
-                ]
+                inter = (
+                    F.silu(gate_up[: gate_up.numel() // 2])
+                    * gate_up[gate_up.numel() // 2 :]
+                )
             elif activation == "gelu":
-                inter = F.gelu(gate_up[: gate_up.numel() // 2]) * gate_up[
-                    gate_up.numel() // 2:
-                ]
+                inter = (
+                    F.gelu(gate_up[: gate_up.numel() // 2])
+                    * gate_up[gate_up.numel() // 2 :]
+                )
             elif activation == "silu_no_mul":
                 inter = F.silu(gate_up)
             elif activation == "gelu_no_mul":
@@ -72,9 +81,7 @@ def _record_routing(topk_ids):
     top_k = topk_ids.shape[1]
     for token in range(topk_ids.shape[0]):
         for slot in range(top_k):
-            routing[token * top_k + slot] = (
-                token, slot, int(topk_ids[token, slot])
-            )
+            routing[token * top_k + slot] = (token, slot, int(topk_ids[token, slot]))
     return routing
 
 
@@ -97,13 +104,14 @@ def _cpu_compat_shims(monkeypatch):
     * ``vllm.triton_utils.tl`` lacks the triton scalar-type aliases on a
       CPU-only install — the module maps torch dtypes onto them.
     """
+    import vllm.triton_utils as tu
     from vllm.model_executor.layers.fused_moe.fused_moe import (
         _get_config_quant_dtype as real_qd,
     )
-    import vllm.triton_utils as tu
 
     monkeypatch.setattr(
-        ffm, "_get_config_quant_dtype",
+        ffm,
+        "_get_config_quant_dtype",
         lambda **kw: real_qd(
             use_fp8_w8a8=kw.get("use_fp8_w8a8", False),
             use_int8_w8a8=kw.get("use_int8_w8a8", False),
@@ -121,9 +129,21 @@ def _cpu_compat_shims(monkeypatch):
     _ROUTING = {}
     _INVOKE_COUNT = {"n": 0}
 
-    def cpu_invoke(A, B, C, A_scale, B_scale, topk_weights,
-                   sorted_token_ids, expert_ids, num_tokens_post_padded,
-                   mul_routed_weight, top_k, config, **kwargs):
+    def cpu_invoke(
+        A,
+        B,
+        C,
+        A_scale,
+        B_scale,
+        topk_weights,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        mul_routed_weight,
+        top_k,
+        config,
+        **kwargs,
+    ):
         """Emulate the aligned grouped GEMM using recorded routing.
 
         Every A row is (token * top_k + slot) with its expert known from
@@ -202,19 +222,15 @@ def _cpu_compat_shims(monkeypatch):
         valid_ids = flat[valid][order]
         num_blocks = (valid_ids.numel() + block_size - 1) // max(block_size, 1)
         total = num_blocks * max(block_size, 1)
-        sorted_token_ids = torch.arange(
-            total, dtype=torch.int32
-        ) % max(valid_ids.numel(), 1)
+        sorted_token_ids = torch.arange(total, dtype=torch.int32) % max(
+            valid_ids.numel(), 1
+        )
         expert_ids = torch.zeros(num_blocks, dtype=torch.int32)
         for b in range(num_blocks):
-            chunk = valid_ids[
-                b * block_size: (b + 1) * block_size
-            ]
+            chunk = valid_ids[b * block_size : (b + 1) * block_size]
             if chunk.numel():
                 expert_ids[b] = chunk[0]
-        num_tokens_post_padded = torch.tensor(
-            total, dtype=torch.int32
-        )
+        num_tokens_post_padded = torch.tensor(total, dtype=torch.int32)
         return sorted_token_ids, expert_ids, num_tokens_post_padded
 
     monkeypatch.setattr(ffm, "_moe_align_block_size", cpu_moe_align)
@@ -247,16 +263,14 @@ class TestFusedExpertsImpl:
         # no-mul keeps the full gate_up width, so w2 must be [E, K, 2I].
         hs, w1, _, tw, ti = _moe_inputs(seed=3, I=4)
         w2 = torch.randn(w1.shape[0], hs.shape[1], w1.shape[1]) * 0.2
-        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti,
-                                     activation="silu_no_mul")
+        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti, activation="silu_no_mul")
         expected = _oracle(hs, w1, w2, tw, ti, activation="silu_no_mul")
         torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-4)
 
     def test_gelu_no_mul_activation(self):
         hs, w1, _, tw, ti = _moe_inputs(seed=4, I=4)
         w2 = torch.randn(w1.shape[0], hs.shape[1], w1.shape[1]) * 0.2
-        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti,
-                                     activation="gelu_no_mul")
+        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti, activation="gelu_no_mul")
         expected = _oracle(hs, w1, w2, tw, ti, activation="gelu_no_mul")
         torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-4)
 
@@ -265,8 +279,7 @@ class TestFusedExpertsImpl:
         with pytest.raises(ValueError, match="Unsupported FusedMoe"):
             ffm.fused_experts_impl(hs, w1, w2, tw, ti, activation="relu")
 
-    def test_apply_router_weight_on_input_two_gemm_flag_contract(self,
-                                                                 monkeypatch):
+    def test_apply_router_weight_on_input_two_gemm_flag_contract(self, monkeypatch):
         """Pin the first/second GEMM flag routing of fused_experts_impl.
 
         The CPU stub ``cpu_invoke`` used by the fixture implements both
@@ -297,25 +310,40 @@ class TestFusedExpertsImpl:
             for token in range(topk_ids.shape[0]):
                 for slot in range(top_k):
                     routing[token * top_k + slot] = (
-                        token, slot, int(topk_ids[token, slot])
+                        token,
+                        slot,
+                        int(topk_ids[token, slot]),
                     )
             routing["num_rows"] = topk_ids.numel()
             calls.clear()
             return real_impl(*args, **kwargs)
 
-        def flag_sensitive_invoke(A, B, C, A_scale, B_scale, topk_weights,
-                                  sorted_token_ids, expert_ids,
-                                  num_tokens_post_padded, mul_routed_weight,
-                                  top_k, config, **kwargs):
+        def flag_sensitive_invoke(
+            A,
+            B,
+            C,
+            A_scale,
+            B_scale,
+            topk_weights,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            mul_routed_weight,
+            top_k,
+            config,
+            **kwargs,
+        ):
             """A-path vs B-path: the flag alone decides whether the
             routed weight scales the row written here."""
             num_rows = routing.get("num_rows")
             expanded = num_rows is not None and A.shape[0] == num_rows
-            calls.append({
-                "flag": bool(mul_routed_weight),
-                "expanded": expanded,
-                "topk_weights_passed": topk_weights is not None,
-            })
+            calls.append(
+                {
+                    "flag": bool(mul_routed_weight),
+                    "expanded": expanded,
+                    "topk_weights_passed": topk_weights is not None,
+                }
+            )
             if A.shape[1] != B.shape[2]:
                 return
             flat = C.reshape(-1, C.shape[-1])
@@ -334,16 +362,18 @@ class TestFusedExpertsImpl:
                 flat[row] = out.to(flat.dtype)
 
         monkeypatch.setattr(ffm, "fused_experts_impl", routing_wrapper)
-        monkeypatch.setattr(ffm, "_invoke_fused_moe_triton_kernel",
-                            flag_sensitive_invoke)
+        monkeypatch.setattr(
+            ffm, "_invoke_fused_moe_triton_kernel", flag_sensitive_invoke
+        )
 
         hs, w1, w2, tw, ti = _moe_inputs(seed=11)
 
         # apply_router_weight_on_input=True: the raw flag reaches GEMM1
         # (raw hidden states, weight folded into the gate_up row), the
         # inverted flag reaches GEMM2 (expanded rows, unweighted).
-        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti,
-                                      apply_router_weight_on_input=True)
+        out = ffm.fused_experts_impl(
+            hs, w1, w2, tw, ti, apply_router_weight_on_input=True
+        )
         assert [c["flag"] for c in calls] == [True, False]
         assert calls[0]["expanded"] is False
         assert calls[1]["expanded"] is True
@@ -354,9 +384,10 @@ class TestFusedExpertsImpl:
                 e = int(ti[t, s])
                 gate_up = hs[t] @ w1[e].T
                 scaled = gate_up * tw[t, s]
-                inter = F.silu(scaled[: scaled.numel() // 2]) * scaled[
-                    scaled.numel() // 2:
-                ]
+                inter = (
+                    F.silu(scaled[: scaled.numel() // 2])
+                    * scaled[scaled.numel() // 2 :]
+                )
                 expected[t] += inter @ w2[e].T
         torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-4)
 
@@ -364,8 +395,9 @@ class TestFusedExpertsImpl:
         # unweighted, GEMM2 weights the contribution.
         out = ffm.fused_experts_impl(hs, w1, w2, tw, ti)
         assert [c["flag"] for c in calls] == [False, True]
-        torch.testing.assert_close(out, _oracle(hs, w1, w2, tw, ti),
-                                   rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(
+            out, _oracle(hs, w1, w2, tw, ti), rtol=1e-4, atol=1e-4
+        )
 
     def test_apply_router_weight_on_input(self):
         """Router weights scale the first GEMM output before activation.
@@ -376,8 +408,9 @@ class TestFusedExpertsImpl:
         kernel contract directly.
         """
         hs, w1, w2, tw, ti = _moe_inputs(seed=5)
-        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti,
-                                      apply_router_weight_on_input=True)
+        out = ffm.fused_experts_impl(
+            hs, w1, w2, tw, ti, apply_router_weight_on_input=True
+        )
         M, K = hs.shape
         expected = torch.zeros_like(hs)
         for t in range(M):
@@ -385,9 +418,10 @@ class TestFusedExpertsImpl:
                 e = int(ti[t, s])
                 gate_up = hs[t] @ w1[e].T
                 scaled = gate_up * tw[t, s]
-                inter = F.silu(scaled[: scaled.numel() // 2]) * scaled[
-                    scaled.numel() // 2:
-                ]
+                inter = (
+                    F.silu(scaled[: scaled.numel() // 2])
+                    * scaled[scaled.numel() // 2 :]
+                )
                 expected[t] += inter @ w2[e].T
         torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-4)
 
@@ -398,8 +432,7 @@ class TestFusedExpertsImpl:
         )
 
         hs, w1, w2, tw, ti = _moe_inputs(seed=6)
-        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti,
-                                     activation=MoEActivation.SILU)
+        out = ffm.fused_experts_impl(hs, w1, w2, tw, ti, activation=MoEActivation.SILU)
         expected = _oracle(hs, w1, w2, tw, ti)
         torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-4)
 
@@ -412,8 +445,9 @@ class TestFusedExpertsImpl:
         hs, w1, w2, tw, ti = _moe_inputs(K=6)
         # use_int4_w4a16 compares hidden // 2 with w1.size(2).
         with pytest.raises(AssertionError, match="Hidden size mismatch"):
-            ffm.fused_experts_impl(torch.randn(4, 5), w1, w2, tw, ti,
-                                   use_int4_w4a16=True)
+            ffm.fused_experts_impl(
+                torch.randn(4, 5), w1, w2, tw, ti, use_int4_w4a16=True
+            )
 
     def test_topk_shape_mismatch_asserts(self):
         hs, w1, w2, tw, ti = _moe_inputs()
@@ -448,9 +482,7 @@ class TestFusedExpertsWrapper:
     def test_default_quant_config_path(self, monkeypatch):
         # Keep the wrapper on the local-impl path (the vendor branch would
         # resolve through the kunlunxin op, unavailable on CPU hosts).
-        monkeypatch.setattr(
-            ffm, "current_platform", SimpleNamespace(vendor_name=None)
-        )
+        monkeypatch.setattr(ffm, "current_platform", SimpleNamespace(vendor_name=None))
         hs, w1, w2, tw, ti = _moe_inputs(seed=7)
         out = ffm.fused_experts(hs, w1, w2, tw, ti)
         expected = _oracle(hs, w1, w2, tw, ti)
@@ -475,8 +507,11 @@ class TestFusedExpertsWrapper:
                     call["topk_ids"] = args[4]
                 calls.append(call)
                 return _oracle(
-                    call["hidden_states"], call["w1"], call["w2"],
-                    call["topk_weights"], call["topk_ids"],
+                    call["hidden_states"],
+                    call["w1"],
+                    call["w2"],
+                    call["topk_weights"],
+                    call["topk_ids"],
                     activation=call.get("activation", "silu"),
                     apply_router_weight_on_input=call.get(
                         "apply_router_weight_on_input", False
@@ -489,7 +524,8 @@ class TestFusedExpertsWrapper:
         from vllm.platforms import current_platform
 
         monkeypatch.setattr(
-            ffm, "current_platform",
+            ffm,
+            "current_platform",
             SimpleNamespace(vendor_name="kunlunxin"),
             raising=False,
         )
@@ -504,7 +540,8 @@ class TestFusedExpertsWrapper:
 
     def test_non_kunlunxin_uses_local_impl(self, monkeypatch):
         monkeypatch.setattr(
-            ffm, "current_platform",
+            ffm,
+            "current_platform",
             SimpleNamespace(vendor_name="nvidia"),
             raising=False,
         )
@@ -523,9 +560,7 @@ class TestFusedExpertsWrapper:
             return real_impl(**kwargs)
 
         monkeypatch.setattr(ffm, "fused_experts_impl", spy)
-        monkeypatch.setattr(
-            ffm, "current_platform", SimpleNamespace(vendor_name=None)
-        )
+        monkeypatch.setattr(ffm, "current_platform", SimpleNamespace(vendor_name=None))
         hs, w1, w2, tw, ti = _moe_inputs(seed=10)
         quant_config = SimpleNamespace(
             use_fp8_w8a8=False,
@@ -543,8 +578,7 @@ class TestFusedExpertsWrapper:
             w1_bias=None,
             w2_bias=None,
         )
-        out = ffm.fused_experts(hs, w1, w2, tw, ti,
-                                quant_config=quant_config)
+        out = ffm.fused_experts(hs, w1, w2, tw, ti, quant_config=quant_config)
         assert captured["per_channel_quant"] is False
         assert captured["w1_scale"] is None
         expected = _oracle(hs, w1, w2, tw, ti)

@@ -84,8 +84,10 @@ def _cache(layout, dtype, fill):
 def _inputs(dtype, tokens=6):
     shape = (tokens, _SHAPE[2], _SHAPE[3])
     key = (
-        torch.arange(tokens * shape[1] * shape[2], device="cuda") % 29
-    ).reshape(shape).to(dtype)
+        (torch.arange(tokens * shape[1] * shape[2], device="cuda") % 29)
+        .reshape(shape)
+        .to(dtype)
+    )
     return key, key + 41
 
 
@@ -109,9 +111,7 @@ def _expected(cache, source, slots):
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("layout", ["NHD", "HND"])
 @pytest.mark.parametrize("slot_dtype", [torch.int32, torch.int64])
-def test_scatter_accepts_both_slot_dtypes(
-    cache_writer, dtype, layout, slot_dtype
-):
+def test_scatter_accepts_both_slot_dtypes(cache_writer, dtype, layout, slot_dtype):
     """The Triton launch lands mapped tokens for int32 *and* int64 slots.
 
     ``tests/unit_tests/dispatch/test_thead_cache.py`` pins the scatter oracle
@@ -170,10 +170,14 @@ def test_multiple_element_tiles_and_out_of_range_slots(cache_writer, dtype):
     shape = (5, 3, 215)  # 645 elements -> tiles_per_token == 3
     blocks, block_size = 2, 8
     key = (
-        torch.arange(shape[0] * shape[1] * shape[2], device="cuda") % 97
-    ).reshape(shape).to(dtype)
+        (torch.arange(shape[0] * shape[1] * shape[2], device="cuda") % 97)
+        .reshape(shape)
+        .to(dtype)
+    )
     value = -key
-    key_cache = torch.full((blocks, block_size, shape[1], shape[2]), -5, device="cuda", dtype=dtype)
+    key_cache = torch.full(
+        (blocks, block_size, shape[1], shape[2]), -5, device="cuda", dtype=dtype
+    )
     value_cache = torch.full_like(key_cache, -9)
     # Slot 31 is out of range (2 blocks * 8 tokens = 16 slots total).
     slots = torch.tensor([0, 31, 15, -1, 7], device="cuda", dtype=torch.int64)

@@ -136,7 +136,7 @@ class TestWeakRefSingleTensor:
         """
         device = _cuda()
         source = torch.randn(16, dtype=torch.float32, device=device)
-        pool = source.untyped().data_ptr() if hasattr(source, "untyped") else None
+        source.untyped().data_ptr() if hasattr(source, "untyped") else None
         result = _weak_ref(source)
         del source
         gc.collect()
@@ -159,7 +159,6 @@ class TestWeakRefSingleTensor:
 
     def test_raises_when_primitives_missing(self, monkeypatch):
         """CoreX PyTorch without the construction primitives must fail loudly."""
-        from vllm_fl.dispatch.backends.vendor.iluvatar import graph as graph_module
 
         monkeypatch.setattr(
             torch._C,

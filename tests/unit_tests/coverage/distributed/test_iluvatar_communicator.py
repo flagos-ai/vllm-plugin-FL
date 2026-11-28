@@ -158,11 +158,11 @@ class TestInit:
         ``IluvatarCommunicatorFL.__init__`` then both execute, and the
         vendor guard (communicator.py L40-43) is the code under test.
         """
-        import vllm_fl.distributed.communicator as comm_fl
         from vllm.distributed.device_communicators.base_device_communicator import (
             DeviceCommunicatorBase,
         )
 
+        import vllm_fl.distributed.communicator as comm_fl
         from vllm_fl.dispatch.backends.vendor.iluvatar.communicator import (
             IluvatarCommunicatorFL,
         )
@@ -215,11 +215,11 @@ class TestInit:
         """
         import logging
 
-        import vllm_fl.distributed.communicator as comm_fl
         from vllm.distributed.device_communicators.base_device_communicator import (
             DeviceCommunicatorBase,
         )
 
+        import vllm_fl.distributed.communicator as comm_fl
         from vllm_fl.dispatch.backends.vendor.iluvatar.communicator import (
             IluvatarCommunicatorFL,
         )
@@ -294,9 +294,7 @@ class TestAllReduceVisionUpcast:
         base = cls.__mro__[1]
         monkeypatch.setattr(base, "all_reduce", recording)
 
-    def test_bf16_upcast_inside_vision_forward(
-        self, monkeypatch, comm_with_recorder
-    ):
+    def test_bf16_upcast_inside_vision_forward(self, monkeypatch, comm_with_recorder):
         from vllm_fl.dispatch.backends.vendor.iluvatar import vision_precision
 
         comm, seen, recording = comm_with_recorder
@@ -312,9 +310,7 @@ class TestAllReduceVisionUpcast:
         # fp32 math: 1.0 * 10 exactly representable in bf16
         assert torch.all(out == 10.0)
 
-    def test_fp16_upcast_inside_vision_forward(
-        self, monkeypatch, comm_with_recorder
-    ):
+    def test_fp16_upcast_inside_vision_forward(self, monkeypatch, comm_with_recorder):
         from vllm_fl.dispatch.backends.vendor.iluvatar import vision_precision
 
         comm, seen, recording = comm_with_recorder
@@ -346,9 +342,7 @@ class TestAllReduceVisionUpcast:
         assert seen[0] is x
         assert out.dtype == torch.float32
 
-    def test_no_cast_outside_vision_forward(
-        self, monkeypatch, comm_with_recorder
-    ):
+    def test_no_cast_outside_vision_forward(self, monkeypatch, comm_with_recorder):
         comm, seen, recording = comm_with_recorder
         self._patch_base(monkeypatch, type(comm), recording)
         x = torch.ones(4, dtype=torch.bfloat16)
@@ -356,9 +350,7 @@ class TestAllReduceVisionUpcast:
         assert seen[0] is x, "bf16 must be passed through untouched"
         assert out.dtype == torch.bfloat16
 
-    def test_return_cast_only_when_dtype_changed(
-        self, monkeypatch, comm_with_recorder
-    ):
+    def test_return_cast_only_when_dtype_changed(self, monkeypatch, comm_with_recorder):
         """If the collective already returns the original dtype, no .to()."""
         from vllm_fl.dispatch.backends.vendor.iluvatar import vision_precision
 

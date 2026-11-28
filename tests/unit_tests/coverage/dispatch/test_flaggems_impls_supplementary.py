@@ -233,12 +233,8 @@ class _VllmStubTree:
             def all_gather(self, tensor, dim):
                 return tensor
 
-        self._leaf(
-            "vllm.distributed.parallel_state", get_dcp_group=lambda: _DcpGroup()
-        )
-        self._leaf(
-            "vllm.model_executor.layers.attention.attention", Attention=object
-        )
+        self._leaf("vllm.distributed.parallel_state", get_dcp_group=lambda: _DcpGroup())
+        self._leaf("vllm.model_executor.layers.attention.attention", Attention=object)
         mla = self._leaf("vllm.model_executor.layers.attention.mla_attention")
         mla.MLACommonBackend = classes.MLACommonBackend
         mla.MLACommonMetadata = classes.MLACommonMetadata
@@ -269,9 +265,7 @@ class _VllmStubTree:
                 return self.path
 
         class _Enum:
-            TRITON_ATTN = _Entry(
-                "vllm.v1.attention.backends.triton_attn.TritonAttn"
-            )
+            TRITON_ATTN = _Entry("vllm.v1.attention.backends.triton_attn.TritonAttn")
 
         backend_mod.AttentionBackendEnum = _Enum
         self._leaf(
@@ -430,9 +424,7 @@ class TestAttentionBackendSurface:
     """AttentionFLBackend metadata and support gates."""
 
     def test_get_name_and_impl_cls(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         AttentionFLBackend = module.AttentionFLBackend
         AttentionFLImpl = module.AttentionFLImpl
         AttentionFLMetadataBuilder = module.AttentionFLMetadataBuilder
@@ -442,9 +434,7 @@ class TestAttentionBackendSurface:
         assert AttentionFLBackend.get_builder_cls() is AttentionFLMetadataBuilder
 
     def test_supports_attn_type(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         AttentionFLBackend = module.AttentionFLBackend
         from vllm.v1.attention.backend import AttentionType
 
@@ -458,9 +448,7 @@ class TestAttentionBackendSurface:
         assert not AttentionFLBackend.supports_attn_type("unknown")
 
     def test_supports_kv_cache_dtype(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         AttentionFLBackend = module.AttentionFLBackend
 
         assert AttentionFLBackend.supports_kv_cache_dtype(None)
@@ -468,9 +456,7 @@ class TestAttentionBackendSurface:
         assert not AttentionFLBackend.supports_kv_cache_dtype("fp8")
 
     def test_supports_head_size(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         AttentionFLBackend = module.AttentionFLBackend
 
         assert AttentionFLBackend.supports_head_size(8)
@@ -479,35 +465,58 @@ class TestAttentionBackendSurface:
         assert not AttentionFLBackend.supports_head_size(264)
 
     def test_supports_combination(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         AttentionFLBackend = module.AttentionFLBackend
 
         assert (
             AttentionFLBackend.supports_combination(
-                128, torch.float16, "auto", 16, False, False, False, False,
+                128,
+                torch.float16,
+                "auto",
+                16,
+                False,
+                False,
+                False,
+                False,
                 SimpleNamespace(),
             )
             is None
         )
-        assert AttentionFLBackend.supports_combination(
-            128, torch.float16, "auto", 16, False, True, False, False,
-            SimpleNamespace(),
-        ) == "not support sink"
-        assert AttentionFLBackend.supports_combination(
-            128, torch.float16, "auto", 16, False, False, False, True,
-            SimpleNamespace(),
-        ) == "FlagGems FA2 does not support multimodal prefix attention"
+        assert (
+            AttentionFLBackend.supports_combination(
+                128,
+                torch.float16,
+                "auto",
+                16,
+                False,
+                True,
+                False,
+                False,
+                SimpleNamespace(),
+            )
+            == "not support sink"
+        )
+        assert (
+            AttentionFLBackend.supports_combination(
+                128,
+                torch.float16,
+                "auto",
+                16,
+                False,
+                False,
+                False,
+                True,
+                SimpleNamespace(),
+            )
+            == "FlagGems FA2 does not support multimodal prefix attention"
+        )
 
 
 class TestSplitKvCache:
     """_split_kv_cache view construction."""
 
     def test_4d_cache_transposes_and_splits(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         _split_kv_cache = module._split_kv_cache
 
         kv_cache = torch.arange(2 * 3 * 4 * 16, dtype=torch.float32).reshape(
@@ -519,9 +528,7 @@ class TestSplitKvCache:
         assert key_cache.shape == (2, 4, 3, 8)
 
     def test_unequal_head_sizes_rejected(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         _split_kv_cache = module._split_kv_cache
 
         kv_cache = torch.zeros(2, 3, 4, 20)
@@ -529,9 +536,7 @@ class TestSplitKvCache:
             _split_kv_cache(kv_cache, 8)
 
     def test_unsupported_ndim_rejected(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         _split_kv_cache = module._split_kv_cache
 
         kv_cache = torch.zeros(2, 3, 4, 16, 5)
@@ -553,9 +558,7 @@ def _make_attention_impl(stubs, **overrides):
         kv_cache_dtype="auto",
     )
     kwargs.update(overrides)
-    impl = module.AttentionFLImpl(
-        attn_type=AttentionType.DECODER, **kwargs
-    )
+    impl = module.AttentionFLImpl(attn_type=AttentionType.DECODER, **kwargs)
     # __init__ never assigns dcp_world_size yet forward() reads it (a
     # known source quirk — production callers set it explicitly).
     impl.dcp_world_size = 1
@@ -584,8 +587,13 @@ class TestAttentionImplInit:
         module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         AttentionType = stubs.classes.AttentionType
         impl = module.AttentionFLImpl(
-            num_heads=4, head_size=64, scale=0.1, num_kv_heads=2,
-            alibi_slopes=None, sliding_window=128, kv_cache_dtype="auto",
+            num_heads=4,
+            head_size=64,
+            scale=0.1,
+            num_kv_heads=2,
+            alibi_slopes=None,
+            sliding_window=128,
+            kv_cache_dtype="auto",
             attn_type=AttentionType.ENCODER_ONLY,
         )
         assert impl.sliding_window == (127, 127)
@@ -642,9 +650,14 @@ class TestAttentionImplForward:
     def test_profiling_run_zeroes_output(self, stubs):
         module, impl = _make_attention_impl(stubs)
         output = torch.ones(4, 4, 64)
-        result = impl.forward(
-            self._layer(), torch.zeros(4, 4, 64), torch.zeros(4, 2, 64),
-            torch.zeros(4, 2, 64), torch.zeros(1, 2, 8, 128), None, output,
+        impl.forward(
+            self._layer(),
+            torch.zeros(4, 4, 64),
+            torch.zeros(4, 2, 64),
+            torch.zeros(4, 2, 64),
+            torch.zeros(1, 2, 8, 128),
+            None,
+            output,
         )
         assert torch.count_nonzero(output) == 0
 
@@ -652,9 +665,13 @@ class TestAttentionImplForward:
         module, impl = _make_attention_impl(stubs)
         with pytest.raises(NotImplementedError, match="fused output quantization"):
             impl.forward(
-                self._layer(), torch.zeros(4, 4, 64), torch.zeros(4, 2, 64),
-                torch.zeros(4, 2, 64), torch.zeros(1, 2, 8, 128),
-                self._metadata(), torch.zeros(4, 4, 64),
+                self._layer(),
+                torch.zeros(4, 4, 64),
+                torch.zeros(4, 2, 64),
+                torch.zeros(4, 2, 64),
+                torch.zeros(1, 2, 8, 128),
+                self._metadata(),
+                torch.zeros(4, 4, 64),
                 output_scale=torch.ones(1),
             )
 
@@ -685,8 +702,13 @@ class TestAttentionImplForward:
         module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         AttentionType = stubs.classes.AttentionType
         impl = module.AttentionFLImpl(
-            num_heads=4, head_size=64, scale=0.125, num_kv_heads=2,
-            alibi_slopes=None, sliding_window=None, kv_cache_dtype="auto",
+            num_heads=4,
+            head_size=64,
+            scale=0.125,
+            num_kv_heads=2,
+            alibi_slopes=None,
+            sliding_window=None,
+            kv_cache_dtype="auto",
             attn_type=AttentionType.ENCODER_ONLY,
         )
         impl.dcp_world_size = 1
@@ -695,9 +717,7 @@ class TestAttentionImplForward:
         q = torch.randn(4, 4, 64)
         k = torch.randn(4, 2, 64)
         v = torch.randn(4, 2, 64)
-        result = impl.forward(
-            self._layer(), q, k, v, torch.zeros(1), metadata, output
-        )
+        result = impl.forward(self._layer(), q, k, v, torch.zeros(1), metadata, output)
         assert len(stubs.state.flash_attn_calls) == 1
         call = stubs.state.flash_attn_calls[0]
         # Encoder attention is bidirectional and uses q/k/v directly (the
@@ -726,8 +746,13 @@ class TestAttentionImplForward:
         )
         output = torch.zeros(4, 4, 64)
         impl.forward(
-            self._layer(), torch.randn(4, 4, 64), torch.randn(4, 2, 64),
-            torch.randn(4, 2, 64), torch.zeros(2, 2, 8, 128), metadata, output,
+            self._layer(),
+            torch.randn(4, 4, 64),
+            torch.randn(4, 2, 64),
+            torch.randn(4, 2, 64),
+            torch.zeros(2, 2, 8, 128),
+            metadata,
+            output,
         )
         assert calls, "cascade_attention must run for use_cascade metadata"
         args, kwargs = calls[0]
@@ -744,8 +769,13 @@ class TestAttentionImplForward:
         metadata = self._metadata()
         output = torch.zeros(4, 4, 64)
         result = impl.forward(
-            self._layer(), torch.randn(4, 4, 64), torch.randn(4, 2, 64),
-            torch.randn(4, 2, 64), torch.zeros(2, 2, 8, 128), metadata, output,
+            self._layer(),
+            torch.randn(4, 4, 64),
+            torch.randn(4, 2, 64),
+            torch.randn(4, 2, 64),
+            torch.zeros(2, 2, 8, 128),
+            metadata,
+            output,
         )
         assert calls, "_forward_with_dcp must run for dcp_world_size > 1"
         assert result is output
@@ -763,13 +793,17 @@ class TestDoKvCacheUpdate:
         # of the poisoned module would raise ImportError before that).
         launches = []
 
-        def recording_op(key, value, key_cache, value_cache, slot_mapping,
-                         kv_dtype, k_scale, v_scale):
+        def recording_op(
+            key, value, key_cache, value_cache, slot_mapping, kv_dtype, k_scale, v_scale
+        ):
             launches.append(
                 {
-                    "key": key, "value": value,
-                    "key_cache": key_cache, "value_cache": value_cache,
-                    "slot_mapping": slot_mapping, "kv_dtype": kv_dtype,
+                    "key": key,
+                    "value": value,
+                    "key_cache": key_cache,
+                    "value_cache": value_cache,
+                    "slot_mapping": slot_mapping,
+                    "kv_dtype": kv_dtype,
                 }
             )
 
@@ -779,8 +813,13 @@ class TestDoKvCacheUpdate:
         )
         for attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
             impl = module.AttentionFLImpl(
-                num_heads=4, head_size=64, scale=0.1, num_kv_heads=2,
-                alibi_slopes=None, sliding_window=None, kv_cache_dtype="auto",
+                num_heads=4,
+                head_size=64,
+                scale=0.1,
+                num_kv_heads=2,
+                alibi_slopes=None,
+                sliding_window=None,
+                kv_cache_dtype="auto",
                 attn_type=attn_type,
             )
             kv_cache = torch.zeros(2, 2, 8, 128)
@@ -788,8 +827,10 @@ class TestDoKvCacheUpdate:
             # The early return must not touch the cache or import the op.
             impl.do_kv_cache_update(
                 SimpleNamespace(_k_scale=None, _v_scale=None),
-                torch.randn(4, 2, 64), torch.randn(4, 2, 64),
-                kv_cache, torch.tensor([0, 1, 2, 3], dtype=torch.int32),
+                torch.randn(4, 2, 64),
+                torch.randn(4, 2, 64),
+                kv_cache,
+                torch.tensor([0, 1, 2, 3], dtype=torch.int32),
             )
             # No writer launch happened and the cache bytes are intact.
             assert launches == []
@@ -799,17 +840,21 @@ class TestDoKvCacheUpdate:
         module, impl = _make_attention_impl(stubs)
         launches = []
 
-        def recording_op(key, value, key_cache, value_cache, slot_mapping,
-                         kv_dtype, k_scale, v_scale):
+        def recording_op(
+            key, value, key_cache, value_cache, slot_mapping, kv_dtype, k_scale, v_scale
+        ):
             launches.append(
                 {
-                    "key": key, "value": value,
-                    "key_cache": key_cache, "value_cache": value_cache,
-                    "slot_mapping": slot_mapping, "kv_dtype": kv_dtype,
+                    "key": key,
+                    "value": value,
+                    "key_cache": key_cache,
+                    "value_cache": value_cache,
+                    "slot_mapping": slot_mapping,
+                    "kv_dtype": kv_dtype,
                 }
             )
 
-        triton_op_mod = stubs._leaf(
+        stubs._leaf(
             "vllm.v1.attention.ops.triton_reshape_and_cache_flash",
             triton_reshape_and_cache_flash=recording_op,
         )
@@ -832,9 +877,7 @@ class TestUseCascadeAttentionDecision:
     """The use_cascade_attention heuristic decision table."""
 
     def _call(self, stubs, **overrides):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         use_cascade_attention = module.use_cascade_attention
 
         kwargs = dict(
@@ -872,7 +915,8 @@ class TestUseCascadeAttentionDecision:
     def test_uniform_decode_with_flash_decoding_decision(self, stubs):
         # num_queries_per_kv > 1 and all query_lens == 1: flash decoding is
         # used, so the decision compares the two CTA models.
-        result = self._call(stubs, 
+        result = self._call(
+            stubs,
             query_lens=np_array([1] * 16),
             common_prefix_len=2048,
             num_sms=1,  # tiny SM count favors cascade
@@ -894,9 +938,7 @@ class TestCascadeAttentionPlumbing:
     """cascade_attention argument plumbing against the kernel double."""
 
     def test_prefix_and_suffix_calls(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         cascade_attention = module.cascade_attention
 
         query = torch.randn(8, 4, 64)
@@ -912,13 +954,23 @@ class TestCascadeAttentionPlumbing:
         block_table = torch.arange(4, dtype=torch.int32).reshape(1, 4)
 
         cascade_attention(
-            output, query, key_cache, value_cache,
-            cu_query_lens=cu_query_lens, max_query_len=8,
+            output,
+            query,
+            key_cache,
+            value_cache,
+            cu_query_lens=cu_query_lens,
+            max_query_len=8,
             cu_prefix_query_lens=cu_prefix_query_lens,
-            prefix_kv_lens=prefix_kv_lens, suffix_kv_lens=suffix_kv_lens,
-            max_kv_len=64, softmax_scale=0.125, alibi_slopes=None,
-            sliding_window=(-1, -1), logits_soft_cap=0,
-            block_table=block_table, common_prefix_len=32, fa_version=2,
+            prefix_kv_lens=prefix_kv_lens,
+            suffix_kv_lens=suffix_kv_lens,
+            max_kv_len=64,
+            softmax_scale=0.125,
+            alibi_slopes=None,
+            sliding_window=(-1, -1),
+            logits_soft_cap=0,
+            block_table=block_table,
+            common_prefix_len=32,
+            fa_version=2,
         )
 
         # Two kernel calls: shared prefix then per-query suffix.
@@ -929,31 +981,33 @@ class TestCascadeAttentionPlumbing:
         assert torch.equal(prefix_call["block_table"], block_table[:1])
         assert suffix_call["causal"] is True
         assert suffix_call["max_seqlen_k"] == 64 - 32
-        assert torch.equal(
-            suffix_call["block_table"], block_table[:, 32 // 16:]
-        )
+        assert torch.equal(suffix_call["block_table"], block_table[:, 32 // 16 :])
 
     def test_alibi_rejected(self, stubs):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.attention"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.attention")
         cascade_attention = module.cascade_attention
 
         query = torch.randn(8, 4, 64)
         key_cache = torch.zeros(4, 2, 16, 64)
         with pytest.raises(AssertionError, match="does not support ALiBi"):
             cascade_attention(
-                torch.zeros(8, 4, 64), query, key_cache, key_cache,
+                torch.zeros(8, 4, 64),
+                query,
+                key_cache,
+                key_cache,
                 cu_query_lens=torch.tensor([0, 8], dtype=torch.int32),
                 max_query_len=8,
                 cu_prefix_query_lens=torch.tensor([0, 8], dtype=torch.int32),
                 prefix_kv_lens=torch.tensor([32], dtype=torch.int32),
                 suffix_kv_lens=torch.tensor([32], dtype=torch.int32),
-                max_kv_len=64, softmax_scale=0.125,
+                max_kv_len=64,
+                softmax_scale=0.125,
                 alibi_slopes=torch.ones(4),
-                sliding_window=(-1, -1), logits_soft_cap=0,
+                sliding_window=(-1, -1),
+                logits_soft_cap=0,
                 block_table=torch.zeros(1, 4, dtype=torch.int32),
-                common_prefix_len=32, fa_version=2,
+                common_prefix_len=32,
+                fa_version=2,
             )
 
 
@@ -965,8 +1019,9 @@ class TestCascadeAttentionPlumbing:
 class TestRotaryEmbeddingFlaggems:
     """rotary_embedding_flaggems vendor-branch matrix."""
 
-    def _make(self, stubs, monkeypatch, vendor="nvidia", device_type="cuda",
-             kernel=None):
+    def _make(
+        self, stubs, monkeypatch, vendor="nvidia", device_type="cuda", kernel=None
+    ):
         stubs.state.vendor_name = vendor
         stubs.state.device_type = device_type
 
@@ -977,14 +1032,12 @@ class TestRotaryEmbeddingFlaggems:
 
         import flag_gems
 
-        def gems_apply(q, k, cos, sin, position_ids=None,
-                       rotary_interleaved=False):
+        def gems_apply(q, k, cos, sin, position_ids=None, rotary_interleaved=False):
             calls["gems"].append((q, k))
             return q * 2.0, k * 3.0
 
         monkeypatch.setattr(
-            flag_gems, "apply_rotary_pos_emb", kernel or gems_apply,
-            raising=False
+            flag_gems, "apply_rotary_pos_emb", kernel or gems_apply, raising=False
         )
         monkeypatch.setattr(flag_gems, "vendor_name", vendor, raising=False)
 
@@ -995,19 +1048,17 @@ class TestRotaryEmbeddingFlaggems:
         # sys.modules explicitly to shadow it.
         config_mod = stubs._leaf("flag_gems.config")
         monkeypatch.setitem(sys.modules, "flag_gems.config", config_mod)
-        monkeypatch.setattr(config_mod, "use_c_extension", False,
-                            raising=False)
+        monkeypatch.setattr(config_mod, "use_c_extension", False, raising=False)
 
         flaggems_vllm = sys.modules["flaggems_vllm"]
 
-        def vllm_rope(q, k, cos, sin, position_ids=None,
-                      rotary_interleaved=False, inplace=False):
+        def vllm_rope(
+            q, k, cos, sin, position_ids=None, rotary_interleaved=False, inplace=False
+        ):
             calls["vllm"].append({"q": q, "k": k, "inplace": inplace})
             return q * 2.0, k * 3.0
 
-        monkeypatch.setattr(
-            flaggems_vllm, "apply_rotary_pos_emb", vllm_rope
-        )
+        monkeypatch.setattr(flaggems_vllm, "apply_rotary_pos_emb", vllm_rope)
         return module, calls
 
     def test_plain_passthrough(self, stubs, monkeypatch):
@@ -1100,7 +1151,7 @@ class TestRotaryEmbeddingFlaggems:
         pos = torch.tensor([[0], [1]])
 
         q_snapshot = q.clone()
-        k_snapshot = k.clone()
+        k.clone()
         q_out, k_out = module.rotary_embedding_flaggems(
             None, q, k, cos, sin, pos, inplace=True
         )
@@ -1135,14 +1186,11 @@ class TestNormalizationDelegate:
     """rms_norm_flaggems delegate contract."""
 
     def test_forwards_weight_epsilon_and_residual(self, stubs, monkeypatch):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.normalization"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.normalization")
         recorded = {}
 
         def fake_gems_rms(x, residual, weight, epsilon):
-            recorded.update(x=x, residual=residual, weight=weight,
-                            epsilon=epsilon)
+            recorded.update(x=x, residual=residual, weight=weight, epsilon=epsilon)
             return x
 
         # The production function resolves ``flag_gems.modules.normalization``
@@ -1157,9 +1205,7 @@ class TestNormalizationDelegate:
         # deterministic on every flag_gems version.
         gems_mod = ModuleType("flag_gems.modules.normalization")
         gems_mod.gems_rms_forward = fake_gems_rms
-        monkeypatch.setitem(
-            sys.modules, "flag_gems.modules.normalization", gems_mod
-        )
+        monkeypatch.setitem(sys.modules, "flag_gems.modules.normalization", gems_mod)
 
         class Layer:
             weight = torch.ones(6)
@@ -1175,9 +1221,7 @@ class TestNormalizationDelegate:
         assert out is x
 
     def test_residual_none_forwarded(self, stubs, monkeypatch):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.normalization"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.normalization")
         recorded = {}
 
         def fake_gems_rms(x, residual, weight, epsilon):
@@ -1186,9 +1230,7 @@ class TestNormalizationDelegate:
 
         gems_mod = ModuleType("flag_gems.modules.normalization")
         gems_mod.gems_rms_forward = fake_gems_rms
-        monkeypatch.setitem(
-            sys.modules, "flag_gems.modules.normalization", gems_mod
-        )
+        monkeypatch.setitem(sys.modules, "flag_gems.modules.normalization", gems_mod)
 
         class Layer:
             weight = torch.ones(6)
@@ -1202,9 +1244,7 @@ class TestActivationDelegates:
     """silu_and_mul_flaggems / gelu_and_mul_flaggems contracts."""
 
     def test_silu_splits_and_combines(self, stubs, monkeypatch):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.activation"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.activation")
         recorded = {}
 
         def fake_silu(x1, x2):
@@ -1225,9 +1265,7 @@ class TestActivationDelegates:
         torch.testing.assert_close(out, expected, rtol=1e-6, atol=1e-6)
 
     def test_gelu_forwards_approximate(self, stubs, monkeypatch):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.activation"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.activation")
         recorded = {}
 
         def fake_gelu(x1, x2, approximate="none"):
@@ -1252,9 +1290,7 @@ class TestActivationDelegates:
         assert out.shape == (2, 3)
 
     def test_gelu_none_obj_defaults_to_none(self, stubs, monkeypatch):
-        module = _import_impl(
-            "vllm_fl.dispatch.backends.flaggems.impl.activation"
-        )
+        module = _import_impl("vllm_fl.dispatch.backends.flaggems.impl.activation")
         recorded = {}
 
         def fake_gelu(x1, x2, approximate="none"):
@@ -1266,5 +1302,3 @@ class TestActivationDelegates:
 
         module.gelu_and_mul_flaggems(None, torch.randn(2, 6))
         assert recorded["approximate"] == "none"
-
-

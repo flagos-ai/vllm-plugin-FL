@@ -13,6 +13,7 @@ It provides:
   - Session-scoped shared resources (model paths, temp dirs, etc.)
 """
 
+import contextlib
 import os
 import tempfile
 import warnings
@@ -88,12 +89,16 @@ def pytest_configure(config):
         # former tests/supplementary_tests tree, which registered them
         # locally; the standard-tree migration requires root registration so
         # bare pytest runs stay warning-free).
-        "supplementary: coverage-suite test beyond the core suites "
-        "(moved from tests/supplementary_tests, see tests/unit_tests/coverage/)",
-        "platforms(name): gate a test to the listed platforms "
-        "(skip when the session platform is not among them; gate is the "
-        "_platforms_gate step in this conftest's "
-        "pytest_collection_modifyitems)",
+        (
+            "supplementary: coverage-suite test beyond the core suites "
+            "(moved from tests/supplementary_tests, see tests/unit_tests/coverage/)"
+        ),
+        (
+            "platforms(name): gate a test to the listed platforms "
+            "(skip when the session platform is not among them; gate is the "
+            "_platforms_gate step in this conftest's "
+            "pytest_collection_modifyitems)"
+        ),
         "area(name): area tag used by the per-area coverage report",
     ]:
         config.addinivalue_line("markers", line)
@@ -126,11 +131,9 @@ def _active_platform(config) -> str:
     environment variable the runners also export.
     """
     value = ""
-    try:
+    # option not registered (bare pytest without the runner) -> keep ""
+    with contextlib.suppress(ValueError, KeyError):
         value = config.getoption("--platform") or ""
-    except (ValueError, KeyError):
-        # option not registered (bare pytest without the runner)
-        pass
     return value or os.environ.get("FL_TEST_PLATFORM", "")
 
 

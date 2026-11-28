@@ -64,9 +64,7 @@ class TestVendorBackendClass:
         import os
 
         assert not os.path.isfile(
-            os.path.join(
-                os.path.dirname(hygon_pkg.__file__ or ""), "register_ops.py"
-            )
+            os.path.join(os.path.dirname(hygon_pkg.__file__ or ""), "register_ops.py")
         )
         # 3. The patch entry is the process-level entry the startup hook
         #    routes to: same object reachable through the documented name.

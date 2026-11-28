@@ -100,17 +100,13 @@ class TestTopkSoftmaxNoBias:
             "call_op",
             lambda *a, **k: (ref_weights.clone(), ref_indices.clone()),
         )
-        mr.topk_softmax(
-            topk_weights, topk_indices, token_expert_indices, gating, False
-        )
+        mr.topk_softmax(topk_weights, topk_indices, token_expert_indices, gating, False)
         assert not torch.any(topk_weights == -123.0)
         assert not torch.any(topk_indices == -7)
         assert torch.equal(topk_weights, ref_weights)
         assert torch.equal(topk_indices, ref_indices)
 
-    def test_token_expert_indices_untouched_by_no_bias_branch(
-        self, monkeypatch
-    ):
+    def test_token_expert_indices_untouched_by_no_bias_branch(self, monkeypatch):
         """The no-bias branch delegates to call_op and only copies weights
         and indices back; ``token_expert_indices`` is left to the underlying
         op (not written by this adapter)."""
@@ -132,9 +128,7 @@ class TestTopkSoftmaxNoBias:
             "call_op",
             lambda *a, **k: (ref_weights.clone(), ref_indices.clone()),
         )
-        mr.topk_softmax(
-            topk_weights, topk_indices, token_expert_indices, gating, False
-        )
+        mr.topk_softmax(topk_weights, topk_indices, token_expert_indices, gating, False)
         # adapter copies weights/indices but never writes token_expert_indices
         assert torch.equal(token_expert_indices, torch.full_like(sentinel, -99))
 
@@ -152,14 +146,10 @@ class TestTopkSoftmaxBias:
         return weights, indices
 
     @pytest.mark.parametrize("renormalize", [False, True])
-    def test_selection_by_bias_weights_from_unbiased_softmax(
-        self, renormalize
-    ):
+    def test_selection_by_bias_weights_from_unbiased_softmax(self, renormalize):
         import vllm_fl.dispatch.backends.vendor.iluvatar.moe_router as mr
 
-        gating, topk_weights, topk_indices, token_expert_indices = _make_case(
-            seed=4
-        )
+        gating, topk_weights, topk_indices, token_expert_indices = _make_case(seed=4)
         bias = torch.randn(gating.shape[-1])
         topk = topk_indices.shape[1]
 
@@ -185,7 +175,9 @@ class TestTopkSoftmaxBias:
         topk_indices = torch.zeros(1, 2, dtype=torch.int32)
         token_expert_indices = torch.zeros(1, 2, dtype=torch.int32)
 
-        mr.topk_softmax(topk_weights, topk_indices, token_expert_indices, gating, False, bias)
+        mr.topk_softmax(
+            topk_weights, topk_indices, token_expert_indices, gating, False, bias
+        )
         ref_weights, ref_indices = self._oracle(gating, bias, 2, False)
         assert torch.equal(topk_indices, ref_indices)
         assert 0 not in topk_indices.tolist()[0]
@@ -223,21 +215,22 @@ class TestTopkSoftmaxBias:
             raise AssertionError("call_op must not be used on the bias path")
 
         monkeypatch.setattr(vllm_fl.dispatch, "call_op", explode)
-        gating, topk_weights, topk_indices, token_expert_indices = _make_case(
-            seed=9
-        )
+        gating, topk_weights, topk_indices, token_expert_indices = _make_case(seed=9)
         bias = torch.randn(gating.shape[-1])
         mr.topk_softmax(
             topk_weights, topk_indices, token_expert_indices, gating, False, bias
         )
-        ref_weights, ref_indices = self._oracle(gating, bias, topk_indices.shape[1], False)
+        ref_weights, ref_indices = self._oracle(
+            gating, bias, topk_indices.shape[1], False
+        )
         assert torch.allclose(topk_weights, ref_weights)
 
 
 class TestPaddingMask:
     def test_padded_rows_filled_with_minus_one(self, monkeypatch):
-        import vllm_fl.dispatch
         import vllm.model_executor.layers.fused_moe.router.fused_topk_router as ftr
+
+        import vllm_fl.dispatch
         import vllm_fl.dispatch.backends.vendor.iluvatar.moe_router as mr
 
         num_tokens = 5
@@ -249,9 +242,7 @@ class TestPaddingMask:
         ref_weights = scores.gather(1, ref_indices)
 
         mask = torch.tensor([False, True, False, True, False])
-        monkeypatch.setattr(
-            ftr, "_get_padding_mask", lambda n: mask[:n]
-        )
+        monkeypatch.setattr(ftr, "_get_padding_mask", lambda n: mask[:n])
         monkeypatch.setattr(
             vllm_fl.dispatch,
             "call_op",
@@ -270,8 +261,9 @@ class TestPaddingMask:
         assert torch.equal(i[0], ref_indices[0])
 
     def test_no_mask_leaves_indices_untouched(self, monkeypatch):
-        import vllm_fl.dispatch
         import vllm.model_executor.layers.fused_moe.router.fused_topk_router as ftr
+
+        import vllm_fl.dispatch
         import vllm_fl.dispatch.backends.vendor.iluvatar.moe_router as mr
 
         gating, topk_weights, topk_indices, token_expert_indices = _make_case()

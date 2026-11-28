@@ -21,6 +21,7 @@ that later import triton normally are unaffected.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import inspect
 import linecache
@@ -130,9 +131,7 @@ def gdn(monkeypatch):
         if orig is None:
             return
         params = inspect.signature(orig).parameters
-        if any(
-            p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values()
-        ):
+        if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values()):
             return
         n_pos = (
             sum(
@@ -194,10 +193,12 @@ def gdn(monkeypatch):
     import triton.language.standard as current_std
 
     for (holder, name), original in replaced.items():
-        holder_ref = current_std if holder is current_std or holder is std else current_tl
-        try:
+        holder_ref = (
+            current_std if holder is current_std or holder is std else current_tl
+        )
+        # defensive restore: some stub attrs may not be re-settable
+        with contextlib.suppress(Exception):
             setattr(holder_ref, name, original)
-        except Exception:  # pragma: no cover - defensive restore
             pass
     sys.modules.pop(_GDN_MODULE, None)
 

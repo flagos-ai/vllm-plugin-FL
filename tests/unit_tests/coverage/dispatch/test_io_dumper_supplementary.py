@@ -40,8 +40,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from vllm_fl.dispatch import io_common
-from vllm_fl.dispatch import io_dumper as d
+from vllm_fl.dispatch import io_common, io_dumper as d
 
 pytestmark = [pytest.mark.supplementary]
 
@@ -123,8 +122,11 @@ class TestPrintHelpers:
     def test_log_combined_writes_structured_block(self, caplog):
         with caplog.at_level(logging.INFO, logger=d._print_logger.name):
             d._log_combined(
-                "my_label", ["  arg[0]: x"], torch.ones(2),
-                op_tag="[op=1,1]", exec_order=3,
+                "my_label",
+                ["  arg[0]: x"],
+                torch.ones(2),
+                op_tag="[op=1,1]",
+                exec_order=3,
             )
         joined = "\n".join(r.message for r in caplog.records)
         assert "[IO_PRINT][rank=0][step=0][exec_order=3][op=1,1] my_label" in joined
@@ -150,9 +152,7 @@ class TestStepAdvance:
 
     def test_lazy_dispatch_mode_entry(self, tmp_path):
         """step_range deferring activation re-enters at the boundary."""
-        d.enable_io_dump(
-            dump_dir=str(tmp_path), with_metas=True, step_range="1-2"
-        )
+        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, step_range="1-2")
         assert not io_common.dispatch_mode_mgr.is_entered("dump")
         # Completing step 0 brings next_step to 1, inside [1, 3).
         d._on_step_advance(0, set(), set())
@@ -170,18 +170,27 @@ class TestStepAdvance:
 
 class TestShouldDumpGates:
     def test_layer_filter_rejects_without_context(self, tmp_path):
-        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True,
-                         layers={"model.layers.9"})
+        d.enable_io_dump(
+            dump_dir=str(tmp_path), with_metas=True, layers={"model.layers.9"}
+        )
         assert not d._should_dump("any_op", ())
 
     def test_should_dump_torch_func_step_gate(self, tmp_path):
-        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True,
-                         with_torch_funcs=True, step_range="5-9")
+        d.enable_io_dump(
+            dump_dir=str(tmp_path),
+            with_metas=True,
+            with_torch_funcs=True,
+            step_range="5-9",
+        )
         assert not d._should_dump_torch_func("matmul")  # step 0 < 5
 
     def test_should_dump_torch_func_module_gate(self, tmp_path):
-        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True,
-                         with_torch_funcs=True, modules={"Missing"})
+        d.enable_io_dump(
+            dump_dir=str(tmp_path),
+            with_metas=True,
+            with_torch_funcs=True,
+            modules={"Missing"},
+        )
         assert not d._should_dump_torch_func("matmul")
 
 
@@ -241,7 +250,10 @@ class TestBackgroundWriter:
             device = SimpleNamespace(type="cpu")
 
         d._bg_compute_and_write(
-            str(tmp_path / "input.json"), 1, {"op": "o"}, {"arg_0": _BrokenTensor()},
+            str(tmp_path / "input.json"),
+            1,
+            {"op": "o"},
+            {"arg_0": _BrokenTensor()},
             None,
         )
         data = _read_jsonl(tmp_path / "input.json")
@@ -255,8 +267,11 @@ class TestBackgroundWriter:
                 synced.append(True)
 
         d._bg_save_pt(
-            (torch.ones(2),), {}, is_output=False,
-            pt_path=str(tmp_path / "c1.pt"), device_event=_Event(),
+            (torch.ones(2),),
+            {},
+            is_output=False,
+            pt_path=str(tmp_path / "c1.pt"),
+            device_event=_Event(),
         )
         assert synced == [True]
         loaded = torch.load(tmp_path / "c1.pt", weights_only=False)
@@ -299,9 +314,11 @@ class TestDumpInputOutputEdges:
 
     def test_dump_output_swallows_internal_errors(self, tmp_path, monkeypatch, caplog):
         d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True)
-        monkeypatch.setattr(d, "_pop_pairing", lambda name: (_ for _ in ()).throw(
-            RuntimeError("pairing stack broken")
-        ))
+        monkeypatch.setattr(
+            d,
+            "_pop_pairing",
+            lambda name: (_ for _ in ()).throw(RuntimeError("pairing stack broken")),
+        )
         with caplog.at_level(logging.WARNING, logger=d.logger.name):
             d._dump_output("op_q", torch.zeros(1))
         assert any("Failed to queue output dump" in r.message for r in caplog.records)
@@ -318,9 +335,7 @@ class TestDumpInputOutputEdges:
 
     def test_dump_after_without_pairing_logs_outputs_only(self, tmp_path, caplog):
         """with_print + no pushed pairing logs the outputs-only fallback."""
-        d.enable_io_dump(
-            dump_dir="", with_print=True, with_metas=True, ops=["solo_op"]
-        )
+        d.enable_io_dump(dump_dir="", with_print=True, with_metas=True, ops=["solo_op"])
         with caplog.at_level(logging.INFO, logger=d._print_logger.name):
             d.dump_after("solo_op", (torch.ones(3),), torch.zeros(3))
         joined = "\n".join(r.message for r in caplog.records)
@@ -529,8 +544,9 @@ class TestEnableIoDumpLayers:
         finally:
             d._clear_env_vars()
         for key in list(os.environ):
-            assert not (key.startswith("VLLM_FL_IO_DUMP")
-                       and os.environ[key] == str(tmp_path))
+            assert not (
+                key.startswith("VLLM_FL_IO_DUMP") and os.environ[key] == str(tmp_path)
+            )
 
 
 class TestInitFromEnv:
@@ -631,10 +647,12 @@ class TestSummaryClassification:
         d.enable_io_dump(dump_dir=str(tmp_path))
         with d._lock:
             d._op_summary["aten.mm"] = {
-                "dispatch_keys": "[(CUDA, FlagGems, False)]", "call_count": 2,
+                "dispatch_keys": "[(CUDA, FlagGems, False)]",
+                "call_count": 2,
             }
             d._op_summary["aten.add"] = {
-                "dispatch_keys": "[(CPU, CPU, False)]", "call_count": 1,
+                "dispatch_keys": "[(CPU, CPU, False)]",
+                "call_count": 1,
             }
         d.disable_io_dump()
         summary = self._summary(tmp_path)
@@ -678,8 +696,7 @@ class TestSummaryClassification:
 
 class TestModeLifecycleHelpers:
     def test_pause_resume_roundtrip(self, tmp_path):
-        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True,
-                         with_torch_funcs=True)
+        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_torch_funcs=True)
         assert io_common.dispatch_mode_mgr.is_entered("dump")
         assert io_common.func_mode_mgr.is_entered("dump")
         d.pause_dispatch_modes()
@@ -697,8 +714,7 @@ class TestModeLifecycleHelpers:
         assert not io_common.dispatch_mode_mgr.is_entered("dump")
 
     def test_exit_dispatch_modes_requests_both(self, tmp_path):
-        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True,
-                         with_torch_funcs=True)
+        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_torch_funcs=True)
         d._exit_dispatch_modes()
         assert not io_common.dispatch_mode_mgr.is_entered("dump")
         assert not io_common.func_mode_mgr.is_entered("dump")
@@ -770,9 +786,7 @@ class TestTorchFuncModeInterception:
             d.disable_io_dump()
 
     def test_torch_func_mode_dumps_and_releases_tags(self, tmp_path):
-        d.enable_io_dump(
-            dump_dir=str(tmp_path), with_metas=True, with_torch_funcs=True
-        )
+        d.enable_io_dump(dump_dir=str(tmp_path), with_metas=True, with_torch_funcs=True)
         try:
             left = torch.tensor([[1.0, 2.0]])
             result = torch.matmul(left, left.transpose(0, 1))
@@ -801,7 +815,9 @@ class TestInitIoDumpFromEnvGates:
 
     def test_config_only_activates(self, monkeypatch, tmp_path):
         monkeypatch.delenv("VLLM_FL_IO_DUMP", raising=False)
-        monkeypatch.setenv("VLLM_FL_CONFIG", _write_yaml(tmp_path, {"dir": str(tmp_path)}))
+        monkeypatch.setenv(
+            "VLLM_FL_CONFIG", _write_yaml(tmp_path, {"dir": str(tmp_path)})
+        )
         d.init_io_dump_from_env(eager=True)
         assert d._enabled is True
         assert d._hooks_activated is True

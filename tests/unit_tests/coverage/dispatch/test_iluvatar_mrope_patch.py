@@ -50,9 +50,7 @@ def _clean_mrope_env(monkeypatch):
         forward = forward.__wrapped__
     monkeypatch.setattr(MRotaryEmbedding, "forward_native", forward)
     # drop the env-var dict entry a previous patch_mrope() may have left
-    monkeypatch.delitem(
-        vllm.envs.environment_variables, _ENV_VAR, raising=False
-    )
+    monkeypatch.delitem(vllm.envs.environment_variables, _ENV_VAR, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -109,13 +107,15 @@ class TestPatchMrope:
         _Platform.vendor_name = vendor_name
         monkeypatch.setattr(vllm.platforms, "current_platform", _Platform())
 
-    def test_non_iluvatar_vendor_is_noop(self, monkeypatch, _save_and_restore_forward_native):
+    def test_non_iluvatar_vendor_is_noop(
+        self, monkeypatch, _save_and_restore_forward_native
+    ):
         import vllm.envs
-
-        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
         from vllm.model_executor.layers.rotary_embedding.mrope import (
             MRotaryEmbedding,
         )
+
+        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
 
         original = MRotaryEmbedding.forward_native
         self._patched_platform(monkeypatch, "nvidia")
@@ -127,11 +127,11 @@ class TestPatchMrope:
         self, monkeypatch, _save_and_restore_forward_native
     ):
         import vllm.envs
-
-        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
         from vllm.model_executor.layers.rotary_embedding.mrope import (
             MRotaryEmbedding,
         )
+
+        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
 
         original = MRotaryEmbedding.forward_native
         self._patched_platform(monkeypatch, "iluvatar")
@@ -148,10 +148,11 @@ class TestPatchMrope:
     def test_iluvatar_repeated_patch_keeps_single_wrapper(
         self, monkeypatch, _save_and_restore_forward_native
     ):
-        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
         from vllm.model_executor.layers.rotary_embedding.mrope import (
             MRotaryEmbedding,
         )
+
+        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
 
         self._patched_platform(monkeypatch, "iluvatar")
         mrope_mod.patch_mrope()
@@ -165,10 +166,11 @@ class TestPatchMrope:
     def test_native_mode_unwraps_to_original(
         self, monkeypatch, _save_and_restore_forward_native
     ):
-        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
         from vllm.model_executor.layers.rotary_embedding.mrope import (
             MRotaryEmbedding,
         )
+
+        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
 
         original = MRotaryEmbedding.forward_native
         self._patched_platform(monkeypatch, "iluvatar")
@@ -188,10 +190,11 @@ class TestPatchMrope:
     def test_native_mode_after_opaque_unwraps(
         self, monkeypatch, _save_and_restore_forward_native
     ):
-        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
         from vllm.model_executor.layers.rotary_embedding.mrope import (
             MRotaryEmbedding,
         )
+
+        import vllm_fl.dispatch.backends.vendor.iluvatar.mrope as mrope_mod
 
         original = MRotaryEmbedding.forward_native
         self._patched_platform(monkeypatch, "iluvatar")

@@ -103,9 +103,7 @@ class TestCpuPassthrough:
             _weak_ref_iluvatar_tensors,
         )
 
-        result = _weak_ref_iluvatar_tensors(
-            {"a": [], "b": ({},), "c": {"d": ()}}
-        )
+        result = _weak_ref_iluvatar_tensors({"a": [], "b": ({},), "c": {"d": ()}})
         assert result == {"a": [], "b": ({},), "c": {"d": ()}}
         assert isinstance(result["b"], tuple)
 
@@ -147,9 +145,7 @@ class TestCudaBranch:
             if saved[name] is not None:
                 monkeypatch.delattr(torch_mod._C, name, raising=True)
             else:
-                monkeypatch.setattr(
-                    torch_mod._C, name, None, raising=False
-                )
+                monkeypatch.setattr(torch_mod._C, name, None, raising=False)
         with pytest.raises(RuntimeError, match="Iluvatar graph weak references"):
             _weak_ref_iluvatar_tensor(fake)
 
@@ -202,9 +198,7 @@ class TestCudaBranch:
             "_construct_CUDA_Tensor_From_Storage_And_Metadata",
             None,
         )
-        primitives_present = callable(construct_storage) and callable(
-            construct_tensor
-        )
+        primitives_present = callable(construct_storage) and callable(construct_tensor)
 
         tree = [torch.ones(2), {"gpu": _fake_cuda(torch.arange(3.0))}]
         if primitives_present:

@@ -47,9 +47,7 @@ def _import_flaggems_backend():
     empty wheels. Where resolution works naturally this is a no-op.
     """
     try:
-        module = importlib.import_module(
-            "vllm_fl.dispatch.backends.flaggems.flaggems"
-        )
+        module = importlib.import_module("vllm_fl.dispatch.backends.flaggems.flaggems")
     except Exception:
         import vllm.platforms as platforms_mod
 
@@ -67,9 +65,7 @@ def _import_flaggems_backend():
             inert = _InertPlatform()
             platforms_mod.__dict__["current_platform"] = inert
             platforms_mod._current_platform = inert
-        module = importlib.import_module(
-            "vllm_fl.dispatch.backends.flaggems.flaggems"
-        )
+        module = importlib.import_module("vllm_fl.dispatch.backends.flaggems.flaggems")
     return module.FlagGemsBackend
 
 
@@ -211,9 +207,9 @@ def test_triton_attn_small_shape_matches_sdpa_on_ppu(
     """End-to-end small-shape run of the selected TRITON_ATTN kernel on PPU."""
     from vllm.v1.attention.backend import AttentionType
 
-    (
-        keys, values, queries, pages, slots, seq_lens, query_lens, head_size
-    ) = _paged_case()
+    (keys, values, queries, pages, slots, seq_lens, query_lens, head_size) = (
+        _paged_case()
+    )
     block_size = 16
     heads_q = queries.shape[1]
     num_blocks = 4
@@ -233,11 +229,15 @@ def test_triton_attn_small_shape_matches_sdpa_on_ppu(
     # Logical [B, H, N, 2*D] cache; fill through the impl's own split view so
     # the write and the read agree on the packed layout.
     kv_cache = torch.zeros(
-        num_blocks, keys.shape[1], block_size, 2 * head_size,
-        device="cuda", dtype=torch.bfloat16,
+        num_blocks,
+        keys.shape[1],
+        block_size,
+        2 * head_size,
+        device="cuda",
+        dtype=torch.bfloat16,
     )
     key_cache, value_cache = kv_cache.transpose(1, 2).split(head_size, dim=-1)
-    slot_tensor = torch.tensor(slots, dtype=torch.int64, device="cuda")
+    torch.tensor(slots, dtype=torch.int64, device="cuda")
     for token, slot in enumerate(slots):
         if slot >= 0:
             key_cache[slot // block_size, slot % block_size].copy_(keys[token].cuda())
@@ -297,7 +297,10 @@ def test_triton_attn_small_shape_matches_sdpa_on_ppu(
         q_positions = torch.arange(query_len) + seq_len - query_len
         mask = torch.arange(seq_len)[None, :] <= q_positions[:, None]
         result = F.scaled_dot_product_attention(
-            query[None], key[None], value[None], attn_mask=mask,
+            query[None],
+            key[None],
+            value[None],
+            attn_mask=mask,
             scale=1 / math.sqrt(head_size),
         )
         expected.append(result[0].transpose(0, 1))

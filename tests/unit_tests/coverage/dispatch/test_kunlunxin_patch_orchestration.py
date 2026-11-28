@@ -176,6 +176,7 @@ def _recorded_legacy_calls():
             saved_modules[full] = sys.modules.get(full)
             stub = ModuleType(full)
             for apply_name in apply_names:
+
                 def recorder(_name=apply_name, _mod=module_name):
                     calls.append(f"{_mod}.{_name}")
 
@@ -202,13 +203,13 @@ def _graph_surfaces_snapshotted():
     """
     import vllm.compilation.breakable_cudagraph as real_breakable
     import vllm.v1.worker.gpu.cudagraph_utils as cudagraph_utils
-    import vllm_fl.distributed.communicator as comm_mod
-
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
-        KunlunxinAttentionBackendImpl,
-    )
     from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
         QwenGatedDeltaNetAttention,
+    )
+
+    import vllm_fl.distributed.communicator as comm_mod
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+        KunlunxinAttentionBackendImpl,
     )
 
     surfaces = [
@@ -232,10 +233,8 @@ def _graph_surfaces_snapshotted():
             if existed:
                 setattr(owner, name, saved)
             else:
-                try:
+                with contextlib.suppress(AttributeError):
                     delattr(owner, name)
-                except AttributeError:
-                    pass
 
 
 @contextlib.contextmanager
@@ -276,24 +275,18 @@ def _stubbed_runner_modules(**attrs):
         yield SimpleNamespace(gpu_runner=gpu_runner, fl_runner=fl_runner)
     finally:
         if saved_gpu_attr is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del gpu_pkg.gpu_model_runner
-            except AttributeError:
-                pass
         else:
             gpu_pkg.gpu_model_runner = saved_gpu_attr
         if saved_fl_mr_attr is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del vllm_fl.worker.model_runner
-            except AttributeError:
-                pass
         else:
             vllm_fl.worker.model_runner = saved_fl_mr_attr
         if saved_fl_worker is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del vllm_fl.worker
-            except AttributeError:
-                pass
         else:
             vllm_fl.worker = saved_fl_worker
         for name, entry in saved.items():
@@ -328,9 +321,11 @@ class TestApplyKunlunxinPatchesOrchestration:
 
                 shared_globals[fn_name] = recorder
 
-            with _recorded_legacy_calls() as module_calls:
-                with _graph_surfaces_snapshotted():
-                    ns["apply_kunlunxin_patches"]()
+            with (
+                _recorded_legacy_calls() as module_calls,
+                _graph_surfaces_snapshotted(),
+            ):
+                ns["apply_kunlunxin_patches"]()
 
             assert state.applied is True
             assert state.initializing is False
@@ -354,15 +349,17 @@ class TestApplyKunlunxinPatchesOrchestration:
             ns = _load_patch_module()
             state = ns["_patch_state"]
 
-            with _recorded_legacy_calls() as module_calls:
-                with _graph_surfaces_snapshotted():
-                    ns["apply_kunlunxin_patches"]()
-                    assert state.applied is True
-                    count_after_first = len(module_calls)
-                    # a second entry must short-circuit on the applied flag
-                    # before dispatching anything again
-                    ns["apply_kunlunxin_patches"]()
-            assert len(module_calls) == count_after_first
+            with (
+                _recorded_legacy_calls() as module_calls,
+                _graph_surfaces_snapshotted(),
+            ):
+                ns["apply_kunlunxin_patches"]()
+                assert state.applied is True
+                count_after_first = len(module_calls)
+                # a second entry must short-circuit on the applied flag
+                # before dispatching anything again
+                ns["apply_kunlunxin_patches"]()
+                assert len(module_calls) == count_after_first
 
     @pytest.mark.platforms("kunlunxin")
     def test_failed_patch_does_not_flip_the_applied_flag(self):
@@ -375,10 +372,12 @@ class TestApplyKunlunxinPatchesOrchestration:
 
             ns["__shared_globals__"]["patch_sampler_rng"] = boom
 
-            with _recorded_legacy_calls() as module_calls:
-                with _graph_surfaces_snapshotted():
-                    with pytest.raises(RuntimeError, match="sub-patch exploded"):
-                        ns["apply_kunlunxin_patches"]()
+            with (
+                _recorded_legacy_calls() as module_calls,
+                _graph_surfaces_snapshotted(),
+                pytest.raises(RuntimeError, match="sub-patch exploded"),
+            ):
+                ns["apply_kunlunxin_patches"]()
 
             assert state.applied is False
             assert state.initializing is False, (
@@ -436,8 +435,8 @@ class TestGraphAdaptationsPublishRollback:
             def __setattr__(self, name, value):
                 raise ValueError("simulated publish failure")
 
-        boom_fl_runner = _BoomModule("vllm_fl.worker.model_runner")
-        boom_gpu_runner = _BoomModule("vllm.v1.worker.gpu_model_runner")
+        _BoomModule("vllm_fl.worker.model_runner")
+        _BoomModule("vllm.v1.worker.gpu_model_runner")
 
         # snapshots of every surface published BEFORE the boom owner
         dispatch_before = CudagraphDispatcher.dispatch
@@ -485,24 +484,18 @@ class TestGraphAdaptationsPublishRollback:
         finally:
             # restore the runner modules and parent attributes regardless
             if saved_gpu_attr is None:
-                try:
+                with contextlib.suppress(AttributeError):
                     del gpu_pkg.gpu_model_runner
-                except AttributeError:
-                    pass
             else:
                 gpu_pkg.gpu_model_runner = saved_gpu_attr
             if saved_fl_mr_attr is None:
-                try:
+                with contextlib.suppress(AttributeError):
                     del vllm_fl.worker.model_runner
-                except AttributeError:
-                    pass
             else:
                 vllm_fl.worker.model_runner = saved_fl_mr_attr
             if saved_fl_worker is None:
-                try:
+                with contextlib.suppress(AttributeError):
                     del vllm_fl.worker
-                except AttributeError:
-                    pass
             else:
                 vllm_fl.worker = saved_fl_worker
             for name, entry in saved.items():
@@ -591,9 +584,7 @@ class TestSsmCacheUpdateFallback:
     fails, the error is re-raised as RuntimeError (1164-1171).
     """
 
-    FW_NAME = (
-        "vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_forward_core"
-    )
+    FW_NAME = "vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_forward_core"
 
     @pytest.mark.platforms("kunlunxin")
     def test_import_failure_falls_back_to_apply_ssm_patch(self):

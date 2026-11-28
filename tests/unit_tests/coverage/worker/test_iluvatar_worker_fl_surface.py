@@ -42,7 +42,6 @@ import torch
 pytestmark = [pytest.mark.supplementary, pytest.mark.platforms("iluvatar")]
 
 
-
 @pytest.fixture
 def worker_module():
     import vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker as w
@@ -167,7 +166,9 @@ class TestSleepWakeUp:
         )
         worker.sleep(level=2)
         assert torch.equal(worker._sleep_saved_buffers["buf"], model.buf)
-        assert torch.equal(worker._sleep_saved_draft_buffers["draft_buf"], draft.draft_buf)
+        assert torch.equal(
+            worker._sleep_saved_draft_buffers["draft_buf"], draft.draft_buf
+        )
         # saved copies must be independent of the live buffers
         model.buf.mul_(100)
         assert torch.equal(worker._sleep_saved_buffers["buf"], torch.arange(6)), (
@@ -343,9 +344,7 @@ class TestSleepWakeUp:
         k = torch.full((2,), 1.0)
         layer = SimpleNamespace(_k_scale=k, k_scale=None, _v_scale=None, v_scale=None)
         worker.cache_config = SimpleNamespace(cache_dtype="fp8")
-        worker.compilation_config = SimpleNamespace(
-            static_forward_context={"l": layer}
-        )
+        worker.compilation_config = SimpleNamespace(static_forward_context={"l": layer})
         import vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker as w
 
         calls = {"sync": 0, "meminfo": 0}
@@ -370,9 +369,7 @@ class TestSleepWakeUp:
             "_get_sleep_mode_backend",
             lambda self: SimpleNamespace(suspend=lambda level: None),
         )
-        monkeypatch.setattr(
-            worker_module.current_platform, "is_rocm", lambda: True
-        )
+        monkeypatch.setattr(worker_module.current_platform, "is_rocm", lambda: True)
         worker.sleep(level=1)
         assert calls["meminfo"] >= 3, (
             "the rocm deadline path must poll memory again after a decrease"
@@ -399,9 +396,7 @@ class TestUpdateConfig:
         assert worker.vllm_config.model_config is new_config
         assert new_config.replaced is True
 
-    def test_whitelisted_load_config_override(
-        self, worker, monkeypatch
-    ):
+    def test_whitelisted_load_config_override(self, worker, monkeypatch):
         import vllm.config
 
         worker.vllm_config = SimpleNamespace(load_config=object())
@@ -414,9 +409,7 @@ class TestUpdateConfig:
         assert worker.load_config is new_config
         assert worker.model_runner.load_config is new_config
 
-    def test_unknown_config_name_is_rejected(
-        self, worker, monkeypatch
-    ):
+    def test_unknown_config_name_is_rejected(self, worker, monkeypatch):
         """Only the whitelist is accepted; anything else raises."""
         worker.vllm_config = SimpleNamespace()
         worker.model_runner = SimpleNamespace()
@@ -528,16 +521,12 @@ class TestExecuteModel:
         )
         worker.use_v2_model_runner = False
         worker.annotate_profile = lambda _: _null_context()
-        result = worker.execute_model(
-            SimpleNamespace(total_num_scheduled_tokens=0)
-        )
+        result = worker.execute_model(SimpleNamespace(total_num_scheduled_tokens=0))
         handle_a.wait.assert_called_once()
         handle_b.wait.assert_called_once()
         assert result is None
 
-    def test_last_rank_returns_runner_output(
-        self, worker, worker_module, monkeypatch
-    ):
+    def test_last_rank_returns_runner_output(self, worker, worker_module, monkeypatch):
         """A None runner output is a valid ModelRunnerOutput-path return."""
         self._wire_groups(monkeypatch, worker_module)
         worker.model_runner = SimpleNamespace(
@@ -546,9 +535,7 @@ class TestExecuteModel:
         )
         worker.use_v2_model_runner = False
         worker.annotate_profile = lambda _: _null_context()
-        output = worker.execute_model(
-            SimpleNamespace(total_num_scheduled_tokens=5)
-        )
+        output = worker.execute_model(SimpleNamespace(total_num_scheduled_tokens=5))
         assert output is None, "last rank returns the runner output"
         assert worker._pp_send_work == [], "no send on the last rank"
 
@@ -566,9 +553,7 @@ class TestExecuteModel:
             is_first_rank=False,
             is_last_rank=False,
             world_size=2,
-            irecv_tensor_dict=Mock(
-                return_value=(received, [comm_handle], [comm_post])
-            ),
+            irecv_tensor_dict=Mock(return_value=(received, [comm_handle], [comm_post])),
             isend_tensor_dict=Mock(return_value=[Mock(), Mock()]),
         )
         monkeypatch.setattr(worker_module, "get_pp_group", lambda: group)
@@ -586,9 +571,7 @@ class TestExecuteModel:
         worker.use_v2_model_runner = False
         worker.annotate_profile = lambda _: _null_context()
         worker.vllm_config = SimpleNamespace(
-            parallel_config=SimpleNamespace(
-                distributed_executor_backend="mp"
-            )
+            parallel_config=SimpleNamespace(distributed_executor_backend="mp")
         )
         worker.execute_model(SimpleNamespace(total_num_scheduled_tokens=5))
         intermediate = seen_intermediate[0]
@@ -631,13 +614,9 @@ class TestExecuteModel:
         worker.use_v2_model_runner = False
         worker.annotate_profile = lambda _: _null_context()
         worker.vllm_config = SimpleNamespace(
-            parallel_config=SimpleNamespace(
-                distributed_executor_backend="mp"
-            )
+            parallel_config=SimpleNamespace(distributed_executor_backend="mp")
         )
-        result = worker.execute_model(
-            SimpleNamespace(total_num_scheduled_tokens=5)
-        )
+        result = worker.execute_model(SimpleNamespace(total_num_scheduled_tokens=5))
         assert result is None, "non-last rank returns None after the send"
         group.isend_tensor_dict.assert_called_once_with(
             tensors, all_gather_group=tp_group
@@ -660,16 +639,12 @@ class TestExecuteModel:
         worker.use_v2_model_runner = True
         worker.annotate_profile = lambda _: _null_context()
         self._wire_groups(monkeypatch, worker_module)
-        result = worker.execute_model(
-            SimpleNamespace(total_num_scheduled_tokens=5)
-        )
+        result = worker.execute_model(SimpleNamespace(total_num_scheduled_tokens=5))
         assert result is None
         pool.assert_called_once_with()
         # a second identical step also pools (state not corrupted)
         pool.reset_mock()
-        worker.execute_model(
-            SimpleNamespace(total_num_scheduled_tokens=5)
-        )
+        worker.execute_model(SimpleNamespace(total_num_scheduled_tokens=5))
         pool.assert_called_once_with()
 
     def test_v2_pooling_model_pools_after_intermediate_send(
@@ -693,22 +668,16 @@ class TestExecuteModel:
         pool = Mock(return_value=None)
         tensors = {"hidden_states": torch.zeros(2, 3)}
         worker.model_runner = SimpleNamespace(
-            execute_model=Mock(
-                return_value=worker_module.IntermediateTensors(tensors)
-            ),
+            execute_model=Mock(return_value=worker_module.IntermediateTensors(tensors)),
             is_pooling_model=True,
             pool=pool,
         )
         worker.use_v2_model_runner = True
         worker.annotate_profile = lambda _: _null_context()
         worker.vllm_config = SimpleNamespace(
-            parallel_config=SimpleNamespace(
-                distributed_executor_backend="mp"
-            )
+            parallel_config=SimpleNamespace(distributed_executor_backend="mp")
         )
-        result = worker.execute_model(
-            SimpleNamespace(total_num_scheduled_tokens=5)
-        )
+        result = worker.execute_model(SimpleNamespace(total_num_scheduled_tokens=5))
         assert result is None
         # exactly one pool call: the post-send hook (L237-238)
         pool.assert_called_once_with()
@@ -764,9 +733,7 @@ class TestInitDevice:
         def broken(group):
             raise RuntimeError("pipeline install exploded")
 
-        monkeypatch.setattr(
-            pipeline_mod, "install_pipeline_transport", broken
-        )
+        monkeypatch.setattr(pipeline_mod, "install_pipeline_transport", broken)
         with pytest.raises(RuntimeError, match="pipeline install exploded"):
             worker.init_device()
 
@@ -839,9 +806,7 @@ class TestApplyWorkerPatches:
             "patch_sampler_compile_for_iluvatar",
         ], "every worker patch must run exactly once, in the fixed order"
 
-    def test_required_strict_patches_fail_startup(
-        self, monkeypatch, iluvatar_module
-    ):
+    def test_required_strict_patches_fail_startup(self, monkeypatch, iluvatar_module):
         """strict inductor/sampler failures propagate: startup must die."""
 
         def explode(*args, **kwargs):
@@ -851,7 +816,9 @@ class TestApplyWorkerPatches:
         monkeypatch.setattr(iluvatar_module, "current_platform", _vendor("iluvatar"))
         monkeypatch.setattr(iluvatar_module, "patch_autotune_memory", lambda: None)
         monkeypatch.setattr(iluvatar_module, "patch_v2_uva", lambda: None)
-        monkeypatch.setattr(iluvatar_module, "patch_torch_inductor_for_iluvatar", explode)
+        monkeypatch.setattr(
+            iluvatar_module, "patch_torch_inductor_for_iluvatar", explode
+        )
         monkeypatch.setattr(
             iluvatar_module, "patch_sampler_compile_for_iluvatar", lambda: None
         )

@@ -22,7 +22,6 @@ All numeric checks use independent torch oracles built in the tests.
 
 from __future__ import annotations
 
-from functools import partial
 from types import SimpleNamespace
 
 import pytest
@@ -62,8 +61,15 @@ def _router_simple(**attrs):
 
 
 class TestFlGroupedTopkFallback:
-    def _softmax_oracle(self, gating, topk, num_expert_group, topk_group,
-                        renormalize, routed_scaling_factor):
+    def _softmax_oracle(
+        self,
+        gating,
+        topk,
+        num_expert_group,
+        topk_group,
+        renormalize,
+        routed_scaling_factor,
+    ):
         """Reference implementation built only from public torch APIs."""
         scores = torch.softmax(gating.float(), dim=-1)
         num_experts = scores.size(-1)
@@ -118,7 +124,12 @@ class TestFlGroupedTopkFallback:
         torch.manual_seed(4)
         gating = torch.randn(4, 6)
         weights, ids = router_mod._fl_grouped_topk(
-            gating, gating, 2, True, num_expert_group=3, topk_group=2,
+            gating,
+            gating,
+            2,
+            True,
+            num_expert_group=3,
+            topk_group=2,
             scoring_func="sigmoid",
         )
         scores = torch.sigmoid(gating)
@@ -126,14 +137,15 @@ class TestFlGroupedTopkFallback:
         expected = re_gathered / re_gathered.sum(-1, keepdim=True)
         torch.testing.assert_close(weights, expected, rtol=1e-5, atol=1e-5)
         # Weights renormalized to sum 1 per row.
-        torch.testing.assert_close(
-            weights.sum(-1), torch.ones(4), rtol=1e-5, atol=1e-5
-        )
+        torch.testing.assert_close(weights.sum(-1), torch.ones(4), rtol=1e-5, atol=1e-5)
 
     def test_unsupported_scoring_without_bias(self):
         with pytest.raises(ValueError, match="Unsupported scoring function"):
             router_mod._fl_grouped_topk(
-                torch.zeros(2, 4), torch.zeros(2, 4), 2, True,
+                torch.zeros(2, 4),
+                torch.zeros(2, 4),
+                2,
+                True,
                 scoring_func="relu",
             )
 
@@ -141,7 +153,12 @@ class TestFlGroupedTopkFallback:
         gating = torch.zeros(2, 4)
         gating[0, 0] = 10.0  # expert 0 dominates
         weights, ids = router_mod._fl_grouped_topk(
-            gating, gating, 1, True, num_expert_group=2, topk_group=1,
+            gating,
+            gating,
+            1,
+            True,
+            num_expert_group=2,
+            topk_group=1,
             routed_scaling_factor=2.5,
         )
         assert torch.allclose(weights, torch.full((2, 1), 2.5))
@@ -162,8 +179,12 @@ class TestFlGroupedTopkFallback:
         gating = torch.randn(20, 12)
         num_expert_group, topk_group, topk = 3, 1, 4
         _, ids = router_mod._fl_grouped_topk(
-            gating, gating, topk, True,
-            num_expert_group=num_expert_group, topk_group=topk_group,
+            gating,
+            gating,
+            topk,
+            True,
+            num_expert_group=num_expert_group,
+            topk_group=topk_group,
         )
         scores = torch.softmax(gating.float(), dim=-1)
         group_size = 12 // num_expert_group
@@ -174,8 +195,7 @@ class TestFlGroupedTopkFallback:
             lo, hi = g * group_size, (g + 1) * group_size
             for expert in ids[row].tolist():
                 assert lo <= expert < hi, (
-                    f"row {row}: expert {expert} outside group {g} "
-                    f"[{lo}, {hi})"
+                    f"row {row}: expert {expert} outside group {g} [{lo}, {hi})"
                 )
 
 
@@ -220,8 +240,14 @@ class TestFlGroupedTopkBiased:
         gating = torch.tensor([[0.5, -0.2], [1.0, 0.3]])
         bias = torch.zeros(2)
         weights, ids = router_mod._fl_grouped_topk(
-            gating, gating, 1, True, num_expert_group=1, topk_group=1,
-            scoring_func="sigmoid", e_score_correction_bias=bias,
+            gating,
+            gating,
+            1,
+            True,
+            num_expert_group=1,
+            topk_group=1,
+            scoring_func="sigmoid",
+            e_score_correction_bias=bias,
         )
         assert calls, "the patched op must be called"
         # The sigmoid arm forwards the RAW gating output (not sigmoided).
@@ -242,20 +268,28 @@ class TestFlGroupedTopkBiased:
         gating = torch.tensor([[0.5, -0.2], [1.0, 0.3]])
         bias = torch.zeros(2)
         router_mod._fl_grouped_topk(
-            gating, gating, 1, True, num_expert_group=1, topk_group=1,
-            scoring_func="softmax", e_score_correction_bias=bias,
+            gating,
+            gating,
+            1,
+            True,
+            num_expert_group=1,
+            topk_group=1,
+            scoring_func="softmax",
+            e_score_correction_bias=bias,
         )
         # The softmax arm pre-normalizes the scores before the op.
-        torch.testing.assert_close(
-            calls[0][0], torch.softmax(gating, dim=-1)
-        )
+        torch.testing.assert_close(calls[0][0], torch.softmax(gating, dim=-1))
         assert calls[0][7] == 0  # scoring_func code for softmax
 
     def test_unsupported_scoring_with_bias(self):
         with pytest.raises(ValueError, match="Unsupported scoring function"):
             router_mod._fl_grouped_topk(
-                torch.zeros(2, 4), torch.zeros(2, 4), 1, True,
-                scoring_func="relu", e_score_correction_bias=torch.zeros(4),
+                torch.zeros(2, 4),
+                torch.zeros(2, 4),
+                1,
+                True,
+                scoring_func="relu",
+                e_score_correction_bias=torch.zeros(4),
             )
 
 
@@ -278,7 +312,10 @@ class TestGroupedTopKRouterComputeRouting:
         # num_experts (4) <= num_expert_group (8): invalid grouping.
         router = self._router(num_expert_group=8, topk_group=1)
         weights, ids = router_mod.GroupedTopKRouterFL._compute_routing(
-            router, torch.zeros(1, 4), torch.zeros(1, 4), torch.int32,
+            router,
+            torch.zeros(1, 4),
+            torch.zeros(1, 4),
+            torch.int32,
         )
         assert torch.equal(ids, torch.tensor([[1, 0]], dtype=torch.int32))
         assert captured["topk"] == 2
@@ -297,7 +334,10 @@ class TestGroupedTopKRouterComputeRouting:
             routed_scaling_factor=0.5,
         )
         weights, ids = router_mod.GroupedTopKRouterFL._compute_routing(
-            router, torch.zeros(1, 4), torch.zeros(1, 4), torch.int32,
+            router,
+            torch.zeros(1, 4),
+            torch.zeros(1, 4),
+            torch.int32,
         )
         assert captured["topk"] == 2
         assert torch.allclose(weights, torch.full((1, 2), 0.25))  # 0.5 * 0.5
@@ -312,7 +352,10 @@ class TestGroupedTopKRouterComputeRouting:
         monkeypatch.setattr(router_mod, "_fl_grouped_topk", fake_grouped)
         router = self._router(num_expert_group=2, topk_group=1)
         weights, ids = router_mod.GroupedTopKRouterFL._compute_routing(
-            router, torch.zeros(1, 4), torch.zeros(1, 4), torch.int32,
+            router,
+            torch.zeros(1, 4),
+            torch.zeros(1, 4),
+            torch.int32,
         )
         assert "num_expert_group" in captured
         assert captured["num_expert_group"] == 2
@@ -337,13 +380,18 @@ class TestGroupedTopKRouterComputeRouting:
             lambda: True,
         )
         monkeypatch.setattr(
-            router_mod, "rocm_aiter_grouped_topk",
+            router_mod,
+            "rocm_aiter_grouped_topk",
             lambda *args, **kwargs: fake_aiter(*args, **kwargs),
         )
-        router = self._router(num_expert_group=2, topk_group=1,
-                              num_fused_shared_experts=0)
+        router = self._router(
+            num_expert_group=2, topk_group=1, num_fused_shared_experts=0
+        )
         weights, ids = router_mod.GroupedTopKRouterFL._compute_routing(
-            router, torch.zeros(1, 4), torch.zeros(1, 4), torch.int32,
+            router,
+            torch.zeros(1, 4),
+            torch.zeros(1, 4),
+            torch.int32,
         )
         assert captured["hidden"] is not None
         assert torch.equal(ids, torch.tensor([[2]], dtype=torch.int32))
@@ -362,11 +410,12 @@ class TestFusedTopKRouterComputeRouting:
             )
 
         monkeypatch.setattr(router_mod, "fused_topk", fake_fused_topk)
-        router = _router_simple(
-            top_k=2, renormalize=False, scoring_func="softmax"
-        )
+        router = _router_simple(top_k=2, renormalize=False, scoring_func="softmax")
         weights, ids = router_mod.FusedTopKRouterFL._compute_routing(
-            router, torch.zeros(1, 6), torch.zeros(1, 6), torch.int64,
+            router,
+            torch.zeros(1, 6),
+            torch.zeros(1, 6),
+            torch.int64,
         )
         assert captured["topk"] == 2
         assert captured["renormalize"] is False
@@ -391,11 +440,16 @@ class TestBiasRouterArms:
         bias = torch.randn(5)
         router = _router_simple(
             e_score_correction_bias=torch.nn.Parameter(bias),
-            top_k=2, renormalize=True, scoring_func="sqrtsoftplus",
+            top_k=2,
+            renormalize=True,
+            scoring_func="sqrtsoftplus",
             routed_scaling_factor=1.0,
         )
         weights, ids = router_mod.FusedTopKBiasRouterFL._compute_routing(
-            router, torch.zeros(3, 4), gating, torch.int32,
+            router,
+            torch.zeros(3, 4),
+            gating,
+            torch.int32,
         )
         # Independent oracle: sqrt(softplus(x) + bias) selection.
         scores = torch.sqrt(F.softplus(gating))
@@ -404,13 +458,13 @@ class TestBiasRouterArms:
         expected_w = scores.gather(1, expected_ids)
         expected_w = expected_w / expected_w.sum(-1, keepdim=True)
         assert set(ids[0].tolist()) == set(expected_ids[0].tolist())
-        torch.testing.assert_close(
-            weights.sum(-1), torch.ones(3), rtol=1e-5, atol=1e-5
-        )
+        torch.testing.assert_close(weights.sum(-1), torch.ones(3), rtol=1e-5, atol=1e-5)
 
     def test_shared_experts_appended(self, monkeypatch):
         def fake_bias(**kwargs):
-            return torch.tensor([[0.25, 0.75]]), torch.tensor([[2, 4]], dtype=torch.int32)
+            return torch.tensor([[0.25, 0.75]]), torch.tensor(
+                [[2, 4]], dtype=torch.int32
+            )
 
         monkeypatch.setattr(router_mod, "fused_topk_bias", fake_bias)
         monkeypatch.setattr(router_mod, "_is_ascend_npu_tensor", lambda v: False)
@@ -421,12 +475,13 @@ class TestBiasRouterArms:
             scoring_func="softmax",
         )
         weights, ids = router_mod.FusedTopKBiasRouterFL._compute_routing(
-            router, torch.zeros(1, 4), torch.zeros(1, 6), torch.int32,
+            router,
+            torch.zeros(1, 4),
+            torch.zeros(1, 6),
+            torch.int32,
         )
         assert torch.equal(ids, torch.tensor([[2, 4, 6, 7]], dtype=torch.int32))
-        assert torch.equal(
-            weights, torch.tensor([[0.25, 0.75, 1.25, 1.25]])
-        )
+        assert torch.equal(weights, torch.tensor([[0.25, 0.75, 1.25, 1.25]]))
 
     def test_upstream_path_forwards_all_arguments(self, monkeypatch):
         captured = {}
@@ -446,7 +501,10 @@ class TestBiasRouterArms:
             _hash_indices_table=hash_table,
         )
         router_mod.FusedTopKBiasRouterFL._compute_routing(
-            router, torch.zeros(1, 4), torch.zeros(1, 3), torch.int32,
+            router,
+            torch.zeros(1, 4),
+            torch.zeros(1, 3),
+            torch.int32,
             input_ids=input_ids,
         )
         assert captured["input_tokens"] is input_ids
@@ -456,9 +514,9 @@ class TestBiasRouterArms:
 
 class TestReplaceRouterWithFl:
     def test_methods_installed_on_upstream(self):
+        import vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router as btr
         import vllm.model_executor.layers.fused_moe.router.fused_topk_router as ftr
         import vllm.model_executor.layers.fused_moe.router.grouped_topk_router as gtr
-        import vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router as btr
 
         originals = (
             ftr.FusedTopKRouter._compute_routing,
@@ -467,13 +525,21 @@ class TestReplaceRouterWithFl:
         )
         try:
             router_mod.replace_router_with_fl()
-            assert (ftr.FusedTopKRouter._compute_routing
-                    is router_mod.FusedTopKRouterFL._compute_routing)
-            assert (gtr.GroupedTopKRouter._compute_routing
-                    is router_mod.GroupedTopKRouterFL._compute_routing)
-            assert (btr.FusedTopKBiasRouter._compute_routing
-                    is router_mod.FusedTopKBiasRouterFL._compute_routing)
+            assert (
+                ftr.FusedTopKRouter._compute_routing
+                is router_mod.FusedTopKRouterFL._compute_routing
+            )
+            assert (
+                gtr.GroupedTopKRouter._compute_routing
+                is router_mod.GroupedTopKRouterFL._compute_routing
+            )
+            assert (
+                btr.FusedTopKBiasRouter._compute_routing
+                is router_mod.FusedTopKBiasRouterFL._compute_routing
+            )
         finally:
-            (ftr.FusedTopKRouter._compute_routing,
-             gtr.GroupedTopKRouter._compute_routing,
-             btr.FusedTopKBiasRouter._compute_routing) = originals
+            (
+                ftr.FusedTopKRouter._compute_routing,
+                gtr.GroupedTopKRouter._compute_routing,
+                btr.FusedTopKBiasRouter._compute_routing,
+            ) = originals

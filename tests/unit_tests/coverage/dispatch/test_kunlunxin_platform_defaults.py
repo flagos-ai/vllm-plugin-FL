@@ -247,9 +247,7 @@ class TestIrOpPriorityNativeOnly:
         from vllm.config.compilation import CompilationConfig, CompilationMode
 
         config = _make_config(
-            compilation_config=CompilationConfig(
-                mode=CompilationMode.VLLM_COMPILE
-            )
+            compilation_config=CompilationConfig(mode=CompilationMode.VLLM_COMPILE)
         )
         priority = plat.PlatformFL.get_default_ir_op_priority(config)
         assert priority.rms_norm == ["native"]

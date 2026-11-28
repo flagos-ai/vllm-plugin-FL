@@ -199,9 +199,7 @@ class TestRmsNorm:
             # before any in-place store.
             s = kwargs["x"] + kwargs["y"]
             kwargs["residual_output"].copy_(s)
-            kwargs["output"].copy_(
-                _rms_oracle(s, kwargs["weight"], kwargs["eps"])
-            )
+            kwargs["output"].copy_(_rms_oracle(s, kwargs["weight"], kwargs["eps"]))
 
         with _xtorch_ops(add_rmsnorm=add_rmsnorm):
             out_x, out_residual = rms_norm_kunlunxin(obj, x, residual)
@@ -354,7 +352,9 @@ def _rope_tensor(x, positions, cos, sin, neox):
 
 
 def _make_rotary_stub(calls):
-    def rotary_embedding(position_ids, q_flat, k_flat, head_size, cos_sin_cache, is_neox):
+    def rotary_embedding(
+        position_ids, q_flat, k_flat, head_size, cos_sin_cache, is_neox
+    ):
         calls.append(
             {
                 "position_ids": position_ids.clone(),

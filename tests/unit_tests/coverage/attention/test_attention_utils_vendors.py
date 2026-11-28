@@ -27,7 +27,6 @@ the source's formulas.
 from __future__ import annotations
 
 import importlib.util
-import math
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -63,9 +62,7 @@ def _install_vllm_stubs(monkeypatch, vendor_name, is_cuda=False):
                 modules[partial] = module
         for length in range(1, len(parts)):
             parent, attribute = ".".join(parts[:length]), parts[length]
-            setattr(
-                modules[parent], attribute, modules[".".join(parts[: length + 1])]
-            )
+            setattr(modules[parent], attribute, modules[".".join(parts[: length + 1])])
         return modules[name]
 
     for name in _VIT_LEAVES + _MM_LEAVES + ("vllm.platforms", "vllm.logger"):
@@ -108,8 +105,15 @@ def _install_vllm_stubs(monkeypatch, vendor_name, is_cuda=False):
     mm = modules[_MM_LEAVES[0]]
 
     class MMEncoderAttention:
-        def forward_native(self, query, key, value, cu_seqlens=None, max_seqlen=None,
-                           sequence_lengths=None):
+        def forward_native(
+            self,
+            query,
+            key,
+            value,
+            cu_seqlens=None,
+            max_seqlen=None,
+            sequence_lengths=None,
+        ):
             raise AssertionError("original forward_native must not run")
 
         def forward_oot(self, *args, **kwargs):
@@ -261,8 +265,13 @@ class TestGcuEnflameArm:
         attention.attn_backend = stubs.registry.AttentionBackendEnum.FLASH_ATTN
         with pytest.raises(AssertionError, match="both set or both None"):
             module._gcu_forward_mm_attention(
-                attention, torch.zeros(1), torch.zeros(1), torch.zeros(1),
-                None, torch.tensor(5), None,
+                attention,
+                torch.zeros(1),
+                torch.zeros(1),
+                torch.zeros(1),
+                None,
+                torch.tensor(5),
+                None,
             )
 
 
@@ -276,12 +285,26 @@ class TestGcuVarlenForward:
         cls = stubs.mm.MMEncoderAttention
         kernel_calls = []
 
-        def flash_attn_varlen_func(*, q, k, v, cu_seqlens_q, cu_seqlens_k,
-                                   max_seqlen_q, max_seqlen_k, dropout_p,
-                                   causal, softmax_scale, fa_version, **kwargs):
+        def flash_attn_varlen_func(
+            *,
+            q,
+            k,
+            v,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            dropout_p,
+            causal,
+            softmax_scale,
+            fa_version,
+            **kwargs,
+        ):
             kernel_calls.append(
                 {
-                    "q": q, "k": k, "v": v,
+                    "q": q,
+                    "k": k,
+                    "v": v,
                     "cu_seqlens_q": cu_seqlens_q,
                     "cu_seqlens_k": cu_seqlens_k,
                     "max_seqlen_q": max_seqlen_q,
@@ -299,9 +322,9 @@ class TestGcuVarlenForward:
             seg_k = cu_seqlens_k.tolist()
             for idx in range(len(seg_q) - 1):
                 # Per-batch slices of the flattened token dimension.
-                q_seg = q[seg_q[idx]:seg_q[idx + 1]]  # (S_q, H, D)
-                k_seg = k[seg_k[idx]:seg_k[idx + 1]]  # (S_k, H_kv, D)
-                v_seg = v[seg_k[idx]:seg_k[idx + 1]]
+                q_seg = q[seg_q[idx] : seg_q[idx + 1]]  # (S_q, H, D)
+                k_seg = k[seg_k[idx] : seg_k[idx + 1]]  # (S_k, H_kv, D)
+                v_seg = v[seg_k[idx] : seg_k[idx + 1]]
                 heads = q_seg.shape[1]
                 kv_heads = k_seg.shape[1]
                 repeats = heads // kv_heads
@@ -311,7 +334,7 @@ class TestGcuVarlenForward:
                 scores = torch.einsum("shd,thd->hst", q_seg, k_exp) * softmax_scale
                 weights = torch.softmax(scores, dim=-1)
                 out_seg = torch.einsum("hst,thd->shd", weights, v_exp)
-                out[seg_q[idx]:seg_q[idx + 1]] = out_seg
+                out[seg_q[idx] : seg_q[idx + 1]] = out_seg
             return out
 
         flash_pkg = ModuleType("flash_attn")
@@ -414,13 +437,13 @@ class TestGcuVarlenForward:
         bounds = cu_seqlens.tolist()
         expected = torch.empty_like(flat_q)
         for idx in range(len(bounds) - 1):
-            q_seg = flat_q[bounds[idx]:bounds[idx + 1]]  # (s, H, D)
-            k_seg = flat_k[bounds[idx]:bounds[idx + 1]]  # (s, 1, D)
-            v_seg = flat_v[bounds[idx]:bounds[idx + 1]]
+            q_seg = flat_q[bounds[idx] : bounds[idx + 1]]  # (s, H, D)
+            k_seg = flat_k[bounds[idx] : bounds[idx + 1]]  # (s, 1, D)
+            v_seg = flat_v[bounds[idx] : bounds[idx + 1]]
             scores = torch.einsum("shd,thd->hst", q_seg, k_seg) * 0.25
             weights = torch.softmax(scores, dim=-1)
             out_seg = torch.einsum("hst,thd->shd", weights, v_seg)
-            expected[bounds[idx]:bounds[idx + 1]] = out_seg
+            expected[bounds[idx] : bounds[idx + 1]] = out_seg
         torch.testing.assert_close(output, expected.reshape(bsz, q_len, 2, 4))
 
 
@@ -490,28 +513,29 @@ class TestKunlunxinArm:
         bounds = cu_seqlens.tolist()
         expected = torch.empty_like(query)
         for idx in range(len(bounds) - 1):
-            q_seg = query[0, bounds[idx]:bounds[idx + 1]]
-            k_seg = key[0, bounds[idx]:bounds[idx + 1]]
-            v_seg = value[0, bounds[idx]:bounds[idx + 1]]
-            expected[0, bounds[idx]:bounds[idx + 1]] = _oracle_bshd(
-                q_seg.unsqueeze(0), k_seg.unsqueeze(0), v_seg.unsqueeze(0),
+            q_seg = query[0, bounds[idx] : bounds[idx + 1]]
+            k_seg = key[0, bounds[idx] : bounds[idx + 1]]
+            v_seg = value[0, bounds[idx] : bounds[idx + 1]]
+            expected[0, bounds[idx] : bounds[idx + 1]] = _oracle_bshd(
+                q_seg.unsqueeze(0),
+                k_seg.unsqueeze(0),
+                v_seg.unsqueeze(0),
                 scale=attention.scale,
             )[0]
         torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-4)
 
     def test_gqa_flag_passed_when_heads_differ(self, load_adapter, monkeypatch):
         """num_heads > num_kv_heads passes enable_gqa=True to SDPA."""
-        module, attention = self._make_attention(
-            load_adapter, heads=4, kv_heads=2
-        )
+        module, attention = self._make_attention(load_adapter, heads=4, kv_heads=2)
         seen = {}
 
         def recording_sdpa(q, k, v, dropout_p=0.0, scale=None, enable_gqa=False):
             seen["enable_gqa"] = enable_gqa
             return torch.zeros_like(q)
 
-        monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention",
-                            recording_sdpa)
+        monkeypatch.setattr(
+            torch.nn.functional, "scaled_dot_product_attention", recording_sdpa
+        )
         generator = torch.Generator().manual_seed(65)
         bsz, s_q, s_k, heads, dim = 1, 3, 3, 4, 8
         query = torch.randn(bsz, s_q, heads * dim, generator=generator)
@@ -520,8 +544,9 @@ class TestKunlunxinArm:
         attention._forward_sdpa(query, key, value, cu_seqlens=None)
         assert seen["enable_gqa"] is True
 
-    def test_chunk_boundary_exactness_beyond_chunk_size(self, load_adapter,
-                                                        monkeypatch):
+    def test_chunk_boundary_exactness_beyond_chunk_size(
+        self, load_adapter, monkeypatch
+    ):
         """Inputs longer than the 512 query chunk still produce exact output."""
         heads, dim = 2, 8
         module, attention = self._make_attention(
@@ -569,8 +594,9 @@ class TestNvidiaAndSelectorArms:
         assert callable(replaced)
         assert replaced.__name__ == "_patched_maybe_get_vit_flash_attn_backend"
 
-    def test_selector_flash_backend_returns_varlen_func(self, load_adapter,
-                                                         monkeypatch):
+    def test_selector_flash_backend_returns_varlen_func(
+        self, load_adapter, monkeypatch
+    ):
         """The replaced backend selector maps FLASH_ATTN to a varlen callable."""
         module, stubs = load_adapter("hygon")
         enum = stubs.registry.AttentionBackendEnum
@@ -590,8 +616,7 @@ class TestNvidiaAndSelectorArms:
         # Unknown backends map to None.
         assert selector("UNKNOWN") is None
 
-    def test_selector_falls_back_to_flash_attn_package(self, load_adapter,
-                                                       monkeypatch):
+    def test_selector_falls_back_to_flash_attn_package(self, load_adapter, monkeypatch):
         """Without vllm.vllm_flash_attn the flash_attn package is used."""
         module, stubs = load_adapter("hygon")
         enum = stubs.registry.AttentionBackendEnum

@@ -87,9 +87,9 @@ def _paged_scenario(head_dim, num_q_heads=8, num_kv_heads=2, block_size=16):
         .reshape(request_count, pages_per_request)
         .to(torch.int32)
     )
-    packed_cpu = torch.zeros(
-        num_blocks, num_kv_heads, block_size, 2 * head_dim
-    ).to(torch.bfloat16)
+    packed_cpu = torch.zeros(num_blocks, num_kv_heads, block_size, 2 * head_dim).to(
+        torch.bfloat16
+    )
     packed = packed_cpu.cuda()
     key_cache, value_cache = packed.transpose(1, 2).split(head_dim, dim=-1)
 
@@ -100,9 +100,9 @@ def _paged_scenario(head_dim, num_q_heads=8, num_kv_heads=2, block_size=16):
     new_values = torch.randn(
         request_count, num_kv_heads, head_dim, generator=generator
     ).to(torch.bfloat16)
-    queries = torch.randn(
-        request_count, num_q_heads, head_dim, generator=generator
-    ).to(torch.bfloat16)
+    queries = torch.randn(request_count, num_q_heads, head_dim, generator=generator).to(
+        torch.bfloat16
+    )
 
     # Each request's new token lands on its own next free slot.
     slots = []
@@ -114,8 +114,6 @@ def _paged_scenario(head_dim, num_q_heads=8, num_kv_heads=2, block_size=16):
     # Fill the *prior* context with recognizable values through the very
     # writer under test — the same op the engine uses each step.
     prior_slots = []
-    prior_keys = []
-    prior_values = []
     for request, prior in enumerate(prior_lens):
         for token in range(prior):
             page = block_table[request, token // block_size]
@@ -220,9 +218,7 @@ def test_write_then_paged_attention_matches_sdpa(ppu_pipeline, head_dim):
     for request, sequence_len in enumerate(sequence_lens):
         pages = block_table[request, : math.ceil(sequence_len / block_size)]
         keys = key_cache.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
-        values = (
-            value_cache.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
-        )
+        values = value_cache.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
         keys = keys.transpose(0, 1).repeat_interleave(
             scenario["num_q_heads"] // scenario["num_kv_heads"], dim=0
         )
@@ -234,8 +230,11 @@ def test_write_then_paged_attention_matches_sdpa(ppu_pipeline, head_dim):
         )
         mask = torch.arange(sequence_len)[None, :] <= sequence_len - 1
         result = F.scaled_dot_product_attention(
-            queries, keys[None], values[None],
-            attn_mask=mask, scale=head_dim**-0.5,
+            queries,
+            keys[None],
+            values[None],
+            attn_mask=mask,
+            scale=head_dim**-0.5,
         )
         expected.append(result[0].transpose(0, 1))
     torch.testing.assert_close(
@@ -295,9 +294,7 @@ def test_unwritten_pages_do_not_leak_into_attention(ppu_pipeline):
     for request, sequence_len in enumerate(sequence_lens):
         pages = block_table[request, : math.ceil(sequence_len / block_size)]
         keys = key_cache.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
-        values = (
-            value_cache.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
-        )
+        values = value_cache.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
         keys = keys.transpose(0, 1).repeat_interleave(
             scenario["num_q_heads"] // scenario["num_kv_heads"], dim=0
         )
@@ -309,8 +306,11 @@ def test_unwritten_pages_do_not_leak_into_attention(ppu_pipeline):
         )
         mask = torch.arange(sequence_len)[None, :] <= sequence_len - 1
         result = F.scaled_dot_product_attention(
-            queries, keys[None], values[None],
-            attn_mask=mask, scale=head_dim**-0.5,
+            queries,
+            keys[None],
+            values[None],
+            attn_mask=mask,
+            scale=head_dim**-0.5,
         )
         expected.append(result[0].transpose(0, 1))
     torch.testing.assert_close(

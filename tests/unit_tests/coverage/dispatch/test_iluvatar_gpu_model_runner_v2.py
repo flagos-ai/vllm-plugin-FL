@@ -32,6 +32,7 @@ structural (the numeric oracle for buffer contents is a plain
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 import pytest
@@ -45,6 +46,7 @@ pytestmark = [
     pytest.mark.serial,
 ]
 
+
 def _fake_model_dir(root) -> str:
     """Minimal HF-layout qwen3 config for ``VllmConfig`` validation.
 
@@ -54,7 +56,6 @@ def _fake_model_dir(root) -> str:
     directory instead of pointing MODEL_PATH at a nonexistent path.
     """
     import json
-    import os
 
     model_dir = root / "fake-qwen3"
     model_dir.mkdir(exist_ok=True)
@@ -72,9 +73,7 @@ def _fake_model_dir(root) -> str:
         "torch_dtype": "bfloat16",
     }
     (model_dir / "config.json").write_text(json.dumps(config))
-    (model_dir / "tokenizer_config.json").write_text(
-        '{"model_type": "qwen3"}'
-    )
+    (model_dir / "tokenizer_config.json").write_text('{"model_type": "qwen3"}')
     (model_dir / "vocab.json").write_text("null")
     (model_dir / "merges.txt").write_text("")
     return str(model_dir)
@@ -117,7 +116,6 @@ class TestPatchV2Uva:
     def test_foreign_vendor_is_a_noop(self, monkeypatch):
         """A non-iluvatar vendor never touches buffer_utils."""
         import vllm.platforms
-
         from vllm.v1.worker.gpu import buffer_utils
 
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
@@ -158,10 +156,8 @@ class TestIluvatarGPUModelRunnerV2:
             IluvatarGPUModelRunnerV2,
         )
 
-        try:
+        with contextlib.suppress(Exception):
             destroy_model_parallel()
-        except Exception:
-            pass
         dist.destroy_process_group() if dist.is_initialized() else None
         model_path = _fake_model_dir(tmp_path_factory.mktemp("iluvatar_v2_model"))
         store_path = (
@@ -197,10 +193,8 @@ class TestIluvatarGPUModelRunnerV2:
             initialize_model_parallel(tensor_model_parallel_size=1)
             runner = IluvatarGPUModelRunnerV2(config, _cuda())
         yield runner
-        try:
+        with contextlib.suppress(Exception):
             destroy_model_parallel()
-        except Exception:
-            pass
         if dist.is_initialized():
             dist.destroy_process_group()
 

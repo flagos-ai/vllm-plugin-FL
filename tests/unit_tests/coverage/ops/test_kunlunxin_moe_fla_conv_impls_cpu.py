@@ -30,7 +30,6 @@ from types import ModuleType
 
 import pytest
 import torch
-import torch.nn.functional as F
 
 pytestmark = [pytest.mark.supplementary]
 
@@ -94,7 +93,13 @@ class TestFusedExpertsRejections:
                 "does not support activation 'gelu_tanh'",
             ),
         ],
-        ids=["fp8_w8a8", "int8_w8a16", "int4_w4a16", "router_weight_on_input", "activation"],
+        ids=[
+            "fp8_w8a8",
+            "int8_w8a16",
+            "int4_w4a16",
+            "router_weight_on_input",
+            "activation",
+        ],
     )
     @pytest.mark.platforms("kunlunxin")
     def test_unsupported_features_raise_not_implemented(self, kwargs, message):
@@ -104,7 +109,14 @@ class TestFusedExpertsRejections:
             w1 = torch.randn(3, 8)
             w2 = torch.randn(3, 4)
             with pytest.raises(NotImplementedError, match=message):
-                fn(hidden, w1, w2, torch.ones(2, 2), torch.zeros(2, 2, dtype=torch.int32), **kwargs)
+                fn(
+                    hidden,
+                    w1,
+                    w2,
+                    torch.ones(2, 2),
+                    torch.zeros(2, 2, dtype=torch.int32),
+                    **kwargs,
+                )
 
     @pytest.mark.platforms("kunlunxin")
     def test_supported_activations_are_accepted(self):
@@ -212,8 +224,13 @@ class TestFusedExpertsOutputContract:
             ids = torch.full_like(ids, 3)
             ids[0, :] = 4
             fn(
-                hidden, w1, w2, weights, ids,
-                inplace=False, expert_map=expert_map,
+                hidden,
+                w1,
+                w2,
+                weights,
+                ids,
+                inplace=False,
+                expert_map=expert_map,
             )
             expected = expert_map[ids.long()].to(ids.dtype)
             torch.testing.assert_close(seen["topk_ids"], expected)
@@ -234,9 +251,7 @@ class TestKlxFusedExpertsPipeline:
             ("silu_no_mul", "silu"),
         ],
     )
-    def test_activation_switch_selects_the_right_kernel(
-        self, activation, expected_op
-    ):
+    def test_activation_switch_selects_the_right_kernel(self, activation, expected_op):
         torch.manual_seed(29)
         seq_num, hidden_dim, experts, topk, ffn = 2, 4, 3, 2, 6
         hidden = torch.randn(seq_num, hidden_dim)
@@ -275,7 +290,7 @@ class TestKlxFusedExpertsPipeline:
 
         def moe_fc(x, w, lod, index, moe_topk, out, bias=None):
             counters["moe_fc"] += 1
-            order.append(f"moe_fc")
+            order.append("moe_fc")
             return None
 
         def swiglu(x, out):
@@ -448,9 +463,7 @@ class TestVllmTopkSoftmax:
             topk_ids = torch.empty(n, k, dtype=torch.int32)
             token_expert_indices = torch.empty(n, k, dtype=torch.int32)
 
-            w, i = fn(
-                topk_weights, topk_ids, token_expert_indices, gating, renormalize
-            )
+            w, i = fn(topk_weights, topk_ids, token_expert_indices, gating, renormalize)
 
             # independent oracle
             scores = _manual_softmax(gating.float())
@@ -579,9 +592,7 @@ class TestFusedTopkBias:
         ],
     )
     @pytest.mark.platforms("kunlunxin")
-    def test_selection_uses_bias_weights_use_raw_scores(
-        self, n, e, k, renormalize
-    ):
+    def test_selection_uses_bias_weights_use_raw_scores(self, n, e, k, renormalize):
         with _xtorch_ops_reimport(_STUB_REQUIRED) as (_, modules):
             fn = modules[_EXPERTS].fused_topk_bias
             torch.manual_seed(43)
@@ -610,8 +621,10 @@ class TestFusedTopkBias:
             # unspecified: torch.topk(sorted=False)) and positionally against
             # the impl's own selected ids
             torch.testing.assert_close(
-                torch.sort(w, dim=-1).values, torch.sort(expect_w, dim=-1).values,
-                rtol=1e-5, atol=1e-5,
+                torch.sort(w, dim=-1).values,
+                torch.sort(expect_w, dim=-1).values,
+                rtol=1e-5,
+                atol=1e-5,
             )
             # positional check against the impl's own selection (with the
             # same renormalization)
@@ -664,18 +677,17 @@ class TestGroupedTopk:
             topk_ids.copy_(sel.to(torch.int32))
             topk_weights.copy_(scores.gather(1, sel))
 
-        with _xtorch_ops_reimport(
-            _STUB_REQUIRED, moe_group_topk=moe_group_topk
-        ) as (_, modules):
+        with _xtorch_ops_reimport(_STUB_REQUIRED, moe_group_topk=moe_group_topk) as (
+            _,
+            modules,
+        ):
             fn = modules[_EXPERTS].grouped_topk
             torch.manual_seed(47)
             n, e, n_group, topk_group, topk = 1, 8, 4, 2, 3
             scores = torch.rand(n, e)
             bias = torch.randn(e)
 
-            w, i = fn(
-                scores, n_group, topk_group, topk, False, 1.0, bias, 0
-            )
+            w, i = fn(scores, n_group, topk_group, topk, False, 1.0, bias, 0)
 
             call = received[0]
             assert call["n_group"] == n_group
@@ -694,17 +706,24 @@ class TestGroupedTopk:
             topk_ids.copy_(sel.to(torch.int32))
             topk_weights.copy_(scores.gather(1, sel))
 
-        with _xtorch_ops_reimport(
-            _STUB_REQUIRED, moe_group_topk=moe_group_topk
-        ) as (_, modules):
+        with _xtorch_ops_reimport(_STUB_REQUIRED, moe_group_topk=moe_group_topk) as (
+            _,
+            modules,
+        ):
             fn = modules[_EXPERTS].grouped_topk
             torch.manual_seed(51)
             n, e, k = 2, 6, 3
             scores = torch.rand(n, e)
             scaling = 2.5
             w, i = fn(
-                scores, 2, 1, k, renormalize, scaling,
-                torch.zeros(e), 0,
+                scores,
+                2,
+                1,
+                k,
+                renormalize,
+                scaling,
+                torch.zeros(e),
+                0,
             )
             gathered = scores.gather(1, i.long())
             if renormalize:
@@ -723,15 +742,14 @@ class TestGroupedTopk:
             topk_ids.copy_(sel.to(torch.int32))
             topk_weights.copy_(scores.gather(1, sel))
 
-        with _xtorch_ops_reimport(
-            _STUB_REQUIRED, moe_group_topk=moe_group_topk
-        ) as (_, modules):
+        with _xtorch_ops_reimport(_STUB_REQUIRED, moe_group_topk=moe_group_topk) as (
+            _,
+            modules,
+        ):
             fn = modules[_EXPERTS].grouped_topk
             torch.manual_seed(53)
             logits = torch.randn(2, 5) * 3
-            w, i = fn(
-                logits, 1, 1, 3, False, 1.0, torch.zeros(5), 1
-            )
+            w, i = fn(logits, 1, 1, 3, False, 1.0, torch.zeros(5), 1)
             torch.testing.assert_close(received[0], torch.sigmoid(logits))
 
     @pytest.mark.platforms("kunlunxin")
@@ -744,9 +762,10 @@ class TestGroupedTopk:
             topk_ids.copy_(sel.to(torch.int32))
             topk_weights.copy_(scores.gather(1, sel))
 
-        with _xtorch_ops_reimport(
-            _STUB_REQUIRED, moe_group_topk=moe_group_topk
-        ) as (_, modules):
+        with _xtorch_ops_reimport(_STUB_REQUIRED, moe_group_topk=moe_group_topk) as (
+            _,
+            modules,
+        ):
             fn = modules[_EXPERTS].grouped_topk
             torch.manual_seed(59)
             scores = torch.rand(2, 6)
@@ -789,7 +808,11 @@ class TestChunkGatedDeltaRule:
             state = torch.randn(1, 2, 4, 4)
             with pytest.raises(ValueError, match="number of initial states"):
                 fn(
-                    q, k_t, v_t, g, beta,
+                    q,
+                    k_t,
+                    v_t,
+                    g,
+                    beta,
                     initial_state=state,
                     cu_seqlens=torch.tensor([0, 3, 6]),
                 )
@@ -806,7 +829,9 @@ class TestChunkGatedDeltaRule:
             # call never returns normally.
             kernel_called = []
             modules[_CHUNK].__dict__["xtorch_ops"] = type(
-                "Probe", (), {"chunk_gated_delta_rule": lambda *a: kernel_called.append(1)}
+                "Probe",
+                (),
+                {"chunk_gated_delta_rule": lambda *a: kernel_called.append(1)},
             )()
             with pytest.raises((DeprecationWarning, TypeError)):
                 fn(q, k_t, v_t, g, beta, head_first=True)
@@ -825,8 +850,18 @@ class TestChunkGatedDeltaRule:
         received = {}
 
         def chunk_gated_delta_rule(
-            q, k, v, g, beta, scale, state, o, final_state, cu_seqlens,
-            head_first=False, use_qk_l2norm_in_kernel=True,
+            q,
+            k,
+            v,
+            g,
+            beta,
+            scale,
+            state,
+            o,
+            final_state,
+            cu_seqlens,
+            head_first=False,
+            use_qk_l2norm_in_kernel=True,
         ):
             received["scale"] = scale
             received["use_qk_l2norm_in_kernel"] = use_qk_l2norm_in_kernel
@@ -841,7 +876,7 @@ class TestChunkGatedDeltaRule:
             initial = torch.randn(1, 2, 4, 4, dtype=torch.bfloat16)
             o, final_state = fn(q, k_t, v_t, g, beta, initial_state=initial)
             # K = 4 -> scale = 4 ** -0.5 = 0.5
-            assert received["scale"] == pytest.approx(4 ** -0.5)
+            assert received["scale"] == pytest.approx(4**-0.5)
             # explicit scale is forwarded verbatim
             o, final_state = fn(q, k_t, v_t, g, beta, scale=0.25, initial_state=initial)
             assert received["scale"] == 0.25
@@ -852,8 +887,18 @@ class TestChunkGatedDeltaRule:
         received = {}
 
         def chunk_gated_delta_rule(
-            q, k, v, g, beta, scale, state, o, final_state, cu_seqlens,
-            head_first=False, use_qk_l2norm_in_kernel=True,
+            q,
+            k,
+            v,
+            g,
+            beta,
+            scale,
+            state,
+            o,
+            final_state,
+            cu_seqlens,
+            head_first=False,
+            use_qk_l2norm_in_kernel=True,
         ):
             received["initial_state"] = state.clone()
             received["cu_seqlens"] = cu_seqlens
@@ -879,7 +924,12 @@ class TestChunkGatedDeltaRule:
             cu = torch.tensor([0, 2, 5])
 
             g_out, o, A, final_state, w, h, v_new = fwd(
-                q, k_t, v_t, g, beta, scale=0.5,
+                q,
+                k_t,
+                v_t,
+                g,
+                beta,
+                scale=0.5,
                 initial_state=initial,
                 output_final_state=True,
                 cu_seqlens=cu,
@@ -893,15 +943,15 @@ class TestChunkGatedDeltaRule:
             assert received["cu_seqlens"] is not None
             # cu_seqlens was moved to host; on a CPU tensor .cpu() is the
             # identity, so the value is unchanged either way
-            torch.testing.assert_close(
-                received["cu_seqlens"], torch.tensor([0, 2, 5])
-            )
+            torch.testing.assert_close(received["cu_seqlens"], torch.tensor([0, 2, 5]))
             assert received["head_first"] is False
             assert received["l2norm"] is True
             # caller gets [N, H, V, K] back: the kernel's [K, V] output
             # re-transposed
             assert final_state.shape == (1, H, V, K)
-            torch.testing.assert_close(final_state, expect_kernel_state.transpose(2, 3).contiguous())
+            torch.testing.assert_close(
+                final_state, expect_kernel_state.transpose(2, 3).contiguous()
+            )
             # 7-tuple ABI: (g, o, A, final_state, w, h, v_new)
             assert g_out is g
             assert o.shape == v_t.shape
@@ -912,8 +962,18 @@ class TestChunkGatedDeltaRule:
         received = {}
 
         def chunk_gated_delta_rule(
-            q, k, v, g, beta, scale, state, o, final_state, cu_seqlens,
-            head_first=False, use_qk_l2norm_in_kernel=True,
+            q,
+            k,
+            v,
+            g,
+            beta,
+            scale,
+            state,
+            o,
+            final_state,
+            cu_seqlens,
+            head_first=False,
+            use_qk_l2norm_in_kernel=True,
         ):
             received["g_dtype"] = g.dtype
             received["beta_dtype"] = beta.dtype
@@ -927,8 +987,14 @@ class TestChunkGatedDeltaRule:
             q, k_t, v_t, g, beta = _fla_inputs()
             initial = torch.randn(1, 2, 4, 4, dtype=torch.bfloat16)
             fwd(
-                q, k_t, v_t, g, beta, scale=0.5,
-                initial_state=initial, output_final_state=True,
+                q,
+                k_t,
+                v_t,
+                g,
+                beta,
+                scale=0.5,
+                initial_state=initial,
+                output_final_state=True,
             )
             assert received["g_dtype"] == torch.float32
             assert received["beta_dtype"] == torch.float32
@@ -939,8 +1005,18 @@ class TestChunkGatedDeltaRule:
         received = {}
 
         def chunk_gated_delta_rule(
-            q, k, v, g, beta, scale, state, o, final_state, cu_seqlens,
-            head_first=False, use_qk_l2norm_in_kernel=True,
+            q,
+            k,
+            v,
+            g,
+            beta,
+            scale,
+            state,
+            o,
+            final_state,
+            cu_seqlens,
+            head_first=False,
+            use_qk_l2norm_in_kernel=True,
         ):
             received["scale"] = scale
             final_state.copy_(state)
@@ -952,8 +1028,14 @@ class TestChunkGatedDeltaRule:
             q, k_t, v_t, g, beta = _fla_inputs()
             initial = torch.randn(1, 2, 4, 4, dtype=torch.bfloat16)
             fwd(
-                q, k_t, v_t, g, beta, scale=None,
-                initial_state=initial, output_final_state=True,
+                q,
+                k_t,
+                v_t,
+                g,
+                beta,
+                scale=None,
+                initial_state=initial,
+                output_final_state=True,
             )
             # -1 is the kernel's "auto scale" sentinel
             assert received["scale"] == -1
@@ -963,8 +1045,18 @@ class TestChunkGatedDeltaRule:
         received = {}
 
         def chunk_gated_delta_rule(
-            q, k, v, g, beta, scale, state, o, final_state, cu_seqlens,
-            head_first=False, use_qk_l2norm_in_kernel=True,
+            q,
+            k,
+            v,
+            g,
+            beta,
+            scale,
+            state,
+            o,
+            final_state,
+            cu_seqlens,
+            head_first=False,
+            use_qk_l2norm_in_kernel=True,
         ):
             received["l2norm"] = use_qk_l2norm_in_kernel
             o.copy_(torch.full_like(o, 2.0))
@@ -977,8 +1069,13 @@ class TestChunkGatedDeltaRule:
             q, k_t, v_t, g, beta = _fla_inputs()
             initial = torch.randn(1, 2, 4, 4, dtype=torch.bfloat16)
             o, final_state = fn(
-                q, k_t, v_t, g, beta,
-                initial_state=initial, use_qk_l2norm_in_kernel=True,
+                q,
+                k_t,
+                v_t,
+                g,
+                beta,
+                initial_state=initial,
+                use_qk_l2norm_in_kernel=True,
             )
             assert received["l2norm"] is True
             assert o.dtype == torch.bfloat16
@@ -987,14 +1084,17 @@ class TestChunkGatedDeltaRule:
             # core_attn_out receives a flattened copy of the output
             core_attn_out = torch.zeros(64, dtype=torch.bfloat16)
             o2, _ = fn(
-                q, k_t, v_t, g, beta,
+                q,
+                k_t,
+                v_t,
+                g,
+                beta,
                 initial_state=initial,
-                use_qk_l2norm_in_kernel=True, core_attn_out=core_attn_out,
+                use_qk_l2norm_in_kernel=True,
+                core_attn_out=core_attn_out,
             )
             flat = o2.reshape(-1)
-            torch.testing.assert_close(
-                core_attn_out[: flat.numel()], flat
-            )
+            torch.testing.assert_close(core_attn_out[: flat.numel()], flat)
 
 
 # ---------------------------------------------------------------------------
@@ -1026,7 +1126,7 @@ class TestFusedRecurrent:
             q, k_t, v_t, g, beta = _fla_inputs()
             # K = 4 -> default scale = 4 ** -0.5
             fn(q, k_t, v_t, g, beta)
-            assert seen["scale"] == pytest.approx(4 ** -0.5)
+            assert seen["scale"] == pytest.approx(4**-0.5)
             # explicit scale is used verbatim
             fn(q, k_t, v_t, g, beta, scale=0.125)
             assert seen["scale"] == 0.125
@@ -1057,9 +1157,19 @@ class TestFusedRecurrent:
         seen = {}
 
         def fwd_v2(
-            q, k, v, g, beta, scale, initial_state, inplace,
-            cu_seqlens=None, h0_indices=None, num_accepted_tokens=None,
-            use_qk_l2norm_in_kernel=False, is_h0_transposed=True,
+            q,
+            k,
+            v,
+            g,
+            beta,
+            scale,
+            initial_state,
+            inplace,
+            cu_seqlens=None,
+            h0_indices=None,
+            num_accepted_tokens=None,
+            use_qk_l2norm_in_kernel=False,
+            is_h0_transposed=True,
         ):
             seen.update(
                 {
@@ -1087,7 +1197,7 @@ class TestFusedRecurrent:
             q, k_t, v_t, g, beta = _fla_inputs()
             # make q non-contiguous to observe the .contiguous() calls
             q_nc_base = torch.randn(1, 6, 2, 4, dtype=torch.bfloat16)
-            q_nc = q_nc_base.transpose(1, 2).transpose(1, 2)  # still contiguous
+            q_nc_base.transpose(1, 2).transpose(1, 2)  # still contiguous
             q_strided = q_nc_base[:, ::2]
             assert not q_strided.is_contiguous()
             initial = torch.randn(1, 2, 4, 4, dtype=torch.bfloat16)
@@ -1096,10 +1206,18 @@ class TestFusedRecurrent:
             nat = torch.tensor([1, 2])
 
             o, ht = fwd(
-                q_strided, k_t, v_t, g, beta, scale=0.5,
-                initial_state=initial, inplace_final_state=False,
-                cu_seqlens=cu, ssm_state_indices=idx,
-                num_accepted_tokens=nat, use_qk_l2norm_in_kernel=True,
+                q_strided,
+                k_t,
+                v_t,
+                g,
+                beta,
+                scale=0.5,
+                initial_state=initial,
+                inplace_final_state=False,
+                cu_seqlens=cu,
+                ssm_state_indices=idx,
+                num_accepted_tokens=nat,
+                use_qk_l2norm_in_kernel=True,
             )
 
             # contiguity enforced for all five tensors
@@ -1132,10 +1250,16 @@ class TestCausalConv1dFn:
             fn = modules[_CONV1D].causal_conv1d_fn_kunlunxin
             x = torch.randn(8, 4)
             w = torch.randn(4, 3)
-            with pytest.raises(NotImplementedError, match="activation must be None, silu, or swish"):
+            with pytest.raises(
+                NotImplementedError, match="activation must be None, silu, or swish"
+            ):
                 fn(
-                    x, w, None, torch.randn(2, 4, 8),
-                    torch.tensor([0, 4, 8]), activation="gelu",
+                    x,
+                    w,
+                    None,
+                    torch.randn(2, 4, 8),
+                    torch.tensor([0, 4, 8]),
+                    activation="gelu",
                 )
 
     @pytest.mark.platforms("kunlunxin")
@@ -1144,9 +1268,17 @@ class TestCausalConv1dFn:
         seen = {}
 
         def causal_conv1d_fwd(
-            x, weight, bias, conv_states, query_start_loc,
-            cache_indices, has_initial_state, use_activation, is_ncw,
-            query_start_loc_cpu, pad_slot_id,
+            x,
+            weight,
+            bias,
+            conv_states,
+            query_start_loc,
+            cache_indices,
+            has_initial_state,
+            use_activation,
+            is_ncw,
+            query_start_loc_cpu,
+            pad_slot_id,
         ):
             seen["x"] = x
             seen["bias"] = bias
@@ -1167,7 +1299,12 @@ class TestCausalConv1dFn:
             qsl = torch.tensor([0, 4, 8])
 
             result = fn(
-                x, weight, bias, conv_states, qsl, activation=activation,
+                x,
+                weight,
+                bias,
+                conv_states,
+                qsl,
+                activation=activation,
                 pad_slot_id=-2,
             )
 
@@ -1189,9 +1326,17 @@ class TestCausalConv1dFn:
         seen = {}
 
         def causal_conv1d_fwd(
-            x, weight, bias, conv_states, query_start_loc,
-            cache_indices, has_initial_state, use_activation, is_ncw,
-            query_start_loc_cpu, pad_slot_id,
+            x,
+            weight,
+            bias,
+            conv_states,
+            query_start_loc,
+            cache_indices,
+            has_initial_state,
+            use_activation,
+            is_ncw,
+            query_start_loc_cpu,
+            pad_slot_id,
         ):
             seen["x"] = x
 
@@ -1204,8 +1349,12 @@ class TestCausalConv1dFn:
             assert not x.is_contiguous()
             x_snapshot = x.clone()
             result = fn(
-                x, torch.randn(4, 3), None, torch.randn(2, 4, 8),
-                torch.tensor([0, 8]), activation=None,
+                x,
+                torch.randn(4, 3),
+                None,
+                torch.randn(2, 4, 8),
+                torch.tensor([0, 8]),
+                activation=None,
             )
             assert seen["x"].is_contiguous()
             assert seen["x"] is not x
@@ -1220,9 +1369,16 @@ class TestCausalConv1dFn:
 class TestCausalConv1dUpdate:
     def _noop_kernel(self, seen):
         def causal_conv1d_update(
-            x, conv_state, weight, bias, use_activation,
-            cache_seqlens, conv_state_indices, intermediate_conv_window,
-            is_ncw, pad_slot_id,
+            x,
+            conv_state,
+            weight,
+            bias,
+            use_activation,
+            cache_seqlens,
+            conv_state_indices,
+            intermediate_conv_window,
+            is_ncw,
+            pad_slot_id,
         ):
             seen["x"] = x
             seen["conv_state"] = conv_state
@@ -1243,7 +1399,9 @@ class TestCausalConv1dUpdate:
             fn = modules[_CONV1D].causal_conv1d_update_kunlunxin
             with pytest.raises(NotImplementedError, match="speculative decoding"):
                 fn(
-                    torch.randn(2, 4), torch.randn(2, 4, 3), torch.randn(4, 3),
+                    torch.randn(2, 4),
+                    torch.randn(2, 4, 3),
+                    torch.randn(4, 3),
                     num_accepted_tokens=torch.tensor([1, 1]),
                 )
 
@@ -1251,24 +1409,33 @@ class TestCausalConv1dUpdate:
     def test_rejects_varlen_query_start_loc(self):
         with _xtorch_ops_reimport(_STUB_REQUIRED) as (_, modules):
             fn = modules[_CONV1D].causal_conv1d_update_kunlunxin
-            with pytest.raises(NotImplementedError, match="varlen with query_start_loc"):
+            with pytest.raises(
+                NotImplementedError, match="varlen with query_start_loc"
+            ):
                 fn(
-                    torch.randn(2, 4), torch.randn(2, 4, 3), torch.randn(4, 3),
-                    query_start_loc=torch.tensor([0, 1, 2]), max_query_len=4,
+                    torch.randn(2, 4),
+                    torch.randn(2, 4, 3),
+                    torch.randn(4, 3),
+                    query_start_loc=torch.tensor([0, 1, 2]),
+                    max_query_len=4,
                 )
 
     @pytest.mark.platforms("kunlunxin")
     def test_varlen_without_max_query_len_is_allowed(self):
         seen = {}
         kernel = self._noop_kernel(seen)
-        with _xtorch_ops_reimport(
-            _STUB_REQUIRED, causal_conv1d_update=kernel
-        ) as (_, modules):
+        with _xtorch_ops_reimport(_STUB_REQUIRED, causal_conv1d_update=kernel) as (
+            _,
+            modules,
+        ):
             fn = modules[_CONV1D].causal_conv1d_update_kunlunxin
             # query_start_loc set but max_query_len unset (-1/0): not varlen
             fn(
-                torch.randn(2, 4), torch.randn(2, 4, 3), torch.randn(4, 3),
-                query_start_loc=torch.tensor([0, 1, 2]), max_query_len=-1,
+                torch.randn(2, 4),
+                torch.randn(2, 4, 3),
+                torch.randn(4, 3),
+                query_start_loc=torch.tensor([0, 1, 2]),
+                max_query_len=-1,
             )
             assert "x" in seen
 
@@ -1278,7 +1445,9 @@ class TestCausalConv1dUpdate:
             fn = modules[_CONV1D].causal_conv1d_update_kunlunxin
             with pytest.raises(NotImplementedError, match="actual: gelu"):
                 fn(
-                    torch.randn(2, 4), torch.randn(2, 4, 3), torch.randn(4, 3),
+                    torch.randn(2, 4),
+                    torch.randn(2, 4, 3),
+                    torch.randn(4, 3),
                     activation="gelu",
                 )
 
@@ -1286,9 +1455,10 @@ class TestCausalConv1dUpdate:
     def test_dim2_unsqueezes_and_restores_values(self):
         seen = {}
         kernel = self._noop_kernel(seen)
-        with _xtorch_ops_reimport(
-            _STUB_REQUIRED, causal_conv1d_update=kernel
-        ) as (_, modules):
+        with _xtorch_ops_reimport(_STUB_REQUIRED, causal_conv1d_update=kernel) as (
+            _,
+            modules,
+        ):
             fn = modules[_CONV1D].causal_conv1d_update_kunlunxin
             x = torch.randn(3, 5)  # [batch, dim], dim()==2
             x_snapshot = x.clone()
@@ -1314,9 +1484,10 @@ class TestCausalConv1dUpdate:
     def test_dim3_transpose_round_trip(self):
         seen = {}
         kernel = self._noop_kernel(seen)
-        with _xtorch_ops_reimport(
-            _STUB_REQUIRED, causal_conv1d_update=kernel
-        ) as (_, modules):
+        with _xtorch_ops_reimport(_STUB_REQUIRED, causal_conv1d_update=kernel) as (
+            _,
+            modules,
+        ):
             fn = modules[_CONV1D].causal_conv1d_update_kunlunxin
             # [batch, dim, seqlen] input; kernel receives [batch, seqlen, dim]
             x = torch.randn(3, 5, 2)
@@ -1336,9 +1507,16 @@ class TestCausalConv1dUpdate:
         seen = {}
 
         def causal_conv1d_update(
-            x, conv_state, weight, bias, use_activation,
-            cache_seqlens, conv_state_indices, intermediate_conv_window,
-            is_ncw, pad_slot_id,
+            x,
+            conv_state,
+            weight,
+            bias,
+            use_activation,
+            cache_seqlens,
+            conv_state_indices,
+            intermediate_conv_window,
+            is_ncw,
+            pad_slot_id,
         ):
             seen["x"] = x
 

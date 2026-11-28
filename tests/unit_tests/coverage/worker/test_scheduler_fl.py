@@ -153,8 +153,8 @@ def _req(grammar):
 
 
 def test_fast_path_bonus_failure_rolls_back_and_falls_back(fake_xgrammar):
-    calls = fake_xgrammar
     base = _fast_manager()
+
     # Current fill succeeds; the bonus fill fails because the grammar loses
     # its matcher mid-flight. Model that with a grammar whose matcher is
     # present for current rows but gone for bonus rows.

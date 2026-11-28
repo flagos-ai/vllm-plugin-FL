@@ -103,8 +103,7 @@ def _arguments(M=4, E=2, K=4, N=6, I=3, topk=1, seed=0):
         "w1": w1,
         "w2": w2,
         "topk_weights": torch.rand(M, topk, generator=g),
-        "topk_ids": torch.randint(0, E, (M, topk), generator=g,
-                                   dtype=torch.int64),
+        "topk_ids": torch.randint(0, E, (M, topk), generator=g, dtype=torch.int64),
         "activation": fmu.MoEActivation.SILU,
         "global_num_experts": E,
         "expert_map": None,
@@ -126,23 +125,37 @@ def _silence_generic_pipeline(monkeypatch):
     """
     invocations = []
 
-    def fake_invoke(A, B, C, A_scale, B_scale, topk_weights,
-                    sorted_token_ids, expert_ids, num_tokens_post_padded,
-                    mul_routed_weight, top_k, config, **kwargs):
+    def fake_invoke(
+        A,
+        B,
+        C,
+        A_scale,
+        B_scale,
+        topk_weights,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        mul_routed_weight,
+        top_k,
+        config,
+        **kwargs,
+    ):
         invocations.append({"B": B, "flag": bool(mul_routed_weight)})
         C.reshape(-1, C.shape[-1]).fill_(1.0)
 
-    monkeypatch.setattr(fmu, "try_get_optimal_moe_config",
-                        lambda *a, **k: {"BLOCK_SIZE_M": 16})
     monkeypatch.setattr(
-        fmu, "_prepare_expert_assignment",
+        fmu, "try_get_optimal_moe_config", lambda *a, **k: {"BLOCK_SIZE_M": 16}
+    )
+    monkeypatch.setattr(
+        fmu,
+        "_prepare_expert_assignment",
         lambda *a, **k: ("sorted", "experts", "padded"),
     )
     monkeypatch.setattr(fmu, "_invoke_fused_moe_triton_kernel", fake_invoke)
-    monkeypatch.setattr(fmu, "apply_moe_activation",
-                        lambda *a, **k: None)
+    monkeypatch.setattr(fmu, "apply_moe_activation", lambda *a, **k: None)
     monkeypatch.setattr(
-        fmu, "moe_kernel_quantize_input",
+        fmu,
+        "moe_kernel_quantize_input",
         lambda A, A_scale, *a, **k: (A, A_scale),
     )
     monkeypatch.setattr(fmu, "_moe_sum", lambda inp, out: None)
@@ -181,9 +194,13 @@ class TestCudaFlaggemsArm:
         fake.fused_experts_impl = fused_experts_impl
         fake.__path__ = []
         monkeypatch.setitem(sys.modules, "flaggems_vllm", fake)
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            is_cuda=lambda: True,
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                is_cuda=lambda: True,
+            ),
+        )
         return captured
 
     def test_calls_flaggems_and_copies_result(self, flaggems_impl):
@@ -253,16 +270,28 @@ class TestGenericPipeline:
     @pytest.fixture
     def pipeline_stubs(self, monkeypatch):
         """Recording doubles for every CachedOp dispatch point."""
-        captured = {"invoke": [], "activation": [], "quantize": [],
-                    "moe_sum": [], "align": None, "config": None}
+        captured = {
+            "invoke": [],
+            "activation": [],
+            "quantize": [],
+            "moe_sum": [],
+            "align": None,
+            "config": None,
+        }
 
-        def fake_config(w1_shape, w2_shape, top_k, dtype_str, M, *,
-                        block_shape=None):
+        def fake_config(w1_shape, w2_shape, top_k, dtype_str, M, *, block_shape=None):
             captured["config"] = (w1_shape, w2_shape, top_k, dtype_str, M)
             return {"BLOCK_SIZE_M": 16}
 
-        def fake_prepare(topk_ids, config, num_tokens, top_k_num,
-                         global_num_experts, expert_map, **kwargs):
+        def fake_prepare(
+            topk_ids,
+            config,
+            num_tokens,
+            top_k_num,
+            global_num_experts,
+            expert_map,
+            **kwargs,
+        ):
             captured["align"] = {
                 "topk_ids": topk_ids,
                 "config": config,
@@ -273,35 +302,58 @@ class TestGenericPipeline:
             }
             return ("sorted", "experts", "padded")
 
-        def fake_invoke(A, B, C, A_scale, B_scale, topk_weights,
-                        sorted_token_ids, expert_ids, num_tokens_post_padded,
-                        mul_routed_weight, top_k, config, **kwargs):
-            captured["invoke"].append({
-                "A": A, "B": B, "C": C,
-                "A_scale": A_scale, "B_scale": B_scale,
-                "topk_weights": topk_weights,
-                "sorted_token_ids": sorted_token_ids,
-                "expert_ids": expert_ids,
-                "mul_routed_weight": mul_routed_weight,
-                "top_k": top_k, "config": config,
-                **kwargs,
-            })
+        def fake_invoke(
+            A,
+            B,
+            C,
+            A_scale,
+            B_scale,
+            topk_weights,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            mul_routed_weight,
+            top_k,
+            config,
+            **kwargs,
+        ):
+            captured["invoke"].append(
+                {
+                    "A": A,
+                    "B": B,
+                    "C": C,
+                    "A_scale": A_scale,
+                    "B_scale": B_scale,
+                    "topk_weights": topk_weights,
+                    "sorted_token_ids": sorted_token_ids,
+                    "expert_ids": expert_ids,
+                    "mul_routed_weight": mul_routed_weight,
+                    "top_k": top_k,
+                    "config": config,
+                    **kwargs,
+                }
+            )
             # Emulate the GEMM writing through to C so downstream steps
             # see plausible buffers.
             C.reshape(-1, C.shape[-1]).fill_(1.0)
 
-        def fake_activation(activation, out, inp, *, activation_config=None,
-                            **kwargs):
+        def fake_activation(activation, out, inp, *, activation_config=None, **kwargs):
             captured["activation"].append(
                 {"activation": activation, "out": out, "inp": inp}
             )
             out.fill_(2.0)
 
-        def fake_quantize(A, A_scale, quant_dtype, per_act_token_quant,
-                          block_shape, *, quantization_emulation=False):
+        def fake_quantize(
+            A,
+            A_scale,
+            quant_dtype,
+            per_act_token_quant,
+            block_shape,
+            *,
+            quantization_emulation=False,
+        ):
             captured["quantize"].append(
-                {"A": A, "A_scale": A_scale,
-                 "per_act_token_quant": per_act_token_quant}
+                {"A": A, "A_scale": A_scale, "per_act_token_quant": per_act_token_quant}
             )
             return A, A_scale
 
@@ -311,7 +363,8 @@ class TestGenericPipeline:
         monkeypatch.setattr(fmu, "apply_moe_activation", fake_activation)
         monkeypatch.setattr(fmu, "moe_kernel_quantize_input", fake_quantize)
         monkeypatch.setattr(
-            fmu, "_moe_sum",
+            fmu,
+            "_moe_sum",
             lambda inp, out: captured["moe_sum"].append((inp, out)),
         )
         _pin_triton_scalars(monkeypatch)
@@ -324,9 +377,14 @@ class TestGenericPipeline:
         # iluvatar/hygon report device_type=cuda but is_cuda()=False, so
         # both the kunlunxin arm, the NPU arm and the FlagGems arm are
         # skipped and the generic pipeline runs.
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name="iluvatar", device_type="cuda",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name="iluvatar",
+                device_type="cuda",
+            ),
+        )
         experts = _experts()
         arguments = _arguments()
         fmu.TritonExpertsFL.apply(experts, **arguments)
@@ -369,8 +427,9 @@ class TestGenericPipeline:
 
         assert len(pipeline_stubs["activation"]) == 1
         assert len(pipeline_stubs["quantize"]) == 1
-        assert pipeline_stubs["quantize"][0]["A"] is (
-            pipeline_stubs["activation"][0]["out"]
+        assert (
+            pipeline_stubs["quantize"][0]["A"]
+            is (pipeline_stubs["activation"][0]["out"])
         )
         act = pipeline_stubs["activation"][0]
         assert act["activation"] is fmu.MoEActivation.SILU
@@ -382,7 +441,8 @@ class TestGenericPipeline:
         assert pipeline_stubs["moe_sum"][0][1] is arguments["output"]
 
     def test_router_weight_on_input_inverts_gemm2_flag(
-            self, pipeline_stubs, monkeypatch):
+        self, pipeline_stubs, monkeypatch
+    ):
         """apply_router_weight_on_input=True drops the GEMM2 weighting.
 
         GEMM1 is hardcoded to the unweighted contract (topk_weights=None,
@@ -391,9 +451,14 @@ class TestGenericPipeline:
         GEMM2 inverted. This pins today's contract; see the file docstring
         for the suspected production gap this documents.
         """
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name="hygon", device_type="cuda",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name="hygon",
+                device_type="cuda",
+            ),
+        )
         experts = _experts()
         arguments = _arguments()
         arguments["apply_router_weight_on_input"] = True
@@ -404,19 +469,21 @@ class TestGenericPipeline:
         assert second["mul_routed_weight"] is False
 
     @pytest.mark.parametrize("vendor", ["iluvatar", "hygon"])
-    def test_iluvatar_hygon_reach_generic_pipeline(
-            self, monkeypatch, vendor):
+    def test_iluvatar_hygon_reach_generic_pipeline(self, monkeypatch, vendor):
         """Neither OOT vendor reaches the CUDA FlagGems fast path."""
         flaggems_seen = []
         fake = ModuleType("flaggems_vllm")
-        fake.fused_experts_impl = (
-            lambda *a, **k: flaggems_seen.append(1)
-        )
+        fake.fused_experts_impl = lambda *a, **k: flaggems_seen.append(1)
         fake.__path__ = []
         monkeypatch.setitem(sys.modules, "flaggems_vllm", fake)
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name=vendor, device_type="cuda",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name=vendor,
+                device_type="cuda",
+            ),
+        )
         invocations = _silence_generic_pipeline(monkeypatch)
         experts = _experts()
         arguments = _arguments()
@@ -429,13 +496,19 @@ class TestGenericPipeline:
 
     def test_shape_guards_run_before_pipeline(self, monkeypatch):
         """The generic pipeline's asserts fire on mismatched shapes."""
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name="iluvatar", device_type="cuda",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name="iluvatar",
+                device_type="cuda",
+            ),
+        )
         # Stub only the config lookup; the asserts must fire first.
         config_called = []
         monkeypatch.setattr(
-            fmu, "try_get_optimal_moe_config",
+            fmu,
+            "try_get_optimal_moe_config",
             lambda *a, **k: config_called.append(1) or {"BLOCK_SIZE_M": 16},
         )
         experts = _experts()
@@ -446,9 +519,14 @@ class TestGenericPipeline:
         assert config_called == []
 
     def test_non_contiguous_hidden_states_rejected(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name="iluvatar", device_type="cuda",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name="iluvatar",
+                device_type="cuda",
+            ),
+        )
         experts = _experts()
         arguments = _arguments(K=8)
         strided = torch.randn(4, 16)[:, ::2]
@@ -458,9 +536,14 @@ class TestGenericPipeline:
             fmu.TritonExpertsFL.apply(experts, **arguments)
 
     def test_non_unit_weight_stride_rejected(self, monkeypatch):
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name="iluvatar", device_type="cuda",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name="iluvatar",
+                device_type="cuda",
+            ),
+        )
         experts = _experts()
         arguments = _arguments(K=8)
         wide = torch.randn(2, 6, 16)
@@ -472,9 +555,14 @@ class TestGenericPipeline:
         """A dtype outside the guarded list fails the dtype assert before
         the compute-type lookup (the ValueError in that lookup is
         unreachable behind the assert)."""
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name="iluvatar", device_type="cuda",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name="iluvatar",
+                device_type="cuda",
+            ),
+        )
         experts = _experts()
         arguments = _arguments()
         arguments["hidden_states"] = arguments["hidden_states"].double()
@@ -486,8 +574,7 @@ class TestVendorRoutingMatrix:
     """Which apply() arm each OOT vendor reaches end to end."""
 
     @pytest.mark.parametrize("vendor", ["iluvatar", "hygon", "kunlunxin"])
-    def test_kunlunxin_routes_to_resolve_others_to_generic(
-            self, monkeypatch, vendor):
+    def test_kunlunxin_routes_to_resolve_others_to_generic(self, monkeypatch, vendor):
         """kunlunxin resolves the vendor op; iluvatar/hygon fall back.
 
         Both arms are driven through recording doubles so the routing
@@ -507,15 +594,18 @@ class TestVendorRoutingMatrix:
             return impl
 
         fake = ModuleType("flaggems_vllm")
-        fake.fused_experts_impl = (
-            lambda *a, **k: vendor_calls["flaggems"].append(1)
-        )
+        fake.fused_experts_impl = lambda *a, **k: vendor_calls["flaggems"].append(1)
         fake.__path__ = []
         monkeypatch.setitem(sys.modules, "flaggems_vllm", fake)
         monkeypatch.setattr(fmu, "resolve_op", fake_resolve)
-        monkeypatch.setattr(fmu, "current_platform", _fake_platform(
-            vendor_name=vendor, device_type="cuda",
-        ))
+        monkeypatch.setattr(
+            fmu,
+            "current_platform",
+            _fake_platform(
+                vendor_name=vendor,
+                device_type="cuda",
+            ),
+        )
         invocations = _silence_generic_pipeline(monkeypatch)
 
         experts = _experts()

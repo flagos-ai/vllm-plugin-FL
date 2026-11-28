@@ -155,14 +155,10 @@ def _invoke(routes_cpu, block_size, num_experts, **kwargs):
     device = _device()
     topk_ids = routes_cpu.to(torch.int32).to(device)
     before = topk_ids.clone()
-    outputs = moe_align_block_size_flaggems(
-        topk_ids, block_size, num_experts, **kwargs
-    )
+    outputs = moe_align_block_size_flaggems(topk_ids, block_size, num_experts, **kwargs)
     torch.cuda.synchronize(device)
     # the adapter must not mutate its input
-    torch.testing.assert_close(
-        topk_ids.cpu(), before.cpu(), rtol=RTOL, atol=ATOL
-    )
+    torch.testing.assert_close(topk_ids.cpu(), before.cpu(), rtol=RTOL, atol=ATOL)
     return outputs
 
 
@@ -207,9 +203,7 @@ class TestMoeAlignKernelVsOracle:
         self, num_tokens, block_size, num_experts, topk
     ):
         generator = torch.Generator().manual_seed(20261019 + num_tokens)
-        routes = _routes(
-            num_tokens, num_experts, topk, generator=generator
-        )
+        routes = _routes(num_tokens, num_experts, topk, generator=generator)
         outputs = _invoke(routes, block_size, num_experts)
         _assert_alignment(outputs, routes, block_size, num_experts)
 

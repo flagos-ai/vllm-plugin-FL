@@ -82,7 +82,7 @@ def _import_fresh():
         parent = sys.modules.get(_PARENT)
         if parent is not None:
             if saved is not None or saved_attr is not None:
-                setattr(parent, "flagcx", saved if saved is not None else saved_attr)
+                parent.flagcx = saved if saved is not None else saved_attr
             else:
                 # first import in the session: leave the package untouched
                 if hasattr(parent, "flagcx"):
@@ -188,13 +188,19 @@ class RecordingLibrary:
         self.calls.append(("AllGather", inbuf, outbuf, count, dtype, comm, stream))
 
     def flagcxBroadcast(self, inbuf, outbuf, count, dtype, root, comm, stream):
-        self.calls.append(("Broadcast", inbuf, outbuf, count, dtype, root, comm, stream))
+        self.calls.append(
+            ("Broadcast", inbuf, outbuf, count, dtype, root, comm, stream)
+        )
 
     def flagcxReduceScatter(self, inbuf, outbuf, count, dtype, op, comm, stream):
-        self.calls.append(("ReduceScatter", inbuf, outbuf, count, dtype, op, comm, stream))
+        self.calls.append(
+            ("ReduceScatter", inbuf, outbuf, count, dtype, op, comm, stream)
+        )
 
     def flagcxReduce(self, inbuf, outbuf, count, dtype, op, root, comm, stream):
-        self.calls.append(("Reduce", inbuf, outbuf, count, dtype, op, root, comm, stream))
+        self.calls.append(
+            ("Reduce", inbuf, outbuf, count, dtype, op, root, comm, stream)
+        )
 
     def flagcxSend(self, inbuf, count, dtype, dst, comm, stream):
         self.calls.append(("Send", inbuf, count, dtype, dst, comm, stream))
@@ -276,9 +282,7 @@ class TestIsKunlunxin:
 
 
 class TestLoadKunlunxinFlagcxApi:
-    def test_source_dir_wrapper_is_imported_and_returned(
-        self, monkeypatch, tmp_path
-    ):
+    def test_source_dir_wrapper_is_imported_and_returned(self, monkeypatch, tmp_path):
         """A FLAGCX_PATH dir containing plugin/interservice wins over flagcx.api."""
         module = _import_fresh()
         monkeypatch.delenv("GEMS_VENDOR", raising=False)
@@ -329,9 +333,7 @@ class TestModuleImportModes:
         import importlib.util
 
         if importlib.util.find_spec("flagcx") is not None:
-            pytest.skip(
-                "real flagcx wheel present: the module does not degrade here"
-            )
+            pytest.skip("real flagcx wheel present: the module does not degrade here")
         monkeypatch.delenv("FLAGCX_PATH", raising=False)
         monkeypatch.delenv("GEMS_VENDOR", raising=False)
 
@@ -364,12 +366,14 @@ class TestModuleImportModes:
         fake_plugin.__path__ = []
         saved_plugin_modules = {
             name: sys.modules.get(name)
-            for name in ("plugin", "plugin.interservice",
-                         "plugin.interservice.flagcx_wrapper")
+            for name in (
+                "plugin",
+                "plugin.interservice",
+                "plugin.interservice.flagcx_wrapper",
+            )
         }
         sys.modules["plugin"] = fake_plugin
-        for name in ("plugin.interservice",
-                     "plugin.interservice.flagcx_wrapper"):
+        for name in ("plugin.interservice", "plugin.interservice.flagcx_wrapper"):
             sys.modules.pop(name, None)
         try:
             module = _import_fresh()
@@ -766,9 +770,7 @@ class TestConstructorPaths:
         assert c.available is False
         assert isinstance(c.init_error, ImportError)
 
-    def test_library_path_resolution_from_flagcx_path(
-        self, dist_mocks, monkeypatch
-    ):
+    def test_library_path_resolution_from_flagcx_path(self, dist_mocks, monkeypatch):
         """Without FLAGCX_LIB_PATH, FLAGCX_PATH/build/lib/libflagcx.so is used."""
         module = _import_fresh()
         constructor_paths = []
@@ -809,9 +811,7 @@ class TestConstructorPaths:
         assert constructor_paths == ["/custom/lib.so"]
         assert isinstance(c.init_error, RuntimeError)
 
-    def test_wheel_library_default_when_no_flagcx_path(
-        self, dist_mocks, monkeypatch
-    ):
+    def test_wheel_library_default_when_no_flagcx_path(self, dist_mocks, monkeypatch):
         module = _import_fresh()
         constructor_paths = []
 
@@ -871,9 +871,7 @@ class TestCurrentStreamSelection:
         module = _import_fresh()
         monkeypatch.setattr(module, "_flagcx_amd_source", True)
         expected = object()
-        monkeypatch.setattr(
-            torch.cuda, "current_stream", lambda device: expected
-        )
+        monkeypatch.setattr(torch.cuda, "current_stream", lambda device: expected)
         c = _make_comm(module, RecordingLibrary(), device="cuda:0")
         assert c._current_stream() is expected
 
@@ -933,7 +931,9 @@ class TestFullConstructorAgainstRecordingLibrary:
         )
         return module
 
-    def test_stateless_group_init_completes_and_warms_up(self, warm_module, monkeypatch):
+    def test_stateless_group_init_completes_and_warms_up(
+        self, warm_module, monkeypatch
+    ):
         # Bind our stub group class as the module's StatelessProcessGroup so
         # isinstance dispatch takes the stateless path.
         monkeypatch.setattr(warm_module, "StatelessProcessGroup", StatelessGroup)
@@ -1014,9 +1014,7 @@ class TestFullConstructorAgainstRecordingLibrary:
         group.broadcast_obj = lambda value, src=0: SimpleNamespace(
             internal=[7, 8, 9, 10]
         )
-        c = warm_module.PyFlagcxCommunicator(
-            group, "cpu", library_path="unused"
-        )
+        c = warm_module.PyFlagcxCommunicator(group, "cpu", library_path="unused")
         init = [call for call in library.calls if call[0] == "CommInitRank"]
         assert init == [("CommInitRank", 2, c.unique_id, 1)]
         assert c.unique_id.internal == [7, 8, 9, 10]
@@ -1129,7 +1127,9 @@ class TestConstructorDeviceContextsAndWarmup:
         warm_module.FLAGCXLibrary = library
         destroy_calls = []
         monkeypatch.setattr(
-            warm_module.PyFlagcxCommunicator, "destroy", lambda self: destroy_calls.append(1)
+            warm_module.PyFlagcxCommunicator,
+            "destroy",
+            lambda self: destroy_calls.append(1),
         )
         monkeypatch.setattr(
             warm_module.PyFlagcxCommunicator,

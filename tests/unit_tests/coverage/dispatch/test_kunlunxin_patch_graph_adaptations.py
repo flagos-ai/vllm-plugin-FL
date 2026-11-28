@@ -55,9 +55,7 @@ def _vllm_config_context():
             max_num_batched_tokens=128,
             max_model_len=256,
         ),
-        compilation_config=CompilationConfig(
-            mode=CompilationMode.VLLM_COMPILE
-        ),
+        compilation_config=CompilationConfig(mode=CompilationMode.VLLM_COMPILE),
     )
     # Platform defaults (CPU platform / PlatformFL-kunlunxin) downgrade the
     # mode inside __post_init__; the wrapper only needs a non-NONE mode and
@@ -66,6 +64,7 @@ def _vllm_config_context():
     config.compilation_config.mode = CompilationMode.VLLM_COMPILE
     with set_current_vllm_config(config):
         yield
+
 
 pytestmark = [pytest.mark.supplementary]
 
@@ -156,27 +155,22 @@ class _ModuleStubs:
 
     def __exit__(self, *exc):
         import vllm.v1.worker.gpu as gpu_pkg
+
         import vllm_fl
 
         if self._saved_gpu_pkg_attr is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del gpu_pkg.gpu_model_runner
-            except AttributeError:
-                pass
         else:
             gpu_pkg.gpu_model_runner = self._saved_gpu_pkg_attr
         if self._saved_fl_mr_attr is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del vllm_fl.worker.model_runner
-            except AttributeError:
-                pass
         else:
             vllm_fl.worker.model_runner = self._saved_fl_mr_attr
         if self._saved_fl_worker is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del vllm_fl.worker
-            except AttributeError:
-                pass
         else:
             vllm_fl.worker = self._saved_fl_worker
         for name, entry in self._saved.items():
@@ -431,9 +425,10 @@ class TestBreakablePrivatePools:
                 replacements = []
                 ns["patch_breakable_private_pools"](replacements)
                 init_with_private_pools = replacements[0][3]
-                assert getattr(
-                    init_with_private_pools, "_kunlunxin_private_pools", False
-                ) is True
+                assert (
+                    getattr(init_with_private_pools, "_kunlunxin_private_pools", False)
+                    is True
+                )
 
                 target = SimpleNamespace()
                 config = SimpleNamespace(
@@ -474,8 +469,8 @@ class TestBreakablePrivatePools:
 class TestBreakableFullOnly:
     @pytest.mark.platforms("kunlunxin")
     def test_per_descriptor_pool_reuse_and_restore(self):
-        import vllm.platforms as platforms
         import vllm.forward_context as forward_context_module
+        import vllm.platforms as platforms
         from vllm.config import CUDAGraphMode
         from vllm.forward_context import BatchDescriptor, ForwardContext
 
@@ -497,9 +492,7 @@ class TestBreakableFullOnly:
                 replacements = []
                 ns["patch_breakable_full_only"](replacements)
                 call_full_only = replacements[0][3]
-                assert getattr(
-                    call_full_only, "_kunlunxin_full_only", False
-                ) is True
+                assert getattr(call_full_only, "_kunlunxin_full_only", False) is True
 
                 class FakeWrapper:
                     def __init__(self):
@@ -612,9 +605,9 @@ class TestBreakableFullOnly:
                     wrapper = FakeWrapper()
                     result = call_full_only(wrapper, 1)
                     assert result == ("KNOWN_DESCRIPTOR", "ORIGINAL_POOL")
-                    assert not hasattr(
-                        wrapper, "_kunlunxin_descriptor_pools"
-                    ), "known descriptor must not allocate pools"
+                    assert not hasattr(wrapper, "_kunlunxin_descriptor_pools"), (
+                        "known descriptor must not allocate pools"
+                    )
                 finally:
                     forward_context_module._forward_context = prev_ctx
             finally:
@@ -647,9 +640,7 @@ class TestBreakableFullOnly:
                 # function globals.
                 fn_globals = call_full_only.__globals__
                 real_has = fn_globals["_has_compiled_piecewise_runner"]
-                fn_globals["_has_compiled_piecewise_runner"] = (
-                    lambda wrapper: True
-                )
+                fn_globals["_has_compiled_piecewise_runner"] = lambda wrapper: True
 
                 class FakeWrapper:
                     runnable = staticmethod(lambda *a, **k: ("COMPILED", a))
@@ -745,9 +736,7 @@ class TestHasCompiledPiecewiseRunner:
 
         wrapper = SimpleNamespace(
             compilation_config=SimpleNamespace(
-                mode=CompilationMode.VLLM_COMPILE
-                if mode is None
-                else mode,
+                mode=CompilationMode.VLLM_COMPILE if mode is None else mode,
                 cudagraph_mode=SimpleNamespace(
                     has_piecewise_cudagraphs=lambda: piecewise
                 ),
@@ -925,9 +914,7 @@ class TestHasCompiledPiecewiseRunner:
         wrapper = SimpleNamespace(
             compilation_config=SimpleNamespace(
                 mode="NOT_USED",
-                cudagraph_mode=SimpleNamespace(
-                    has_piecewise_cudagraphs=lambda: False
-                ),
+                cudagraph_mode=SimpleNamespace(has_piecewise_cudagraphs=lambda: False),
             ),
             runnable=SimpleNamespace(compiled=True),
         )
@@ -942,18 +929,30 @@ class TestHasCompiledPiecewiseRunner:
 class TestNativePiecewiseBoundaries:
     @pytest.mark.platforms("kunlunxin")
     def test_stages_both_boundaries(self):
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
-            KunlunxinAttentionBackendImpl,
-        )
         from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
             QwenGatedDeltaNetAttention,
+        )
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            KunlunxinAttentionBackendImpl,
         )
 
         real_forward = KunlunxinAttentionBackendImpl.forward
         real_core = QwenGatedDeltaNetAttention._forward_core
 
-        def fake_forward(self, layer, query, key, value, kv_cache, attn_metadata,
-                         k_scale=None, v_scale=None, attn_type=None, output=None):
+        def fake_forward(
+            self,
+            layer,
+            query,
+            key,
+            value,
+            kv_cache,
+            attn_metadata,
+            k_scale=None,
+            v_scale=None,
+            attn_type=None,
+            output=None,
+        ):
             return ("ORIG_FWD", query)
 
         def fake_core(self, mixed_qkv, b, a, core_attn_out):
@@ -971,9 +970,7 @@ class TestNativePiecewiseBoundaries:
                 assert names == {"forward", "_forward_core"}
                 for _, _, _, replacement, _ in replacements:
                     assert (
-                        getattr(
-                            replacement, "_kunlunxin_piecewise_boundary", False
-                        )
+                        getattr(replacement, "_kunlunxin_piecewise_boundary", False)
                         is True
                     )
         finally:
@@ -982,11 +979,12 @@ class TestNativePiecewiseBoundaries:
 
     @pytest.mark.platforms("kunlunxin")
     def test_already_flagged_boundaries_are_skipped(self):
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
-            KunlunxinAttentionBackendImpl,
-        )
         from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
             QwenGatedDeltaNetAttention,
+        )
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            KunlunxinAttentionBackendImpl,
         )
 
         real_forward = KunlunxinAttentionBackendImpl.forward
@@ -1026,20 +1024,31 @@ class TestNativePiecewiseBoundaries:
         self, idle_capture_type, description
     ):
         import vllm.compilation.breakable_cudagraph as real_breakable
+        from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
+            QwenGatedDeltaNetAttention,
+        )
 
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
             KunlunxinAttentionBackendImpl,
-        )
-        from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
-            QwenGatedDeltaNetAttention,
         )
 
         real_forward = KunlunxinAttentionBackendImpl.forward
         real_core = QwenGatedDeltaNetAttention._forward_core
         real_current = real_breakable.BreakableCUDAGraphCapture.current
 
-        def fake_forward(self, layer, query, key, value, kv_cache, attn_metadata,
-                         k_scale=None, v_scale=None, attn_type=None, output=None):
+        def fake_forward(
+            self,
+            layer,
+            query,
+            key,
+            value,
+            kv_cache,
+            attn_metadata,
+            k_scale=None,
+            v_scale=None,
+            attn_type=None,
+            output=None,
+        ):
             return ("ORIG_FWD", query)
 
         def fake_core(self, mixed_qkv, b, a, core_attn_out):
@@ -1056,29 +1065,31 @@ class TestNativePiecewiseBoundaries:
                 ns = _load_patch_module()
                 replacements = []
                 ns["patch_native_piecewise_boundaries"](replacements)
-                forward_boundary = next(
-                    r for r in replacements if r[1] == "forward"
-                )[3]
+                forward_boundary = next(r for r in replacements if r[1] == "forward")[3]
                 core_boundary = next(
                     r for r in replacements if r[1] == "_forward_core"
                 )[3]
 
                 if idle_capture_type is None:
-                    real_breakable.BreakableCUDAGraphCapture.current = (
-                        classmethod(lambda cls: None)
+                    real_breakable.BreakableCUDAGraphCapture.current = classmethod(
+                        lambda cls: None
                     )
                 else:
-                    real_breakable.BreakableCUDAGraphCapture.current = (
-                        classmethod(lambda cls: IdleCapture())
+                    real_breakable.BreakableCUDAGraphCapture.current = classmethod(
+                        lambda cls: IdleCapture()
                     )
                 q = torch.zeros(2, 4)
                 assert forward_boundary(
-                    object(), layer="L", query=q, key=None, value=None,
-                    kv_cache=None, attn_metadata="META", output="OUT",
+                    object(),
+                    layer="L",
+                    query=q,
+                    key=None,
+                    value=None,
+                    kv_cache=None,
+                    attn_metadata="META",
+                    output="OUT",
                 ) == ("ORIG_FWD", q)
-                assert core_boundary(
-                    object(), q, q, q, q
-                ) == ("ORIG_CORE", q)
+                assert core_boundary(object(), q, q, q, q) == ("ORIG_CORE", q)
         finally:
             real_breakable.BreakableCUDAGraphCapture.current = real_current
             KunlunxinAttentionBackendImpl.forward = real_forward
@@ -1091,20 +1102,31 @@ class TestNativePiecewiseBoundaries:
         import vllm.model_executor.layers.attention.attention as attention_module
         from vllm.config import CUDAGraphMode
         from vllm.forward_context import ForwardContext
+        from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
+            QwenGatedDeltaNetAttention,
+        )
 
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
             KunlunxinAttentionBackendImpl,
-        )
-        from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
-            QwenGatedDeltaNetAttention,
         )
 
         real_forward = KunlunxinAttentionBackendImpl.forward
         real_core = QwenGatedDeltaNetAttention._forward_core
         real_current = real_breakable.BreakableCUDAGraphCapture.current
 
-        def fake_forward(self, layer, query, key, value, kv_cache, attn_metadata,
-                         k_scale=None, v_scale=None, attn_type=None, output=None):
+        def fake_forward(
+            self,
+            layer,
+            query,
+            key,
+            value,
+            kv_cache,
+            attn_metadata,
+            k_scale=None,
+            v_scale=None,
+            attn_type=None,
+            output=None,
+        ):
             return ("ORIG_FWD", layer, query)
 
         def fake_core(self, mixed_qkv, b, a, core_attn_out):
@@ -1147,9 +1169,7 @@ class TestNativePiecewiseBoundaries:
                 ns = _load_patch_module()
                 replacements = []
                 ns["patch_native_piecewise_boundaries"](replacements)
-                forward_boundary = next(
-                    r for r in replacements if r[1] == "forward"
-                )[3]
+                forward_boundary = next(r for r in replacements if r[1] == "forward")[3]
                 core_boundary = next(
                     r for r in replacements if r[1] == "_forward_core"
                 )[3]
@@ -1167,8 +1187,14 @@ class TestNativePiecewiseBoundaries:
                 layer = SimpleNamespace(layer_name="layers.3")
                 q = torch.zeros(2, 4)
                 result = forward_boundary(
-                    object(), layer=layer, query=q, key=None, value=None,
-                    kv_cache=None, attn_metadata="META", output="OUT",
+                    object(),
+                    layer=layer,
+                    query=q,
+                    key=None,
+                    value=None,
+                    kv_cache=None,
+                    attn_metadata="META",
+                    output="OUT",
                 )
                 assert result == "ADDED"
                 assert len(eager_fns) == 1
@@ -1185,7 +1211,10 @@ class TestNativePiecewiseBoundaries:
                 # same objects
                 mixed = torch.zeros(3)
                 result = core_boundary(
-                    object(), mixed, torch.zeros(3), torch.zeros(3),
+                    object(),
+                    mixed,
+                    torch.zeros(3),
+                    torch.zeros(3),
                     torch.zeros(3),
                 )
                 assert result == "ADDED"
@@ -1231,6 +1260,7 @@ class TestGraphAdaptationsPreflight:
         # still succeed: the second run re-stages from the same owners.
         import vllm.compilation.breakable_cudagraph as real_breakable
         import vllm.v1.worker.gpu.cudagraph_utils as cudagraph_utils
+
         import vllm_fl.distributed.communicator as comm_mod
 
         # snapshot every owner the publish touches so it is fully restored
@@ -1250,11 +1280,12 @@ class TestGraphAdaptationsPreflight:
         ]
         # patch_native_piecewise_boundaries wraps the two _forward_core /
         # forward methods too
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
-            KunlunxinAttentionBackendImpl,
-        )
         from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
             QwenGatedDeltaNetAttention,
+        )
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            KunlunxinAttentionBackendImpl,
         )
 
         snapshots.append(
@@ -1288,7 +1319,5 @@ class TestGraphAdaptationsPreflight:
             if existed:
                 setattr(owner, name, saved)
             else:
-                try:
+                with contextlib.suppress(AttributeError):
                     delattr(owner, name)
-                except AttributeError:
-                    pass

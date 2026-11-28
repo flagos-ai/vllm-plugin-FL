@@ -143,9 +143,7 @@ def _fake_fused_recurrent_impl():
         "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.fused_recurrent"
     )
     fake_mod.fused_recurrent_gated_delta_rule = fake_fwd
-    name = (
-        "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.fused_recurrent"
-    )
+    name = "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.fused_recurrent"
     saved = sys.modules.get(name)
     sys.modules[name] = fake_mod
     try:
@@ -168,10 +166,8 @@ def _restore_attr(owner, name):
         if existed:
             setattr(owner, name, saved)
         else:
-            try:
+            with contextlib.suppress(AttributeError):
                 delattr(owner, name)
-            except AttributeError:
-                pass
 
 
 def _apply_fused_gdn_gating():
@@ -231,7 +227,6 @@ class TestBlockTableSlotMapping:
 
     @pytest.mark.platforms("kunlunxin")
     def test_slot_values_match_hand_computed_reference(self):
-        import numpy as np
 
         from vllm.v1.worker.block_table import BlockTable
 
@@ -343,10 +338,7 @@ class TestBlockTableSlotMapping:
             # dcp ownership: (vbo // interleave) % 2 == 0 -> even vbo owned.
             # block offset inside the physical block is vbo // dcp_world_size.
             for pos in range(8):
-                if pos % 2 == 1:
-                    expected = -1
-                else:
-                    expected = 3 * block_size + pos // 2
+                expected = -1 if pos % 2 == 1 else 3 * block_size + pos // 2
                 assert slot[pos].item() == expected, f"pos={pos}"
         finally:
             BlockTable.compute_slot_mapping = real
@@ -372,8 +364,7 @@ class TestAttentionBackendRegistry:
             patch_attention_backend_registry()
             assert member.is_overridden()
             assert (
-                member.get_path()
-                == "vllm_fl.dispatch.backends.vendor.kunlunxin.impl."
+                member.get_path() == "vllm_fl.dispatch.backends.vendor.kunlunxin.impl."
                 "attention.KunlunxinAttentionBackend"
             )
             from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
@@ -449,8 +440,9 @@ class TestSamplerRng:
             wrapped = sampler_mod.random_sample
             probs = torch.rand(2, 5)
             generators = {i: torch.Generator() for i in range(2)}
-            with caplog.at_level("WARNING", logger="vllm_fl.dispatch.backends."
-                                   "vendor.kunlunxin.patch"):
+            with caplog.at_level(
+                "WARNING", logger="vllm_fl.dispatch.backends.vendor.kunlunxin.patch"
+            ):
                 out = wrapped(probs, generators)
             assert out.shape == (2,)
             assert any(
@@ -473,7 +465,6 @@ class TestCausalConv1dAdapters:
         import vllm.model_executor.layers.mamba.ops.causal_conv1d as conv1d_lib
 
         import vllm_fl.dispatch
-        import vllm_fl.dispatch.backends.vendor.kunlunxin.patch as patch_mod
         from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import (
             patch_causal_conv1d,
         )
@@ -526,9 +517,7 @@ class TestCausalConv1dAdapters:
             weight = torch.ones(6, 6)
             conv_states = torch.arange(12, dtype=torch.float32).view(1, 6, 2)
             qsl = torch.tensor([0, 3])
-            out = gdn.causal_conv1d_fn(
-                x, weight, None, conv_states, qsl, custom_kw=7
-            )
+            out = gdn.causal_conv1d_fn(x, weight, None, conv_states, qsl, custom_kw=7)
             # adapter passed x transposed to NWC and transposed back
             call = kernel_calls[0]
             assert tuple(call["x"].shape) == (3, 6)
@@ -587,6 +576,7 @@ class TestFlaOps:
                 from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.fused_recurrent import (
                     fused_recurrent_gated_delta_rule as klx_recurrent,
                 )
+
                 patch_fla_ops()
             assert ops.chunk_gated_delta_rule is klx_chunk
             assert chunk.chunk_gated_delta_rule is klx_chunk
@@ -640,9 +630,7 @@ class TestFusedPostConvPrep:
         )
 
         # independent oracle
-        q_ref, k_ref, v_ref = torch.split(
-            conv_output, (q_size, k_size, v_size), dim=-1
-        )
+        q_ref, k_ref, v_ref = torch.split(conv_output, (q_size, k_size, v_size), dim=-1)
         q_ref = q_ref.reshape(-1, num_k_heads, head_k_dim)
         k_ref = k_ref.reshape(-1, num_k_heads, head_k_dim)
         v_ref = v_ref.reshape(-1, num_v_heads, head_v_dim)
@@ -703,10 +691,13 @@ class TestFusedSigmoidGatingDeltaRuleUpdate:
         real_prep = gdn.fused_post_conv_prep
         real_update = gdn.fused_sigmoid_gating_delta_rule_update
         real_gating = getattr(gdn, "fused_gdn_gating", None)
-        with _xtorch_ops_stub(
-            fused_gdn_gating=fake_kernel,
-            fused_recurrent_gated_delta_rule_fwdv2=fake_kernel,
-        ), _fake_fused_recurrent_impl() as calls:
+        with (
+            _xtorch_ops_stub(
+                fused_gdn_gating=fake_kernel,
+                fused_recurrent_gated_delta_rule_fwdv2=fake_kernel,
+            ),
+            _fake_fused_recurrent_impl() as calls,
+        ):
             patch_fused_gdn_gating()
             try:
                 yield (
@@ -740,10 +731,18 @@ class TestFusedSigmoidGatingDeltaRuleUpdate:
         update, calls = installed
         x = self._inputs()
         result = update(
-            x["A_log"], x["a"], x["b"], x["dt_bias"],
-            x["q"], x["k"], x["v"],
-            beta=2.0, threshold=15.0, scale=0.7,
-            initial_state="STATE", inplace_final_state=False,
+            x["A_log"],
+            x["a"],
+            x["b"],
+            x["dt_bias"],
+            x["q"],
+            x["k"],
+            x["v"],
+            beta=2.0,
+            threshold=15.0,
+            scale=0.7,
+            initial_state="STATE",
+            inplace_final_state=False,
         )
         assert result == ("O", "HT")
         g_oracle = (
@@ -765,8 +764,14 @@ class TestFusedSigmoidGatingDeltaRuleUpdate:
         x = self._inputs()
         with pytest.raises(NotImplementedError, match="KDA"):
             update(
-                x["A_log"], x["a"], x["b"], x["dt_bias"],
-                x["q"], x["k"], x["v"], is_kda=True,
+                x["A_log"],
+                x["a"],
+                x["b"],
+                x["dt_bias"],
+                x["q"],
+                x["k"],
+                x["v"],
+                is_kda=True,
             )
 
     @pytest.mark.platforms("kunlunxin")
@@ -774,16 +779,17 @@ class TestFusedSigmoidGatingDeltaRuleUpdate:
         update, calls = installed
         x = self._inputs()
         update(
-            x["A_log"], x["a"], x["b"], x["dt_bias"],
-            x["q"], x["k"], x["v"],
+            x["A_log"],
+            x["a"],
+            x["b"],
+            x["dt_bias"],
+            x["q"],
+            x["k"],
+            x["v"],
             use_qk_l2norm_in_kernel=True,
         )
-        torch.testing.assert_close(
-            calls["q"], F.normalize(x["q"], p=2, dim=-1)
-        )
-        torch.testing.assert_close(
-            calls["k"], F.normalize(x["k"], p=2, dim=-1)
-        )
+        torch.testing.assert_close(calls["q"], F.normalize(x["q"], p=2, dim=-1))
+        torch.testing.assert_close(calls["k"], F.normalize(x["k"], p=2, dim=-1))
         assert calls["use_qk_l2norm_in_kernel"] is False
 
     @pytest.mark.platforms("kunlunxin")
@@ -791,8 +797,13 @@ class TestFusedSigmoidGatingDeltaRuleUpdate:
         update, calls = installed
         x = self._inputs()
         update(
-            x["A_log"], x["a"], x["b"], x["dt_bias"],
-            x["q"], x["k"], x["v"],
+            x["A_log"],
+            x["a"],
+            x["b"],
+            x["dt_bias"],
+            x["q"],
+            x["k"],
+            x["v"],
             use_qk_l2norm_in_kernel=False,
         )
         assert calls["q"] is x["q"]
@@ -805,15 +816,18 @@ class TestFusedSigmoidGatingDeltaRuleUpdate:
         x = self._inputs()
         indices = torch.arange(8)
         update(
-            x["A_log"], x["a"], x["b"], x["dt_bias"],
-            x["q"], x["k"], x["v"],
+            x["A_log"],
+            x["a"],
+            x["b"],
+            x["dt_bias"],
+            x["q"],
+            x["k"],
+            x["v"],
             cu_seqlens=torch.tensor([0, 2, 4]),
             ssm_state_indices=indices,
         )
         # cu_seqlens has 3 entries -> 2 decode sequences -> first 2 indices
-        torch.testing.assert_close(
-            calls["ssm_state_indices"], indices[: 3 - 1]
-        )
+        torch.testing.assert_close(calls["ssm_state_indices"], indices[: 3 - 1])
 
     @pytest.mark.platforms("kunlunxin")
     def test_2d_indices_are_not_sliced(self, installed):
@@ -821,8 +835,13 @@ class TestFusedSigmoidGatingDeltaRuleUpdate:
         x = self._inputs()
         indices = torch.arange(6).view(2, 3)
         update(
-            x["A_log"], x["a"], x["b"], x["dt_bias"],
-            x["q"], x["k"], x["v"],
+            x["A_log"],
+            x["a"],
+            x["b"],
+            x["dt_bias"],
+            x["q"],
+            x["k"],
+            x["v"],
             cu_seqlens=torch.tensor([0, 2, 4]),
             ssm_state_indices=indices,
         )
@@ -833,8 +852,13 @@ class TestFusedSigmoidGatingDeltaRuleUpdate:
         update, calls = installed
         x = self._inputs()
         update(
-            x["A_log"], x["a"], x["b"], x["dt_bias"],
-            x["q"], x["k"], x["v"],
+            x["A_log"],
+            x["a"],
+            x["b"],
+            x["dt_bias"],
+            x["q"],
+            x["k"],
+            x["v"],
             cu_seqlens=torch.tensor([0, 4]),
         )
         assert calls["ssm_state_indices"] is None
@@ -895,8 +919,8 @@ class TestSsmCacheUpdate:
             )
             return 0
 
-        att_mod.KunlunxinPagedAttention.reshape_and_cache_flash = (
-            staticmethod(recording_flash)
+        att_mod.KunlunxinPagedAttention.reshape_and_cache_flash = staticmethod(
+            recording_flash
         )
         try:
             # ssm_state (N, HV, K, V) with HV=2, K=3, V=5

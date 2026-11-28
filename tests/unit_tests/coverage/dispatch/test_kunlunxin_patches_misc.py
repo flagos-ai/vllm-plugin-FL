@@ -130,9 +130,7 @@ class TestInitializeFromForwardContext:
             # each mamba layer's kv_cache is the (conv, temporal) state
             # pair, zipped positionally with the copy-spec funcs
             forward_context = {
-                "mamba.layer": SimpleNamespace(
-                    kv_cache=[conv_state, temporal_state]
-                ),
+                "mamba.layer": SimpleNamespace(kv_cache=[conv_state, temporal_state]),
             }
 
             from vllm.model_executor.layers.mamba.mamba_utils import (
@@ -176,9 +174,7 @@ class TestInitializeFromForwardContext:
             assert len(groups[0].conv_states) == 1
             torch.testing.assert_close(groups[0].conv_states[0], conv_state)
             assert len(groups[0].temporal_states) == 1
-            torch.testing.assert_close(
-                groups[0].temporal_states[0], temporal_state
-            )
+            torch.testing.assert_close(groups[0].temporal_states[0], temporal_state)
 
     @pytest.mark.platforms("kunlunxin")
     def test_already_initialized_short_circuits_super(self):
@@ -221,8 +217,11 @@ class TestRunFusedPrecopy:
             obj = _make_context(cls, is_initialized=False)
             assert (
                 obj.run_fused_precopy(
-                    1, torch.tensor([0]), torch.tensor([0]),
-                    torch.tensor([0]), torch.tensor([0]),
+                    1,
+                    torch.tensor([0]),
+                    torch.tensor([0]),
+                    torch.tensor([0]),
+                    torch.tensor([0]),
                 )
                 is None
             )
@@ -246,18 +245,16 @@ class TestRunFusedPrecopy:
             # src col 0, dst col 1, token bias 2, request idx 0
             obj.run_fused_precopy(
                 1,
-                torch.tensor([1]),      # state_idx -> dst col
-                torch.tensor([0]),      # src col
-                torch.tensor([2]),      # token bias
-                torch.tensor([0]),      # idx mapping
+                torch.tensor([1]),  # state_idx -> dst col
+                torch.tensor([0]),  # src col
+                torch.tensor([2]),  # token bias
+                torch.tensor([0]),  # idx mapping
             )
 
             # block table row 0: src block = table[0, 0] = 1, dst = table[0, 1] = 2
             # conv: state[2][0:2] <- state[1][2:4] (token bias shift)
             conv_result = obj._kunlunxin_states[0].conv_states[0]
-            torch.testing.assert_close(
-                conv_result[2, :2], conv_pages[1, 2:4]
-            )
+            torch.testing.assert_close(conv_result[2, :2], conv_pages[1, 2:4])
             # untouched row keeps its original content
             torch.testing.assert_close(conv_result[0], conv_pages[0])
             # temporal src block = table[0, src+bias] = table[0, 2] = 3
@@ -301,17 +298,15 @@ class TestRunFusedPostprocessAlign:
     def test_zero_requests_and_uninitialized_return_early(self):
         with _mamba_align_applied() as cls:
             obj = _make_context(cls)
-            assert (
-                obj.run_fused_postprocess_align(
-                    0, None, None, None, None
-                )
-                is None
-            )
+            assert obj.run_fused_postprocess_align(0, None, None, None, None) is None
             obj2 = _make_context(cls, is_initialized=False)
             assert (
                 obj2.run_fused_postprocess_align(
-                    1, torch.tensor([1]), torch.tensor([1]),
-                    torch.tensor([1]), torch.tensor([0]),
+                    1,
+                    torch.tensor([1]),
+                    torch.tensor([1]),
+                    torch.tensor([1]),
+                    torch.tensor([0]),
                 )
                 is None
             )
@@ -332,8 +327,8 @@ class TestRunFusedPostprocessAlign:
                 ],
             )
             num_accepted = torch.tensor([1])
-            state_idx = torch.tensor([0])   # src col
-            computed = torch.tensor([5])    # new computed tokens
+            state_idx = torch.tensor([0])  # src col
+            computed = torch.tensor([5])  # new computed tokens
             idx_mapping = torch.tensor([0])
 
             obj.run_fused_postprocess_align(
@@ -376,9 +371,7 @@ class TestRunFusedPostprocessAlign:
             # but num_accepted is reset to 1 on the reset row (a no-op write)
             assert num_accepted.tolist() == [1]
             # states untouched (same-block, zero-bias copy is skipped)
-            torch.testing.assert_close(
-                conv, obj._kunlunxin_states[0].conv_states[0]
-            )
+            torch.testing.assert_close(conv, obj._kunlunxin_states[0].conv_states[0])
 
     @pytest.mark.platforms("kunlunxin")
     def test_cross_block_postprocess_copies_state(self):
@@ -425,7 +418,7 @@ class TestMaybeReduceVisionTp:
         # enter the vision TP scope
         token = vl_compat._vision_tp_scope.set(True)
         try:
-            partials = [
+            [
                 torch.tensor([0.1, 0.2], dtype=torch.bfloat16),
                 torch.tensor([0.3, 0.4], dtype=torch.bfloat16),
             ]
@@ -440,21 +433,16 @@ class TestMaybeReduceVisionTp:
 
                 def all_gather(self, tensor, dim=0):
                     # logical rank order gather
-                    return torch.cat(
-                        [tensor.float() for _ in range(4)], dim=0
-                    ).to(torch.bfloat16)
+                    return torch.cat([tensor.float() for _ in range(4)], dim=0).to(
+                        torch.bfloat16
+                    )
 
             comm = FakeComm()
             # the rank-ordered FP32 sum of four identical partials
             result = vl_compat.maybe_reduce_vision_tp(
                 comm, torch.tensor([0.25, 0.5], dtype=torch.bfloat16)
             )
-            expected = (
-                torch.tensor([0.25, 0.5])
-                .float()
-                .mul(4)
-                .to(torch.bfloat16)
-            )
+            expected = torch.tensor([0.25, 0.5]).float().mul(4).to(torch.bfloat16)
             assert result is not None
             assert result.dtype == torch.bfloat16
             torch.testing.assert_close(result, expected)
@@ -521,9 +509,7 @@ class TestInputBatchApplyPropagation:
         gpu_pkg.input_batch = input_batch
         try:
             input_batch_compat.apply_input_batch_compat()
-            assert getattr(
-                input_batch, input_batch_compat._PATCH_FLAG_LAUNCHERS, False
-            )
+            assert getattr(input_batch, input_batch_compat._PATCH_FLAG_LAUNCHERS, False)
             for name in (
                 "combine_sampled_and_draft_tokens",
                 "prepare_pos_seq_lens",
@@ -557,17 +543,13 @@ class TestInputBatchApplyPropagation:
                 else:
                     sys.modules[name] = entry
             if saved_mr_attr is None:
-                try:
+                with contextlib.suppress(AttributeError):
                     del gpu_pkg.model_runner
-                except AttributeError:
-                    pass
             else:
                 gpu_pkg.model_runner = saved_mr_attr
             if saved_ib_attr is None:
-                try:
+                with contextlib.suppress(AttributeError):
                     del gpu_pkg.input_batch
-                except AttributeError:
-                    pass
             else:
                 gpu_pkg.input_batch = saved_ib_attr
 
@@ -648,7 +630,10 @@ class TestBufferUtilsApplyWriteEmptyContent:
         obj._staged_write_cu_lens = [1, 1, 5, 8]
         obj._staged_write_contents = [
             11.0,
-            21.0, 22.0, 23.0, 24.0,
+            21.0,
+            22.0,
+            23.0,
+            24.0,
         ]
         cleared = []
         obj.clear_staged_writes = lambda: cleared.append(True)
@@ -676,9 +661,7 @@ class TestMambaHybridAllNegativeMapping:
             mamba_hybrid_compat,
         )
 
-        _scatter_num_accepted_torch = (
-            mamba_hybrid_compat._scatter_num_accepted_torch
-        )
+        _scatter_num_accepted_torch = mamba_hybrid_compat._scatter_num_accepted_torch
 
         num_accepted = torch.tensor([7, 7, 7], dtype=torch.int64)
         idx_mapping = torch.tensor([-1, -1, -1], dtype=torch.int64)
@@ -696,9 +679,7 @@ class TestMambaHybridAllNegativeMapping:
             mamba_hybrid_compat,
         )
 
-        _fill_num_accepted_torch = (
-            mamba_hybrid_compat._fill_num_accepted_torch
-        )
+        _fill_num_accepted_torch = mamba_hybrid_compat._fill_num_accepted_torch
 
         num_accepted = torch.tensor([9, 9], dtype=torch.int64)
         idx_mapping = torch.tensor([-1, -1], dtype=torch.int64)
@@ -715,9 +696,7 @@ class TestMambaHybridAllNegativeMapping:
             mamba_hybrid_compat,
         )
 
-        _scatter_num_accepted_torch = (
-            mamba_hybrid_compat._scatter_num_accepted_torch
-        )
+        _scatter_num_accepted_torch = mamba_hybrid_compat._scatter_num_accepted_torch
 
         num_accepted = torch.zeros(2, dtype=torch.int64)
         idx_mapping = torch.tensor([-1, 1], dtype=torch.int64)
@@ -820,9 +799,7 @@ class TestMambaAlignUniformSpecsUnpacking:
                 ]
             )
             forward_context = {
-                "mamba.layer": SimpleNamespace(
-                    kv_cache=[conv_state, temporal_state]
-                ),
+                "mamba.layer": SimpleNamespace(kv_cache=[conv_state, temporal_state]),
             }
 
             from vllm.model_executor.layers.mamba.mamba_utils import (
@@ -857,6 +834,4 @@ class TestMambaAlignUniformSpecsUnpacking:
             groups = obj._kunlunxin_states
             assert len(groups) == 1
             torch.testing.assert_close(groups[0].conv_states[0], conv_state)
-            torch.testing.assert_close(
-                groups[0].temporal_states[0], temporal_state
-            )
+            torch.testing.assert_close(groups[0].temporal_states[0], temporal_state)

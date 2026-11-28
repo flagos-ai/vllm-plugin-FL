@@ -214,6 +214,7 @@ class TestAttentionBackendPath:
             reason="vLLM attention registry required for the fallback path",
         )
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
         from vllm_fl.dispatch.backends.vendor.thead.thead import TheadBackend
 
         expected = AttentionBackendEnum.FLASH_ATTN.get_path()

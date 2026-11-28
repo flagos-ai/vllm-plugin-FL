@@ -78,9 +78,7 @@ def single_card_comm(tmp_path_factory):
 
     store_path = tmp_path_factory.mktemp("iluvatar_comm") / f"gloo-{uuid.uuid4().hex}"
     store = dist.FileStore(str(store_path), world_size=1)
-    dist.init_process_group(
-        backend="gloo", store=store, rank=0, world_size=1
-    )
+    dist.init_process_group(backend="gloo", store=store, rank=0, world_size=1)
     group = dist.group.WORLD
     device = _device()
     comm = IluvatarCommunicatorFL(

@@ -129,9 +129,7 @@ def test_huge_device_is_clamped_to_the_requested_4_gib(monkeypatch):
     # one huge card does not lock 30% of the budget away from the KV cache.
     query = _stub_platform(monkeypatch, 100 * GIB)
 
-    headroom = hygon_worker.cudagraph_memory_headroom(
-        _config(CUDAGraphMode.PIECEWISE)
-    )
+    headroom = hygon_worker.cudagraph_memory_headroom(_config(CUDAGraphMode.PIECEWISE))
 
     assert headroom == 4294967296  # 4 GiB exactly, not 32 GiB
     assert isinstance(headroom, int)
@@ -144,9 +142,7 @@ def test_six_gib_device_cap_wins_at_1_8_gib(monkeypatch):
     # small card keeps 70% of its memory for the KV cache.
     query = _stub_platform(monkeypatch, 6 * GIB)
 
-    headroom = hygon_worker.cudagraph_memory_headroom(
-        _config(CUDAGraphMode.PIECEWISE)
-    )
+    headroom = hygon_worker.cudagraph_memory_headroom(_config(CUDAGraphMode.PIECEWISE))
 
     assert headroom == int(6 * GIB * 0.3)  # 1932735283 bytes
     assert headroom == 1932735283

@@ -361,7 +361,14 @@ class TestOpDelegation:
 
     @pytest.mark.platforms("kunlunxin")
     @pytest.mark.parametrize(
-        ("method", "impl_module", "impl_function", "args", "call_kwargs", "forwarded_kwargs"),
+        (
+            "method",
+            "impl_module",
+            "impl_function",
+            "args",
+            "call_kwargs",
+            "forwarded_kwargs",
+        ),
         _DELEGATION_CASES,
     )
     def test_op_method_delegates_to_impl_function(

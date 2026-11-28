@@ -39,8 +39,7 @@ GIB = 1 << 30
 
 def test_count_nans_per_row_counts_only_last_dim():
     logits = torch.tensor(
-        [[float("nan"), 1.0, 2.0], [0.0, float("nan"), float("nan")],
-         [0.0, 1.0, 2.0]]
+        [[float("nan"), 1.0, 2.0], [0.0, float("nan"), float("nan")], [0.0, 1.0, 2.0]]
     )
     counts = MR.count_nans_per_row(logits)
     assert counts.tolist() == [1, 2, 0]
@@ -201,9 +200,7 @@ def test_kl_guard_on_reads_current_platform_vendor(monkeypatch):
     assert MR.ModelRunnerFL._kl_guard_on(instance) is False
 
     # Missing vendor_name attribute must not raise (getattr default).
-    monkeypatch.setattr(
-        MR, "current_platform", NS(device_type="cuda"), raising=False
-    )
+    monkeypatch.setattr(MR, "current_platform", NS(device_type="cuda"), raising=False)
     assert MR.ModelRunnerFL._kl_guard_on(instance) is False
 
 
@@ -250,11 +247,11 @@ def test_kl_filter_descs_budget_is_min_of_30pct_total_75pct_free(monkeypatch):
 @pytest.mark.parametrize(
     "used,budget,pre_stopped,expected_stop,expected_result",
     [
-        (0, 100, False, False, "same"),       # under budget, no stop
-        (99, 100, False, False, "same"),      # just under budget
-        (100, 100, False, True, []),          # at budget -> stop
-        (150, 100, False, True, []),          # over budget -> stop
-        (10, 100, True, True, []),           # pre-stopped flag wins
+        (0, 100, False, False, "same"),  # under budget, no stop
+        (99, 100, False, False, "same"),  # just under budget
+        (100, 100, False, True, []),  # at budget -> stop
+        (150, 100, False, True, []),  # over budget -> stop
+        (10, 100, True, True, []),  # pre-stopped flag wins
     ],
 )
 def test_kl_filter_descs_stop_semantics(
@@ -439,8 +436,7 @@ def test_update_max_model_len_updates_drafter_len_only_when_unset():
     assert instance.max_model_len == 256
 
     # Draft config without its own max_model_len inherits the new length.
-    instance.speculative_config = NS(
-        draft_model_config=NS(max_model_len=None))
+    instance.speculative_config = NS(draft_model_config=NS(max_model_len=None))
     MR.ModelRunnerFL.update_max_model_len(instance, 512)
     assert instance.max_model_len == 512
     assert instance.effective_drafter_max_model_len == 512
@@ -451,8 +447,7 @@ def test_update_max_model_len_preserves_drafter_len_when_configured():
     instance.max_model_len = 128
     # An explicit drafter max_model_len is preserved: the assignment only
     # runs on the `is None or draft_config is None` branch.
-    instance.speculative_config = NS(
-        draft_model_config=NS(max_model_len=64))
+    instance.speculative_config = NS(draft_model_config=NS(max_model_len=64))
     MR.ModelRunnerFL.update_max_model_len(instance, 1024)
     assert instance.max_model_len == 1024
     # effective_drafter_max_model_len was never reassigned by the method.
@@ -484,10 +479,13 @@ def test_get_positions_routes_int_tensor_and_mrope():
 
     instance.uses_mrope = True
     instance.mrope_positions = NS(
-        gpu=torch.arange(300, dtype=torch.int64).reshape(3, 100))
+        gpu=torch.arange(300, dtype=torch.int64).reshape(3, 100)
+    )
     assert MR.ModelRunnerFL._get_positions(instance, 4).shape == (3, 4)
-    assert MR.ModelRunnerFL._get_positions(
-        instance, torch.tensor([9, 1])).shape == (3, 2)
+    assert MR.ModelRunnerFL._get_positions(instance, torch.tensor([9, 1])).shape == (
+        3,
+        2,
+    )
 
 
 def test_make_buffer_builds_cpu_gpu_buffer_on_cpu(monkeypatch):
@@ -496,9 +494,7 @@ def test_make_buffer_builds_cpu_gpu_buffer_on_cpu(monkeypatch):
     # allocator, so swap the keyword default for the duration of the check.
     from vllm.v1.utils import CpuGpuBuffer
 
-    monkeypatch.setitem(
-        CpuGpuBuffer.__init__.__kwdefaults__, "pin_memory", False
-    )
+    monkeypatch.setitem(CpuGpuBuffer.__init__.__kwdefaults__, "pin_memory", False)
     import vllm.v1.utils as v1u
 
     monkeypatch.setattr(v1u, "PIN_MEMORY", False)
@@ -514,7 +510,8 @@ def test_make_buffer_builds_cpu_gpu_buffer_on_cpu(monkeypatch):
 
     # numpy=False keeps a torch-only buffer (bfloat16-style allocation).
     buf2 = MR.ModelRunnerFL._make_buffer(
-        instance, 4, 2, dtype=torch.float32, numpy=False)
+        instance, 4, 2, dtype=torch.float32, numpy=False
+    )
     assert not hasattr(buf2, "np")
     assert buf2.cpu.shape == (4, 2)
 
@@ -606,8 +603,7 @@ def test_process_encoder_cache_scheduler_output_pops_hashes():
     instance = object.__new__(MR.ModelRunnerFL)
     instance.encoder_cache = {"h1": 1, "h2": 2}
     scheduler_output = NS(free_encoder_mm_hashes=["h1"])
-    MR.ModelRunnerFL._process_encoder_cache_scheduler_output(
-        instance, scheduler_output)
+    MR.ModelRunnerFL._process_encoder_cache_scheduler_output(instance, scheduler_output)
     assert instance.encoder_cache == {"h2": 2}
 
 

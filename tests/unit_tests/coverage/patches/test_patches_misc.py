@@ -25,13 +25,13 @@ tests are order-independent.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import logging
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-import numpy as np
 import pytest
 import torch
 
@@ -202,7 +202,9 @@ class TestExponentialCompat:
         """The fallback warning is emitted once per module, not per call."""
         compat.apply_exponential_compat()
 
-        with caplog.at_level(logging.WARNING, logger="supp_exponential_compat_under_test"):
+        with caplog.at_level(
+            logging.WARNING, logger="supp_exponential_compat_under_test"
+        ):
             for _ in range(3):
                 tensor = torch.full((2,), 0.5, dtype=torch.float64)
                 tensor.exponential_(generator=torch.Generator().manual_seed(1))
@@ -354,9 +356,7 @@ class TestFlagtreeTargetInfo:
                 f"{name}() for arch={arch}: expected {expected}, got {predicate()}"
             )
 
-    def test_non_hip_target_disables_every_predicate(
-        self, flagtree, fake_target_info
-    ):
+    def test_non_hip_target_disables_every_predicate(self, flagtree, fake_target_info):
         """A CUDA/CPU target makes every added predicate False even on gfx names."""
         fake_target_info.arch = "gfx942"
         fake_target_info.is_hip_returns = False
@@ -413,9 +413,7 @@ class TestFlagtreeTargetInfo:
         assert flagtree.apply_flagtree_target_info() is False
         assert any(level == "debug" for level, _ in flagtree.logger.records)
 
-    def test_current_target_failure_yields_empty_arch(
-        self, flagtree, fake_target_info
-    ):
+    def test_current_target_failure_yields_empty_arch(self, flagtree, fake_target_info):
         """A raising current_target makes predicates False instead of crashing."""
 
         def broken_target():
@@ -450,7 +448,9 @@ class TestFlagtreeTargetInfo:
         second = flagtree.apply_flagtree_target_info()
 
         assert first is True and second is True
-        infos = [message for level, message in flagtree.logger.records if level == "info"]
+        infos = [
+            message for level, message in flagtree.logger.records if level == "info"
+        ]
         assert len(infos) == 1, "info log must be emitted once despite the lru_cache"
         assert "7 architecture predicate(s)" in infos[0]
         assert "is_hip_gfx1250" in infos[0]
@@ -501,10 +501,8 @@ class TestFlaModuleRelocation:
         sys.modules.pop(self._OLD + ".ops", None)
         layers = sys.modules.get("vllm.model_executor.layers")
         if layers is not None and hasattr(layers, "fla"):
-            try:
+            with contextlib.suppress(AttributeError):
                 delattr(layers, "fla")
-            except AttributeError:  # pragma: no cover - defensive
-                pass
 
     def test_noop_when_old_package_exists(self, fla, monkeypatch):
         """vLLM <= 0.24 ships the real ...layers.fla: leave it alone."""
@@ -524,7 +522,9 @@ class TestFlaModuleRelocation:
         monkeypatch.setattr(fla, "_module_exists", lambda name: name != self._NEW)
         layers = _fake_pkg("vllm.model_executor.layers")
         monkeypatch.setitem(sys.modules, "vllm", _fake_pkg("vllm"))
-        monkeypatch.setitem(sys.modules, "vllm.model_executor", _fake_pkg("vllm.model_executor"))
+        monkeypatch.setitem(
+            sys.modules, "vllm.model_executor", _fake_pkg("vllm.model_executor")
+        )
         monkeypatch.setitem(sys.modules, "vllm.model_executor.layers", layers)
         # The old prefix is genuinely absent (parent has an empty path so the
         # finders cannot locate a child) and the new prefix is absent too.
@@ -541,10 +541,14 @@ class TestFlaModuleRelocation:
         ops_pkg = _fake_pkg(self._NEW + ".ops")
         layers_pkg = _fake_pkg("vllm.model_executor.layers")
         monkeypatch.setitem(sys.modules, "vllm", _fake_pkg("vllm"))
-        monkeypatch.setitem(sys.modules, "vllm.third_party", _fake_pkg("vllm.third_party"))
+        monkeypatch.setitem(
+            sys.modules, "vllm.third_party", _fake_pkg("vllm.third_party")
+        )
         monkeypatch.setitem(sys.modules, self._NEW, new_pkg)
         monkeypatch.setitem(sys.modules, self._NEW + ".ops", ops_pkg)
-        monkeypatch.setitem(sys.modules, "vllm.model_executor", _fake_pkg("vllm.model_executor"))
+        monkeypatch.setitem(
+            sys.modules, "vllm.model_executor", _fake_pkg("vllm.model_executor")
+        )
         monkeypatch.setitem(sys.modules, "vllm.model_executor.layers", layers_pkg)
         # A live session may already carry old-prefix alias entries (the
         # kunlunxin plugin installs them at vllm import). install() is a
@@ -734,9 +738,7 @@ class TestWithoutKCacheEvictionHint:
 
     def test_returns_none_when_already_patched(self, qsa):
         """A source without the hint reports None (already fixed)."""
-        assert (
-            qsa._without_k_cache_eviction_hint(_FakeQsaKernel(_UNHINTED_SRC)) is None
-        )
+        assert qsa._without_k_cache_eviction_hint(_FakeQsaKernel(_UNHINTED_SRC)) is None
 
     def test_rejects_missing_k_cache_load(self, qsa):
         """Zero matching K-cache loads raise the revalidation error."""
@@ -783,9 +785,7 @@ class _QsaPatchEnv:
         self.kernels = {
             name: _FakeQsaKernel(_HINTED_SRC) for name in qsa_kernel_names()
         }
-        self.qsa_indexer = ModuleType(
-            "vllm.models.qwen4_exp.nvidia.ops.qsa_indexer"
-        )
+        self.qsa_indexer = ModuleType("vllm.models.qwen4_exp.nvidia.ops.qsa_indexer")
         for name, kernel in self.kernels.items():
             setattr(self.qsa_indexer, name, kernel)
 
@@ -797,9 +797,7 @@ class _QsaPatchEnv:
         parent = ModuleType("vllm.models.qwen4_exp.nvidia.ops")
         parent.__path__ = []
         monkeypatch.setitem(sys.modules, "vllm", vllm_pkg)
-        monkeypatch.setitem(
-            sys.modules, "vllm.models.qwen4_exp.nvidia.ops", parent
-        )
+        monkeypatch.setitem(sys.modules, "vllm.models.qwen4_exp.nvidia.ops", parent)
         monkeypatch.setitem(
             sys.modules,
             "vllm.models.qwen4_exp.nvidia.ops.qsa_indexer",
@@ -948,7 +946,7 @@ class TestPatchQsaCacheHintGates:
 @pytest.fixture
 def arm_gdn(monkeypatch):
     """Load the ARM CPU GDN patch module with a plain logging logger."""
-    logger = _FakeLogger()
+    _FakeLogger()
     vllm_stub = ModuleType("vllm")
     vllm_stub.__path__ = []
     gdn_attn = ModuleType("vllm.v1.attention.backends.gdn_attn")
@@ -967,9 +965,7 @@ def arm_gdn(monkeypatch):
                 "vllm": vllm_stub,
                 "vllm.v1": ModuleType("vllm.v1"),
                 "vllm.v1.attention": ModuleType("vllm.v1.attention"),
-                "vllm.v1.attention.backends": ModuleType(
-                    "vllm.v1.attention.backends"
-                ),
+                "vllm.v1.attention.backends": ModuleType("vllm.v1.attention.backends"),
                 "vllm.v1.attention.backends.gdn_attn": gdn_attn,
             },
         ),

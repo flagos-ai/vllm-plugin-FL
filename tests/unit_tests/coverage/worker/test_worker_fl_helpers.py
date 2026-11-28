@@ -22,9 +22,9 @@ CPU-only checks (stub doubles; no accelerator or distributed init):
 """
 
 from __future__ import annotations
+import __future__
 
 import ast
-import __future__
 from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
@@ -172,9 +172,7 @@ class TestIsHybridKvModel:
 
 
 def test_apply_worker_vendor_patches_noop_outside_iluvatar(monkeypatch):
-    monkeypatch.setattr(
-        worker_mod.current_platform, "vendor_name", "kunlunxin"
-    )
+    monkeypatch.setattr(worker_mod.current_platform, "vendor_name", "kunlunxin")
     # Must not import the iluvatar vendor module.
     import sys
 
@@ -207,7 +205,6 @@ def test_apply_worker_vendor_patches_swallows_import_errors(monkeypatch):
     def broken_import():
         raise ImportError("vendor stack missing")
 
-    real_import = __import__
     monkeypatch.setitem(
         sys.modules, "vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar", None
     )
@@ -241,12 +238,12 @@ def test_async_intermediate_tensors_waits_for_handles():
     post = Mock()
     ait = _ait({"t": object()}, handles=[handle_a, handle_b], postprocess=[post])
     # First access to .tensors waits on both handles and runs postprocess.
-    ait.tensors
+    assert ait.tensors is not None
     handle_a.wait.assert_called_once_with()
     handle_b.wait.assert_called_once_with()
     post.assert_called_once_with()
     # Second access: waits are not repeated.
-    ait.tensors
+    assert ait.tensors is not None
     handle_a.wait.assert_called_once_with()
     post.assert_called_once_with()
 
@@ -372,9 +369,7 @@ class TestWeightTransferSession:
             supports_draft_weight_update=True,
             update_weights=Mock(side_effect=RuntimeError("oom")),
         )
-        worker = _worker(
-            weight_transfer_engine=engine, _weight_update_active=True
-        )
+        worker = _worker(weight_transfer_engine=engine, _weight_update_active=True)
         with pytest.raises(RuntimeError, match="oom"):
             worker.update_weights({"chunk": 1})
         assert worker._weight_update_active is False
@@ -545,12 +540,8 @@ def test_get_kv_connector_handshake_metadata_variants(monkeypatch):
         "get_kv_transfer_group",
         lambda: NS(get_handshake_metadata=lambda: metadata),
     )
-    monkeypatch.setattr(
-        worker_mod, "get_pp_group", lambda: NS(rank_in_group=1)
-    )
-    monkeypatch.setattr(
-        worker_mod, "get_tp_group", lambda: NS(rank_in_group=2)
-    )
+    monkeypatch.setattr(worker_mod, "get_pp_group", lambda: NS(rank_in_group=1))
+    monkeypatch.setattr(worker_mod, "get_tp_group", lambda: NS(rank_in_group=2))
     assert worker.get_kv_connector_handshake_metadata() == {(1, 2): metadata}
 
 
@@ -588,13 +579,12 @@ def test_determine_available_memory_txda_budget(monkeypatch):
     )
     runner = NS(
         device="txda:0",
-        cache_config=NS(
-            kv_cache_memory_bytes=None, gpu_memory_utilization=0.8
-        ),
+        cache_config=NS(kv_cache_memory_bytes=None, gpu_memory_utilization=0.8),
         init_snapshot=NS(total_memory=0, free_memory=0),
         requested_memory=0,
         model_runner=NS(
-            model_memory_usage=0, profile_run=Mock(),
+            model_memory_usage=0,
+            profile_run=Mock(),
         ),
         vllm_config=NS(compilation_config=NS(cudagraph_mode=object())),
         model_config=NS(multimodal_config=object()),
@@ -634,9 +624,7 @@ def test_determine_available_memory_txda_env_override(monkeypatch):
     )
     runner = NS(
         device="txda:0",
-        cache_config=NS(
-            kv_cache_memory_bytes=None, gpu_memory_utilization=0.8
-        ),
+        cache_config=NS(kv_cache_memory_bytes=None, gpu_memory_utilization=0.8),
         init_snapshot=NS(total_memory=0, free_memory=0),
         requested_memory=0,
         model_runner=NS(model_memory_usage=0, profile_run=Mock()),
@@ -670,14 +658,14 @@ def test_determine_available_memory_txda_rejects_bad_env(monkeypatch):
     monkeypatch.setenv("VLLM_TXDA_KV_CACHE_SIZE", "not-a-number")
 
     profile = NS(
-        total_consumed=0, transient_peak_headroom=0, non_kv_cache_memory=0,
+        total_consumed=0,
+        transient_peak_headroom=0,
+        non_kv_cache_memory=0,
         after_profile=NS(free_memory=0),
     )
     runner = NS(
         device="txda:0",
-        cache_config=NS(
-            kv_cache_memory_bytes=None, gpu_memory_utilization=0.8
-        ),
+        cache_config=NS(kv_cache_memory_bytes=None, gpu_memory_utilization=0.8),
         init_snapshot=NS(total_memory=0, free_memory=0),
         requested_memory=0,
         model_runner=NS(model_memory_usage=0, profile_run=Mock()),
@@ -712,14 +700,14 @@ def test_determine_available_memory_txda_rejects_nonpositive(monkeypatch):
     monkeypatch.setenv("VLLM_TXDA_KV_CACHE_SIZE", "0")
 
     profile = NS(
-        total_consumed=0, transient_peak_headroom=0, non_kv_cache_memory=0,
+        total_consumed=0,
+        transient_peak_headroom=0,
+        non_kv_cache_memory=0,
         after_profile=NS(free_memory=0),
     )
     runner = NS(
         device="txda:0",
-        cache_config=NS(
-            kv_cache_memory_bytes=None, gpu_memory_utilization=0.8
-        ),
+        cache_config=NS(kv_cache_memory_bytes=None, gpu_memory_utilization=0.8),
         init_snapshot=NS(total_memory=0, free_memory=0),
         requested_memory=0,
         model_runner=NS(model_memory_usage=0, profile_run=Mock()),
@@ -791,9 +779,7 @@ class TestWorkerExecuteModel:
             use_v2_model_runner=False,
             _pp_send_work=[],
             annotate_profile=lambda _: nullcontext(),
-            vllm_config=NS(
-                parallel_config=NS(distributed_executor_backend="mp")
-            ),
+            vllm_config=NS(parallel_config=NS(distributed_executor_backend="mp")),
         ), group
 
     def test_first_rank_empty_output_returns_output(self, monkeypatch):
@@ -855,7 +841,6 @@ class TestWorkerProfile:
             worker.profile(is_start=True, profile_prefix="trace")
 
     def test_torch_profiler_started_and_stopped(self, monkeypatch):
-        from vllm.profiler.wrapper import TorchProfilerWrapper
 
         worker = _worker()
         worker.profiler_config = NS(profiler="torch")
@@ -913,31 +898,21 @@ def test_shutdown_releases_every_layer(monkeypatch):
     runner.shutdown = lambda: events.append("runner")
     worker = _worker(model_runner=runner)
     worker.profiler = Mock(shutdown=lambda: events.append("profiler"))
-    worker.weight_transfer_engine = Mock(
-        shutdown=lambda: events.append("weights")
-    )
+    worker.weight_transfer_engine = Mock(shutdown=lambda: events.append("weights"))
     # CPU platform: no CuMem pool release branch.
-    monkeypatch.setattr(
-        worker_mod.current_platform, "is_cuda_alike", lambda: False
-    )
+    monkeypatch.setattr(worker_mod.current_platform, "is_cuda_alike", lambda: False)
     worker.shutdown()
     # Order: kv, ec, profiler, weights, runner.
     assert events == ["kv", "ec", "profiler", "weights", "runner"]
 
 
 def test_shutdown_tolerates_missing_attributes(monkeypatch):
-    monkeypatch.setattr(
-        worker_mod, "ensure_kv_transfer_shutdown", lambda: None
-    )
-    monkeypatch.setattr(
-        worker_mod, "ensure_ec_transfer_shutdown", lambda: None
-    )
+    monkeypatch.setattr(worker_mod, "ensure_kv_transfer_shutdown", lambda: None)
+    monkeypatch.setattr(worker_mod, "ensure_ec_transfer_shutdown", lambda: None)
     worker = _worker()
     del worker.weight_transfer_engine
     del worker.model_runner
-    monkeypatch.setattr(
-        worker_mod.current_platform, "is_cuda_alike", lambda: False
-    )
+    monkeypatch.setattr(worker_mod.current_platform, "is_cuda_alike", lambda: False)
     worker.shutdown()  # must not raise
 
 
@@ -946,8 +921,13 @@ def test_shutdown_tolerates_missing_attributes(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _warmup_method(monkeypatch, device_type="cuda", vendor="nvidia",
-                   npu_device=False, enable_jit_warmup=True):
+def _warmup_method(
+    monkeypatch,
+    device_type="cuda",
+    vendor="nvidia",
+    npu_device=False,
+    enable_jit_warmup=True,
+):
     """ast-extract compile_or_warm_up_model with stub dependencies.
 
     The method body resolves ``kernel_warmup`` / ``activate_jit_monitor`` /
@@ -965,14 +945,12 @@ def _warmup_method(monkeypatch, device_type="cuda", vendor="nvidia",
     )
     import vllm.utils.jit_monitor as jm
 
-    real_activate = jm.activate
-
     def record_activate(mode=None, verbose=False):
         activated.append("jit")
 
     monkeypatch.setattr(jm, "activate", record_activate)
 
-    from vllm.config import CUDAGraphMode, CompilationMode
+    from vllm.config import CompilationMode
 
     runner = NS(
         _dummy_run=Mock(return_value=("hidden", "last-hidden")),
@@ -1002,14 +980,10 @@ def _warmup_method(monkeypatch, device_type="cuda", vendor="nvidia",
         vllm_config=NS(
             compilation_config=NS(mode=CompilationMode.NONE),
             kernel_config=NS(enable_jit_warmup=enable_jit_warmup),
-            observability_config=NS(
-                jit_monitor_mode="off", jit_monitor_verbose=False
-            ),
+            observability_config=NS(jit_monitor_mode="off", jit_monitor_verbose=False),
         ),
         parallel_config=NS(tensor_parallel_size=1),
-        observability_config=NS(
-            jit_monitor_mode="off", jit_monitor_verbose=False
-        ),
+        observability_config=NS(jit_monitor_mode="off", jit_monitor_verbose=False),
         model_runner=runner,
         execute_model=Mock(),
         sample_tokens=Mock(),
@@ -1026,9 +1000,7 @@ def _warmup_method(monkeypatch, device_type="cuda", vendor="nvidia",
     )
     import vllm.utils.torch_utils as torch_utils
 
-    monkeypatch.setattr(
-        torch_utils, "set_torch_threads_for_runtime", lambda: None
-    )
+    monkeypatch.setattr(torch_utils, "set_torch_threads_for_runtime", lambda: None)
 
     namespace = dict(worker_mod.__dict__)
     method = _method("WorkerFL", "compile_or_warm_up_model", namespace)

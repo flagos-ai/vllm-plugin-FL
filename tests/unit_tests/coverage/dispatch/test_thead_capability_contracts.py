@@ -225,9 +225,7 @@ class TestSupportsCombination:
 
     def test_sink_is_refused(self, thead_attention):
         module, _ = thead_attention
-        reason = self._combination(
-            module.TheadFlashAttentionBackend, has_sink=True
-        )
+        reason = self._combination(module.TheadFlashAttentionBackend, has_sink=True)
         assert reason == "sink not supported on PPU (CC < 9.0)"
 
     def test_mla_is_refused(self, thead_attention):
@@ -237,19 +235,17 @@ class TestSupportsCombination:
 
     def test_sparse_is_refused(self, thead_attention):
         module, _ = thead_attention
-        reason = self._combination(
-            module.TheadFlashAttentionBackend, use_sparse=True
+        reason = self._combination(module.TheadFlashAttentionBackend, use_sparse=True)
+        assert (
+            reason == "sparse attention not supported in thead flash attention backend"
         )
-        assert reason == "sparse attention not supported in thead flash attention backend"
 
     def test_mm_prefix_is_refused(self, thead_attention):
         module, _ = thead_attention
         reason = self._combination(
             module.TheadFlashAttentionBackend, use_mm_prefix=True
         )
-        assert reason == (
-            "multimodal prefix masks require FA4, unavailable on PPU FA3"
-        )
+        assert reason == ("multimodal prefix masks require FA4, unavailable on PPU FA3")
 
     def test_quantized_kv_cache_dtypes_are_refused(self, thead_attention):
         """Everything except None/auto/float16/bfloat16 is refused, with the
@@ -267,9 +263,9 @@ class TestSupportsCombination:
         module, _ = thead_attention
         backend = module.TheadFlashAttentionBackend
         for kv_cache_dtype in (None, "auto", "float16", "bfloat16"):
-            assert self._combination(
-                backend, kv_cache_dtype=kv_cache_dtype
-            ) is None, f"kv_cache_dtype={kv_cache_dtype!r} must be supported"
+            assert self._combination(backend, kv_cache_dtype=kv_cache_dtype) is None, (
+                f"kv_cache_dtype={kv_cache_dtype!r} must be supported"
+            )
 
 
 class TestSupportsComputeCapability:
@@ -379,26 +375,20 @@ class TestCacheMetadataValidation:
         args = _writer_args(
             key, key, cache, cache, torch.zeros(1, dtype=torch.int64), "fp8"
         )
-        with pytest.raises(
-            NotImplementedError, match="do not support cache dtype"
-        ):
+        with pytest.raises(NotImplementedError, match="do not support cache dtype"):
             cache_writer(*args)
 
     def test_two_dimensional_keys_are_rejected(self, cache_writer):
         key = torch.zeros((2, 3), dtype=torch.float16)
         cache = torch.zeros((1, 4, 1, 4), dtype=torch.float16)
-        args = _writer_args(
-            key, key, cache, cache, torch.zeros(1, dtype=torch.int64)
-        )
+        args = _writer_args(key, key, cache, cache, torch.zeros(1, dtype=torch.int64))
         with pytest.raises(ValueError, match=r"shape \[tokens, heads, dim\]"):
             cache_writer(*args)
 
     def test_non_4d_cache_is_rejected(self, cache_writer):
         key = torch.zeros((2, 1, 4), dtype=torch.float16)
         cache = torch.zeros((4, 1, 4), dtype=torch.float16)
-        args = _writer_args(
-            key, key, cache, cache, torch.zeros(2, dtype=torch.int64)
-        )
+        args = _writer_args(key, key, cache, cache, torch.zeros(2, dtype=torch.int64))
         with pytest.raises(ValueError, match=r"\[blocks, block_size, heads, dim\]"):
             cache_writer(*args)
 
@@ -409,23 +399,17 @@ class TestCacheMetadataValidation:
             torch.zeros(2, dtype=torch.float32),  # non-integer
         ],
     )
-    def test_slot_mapping_shape_and_dtype_are_rejected(
-        self, cache_writer, slot_tensor
-    ):
+    def test_slot_mapping_shape_and_dtype_are_rejected(self, cache_writer, slot_tensor):
         key = torch.zeros((2, 1, 4), dtype=torch.float16)
         cache = torch.zeros((1, 4, 1, 4), dtype=torch.float16)
         args = _writer_args(key, key, cache, cache, slot_tensor)
-        with pytest.raises(
-            ValueError, match="one-dimensional integer tensor"
-        ):
+        with pytest.raises(ValueError, match="one-dimensional integer tensor"):
             cache_writer(*args)
 
     def test_slot_count_above_token_count_is_rejected(self, cache_writer):
         key = torch.zeros((2, 1, 4), dtype=torch.float16)
         cache = torch.zeros((1, 4, 1, 4), dtype=torch.float16)
-        args = _writer_args(
-            key, key, cache, cache, torch.zeros(5, dtype=torch.int64)
-        )
+        args = _writer_args(key, key, cache, cache, torch.zeros(5, dtype=torch.int64))
         with pytest.raises(ValueError, match="cannot exceed"):
             cache_writer(*args)
 
@@ -433,9 +417,7 @@ class TestCacheMetadataValidation:
         key = torch.zeros((2, 2, 4), dtype=torch.float16)
         value = torch.zeros((2, 3, 4), dtype=torch.float16)
         cache = torch.zeros((1, 4, 2, 4), dtype=torch.float16)
-        args = _writer_args(
-            key, value, cache, cache, torch.zeros(2, dtype=torch.int64)
-        )
+        args = _writer_args(key, value, cache, cache, torch.zeros(2, dtype=torch.int64))
         with pytest.raises(ValueError, match="same heads and head size"):
             cache_writer(*args)
 
@@ -444,18 +426,14 @@ class TestCacheMetadataValidation:
         value = torch.zeros((2, 2, 4), dtype=torch.float16)
         cache = torch.zeros((2, 4, 2, 4), dtype=torch.float16)
         other = torch.zeros((1, 4, 2, 4), dtype=torch.float16)
-        args = _writer_args(
-            key, value, cache, other, torch.zeros(2, dtype=torch.int64)
-        )
+        args = _writer_args(key, value, cache, other, torch.zeros(2, dtype=torch.int64))
         with pytest.raises(ValueError, match="must match their source heads"):
             cache_writer(*args)
 
     def test_zero_block_size_is_rejected(self, cache_writer):
         key = torch.zeros((2, 1, 4), dtype=torch.float16)
         cache = torch.zeros((1, 0, 1, 4), dtype=torch.float16)
-        args = _writer_args(
-            key, key, cache, cache, torch.zeros(2, dtype=torch.int64)
-        )
+        args = _writer_args(key, key, cache, cache, torch.zeros(2, dtype=torch.int64))
         with pytest.raises(ValueError, match="must be positive"):
             cache_writer(*args)
 
@@ -463,9 +441,7 @@ class TestCacheMetadataValidation:
         """Non FP16/BF16 tensors are refused before any device access."""
         key = torch.zeros((2, 1, 4), dtype=torch.float32)
         cache = torch.zeros((1, 4, 1, 4), dtype=torch.float32)
-        args = _writer_args(
-            key, key, cache, cache, torch.zeros(2, dtype=torch.int64)
-        )
+        args = _writer_args(key, key, cache, cache, torch.zeros(2, dtype=torch.int64))
         with pytest.raises(NotImplementedError, match="FP16 or BF16"):
             cache_writer(*args)
 

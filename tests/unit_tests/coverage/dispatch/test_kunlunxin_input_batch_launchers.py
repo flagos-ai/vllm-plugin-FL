@@ -39,7 +39,6 @@ from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.input_batch_compat impor
     _make_prepare_prefill_inputs_torch,
 )
 
-
 # ---------------------------------------------------------------------------
 # _make_prepare_pos_seq_lens_torch
 # ---------------------------------------------------------------------------
@@ -50,9 +49,7 @@ class TestPreparePosSeqLens:
         fn = _make_prepare_pos_seq_lens_torch()
         # 3 active requests (rows 0-2) padded to 5 total slots
         idx_mapping = torch.tensor([2, 0, 4, -1, -1], dtype=torch.int64)
-        query_start_loc = torch.tensor(
-            [0, 2, 5, 5, 5, 5], dtype=torch.int32
-        )
+        query_start_loc = torch.tensor([0, 2, 5, 5, 5, 5], dtype=torch.int32)
         num_computed_tokens = torch.tensor([7, 3, 0, 0, 0], dtype=torch.int64)
         pos = torch.full((5,), -99, dtype=torch.int64)
         seq_lens = torch.tensor([1, 1, 1, 1, 1], dtype=torch.int64)
@@ -166,16 +163,12 @@ class TestPostUpdate:
         idx_mapping = torch.tensor([0, 1], dtype=torch.int64)
         num_computed_tokens = torch.tensor([2, 1], dtype=torch.int64)
         last_sampled = torch.tensor([99, 88], dtype=torch.int64)
-        output_bin_counts = (
-            torch.zeros(2, 10, dtype=torch.int64) if with_bins else None
-        )
+        output_bin_counts = torch.zeros(2, 10, dtype=torch.int64) if with_bins else None
         sampled_tokens = torch.tensor([[5, 6, 7], [3, 0, 0]], dtype=torch.int64)
         num_sampled = torch.tensor([3, 1], dtype=torch.int64)
         num_rejected = torch.tensor([1, 0], dtype=torch.int64)
         query_start_loc = (
-            torch.tensor([0, 4, 5], dtype=torch.int32)
-            if with_query_start_loc
-            else None
+            torch.tensor([0, 4, 5], dtype=torch.int32) if with_query_start_loc else None
         )
         all_token_ids = torch.zeros(2, 12, dtype=torch.int64)
         total_len = torch.tensor([4, 6], dtype=torch.int64)
@@ -407,14 +400,12 @@ class TestCombineSampledAndDraftTokens:
         fn = _make_combine_sampled_and_draft_tokens_torch()
         num_reqs = len(seq_lens)
         total_logits = sum(d + num_new for d in drafts)
-        input_ids = torch.arange(
-            num_reqs * (max(drafts) + num_new), dtype=torch.int64
-        )[: total_logits].clone()
+        input_ids = torch.arange(num_reqs * (max(drafts) + num_new), dtype=torch.int64)[
+            :total_logits
+        ].clone()
         saved_input_ids = input_ids.clone()
         idx_mapping = torch.arange(num_reqs, dtype=torch.int64)
-        last_sampled = (
-            torch.arange(100, 100 + num_reqs, dtype=torch.int64)
-        )
+        last_sampled = torch.arange(100, 100 + num_reqs, dtype=torch.int64)
         query_start_loc = torch.zeros(num_reqs + 1, dtype=torch.int32)
         for i, d in enumerate(drafts):
             needed = d + num_new
@@ -495,8 +486,15 @@ class TestCombineSampledAndDraftTokens:
         cu_num_logits = torch.tensor([0, 2], dtype=torch.int64)
 
         fn(
-            input_ids, idx_mapping, last_sampled, query_start_loc,
-            seq_lens, prefill_len, draft_tokens, cu_num_logits, 2,
+            input_ids,
+            idx_mapping,
+            last_sampled,
+            query_start_loc,
+            seq_lens,
+            prefill_len,
+            draft_tokens,
+            cu_num_logits,
+            2,
             num_new_sampled_tokens=2,
         )
         assert input_ids.tolist() == [7, 8]
@@ -529,8 +527,15 @@ class TestCombineSampledAndDraftTokens:
         cu_num_logits = torch.tensor([0, 3], dtype=torch.int64)
 
         logits_indices = fn(
-            input_ids, idx_mapping, last_sampled, query_start_loc,
-            seq_lens, prefill_len, draft_tokens, cu_num_logits, 3,
+            input_ids,
+            idx_mapping,
+            last_sampled,
+            query_start_loc,
+            seq_lens,
+            prefill_len,
+            draft_tokens,
+            cu_num_logits,
+            3,
             num_new_sampled_tokens=0,
         )
         # num_new=0 -> n_logits=3 all drafts; no sampled writeback

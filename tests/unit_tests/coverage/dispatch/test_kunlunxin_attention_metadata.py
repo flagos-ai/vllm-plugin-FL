@@ -155,9 +155,7 @@ class TestKunlunxinMetadataProperties:
             query_start_loc=torch.tensor([0, 4, 6, 8], dtype=torch.int32),
             query_start_loc_host=torch.tensor([0, 4, 6, 8], dtype=torch.int32),
             kv_prefix_start_loc=torch.tensor([0, 5, 11, 18], dtype=torch.int32),
-            kv_prefix_start_loc_host=torch.tensor(
-                [0, 5, 11, 18], dtype=torch.int32
-            ),
+            kv_prefix_start_loc_host=torch.tensor([0, 5, 11, 18], dtype=torch.int32),
             seq_lens_tensor_host=torch.tensor([5, 6, 7], dtype=torch.int32),
         )
         defaults.update(overrides)
@@ -235,9 +233,7 @@ class TestKunlunxinMetadataProperties:
         assert meta.decode_metadata is decode
 
     def test_decode_metadata_identity_when_no_prefills(self):
-        meta = self._metadata(
-            num_prefills=0, num_prefill_tokens=0, num_decode_tokens=8
-        )
+        meta = self._metadata(num_prefills=0, num_prefill_tokens=0, num_decode_tokens=8)
         decode = meta.decode_metadata
         assert decode.slot_mapping is meta.slot_mapping
         assert decode.seq_lens_tensor is meta.seq_lens_tensor
@@ -374,9 +370,7 @@ class TestMetadataBuilder:
         six_reqs = _common_metadata(
             num_reqs=6,
             query_start_loc=torch.tensor([0, 1, 2, 3, 4, 5, 6], dtype=torch.int32),
-            query_start_loc_cpu=torch.tensor(
-                [0, 1, 2, 3, 4, 5, 6], dtype=torch.int32
-            ),
+            query_start_loc_cpu=torch.tensor([0, 1, 2, 3, 4, 5, 6], dtype=torch.int32),
             seq_lens=torch.tensor([2, 3, 4, 5, 6, 7], dtype=torch.int32),
             seq_lens_cpu_upper_bound=torch.tensor(
                 [2, 3, 4, 5, 6, 7], dtype=torch.int32
@@ -438,6 +432,7 @@ class TestMetadataBuilder:
 
     def test_cudagraph_support_is_uniform_batch(self):
         from vllm.v1.attention.backend import AttentionCGSupport
+
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
             KunlunxinAttentionMetadataBuilder,
         )
@@ -490,6 +485,7 @@ class TestBackendClassmethods:
 
     def test_supported_kv_cache_layouts(self):
         from vllm.v1.kv_cache_layout import KVCacheLayout
+
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
             KunlunxinAttentionBackend,
         )
@@ -506,10 +502,7 @@ class TestBackendClassmethods:
         )
 
         assert KunlunxinAttentionBackend.get_name() == "CUSTOM"
-        assert (
-            KunlunxinAttentionBackend.get_impl_cls()
-            is KunlunxinAttentionBackendImpl
-        )
+        assert KunlunxinAttentionBackend.get_impl_cls() is KunlunxinAttentionBackendImpl
         assert KunlunxinAttentionBackend.get_metadata_cls() is KunlunxinMetadata
         assert (
             KunlunxinAttentionBackend.get_builder_cls()
@@ -661,9 +654,7 @@ class TestAvailabilityHelpers:
             _is_full_graph_runtime,
         )
 
-        ctx = ForwardContext(
-            no_compile_layers={}, attn_metadata={}, slot_mapping={}
-        )
+        ctx = ForwardContext(no_compile_layers={}, attn_metadata={}, slot_mapping={})
         ctx.cudagraph_runtime_mode = CUDAGraphMode.FULL
         prev = forward_context_module._forward_context
         forward_context_module._forward_context = ctx
@@ -681,9 +672,7 @@ class TestAvailabilityHelpers:
             _is_full_graph_runtime,
         )
 
-        ctx = ForwardContext(
-            no_compile_layers={}, attn_metadata={}, slot_mapping={}
-        )
+        ctx = ForwardContext(no_compile_layers={}, attn_metadata={}, slot_mapping={})
         ctx.cudagraph_runtime_mode = CUDAGraphMode.PIECEWISE
         prev = forward_context_module._forward_context
         forward_context_module._forward_context = ctx
@@ -781,9 +770,7 @@ class TestForwardProfilingPath:
             calls.append(("cache",))
 
         xmlir = ModuleType("torch_xmlir")
-        impl_name = (
-            "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention"
-        )
+        impl_name = "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention"
         saved_xml = sys.modules.get("torch_xmlir")
         saved_impl = sys.modules.get(impl_name)
         sys.modules["torch_xmlir"] = xmlir
@@ -825,9 +812,7 @@ class TestForwardProfilingPath:
                     assert "prefill" in kinds
                     # the fake metadata is prefix-cache-free: the no-prefix
                     # branch passes key/value (None here) directly
-                    prefill_kwargs = next(
-                        kw for kind, kw in calls if kind == "prefill"
-                    )
+                    prefill_kwargs = next(kw for kind, kw in calls if kind == "prefill")
                     assert prefill_kwargs["is_prefix_cache"] is False
                     assert prefill_kwargs["is_causal"] is True
                 finally:
@@ -861,9 +846,7 @@ class TestReshapeAndCacheFlashRejections:
         )
 
         key = torch.zeros(3, 2, 64, dtype=torch.float16)
-        with pytest.raises(
-            ValueError, match="sdnn do not support quant"
-        ):
+        with pytest.raises(ValueError, match="sdnn do not support quant"):
             KunlunxinPagedAttention.reshape_and_cache_flash(
                 key,
                 torch.zeros(3, 2, 64, dtype=torch.float16),
@@ -879,9 +862,7 @@ class TestReshapeAndCacheFlashRejections:
         )
 
         key = torch.zeros(3, 2, 64, dtype=torch.float16)
-        with pytest.raises(
-            ValueError, match="k only do not support quant"
-        ):
+        with pytest.raises(ValueError, match="k only do not support quant"):
             KunlunxinPagedAttention.reshape_and_cache_flash(
                 key,
                 None,  # K-only mode
@@ -896,9 +877,7 @@ class TestReshapeAndCacheFlashRejections:
         )
 
         key = torch.zeros(3, 2, 64, dtype=torch.float16)
-        with pytest.raises(
-            ValueError, match="k only do not support quant"
-        ):
+        with pytest.raises(ValueError, match="k only do not support quant"):
             KunlunxinPagedAttention.reshape_and_cache_flash(
                 key,
                 torch.zeros(3, 2, 64, dtype=torch.float16),
@@ -912,9 +891,7 @@ class TestReshapeAndCacheFlashRejections:
         # record; the guard must not reject it
         calls = []
         xmlir = ModuleType("torch_xmlir")
-        impl_name = (
-            "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention"
-        )
+        impl_name = "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention"
         saved_xml = sys.modules.get("torch_xmlir")
         saved_impl = sys.modules.get(impl_name)
         sys.modules["torch_xmlir"] = xmlir
@@ -973,9 +950,7 @@ class TestReorderBatch:
     def _scheduler_output(tokens_per_req):
         from types import SimpleNamespace
 
-        return SimpleNamespace(
-            num_scheduled_tokens=dict(tokens_per_req)
-        )
+        return SimpleNamespace(num_scheduled_tokens=dict(tokens_per_req))
 
     def test_decodes_are_counted_and_threshold_not_crossed(self):
         builder = self._builder()

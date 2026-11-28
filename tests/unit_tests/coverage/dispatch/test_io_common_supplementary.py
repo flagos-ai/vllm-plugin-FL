@@ -150,9 +150,11 @@ class TestManagedInferenceMode:
 
         @ioc.managed_inference_mode()
         def fn(x):
-            marker.append(torch.is_inference_mode_enabled
-                          if hasattr(torch, "is_inference_mode_enabled")
-                          else None)
+            marker.append(
+                torch.is_inference_mode_enabled
+                if hasattr(torch, "is_inference_mode_enabled")
+                else None
+            )
             return x * 3
 
         out = fn(torch.ones(2))
@@ -345,9 +347,7 @@ class TestDispatchTableParsing:
             "CompositeExplicitAutograd: registered somewhere odd [kernel]\n"
             "AutogradOther: registered at no/markers/here.cpp:9\n"
         )
-        monkeypatch.setattr(
-            torch._C, "_dispatch_dump_table", lambda q: table
-        )
+        monkeypatch.setattr(torch._C, "_dispatch_dump_table", lambda q: table)
         entries = ioc._parse_dispatch_table(self._fake_op("aten::probe1"))
         assert ("CPU", "CPU", False) in entries
         assert ("CUDA", "FlagGems", True) in entries
@@ -382,9 +382,7 @@ class TestDispatchTableParsing:
 
     def test_get_dispatch_keys_fallback(self):
         # A func without .name() -> empty parse -> unknown tuple fallback.
-        assert ioc.get_dispatch_keys(object()) == [
-            ("unknown", "unknown", True)
-        ]
+        assert ioc.get_dispatch_keys(object()) == [("unknown", "unknown", True)]
 
     def test_nameless_func_returns_empty(self):
         assert ioc._parse_dispatch_table(lambda x: x) == []
@@ -395,7 +393,8 @@ class TestStackContextMatching:
         ctx = [("Linear", "model.layers.0.q_proj"), ("Linear", "")]
         assert ioc.layer_path_matches_from_stack({"model.layers.0"}, ctx)
         assert not ioc.layer_path_matches_from_stack(
-            {"model.layers.0.self_attn"}, ctx  # prefix must cover whole tail
+            {"model.layers.0.self_attn"},
+            ctx,  # prefix must cover whole tail
         )
         assert not ioc.layer_path_matches_from_stack({"anything"}, [("", "p")])
         assert ioc.module_context_matches_from_stack({"Linear"}, ctx)
@@ -435,8 +434,10 @@ class TestTensorStatRegistry:
         saved = list(ioc._TENSOR_STAT_REGISTRY)
         try:
             ioc.register_tensor_stat("min", lambda t: -1.0)
-            assert any(name == "min" and fn(torch.zeros(1)) == -1.0
-                       for name, fn, _ in ioc._TENSOR_STAT_REGISTRY)
+            assert any(
+                name == "min" and fn(torch.zeros(1)) == -1.0
+                for name, fn, _ in ioc._TENSOR_STAT_REGISTRY
+            )
             assert len(ioc._TENSOR_STAT_REGISTRY) == len(saved)  # replaced
         finally:
             ioc._TENSOR_STAT_REGISTRY[:] = saved

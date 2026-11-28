@@ -52,8 +52,9 @@ class TestDynamicInt8Qdq:
     def test_matches_oracle(self):
         torch.manual_seed(0)
         value = torch.randn(6, 7)
-        torch.testing.assert_close(me._dynamic_int8_qdq(value), _qdq(value),
-                                   rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(
+            me._dynamic_int8_qdq(value), _qdq(value), rtol=1e-5, atol=1e-5
+        )
 
     def test_zero_rows_stay_zero(self):
         value = torch.zeros(3, 5)
@@ -78,9 +79,9 @@ class TestW8a8Swiglu:
         limit = 2.0
         out = me._w8a8_swiglu(gate_up, limit)
         gate, up = gate_up.float().chunk(2, dim=-1)
-        expected = (
-            F.silu(gate.clamp(max=limit)) * up.clamp(-limit, limit)
-        ).to(gate_up.dtype)
+        expected = (F.silu(gate.clamp(max=limit)) * up.clamp(-limit, limit)).to(
+            gate_up.dtype
+        )
         assert out.dtype == gate_up.dtype
         torch.testing.assert_close(out, expected, rtol=1e-2, atol=1e-2)
 
@@ -98,9 +99,20 @@ class TestW8a8Swiglu:
         )
 
 
-def _reference_native(hidden_states, w1, w2, topk_weights, topk_ids,
-                      w1_scale, w2_scale, w1_bias, w2_bias, expert_map,
-                      apply_router_weight_on_input, clamp_limit):
+def _reference_native(
+    hidden_states,
+    w1,
+    w2,
+    topk_weights,
+    topk_ids,
+    w1_scale,
+    w2_scale,
+    w1_bias,
+    w2_bias,
+    expert_map,
+    apply_router_weight_on_input,
+    clamp_limit,
+):
     """Independent oracle for _native_w8a8_fused_experts."""
     output = torch.zeros_like(hidden_states)
     local_ids = topk_ids.long()
@@ -118,9 +130,9 @@ def _reference_native(hidden_states, w1, w2, topk_weights, topk_ids,
             inputs = hidden_states[mask]
             route = topk_weights[mask, slot].to(inputs.dtype)
             inputs = _qdq(inputs)
-            gu_w = (w1[expert_id].to(inputs.dtype)
-                    * w1_scale[expert_id].squeeze(-1).to(inputs.dtype)
-                    .unsqueeze(-1))
+            gu_w = w1[expert_id].to(inputs.dtype) * w1_scale[expert_id].squeeze(-1).to(
+                inputs.dtype
+            ).unsqueeze(-1)
             gate_up = inputs @ gu_w.T
             if w1_bias is not None:
                 gate_up = gate_up + w1_bias[expert_id].to(gate_up.dtype)
@@ -130,9 +142,9 @@ def _reference_native(hidden_states, w1, w2, topk_weights, topk_ids,
                 up = up.clamp(-clamp_limit, clamp_limit)
             inter = (F.silu(gate) * up).to(hidden_states.dtype)
             inter = _qdq(inter)
-            dn_w = (w2[expert_id].to(inter.dtype)
-                    * w2_scale[expert_id].squeeze(-1).to(inter.dtype)
-                    .unsqueeze(-1))
+            dn_w = w2[expert_id].to(inter.dtype) * w2_scale[expert_id].squeeze(-1).to(
+                inter.dtype
+            ).unsqueeze(-1)
             out = inter @ dn_w.T
             if w2_bias is not None:
                 out = out + w2_bias[expert_id].to(out.dtype)
@@ -145,8 +157,8 @@ def _reference_native(hidden_states, w1, w2, topk_weights, topk_ids,
 def _native_inputs(E=3, M=6, K=4, I=8, topk=2, seed=5, dtype=torch.float32):
     g = torch.Generator().manual_seed(seed)
     hidden_states = torch.randn(M, K, generator=g).to(dtype)
-    w1 = (torch.randn(E, 2 * I, K, generator=g) * 0.1)
-    w2 = (torch.randn(E, K, I, generator=g) * 0.1)
+    w1 = torch.randn(E, 2 * I, K, generator=g) * 0.1
+    w2 = torch.randn(E, K, I, generator=g) * 0.1
     w1_scale = torch.rand(E, 2 * I, 1, generator=g) + 0.5
     w2_scale = torch.rand(E, K, 1, generator=g) + 0.5
     topk_weights = torch.rand(M, topk, generator=g)
@@ -164,8 +176,18 @@ class TestNativeW8a8FusedExperts:
             hs, w1, w2, tw, ti, w1s, w2s, w1_bias, w2_bias, expert_map, False
         )
         expected = _reference_native(
-            hs, w1, w2, tw, ti, w1s, w2s, w1_bias, w2_bias, expert_map,
-            False, None,
+            hs,
+            w1,
+            w2,
+            tw,
+            ti,
+            w1s,
+            w2s,
+            w1_bias,
+            w2_bias,
+            expert_map,
+            False,
+            None,
         )
         torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-4)
 
@@ -182,7 +204,17 @@ class TestNativeW8a8FusedExperts:
     def test_clamp_limit_matches_oracle(self):
         hs, w1, w2, tw, ti, w1s, w2s = _native_inputs(seed=7)
         out = me._native_w8a8_fused_experts(
-            hs, w1, w2, tw, ti, w1s, w2s, None, None, None, False,
+            hs,
+            w1,
+            w2,
+            tw,
+            ti,
+            w1s,
+            w2s,
+            None,
+            None,
+            None,
+            False,
             clamp_limit=1.5,
         )
         expected = _reference_native(
@@ -278,7 +310,9 @@ class TestValidateW8a8ContractBranches:
         args = self._valid()
         # hidden_states K (8) != w1.shape[2] (8): keep; break expert count.
         args["w2"] = torch.randint(
-            -127, 127, (3, args["w2"].shape[1], args["w2"].shape[2]),
+            -127,
+            127,
+            (3, args["w2"].shape[1], args["w2"].shape[2]),
             dtype=torch.int8,
         )
         with pytest.raises(ValueError, match="incompatible"):
@@ -288,7 +322,9 @@ class TestValidateW8a8ContractBranches:
         args = self._valid()
         w1 = args["w1"]
         args["w1"] = torch.randint(
-            -127, 127, (w1.shape[0], w1.shape[1] + 2, w1.shape[2]),
+            -127,
+            127,
+            (w1.shape[0], w1.shape[1] + 2, w1.shape[2]),
             dtype=torch.int8,
         )
         args["w1_scale"] = torch.rand(w1.shape[0], w1.shape[1] + 2, 1)
@@ -299,10 +335,12 @@ class TestValidateW8a8ContractBranches:
         args = self._valid()
         args["w1"] = args["w1"].transpose(1, 2).contiguous().transpose(1, 2)
         # force a non-unit last-dim stride via storage offset tricks
-        wide = torch.randint(-127, 127, (args["w1"].shape[0],
-                                          args["w1"].shape[1],
-                                          args["w1"].shape[2] * 2),
-                             dtype=torch.int8)
+        wide = torch.randint(
+            -127,
+            127,
+            (args["w1"].shape[0], args["w1"].shape[1], args["w1"].shape[2] * 2),
+            dtype=torch.int8,
+        )
         args["w1"] = wide[:, :, ::2]
         with pytest.raises(ValueError, match="contiguous in K"):
             me._validate_w8a8_contract(**args)
@@ -354,6 +392,7 @@ class TestValidateW8a8ContractBranches:
 
     def test_rejects_scale_device_mismatch(self):
         args = self._valid()
+
         # No second device is available on CPU hosts; emulate one by patching
         # the comparison through a subclassed tensor-like object.
         class _OtherDeviceTensor(torch.Tensor):
@@ -394,8 +433,17 @@ class TestAscendGroupedExpertsEdges:
         args = _native_inputs(M=2, E=2, K=4, I=4, topk=1, seed=9)
         with pytest.raises(TypeError, match="bfloat16 or float16"):
             me._ascend_w8a8_grouped_experts(
-                args[0], args[1], args[2], args[3], args[4],
-                args[5], args[6], None, None, None, False,
+                args[0],
+                args[1],
+                args[2],
+                args[3],
+                args[4],
+                args[5],
+                args[6],
+                None,
+                None,
+                None,
+                False,
             )
 
     def test_zero_tokens_early_return(self, monkeypatch):
@@ -405,15 +453,26 @@ class TestAscendGroupedExpertsEdges:
             raise AssertionError("no kernel work for empty batch")
 
         self._install_torch_npu(
-            monkeypatch, npu_dynamic_quant=boom, npu_grouped_matmul=boom,
+            monkeypatch,
+            npu_dynamic_quant=boom,
+            npu_grouped_matmul=boom,
             npu_swiglu=boom,
         )
         hs = torch.zeros(0, 4, dtype=torch.bfloat16)
         w1 = torch.zeros(2, 8, 4, dtype=torch.int8)
         w2 = torch.zeros(2, 4, 4, dtype=torch.int8)
         out = me._ascend_w8a8_grouped_experts(
-            hs, w1, w2, torch.zeros(0, 1), torch.zeros(0, 1, dtype=torch.int64),
-            torch.ones(2, 8, 1), torch.ones(2, 4, 1), None, None, None, False,
+            hs,
+            w1,
+            w2,
+            torch.zeros(0, 1),
+            torch.zeros(0, 1, dtype=torch.int64),
+            torch.ones(2, 8, 1),
+            torch.ones(2, 4, 1),
+            None,
+            None,
+            None,
+            False,
         )
         assert out.shape == (0, 4)
 
@@ -422,7 +481,9 @@ class TestAscendGroupedExpertsEdges:
             raise AssertionError("no kernel work when no route is local")
 
         self._install_torch_npu(
-            monkeypatch, npu_dynamic_quant=boom, npu_grouped_matmul=boom,
+            monkeypatch,
+            npu_dynamic_quant=boom,
+            npu_grouped_matmul=boom,
             npu_swiglu=boom,
         )
         hs = torch.ones(2, 4, dtype=torch.bfloat16)
@@ -430,9 +491,17 @@ class TestAscendGroupedExpertsEdges:
         w2 = torch.zeros(2, 4, 4, dtype=torch.int8)
         expert_map = torch.full((2,), -1)
         out = me._ascend_w8a8_grouped_experts(
-            hs, w1, w2, torch.ones(2, 1), torch.tensor([[0], [1]]),
-            torch.ones(2, 8, 1), torch.ones(2, 4, 1), None, None,
-            expert_map, False,
+            hs,
+            w1,
+            w2,
+            torch.ones(2, 1),
+            torch.tensor([[0], [1]]),
+            torch.ones(2, 8, 1),
+            torch.ones(2, 4, 1),
+            None,
+            None,
+            expert_map,
+            False,
         )
         assert out.shape == (2, 4)
         assert torch.count_nonzero(out) == 0
@@ -444,30 +513,44 @@ class TestAscendGroupedExpertsEdges:
         def fake_dynamic_quant(value):
             scale = value.float().abs().amax(dim=-1) / 127.0
             safe = torch.where(scale > 0, scale, torch.ones_like(scale))
-            quantized = (torch.round(value.float() / safe[:, None])
-                         .clamp(-127, 127).to(torch.int8))
+            quantized = (
+                torch.round(value.float() / safe[:, None])
+                .clamp(-127, 127)
+                .to(torch.int8)
+            )
             return quantized, scale
 
-        def fake_grouped_matmul(*, x, weight, bias, scale, per_token_scale,
-                                group_list, output_dtype, **kw):
+        def fake_grouped_matmul(
+            *, x, weight, bias, scale, per_token_scale, group_list, output_dtype, **kw
+        ):
             rows = x[0].shape[0]
-            return [torch.zeros((rows, weight[0].shape[1]),
-                               dtype=output_dtype)]
+            return [torch.zeros((rows, weight[0].shape[1]), dtype=output_dtype)]
 
         def fake_swiglu(value, dim=-1):
             called["npu_swiglu"] = True
             return value
 
         self._install_torch_npu(
-            monkeypatch, npu_dynamic_quant=fake_dynamic_quant,
-            npu_grouped_matmul=fake_grouped_matmul, npu_swiglu=fake_swiglu,
+            monkeypatch,
+            npu_dynamic_quant=fake_dynamic_quant,
+            npu_grouped_matmul=fake_grouped_matmul,
+            npu_swiglu=fake_swiglu,
         )
         hs = torch.ones(1, 4, dtype=torch.bfloat16)
         w1 = torch.zeros(1, 8, 4, dtype=torch.int8)
         w2 = torch.zeros(1, 4, 4, dtype=torch.int8)
         out = me._ascend_w8a8_grouped_experts(
-            hs, w1, w2, torch.ones(1, 1), torch.zeros(1, 1, dtype=torch.int64),
-            torch.ones(1, 8, 1), torch.ones(1, 4, 1), None, None, None, False,
+            hs,
+            w1,
+            w2,
+            torch.ones(1, 1),
+            torch.zeros(1, 1, dtype=torch.int64),
+            torch.ones(1, 8, 1),
+            torch.ones(1, 4, 1),
+            None,
+            None,
+            None,
+            False,
             clamp_limit=2.0,
         )
         assert out.shape == (1, 4)
@@ -480,15 +563,16 @@ class TestAscendGroupedExpertsEdges:
         def fake_dynamic_quant(value):
             return value.to(torch.int8), torch.ones(value.shape[0])
 
-        def fake_grouped_matmul(*, x, weight, bias, scale, per_token_scale,
-                                group_list, output_dtype, **kw):
+        def fake_grouped_matmul(
+            *, x, weight, bias, scale, per_token_scale, group_list, output_dtype, **kw
+        ):
             seen["scale_dtype"] = scale[0].dtype
             rows = x[0].shape[0]
-            return [torch.zeros((rows, weight[0].shape[1]),
-                               dtype=output_dtype)]
+            return [torch.zeros((rows, weight[0].shape[1]), dtype=output_dtype)]
 
         self._install_torch_npu(
-            monkeypatch, npu_dynamic_quant=fake_dynamic_quant,
+            monkeypatch,
+            npu_dynamic_quant=fake_dynamic_quant,
             npu_grouped_matmul=fake_grouped_matmul,
             npu_swiglu=lambda v, dim=-1: v,
         )
@@ -501,10 +585,17 @@ class TestAscendGroupedExpertsEdges:
             w1 = torch.zeros(1, 8, 4, dtype=torch.int8)
             w2 = torch.zeros(1, 4, 4, dtype=torch.int8)
             me._ascend_w8a8_grouped_experts(
-                hs, w1, w2, torch.ones(1, 1),
+                hs,
+                w1,
+                w2,
+                torch.ones(1, 1),
                 torch.zeros(1, 1, dtype=torch.int64),
-                torch.ones(1, 8, 1), torch.ones(1, 4, 1), None, None,
-                None, False,
+                torch.ones(1, 8, 1),
+                torch.ones(1, 4, 1),
+                None,
+                None,
+                None,
+                False,
             )
             assert seen["scale_dtype"] == expected
 
@@ -556,17 +647,25 @@ def _experts_instance(quant_config=None, *, lora_context=None):
 class TestApplyGuardArms:
     """Guard branches in both experts adapters the core suite misses."""
 
-    @pytest.mark.parametrize("experts_cls", [
-        me.VllmFunctionalW8A8Experts, me.FlagGemsW8A8Experts,
-    ])
+    @pytest.mark.parametrize(
+        "experts_cls",
+        [
+            me.VllmFunctionalW8A8Experts,
+            me.FlagGemsW8A8Experts,
+        ],
+    )
     def test_rejects_non_int8_quant_config(self, experts_cls):
         instance = _experts_instance(_quant_config(use_int8_w8a8=False))
         with pytest.raises(ValueError, match="INT8 W8A8"):
             experts_cls.apply(instance, **_apply_arguments())
 
-    @pytest.mark.parametrize("experts_cls", [
-        me.VllmFunctionalW8A8Experts, me.FlagGemsW8A8Experts,
-    ])
+    @pytest.mark.parametrize(
+        "experts_cls",
+        [
+            me.VllmFunctionalW8A8Experts,
+            me.FlagGemsW8A8Experts,
+        ],
+    )
     def test_rejects_non_dynamic_or_blocked_quant(self, experts_cls):
         instance = _experts_instance(_quant_config(per_act_token_quant=False))
         with pytest.raises(ValueError, match="dynamic per-token"):
@@ -575,17 +674,25 @@ class TestApplyGuardArms:
         with pytest.raises(ValueError, match="dynamic per-token"):
             experts_cls.apply(instance2, **_apply_arguments())
 
-    @pytest.mark.parametrize("experts_cls", [
-        me.VllmFunctionalW8A8Experts, me.FlagGemsW8A8Experts,
-    ])
+    @pytest.mark.parametrize(
+        "experts_cls",
+        [
+            me.VllmFunctionalW8A8Experts,
+            me.FlagGemsW8A8Experts,
+        ],
+    )
     def test_rejects_lora_context(self, experts_cls):
         instance = _experts_instance(lora_context=object())
         with pytest.raises(NotImplementedError, match="LoRA"):
             experts_cls.apply(instance, **_apply_arguments())
 
-    @pytest.mark.parametrize("experts_cls", [
-        me.VllmFunctionalW8A8Experts, me.FlagGemsW8A8Experts,
-    ])
+    @pytest.mark.parametrize(
+        "experts_cls",
+        [
+            me.VllmFunctionalW8A8Experts,
+            me.FlagGemsW8A8Experts,
+        ],
+    )
     def test_rejects_non_floating_hidden_states(self, experts_cls):
         arguments = _apply_arguments()
         arguments["hidden_states"] = torch.ones((2, 4), dtype=torch.int32)
@@ -607,6 +714,4 @@ class TestApplyGuardArms:
             SimpleNamespace(quant_config=config), **arguments
         )
         assert calls[0]["quant_config"] is config
-        assert torch.equal(
-            arguments["output"], torch.full_like(arguments["output"], 2)
-        )
+        assert torch.equal(arguments["output"], torch.full_like(arguments["output"], 2))

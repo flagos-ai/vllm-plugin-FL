@@ -38,14 +38,12 @@ from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.triton_compat import (
     apply_triton_compat,
 )
 
-
 # ---------------------------------------------------------------------------
 # accelerator_compat
 # ---------------------------------------------------------------------------
 
 
 class TestAcceleratorCompat:
-
     pytestmark = pytest.mark.platforms("kunlunxin")
 
     def test_binds_only_missing_names_from_torch_cuda(self):
@@ -55,11 +53,12 @@ class TestAcceleratorCompat:
         import torch
 
         bound_before = {
-            name: getattr(torch.accelerator, name, None)
-            for name in _ACCELERATOR_COMPAT
+            name: getattr(torch.accelerator, name, None) for name in _ACCELERATOR_COMPAT
         }
         missing = [n for n in _ACCELERATOR_COMPAT if not hasattr(torch.accelerator, n)]
-        assert missing, "this torch build exposes every compat name; test setup is stale"
+        assert missing, (
+            "this torch build exposes every compat name; test setup is stale"
+        )
 
         apply_accelerator_compat()
 
@@ -79,8 +78,7 @@ class TestAcceleratorCompat:
 
         # snapshot both surfaces fully so every mutation is reversible
         accel_snapshot = {
-            name: getattr(torch.accelerator, name, None)
-            for name in _ACCELERATOR_COMPAT
+            name: getattr(torch.accelerator, name, None) for name in _ACCELERATOR_COMPAT
         }
         cuda_snapshot = {
             cuda_name: getattr(torch.cuda, cuda_name, None)
@@ -103,9 +101,11 @@ class TestAcceleratorCompat:
             for name, cuda_name in _ACCELERATOR_COMPAT.items():
                 if cuda_name == victim:
                     continue
-                assert getattr(torch.accelerator, name, None) is torch.cuda.__dict__.get(
-                    cuda_name
-                ), f"{name} was not bound from torch.cuda.{cuda_name}"
+                assert getattr(
+                    torch.accelerator, name, None
+                ) is torch.cuda.__dict__.get(cuda_name), (
+                    f"{name} was not bound from torch.cuda.{cuda_name}"
+                )
         finally:
             for name, value in accel_snapshot.items():
                 if value is not None:
@@ -121,13 +121,11 @@ class TestAcceleratorCompat:
 
         apply_accelerator_compat()
         snapshot = {
-            name: getattr(torch.accelerator, name, None)
-            for name in _ACCELERATOR_COMPAT
+            name: getattr(torch.accelerator, name, None) for name in _ACCELERATOR_COMPAT
         }
         apply_accelerator_compat()
         assert {
-            name: getattr(torch.accelerator, name, None)
-            for name in _ACCELERATOR_COMPAT
+            name: getattr(torch.accelerator, name, None) for name in _ACCELERATOR_COMPAT
         } == snapshot
 
 
@@ -142,12 +140,11 @@ _XPU_PKG = "triton.backends.xpu"
 @contextlib.contextmanager
 def _fake_xpu_options():
     """Install a fake triton.backends.xpu.compiler with a bare XPUOptions."""
+
     class FakeXPUOptions:
         pass
 
-    saved = {
-        name: sys.modules.get(name) for name in (_XPU_PKG, _XPU_COMPILER)
-    }
+    saved = {name: sys.modules.get(name) for name in (_XPU_PKG, _XPU_COMPILER)}
     pkg = ModuleType(_XPU_PKG)
     pkg.__path__ = []
     compiler = ModuleType(_XPU_COMPILER)
@@ -165,7 +162,6 @@ def _fake_xpu_options():
 
 
 class TestTritonCompat:
-
     pytestmark = pytest.mark.platforms("kunlunxin")
 
     def test_binds_launch_cooperative_grid_false(self):
@@ -208,8 +204,8 @@ class TestTritonCompat:
 
 
 class TestRopeCompat:
-
     pytestmark = pytest.mark.platforms("kunlunxin")
+
     @pytest.fixture
     def rope_module(self):
         import vllm.v1.worker.gpu.mm.rope as rope
@@ -328,8 +324,8 @@ def _platform_fl_or_skip():
 
 
 class TestFlaUtilsCompat:
-
     pytestmark = pytest.mark.platforms("kunlunxin")
+
     @pytest.fixture(autouse=True)
     def _restore_get_device_name(self):
         import torch

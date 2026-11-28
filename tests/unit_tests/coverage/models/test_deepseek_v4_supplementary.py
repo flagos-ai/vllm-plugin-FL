@@ -136,13 +136,12 @@ def deepseek_mod(monkeypatch):
 
 def _set_attn_metadata(module, attn_metadata):
     """Point the loaded module's get_forward_context at fixed metadata."""
-    module.get_forward_context = lambda: SimpleNamespace(
-        attn_metadata=attn_metadata
-    )
+    module.get_forward_context = lambda: SimpleNamespace(attn_metadata=attn_metadata)
 
 
-def _vllm_config(ratios, layers=None, sliding_window=128, max_model_len=128,
-                 index_topk=512):
+def _vllm_config(
+    ratios, layers=None, sliding_window=128, max_model_len=128, index_topk=512
+):
     hf_config = SimpleNamespace(
         compress_ratios=ratios,
         num_hidden_layers=len(ratios) if layers is None else layers,
@@ -150,8 +149,7 @@ def _vllm_config(ratios, layers=None, sliding_window=128, max_model_len=128,
         index_topk=index_topk,
     )
     return SimpleNamespace(
-        model_config=SimpleNamespace(hf_config=hf_config,
-                                     max_model_len=max_model_len)
+        model_config=SimpleNamespace(hf_config=hf_config, max_model_len=max_model_len)
     )
 
 
@@ -163,17 +161,12 @@ class TestValidateShortContext:
         validation without an exception; the paired negative cases below
         (test_rejects_*) pin each rejection branch with pytest.raises.
         """
-        deepseek_mod._validate_short_context_attention(
-            _vllm_config([0, 1, 4, 128])
-        )
+        deepseek_mod._validate_short_context_attention(_vllm_config([0, 1, 4, 128]))
 
     def test_rejects_unsupported_ratio(self, deepseek_mod):
         for bad in (2, 3, 64):
-            with pytest.raises(NotImplementedError,
-                               match=rf"compress_ratio={bad}"):
-                deepseek_mod._validate_short_context_attention(
-                    _vllm_config([bad])
-                )
+            with pytest.raises(NotImplementedError, match=rf"compress_ratio={bad}"):
+                deepseek_mod._validate_short_context_attention(_vllm_config([bad]))
 
     def test_rejects_context_beyond_window(self, deepseek_mod):
         with pytest.raises(ValueError, match="<= sliding_window"):
@@ -181,8 +174,7 @@ class TestValidateShortContext:
                 _vllm_config([4], max_model_len=129)
             )
 
-    def test_rejects_context_beyond_128_even_with_larger_window(
-            self, deepseek_mod):
+    def test_rejects_context_beyond_128_even_with_larger_window(self, deepseek_mod):
         with pytest.raises(ValueError, match="max_model_len <= 128"):
             deepseek_mod._validate_short_context_attention(
                 _vllm_config([4], max_model_len=129, sliding_window=256)
@@ -202,9 +194,7 @@ class TestValidateShortContext:
         (test_c4a_requires_all_candidates_fit_index_topk, topk=31) pins
         the rejection side with pytest.raises.
         """
-        deepseek_mod._validate_short_context_attention(
-            _vllm_config([4], index_topk=32)
-        )
+        deepseek_mod._validate_short_context_attention(_vllm_config([4], index_topk=32))
 
     def test_ignores_ratio_4_beyond_hidden_layers(self, deepseek_mod):
         """Acceptance = the no-raise contract for the truncation rule.
@@ -233,16 +223,16 @@ class TestCacheHelpers:
         num_blocks, block_size, width = 3, 2, 5
         cache = torch.zeros(num_blocks, block_size, width)
         targets = [(2, 1), (0, 0), (1, 0)]
-        slots = torch.tensor(
-            [page * block_size + offset for page, offset in targets]
-        )
+        slots = torch.tensor([page * block_size + offset for page, offset in targets])
         rows = torch.arange(3 * width, dtype=torch.float32).reshape(3, width)
 
         deepseek_mod._store_cache_rows(cache, slots, rows, block_size)
 
         torch.testing.assert_close(
-            deepseek_mod._cache_rows(cache, slots, block_size), rows,
-            rtol=0, atol=0,
+            deepseek_mod._cache_rows(cache, slots, block_size),
+            rows,
+            rtol=0,
+            atol=0,
         )
         expected = torch.zeros_like(cache)
         for (page, offset), row in zip(targets, rows):
@@ -256,37 +246,42 @@ class TestCacheHelpers:
         deepseek_mod._store_cache_rows(cache, slots, rows, block_size=2)
         torch.testing.assert_close(
             deepseek_mod._cache_rows(cache, slots, 2),
-            rows.to(torch.bfloat16), rtol=0, atol=0,
+            rows.to(torch.bfloat16),
+            rtol=0,
+            atol=0,
         )
 
 
 class TestRegistrySurface:
     def test_backend_names(self, deepseek_mod):
-        assert deepseek_mod.DeepseekV4FLBackend.get_name() == (
-            "FL_ASCEND_V4_BF16_SWA"
-        )
+        assert deepseek_mod.DeepseekV4FLBackend.get_name() == ("FL_ASCEND_V4_BF16_SWA")
         assert deepseek_mod.DeepseekV4FLSWABackend.get_name() == (
             "FL_ASCEND_V4_BF16_SWA_CACHE"
         )
-        assert (deepseek_mod.DeepseekV4FLBackend.get_builder_cls()
-                is deepseek_mod.DeepseekV4SparseMLAMetadataBuilder)
-        assert (deepseek_mod.DeepseekV4FLSWABackend.get_builder_cls()
-                is deepseek_mod.DeepseekV4FLMetadataBuilder)
+        assert (
+            deepseek_mod.DeepseekV4FLBackend.get_builder_cls()
+            is deepseek_mod.DeepseekV4SparseMLAMetadataBuilder
+        )
+        assert (
+            deepseek_mod.DeepseekV4FLSWABackend.get_builder_cls()
+            is deepseek_mod.DeepseekV4FLMetadataBuilder
+        )
 
     def test_supports_any_capability(self, deepseek_mod):
-        assert deepseek_mod.DeepseekV4FLBackend.supports_compute_capability(
-            None
-        )
+        assert deepseek_mod.DeepseekV4FLBackend.supports_compute_capability(None)
 
     def test_tile_scheduler_disables_engines(self, deepseek_mod):
         scheduler = deepseek_mod.DeepseekV4FLMetadataBuilder()
         assert scheduler.build_tile_scheduler(0) == {
-            "swaonly": None, "c4a": None, "c128a": None,
+            "swaonly": None,
+            "c4a": None,
+            "c128a": None,
         }
 
     def test_module_all_exports(self, deepseek_mod):
         assert set(deepseek_mod.__all__) == {
-            "DeepseekV4ForCausalLM", "DeepseekV4FLAttention"
+            "DeepseekV4ForCausalLM",
+            "DeepseekV4FLAttention",
         }
 
 
@@ -311,9 +306,7 @@ class TestAttentionConstruction:
 
         _UpstreamBase.__init__ = recording_init
         try:
-            instance = deepseek_mod.DeepseekV4FLAttention(
-                vllm_config=self._config()
-            )
+            instance = deepseek_mod.DeepseekV4FLAttention(vllm_config=self._config())
             assert seen["event_at_super"] is torch.npu.Event
             assert torch.cuda.Event is original_event  # restored
             assert isinstance(instance, deepseek_mod.DeepseekV4FLAttention)
@@ -375,9 +368,7 @@ class TestAttentionConstruction:
             deepseek_mod.DeepseekV4FLSWABackend
         )
         assert deepseek_mod.DeepseekV4FLAttention.use_fp8_ds_mla_layout is False
-        assert deepseek_mod.DeepseekV4FLBackend.supported_kv_cache_dtypes == [
-            "auto"
-        ]
+        assert deepseek_mod.DeepseekV4FLBackend.supported_kv_cache_dtypes == ["auto"]
         assert deepseek_mod.DeepseekV4FLAttention.get_padded_num_q_heads(7) == 7
 
 
@@ -440,8 +431,7 @@ class TestForward:
     def test_allocates_o_padded_and_slices_for_o_proj(self, deepseek_mod):
         seen = {}
 
-        def fake_prepare(hidden_states, qr, kv, kv_score, iks, iw, positions,
-                         o_padded):
+        def fake_prepare(hidden_states, qr, kv, kv_score, iks, iw, positions, o_padded):
             seen["o_padded"] = o_padded
             o_padded.fill_(2.0)
 
@@ -458,7 +448,10 @@ class TestForward:
             q_norm=SimpleNamespace(weight=torch.ones(3)),
             kv_norm=SimpleNamespace(weight=torch.ones(4)),
             _run_parallel_input_projections=lambda hs: (
-                torch.zeros(2, 7), torch.zeros(2, 4), None, None,
+                torch.zeros(2, 7),
+                torch.zeros(2, 4),
+                None,
+                None,
             ),
             _prepare_and_attn_fn=fake_prepare,
             _o_proj=fake_o_proj,
@@ -486,8 +479,7 @@ class TestInputProjections:
             seen["hidden_states"] = hidden_states
             return gemm_result
 
-        attention = SimpleNamespace(_fused_wqa_wkv_gemm=fake_gemm,
-                                    compressor=None)
+        attention = SimpleNamespace(_fused_wqa_wkv_gemm=fake_gemm, compressor=None)
         hidden_states = torch.randn(3, 5)
 
         qr_kv, kv_score, iks, iw = (
@@ -504,17 +496,14 @@ class TestInputProjections:
         hidden_states = torch.randn(3, 5, dtype=torch.bfloat16)
         attention = SimpleNamespace(
             _fused_wqa_wkv_gemm=lambda hs: torch.zeros(3, 2),
-            compressor=SimpleNamespace(
-                fused_wkv_wgate=SimpleNamespace(weight=weight)
-            ),
+            compressor=SimpleNamespace(fused_wkv_wgate=SimpleNamespace(weight=weight)),
         )
         qr_kv, kv_score, _, _ = (
             deepseek_mod.DeepseekV4FLAttention._run_parallel_input_projections(
                 attention, hidden_states
             )
         )
-        expected = torch.einsum("td,od->to", hidden_states.float(),
-                               weight.float())
+        expected = torch.einsum("td,od->to", hidden_states.float(), weight.float())
         torch.testing.assert_close(kv_score, expected)
         assert kv_score.dtype == torch.float32
         assert qr_kv.shape == (3, 2)
@@ -528,11 +517,12 @@ class TestFusedQnormRopeKvInsert:
             )
         )
         q = torch.randn(2, 3, 4)
-        returned = (
-            deepseek_mod.DeepseekV4FLAttention._fused_qnorm_rope_kv_insert(
-                attention, q, torch.randn(2, 4),
-                torch.zeros(2, dtype=torch.long), object(),
-            )
+        returned = deepseek_mod.DeepseekV4FLAttention._fused_qnorm_rope_kv_insert(
+            attention,
+            q,
+            torch.randn(2, 4),
+            torch.zeros(2, dtype=torch.long),
+            object(),
         )
         assert returned is q
 
@@ -555,24 +545,22 @@ class TestFusedQnormRopeKvInsert:
         rotary = _ScaleRotary()
         q = torch.full((3, 1, head_dim), 2.0)
         kv = torch.stack(
-            [torch.arange(head_dim, dtype=torch.float32) + float(i)
-             for i in range(3)]
+            [torch.arange(head_dim, dtype=torch.float32) + float(i) for i in range(3)]
         )
         positions = torch.tensor([0, 1, 2])
         metadata = SimpleNamespace(
             slot_mapping=torch.tensor([0, -1, 2]), block_size=block_size
         )
         attention = SimpleNamespace(
-            swa_cache_layer=SimpleNamespace(prefix="layer.swa_cache",
-                                            kv_cache=kv_cache),
+            swa_cache_layer=SimpleNamespace(
+                prefix="layer.swa_cache", kv_cache=kv_cache
+            ),
             eps=eps,
             rotary_emb=rotary,
         )
 
-        returned = (
-            deepseek_mod.DeepseekV4FLAttention._fused_qnorm_rope_kv_insert(
-                attention, q, kv, positions, {"layer.swa_cache": metadata}
-            )
+        returned = deepseek_mod.DeepseekV4FLAttention._fused_qnorm_rope_kv_insert(
+            attention, q, kv, positions, {"layer.swa_cache": metadata}
         )
 
         norm = torch.rsqrt(torch.tensor(4.0 + eps))
@@ -594,16 +582,19 @@ class TestFusedQnormRopeKvInsert:
                 return q, kv
 
         attention = SimpleNamespace(
-            swa_cache_layer=SimpleNamespace(prefix="layer.swa_cache",
-                                            kv_cache=kv_cache),
+            swa_cache_layer=SimpleNamespace(
+                prefix="layer.swa_cache", kv_cache=kv_cache
+            ),
             eps=1e-6,
             rotary_emb=_Rotary(),
         )
-        metadata = SimpleNamespace(slot_mapping=torch.tensor([-1, -1]),
-                                   block_size=2)
+        metadata = SimpleNamespace(slot_mapping=torch.tensor([-1, -1]), block_size=2)
         deepseek_mod.DeepseekV4FLAttention._fused_qnorm_rope_kv_insert(
-            attention, torch.randn(2, 1, 3), torch.randn(2, 3),
-            torch.tensor([0, 1]), {"layer.swa_cache": metadata},
+            attention,
+            torch.randn(2, 1, 3),
+            torch.randn(2, 3),
+            torch.tensor([0, 1]),
+            {"layer.swa_cache": metadata},
         )
         assert torch.count_nonzero(kv_cache) == 0
 
@@ -640,8 +631,7 @@ class TestPrepareAndAttn:
         for key, value in attrs.items():
             setattr(attention, key, value)
         # Bind the real method under test for the nested helper.
-        attention._fused_qnorm_rope_kv_insert = (
-            lambda q, kv, positions, attn_metadata:
+        attention._fused_qnorm_rope_kv_insert = lambda q, kv, positions, attn_metadata: (
             deepseek_mod.DeepseekV4FLAttention._fused_qnorm_rope_kv_insert(
                 attention, q, kv, positions, attn_metadata
             )
@@ -651,8 +641,10 @@ class TestPrepareAndAttn:
     def test_pipeline_without_compressor(self, deepseek_mod):
         calls = {}
         attention = self._attention(
-            deepseek_mod, forward_mqa=lambda q, kv, positions, output:
-            calls.setdefault("mqa", (q, kv, positions, output)),
+            deepseek_mod,
+            forward_mqa=lambda q, kv, positions, output: calls.setdefault(
+                "mqa", (q, kv, positions, output)
+            ),
         )
         metadata = {
             "layer.swa_cache": SimpleNamespace(
@@ -663,14 +655,19 @@ class TestPrepareAndAttn:
         q = torch.ones(1, 1, 2)
 
         deepseek_mod.DeepseekV4FLAttention._prepare_and_attn(
-            attention, "hs", torch.ones(1, 2), torch.ones(1, 2),
-            None, None, None, torch.tensor([0]), torch.zeros(1, 1, 2),
+            attention,
+            "hs",
+            torch.ones(1, 2),
+            torch.ones(1, 2),
+            None,
+            None,
+            None,
+            torch.tensor([0]),
+            torch.zeros(1, 1, 2),
         )
         mqa_q = calls["mqa"][0]
         # qnorm applied: ones * rsqrt(1 + eps).
-        torch.testing.assert_close(
-            mqa_q, q * torch.rsqrt(torch.tensor(1.0 + 1e-6))
-        )
+        torch.testing.assert_close(mqa_q, q * torch.rsqrt(torch.tensor(1.0 + 1e-6)))
 
     def test_c4a_topk_fill_for_ratio_4(self, deepseek_mod):
         calls = {}
@@ -680,10 +677,12 @@ class TestPrepareAndAttn:
             compress_ratio=4,
             indexer=SimpleNamespace(topk_tokens=8),
             topk_indices_buffer=torch.zeros(4, 8, dtype=torch.int32),
-            forward_mqa=lambda q, kv, positions, output:
-            calls.setdefault("mqa", (q, kv)),
-            _compress_kv_bf16=lambda kv_score, positions:
-            calls.setdefault("compress", (kv_score, positions)),
+            forward_mqa=lambda q, kv, positions, output: calls.setdefault(
+                "mqa", (q, kv)
+            ),
+            _compress_kv_bf16=lambda kv_score, positions: calls.setdefault(
+                "compress", (kv_score, positions)
+            ),
         )
         metadata = {
             "layer.swa_cache": SimpleNamespace(
@@ -693,14 +692,18 @@ class TestPrepareAndAttn:
         _set_attn_metadata(deepseek_mod, metadata)
 
         deepseek_mod.DeepseekV4FLAttention._prepare_and_attn(
-            attention, "hs", torch.ones(4, 2), torch.ones(4, 2),
-            "kv-score", None, None, torch.tensor([1, 3, 4, 7]),
+            attention,
+            "hs",
+            torch.ones(4, 2),
+            torch.ones(4, 2),
+            "kv-score",
+            None,
+            None,
+            torch.tensor([1, 3, 4, 7]),
             torch.zeros(4, 1, 2),
         )
         assert calls["compress"][0] == "kv-score"
-        torch.testing.assert_close(
-            calls["compress"][1], torch.tensor([1, 3, 4, 7])
-        )
+        torch.testing.assert_close(calls["compress"][1], torch.tensor([1, 3, 4, 7]))
         expected = torch.tensor(
             [
                 [-1, -1, -1, -1, -1, -1, -1, -1],
@@ -715,18 +718,27 @@ class TestPrepareAndAttn:
     def test_skips_topk_fill_for_ratio_128(self, deepseek_mod):
         buffer = torch.full((2, 8), 7, dtype=torch.int32)
         attention = self._attention(
-            deepseek_mod, compress_ratio=128,
+            deepseek_mod,
+            compress_ratio=128,
             topk_indices_buffer=buffer,
         )
         _set_attn_metadata(
             deepseek_mod,
-            {"layer.swa_cache": SimpleNamespace(
-                slot_mapping=torch.tensor([0, 1]), block_size=4
-            )},
+            {
+                "layer.swa_cache": SimpleNamespace(
+                    slot_mapping=torch.tensor([0, 1]), block_size=4
+                )
+            },
         )
         deepseek_mod.DeepseekV4FLAttention._prepare_and_attn(
-            attention, "hs", torch.ones(2, 2), torch.ones(2, 2),
-            None, None, None, torch.tensor([127, 255]),
+            attention,
+            "hs",
+            torch.ones(2, 2),
+            torch.ones(2, 2),
+            None,
+            None,
+            None,
+            torch.tensor([127, 255]),
             torch.zeros(2, 1, 2),
         )
         assert torch.equal(
@@ -736,21 +748,30 @@ class TestPrepareAndAttn:
 
     def test_missing_topk_buffer_asserts_for_ratio_4(self, deepseek_mod):
         attention = self._attention(
-            deepseek_mod, compress_ratio=4, indexer=SimpleNamespace(
-                topk_tokens=8
-            ),
+            deepseek_mod,
+            compress_ratio=4,
+            indexer=SimpleNamespace(topk_tokens=8),
         )
         attention.topk_indices_buffer = None
         _set_attn_metadata(
             deepseek_mod,
-            {"layer.swa_cache": SimpleNamespace(
-                slot_mapping=torch.tensor([0]), block_size=4
-            )},
+            {
+                "layer.swa_cache": SimpleNamespace(
+                    slot_mapping=torch.tensor([0]), block_size=4
+                )
+            },
         )
         with pytest.raises(AssertionError):
             deepseek_mod.DeepseekV4FLAttention._prepare_and_attn(
-                attention, "hs", torch.ones(1, 2), torch.ones(1, 2),
-                None, None, None, torch.tensor([3]), torch.zeros(1, 1, 2),
+                attention,
+                "hs",
+                torch.ones(1, 2),
+                torch.ones(1, 2),
+                None,
+                None,
+                None,
+                torch.tensor([3]),
+                torch.zeros(1, 1, 2),
             )
 
 
@@ -765,16 +786,15 @@ class TestCompressKvBf16:
     nothing else.
     """
 
-    def _attention(self, deepseek_mod, ratio, head_dim=2, num_blocks=2,
-                   block_size=4, num_tokens=4):
+    def _attention(
+        self, deepseek_mod, ratio, head_dim=2, num_blocks=2, block_size=4, num_tokens=4
+    ):
         overlap = ratio == 4
         coff = 1 + overlap
         state_width = coff * head_dim
         # ape rows are indexed by positions % ratio and added to score.
         ape = torch.randn(ratio, state_width)
-        state_cache = torch.zeros(
-            num_blocks, block_size, 2 * state_width
-        )
+        state_cache = torch.zeros(num_blocks, block_size, 2 * state_width)
         compressor = SimpleNamespace(
             state_cache=SimpleNamespace(
                 prefix="layer.state_cache", kv_cache=state_cache
@@ -809,8 +829,8 @@ class TestCompressKvBf16:
         return attention, kv_score, positions, ape, state_cache, block_size
 
     def test_ratio_4_packs_kv_and_biased_score(self, deepseek_mod):
-        attention, kv_score, positions, ape, state_cache, block_size = (
-            self._attention(deepseek_mod, ratio=4)
+        attention, kv_score, positions, ape, state_cache, block_size = self._attention(
+            deepseek_mod, ratio=4
         )
         deepseek_mod.DeepseekV4FLAttention._compress_kv_bf16(
             attention, kv_score, positions
@@ -834,17 +854,15 @@ class TestCompressKvBf16:
 
     def test_ratio_128_single_width_state(self, deepseek_mod):
         """C128A (no overlap): one head_dim of kv and score per side."""
-        attention, kv_score, positions, ape, state_cache, block_size = (
-            self._attention(deepseek_mod, ratio=128)
+        attention, kv_score, positions, ape, state_cache, block_size = self._attention(
+            deepseek_mod, ratio=128
         )
         deepseek_mod.DeepseekV4FLAttention._compress_kv_bf16(
             attention, kv_score, positions
         )
         state_width = kv_score.shape[-1] // 2
         kv, score = kv_score.split([state_width, state_width], dim=-1)
-        expected = torch.cat(
-            (kv, score + ape[positions.remainder(128)]), -1
-        )
+        expected = torch.cat((kv, score + ape[positions.remainder(128)]), -1)
         slot_mapping = torch.tensor([0, 1, -1, 3])
         valid = slot_mapping >= 0
         rows = state_cache[
@@ -854,8 +872,8 @@ class TestCompressKvBf16:
 
     def test_non_dict_metadata_returns_early(self, deepseek_mod):
         """A non-dict attn_metadata skips the write entirely."""
-        attention, kv_score, positions, ape, state_cache, block_size = (
-            self._attention(deepseek_mod, ratio=4)
+        attention, kv_score, positions, ape, state_cache, block_size = self._attention(
+            deepseek_mod, ratio=4
         )
         deepseek_mod.get_forward_context = lambda: SimpleNamespace(
             attn_metadata=object()  # not a dict
@@ -866,9 +884,7 @@ class TestCompressKvBf16:
         assert torch.count_nonzero(state_cache) == 0
 
     def test_missing_compressor_asserts(self, deepseek_mod):
-        attention, kv_score, positions, *_ = self._attention(
-            deepseek_mod, ratio=4
-        )
+        attention, kv_score, positions, *_ = self._attention(deepseek_mod, ratio=4)
         attention.compressor = None
         with pytest.raises(AssertionError):
             deepseek_mod.DeepseekV4FLAttention._compress_kv_bf16(
@@ -895,9 +911,7 @@ class TestOProj:
         o = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         positions = torch.tensor([0, 1])
 
-        out = deepseek_mod.DeepseekV4FLAttention._o_proj(
-            attention, o, positions
-        )
+        out = deepseek_mod.DeepseekV4FLAttention._o_proj(attention, o, positions)
         torch.testing.assert_close(out, o * 4.0 * 0.5 + 1.0)
         assert [name for name, _ in calls] == ["rope", "wo_a", "wo_b"]
 
@@ -907,7 +921,9 @@ class TestOProj:
                 return o, None
 
         attention = SimpleNamespace(
-            rotary_emb=_Rotary(), wo_a=lambda x: x, wo_b=lambda x: x,
+            rotary_emb=_Rotary(),
+            wo_a=lambda x: x,
+            wo_b=lambda x: x,
             n_local_groups=2,
         )
         with pytest.raises(ValueError, match="one group per TP rank"):
@@ -917,20 +933,28 @@ class TestOProj:
 
 
 class TestForwardMqa:
-    def _swa_double(self, ratio=0, head_dim=4, window_size=128,
-                    sink_value=-float("inf"), swa_cache=None,
-                    compressed_cache=None, topk_buffer=None):
+    def _swa_double(
+        self,
+        ratio=0,
+        head_dim=4,
+        window_size=128,
+        sink_value=-float("inf"),
+        swa_cache=None,
+        compressed_cache=None,
+        topk_buffer=None,
+    ):
         return SimpleNamespace(
             prefix="layer",
-            swa_cache_layer=SimpleNamespace(prefix="layer.swa_cache",
-                                            kv_cache=swa_cache),
+            swa_cache_layer=SimpleNamespace(
+                prefix="layer.swa_cache", kv_cache=swa_cache
+            ),
             kv_cache=compressed_cache,
             compress_ratio=ratio,
             max_model_len=128,
             window_size=window_size,
             head_dim=head_dim,
             n_local_heads=1,
-            scale=head_dim ** -0.5,
+            scale=head_dim**-0.5,
             attn_sink=torch.tensor([sink_value]),
             topk_indices_buffer=topk_buffer,
         )
@@ -940,8 +964,11 @@ class TestForwardMqa:
         attention = self._swa_double(swa_cache=torch.zeros(1, 128, 4))
         _set_attn_metadata(deepseek_mod, object())
         deepseek_mod.DeepseekV4FLAttention.forward_mqa(
-            attention, torch.zeros(2, 1, 4), torch.zeros(2, 4),
-            torch.tensor([0, 1]), output,
+            attention,
+            torch.zeros(2, 1, 4),
+            torch.zeros(2, 4),
+            torch.tensor([0, 1]),
+            output,
         )
         assert torch.count_nonzero(output) == 0
 
@@ -949,8 +976,9 @@ class TestForwardMqa:
         head_dim = 4
         swa_cache = torch.zeros(1, 128, head_dim)
         for i in range(16):
-            swa_cache[0, i] = torch.arange(head_dim,
-                                           dtype=torch.float32) * (i + 1) * 0.1
+            swa_cache[0, i] = (
+                torch.arange(head_dim, dtype=torch.float32) * (i + 1) * 0.1
+            )
         attention = self._swa_double(swa_cache=swa_cache)
         positions = torch.tensor([15])
         q = torch.ones(1, 1, head_dim)
@@ -978,10 +1006,8 @@ class TestForwardMqa:
         window_size = 8
         swa_cache = torch.zeros(1, 128, head_dim)
         for i in range(64):
-            swa_cache[0, i] = torch.arange(head_dim,
-                                           dtype=torch.float32) * (i + 1)
-        attention = self._swa_double(window_size=window_size,
-                                     swa_cache=swa_cache)
+            swa_cache[0, i] = torch.arange(head_dim, dtype=torch.float32) * (i + 1)
+        attention = self._swa_double(window_size=window_size, swa_cache=swa_cache)
         positions = torch.tensor([63])
         q = torch.ones(1, 1, head_dim)
         swa_metadata = SimpleNamespace(
@@ -1007,8 +1033,7 @@ class TestForwardMqa:
         head_dim = 4
         swa_cache = torch.zeros(1, 8, head_dim)
         for i in range(8):
-            swa_cache[0, i] = torch.arange(head_dim,
-                                           dtype=torch.float32) * (i + 1)
+            swa_cache[0, i] = torch.arange(head_dim, dtype=torch.float32) * (i + 1)
         attention = self._swa_double(window_size=8, swa_cache=swa_cache)
         positions = torch.tensor([2])
         q = torch.ones(1, 1, head_dim)
@@ -1034,8 +1059,7 @@ class TestForwardMqa:
     def test_skips_unallocated_blocks(self, deepseek_mod):
         head_dim = 4
         swa_cache = torch.ones(1, 8, head_dim)
-        attention = self._swa_double(window_size=8, sink_value=0.0,
-                                     swa_cache=swa_cache)
+        attention = self._swa_double(window_size=8, sink_value=0.0, swa_cache=swa_cache)
         positions = torch.tensor([5])
         q = torch.ones(1, 1, head_dim)
         swa_metadata = SimpleNamespace(
@@ -1053,15 +1077,16 @@ class TestForwardMqa:
         assert torch.isfinite(output).all()
 
     @pytest.mark.parametrize("ratio,position", [(4, 3), (128, 127)])
-    def test_compressed_and_swa_share_softmax(self, deepseek_mod, ratio,
-                                              position):
+    def test_compressed_and_swa_share_softmax(self, deepseek_mod, ratio, position):
         head_dim = 4
         swa_cache = torch.zeros((1, 128, head_dim), dtype=torch.bfloat16)
-        compressed_cache = torch.zeros((1, 128 // ratio, head_dim),
-                                       dtype=torch.bfloat16)
+        compressed_cache = torch.zeros(
+            (1, 128 // ratio, head_dim), dtype=torch.bfloat16
+        )
         compressed_cache[0, 0, :] = 1
         attention = self._swa_double(
-            ratio=ratio, swa_cache=swa_cache,
+            ratio=ratio,
+            swa_cache=swa_cache,
             compressed_cache=compressed_cache,
             topk_buffer=torch.arange(32, dtype=torch.int32).unsqueeze(0),
         )
@@ -1085,12 +1110,10 @@ class TestForwardMqa:
             attention, q, q, positions, output
         )
 
-        keys = torch.cat((compressed_cache[0, :1],
-                          swa_cache[0, : position + 1]))
+        keys = torch.cat((compressed_cache[0, :1], swa_cache[0, : position + 1]))
         logits = (q[0, 0].float() @ keys.float().T) * attention.scale
         expected = (torch.softmax(logits, dim=-1) @ keys.float()).to(q.dtype)
-        torch.testing.assert_close(output[0, 0], expected, rtol=0.01,
-                                    atol=0.01)
+        torch.testing.assert_close(output[0, 0], expected, rtol=0.01, atol=0.01)
         assert output[0, 0, 0] > 0
 
     def test_batches_requests_via_token_to_req(self, deepseek_mod):
@@ -1098,8 +1121,7 @@ class TestForwardMqa:
         swa_cache = torch.zeros(2, 8, head_dim)
         for i in range(8):
             swa_cache[0, i] = torch.arange(head_dim, dtype=torch.float32)
-            swa_cache[1, i] = torch.arange(head_dim,
-                                           dtype=torch.float32) * -0.5
+            swa_cache[1, i] = torch.arange(head_dim, dtype=torch.float32) * -0.5
         attention = self._swa_double(window_size=8, swa_cache=swa_cache)
         q = torch.ones(2, 1, head_dim)
         positions = torch.tensor([4, 4])
@@ -1120,16 +1142,17 @@ class TestForwardMqa:
             logits = (q[token, 0].float() @ keys.T) * attention.scale
             expected = torch.softmax(logits, dim=-1) @ keys
             torch.testing.assert_close(
-                output[token, 0], expected.to(output.dtype),
-                rtol=0.01, atol=0.01,
+                output[token, 0],
+                expected.to(output.dtype),
+                rtol=0.01,
+                atol=0.01,
             )
 
     def test_finite_sink_beats_all_masked_rows(self, deepseek_mod):
         """All-masked rows resolve to exact zeros, not NaN."""
         head_dim = 4
         swa_cache = torch.ones(1, 8, head_dim)
-        attention = self._swa_double(window_size=1, sink_value=0.0,
-                                     swa_cache=swa_cache)
+        attention = self._swa_double(window_size=1, sink_value=0.0, swa_cache=swa_cache)
         swa_metadata = SimpleNamespace(
             token_to_req_indices=torch.tensor([0], dtype=torch.int32),
             block_size=8,
@@ -1140,7 +1163,10 @@ class TestForwardMqa:
         output = torch.empty_like(q)
 
         deepseek_mod.DeepseekV4FLAttention.forward_mqa(
-            attention, q, torch.zeros(1, head_dim), torch.tensor([0]),
+            attention,
+            q,
+            torch.zeros(1, head_dim),
+            torch.tensor([0]),
             output,
         )
         assert torch.isfinite(output).all()
@@ -1156,7 +1182,8 @@ class TestForwardMqa:
         for i in range(3):
             compressed_cache[0, i] = 1.0 + i
         attention = self._swa_double(
-            ratio=ratio, swa_cache=swa_cache,
+            ratio=ratio,
+            swa_cache=swa_cache,
             compressed_cache=compressed_cache,
             topk_buffer=torch.tensor([[-1, 1, 0]], dtype=torch.int32),
         )
@@ -1183,8 +1210,7 @@ class TestForwardMqa:
         keys = torch.cat((compressed_cache[0, [1, 0]], swa_cache[0, :8]))
         logits = (q[0, 0].float() @ keys.float().T) * attention.scale
         expected = (torch.softmax(logits, dim=-1) @ keys.float()).to(q.dtype)
-        torch.testing.assert_close(output[0, 0], expected, rtol=0.01,
-                                   atol=0.01)
+        torch.testing.assert_close(output[0, 0], expected, rtol=0.01, atol=0.01)
 
 
 class TestHcHeadFallback:
@@ -1201,19 +1227,33 @@ class TestHcHeadFallback:
     def test_forward_native_contract(self, deepseek_mod, monkeypatch):
         captured = {}
 
-        def fake_kernel(flat, hc_fn, hc_scale, hc_base, out, hidden_size,
-                        rms_norm_eps, hc_eps, hc_mult):
+        def fake_kernel(
+            flat,
+            hc_fn,
+            hc_scale,
+            hc_base,
+            out,
+            hidden_size,
+            rms_norm_eps,
+            hc_eps,
+            hc_mult,
+        ):
             captured.update(
-                flat=flat, hc_fn=hc_fn, hc_scale=hc_scale, hc_base=hc_base,
-                out=out, hidden_size=hidden_size, rms_norm_eps=rms_norm_eps,
-                hc_eps=hc_eps, hc_mult=hc_mult,
+                flat=flat,
+                hc_fn=hc_fn,
+                hc_scale=hc_scale,
+                hc_base=hc_base,
+                out=out,
+                hidden_size=hidden_size,
+                rms_norm_eps=rms_norm_eps,
+                hc_eps=hc_eps,
+                hc_mult=hc_mult,
             )
             out.fill_(2.5)
 
         import flaggems_vllm
 
-        monkeypatch.setattr(flaggems_vllm, "hc_head_fused_kernel",
-                            fake_kernel)
+        monkeypatch.setattr(flaggems_vllm, "hc_head_fused_kernel", fake_kernel)
         # forward_native is installed as a plain function attribute on the
         # stub class; call it unbound with hidden_states as `self`-less arg.
         hc_head = _HCHeadOp.__dict__["forward_native"]
@@ -1221,7 +1261,13 @@ class TestHcHeadFallback:
         # The patched function keeps its `self` slot; the stub class has no
         # instances, so satisfy it with a placeholder.
         result = hc_head(
-            _HCHeadOp(), hidden_states, "fn", 1.0, 0.5, 1e-6, 1e-5,
+            _HCHeadOp(),
+            hidden_states,
+            "fn",
+            1.0,
+            0.5,
+            1e-6,
+            1e-5,
         )
         assert captured["hc_mult"] == 3
         assert captured["hidden_size"] == 4
@@ -1239,9 +1285,7 @@ class TestCausalLM:
 
     def test_init_delegates_to_super(self, deepseek_mod):
         config = _vllm_config([0, 1])
-        model = deepseek_mod.DeepseekV4ForCausalLM(
-            vllm_config=config, prefix="p"
-        )
+        model = deepseek_mod.DeepseekV4ForCausalLM(vllm_config=config, prefix="p")
         assert model.init_kwargs == {"vllm_config": config, "prefix": "p"}
 
     def test_init_validates_before_super(self, deepseek_mod):

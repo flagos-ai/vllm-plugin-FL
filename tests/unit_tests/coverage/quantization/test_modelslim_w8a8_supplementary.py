@@ -40,9 +40,7 @@ pytestmark = [pytest.mark.supplementary]
 
 @pytest.fixture(autouse=True)
 def _single_rank_tensor_parallel(monkeypatch):
-    monkeypatch.setattr(
-        vllm_parameter, "get_tensor_model_parallel_rank", lambda: 0
-    )
+    monkeypatch.setattr(vllm_parameter, "get_tensor_model_parallel_rank", lambda: 0)
     monkeypatch.setattr(
         vllm_parameter, "get_tensor_model_parallel_world_size", lambda: 1
     )
@@ -64,10 +62,12 @@ class TestQuantKindArms:
         assert config._quant_kind("model.layers.0.mlp") is None
 
     def test_fused_wqa_wkv_group(self):
-        config = _config({
-            "layers.0.attn.wq_a.weight": "W8A8",
-            "layers.0.attn.wkv.weight": "W8A8",
-        })
+        config = _config(
+            {
+                "layers.0.attn.wq_a.weight": "W8A8",
+                "layers.0.attn.wkv.weight": "W8A8",
+            }
+        )
         assert config._quant_kind("model.layers.0.attn.fused_wqa_wkv") == "W8A8"
         # The non-rooted prefix resolves the same group.
         assert config._quant_kind("layers.0.attn.fused_wqa_wkv") == "W8A8"
@@ -78,49 +78,62 @@ class TestQuantKindArms:
             config._quant_kind("model.layers.0.attn.fused_wqa_wkv")
 
     def test_fused_qkv_a_proj_group(self):
-        config = _config({
-            "layers.0.self_attn.q_a_proj.weight": "W8A8",
-            "layers.0.self_attn.kv_a_proj_with_mqa.weight": "W8A8_DYNAMIC",
-        })
+        config = _config(
+            {
+                "layers.0.self_attn.q_a_proj.weight": "W8A8",
+                "layers.0.self_attn.kv_a_proj_with_mqa.weight": "W8A8_DYNAMIC",
+            }
+        )
         with pytest.raises(ValueError, match="mixes"):
             config._quant_kind("model.layers.0.self_attn.fused_qkv_a_proj")
 
     def test_experts_group_prefers_first_matching_set(self):
         # w1/w2/w3 and gate/up/down alternatives both describe the same
         # packed experts; only one set needs to be present.
-        config = _config({
-            "layers.0.ffn.experts.0.w1.weight": "W8A8_DYNAMIC",
-            "layers.0.ffn.experts.0.w2.weight": "W8A8_DYNAMIC",
-            "layers.0.ffn.experts.0.w3.weight": "W8A8_DYNAMIC",
-        })
+        config = _config(
+            {
+                "layers.0.ffn.experts.0.w1.weight": "W8A8_DYNAMIC",
+                "layers.0.ffn.experts.0.w2.weight": "W8A8_DYNAMIC",
+                "layers.0.ffn.experts.0.w3.weight": "W8A8_DYNAMIC",
+            }
+        )
         assert config._quant_kind("model.layers.0.ffn.experts") == "W8A8_DYNAMIC"
-        gate_up_config = _config({
-            "layers.0.ffn.experts.0.gate_proj.weight": "W8A8_DYNAMIC",
-            "layers.0.ffn.experts.0.up_proj.weight": "W8A8_DYNAMIC",
-            "layers.0.ffn.experts.0.down_proj.weight": "W8A8_DYNAMIC",
-        })
-        assert (gate_up_config._quant_kind("model.layers.0.ffn.experts")
-                == "W8A8_DYNAMIC")
+        gate_up_config = _config(
+            {
+                "layers.0.ffn.experts.0.gate_proj.weight": "W8A8_DYNAMIC",
+                "layers.0.ffn.experts.0.up_proj.weight": "W8A8_DYNAMIC",
+                "layers.0.ffn.experts.0.down_proj.weight": "W8A8_DYNAMIC",
+            }
+        )
+        assert (
+            gate_up_config._quant_kind("model.layers.0.ffn.experts") == "W8A8_DYNAMIC"
+        )
 
     def test_experts_group_incomplete_raises(self):
-        config = _config({
-            "layers.0.ffn.experts.0.w1.weight": "W8A8_DYNAMIC",
-            "layers.0.ffn.experts.0.w2.weight": "W8A8_DYNAMIC",
-            # w3 missing
-        })
+        config = _config(
+            {
+                "layers.0.ffn.experts.0.w1.weight": "W8A8_DYNAMIC",
+                "layers.0.ffn.experts.0.w2.weight": "W8A8_DYNAMIC",
+                # w3 missing
+            }
+        )
         with pytest.raises(ValueError, match="missing quantization entries"):
             config._quant_kind("model.layers.0.ffn.experts")
 
     def test_gate_up_proj_group(self):
-        config = _config({
-            "layers.0.mlp.w1.weight": "W8A8",
-            "layers.0.mlp.w3.weight": "W8A8",
-        })
+        config = _config(
+            {
+                "layers.0.mlp.w1.weight": "W8A8",
+                "layers.0.mlp.w3.weight": "W8A8",
+            }
+        )
         assert config._quant_kind("model.layers.0.mlp.gate_up_proj") == "W8A8"
-        gate_alt = _config({
-            "layers.0.mlp.gate_proj.weight": "W8A8_DYNAMIC",
-            "layers.0.mlp.up_proj.weight": "W8A8_DYNAMIC",
-        })
+        gate_alt = _config(
+            {
+                "layers.0.mlp.gate_proj.weight": "W8A8_DYNAMIC",
+                "layers.0.mlp.up_proj.weight": "W8A8_DYNAMIC",
+            }
+        )
         assert gate_alt._quant_kind("model.layers.0.mlp.gate_up_proj") == "W8A8_DYNAMIC"
 
     def test_down_proj_group(self):
@@ -144,7 +157,8 @@ class TestQuantKindArms:
     def test_plain_prefix_group(self):
         config = _config({"layers.0.ln.weight": "FLOAT"})
         assert config._checkpoint_prefix_groups("model.layers.0.ln") == [
-            ("model.layers.0.ln",), ("layers.0.ln",)
+            ("model.layers.0.ln",),
+            ("layers.0.ln",),
         ]
 
     def test_is_static_and_dynamic_helpers(self):
@@ -177,11 +191,11 @@ class TestDynamicLinearSchemeOffset:
         than replicate it, call the subclass body with a stubbed parent
         whose registration is observable.
         """
-        import vllm.model_executor.layers.quantization.compressed_tensors.\
-            schemes as schemes_mod
+        import vllm.model_executor.layers.quantization.compressed_tensors.schemes as schemes_mod
+
         from vllm_fl.quantization.modelslim_w8a8 import (
-            _ModelSlimW8A8LinearScheme,
             QuantizationStrategy,
+            _ModelSlimW8A8LinearScheme,
         )
 
         parent_calls = []
@@ -190,9 +204,7 @@ class TestDynamicLinearSchemeOffset:
             parent_calls.append(kwargs)
 
         original = schemes_mod.CompressedTensorsW8A8Int8.create_weights
-        schemes_mod.CompressedTensorsW8A8Int8.create_weights = (
-            stub_create_weights
-        )
+        schemes_mod.CompressedTensorsW8A8Int8.create_weights = stub_create_weights
         try:
             scheme = _ModelSlimW8A8LinearScheme(
                 strategy=QuantizationStrategy.CHANNEL,
@@ -238,9 +250,17 @@ class TestMoeMethodOffsets:
             device="cpu",
             routing_method=RoutingMethodType.Renormalize,
             moe_parallel_config=FusedMoEParallelConfig(
-                tp_size=1, pcp_size=1, dp_size=1, ep_size=1,
-                tp_rank=0, pcp_rank=0, dp_rank=0, ep_rank=0,
-                sp_size=1, use_ep=False, all2all_backend="none",
+                tp_size=1,
+                pcp_size=1,
+                dp_size=1,
+                ep_size=1,
+                tp_rank=0,
+                pcp_rank=0,
+                dp_rank=0,
+                ep_rank=0,
+                sp_size=1,
+                use_ep=False,
+                all2all_backend="none",
                 enable_eplb=False,
             ),
             in_dtype=torch.bfloat16,
@@ -255,29 +275,32 @@ class TestMoeMethodOffsets:
         constructor with the config's args, stub the parent registration,
         and check the offsets plus their set attrs.
         """
-        import vllm.model_executor.layers.quantization.compressed_tensors.\
-            compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 as moe_mod
+        import vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 as moe_mod
+
         from vllm_fl.quantization.modelslim_w8a8 import (
-            _ModelSlimW8A8MoEMethod,
             ModelSlimW8A8Config,
+            _ModelSlimW8A8MoEMethod,
         )
 
         config = ModelSlimW8A8Config({})
         parent_calls = []
 
-        def stub_create_weights(self, layer, num_experts, hidden_size,
-                                intermediate_size_per_partition, params_dtype,
-                                **extra):
-            parent_calls.append((num_experts, hidden_size,
-                                 intermediate_size_per_partition))
+        def stub_create_weights(
+            self,
+            layer,
+            num_experts,
+            hidden_size,
+            intermediate_size_per_partition,
+            params_dtype,
+            **extra,
+        ):
+            parent_calls.append(
+                (num_experts, hidden_size, intermediate_size_per_partition)
+            )
 
-        original = (
-            moe_mod.CompressedTensorsW8A8Int8MoEMethod.create_weights
-        )
+        original = moe_mod.CompressedTensorsW8A8Int8MoEMethod.create_weights
         original_init = moe_mod.CompressedTensorsW8A8Int8MoEMethod.__init__
-        moe_mod.CompressedTensorsW8A8Int8MoEMethod.create_weights = (
-            stub_create_weights
-        )
+        moe_mod.CompressedTensorsW8A8Int8MoEMethod.create_weights = stub_create_weights
 
         def stub_init(self, weight_quant, input_quant, moe, layer_name=None):
             # Skip the upstream backend-oracle selection (unsupported on a
@@ -298,7 +321,11 @@ class TestMoeMethodOffsets:
             )
             layer = torch.nn.Module()
             method.create_weights(
-                layer, 2, 4, 6, torch.bfloat16,
+                layer,
+                2,
+                4,
+                6,
+                torch.bfloat16,
                 weight_loader=lambda *a, **k: None,
             )
         finally:
@@ -315,7 +342,6 @@ class TestMoeMethodOffsets:
 
 
 class TestGetQuantMethod:
-
     @pytest.fixture(autouse=True)
     def _routed_under_vllm_config(self):
         """RoutedExperts construction reads the current VllmConfig."""
@@ -343,19 +369,27 @@ class TestGetQuantMethod:
         from vllm.model_executor.layers.fused_moe.activation import (
             MoEActivation,
         )
-        from vllm.model_executor.layers.fused_moe.expert_map_manager import (
-            ExpertMapManager,
-        )
         from vllm.model_executor.layers.fused_moe.config import (
             FusedMoEConfig,
             FusedMoEParallelConfig,
             RoutingMethodType,
         )
+        from vllm.model_executor.layers.fused_moe.expert_map_manager import (
+            ExpertMapManager,
+        )
 
         parallel = FusedMoEParallelConfig(
-            tp_size=1, pcp_size=1, dp_size=1, ep_size=1,
-            tp_rank=0, pcp_rank=0, dp_rank=0, ep_rank=0,
-            sp_size=1, use_ep=False, all2all_backend="none",
+            tp_size=1,
+            pcp_size=1,
+            dp_size=1,
+            ep_size=1,
+            tp_rank=0,
+            pcp_rank=0,
+            dp_rank=0,
+            ep_rank=0,
+            sp_size=1,
+            use_ep=False,
+            all2all_backend="none",
             enable_eplb=False,
         )
         config = FusedMoEConfig(
@@ -404,8 +438,9 @@ class TestGetQuantMethod:
         assert isinstance(method, UnquantizedLinearMethod)
 
     def test_static_w8a8_linear_gets_static_scheme(self):
-        from vllm.model_executor.layers.quantization.compressed_tensors.\
-            compressed_tensors import CompressedTensorsLinearMethod
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+            CompressedTensorsLinearMethod,
+        )
 
         from vllm_fl.quantization.modelslim_w8a8 import (
             _ModelSlimW8A8StaticLinearScheme,
@@ -418,8 +453,9 @@ class TestGetQuantMethod:
         assert isinstance(layer.scheme, _ModelSlimW8A8StaticLinearScheme)
 
     def test_dynamic_w8a8_linear_gets_dynamic_scheme(self):
-        from vllm.model_executor.layers.quantization.compressed_tensors.\
-            compressed_tensors import CompressedTensorsLinearMethod
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (
+            CompressedTensorsLinearMethod,
+        )
 
         from vllm_fl.quantization.modelslim_w8a8 import (
             _ModelSlimW8A8LinearScheme,
@@ -436,52 +472,53 @@ class TestGetQuantMethod:
             UnquantizedFusedMoEMethod,
         )
 
-        config = _config({
-            "layers.0.ffn.experts.0.w1.weight": "FLOAT",
-            "layers.0.ffn.experts.0.w2.weight": "FLOAT",
-            "layers.0.ffn.experts.0.w3.weight": "FLOAT",
-        })
-        method = config.get_quant_method(
-            self._routed_experts(), "layers.0.ffn.experts"
+        config = _config(
+            {
+                "layers.0.ffn.experts.0.w1.weight": "FLOAT",
+                "layers.0.ffn.experts.0.w2.weight": "FLOAT",
+                "layers.0.ffn.experts.0.w3.weight": "FLOAT",
+            }
         )
+        method = config.get_quant_method(self._routed_experts(), "layers.0.ffn.experts")
         assert isinstance(method, UnquantizedFusedMoEMethod)
+
     def test_static_w8a8_routed_experts_raises(self):
-        config = _config({
-            "layers.0.ffn.experts.0.w1.weight": "W8A8",
-            "layers.0.ffn.experts.0.w2.weight": "W8A8",
-            "layers.0.ffn.experts.0.w3.weight": "W8A8",
-        })
+        config = _config(
+            {
+                "layers.0.ffn.experts.0.w1.weight": "W8A8",
+                "layers.0.ffn.experts.0.w2.weight": "W8A8",
+                "layers.0.ffn.experts.0.w3.weight": "W8A8",
+            }
+        )
         with pytest.raises(NotImplementedError, match="static W8A8 routed"):
-            config.get_quant_method(
-                self._routed_experts(), "layers.0.ffn.experts"
-            )
+            config.get_quant_method(self._routed_experts(), "layers.0.ffn.experts")
 
     def test_dynamic_w8a8_routed_experts_gets_offset_method(self):
         from vllm_fl.quantization.modelslim_w8a8 import (
             _ModelSlimW8A8MoEMethod,
         )
 
-        config = _config({
-            "layers.0.ffn.experts.0.w1.weight": "W8A8_DYNAMIC",
-            "layers.0.ffn.experts.0.w2.weight": "W8A8_DYNAMIC",
-            "layers.0.ffn.experts.0.w3.weight": "W8A8_DYNAMIC",
-        })
+        config = _config(
+            {
+                "layers.0.ffn.experts.0.w1.weight": "W8A8_DYNAMIC",
+                "layers.0.ffn.experts.0.w2.weight": "W8A8_DYNAMIC",
+                "layers.0.ffn.experts.0.w3.weight": "W8A8_DYNAMIC",
+            }
+        )
         # The upstream int8 MoE oracle consults device backends unavailable
         # on a CPU host. The MoE method module holds the oracle as a direct
         # module attribute, so patch it there.
-        import vllm.model_executor.layers.quantization.compressed_tensors.\
-            compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 as moe_mod
+        import vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 as moe_mod
 
         experts_layer = self._routed_experts()
         original_select = moe_mod.select_int8_moe_backend
+
         def fake_select(*args, **kwargs):
             return ("triton", object)
 
         moe_mod.select_int8_moe_backend = fake_select
         try:
-            method = config.get_quant_method(
-                experts_layer, "layers.0.ffn.experts"
-            )
+            method = config.get_quant_method(experts_layer, "layers.0.ffn.experts")
         finally:
             moe_mod.select_int8_moe_backend = original_select
         assert isinstance(method, _ModelSlimW8A8MoEMethod)
@@ -503,17 +540,13 @@ class TestStaticSchemeApplyEdges:
             weight_loader=lambda *a, **kw: None,
         )
         out_size = sum(partitions)
-        layer.weight.data = torch.randint(
-            -127, 127, (out_size, k), dtype=torch.int8
-        )
+        layer.weight.data = torch.randint(-127, 127, (out_size, k), dtype=torch.int8)
         layer.input_scale.data = torch.rand(len(partitions)) + 0.25
         layer.input_offset.data = torch.randint(
             -3, 3, (len(partitions),), dtype=torch.float32
         )
         layer.deq_scale.data = torch.rand(out_size) + 0.5
-        layer.quant_bias.data = torch.randint(
-            -50, 50, (out_size,), dtype=torch.int32
-        )
+        layer.quant_bias.data = torch.randint(-50, 50, (out_size,), dtype=torch.int32)
         scheme.process_weights_after_loading(layer)
         return scheme, layer
 
@@ -522,11 +555,7 @@ class TestStaticSchemeApplyEdges:
         with pytest.raises(ValueError, match="single logical matrix"):
             scheme.apply_weights(layer, torch.ones(2, 4, dtype=torch.int8), None)
 
-    def test_row_parallel_without_tp_rank_uses_distributed_rank(self,
-                                                                monkeypatch):
-        from vllm_fl.quantization.modelslim_w8a8 import (
-            _ModelSlimW8A8StaticLinearScheme,
-        )
+    def test_row_parallel_without_tp_rank_uses_distributed_rank(self, monkeypatch):
         import vllm.distributed as vllm_dist
 
         scheme, layer = self._loaded_layer(partitions=(8,))
@@ -542,14 +571,15 @@ class TestStaticSchemeApplyEdges:
         layer = _RowParallel(layer)
         # Patch the distributed rank used inside apply_weights (imported at
         # module scope from vllm.distributed).
-        monkeypatch.setattr(
-            ms_module, "get_tensor_model_parallel_rank", lambda: 0
-        )
+        monkeypatch.setattr(ms_module, "get_tensor_model_parallel_rank", lambda: 0)
 
         def fake_quantize(x, scale, offset, dtype, axis, sqrt_mode):
-            return (x.float() * scale.float() + offset.float()).round().clamp(
-                -128, 127
-            ).to(torch.int8)
+            return (
+                (x.float() * scale.float() + offset.float())
+                .round()
+                .clamp(-128, 127)
+                .to(torch.int8)
+            )
 
         def fake_matmul(x, weight, deq_scale, *, bias, output_dtype):
             acc = x.to(torch.int32) @ weight.to(torch.int32)

@@ -282,9 +282,7 @@ class TestHygonPatchDefensivePaths:
         """A torch double with an empty accelerator namespace."""
         torch = ModuleType("torch")
         torch.accelerator = SimpleNamespace()
-        torch.cuda = SimpleNamespace(
-            mem_get_info=lambda index=None: (4096, 8192)
-        )
+        torch.cuda = SimpleNamespace(mem_get_info=lambda index=None: (4096, 8192))
         return torch
 
     @staticmethod
@@ -419,9 +417,7 @@ class TestHygonPatchDefensivePaths:
         try:
             fake_torch.accelerator = locked
 
-            with pytest.raises(
-                RuntimeError, match="marker attribute is read-only"
-            ):
+            with pytest.raises(RuntimeError, match="marker attribute is read-only"):
                 patch_module._install_accelerator_missing_attrs()
 
             # The fallback binding was written before the marker failed

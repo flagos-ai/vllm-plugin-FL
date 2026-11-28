@@ -123,11 +123,11 @@ class TestIluvatarSiluAndMulCustomOp:
         Runs under ``torch._subclasses.FakeTensorMode`` so the real kernel
         is never launched — this covers the ``register_fake`` body.
         """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
         from vllm_fl.dispatch.backends.vendor.iluvatar.activation import (
             _iluvatar_gems_silu_and_mul,
         )
-
-        from torch._subclasses.fake_tensor import FakeTensorMode
 
         device = _device()
         with FakeTensorMode():

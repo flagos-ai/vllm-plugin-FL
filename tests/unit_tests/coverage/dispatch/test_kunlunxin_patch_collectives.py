@@ -22,6 +22,7 @@ attribute is restored in a ``finally``.
 
 from __future__ import annotations
 
+import contextlib
 import runpy
 import sys
 from pathlib import Path
@@ -98,27 +99,22 @@ class _ModuleStubs:
 
     def __exit__(self, *exc):
         import vllm.v1.worker.gpu as gpu_pkg
+
         import vllm_fl
 
         if self._saved_gpu_pkg_attr is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del gpu_pkg.gpu_model_runner
-            except AttributeError:
-                pass
         else:
             gpu_pkg.gpu_model_runner = self._saved_gpu_pkg_attr
         if self._saved_fl_mr_attr is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del vllm_fl.worker.model_runner
-            except AttributeError:
-                pass
         else:
             vllm_fl.worker.model_runner = self._saved_fl_mr_attr
         if self._saved_fl_worker is None:
-            try:
+            with contextlib.suppress(AttributeError):
                 del vllm_fl.worker
-            except AttributeError:
-                pass
         else:
             vllm_fl.worker = self._saved_fl_worker
         for name, entry in self._saved.items():
@@ -192,9 +188,7 @@ def capture():
 
     instance = _RecordingCapture()
     real_current = real_breakable.BreakableCUDAGraphCapture.current
-    real_breakable.BreakableCUDAGraphCapture.current = classmethod(
-        lambda cls: instance
-    )
+    real_breakable.BreakableCUDAGraphCapture.current = classmethod(lambda cls: instance)
     try:
         yield instance
     finally:
@@ -441,7 +435,7 @@ class TestGraphSafeAllReduce:
                     ns["patch_graph_all_reduce"](replacements)
                     graph_safe = replacements[0][3]
 
-                    out = graph_safe(_FakeComm(), torch.tensor([3.0]))
+                    graph_safe(_FakeComm(), torch.tensor([3.0]))
                 finally:
                     att_mod._is_full_graph_runtime = real_is_full
 
@@ -504,9 +498,7 @@ class TestDirectEagerAllGather:
             # the kernel received the input moved to dim 0 and repeated over
             # the world size
             _, received_shape = flagcx.calls[0]
-            expected_kernel = inp.movedim(dim, 0).repeat(
-                (2,) + (1,) * (inp.dim() - 1)
-            )
+            expected_kernel = inp.movedim(dim, 0).repeat((2,) + (1,) * (inp.dim() - 1))
             assert tuple(received_shape) == tuple(expected_kernel.shape)
 
     @pytest.mark.platforms("kunlunxin")
@@ -674,9 +666,7 @@ class TestCollectiveStaging:
             assert original is comm_mod.CommunicatorFL.all_reduce
             assert owned is True
             # staging must not publish
-            assert (
-                comm_mod.CommunicatorFL.all_reduce is original
-            )
+            assert comm_mod.CommunicatorFL.all_reduce is original
 
     @pytest.mark.platforms("kunlunxin")
     def test_eager_all_gather_stages_against_real_communicator(self):

@@ -16,7 +16,6 @@ no cuda device. Vendor-gated to the iluvatar platform.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 import torch
@@ -72,9 +71,7 @@ class TestIsAvailable:
             vllm.platforms, "current_platform", SimpleNamespace(vendor_name="nvidia")
         )
         # cuda unavailable -> False without calling get_device_name
-        monkeypatch.setattr(
-            torch.cuda, "is_available", lambda: False, raising=True
-        )
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=True)
         assert IluvatarBackend().is_available() is False
 
     def test_missing_vendor_name_uses_cuda_fallback(self, monkeypatch):
@@ -85,9 +82,7 @@ class TestIsAvailable:
         )
 
         # no vendor_name attribute at all -> falls to the cuda branch
-        monkeypatch.setattr(
-            vllm.platforms, "current_platform", SimpleNamespace()
-        )
+        monkeypatch.setattr(vllm.platforms, "current_platform", SimpleNamespace())
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
         monkeypatch.setattr(
             torch.cuda, "get_device_name", lambda idx: "Iluvatar BI-V150"
@@ -162,9 +157,7 @@ class TestIsAvailable:
             def vendor_name(self):
                 raise RuntimeError("platform probe failed")
 
-        monkeypatch.setattr(
-            vllm.platforms, "current_platform", ExplodingPlatform()
-        )
+        monkeypatch.setattr(vllm.platforms, "current_platform", ExplodingPlatform())
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
         assert IluvatarBackend().is_available() is False
 
@@ -181,9 +174,7 @@ class TestIsAvailable:
 class TestSiluAndMul:
     """silu_and_mul delegates to the pure-torch reference implementation."""
 
-    @pytest.mark.parametrize(
-        "shape", [(4, 8), (3, 5, 12), (6,), (2, 0, 4)]
-    )
+    @pytest.mark.parametrize("shape", [(4, 8), (3, 5, 12), (6,), (2, 0, 4)])
     def test_matches_sigmoid_oracle(self, shape):
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
             IluvatarBackend,
@@ -214,9 +205,7 @@ class TestSiluAndMul:
             IluvatarBackend,
         )
 
-        x = torch.tensor(
-            [[-100.0, -100.0, 0.0, 100.0, 100.0, 100.0]]
-        )
+        x = torch.tensor([[-100.0, -100.0, 0.0, 100.0, 100.0, 100.0]])
         out = IluvatarBackend().silu_and_mul(None, x)
         x1, x2 = x[..., :3], x[..., 3:]
         oracle = x1 * torch.sigmoid(x1) * x2
@@ -291,9 +280,7 @@ class TestRmsNorm:
         out = IluvatarBackend().rms_norm(obj, x)
         x_float = x.float()
         var = x_float.square().mean(dim=-1, keepdim=True)
-        oracle = (x_float * torch.rsqrt(var + obj.variance_epsilon)).to(
-            torch.float16
-        )
+        oracle = (x_float * torch.rsqrt(var + obj.variance_epsilon)).to(torch.float16)
         assert torch.allclose(out.float(), oracle.float(), atol=2e-2, rtol=2e-2)
 
     def test_pass_weight_add_false_skips_weight_on_residual_path(self, obj):
@@ -307,9 +294,7 @@ class TestRmsNorm:
         out, _ = IluvatarBackend().rms_norm(obj, x, residual)
         x_float = x.float() + residual.float()
         var = x_float.square().mean(dim=-1, keepdim=True)
-        oracle = (x_float * torch.rsqrt(var + obj.variance_epsilon)).to(
-            torch.float16
-        )
+        oracle = (x_float * torch.rsqrt(var + obj.variance_epsilon)).to(torch.float16)
         assert torch.allclose(out.float(), oracle.float(), atol=2e-2, rtol=2e-2)
 
     def test_dtype_round_trip_float32_exact(self):
@@ -413,11 +398,7 @@ class TestRotaryEmbedding:
         cos, sin = caches
         q = torch.randn(2, 3, 5, self.HEAD_DIM)
         k = torch.randn(2, 3, 5, self.HEAD_DIM)
-        pos = (
-            torch.arange(5)
-            if shared
-            else torch.randint(0, 30, (2, 5))
-        )
+        pos = torch.arange(5) if shared else torch.randint(0, 30, (2, 5))
         q_out, k_out = IluvatarBackend().rotary_embedding(
             None, q, k, cos, sin, pos, rotary_interleaved=interleaved
         )
@@ -463,9 +444,7 @@ class TestRotaryEmbedding:
         q = torch.randn(4, 2, self.HEAD_DIM)
         k = torch.randn(4, 2, self.HEAD_DIM)
         with pytest.raises(ValueError, match="token counts"):
-            IluvatarBackend().rotary_embedding(
-                None, q, k, cos, sin, torch.arange(3)
-            )
+            IluvatarBackend().rotary_embedding(None, q, k, cos, sin, torch.arange(3))
 
     def test_invalid_cache_width_raises(self, caches):
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (

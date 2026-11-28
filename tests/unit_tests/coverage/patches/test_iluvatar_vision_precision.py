@@ -98,13 +98,8 @@ class TestWrapVisionForward:
 
     def test_sets_true_inside_and_false_after(self):
         wrap = self._wrap_target()
-        observed = []
 
-        def forward(x):
-            observed.append(in_vision := None)  # placeholder replaced below
-            return x
-
-        # simpler: capture the flag inside via a closure
+        # capture the flag inside via a closure
         from vllm_fl.dispatch.backends.vendor.iluvatar.vision_precision import (
             in_vision_forward,
         )
@@ -206,9 +201,7 @@ class TestPatchVisionPrecision:
         assert patched is not original_forward
         assert getattr(patched, "_iluvatar_fp32_reduce", False)
 
-    def test_patched_forward_still_executes_original_body(
-        self, fresh_qwen3_vl_stub
-    ):
+    def test_patched_forward_still_executes_original_body(self, fresh_qwen3_vl_stub):
         from vllm_fl.dispatch.backends.vendor.iluvatar.vision_precision import (
             in_vision_forward,
             patch_vision_precision,

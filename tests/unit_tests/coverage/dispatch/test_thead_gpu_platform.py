@@ -46,8 +46,7 @@ def platform_fl():
     )
     if module.PlatformFL.vendor_name != "thead":
         pytest.skip(
-            f"requires a thead-resolved platform; got "
-            f"{module.PlatformFL.vendor_name!r}"
+            f"requires a thead-resolved platform; got {module.PlatformFL.vendor_name!r}"
         )
     return module.PlatformFL
 

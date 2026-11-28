@@ -29,7 +29,7 @@ with which names, and that the vendor patch entry points were invoked.
 from __future__ import annotations
 
 import sys
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
 
@@ -102,15 +102,9 @@ def _install_vllm_graph():
     rotary_mod = _make_module("vllm.model_executor.layers.rotary_embedding")
     fused_moe_layer = _make_module("vllm.model_executor.layers.fused_moe.layer")
     fm_config = _make_module("vllm.model_executor.layers.fused_moe.config")
-    fm_runner = _make_module(
-        "vllm.model_executor.layers.fused_moe.runner.moe_runner"
-    )
-    fm_modular = _make_module(
-        "vllm.model_executor.layers.fused_moe.modular_kernel"
-    )
-    fm_activation = _make_module(
-        "vllm.model_executor.layers.fused_moe.activation"
-    )
+    fm_runner = _make_module("vllm.model_executor.layers.fused_moe.runner.moe_runner")
+    fm_modular = _make_module("vllm.model_executor.layers.fused_moe.modular_kernel")
+    fm_activation = _make_module("vllm.model_executor.layers.fused_moe.activation")
     fm_experts_triton = _make_module(
         "vllm.model_executor.layers.fused_moe.experts.triton_moe"
     )
@@ -378,9 +372,7 @@ def ops_registry(monkeypatch):
 class TestVendorPatchBranches:
     """register_oot_ops device_type / vendor dispatch to vendor patches."""
 
-    def test_fused_moe_not_registered_patches_oracle(
-        self, monkeypatch, ops_registry
-    ):
+    def test_fused_moe_not_registered_patches_oracle(self, monkeypatch, ops_registry):
         """'fused_moe' excluded from registration patches the oracle."""
         custom_ops, _ = _ensure_imported()
         patched = []
@@ -394,38 +386,28 @@ class TestVendorPatchBranches:
         custom_ops.register_oot_ops()
         assert patched == [True]
 
-    def test_npu_device_type_applies_ascend_patches(
-        self, monkeypatch, ops_registry
-    ):
+    def test_npu_device_type_applies_ascend_patches(self, monkeypatch, ops_registry):
         """device_type npu runs apply_ascend_patches inside the op loop."""
         custom_ops, _ = _ensure_imported()
         from vllm.platforms import current_platform
 
         calls = []
-        ascend_patch_mod = _make_module(
-            "vllm_fl.dispatch.backends.vendor.ascend.patch"
-        )
+        ascend_patch_mod = _make_module("vllm_fl.dispatch.backends.vendor.ascend.patch")
         ascend_patch_mod.apply_ascend_patches = lambda: calls.append("ascend")
         monkeypatch.setitem(
             sys.modules,
             "vllm_fl.dispatch.backends.vendor.ascend.patch",
             ascend_patch_mod,
         )
-        monkeypatch.setattr(
-            current_platform, "device_type", "npu", raising=False
-        )
+        monkeypatch.setattr(current_platform, "device_type", "npu", raising=False)
         try:
             monkeypatch.setenv("VLLM_FL_OOT_WHITELIST", "silu_and_mul")
             custom_ops.register_oot_ops()
             assert calls == ["ascend"]
         finally:
-            monkeypatch.setattr(
-                current_platform, "device_type", "cuda", raising=False
-            )
+            monkeypatch.setattr(current_platform, "device_type", "cuda", raising=False)
 
-    def test_ptpu_device_type_applies_sunrise_patches(
-        self, monkeypatch, ops_registry
-    ):
+    def test_ptpu_device_type_applies_sunrise_patches(self, monkeypatch, ops_registry):
         """device_type ptpu runs apply_sunrise_patches inside the op loop."""
         custom_ops, _ = _ensure_imported()
         from vllm.platforms import current_platform
@@ -440,17 +422,13 @@ class TestVendorPatchBranches:
             "vllm_fl.dispatch.backends.vendor.sunrise.patch",
             sunrise_patch_mod,
         )
-        monkeypatch.setattr(
-            current_platform, "device_type", "ptpu", raising=False
-        )
+        monkeypatch.setattr(current_platform, "device_type", "ptpu", raising=False)
         try:
             monkeypatch.setenv("VLLM_FL_OOT_WHITELIST", "silu_and_mul")
             custom_ops.register_oot_ops()
             assert calls == ["sunrise"]
         finally:
-            monkeypatch.setattr(
-                current_platform, "device_type", "cuda", raising=False
-            )
+            monkeypatch.setattr(current_platform, "device_type", "cuda", raising=False)
 
     def test_gcu_vendor_applies_gcu_patches(self, monkeypatch, ops_registry):
         """vendor gcu runs apply_gcu_patches inside the op loop."""
@@ -463,9 +441,7 @@ class TestVendorPatchBranches:
         monkeypatch.setitem(
             sys.modules, "vllm_fl.dispatch.backends.vendor.gcu.patch", gcu_patch_mod
         )
-        monkeypatch.setattr(
-            current_platform, "vendor_name", "gcu", raising=False
-        )
+        monkeypatch.setattr(current_platform, "vendor_name", "gcu", raising=False)
         try:
             monkeypatch.setenv("VLLM_FL_OOT_WHITELIST", "silu_and_mul")
             custom_ops.register_oot_ops()
@@ -484,12 +460,8 @@ class TestVendorPatchBranches:
 
         # get_platform_name reads current_platform.vendor_name; steer the
         # stub platform to kunlunxin for the duration of the call.
-        monkeypatch.setattr(
-            current_platform, "vendor_name", "kunlunxin", raising=False
-        )
-        kx_patch_mod = _make_module(
-            "vllm_fl.dispatch.backends.vendor.kunlunxin.patch"
-        )
+        monkeypatch.setattr(current_platform, "vendor_name", "kunlunxin", raising=False)
+        kx_patch_mod = _make_module("vllm_fl.dispatch.backends.vendor.kunlunxin.patch")
         calls = []
         kx_patch_mod.apply_kunlunxin_patches = lambda: calls.append("kunlunxin")
         monkeypatch.setitem(
@@ -503,9 +475,7 @@ class TestVendorPatchBranches:
         # platform block afterwards.
         monkeypatch.setenv("VLLM_FL_OOT_ENABLED", "1")
         monkeypatch.setenv("VLLM_FL_OOT_WHITELIST", "no_such_op")
-        monkeypatch.setattr(
-            custom_ops, "_patch_unquantized_moe_oracle", lambda: None
-        )
+        monkeypatch.setattr(custom_ops, "_patch_unquantized_moe_oracle", lambda: None)
         custom_ops.register_oot_ops()
         assert calls == ["kunlunxin"]
         assert ops_registry.custom_ops == []

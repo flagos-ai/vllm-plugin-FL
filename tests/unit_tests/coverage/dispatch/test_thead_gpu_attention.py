@@ -86,15 +86,21 @@ def ppu_attention():
 def _varlen_inputs(num_seqs=2, seq_len=64, head_dim=128, dtype=torch.bfloat16):
     """Non-paged varlen inputs: packed Q/K/V with cu_seqlens for both."""
     generator = torch.Generator().manual_seed(2026)
-    query = torch.randn(
-        num_seqs * seq_len, 4, head_dim, generator=generator
-    ).to(dtype).cuda()
-    key = torch.randn(
-        num_seqs * seq_len, 2, head_dim, generator=generator
-    ).to(dtype).cuda()
-    value = torch.randn(
-        num_seqs * seq_len, 2, head_dim, generator=generator
-    ).to(dtype).cuda()
+    query = (
+        torch.randn(num_seqs * seq_len, 4, head_dim, generator=generator)
+        .to(dtype)
+        .cuda()
+    )
+    key = (
+        torch.randn(num_seqs * seq_len, 2, head_dim, generator=generator)
+        .to(dtype)
+        .cuda()
+    )
+    value = (
+        torch.randn(num_seqs * seq_len, 2, head_dim, generator=generator)
+        .to(dtype)
+        .cuda()
+    )
     cu = torch.tensor(
         [i * seq_len for i in range(num_seqs + 1)], device="cuda", dtype=torch.int32
     )
@@ -104,11 +110,7 @@ def _varlen_inputs(num_seqs=2, seq_len=64, head_dim=128, dtype=torch.bfloat16):
 def _gqa_bhld(x, num_seqs, seq_len, num_target_heads):
     """[N, h, d] -> [B, H, L, d] with GQA head expansion."""
     h = x.shape[1]
-    t = (
-        x.detach().cpu().float()
-        .reshape(num_seqs, seq_len, h, -1)
-        .permute(0, 2, 1, 3)
-    )
+    t = x.detach().cpu().float().reshape(num_seqs, seq_len, h, -1).permute(0, 2, 1, 3)
     return t.repeat_interleave(num_target_heads // h, dim=1)
 
 
@@ -234,8 +236,8 @@ def test_return_softmax_lse_matches_logsumexp_oracle(ppu_attention, head_dim):
     mask = positions[None, :] <= positions[:, None]
     scores = scores.masked_fill(~mask.unsqueeze(0).unsqueeze(0), float("-inf"))
     per_batch = torch.logsumexp(scores, dim=-1)  # [B, H, L]
-    expected_lse = (
-        per_batch.permute(1, 0, 2).reshape(query.shape[1], num_seqs * seq_len)
+    expected_lse = per_batch.permute(1, 0, 2).reshape(
+        query.shape[1], num_seqs * seq_len
     )
     torch.testing.assert_close(
         lse.cpu().double(),
@@ -271,9 +273,11 @@ def test_paged_decode_cu_seqlens_k_none_forces_tile_hint(ppu_attention, head_dim
     ).to(torch.bfloat16)
     packed = packed_cpu.cuda()
     key_cache, value_cache = packed.transpose(1, 2).split(head_dim, dim=-1)
-    query = torch.randn(
-        sum(query_lens), num_q, head_dim, generator=generator
-    ).to(torch.bfloat16).cuda()
+    query = (
+        torch.randn(sum(query_lens), num_q, head_dim, generator=generator)
+        .to(torch.bfloat16)
+        .cuda()
+    )
     cu_q = torch.tensor(
         [0, query_lens[0], sum(query_lens)], device="cuda", dtype=torch.int32
     )
@@ -301,20 +305,21 @@ def test_paged_decode_cu_seqlens_k_none_forces_tile_hint(ppu_attention, head_dim
         zip(query_lens, seq_lens, strict=True)
     ):
         pages = block_table[request, : math.ceil(sequence_len / block_size)].long()
-        keys = (
-            key_cpu.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
-        )
-        values = (
-            value_cpu.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
-        )
+        keys = key_cpu.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
+        values = value_cpu.index_select(0, pages).flatten(0, 1)[:sequence_len].float()
         keys = keys.transpose(0, 1).repeat_interleave(num_q // num_kv, dim=0)
         values = values.transpose(0, 1).repeat_interleave(num_q // num_kv, dim=0)
-        queries = query.cpu().float()[query_start : query_start + query_len].transpose(0, 1)
+        queries = (
+            query.cpu().float()[query_start : query_start + query_len].transpose(0, 1)
+        )
         query_positions = torch.arange(query_len) + sequence_len - query_len
         mask = torch.arange(sequence_len)[None, :] <= query_positions[:, None]
         result = F.scaled_dot_product_attention(
-            queries[None], keys[None], values[None],
-            attn_mask=mask, scale=head_dim**-0.5,
+            queries[None],
+            keys[None],
+            values[None],
+            attn_mask=mask,
+            scale=head_dim**-0.5,
         )
         expected.append(result[0].transpose(0, 1))
         query_start += query_len
@@ -334,14 +339,26 @@ def test_default_softmax_scale_used_when_none(ppu_attention):
         num_seqs=1, seq_len=32, head_dim=64
     )
     out_default = ppu_attention._thead_flash_attn_varlen_func(
-        q=query, k=key, v=value,
-        max_seqlen_q=seq_len, cu_seqlens_q=cu, cu_seqlens_k=cu,
-        max_seqlen_k=seq_len, causal=True, softmax_scale=None,
+        q=query,
+        k=key,
+        v=value,
+        max_seqlen_q=seq_len,
+        cu_seqlens_q=cu,
+        cu_seqlens_k=cu,
+        max_seqlen_k=seq_len,
+        causal=True,
+        softmax_scale=None,
     )
     out_explicit = ppu_attention._thead_flash_attn_varlen_func(
-        q=query, k=key, v=value,
-        max_seqlen_q=seq_len, cu_seqlens_q=cu, cu_seqlens_k=cu,
-        max_seqlen_k=seq_len, causal=True, softmax_scale=head_dim**-0.5,
+        q=query,
+        k=key,
+        v=value,
+        max_seqlen_q=seq_len,
+        cu_seqlens_q=cu,
+        cu_seqlens_k=cu,
+        max_seqlen_k=seq_len,
+        causal=True,
+        softmax_scale=head_dim**-0.5,
     )
     torch.cuda.synchronize()
     torch.testing.assert_close(

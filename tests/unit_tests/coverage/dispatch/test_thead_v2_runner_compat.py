@@ -50,6 +50,7 @@ def probe_recorder(monkeypatch):
 
     import vllm.utils.platform_utils as platform_utils
     import vllm.utils.torch_utils as torch_utils
+
     from vllm_fl.dispatch.backends.vendor.thead.patches import v2_runner_compat
 
     probed = []
@@ -63,9 +64,7 @@ def probe_recorder(monkeypatch):
         raise RuntimeError("mapped view unavailable on this build")
 
     monkeypatch.setattr(torch, "zeros", lambda *a, **k: torch.empty(1))
-    monkeypatch.setattr(
-        torch_utils, "get_accelerator_view_from_cpu_tensor", recorder
-    )
+    monkeypatch.setattr(torch_utils, "get_accelerator_view_from_cpu_tensor", recorder)
     monkeypatch.setattr(platform_utils, "is_uva_available", lambda: False)
 
     return types.SimpleNamespace(
@@ -183,9 +182,7 @@ class TestInstallV2RunnerCompat:
         )
 
     @pytest.mark.platforms("thead")
-    def test_probe_false_rebinds_is_uva_available_and_graph_capture(
-        self, monkeypatch
-    ):
+    def test_probe_false_rebinds_is_uva_available_and_graph_capture(self, monkeypatch):
         """Unmappable host memory: both helpers are rebound."""
         fl_capture = object()
         (
@@ -198,9 +195,7 @@ class TestInstallV2RunnerCompat:
         ) = self._install_stub_modules(probe_result=False, fl_capture=fl_capture)
         try:
             # The probe path must report unavailable for the override to run.
-            monkeypatch.setattr(
-                compat, "mapped_host_buffers_available", lambda: False
-            )
+            monkeypatch.setattr(compat, "mapped_host_buffers_available", lambda: False)
             compat.install_v2_runner_compat()
 
             assert buffer_utils.is_uva_available is compat._uva_unavailable, (
@@ -215,9 +210,7 @@ class TestInstallV2RunnerCompat:
             restore()
 
     @pytest.mark.platforms("thead")
-    def test_probe_true_keeps_uva_but_still_rebinds_graph_capture(
-        self, monkeypatch
-    ):
+    def test_probe_true_keeps_uva_but_still_rebinds_graph_capture(self, monkeypatch):
         """Mappable host memory: only graph_capture is rebound (unconditional)."""
         fl_capture = object()
         original_uva = lambda: True  # noqa: E731
@@ -231,9 +224,7 @@ class TestInstallV2RunnerCompat:
         ) = self._install_stub_modules(probe_result=True, fl_capture=fl_capture)
         buffer_utils.is_uva_available = original_uva
         try:
-            monkeypatch.setattr(
-                compat, "mapped_host_buffers_available", lambda: True
-            )
+            monkeypatch.setattr(compat, "mapped_host_buffers_available", lambda: True)
             compat.install_v2_runner_compat()
 
             assert buffer_utils.is_uva_available is original_uva, (
@@ -258,9 +249,7 @@ class TestInstallV2RunnerCompat:
             restore,
         ) = self._install_stub_modules(probe_result=False, fl_capture=fl_capture)
         try:
-            monkeypatch.setattr(
-                compat, "mapped_host_buffers_available", lambda: False
-            )
+            monkeypatch.setattr(compat, "mapped_host_buffers_available", lambda: False)
             compat.install_v2_runner_compat()
             after_first = (
                 buffer_utils.is_uva_available,

@@ -108,7 +108,6 @@ class TestSnapshotDescendants:
 
     def test_vanished_parent_is_skipped(self, fake_psutil, monkeypatch):
         import vllm_fl.dispatch.backends.vendor.iluvatar.shutdown as sd
-
         from vllm_fl.dispatch.backends.vendor.iluvatar.shutdown import (
             _snapshot_descendants,
         )
@@ -169,9 +168,7 @@ class TestWaitForWorkers:
 
         p1, p2 = FakeProcess(1), FakeProcess(2)
         # psutil.wait_procs returns (gone, alive): p1 exited, p2 still alive
-        fake_psutil.on_wait(
-            lambda procs, timeout: ([p1], [p2])
-        )
+        fake_psutil.on_wait(lambda procs, timeout: ([p1], [p2]))
         remaining = _wait_for_workers([p1, p2], timeout=0.01)
         assert remaining == [p2]
 
@@ -197,6 +194,7 @@ class TestCleanupWorkers:
 
         stubborn = FakeProcess(1)
         stubborn.survives_terminate = True
+
         # each wait pass reports (gone, alive): never exits
         def wait(procs, timeout):
             return ([], list(procs))
@@ -215,6 +213,7 @@ class TestCleanupWorkers:
         immortal = FakeProcess(1)
         immortal.survives_terminate = True
         immortal.survives_kill = True
+
         # never exits through any wait: (gone, alive)
         def always_alive(procs, timeout):
             return ([], list(procs))
@@ -294,7 +293,6 @@ class TestWithWorkerCleanup:
             _with_worker_cleanup,
         )
 
-        cleaned = []
         fake_psutil.on_wait(lambda procs, timeout: ([], list(procs)))
 
         def shutdown(processes, timeout=None):

@@ -72,9 +72,7 @@ def attention_bridge():
     except Exception:
         flash_attn_mod = _import_flash_attn_with_inert_platform()
         if flash_attn_mod is None:
-            pytest.skip(
-                "vLLM flash_attn module unavailable on this host"
-            )
+            pytest.skip("vLLM flash_attn module unavailable on this host")
     if flash_attn_mod is None:  # pragma: no cover - defensive
         pytest.skip("vLLM flash_attn module unavailable on this host")
 
@@ -284,13 +282,11 @@ class TestVarlenDefaultsAndLayout:
     """Default handling and the exact 35-argument wheel layout."""
 
     @pytest.mark.platforms("thead")
-    def test_default_softmax_scale_is_inverse_sqrt_head_dim(
-        self, attention_bridge
-    ):
+    def test_default_softmax_scale_is_inverse_sqrt_head_dim(self, attention_bridge):
         module, recorder = attention_bridge
         _varlen(module)
         args = recorder.calls[-1]
-        assert args[23] == pytest.approx(16 ** -0.5), (
+        assert args[23] == pytest.approx(16**-0.5), (
             "softmax_scale must default to head_dim ** -0.5"
         )
 
@@ -342,40 +338,40 @@ class TestVarlenDefaultsAndLayout:
         # The forwarded sentinels are taken from the call itself; the literal
         # entries pin the fixed schema slots (None placeholders, constants).
         expected = (
-            args[0],   # q
-            args[1],   # k
-            args[2],   # v
-            None,      # 3: seqlens_q placeholder
-            None,      # 4: k_new, v_new
-            args[5],   # q_v
-            args[6],   # out
-            args[7],   # cu_seqlens_q
-            None,      # 8: cu_seqlens_k (None for paged)
-            None,      # 9: cu_seqlens_k_new
-            None,      # 10: seqused_q
+            args[0],  # q
+            args[1],  # k
+            args[2],  # v
+            None,  # 3: seqlens_q placeholder
+            None,  # 4: k_new, v_new
+            args[5],  # q_v
+            args[6],  # out
+            args[7],  # cu_seqlens_q
+            None,  # 8: cu_seqlens_k (None for paged)
+            None,  # 9: cu_seqlens_k_new
+            None,  # 10: seqused_q
             args[11],  # seqused_k
-            5,         # 12: max_seqlen_q
-            1,         # 13: max_seqlen_k forced to 1 (paged)
+            5,  # 12: max_seqlen_q
+            1,  # 13: max_seqlen_k forced to 1 (paged)
             args[14],  # block_table
-            None,      # 15: kv_batch_idx
-            None,      # 16: leftpad_k
-            None,      # 17: rotary_cos
-            None,      # 18: rotary_sin
-            None,      # 19: seqlens_rotary
+            None,  # 15: kv_batch_idx
+            None,  # 16: leftpad_k
+            None,  # 17: rotary_cos
+            None,  # 18: rotary_sin
+            None,  # 19: seqlens_rotary
             args[20],  # q_descale
             args[21],  # k_descale
             args[22],  # v_descale
             args[23],  # softmax_scale
             "CAUSAL",  # 24: causal
-            -1,        # 25: window left
-            -1,        # 26: window right
-            0,         # 27: attention_chunk
-            1.25,      # 28: softcap
-            True,      # 29: is_rotary_interleaved
+            -1,  # 25: window left
+            -1,  # 26: window right
+            0,  # 27: attention_chunk
+            1.25,  # 28: softcap
+            True,  # 29: is_rotary_interleaved
             args[30],  # scheduler_metadata
-            11,        # 31: num_splits
-            None,      # 32: pack_gqa
-            0,         # 33: sm_margin
+            11,  # 31: num_splits
+            None,  # 32: pack_gqa
+            0,  # 33: sm_margin
             args[34],  # s_aux
         )
         assert args == expected
