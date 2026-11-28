@@ -89,14 +89,16 @@ def aggregate(
     ``reports`` and ``platforms`` are parallel lists: ``reports[i]`` is
     ``platforms[i]``'s per-platform coverage.py JSON report.
     """
-    # Union of every file any platform measured. The denominator reference is
-    # the first input (arbitrary — the consistency check below enforces the
-    # rest agree); the union statement set is rebuilt per file from
-    # (executed ∪ missing) so the denominator is line-exact even when one
-    # platform's report truncated a file's lists.
+    # Union of every file any platform measured. Each report's files dict is
+    # re-keyed through _norm_key once (coverage.py may emit absolute or
+    # Windows-style keys; both anchor to the same repo-relative path), so a
+    # lookup can never silently miss an input's data.
+    norm_reports: list[dict[str, dict]] = []
     file_keys: set[str] = set()
     for report in reports:
-        file_keys.update(_norm_key(k) for k in report.get("files", {}))
+        norm_files = {_norm_key(k): v for k, v in report.get("files", {}).items()}
+        norm_reports.append(norm_files)
+        file_keys.update(norm_files)
 
     files_out: dict[str, dict] = {}
     total_stmts = 0
@@ -108,14 +110,8 @@ def aggregate(
         statements: set[int] = set()
         ref_num_statements: int | None = None
 
-        for report in reports:
-            info = (
-                report.get("files", {}).get(key)
-                # inputs may key by the original absolute path; _norm_key
-                # anchors both spellings to the same relative key
-                or report.get("files", {}).get(key.replace("/", "\\"))
-                or {}
-            )
+        for norm_files in norm_reports:
+            info = norm_files.get(key) or {}
             file_executed = set(info.get("executed_lines", []))
             file_missing = set(info.get("missing_lines", []))
             executed |= file_executed
@@ -130,24 +126,23 @@ def aggregate(
         # incomplete) instead of failing: the aggregate is a reporting
         # artifact, and the union statement set remains the best
         # line-exact denominator either way.
-        if ref_num_statements is None:
-            num_statements = len(statements)
-        else:
-            num_statements = ref_num_statements
-            if len(statements) != ref_num_statements:
-                inconsistent_files.append(
-                    {
-                        "file": key,
-                        "num_statements": ref_num_statements,
-                        "statement_set_size": len(statements),
-                    }
-                )
-                if len(statements) < ref_num_statements:
-                    # Every input truncated this file's lists; fall back to
-                    # the reference count to keep the denominator, mirroring
-                    # merge_coverage.py's fallback.
-                    statements |= set(range(1, ref_num_statements + 1)) - executed
-            num_statements = len(statements)
+        if ref_num_statements is not None and len(statements) != ref_num_statements:
+            inconsistent_files.append(
+                {
+                    "file": key,
+                    "num_statements": ref_num_statements,
+                    "statement_set_size": len(statements),
+                }
+            )
+            if len(statements) < ref_num_statements:
+                # Every input truncated this file's lists; fall back to
+                # the reference count to keep the denominator, mirroring
+                # merge_coverage.py's fallback.
+                statements |= set(range(1, ref_num_statements + 1)) - executed
+        # denominator = the union statement set (== the reference count
+        # whenever the inputs agree, which the consistency check above
+        # verifies)
+        num_statements = len(statements)
 
         summary = _summary(executed, num_statements)
         files_out[key] = {
@@ -216,15 +211,21 @@ def to_markdown(agg: dict, per_platform_totals: dict[str, dict]) -> str:
         "",
         f"Commit: `{agg['meta'].get('commit_sha', 'n/a')}`",
         "",
-        "Numerator = union of executed lines across participating platforms "
-        "(a line run by several platforms counts once); denominator = full "
-        "vllm_fl executable statements.",
+        (
+            "Numerator = union of executed lines across participating "
+            "platforms (a line run by several platforms counts once); "
+            "denominator = full vllm_fl executable statements."
+        ),
         "",
         "| platform | statements | covered | % |",
         "|---|---:|---:|---:|",
     ]
     for platform, t in per_platform_totals.items():
-        pct = (100.0 * t["covered_lines"] / t["num_statements"]) if t["num_statements"] else 0.0
+        pct = (
+            (100.0 * t["covered_lines"] / t["num_statements"])
+            if t["num_statements"]
+            else 0.0
+        )
         lines.append(
             f"| {platform} | {t['num_statements']} | {t['covered_lines']} | "
             f"{pct:.2f}% |"
@@ -296,13 +297,17 @@ def main() -> int:
         platforms = []
         for p in args.inputs:
             stem = p.stem
-            platform = (
-                stem.split("-", 1)[1].split(".json")[0]
-                if stem.startswith("coverage-")
-                else stem
-            )
-            platform = platform.rsplit("-", 1)[0] if "-" in platform else platform
-            platforms.append(platform)
+            if stem.startswith("coverage-"):
+                stem = stem[len("coverage-") :]
+            # strip trailing caliber tags (-core, -combined, -supp-only, ...)
+            # one segment at a time while a known tag matches
+            while True:
+                head, _, tail = stem.rpartition("-")
+                if tail in ("core", "supp", "supp-only", "combined", "cpu") and head:
+                    stem = head
+                else:
+                    break
+            platforms.append(stem)
 
     expected = [p.strip() for p in args.expected_platforms.split(",") if p.strip()]
 
@@ -338,9 +343,7 @@ def main() -> int:
         print()
         print("=" * 72)
         print("[aggregate] WARNING: AGGREGATE RESULT IS INCOMPLETE")
-        print(
-            f"[aggregate] missing platform reports: {', '.join(missing)}"
-        )
+        print(f"[aggregate] missing platform reports: {', '.join(missing)}")
         print(
             "[aggregate] the union below is a FLOOR for the plan's "
             "aggregate target, not the target number itself"
@@ -364,7 +367,8 @@ def main() -> int:
     for platform, t in per_platform_totals.items():
         pct = (
             100.0 * t["covered_lines"] / t["num_statements"]
-            if t["num_statements"] else 0.0
+            if t["num_statements"]
+            else 0.0
         )
         print(
             f"[aggregate]   {platform}: {t['covered_lines']}/"
