@@ -96,8 +96,6 @@ def main() -> int:
 
     areas = delta(baseline, after)
 
-    base_totals = baseline.get("areas", {}).get("_unassigned")
-    after_totals = after.get("areas", {}).get("_unassigned")
     payload = {
         "platform": args.platform,
         "commit_sha": args.commit_sha,

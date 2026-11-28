@@ -54,10 +54,7 @@ def aggregate(report: dict, scope: dict) -> dict[str, dict]:
     """Aggregate covered/total statements per area (longest-prefix wins)."""
     # sort area prefixes longest-first so the most specific area claims a file
     areas = sorted(
-        (
-            (name, _prefixes(value))
-            for name, value in scope.get("areas", {}).items()
-        ),
+        ((name, _prefixes(value)) for name, value in scope.get("areas", {}).items()),
         key=lambda kv: max(len(p) for p in kv[1]),
         reverse=True,
     )

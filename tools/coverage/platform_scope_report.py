@@ -135,7 +135,11 @@ _DIR_TO_VENDOR_NAMES = {
 # (``.device.type == "npu"`` on a torch device). These classify through the
 # same vendor map: npu=ascend, musa=mthreads, gcu, txda=tsingmicro, ptpu=sunrise.
 _DEVICE_TYPE_VENDORS = {
-    dt: [v for v, d in VENDOR_DEVICE_TYPES.items() if d == dt and v in _DIR_TO_VENDOR_NAMES]
+    dt: [
+        v
+        for v, d in VENDOR_DEVICE_TYPES.items()
+        if d == dt and v in _DIR_TO_VENDOR_NAMES
+    ]
     or [v for v, d in VENDOR_DEVICE_TYPES.items() if d == dt]
     for dt in {"cuda", "npu", "musa", "ptpu", "txda", "gcu", "cpu"}
 }
@@ -307,7 +311,11 @@ class _GuardClassifier:
         for node in ast.walk(test):
             if isinstance(node, ast.Compare):
                 verdicts.add(self._classify_compare(node))
-        if "foreign" in verdicts and "local" not in verdicts and "shared" not in verdicts:
+        if (
+            "foreign" in verdicts
+            and "local" not in verdicts
+            and "shared" not in verdicts
+        ):
             return "foreign"
         if "local" in verdicts:
             return "local"
@@ -380,7 +388,10 @@ class _ForeignBranchCollector(ast.NodeVisitor):
                     v = pat_node.value
                     if isinstance(v, ast.Constant) and isinstance(v.value, str):
                         strings.add(v.value)
-            if strings & self.classifier.foreign and not strings & self.classifier.local:
+            if (
+                strings & self.classifier.foreign
+                and not strings & self.classifier.local
+            ):
                 self._mark(case.body)
         self.generic_visit(node)
 
@@ -393,7 +404,9 @@ def foreign_branch_lines(
         tree = ast.parse(source)
     except SyntaxError:
         return set()
-    collector = _ForeignBranchCollector(_GuardClassifier(foreign_vendors, local_vendors))
+    collector = _ForeignBranchCollector(
+        _GuardClassifier(foreign_vendors, local_vendors)
+    )
     collector.visit(tree)
     return collector.excluded_lines
 
@@ -575,7 +588,9 @@ def main() -> int:
     parser.add_argument(
         "--report", required=True, type=Path, help="raw full-scope coverage.py JSON"
     )
-    parser.add_argument("--platform", required=True, help="platform name, e.g. kunlunxin")
+    parser.add_argument(
+        "--platform", required=True, help="platform name, e.g. kunlunxin"
+    )
     parser.add_argument(
         "--scope",
         type=Path,
