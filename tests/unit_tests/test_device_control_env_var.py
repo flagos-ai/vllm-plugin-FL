@@ -24,7 +24,6 @@ def test_enflame_aliases_use_tops_visible_devices(monkeypatch, vendor):
         "iluvatar",
         "metax",
         "mthreads",
-        "sunrise",
         "hygon",
         "thead",
         "not_a_vendor",
@@ -67,3 +66,8 @@ def test_platform_picks_up_the_dispatched_value():
 def test_tsingmicro_uses_txda_visible_devices(monkeypatch):
     monkeypatch.delenv(_OVERRIDE, raising=False)
     assert get_device_control_env_var("tsingmicro") == "TXDA_VISIBLE_DEVICES"
+
+
+def test_sunrise_uses_tang_visible_devices(monkeypatch):
+    monkeypatch.delenv(_OVERRIDE, raising=False)
+    assert get_device_control_env_var("sunrise") == "TANG_VISIBLE_DEVICES"

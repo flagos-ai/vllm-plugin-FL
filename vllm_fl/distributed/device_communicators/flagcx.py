@@ -144,14 +144,30 @@ try:
     else:
         if _flagcx_path and os.path.isdir(_flagcx_path):
             sys.path.append(_flagcx_path)
-        from plugin.interservice.flagcx_wrapper import (
-            FLAGCXLibrary,
-            buffer_type,
-            flagcxComm_t,
-            flagcxDataTypeEnum,
-            flagcxRedOpTypeEnum,
-            flagcxUniqueId,
-        )
+        try:
+            from plugin.interservice.flagcx_wrapper import (
+                FLAGCXLibrary,
+                buffer_type,
+                flagcxComm_t,
+                flagcxDataTypeEnum,
+                flagcxRedOpTypeEnum,
+                flagcxUniqueId,
+            )
+        except ImportError:
+            from vllm.platforms import current_platform
+
+            if current_platform.device_type != "ptpu":
+                raise
+            from flagcx.api import (
+                FLAGCXLibrary,
+                buffer_type,
+                flagcxComm_t,
+                flagcxDataTypeEnum,
+                flagcxRedOpTypeEnum,
+                flagcxUniqueId,
+            )
+
+            _flagcx_packaged_library = True
     _flagcx_available = True
 except (ImportError, OSError, AttributeError) as exc:
     if (
