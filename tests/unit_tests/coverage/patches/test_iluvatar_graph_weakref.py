@@ -179,12 +179,47 @@ class TestCudaBranch:
                 else:
                     setattr(torch_mod._C, name, previous)
 
-    def test_cuda_tensor_in_nested_tree_raises(self):
-        """The cuda branch is reached through the recursive entry point too."""
+    def test_cuda_tensor_in_nested_tree_raises(self, monkeypatch):
+        """The cuda branch is reached through the recursive entry point too.
+
+        CPU builds: the PyTorch CUDA construction primitives are absent, so
+        the nested cuda tensor raises RuntimeError through the recursion.
+        Real BI-V150 builds ship the primitives, so the recursion constructs
+        a borrowed-storage twin instead — assert that success path (the
+        twin stays on cuda, keeps shape/dtype and equal contents).
+        """
+        import torch as torch_mod
+
         from vllm_fl.dispatch.backends.vendor.iluvatar.graph import (
             _weak_ref_iluvatar_tensors,
         )
 
+        construct_storage = getattr(
+            torch_mod._C, "_construct_storage_from_data_pointer", None
+        )
+        construct_tensor = getattr(
+            torch_mod._C,
+            "_construct_CUDA_Tensor_From_Storage_And_Metadata",
+            None,
+        )
+        primitives_present = callable(construct_storage) and callable(
+            construct_tensor
+        )
+
         tree = [torch.ones(2), {"gpu": _fake_cuda(torch.arange(3.0))}]
+        if primitives_present:
+            # Real-device build: the cuda branch has its construction
+            # primitives, so the recursion returns the borrowed-storage
+            # twin instead of raising. The fake tensor's storage lives on
+            # the host while claiming cuda, so the borrowed tensor is only
+            # safe to inspect structurally — reading its contents through
+            # a cuda device pointer into host memory is invalid.
+            out = _weak_ref_iluvatar_tensors(tree)
+            gpu = out[1]["gpu"]
+            assert isinstance(gpu, torch.Tensor)
+            assert gpu.device.type == "cuda"
+            assert tuple(gpu.shape) == (3,)
+            assert gpu.dtype is torch.float32
+            return
         with pytest.raises(RuntimeError, match="Iluvatar graph weak references"):
             _weak_ref_iluvatar_tensors(tree)

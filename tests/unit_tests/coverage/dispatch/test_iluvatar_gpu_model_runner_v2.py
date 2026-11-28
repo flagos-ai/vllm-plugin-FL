@@ -45,7 +45,39 @@ pytestmark = [
     pytest.mark.serial,
 ]
 
-MODEL_PATH = "/data/Qwen/Qwen3-0.6B"
+def _fake_model_dir(root) -> str:
+    """Minimal HF-layout qwen3 config for ``VllmConfig`` validation.
+
+    ``GPUModelRunner.__init__`` only reads config-derived fields (vocab
+    size, max_model_len, dtype) — it never loads weights — but the real
+    machine exposes no /data checkpoint, so build a tiny synthetic model
+    directory instead of pointing MODEL_PATH at a nonexistent path.
+    """
+    import json
+    import os
+
+    model_dir = root / "fake-qwen3"
+    model_dir.mkdir(exist_ok=True)
+    config = {
+        "model_type": "qwen3",
+        "architectures": ["Qwen3ForCausalLM"],
+        "hidden_size": 16,
+        "intermediate_size": 32,
+        "num_attention_heads": 2,
+        "num_hidden_layers": 1,
+        "num_key_value_heads": 2,
+        "head_dim": 8,
+        "vocab_size": 1024,
+        "max_position_embeddings": 256,
+        "torch_dtype": "bfloat16",
+    }
+    (model_dir / "config.json").write_text(json.dumps(config))
+    (model_dir / "tokenizer_config.json").write_text(
+        '{"model_type": "qwen3"}'
+    )
+    (model_dir / "vocab.json").write_text("null")
+    (model_dir / "merges.txt").write_text("")
+    return str(model_dir)
 
 
 def _cuda():
@@ -115,7 +147,7 @@ class TestIluvatarGPUModelRunnerV2:
         buffers still land on the BI-V150 through the runner's own
         ``device`` argument). The model itself is never loaded.
         """
-        from vllm.config import VllmConfig
+        from vllm.config import VllmConfig, set_current_vllm_config
         from vllm.distributed.parallel_state import (
             destroy_model_parallel,
             init_distributed_environment,
@@ -131,6 +163,7 @@ class TestIluvatarGPUModelRunnerV2:
         except Exception:
             pass
         dist.destroy_process_group() if dist.is_initialized() else None
+        model_path = _fake_model_dir(tmp_path_factory.mktemp("iluvatar_v2_model"))
         store_path = (
             tmp_path_factory.mktemp("iluvatar_v2") / f"store-{uuid.uuid4().hex}"
         )
@@ -141,19 +174,28 @@ class TestIluvatarGPUModelRunnerV2:
             local_rank=0,
             backend="gloo",
         )
-        initialize_model_parallel(tensor_model_parallel_size=1)
-
         config = VllmConfig(
             model_config=dict(
-                model=MODEL_PATH,
-                tokenizer=MODEL_PATH,
+                model=model_path,
+                tokenizer=model_path,
                 dtype="bfloat16",
                 max_model_len=256,
                 trust_remote_code=True,
             ),
-            scheduler_config=dict(max_num_batched_tokens=16, max_num_seqs=4),
+            scheduler_config=dict(
+                max_num_batched_tokens=16,
+                max_num_seqs=4,
+                max_model_len=256,
+                is_encoder_decoder=False,
+            ),
         )
-        runner = IluvatarGPUModelRunnerV2(config, _cuda())
+        # vLLM 0.32's initialize_model_parallel and the runner constructor
+        # both read the process-local current config; run them inside a
+        # set_current_vllm_config context (the default_vllm_config fixture
+        # equivalent for a class-scoped fixture).
+        with set_current_vllm_config(config):
+            initialize_model_parallel(tensor_model_parallel_size=1)
+            runner = IluvatarGPUModelRunnerV2(config, _cuda())
         yield runner
         try:
             destroy_model_parallel()

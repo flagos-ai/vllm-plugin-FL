@@ -111,7 +111,9 @@ def _rank_worker(rank: int, queue, init_file: str):
         # --- fp32 all-reduce vs oracle ------------------------------------
         generator = torch.Generator().manual_seed(4104 + rank)
         local = torch.randn(64, 32, generator=generator).to(device)
-        local_snapshot = local.clone()
+        # snapshot on the host: comparing a cuda tensor with a cpu tensor
+        # raises rather than returning False on the real device build
+        local_snapshot = local.cpu().clone()
         # exchange the peer's input through gloo (independent of FlagCX)
         gathered = [torch.empty_like(local.cpu()) for _ in range(WORLD_SIZE)]
         dist.all_gather(gathered, local.cpu())

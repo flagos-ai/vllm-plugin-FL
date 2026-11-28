@@ -28,20 +28,31 @@ _ENV_VAR = "VLLM_FL_ILUVATAR_MROPE_IMPL"
 
 @pytest.fixture(autouse=True)
 def _clean_mrope_env(monkeypatch):
-    """Isolate the env var and the vllm.envs dict entry; restore after."""
+    """Start every test from a pristine, unpatched global state.
+
+    On the real BI-V150 the full-gate suite runs ``apply_worker_patches``
+    (e.g. ``test_iluvatar_gpu_model_runner_v2``) before this file; that
+    leaves ``MRotaryEmbedding.forward_native`` wrapped and the env-var
+    entry registered in ``vllm.envs.environment_variables``. These tests
+    assert against the *unpatched* originals, so strip any wrapper chain
+    and remove the dict entry first. ``monkeypatch`` restores the previous
+    (possibly polluted) state afterwards for other suites.
+    """
     import vllm.envs
+    from vllm.model_executor.layers.rotary_embedding.mrope import (
+        MRotaryEmbedding,
+    )
 
     monkeypatch.delenv(_ENV_VAR, raising=False)
-    envs_saved = dict(vllm.envs.environment_variables)
-    envs_had_key = _ENV_VAR in envs_saved
-    yield
-    # restore the dict exactly: remove what we may have added, put back
-    # anything the test replaced
-    vllm.envs.environment_variables.clear()
-    vllm.envs.environment_variables.update(envs_saved)
-    if not envs_had_key:
-        vllm.envs.environment_variables.pop(_ENV_VAR, None)
-    monkeypatch.delenv(_ENV_VAR, raising=False)
+    # strip wrappers left by apply_worker_patches / earlier tests
+    forward = MRotaryEmbedding.forward_native
+    while getattr(forward, "_iluvatar_mrope_patched", False):
+        forward = forward.__wrapped__
+    monkeypatch.setattr(MRotaryEmbedding, "forward_native", forward)
+    # drop the env-var dict entry a previous patch_mrope() may have left
+    monkeypatch.delitem(
+        vllm.envs.environment_variables, _ENV_VAR, raising=False
+    )
 
 
 @pytest.fixture(autouse=True)

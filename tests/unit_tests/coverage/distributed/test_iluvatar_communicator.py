@@ -205,7 +205,14 @@ class TestInit:
         assert seen_kwargs["device"] is device
 
     def test_active_flagcx_logs_and_constructs(self, monkeypatch, caplog):
-        """A healthy FlagCX comm takes the active-info branch (L45-49)."""
+        """A healthy FlagCX comm takes the active-info branch (L45-49).
+
+        ``vllm_fl.dispatch`` loggers carry ``propagate=False`` (the dispatch
+        logger manager installs a private stderr handler), so records never
+        reach pytest's root-attached caplog handler on their own. Attach the
+        caplog handler directly to the communicating logger for the call —
+        the same approach as ``tests/unit_tests/coverage/dispatch/conftest.py``.
+        """
         import logging
 
         import vllm_fl.distributed.communicator as comm_fl
@@ -216,6 +223,11 @@ class TestInit:
         from vllm_fl.dispatch.backends.vendor.iluvatar.communicator import (
             IluvatarCommunicatorFL,
         )
+
+        communicator_logger = logging.getLogger(
+            "vllm_fl.dispatch.backends.vendor.iluvatar.communicator"
+        )
+        communicator_logger.addHandler(caplog.handler)
 
         def fake_flagcx(group, device):
             return SimpleNamespace(disabled=False, init_error=None)
@@ -240,10 +252,13 @@ class TestInit:
 
         monkeypatch.setattr(DeviceCommunicatorBase, "__init__", fake_base_init)
         monkeypatch.setattr(comm_fl, "PyFlagcxCommunicator", fake_flagcx)
-        with caplog.at_level(logging.INFO, logger="vllm_fl"):
-            comm = IluvatarCommunicatorFL(
-                cpu_group=object(), device=torch.device("cuda")
-            )
+        try:
+            with caplog.at_level(logging.INFO, logger="vllm_fl"):
+                comm = IluvatarCommunicatorFL(
+                    cpu_group=object(), device=torch.device("cuda")
+                )
+        finally:
+            communicator_logger.removeHandler(caplog.handler)
         assert comm.pyflagcx_comm is not None
         assert not comm.pyflagcx_comm.disabled
         assert any(

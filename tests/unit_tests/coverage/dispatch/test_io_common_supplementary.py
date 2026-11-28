@@ -185,11 +185,20 @@ class TestRankResolution:
         assert ioc.get_rank() == 3
 
     def test_local_rank_used_when_rank_missing(self, monkeypatch):
+        import torch.distributed as dist
+
+        # The env fallback only runs when no default process group is
+        # alive; on the real-machine suite other tests leave one
+        # initialized, so pin the branch under test explicitly.
+        monkeypatch.setattr(dist, "is_initialized", lambda: False)
         monkeypatch.delenv("RANK", raising=False)
         monkeypatch.setenv("LOCAL_RANK", "2")
         assert ioc.get_rank() == 2
 
     def test_non_integer_rank_env_falls_through(self, monkeypatch):
+        import torch.distributed as dist
+
+        monkeypatch.setattr(dist, "is_initialized", lambda: False)
         monkeypatch.delenv("RANK", raising=False)
         monkeypatch.setenv("LOCAL_RANK", "not-a-number")
         assert ioc.get_rank() == 0  # never cached, so zero fallback
