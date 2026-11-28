@@ -269,19 +269,16 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
         "_fl_gcu_original_init",
         worker_utils.KVBlockZeroer.__init__,
     )
-    kv = torch.empty((2, 8, 16, 2, 16), dtype=torch.int32)
-    backend_calls = []
-
-    def block_dim(*args, **kwargs):
-        backend_calls.append((args, kwargs))
-        return 1
+    # Standardized [B, H, N, 2*D], physically head-major, with two
+    # virtual kernel blocks per logical manager block.
+    kv = torch.empty((2, 8, 16, 32), dtype=torch.int32).permute(1, 0, 2, 3)
 
     group = SimpleNamespace(
         kv_cache_spec=FullAttentionSpec(
             block_size=32, num_kv_heads=2, head_size=16, dtype=torch.int32
         ),
         kv_cache_group_id=0,
-        backend=SimpleNamespace(get_kv_cache_block_dim=block_dim),
+        kernel_block_stride=False,
         layer_names=["real", "alias", "runner", "non_tensor"],
     )
     context = {
@@ -311,12 +308,12 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
         torch.device("cpu"),
         (g for g in [group]),
         [16],
-        "auto",
         context,
+        4,
         {"runner"},
     )
     addresses = [kv.data_ptr() + offset for offset in (0, 2048, 16384, 18432)]
-    assert backend_calls == [((16, 2, 16), {"cache_dtype_str": "auto"})]
+    # The standardized layout no longer calls backend shape helpers.
     assert len(snapshots) == 1
     assert snapshots[0][0].tolist() == addresses
     assert queried == addresses

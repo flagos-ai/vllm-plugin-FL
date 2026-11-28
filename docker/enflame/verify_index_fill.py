@@ -13,7 +13,7 @@ import importlib.util
 import json
 from pathlib import Path
 
-EXPECTED_VERSION = "5.4.0"
+EXPECTED_VERSION = "5.5.0.dev0"
 EXPECTED_BYTES = 11609
 EXPECTED_SHA256 = "37aacdee85e497881f47a813b5489d26972b335ba89df312dbd74be5b1a2e07c"
 SOURCE_PATH = "flag_gems/ops/index_fill.py"

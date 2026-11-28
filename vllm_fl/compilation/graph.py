@@ -162,7 +162,7 @@ def weak_ref_tensors(value: Any) -> Any:
 
 
 def _graph_capture_stream() -> Any:
-    if current_platform.device_type in ("musa", "npu", "ptpu"):
+    if current_platform.device_type in ("musa", "npu", "gcu", "ptpu"):
         # Native accelerator contexts do not update vLLM's CUDA stream cache.
         # Read the active accelerator side stream directly during capture.
         return current_platform.torch_device_fn.current_stream()

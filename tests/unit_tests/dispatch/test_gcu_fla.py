@@ -129,3 +129,15 @@ def test_gcu_launchers_patch_consumers_and_preserve_official_kernels(monkeypatch
         fused_recurrent.fused_recurrent_gated_delta_rule_packed_decode_kernel
         is packed_kernel
     )
+
+
+def test_gcu_output_grid_dimensions_do_not_specialize():
+    from vllm_fl.dispatch.backends.vendor.gcu.impl.chunk_o_gcu import chunk_fwd_kernel_o
+
+    kernel = chunk_fwd_kernel_o
+    while not hasattr(kernel, "params"):
+        kernel = kernel.fn
+    for name in ("T", "GCU_NT", "GCU_BH"):
+        parameter = next(param for param in kernel.params if param.name == name)
+        assert parameter.do_not_specialize
+        assert not parameter.is_constexpr
