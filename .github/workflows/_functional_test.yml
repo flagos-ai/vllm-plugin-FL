@@ -129,18 +129,6 @@ jobs:
             --device ${{ inputs.device }} \
             --scope functional
 
-      - name: Generate platform-applicable coverage report
-        # Tier-1 statistic: filter the raw full-scope JSON down to
-        # common code + this platform's vendor code. The raw JSON stays
-        # untouched (kept as artifact, used for the tier-2 aggregate).
-        if: hashFiles('tools/coverage/scope_${{ inputs.platform }}.json') != ''
-        run: |
-          python tools/coverage/platform_scope_report.py \
-            --report coverage-${{ inputs.platform }}.json \
-            --scope tools/coverage/scope_${{ inputs.platform }}.json \
-            --output coverage-${{ inputs.platform }}-applicable.json \
-            --commit-sha "${GITHUB_SHA}"
-
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -151,7 +139,6 @@ jobs:
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
             coverage-${{ inputs.platform }}.json
-            coverage-${{ inputs.platform }}-applicable.json
 
       - name: Check FlagCICD authentication
         id: flagcicd
