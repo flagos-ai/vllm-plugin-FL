@@ -128,7 +128,11 @@ jobs:
         # untouched (kept as artifact, used for the tier-2 aggregate).
         if: hashFiles('tools/coverage/scope_${{ inputs.platform }}.json') != ''
         run: |
-          python tools/coverage/platform_scope_report.py             --report coverage-${{ inputs.platform }}.json             --scope tools/coverage/scope_${{ inputs.platform }}.json             --output coverage-${{ inputs.platform }}-applicable.json             --commit-sha "${GITHUB_SHA}"
+          python tools/coverage/platform_scope_report.py \
+            --report coverage-${{ inputs.platform }}.json \
+            --scope tools/coverage/scope_${{ inputs.platform }}.json \
+            --output coverage-${{ inputs.platform }}-applicable.json \
+            --commit-sha "${GITHUB_SHA}"
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
