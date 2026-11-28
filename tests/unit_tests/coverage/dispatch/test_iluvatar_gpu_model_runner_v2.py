@@ -1,0 +1,279 @@
+# Copyright 2025 BAAI. All rights reserved.
+"""Real-BI-V150 coverage for the Iluvatar V2 model runner and worker device rows.
+
+``vllm_fl/dispatch/backends/vendor/iluvatar/worker/model_runner_v2.py`` (0/6)
+delegates everything to ``patch_v2_uva`` + the upstream GPUModelRunner
+constructor; ``worker/worker.py``'s ``IluvatarWorkerFL`` applies the in-worker
+vendor patches in ``init_device`` and installs the pipeline transport. Both
+need a real CUDA device to construct buffers on.
+
+``GPUModelRunner.__init__`` with a minimal VllmConfig allocates the persistent
+input buffers — exactly the allocation the UVA patch redirects to explicit
+H2D copies on CoreX. Constructing it once on the BI-V150 pins:
+
+* ``patch_v2_uva`` replaced ``buffer_utils.is_uva_available`` with the
+  iluvatar ``False`` *before* the base class ran (the import-order contract
+  the module comment calls out);
+* the runner is a real ``GPUModelRunner`` (MRO) holding device-resident
+  buffers (``input_buffers.input_ids`` / ``positions`` on cuda) that stay
+  zero-initialized until a step runs;
+* the class binds upstream V2 as its direct base;
+* ``apply_worker_patches`` (strict inductor/sampler gates) passes on the
+  real flagtree stack and is re-runnable.
+
+The full ``init_device`` (distributed init + model load) is too heavy for a
+supplementary suite; its ordering and the pure patch machinery branches are
+covered on CPU in ``tests/unit_tests/coverage/worker/\
+test_iluvatar_worker_fl_surface.py`` and
+``.../dispatch/test_iluvatar_patch_functions.py``. Assertions here are
+structural (the numeric oracle for buffer contents is a plain
+``torch.count_nonzero``).
+"""
+
+from __future__ import annotations
+
+import contextlib
+import uuid
+
+import pytest
+import torch
+import torch.distributed as dist
+
+pytestmark = [
+    pytest.mark.supplementary,
+    pytest.mark.platforms("iluvatar"),
+    pytest.mark.gpu,
+    pytest.mark.serial,
+]
+
+
+def _fake_model_dir(root) -> str:
+    """Minimal HF-layout qwen3 config for ``VllmConfig`` validation.
+
+    ``GPUModelRunner.__init__`` only reads config-derived fields (vocab
+    size, max_model_len, dtype) — it never loads weights — but the real
+    machine exposes no /data checkpoint, so build a tiny synthetic model
+    directory instead of pointing MODEL_PATH at a nonexistent path.
+    """
+    import json
+
+    model_dir = root / "fake-qwen3"
+    model_dir.mkdir(exist_ok=True)
+    config = {
+        "model_type": "qwen3",
+        "architectures": ["Qwen3ForCausalLM"],
+        "hidden_size": 16,
+        "intermediate_size": 32,
+        "num_attention_heads": 2,
+        "num_hidden_layers": 1,
+        "num_key_value_heads": 2,
+        "head_dim": 8,
+        "vocab_size": 1024,
+        "max_position_embeddings": 256,
+        "torch_dtype": "bfloat16",
+    }
+    (model_dir / "config.json").write_text(json.dumps(config))
+    (model_dir / "tokenizer_config.json").write_text('{"model_type": "qwen3"}')
+    (model_dir / "vocab.json").write_text("null")
+    (model_dir / "merges.txt").write_text("")
+    return str(model_dir)
+
+
+def _cuda():
+    from tests.utils.device_utils import get_device
+
+    return get_device()
+
+
+class TestPatchV2Uva:
+    """``patch_v2_uva`` — the import-order contract on the real platform."""
+
+    def test_replaces_is_uva_available_with_false(self):
+        from vllm.v1.worker.gpu import buffer_utils
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+            _is_uva_available,
+            patch_v2_uva,
+        )
+
+        patch_v2_uva()
+        # the vendor gate passes on the iluvatar platform, so the module
+        # attribute must now be the iluvatar function
+        assert buffer_utils.is_uva_available is _is_uva_available
+        assert buffer_utils.is_uva_available() is False
+
+    def test_idempotent_double_patch(self):
+        from vllm.v1.worker.gpu import buffer_utils
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+            patch_v2_uva,
+        )
+
+        before = buffer_utils.is_uva_available
+        patch_v2_uva()
+        assert buffer_utils.is_uva_available is before
+
+    def test_foreign_vendor_is_a_noop(self, monkeypatch):
+        """A non-iluvatar vendor never touches buffer_utils."""
+        import vllm.platforms
+        from vllm.v1.worker.gpu import buffer_utils
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+            patch_v2_uva,
+        )
+
+        monkeypatch.setattr(
+            vllm.platforms,
+            "current_platform",
+            type("P", (), {"vendor_name": "nvidia"})(),
+        )
+        original = buffer_utils.is_uva_available
+        patch_v2_uva()
+        assert buffer_utils.is_uva_available is original
+
+
+class TestIluvatarGPUModelRunnerV2:
+    """``IluvatarGPUModelRunnerV2.__init__`` on the real device."""
+
+    @pytest.fixture(scope="class")
+    def runner(self, tmp_path_factory):
+        """Build the runner once: minimal config, single-rank gloo env.
+
+        ``GPUModelRunner.__init__`` reads the pp/tp/dcp group state, so a
+        single-rank ``init_distributed_environment`` +
+        ``initialize_model_parallel`` runs first (gloo backend: the device
+        buffers still land on the BI-V150 through the runner's own
+        ``device`` argument). The model itself is never loaded.
+        """
+        from vllm.config import VllmConfig, set_current_vllm_config
+        from vllm.distributed.parallel_state import (
+            destroy_model_parallel,
+            init_distributed_environment,
+            initialize_model_parallel,
+        )
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
+            IluvatarGPUModelRunnerV2,
+        )
+
+        with contextlib.suppress(Exception):
+            destroy_model_parallel()
+        dist.destroy_process_group() if dist.is_initialized() else None
+        model_path = _fake_model_dir(tmp_path_factory.mktemp("iluvatar_v2_model"))
+        store_path = (
+            tmp_path_factory.mktemp("iluvatar_v2") / f"store-{uuid.uuid4().hex}"
+        )
+        init_distributed_environment(
+            world_size=1,
+            rank=0,
+            distributed_init_method=f"file://{store_path}",
+            local_rank=0,
+            backend="gloo",
+        )
+        config = VllmConfig(
+            model_config=dict(
+                model=model_path,
+                tokenizer=model_path,
+                dtype="bfloat16",
+                max_model_len=256,
+                trust_remote_code=True,
+            ),
+            scheduler_config=dict(
+                max_num_batched_tokens=16,
+                max_num_seqs=4,
+                max_model_len=256,
+                is_encoder_decoder=False,
+            ),
+        )
+        # vLLM 0.32's initialize_model_parallel and the runner constructor
+        # both read the process-local current config; run them inside a
+        # set_current_vllm_config context (the default_vllm_config fixture
+        # equivalent for a class-scoped fixture).
+        with set_current_vllm_config(config):
+            initialize_model_parallel(tensor_model_parallel_size=1)
+            runner = IluvatarGPUModelRunnerV2(config, _cuda())
+        yield runner
+        with contextlib.suppress(Exception):
+            destroy_model_parallel()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def test_constructs_with_real_config_and_device(self, runner):
+        from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+
+        assert isinstance(runner, GPUModelRunner)
+        assert runner.device == _cuda()
+        assert runner.device.type == "cuda"
+        # persistent input buffers allocated on the device
+        assert runner.input_buffers is not None
+        assert runner.input_buffers.input_ids.device.type == "cuda"
+        assert runner.input_buffers.positions.device.type == "cuda"
+        # buffers are zero-initialized until a step runs
+        assert torch.count_nonzero(runner.input_buffers.positions[:16]).item() == 0
+        # a write to the device buffer is readable back (device round trip)
+        runner.input_buffers.input_ids[0] = 7
+        assert int(runner.input_buffers.input_ids[0].item()) == 7
+        runner.input_buffers.input_ids[0] = 0
+
+    def test_class_mro_binds_upstream_v2(self):
+        from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.worker.model_runner_v2 import (
+            IluvatarGPUModelRunnerV2,
+        )
+
+        assert IluvatarGPUModelRunnerV2.__mro__[1] is GPUModelRunner
+
+
+class TestIluvatarWorkerFLSurface:
+    """``IluvatarWorkerFL`` rows executable on the real BI-V150 stack.
+
+    The CPU-reachable surface — init_device ordering against fake patch
+    targets, the apply_worker_patches bundle order/gate, sleep/wake_up
+    scale and buffer round trips, update_config, execute_model PP
+    orchestration — moved to
+    ``tests/unit_tests/coverage/worker/test_iluvatar_worker_fl_surface.py``
+    (an ungated CPU file). What stays here is the real-platform class
+    boundary and the real in-worker patch effects that only a BI-V150
+    with flagtree triton can prove.
+    """
+
+    def test_class_inherits_worker_fl(self):
+        from vllm_fl.dispatch.backends.vendor.iluvatar.worker.worker import (
+            IluvatarWorkerFL,
+        )
+        from vllm_fl.worker.worker import WorkerFL
+
+        assert issubclass(IluvatarWorkerFL, WorkerFL)
+
+    def test_apply_worker_patches_succeeds_on_real_flagtree(self):
+        """The strict bundle (inductor + sampler gates) passes on the real stack.
+
+        ``apply_worker_patches`` ends with strict=True inductor/sampler
+        patches: on the real BI-V150 with flagtree triton they must find a
+        supported target and unwrap the compiled samplers without raising.
+        Idempotency: a second run goes through the same gates harmlessly.
+        """
+        from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+            apply_worker_patches,
+        )
+
+        apply_worker_patches()
+        apply_worker_patches()
+
+    def test_install_pipeline_transport_world_size_1_noop(self):
+        """A world-size-1 group never binds the pipeline transport methods."""
+        from types import SimpleNamespace
+
+        from vllm_fl.dispatch.backends.vendor.iluvatar.pipeline import (
+            install_pipeline_transport,
+        )
+
+        group = SimpleNamespace(
+            world_size=1,
+            device_communicator=None,
+            isend_tensor_dict=None,
+            irecv_tensor_dict=None,
+        )
+        install_pipeline_transport(group)
+        assert group.isend_tensor_dict is None, "world_size 1 must not bind methods"
