@@ -119,8 +119,14 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_multi)
 
     # Platform gate for the coverage suite (moved up from the former
-    # tests/supplementary_tests/conftest.py hook).
-    _platforms_gate(config, items)
+    # tests/supplementary_tests/conftest.py hook). Resolved through this
+    # module's globals rather than called by name: the pre-existing
+    # test_device_utils collection-hook contract exec's this hook with a
+    # restricted namespace (only pytest + the device utils), so any
+    # module-level name referenced directly would raise NameError there.
+    gate = globals().get("_platforms_gate")
+    if gate is not None:
+        gate(config, items)
 
 
 def _active_platform(config) -> str:

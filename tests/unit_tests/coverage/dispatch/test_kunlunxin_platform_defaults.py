@@ -41,6 +41,7 @@ pytestmark = [
 
 def _platform_or_skip():
     """Import PlatformFL, skipping when the vendor is not kunlunxin."""
+    platform_module = None
     try:
         import vllm_fl.platform as platform_module
     except Exception as exc:  # noqa: BLE001 - any import-time failure
@@ -48,7 +49,7 @@ def _platform_or_skip():
             f"vllm_fl.platform unusable in this environment "
             f"(needs GEMS_VENDOR=kunlunxin without VLLM_TARGET_DEVICE): {exc}"
         )
-    if platform_module.PlatformFL.vendor_name != "kunlunxin":
+    if platform_module is None or platform_module.PlatformFL.vendor_name != "kunlunxin":
         pytest.skip(
             f"PlatformFL resolved vendor "
             f"{platform_module.PlatformFL.vendor_name!r}, not kunlunxin"
