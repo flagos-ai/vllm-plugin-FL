@@ -59,8 +59,15 @@ def resolve_device(ci_cfg: dict, platform: str) -> str:
     platform_yaml = REPO_ROOT / "tests" / "platforms" / f"{platform}.yaml"
     cfg = load_yaml(platform_yaml)
     for key, value in cfg.items():
-        if key in ("platform", "vendor", "device_types", "tolerance",
-                   "device_overrides", "unsupported_features", "env_defaults"):
+        if key in (
+            "platform",
+            "vendor",
+            "device_types",
+            "tolerance",
+            "device_overrides",
+            "unsupported_features",
+            "env_defaults",
+        ):
             continue
         if isinstance(value, dict) and "tests" in value:
             return str(key)
@@ -77,17 +84,13 @@ def build_matrix(platforms: list[str]) -> list[dict]:
         if not platform_enabled(registry, platform):
             print(f"[matrix] skipping {platform}: disabled in platforms.yml")
             continue
-        ci_cfg = load_yaml(
-            REPO_ROOT / ".github" / "configs" / f"{platform}.yml"
-        )
+        ci_cfg = load_yaml(REPO_ROOT / ".github" / "configs" / f"{platform}.yml")
         entry = {
             "platform": platform,
             "device": resolve_device(ci_cfg, platform),
             "image": ci_cfg["ci_image"],
             "runner_labels": json.dumps(ci_cfg.get("runner_labels", [])),
-            "container_volumes": json.dumps(
-                ci_cfg.get("container_volumes", [])
-            ),
+            "container_volumes": json.dumps(ci_cfg.get("container_volumes", [])),
             "container_options": ci_cfg.get("container_options", "") or "",
         }
         entries.append(entry)
