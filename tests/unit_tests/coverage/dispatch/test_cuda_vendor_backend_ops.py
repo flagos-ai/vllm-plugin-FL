@@ -377,13 +377,15 @@ class TestCudaBackendAvailability:
         )
 
         # Make ``from vllm.platforms import current_platform`` itself raise
-        # by replacing the module with a raising __getattr__ proxy
-        # (an AttributeError would be swallowed as "missing", so
-        # RuntimeError proves the swallowing branch runs).
+        # by replacing the module with a raising __getattr__ proxy.
+        # The module-level import must raise a non-AttributeError so the
+        # result differs from plain "attribute missing" (None vendor_name);
+        # ValueError plays that role without raising RuntimeError from a
+        # __getattr__ (CodeQL py/raise-from-special-method).
         class _RaisingModule(ModuleType):
             def __getattr__(self, item):
                 if item == "current_platform":
-                    raise RuntimeError("platform probe exploded")
+                    raise ValueError("platform probe exploded")
                 return super().__getattr__(item)
 
         raising = _RaisingModule("vllm.platforms")

@@ -60,7 +60,6 @@ pytest.importorskip("torch")
 import torch  # noqa: E402
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]
-_CONNECTOR_SOURCE = _SOURCE_ROOT / "vllm_fl/distributed/kv_transfer/flagcx_connector.py"
 _FLAGCX_SOURCE = _SOURCE_ROOT / "vllm_fl/distributed/device_communicators/flagcx.py"
 _COMMUNICATOR_SUBJECT = "_test_flagcx_transfer_plan_communicator"
 
