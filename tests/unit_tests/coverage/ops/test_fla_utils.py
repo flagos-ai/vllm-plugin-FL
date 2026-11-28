@@ -184,7 +184,17 @@ class TestInputGuard:
             requested.append(idx)
             return nullcontext()
 
-        with mock.patch.object(torch.cuda, "device", fake_device):
+        # On NPU hosts the guard prefers torch.npu.device; patch that too
+        # when torch exposes the attribute (torch.cpu builds do not), so
+        # the assertion holds on every platform this suite runs on.
+        import contextlib
+
+        npu_ctx = (
+            mock.patch.object(torch.npu, "device", fake_device, create=True)
+            if hasattr(torch, "npu")
+            else contextlib.nullcontext()
+        )
+        with mock.patch.object(torch.cuda, "device", fake_device), npu_ctx:
 
             @input_guard
             def fn(scale=1.0, data=None):

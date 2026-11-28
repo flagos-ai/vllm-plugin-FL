@@ -284,8 +284,23 @@ def test_kunlunxin_loader_directory_without_wrapper_falls_back(
     monkeypatch.setitem(sys.modules, "flagcx", pkg)
     monkeypatch.setitem(sys.modules, "flagcx.api", api_mod)
 
+    # A real flagcx wheel (installed on some vendor CI images) provides
+    # plugin.interservice, and the loader's `from plugin.interservice import
+    # flagcx_wrapper` would then resolve the REAL module. The fallback path
+    # under test needs the import to fail, so make it fail explicitly.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_plugin_interservice(name, *args, **kwargs):
+        if name == "plugin.interservice":
+            raise ImportError("No module named 'plugin.interservice' (test)")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_plugin_interservice)
+
     api = module._load_kunlunxin_flagcx_api(str(root))
-    assert api.MARKER == "package-fallback"
+    assert getattr(api, "MARKER", None) == "package-fallback"
     assert str(root) in sys.path  # the directory was appended for the wrapper
 
 

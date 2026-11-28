@@ -119,6 +119,20 @@ def gdn(monkeypatch):
     triton = pytest.importorskip("triton")
     import triton.language as tl
 
+    # Some vendor triton forks' interpreters (FlagTree's Ascend build) do
+    # not carry ``tl.standard._elementwise_max_default``, which the fused
+    # kernel's scan combine path resolves at apply time. The kernel-numerics
+    # tests below cannot execute there; they skip rather than error.
+    pytest.importorskip(
+        "triton.language.standard",
+        reason="this triton fork's interpreter lacks the scan-combine builtin",
+    )
+    if not hasattr(tl.standard, "_elementwise_max_default"):
+        pytest.skip(
+            "triton interpreter lacks tl.standard._elementwise_max_default "
+            "(vendor fork); kernel numerics unavailable"
+        )
+
     # FlagTree's build wires a lazy ``tl.ext`` symbol dispatcher whose
     # ``__getattr__`` raises RuntimeError (not AttributeError) for unknown
     # names.  The interpreter's ``_patch_builtin`` scans every ``tl`` member

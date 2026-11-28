@@ -450,6 +450,18 @@ class WorkerVllmTree:
         self._put("vllm.logger", init_logger=lambda name: _OnceLogger(name))
         self._put("vllm.lora.request", LoRARequest=object)
         self._put("vllm.model_executor")
+        # worker_symbols_032 (imported by worker.py before anything else)
+        # re-publishes helpers onto the real vllm surface: it needs the
+        # models.interfaces / v1 outputs / v1 worker utils / gpu attn_utils
+        # leaves as install targets (the same surface its own test builds).
+        self._put("vllm.model_executor.models")
+        self._put(
+            "vllm.model_executor.models.interfaces",
+            SupportsXDRoPE=type("SupportsXDRoPE", (), {}),
+        )
+        self._put("vllm.v1.outputs")
+        self._put("vllm.v1.worker.gpu")
+        self._put("vllm.v1.worker.gpu.attn_utils")
         # Lazily imported by init_worker_distributed_environment.
         self._put(
             "vllm.model_executor.determinism",
@@ -722,8 +734,21 @@ def worker_env(fl_sys_modules, monkeypatch):
     monkeypatch.setenv("VLLM_FL_OOT_ENABLED", "0")
 
     def _install(vendor_name="nvidia", device_type="cuda"):
+        # Evict vllm_fl.worker plus the FL bootstrap's transitive leaves
+        # (attention.utils / ops.custom_ops). Their module-level loggers
+        # bind the *stub* vllm.logger only on a fresh import; a leftover
+        # from an earlier test keeps the real site-packages vllm logger,
+        # whose info_once imports is_local_first_rank — a name some
+        # vendor vllm builds lack (thead). Same rationale as the worker
+        # eviction: these leaves are external boundaries for worker tests.
+        evict_prefixes = ("vllm_fl.worker.",)
+        evict_exact = {
+            "vllm_fl.worker",
+            "vllm_fl.attention.utils",
+            "vllm_fl.ops.custom_ops",
+        }
         for name in list(sys.modules):
-            if name == "vllm_fl.worker" or name.startswith("vllm_fl.worker."):
+            if name.startswith(evict_prefixes) or name in evict_exact:
                 sys.modules.pop(name, None)
         tree = WorkerVllmTree(vendor_name=vendor_name, device_type=device_type)
         trees.append(tree)
